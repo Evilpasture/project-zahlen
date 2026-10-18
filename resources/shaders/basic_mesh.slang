@@ -24,7 +24,7 @@ E.Output EmitMeshletVertex<E : IScenePassOutput, bool isShadow>(
         output.materialIndices = uint4(output.materialIndices.x, 0u, 0u, 0u);
     } else {
         float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
-        output.pos = mul(activeVP, worldPos);
+        output.pos = inst.BandedClipDepth(mul(activeVP, worldPos));
     }
 
     return E.Emit(output, viewId);

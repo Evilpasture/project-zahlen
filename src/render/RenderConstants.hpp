@@ -40,6 +40,7 @@ inline constexpr uint32_t kMaxSceneLights = 4096;
 
 enum class Stage : uint8_t {
     MainPass1,
+    SkyboxGBuffer,
     HiZGenerate,
     ClusterCulling,
     MainPass2,

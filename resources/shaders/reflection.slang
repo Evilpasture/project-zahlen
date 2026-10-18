@@ -216,113 +216,6 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, float3 
 
     return float2(-1.0f, -1.0f);
 }
-// Source draws its 3D skybox as a second world behind the main one: the map
-// keeps every pixel it covers and the skybox fills exactly the pixels the map
-// leaves empty (the sky brushes). Rasterizing both into one depth buffer
-// cannot express that rule -- a buried piece is nearer than the surface it
-// must hide behind -- so background-layer instances never enter the G-buffer
-// and this trace is their only primary-visibility path. The composition rule
-// is structural: no authored scenery is dropped, moved or thinned, and
-// nothing can overlap or sink into the world.
-bool TryShadeSkyboxLayer(float3 origin, float3 dir, out float3 shaded) {
-    shaded = float3(0.0f, 0.0f, 0.0f);
-
-    RayDesc ray;
-    ray.Origin    = origin;
-    ray.Direction = dir;
-    ray.TMin      = 0.01f;
-    ray.TMax      = 5000.0f;
-
-    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-    q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskSkyboxLayer, ray);
-    while (q.Proceed()) {
-    }
-    if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
-        return false;
-    }
-
-    uint instanceID        = q.CommittedInstanceID();
-    InstanceData hitInst   = g_instances[instanceID];
-
-    uint primIdx = q.CommittedPrimitiveIndex();
-    uint i0      = primIdx * 3 + 0;
-    uint i1      = primIdx * 3 + 1;
-    uint i2      = primIdx * 3 + 2;
-    if (hitInst.iboAddress != 0) {
-        GPUBuffer<uint> indices = GPUBuffer<uint>(hitInst.iboAddress);
-        i0 = indices.load(i0);
-        i1 = indices.load(i1);
-        i2 = indices.load(i2);
-    }
-
-    float2 baryUV = q.CommittedTriangleBarycentrics();
-    float3 bary   = float3(1.0f - baryUV.x - baryUV.y, baryUV.x, baryUV.y);
-
-    float4 w0, w1, w2;
-    SceneGeometryVertex v0 = hitInst.EvaluateVertex<false>(i0, w0);
-    SceneGeometryVertex v1 = hitInst.EvaluateVertex<false>(i1, w1);
-    SceneGeometryVertex v2 = hitInst.EvaluateVertex<false>(i2, w2);
-
-    float2 uv     = v0.uv * bary.x + v1.uv * bary.y + v2.uv * bary.z;
-    float2 uv1    = v0.uv1 * bary.x + v1.uv1 * bary.y + v2.uv1 * bary.z;
-    float4 color  = v0.color * bary.x + v1.color * bary.y + v2.color * bary.z;
-    float3 N      = SafeNormalize(v0.normal * bary.x + v1.normal * bary.y + v2.normal * bary.z, float3(0.0f, 1.0f, 0.0f));
-    if (dot(N, dir) > 0.0f) {
-        N = -N;
-    }
-
-    MaterialSampleInputs material = MakeMaterialInputs(uv, color, v0.materialIndices, v0.samplerCodes, v0.baseColorFactor, v0.emissiveFactor,
-                                                       v0.pbrFactors, v0.alphaMode);
-    ConfigureSceneMaterial(material, uv1, instanceID);
-    float4 albedo  = SampleMaterialAlbedo<ClearCoatMaterial>(material);
-    float3 emissive = SampleMaterialEmissive<ClearCoatMaterial>(material);
-
-    if (frame.fullBright != 0) {
-        shaded = albedo.rgb + emissive;
-        return true;
-    }
-
-    float3 hitWorldPos = origin + dir * q.CommittedRayT();
-
-    // Sun + sky irradiance + the authored fixture pools: the same windowed
-    // inverse-square the clustered pass uses, over the scene light list the
-    // skybox fixtures occupy. The range gate keeps the loop cheap on the
-    // large background pixels of an outdoor frame.
-    float3 L_sun    = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
-    float  NdotL_sun = saturate(dot(N, L_sun));
-    float3 direct   = frame.sunRadiance.xyz * NdotL_sun;
-
-    for (uint li = 0; li < frame.lightCount; ++li) {
-        Light light = scene.lights[li];
-        if (light.type == LightType::Directional || light.type == LightType::Sun || light.type == LightType::Area) {
-            continue;
-        }
-        float3 L_unnorm = light.position - hitWorldPos;
-        float  range    = max(light.range, 0.001f);
-        float  distSq   = dot(L_unnorm, L_unnorm);
-        if (distSq >= range * range) {
-            continue;
-        }
-        float  distToCenter = sqrt(distSq);
-        float3 L_p          = L_unnorm / (distToCenter + 1e-5f);
-        float  NdotL        = max(dot(N, L_p), 0.0f);
-        float  distRatio    = distToCenter / range;
-        float  window       = saturate(1.0f - distRatio * distRatio);
-        window *= window;
-        float atten = window / (distSq + 1.0f);
-        if (light.type == LightType::Spot && light.outerConeCos > -0.5f) {
-            float3 spotDir  = normalize(light.direction);
-            float  cosAngle = dot(-L_p, spotDir);
-            float  spotAtten = saturate((cosAngle - light.outerConeCos) / max(light.innerConeCos - light.outerConeCos, 1e-4f));
-            atten *= spotAtten * spotAtten;
-        }
-        direct += light.color * (light.intensity * atten * NdotL);
-    }
-
-    float3 ambient = SampleDDGIOrSH(hitWorldPos, N, -dir, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
-    shaded         = albedo.rgb * (1.0f - saturate(hitInst.metallicFactor)) * (direct + ambient) + emissive;
-    return true;
-}
 #endif
 
 struct VSOutput {
@@ -342,15 +235,19 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 litColor;
     float viewDepth = 250.0f;
 
+    // The translucent composite exists only where the prepass drew a
+    // translucent surface. Everywhere else its job is to mirror the opaque
+    // scene (what a transmitted ray sees behind the glass), never to
+    // re-shade the sky fill -- the opaque pass already composited that.
+    if (pc.translucentSurface != 0 && depth >= 1.0f) {
+        return float4(texInput.SampleLevel(pointSampler, input.uv, 0).rgb, 1.0f);
+    }
+
+    // Banded depth (kSkyDepthSplit): world in [0, split], background in
+    // [split, 1]. The background layer shades through the ordinary surface
+    // path below (its G-buffer is the skybox's); only pixels no layer drew
+    // fall through to the authored sky. ReconstructWorldPos undoes the band.
     if (depth >= 1.0f) {
-        // The translucent composite exists only where the prepass drew a
-        // translucent surface. Everywhere else its job is to mirror the opaque
-        // scene (what a transmitted ray sees behind the glass), never to
-        // re-trace the sky fill -- the opaque pass already composited that, and
-        // an all-sky full-screen trace here was the frame's costliest pass.
-        if (pc.translucentSurface != 0) {
-            return float4(texInput.SampleLevel(pointSampler, input.uv, 0).rgb, 1.0f);
-        }
         if (frame.environmentMode == 2) {
             return float4(0.0f, 0.0f, 0.0f, 0.0f);
         }
@@ -358,31 +255,24 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float3 worldPos = ReconstructWorldPos(input.uv, 1.0f, pc.invViewProj);
         float3 rayDir   = SafeNormalize(worldPos - pc.camPos.xyz);
 
-        // The 3D-skybox layer fills the pixels the world leaves empty
-        // (Source's background composite); anything it misses falls through
-        // to the authored sky below.
-        bool filled = false;
-#ifndef DISABLE_RTR
-        filled = TryShadeSkyboxLayer(pc.camPos.xyz, rayDir, litColor);
-#endif
-        if (!filled) {
-            if (frame.environmentMode == 3) {
-                // Equirectangular convention matches ibl_bake.slang. The original
-                // high-energy disk remains visible, but never enters specular IBL.
-                float2 uv = float2(atan2(rayDir.z, rayDir.x) * (0.5f / 3.141592653589793f) + 0.5f,
-                                   acos(clamp(rayDir.y, -1.0f, 1.0f)) / 3.141592653589793f);
-                litColor = texSkyEquirect.SampleLevel(skySampler, uv, 0).rgb * frame.ambientExposure;
-            } else if (frame.environmentMode == 1) {
-                litColor = texEnvMap.SampleLevel(clampSampler, rayDir, 0).rgb * frame.ambientExposure;
-            } else {
-                rayDir = RotateVector(rayDir, frame.lightDir.xyz);
+        // No layer covered the pixel: the authored sky (equirect HDR, env map
+        // or gradient) is the floor of the composite.
+        if (frame.environmentMode == 3) {
+            // Equirectangular convention matches ibl_bake.slang. The original
+            // high-energy disk remains visible, but never enters specular IBL.
+            float2 uv = float2(atan2(rayDir.z, rayDir.x) * (0.5f / 3.141592653589793f) + 0.5f,
+                               acos(clamp(rayDir.y, -1.0f, 1.0f)) / 3.141592653589793f);
+            litColor = texSkyEquirect.SampleLevel(skySampler, uv, 0).rgb * frame.ambientExposure;
+        } else if (frame.environmentMode == 1) {
+            litColor = texEnvMap.SampleLevel(clampSampler, rayDir, 0).rgb * frame.ambientExposure;
+        } else {
+            rayDir = RotateVector(rayDir, frame.lightDir.xyz);
 
-                float dy       = rayDir.y;
-                float3 skyGrad = (dy >= 0.0f) ? lerp(frame.skyHorizon.rgb, frame.skyZenith.rgb, pow(saturate(dy), 1.2f))
-                                              : lerp(frame.skyHorizon.rgb, frame.skyGround.rgb, pow(saturate(-dy), 0.5f));
+            float dy       = rayDir.y;
+            float3 skyGrad = (dy >= 0.0f) ? lerp(frame.skyHorizon.rgb, frame.skyZenith.rgb, pow(saturate(dy), 1.2f))
+                                          : lerp(frame.skyHorizon.rgb, frame.skyGround.rgb, pow(saturate(-dy), 0.5f));
 
-                litColor = skyGrad * frame.ambientExposure;
-            }
+            litColor = skyGrad * frame.ambientExposure;
         }
     } else {
         float4 litColorRaw = texLighting.SampleLevel(pointSampler, input.uv, 0);

@@ -59,6 +59,10 @@ public float3 UnpackNormalOctahedron(float2 oct) {
 }
 
 public float3 ReconstructWorldPos(float2 uv, float depth, float4x4 invViewProj) {
+    // Undo the depth band (kSkyDepthSplit): the world stores [0, kSkyDepthSplit],
+    // the background layer [kSkyDepthSplit, 1], and 1 means neither layer
+    // rasterized the pixel.
+    depth = depth >= kSkyDepthSplit ? (depth - kSkyDepthSplit) / (1.0f - kSkyDepthSplit) : depth / kSkyDepthSplit;
     float4 clipSpacePos  = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, depth, 1.0f);
     float4 worldSpacePos = mul(invViewProj, clipSpacePos);
     float w = worldSpacePos.w;

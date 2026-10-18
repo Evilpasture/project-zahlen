@@ -1075,11 +1075,23 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
                 const JPH::Vec3 dispStartPos(dispInfo.startPosition[0], dispInfo.startPosition[1], dispInfo.startPosition[2]);
                 // Rotate the base quad so corner 0 is the displacement's start
-                // position, keeping winding order.
+                // position, keeping winding order. Skybox windings were already
+                // moved into placed space above (scaled by sky.scale around the
+                // sky_camera), so the start position must ride the same
+                // transform before the match: comparing placed corners against
+                // the source-space start position picked the wrong corner and
+                // warped the whole grid into a self-intersecting sheet.
+                JPH::Vec3 matchStartPos = dispStartPos;
+                if (skyFace) {
+                    const float s[3] = {dispStartPos.GetX(), dispStartPos.GetY(), dispStartPos.GetZ()};
+                    float       out[3];
+                    TransformSkyboxPoint(sky, s, out);
+                    matchStartPos = JPH::Vec3(out[0], out[1], out[2]);
+                }
                 size_t startIndex = 0;
                 float  bestDistSq = 1e30f;
                 for (size_t c = 0; c < 4; ++c) {
-                    const float distSq = ((*winding)[c] - dispStartPos).LengthSq();
+                    const float distSq = ((*winding)[c] - matchStartPos).LengthSq();
                     if (distSq < bestDistSq) {
                         bestDistSq = distSq;
                         startIndex = c;
@@ -1109,7 +1121,20 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
                         const DDispVert& dispVert = map.dispVerts[vertBase + static_cast<size_t>(j) * side + i];
                         const JPH::Vec3  dispVec(dispVert.vec[0], dispVert.vec[1], dispVert.vec[2]);
-                        grid[static_cast<size_t>(j) * side + i] = base + dispVec * dispVert.dist;
+                        JPH::Vec3        offset = dispVec * dispVert.dist;
+                        if (skyFace) {
+                            // The base quad already carries sky.scale (the
+                            // miniscape is magnified into place), but the
+                            // authored relief is source units: without the same
+                            // scale -- and the sky_camera's rotation -- the
+                            // displacement collapses to 1/scale against its own
+                            // base and shear-warps across the transformed quad.
+                            const float d[3] = {offset.GetX(), offset.GetY(), offset.GetZ()};
+                            float       out[3];
+                            TransformSkyboxVector(sky, d, out);
+                            offset = JPH::Vec3(out[0], out[1], out[2]) * sky.scale;
+                        }
+                        grid[static_cast<size_t>(j) * side + i] = base + offset;
                     }
                 }
 

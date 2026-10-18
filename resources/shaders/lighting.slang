@@ -170,6 +170,8 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
 
 float4 PSMain(VSOutput input) : SV_Target0 {
     float depth = texDepth.SampleLevel(pointSampler, input.uv, 0);
+    // Banded depth (kSkyDepthSplit): world in [0, split], background in
+    // [split, 1], 1 empty. ReconstructWorldPos undoes the band.
     if (depth >= 1.0f)
         discard;
 

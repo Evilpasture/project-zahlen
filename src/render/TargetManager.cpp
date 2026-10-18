@@ -289,6 +289,7 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         cmd, _graph.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
     );
 
+
     Vk::ClearColorAndTransition(cmd, _graph.hizMap, 1.0f);
 }
 

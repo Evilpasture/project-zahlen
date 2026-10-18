@@ -22,7 +22,7 @@ SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     SceneGeometryVertex output = inst.EvaluateVertex<withMotion>(inst.fetchRasterIndex(vertexId), worldPos);
     output.instanceId = instId;
     float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
-    activeVPPos = mul(activeVP, worldPos);
+    activeVPPos = inst.BandedClipDepth(mul(activeVP, worldPos));
     return output;
 }
 

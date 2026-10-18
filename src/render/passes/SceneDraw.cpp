@@ -8,13 +8,14 @@ namespace ZHLN::Passes {
 
 auto IsVisibleIn(DrawFlags flags, RenderPassType passType) noexcept -> bool {
     using enum DrawFlags;
-    // The background layer (Source's 3D-skybox world) is never rasterized: its
-    // only primary-visibility path is the sky composite's TLAS trace, which
-    // fills exactly the pixels the main world leaves empty. Rasterizing it
-    // would let a buried piece win the depth race against the surface it must
-    // hide behind -- the very overlap the layer exists to prevent.
+    // The background layer (Source's 3D-skybox world) rasterizes in its own
+    // G-buffer pass -- BackgroundGBufferPass -- with its clip depth remapped
+    // into the far band [kSkyDepthSplit, 1] (the main world uses
+    // [0, kSkyDepthSplit]), so the map wins every pixel it covers as a depth
+    // test, not a draw order. The layer is primary visibility only: it never
+    // casts into the shadow passes.
     if ((flags & Background) != None) {
-        return false;
+        return passType == RenderPassType::Main;
     }
     const bool hasMain   = (flags & VisibleInMain) != None;
     const bool hasShadow = (flags & VisibleInShadow) != None;

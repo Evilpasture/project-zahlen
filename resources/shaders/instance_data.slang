@@ -6,6 +6,19 @@ module instance_data;
 import vertex_format;
 import gpu_buffer;
 
+// InstanceData.flags layout beyond the material byte (see BuildGPUInstanceData):
+// bit 8 skinned, 9 double-sided, 10 transmission, 11 unlit, 12 mirrored,
+// 13 background layer, 16 viewmodel.
+public static const uint kInstanceFlagBackground = 1u << 13;
+
+// Source's depth-range remap for the 3D skybox: the main world's clip depth is
+// scaled into [0, kSkyDepthSplit] and the background layer compressed into
+// [kSkyDepthSplit, 1], so a background fragment can never win a depth test
+// against world geometry no matter where the skybox model sits -- the map wins
+// every pixel it covers, enforced by the rasterizer. The depth buffer stores
+// the banded value; ReconstructWorldPos undoes the band.
+public static const float kSkyDepthSplit = 0.95f;
+
 public struct InstanceData {
     public float4x4 world;
     public float4x4 prevWorld;

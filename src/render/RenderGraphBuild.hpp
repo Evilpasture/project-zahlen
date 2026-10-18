@@ -15,6 +15,7 @@
 #include "passes/forward/OpaqueSceneCopyPass.hpp"
 #include "passes/forward/TranslucentPrePass.hpp"
 #include "passes/gbuffer/DecalPass.hpp"
+#include "passes/gbuffer/BackgroundGBufferPass.hpp"
 #include "passes/gbuffer/GBufferBasePass.hpp"
 #include "passes/gbuffer/GBufferResolvePass.hpp"
 #include "passes/gbuffer/ViewmodelPass.hpp"
@@ -110,6 +111,7 @@ template <AAMode Mode, typename GetSwapchainImageT>
 
     auto core = Vk::MakePassPack(
         Passes::ShadowPass {.particles = self.meshParticles, .frame = self}, Passes::GBufferBasePass {.cull = self.culling, .frame = self},
+        Passes::BackgroundGBufferPass {.frame = self},
         Passes::HiZGeneratePass {.cull = self.culling, .frame = self},
         Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self},
         Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.frame = self}, Passes::TranslucentPrePass {.frame = self},

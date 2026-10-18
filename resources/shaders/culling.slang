@@ -63,6 +63,7 @@ bool ProjectAABB(float3 center, float radius, out float4 outUvBounds, out float 
         }
 
         float3 ndc = clipPos.xyz / clipPos.w;
+        ndc.z *= kSkyDepthSplit; // HiZ holds banded depth (see kSkyDepthSplit)
         float2 uv  = ndc.xy * 0.5f + 0.5f;
 
         minUV = min(minUV, uv);

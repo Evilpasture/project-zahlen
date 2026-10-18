@@ -58,6 +58,7 @@ set(RAW_RENDER_SOURCES
     passes/forward/OpaqueSceneCopyPass.cpp
     passes/forward/TranslucentPrePass.cpp
     passes/gbuffer/DecalPass.cpp
+    passes/gbuffer/BackgroundGBufferPass.cpp
     passes/gbuffer/GBufferBasePass.cpp
     passes/gbuffer/GBufferResolvePass.cpp
     passes/gbuffer/ViewmodelPass.cpp

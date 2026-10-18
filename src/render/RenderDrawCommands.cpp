@@ -105,11 +105,12 @@ struct InstanceDataDesc {
 
     BindlessIndices indices {};
 
-    uint32_t alphaMode   = 0;
-    bool     isViewmodel = false;
-    bool     isSkinned   = false;
-    bool     doubleSided = false;
-    bool     unlit       = false;
+    uint32_t alphaMode    = 0;
+    bool     isViewmodel  = false;
+    bool     isBackground = false;
+    bool     isSkinned    = false;
+    bool     doubleSided  = false;
+    bool     unlit        = false;
 
     uint32_t vertexCount      = 0;
     uint32_t indexCount       = 0;
@@ -166,6 +167,7 @@ struct InstanceDataDesc {
     const ResolvedMeshMaterial* res = desc.resolved;
 
     const uint32_t isViewmodel     = desc.isViewmodel ? 1u : 0u;
+    const uint32_t isBackground    = desc.isBackground ? 1u : 0u;
     const uint32_t isSkinned       = desc.isSkinned ? 1u : 0u;
     const uint32_t doubleSided     = desc.doubleSided ? 1u : 0u;
     const uint32_t hasTransmission = !desc.unlit && desc.transmissionFactor > 0.0f ? 1u : 0u;
@@ -216,17 +218,17 @@ struct InstanceDataDesc {
         .roughnessFactor     = desc.roughnessFactor,
         .alphaCutoff         = desc.alphaCutoff,
 
-        .flags                = (isViewmodel << 16) | (isMirrored << 12) | (isUnlit << 11) | (hasTransmission << 10) | (doubleSided << 9) | (isSkinned << 8) |
-                                (desc.alphaMode & 0xFFu),
-        .jointOffset          = desc.jointOffset,
-        .morphOffset          = desc.morphOffset,
-        .activeMorphCount     = desc.activeMorphCount,
-        .localCenter          = desc.localCenter,
-        ._paddingCenter       = paddingCenter,
-        .morphWeights         = desc.morphWeights,
-        .baseColorFactor      = desc.baseColorFactor,
-        .emissiveFactor       = emissive,
-        .meshletAddress       = (res != nullptr) ? res->meshletAddr.Get() : 0ull,
+        .flags            = (isViewmodel << 16) | (isBackground << 13) | (isMirrored << 12) | (isUnlit << 11) | (hasTransmission << 10) | (doubleSided << 9) |
+                            (isSkinned << 8) | (desc.alphaMode & 0xFFu),
+        .jointOffset      = desc.jointOffset,
+        .morphOffset      = desc.morphOffset,
+        .activeMorphCount = desc.activeMorphCount,
+        .localCenter      = desc.localCenter,
+        ._paddingCenter   = paddingCenter,
+        .morphWeights     = desc.morphWeights,
+        .baseColorFactor  = desc.baseColorFactor,
+        .emissiveFactor   = emissive,
+        .meshletAddress   = (res != nullptr) ? res->meshletAddr.Get() : 0ull,
         .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr.Get() : 0ull,
         .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr.Get() : 0ull,
         .meshletCount         = (res != nullptr) ? res->meshletCount : 0u,
@@ -381,6 +383,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .indices                  = tex,
                  .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
                  .isViewmodel              = isViewmodel != 0u,
+                 .isBackground             = (params.flags & DrawFlags::Background) != DrawFlags::None,
                  .isSkinned                = isSkinned != 0u,
                  .doubleSided              = material.doubleSided,
                  .unlit                    = material.unlit,
@@ -471,6 +474,7 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .surfaceAddress           = resolved->surfaceAddr.Get(),
                     .indices                  = tex,
                     .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
+                    .isBackground             = (flags & DrawFlags::Background) != DrawFlags::None,
                     .isSkinned                = isSkinned != 0u,
                     .doubleSided              = material.doubleSided,
                     .unlit                    = material.unlit,
