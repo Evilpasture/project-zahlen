@@ -25,7 +25,7 @@ namespace {
     return packed;
 }
 
-static_assert(static_cast<size_t>(MaterialTextureSlot::Count) <= 16);
+static_assert(kMaterialTextureSlotCount <= 16);
 
 constexpr MaterialSamplerAddresses kAllAddressModes = [] {
     MaterialSamplerAddresses modes {};
@@ -189,8 +189,8 @@ struct InstanceDataDesc {
         }
     }
 
-    std::array<JPH::Float4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow0;
-    std::array<JPH::Float4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow1;
+    std::array<JPH::Float4, kMaterialTextureSlotCount> uvRow0;
+    std::array<JPH::Float4, kMaterialTextureSlotCount> uvRow1;
     for (size_t slot = 0; slot < uvRow0.size(); ++slot) {
         const auto& transform = desc.textureTransforms[slot];
         const float c         = transform.rotation == 0.0f ? 1.0f : std::cos(transform.rotation);

@@ -642,7 +642,7 @@ auto EmitFrameAddresses(std::string& out, std::span<const FrameAddressRow> rows)
     for (const FrameAddressRow& row: rows) {
         std::format_to(std::back_inserter(out), "    {},\n", row.pushField);
     }
-    std::format_to(std::back_inserter(out), "    COUNT,\n}};\n\nstruct FrameAddressMeta {{\n    FrameAddressField   field;\n    ::std::string_view  pushField;\n    ::std::string_view  registryField;\n    uint32_t            binding;\n    uint32_t            offset;\n    bool                uniformBuffer;\n}};\n\ninline constexpr uint32_t kFrameAddressCount = {};\ninline constexpr ::std::array<FrameAddressMeta, {}> kFrameAddressMeta = {{{{\n", rows.size(), rows.size());
+    std::format_to(std::back_inserter(out), "}};\n\nstruct FrameAddressMeta {{\n    FrameAddressField   field;\n    ::std::string_view  pushField;\n    ::std::string_view  registryField;\n    uint32_t            binding;\n    uint32_t            offset;\n    bool                uniformBuffer;\n}};\n\ninline constexpr uint32_t kFrameAddressCount = {};\ninline constexpr ::std::array<FrameAddressMeta, {}> kFrameAddressMeta = {{{{\n", rows.size(), rows.size());
     for (const FrameAddressRow& row: rows) {
         std::format_to(
             std::back_inserter(out),

@@ -159,49 +159,6 @@ constexpr auto CollectMethodResults(const T& inst) {
     }(std::make_index_sequence<Collector::count> {});
 }
 
-#else
-
-template <typename T, typename F>
-constexpr void ForEachMemberFunction(F&& ) {
-}
-
-template <typename T>
-consteval auto BaseClasses() {
-    return std::array<int, 0> {};
-}
-
-template <typename T>
-consteval bool HasVirtualBases() {
-    return false;
-}
-
-template <typename T, typename F>
-constexpr void ForEachBase(F&& ) {
-}
-
-template <typename T>
-consteval std::size_t MemberFunctionCount() {
-    return 0;
-}
-
-template <typename T>
-consteval auto MemberFunctionNames() {
-    return std::array<std::string_view, 0> {};
-}
-
-template <typename T, typename F>
-constexpr void ForEachNestedType(F&& ) {
-}
-
-template <typename T, typename F>
-constexpr void ForEachMethodPointer(F&& ) {
-}
-
-template <typename T>
-constexpr auto CollectMethodResults(const T& ) {
-    return std::tuple {};
-}
-
 #endif
 
 template <typename T>

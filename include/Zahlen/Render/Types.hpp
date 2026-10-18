@@ -5,6 +5,7 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/Pair.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Render/Handles.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -68,11 +69,14 @@ enum class MaterialTextureSlot : uint8_t {
     SheenRoughness,
     Occlusion,
     Transmission,
-    Specular,
-    Count
+    Specular
 };
+// The slot count is reflected, not sentineled: a Count enumerator would make
+// every reflection tool (EnumCount, EnumNames, ForEachEnumerator, EnumToString)
+// see a phantom seventeenth slot.
+inline constexpr size_t kMaterialTextureSlotCount = Reflect::EnumCount<MaterialTextureSlot>();
 inline constexpr uint32_t kMaterialSamplerVariantCount = 9; // Three S modes x three T modes.
-using MaterialSamplerAddresses                         = std::array<TextureSamplerAddress, static_cast<size_t>(MaterialTextureSlot::Count)>;
+using MaterialSamplerAddresses                         = std::array<TextureSamplerAddress, kMaterialTextureSlotCount>;
 
 // glTF textureInfo, not the image, owns the UV transform and set selection.
 // Apply offset + rotation * scale to TEXCOORD_0 or TEXCOORD_1 per reference.
@@ -87,7 +91,7 @@ struct MaterialTextureTransform {
     uint32_t       texCoord                                                   = 0;
     constexpr bool operator==(const MaterialTextureTransform&) const noexcept = default;
 };
-using MaterialTextureTransforms = std::array<MaterialTextureTransform, static_cast<size_t>(MaterialTextureSlot::Count)>;
+using MaterialTextureTransforms = std::array<MaterialTextureTransform, kMaterialTextureSlotCount>;
 
 struct Mesh {
     using enum BufferHandle;

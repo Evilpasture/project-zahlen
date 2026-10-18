@@ -69,10 +69,7 @@ auto RenderFrameContext::FrameHeapAddresses() const noexcept -> std::array<VkDev
                     return ctx.BufferAddress(frames.jointBuffers[Vk::PreviousFrameSlot(presenter.frameIndex)].Handle());
                 case Slang::FrameAddressField::morphDeltasAddress:
                     return ctx.BufferAddress(morphDeltasBuffer.Handle());
-                case Slang::FrameAddressField::COUNT:
-                    break;
             }
-            return VkDeviceAddress {0};
         }();
     }
     return addresses;

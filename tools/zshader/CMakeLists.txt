@@ -110,16 +110,5 @@ target_precompile_headers(zshader PRIVATE
 # __cpp_impl_reflection -- come from the root CMakeLists' zahlen_enable_reflection
 # list, where every target that includes a reflection header is named. That
 # function does not exist yet while this directory is configured (ShaderCompilation
-# is included above it), so the call sits in that list, next to zcook's.
-#
-# A build without -freflection compiles the stand-ins instead, and Core.hpp's
-# static_assert is the reminder that a target using them has to say so. The
-# transpiled copies above are what makes them harmless here -- the three
-# EnumToString calls, including the one NamesEnumerators() asks its question
-# with, are switches by then -- so the tool opts out of the assert the way the
-# header asks host-only tooling to. A build that reaches the tool with neither
-# is caught at startup instead: NamesEnumerators() refuses to write a catalog
-# whose every descriptor type is the sentinel.
-if(NOT COMPILER_HAS_REFLECTION)
-    target_compile_definitions(zshader PRIVATE $<$<COMPILE_LANGUAGE:CXX>:ZHLN_ALLOW_REFLECTION_STUBS=1>)
-endif()
+# is included above it), so the call sits in that list, next to zcook's. There is
+# no stub fallback anymore: the reflection headers require -freflection outright.
