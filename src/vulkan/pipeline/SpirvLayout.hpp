@@ -755,4 +755,67 @@ class SpirvTypes {
     return layout;
 }
 
+// --- Compute workgroup size, read from the module's own bytes ---------------
+//
+// SPIR-V bakes a compute entry point's threadgroup size into
+// `OpExecutionMode %entry_point LocalSize X Y Z` (opcode 16, mode 17). The
+// parser is constexpr so the value is taken at compile time wherever the bytes
+// are visible: tools/zshader reads the cooked module with it (Reflect.cpp),
+// and ShaderBytecode.cpp holds the generated `Module::LocalSize` against the
+// embedded module with it (CatalogChecks.hpp). The engine itself never parses
+// at runtime -- `LocalSizeOf<Module>` is the constant the generator emitted.
+
+struct WorkgroupSize {
+    uint32_t x = 1;
+    uint32_t y = 1;
+    uint32_t z = 1;
+
+    [[nodiscard]] constexpr auto operator==(const WorkgroupSize&) const noexcept -> bool = default;
+};
+
+[[nodiscard]] constexpr auto ParseComputeLocalSize(std::span<const uint8_t> bytes) noexcept -> WorkgroupSize {
+    if (bytes.size() < 20 || (bytes.size() % 4) != 0) {
+        return {};
+    }
+    const size_t words = bytes.size() / 4;
+    const auto wordAt = [&](size_t idx) -> uint32_t {
+        return static_cast<uint32_t>(bytes[idx * 4]) |
+              (static_cast<uint32_t>(bytes[idx * 4 + 1]) << 8) |
+              (static_cast<uint32_t>(bytes[idx * 4 + 2]) << 16) |
+              (static_cast<uint32_t>(bytes[idx * 4 + 3]) << 24);
+    };
+
+    // OpExecutionMode = 16, ExecutionMode LocalSize = 17
+    for (size_t i = 5; i < words;) {
+        const uint32_t word = wordAt(i);
+        const uint16_t opcode = word & 0xFFFFu;
+        const uint16_t length = (word >> 16u) & 0xFFFFu;
+        if (length == 0 || i + length > words) break;
+
+        if (opcode == 16 && length >= 6) { // OpExecutionMode
+            const uint32_t mode = wordAt(i + 2);
+            if (mode == 17) { // LocalSize
+                return WorkgroupSize {
+                    .x = wordAt(i + 3),
+                    .y = wordAt(i + 4),
+                    .z = wordAt(i + 5),
+                };
+            }
+        }
+        i += length;
+    }
+    return WorkgroupSize {1, 1, 1};
+}
+
+// The module's workgroup size as a compile-time constant. The generated
+// ShaderBindings.hpp states it per compute module (`Module::LocalSize`, what
+// zshader read out of the cooked bytes); CatalogChecks.hpp re-derives it from
+// those same bytes inside ShaderBytecode.cpp, so the constant cannot drift.
+// (`Module::Bytes()` is declaration-only in the header -- the bytes live in
+// ShaderBytecode.cpp alone -- so the parse itself cannot run here. The
+// ShaderProgram constraint is omitted so tools/zshader can include this
+// header without pulling the engine's include guard.)
+template <typename Module>
+inline constexpr WorkgroupSize LocalSizeOf = Module::LocalSize;
+
 }

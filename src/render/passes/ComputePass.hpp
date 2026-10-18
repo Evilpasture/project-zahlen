@@ -97,7 +97,13 @@ struct ComputePass: TemplatedDetail::RenderPassOf<Desc::name, typename Desc::Usa
 
         frame.BindHeapsAndPushFrame(cmd);
 
-        const auto args  = Desc::Prepare(frame, pc);
+        const auto args = Desc::Prepare(frame, pc);
+
+        // Zero-extent check: if screen/viewport/particles are 0, skip pass cleanly
+        if (args.extent.width == 0 || args.extent.height == 0 || args.extent.depth == 0) [[unlikely]] {
+            return;
+        }
+
         const auto block = std::apply(
             [&](const auto&... slots) noexcept {
                 return frame.heapManager.template WriteHeapParameters<typename Desc::ShaderDecl>(Desc::GetBindings(frame), slots...);
@@ -115,12 +121,13 @@ struct ComputePass: TemplatedDetail::RenderPassOf<Desc::name, typename Desc::Usa
                 pass.DispatchHeap(cmd, block);
             }
         } else {
+            // Typed dispatch: the module's threadgroup size is a compile-time
+            // constant (Vk::LocalSizeOf), so the group counts are shift math
+            // and a zero extent is a no-op by construction.
             if constexpr (!std::is_void_v<typename Desc::PushConstants>) {
-                pass.template DispatchHeapIndexedThreads<typename Desc::ShaderModule>(
-                    cmd, block, args.extent.width, args.extent.height, args.extent.depth, args.push
-                );
+                pass.DispatchThreads(cmd, args.extent.width, args.extent.height, args.extent.depth, args.push, block.slot);
             } else {
-                pass.DispatchHeapIndexedThreads(cmd, block, args.extent.width, args.extent.height, args.extent.depth);
+                pass.DispatchThreads(cmd, args.extent.width, args.extent.height, args.extent.depth, block.slot);
             }
         }
     }

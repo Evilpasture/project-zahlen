@@ -5,6 +5,7 @@
 #include "ShaderProgram.hpp"
 
 #include "SpirvBindings.hpp"
+#include "SpirvLayout.hpp"
 
 #include <cstdint>
 #include <span>
@@ -102,6 +103,13 @@ template <ShaderProgram Module>
     constexpr uint32_t kHighest = TemplatedDetail::HighestSetInModule<Module>();
     if (head.HighestDeclaredSet() > kHighest) {
         return false;
+    }
+    // Compute modules also state their threadgroup size; hold it against the
+    // LocalSize execution mode the bytes actually carry.
+    if constexpr (Module::Stage == VK_SHADER_STAGE_COMPUTE_BIT) {
+        if (!(ParseComputeLocalSize(bytes) == Module::LocalSize)) {
+            return false;
+        }
     }
     return TemplatedDetail::SetMatchesBytes<Module, 0>(head) &&
            TemplatedDetail::HigherSetsMatch<Module>(head, bytes, std::make_index_sequence<static_cast<size_t>(kHighest)> {});

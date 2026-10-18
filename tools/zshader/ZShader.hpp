@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <array>
 #include <map>
 #include <print>
 #include <span>
@@ -77,6 +78,7 @@ struct Module {
     std::string      entryPoint;
     std::string_view stage; // "VK_SHADER_STAGE_FRAGMENT_BIT", the enumerator's own name
     bool             reflected = false;
+    std::array<uint32_t, 3> localSize {1, 1, 1}; // compute: [numthreads], from Slang's reflection of the entry point
     std::vector<Descriptor> resources;
     std::vector<Descriptor> samplers;
     std::vector<PushBlock>  pushes;

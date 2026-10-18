@@ -32,6 +32,7 @@
 #include <vulkan/vulkan_core.h> // the enumerators the generated header spells, read here and never called
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <string_view>
 #include <utility>
@@ -215,6 +216,7 @@ void ReflectModule(Module& module, const SlangSource& source, std::span<const st
     SlangEntryInfo info = ReflectCatalogModule(args);
     module.entryPoint   = std::move(info.entryPoint);
     module.stage        = StageName(module.path, StageFor(module.path, module.entryPoint, info.stage));
+    module.localSize    = info.localSize;
     // No unnamed check: the walk fails on an unnamed binding before one can
     // arrive here, as the old reader did on the spot.
     for (SlangBinding& binding : info.bindings) {

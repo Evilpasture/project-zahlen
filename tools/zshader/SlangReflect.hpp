@@ -42,6 +42,7 @@
 #include <slang.h>
 
 #include <cstdint>
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
@@ -94,6 +95,7 @@ struct SlangPushBlock {
 struct SlangEntryInfo {
     std::string                   entryPoint {};
     SlangStage                    stage = SLANG_STAGE_NONE;
+    std::array<uint32_t, 3>       localSize {1, 1, 1}; // compute: [numthreads], straight from Slang's reflection
     std::vector<SlangBinding>     bindings {};
     std::vector<SlangPushBlock>   pushes {};
 };

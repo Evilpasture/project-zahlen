@@ -28,7 +28,7 @@ struct GtaoDesc {
         return giMode == 3 || giMode == 4;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::DynamicComputePass& {
+    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::GtaoCS, GtaoPushConstants>& {
         return frame.postProcess.Gtao();
     }
 
@@ -77,7 +77,7 @@ struct RtShadowDesc {
         return frame.ctx.RayTracingSupported() && wantRT && frame.settings.environment.fullBright == 0 && frame.frames.tlasAddresses[fIdx] != nullptr;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::DynamicComputePass& {
+    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::RtShadowCS, RTShadowPushConstants>& {
         return frame.postProcess.RtShadow();
     }
 
@@ -126,7 +126,7 @@ struct RtrHalfTraceDesc {
         return frame.ctx.RayTracingSupported() && frame.settings.rayTracing.enableReflections && frame.settings.post.enableRTR;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::DynamicComputePass& {
+    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::RtrHalfCS, RtrHalfPushConstants>& {
         return frame.postProcess.RtrHalf();
     }
 
@@ -177,7 +177,7 @@ struct RtgiHalfTraceDesc {
                frame.frames.tlasAddresses[fIdx] != nullptr;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::DynamicComputePass& {
+    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::RtgiHalfCS, RtgiHalfPushConstants>& {
         return frame.postProcess.RtgiHalf();
     }
 
@@ -226,7 +226,7 @@ struct DdgiTraceDesc {
                frame.frames.tlasAddresses[fIdx] != nullptr;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::DynamicComputePass& {
+    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::DdgiTraceCS, DdgiTracePushConstants>& {
         return frame.postProcess.DdgiTrace();
     }
 
@@ -277,7 +277,7 @@ struct DdgiUpdateDesc {
                frame.frames.tlasAddresses[fIdx] != nullptr;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::DynamicComputePass& {
+    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::DdgiUpdateIrradianceCS, DdgiUpdatePushConstants>& {
         return frame.postProcess.DdgiUpdate();
     }
 

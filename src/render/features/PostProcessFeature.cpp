@@ -24,6 +24,28 @@ auto PostProcessFeature::BuildCompute(
     return pass.BuildHeap(impl.ctx.Device(), shader, bindings.GetInfo(), bindings.indexPushOffset, &impl.pipelineBinaries);
 }
 
+// The typed twin of BuildCompute for Vk::TypedComputePass: the module is the
+// template parameter, so the pipeline's workgroup size is a compile-time
+// constant (Vk::LocalSizeOf) and no runtime SPIR-V reflection runs at all.
+template <Vk::ShaderProgram Module, typename PushConstants>
+auto BuildTypedCompute(
+    RenderContext::Impl&                         impl,
+    Vk::TypedComputePass<Module, PushConstants>& pass,
+    Vk::ReflectedLayout&                         layout,
+    Vk::HeapPassBindings&                        bindings
+) -> std::expected<void, ErrorCode> {
+    const auto shader = Vk::CreateShaderDesc<Module>();
+    if (!layout.Build(impl.ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
+    }
+    if (auto built =
+            Vk::BuildHeapPassBindings(impl.heapManager, layout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, bindings);
+        !built) {
+        return std::unexpected(built.error());
+    }
+    return pass.Init(impl.ctx.Device(), bindings.GetInfo(), bindings.indexPushOffset, &impl.pipelineBinaries);
+}
+
 auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void, ErrorCode> {
     return BuildCompute(impl, _bloomThresholdCS, _bloomThresholdCSLayout, _bloomThresholdHeapBindings, Shaders::Modules::BloomThresholdCS::Bytes())
         .and_then(
@@ -46,7 +68,7 @@ auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void,
                 if (!impl.ctx.RayTracingSupported()) {
                     return {};
                 }
-                return BuildCompute(impl, _rtShadowCS, _rtShadowCSLayout, _rtShadowHeapBindings, Shaders::Modules::RtShadowCS::Bytes());
+                return BuildTypedCompute(impl, _rtShadowCS, _rtShadowCSLayout, _rtShadowHeapBindings);
             }
         )
         .and_then(
@@ -64,7 +86,7 @@ auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void,
                 if (!impl.ctx.RayTracingSupported()) {
                     return {};
                 }
-                return BuildCompute(impl, _rtrHalfCS, _rtrHalfCSLayout, _rtrHalfHeapBindings, Shaders::Modules::RtrHalfCS::Bytes());
+                return BuildTypedCompute(impl, _rtrHalfCS, _rtrHalfCSLayout, _rtrHalfHeapBindings);
             }
         )
         .and_then(
@@ -72,7 +94,7 @@ auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void,
                 if (!impl.ctx.RayTracingSupported()) {
                     return {};
                 }
-                return BuildCompute(impl, _rtgiHalfCS, _rtgiHalfCSLayout, _rtgiHalfHeapBindings, Shaders::Modules::RtgiHalfCS::Bytes());
+                return BuildTypedCompute(impl, _rtgiHalfCS, _rtgiHalfCSLayout, _rtgiHalfHeapBindings);
             }
         )
         .and_then(
@@ -90,9 +112,7 @@ auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void,
                 if (!impl.ctx.RayTracingSupported()) {
                     return {};
                 }
-                return BuildCompute(
-                    impl, _ddgiTraceCS, _ddgiTraceCSLayout, _ddgiTraceHeapBindings, Shaders::Modules::DdgiTraceCS::Bytes()
-                );
+                return BuildTypedCompute(impl, _ddgiTraceCS, _ddgiTraceCSLayout, _ddgiTraceHeapBindings);
             }
         )
         .and_then(
@@ -100,9 +120,7 @@ auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void,
                 if (!impl.ctx.RayTracingSupported()) {
                     return {};
                 }
-                return BuildCompute(
-                    impl, _ddgiUpdateCS, _ddgiUpdateCSLayout, _ddgiUpdateHeapBindings, Shaders::Modules::DdgiUpdateIrradianceCS::Bytes()
-                );
+                return BuildTypedCompute(impl, _ddgiUpdateCS, _ddgiUpdateCSLayout, _ddgiUpdateHeapBindings);
             }
         )
         .and_then(
@@ -114,7 +132,7 @@ auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void,
         )
         .and_then(
             [&]() -> std::expected<void, ErrorCode> {
-                return BuildCompute(impl, _gtaoCS, _gtaoCSLayout, _gtaoHeapBindings, Shaders::Modules::GtaoCS::Bytes());
+                return BuildTypedCompute(impl, _gtaoCS, _gtaoCSLayout, _gtaoHeapBindings);
             }
         );
 }
@@ -181,11 +199,11 @@ void PostProcessFeature::InitSamplers(RenderContext::Impl& impl) noexcept {
     }
 }
 
-auto PostProcessFeature::DdgiTrace() noexcept -> Vk::DynamicComputePass& {
+auto PostProcessFeature::DdgiTrace() noexcept -> Vk::TypedComputePass<Shaders::Modules::DdgiTraceCS, DdgiTracePushConstants>& {
     return _ddgiTraceCS;
 }
 
-auto PostProcessFeature::DdgiUpdate() noexcept -> Vk::DynamicComputePass& {
+auto PostProcessFeature::DdgiUpdate() noexcept -> Vk::TypedComputePass<Shaders::Modules::DdgiUpdateIrradianceCS, DdgiUpdatePushConstants>& {
     return _ddgiUpdateCS;
 }
 
@@ -197,7 +215,7 @@ auto PostProcessFeature::DdgiUpdateHeapBindings() noexcept -> Vk::HeapPassBindin
     return _ddgiUpdateHeapBindings;
 }
 
-auto PostProcessFeature::RtShadow() noexcept -> Vk::DynamicComputePass& {
+auto PostProcessFeature::RtShadow() noexcept -> Vk::TypedComputePass<Shaders::Modules::RtShadowCS, RTShadowPushConstants>& {
     return _rtShadowCS;
 }
 
@@ -229,15 +247,15 @@ auto PostProcessFeature::HdrDenoise() noexcept -> Vk::DynamicComputePass& {
     return _hdrDenoiseCS;
 }
 
-auto PostProcessFeature::Gtao() noexcept -> Vk::DynamicComputePass& {
+auto PostProcessFeature::Gtao() noexcept -> Vk::TypedComputePass<Shaders::Modules::GtaoCS, GtaoPushConstants>& {
     return _gtaoCS;
 }
 
-auto PostProcessFeature::RtrHalf() noexcept -> Vk::DynamicComputePass& {
+auto PostProcessFeature::RtrHalf() noexcept -> Vk::TypedComputePass<Shaders::Modules::RtrHalfCS, RtrHalfPushConstants>& {
     return _rtrHalfCS;
 }
 
-auto PostProcessFeature::RtgiHalf() noexcept -> Vk::DynamicComputePass& {
+auto PostProcessFeature::RtgiHalf() noexcept -> Vk::TypedComputePass<Shaders::Modules::RtgiHalfCS, RtgiHalfPushConstants>& {
     return _rtgiHalfCS;
 }
 

@@ -3,7 +3,9 @@
 
 #pragma once
 #include "Rendering.hpp"
+#include "PassPayloads.hpp"
 #include "pipeline/ComputePass.hpp"
+#include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
 #include <cstdint>
@@ -44,15 +46,15 @@ class PostProcessFeature {
     [[nodiscard]] auto BloomDown() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto BloomUp() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto HdrDenoise() noexcept -> Vk::DynamicComputePass&;
-    [[nodiscard]] auto Gtao() noexcept -> Vk::DynamicComputePass&;
-    [[nodiscard]] auto RtShadow() noexcept -> Vk::DynamicComputePass&;
+    [[nodiscard]] auto Gtao() noexcept -> Vk::TypedComputePass<Shaders::Modules::GtaoCS, GtaoPushConstants>&;
+    [[nodiscard]] auto RtShadow() noexcept -> Vk::TypedComputePass<Shaders::Modules::RtShadowCS, RTShadowPushConstants>&;
     [[nodiscard]] auto ShadowDenoise() noexcept -> Vk::DynamicComputePass&;
-    [[nodiscard]] auto RtrHalf() noexcept -> Vk::DynamicComputePass&;
-    [[nodiscard]] auto RtgiHalf() noexcept -> Vk::DynamicComputePass&;
+    [[nodiscard]] auto RtrHalf() noexcept -> Vk::TypedComputePass<Shaders::Modules::RtrHalfCS, RtrHalfPushConstants>&;
+    [[nodiscard]] auto RtgiHalf() noexcept -> Vk::TypedComputePass<Shaders::Modules::RtgiHalfCS, RtgiHalfPushConstants>&;
     [[nodiscard]] auto RtgiDenoise() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto RtgiComposite() noexcept -> Vk::DynamicComputePass&;
-    [[nodiscard]] auto DdgiTrace() noexcept -> Vk::DynamicComputePass&;
-    [[nodiscard]] auto DdgiUpdate() noexcept -> Vk::DynamicComputePass&;
+    [[nodiscard]] auto DdgiTrace() noexcept -> Vk::TypedComputePass<Shaders::Modules::DdgiTraceCS, DdgiTracePushConstants>&;
+    [[nodiscard]] auto DdgiUpdate() noexcept -> Vk::TypedComputePass<Shaders::Modules::DdgiUpdateIrradianceCS, DdgiUpdatePushConstants>&;
 
     [[nodiscard]] auto BloomThresholdHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto BloomDownHeapBindings() noexcept -> Vk::HeapPassBindings&;
@@ -80,15 +82,15 @@ class PostProcessFeature {
     Vk::DynamicComputePass _bloomDownCS;
     Vk::DynamicComputePass _bloomUpCS;
     Vk::DynamicComputePass _hdrDenoiseCS;
-    Vk::DynamicComputePass _gtaoCS;
-    Vk::DynamicComputePass _rtShadowCS;
+    Vk::TypedComputePass<Shaders::Modules::GtaoCS, GtaoPushConstants> _gtaoCS;
+    Vk::TypedComputePass<Shaders::Modules::RtShadowCS, RTShadowPushConstants> _rtShadowCS;
     Vk::DynamicComputePass _shadowDenoiseCS;
-    Vk::DynamicComputePass _rtrHalfCS;
-    Vk::DynamicComputePass _rtgiHalfCS;
+    Vk::TypedComputePass<Shaders::Modules::RtrHalfCS, RtrHalfPushConstants> _rtrHalfCS;
+    Vk::TypedComputePass<Shaders::Modules::RtgiHalfCS, RtgiHalfPushConstants> _rtgiHalfCS;
     Vk::DynamicComputePass _rtgiDenoiseCS;
     Vk::DynamicComputePass _rtgiCompositeCS;
-    Vk::DynamicComputePass _ddgiTraceCS;
-    Vk::DynamicComputePass _ddgiUpdateCS;
+    Vk::TypedComputePass<Shaders::Modules::DdgiTraceCS, DdgiTracePushConstants> _ddgiTraceCS;
+    Vk::TypedComputePass<Shaders::Modules::DdgiUpdateIrradianceCS, DdgiUpdatePushConstants> _ddgiUpdateCS;
 
     Vk::HeapPassBindings _bloomThresholdHeapBindings;
     Vk::HeapPassBindings _bloomDownHeapBindings;

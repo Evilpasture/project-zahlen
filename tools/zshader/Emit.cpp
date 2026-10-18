@@ -128,6 +128,7 @@ constexpr std::string_view kHeaderPreamble = R"ZHLN(// Copyright (C) 2026 Evilpa
 
 #include "Rendering.hpp" // the RHI implementation headers
 #include "pipeline/ShaderProgram.hpp" // Vk::ShaderProgram, Vk::ShaderSet
+#include "pipeline/SpirvLayout.hpp" // Vk::WorkgroupSize (the compute LocalSize below)
 
 #include <cstdint>
 #include <span>
@@ -285,6 +286,16 @@ auto EmitHeader(const Options& options) -> std::string {
         out.Raw(kHeaderSource);
         out.Line("    static constexpr const char* Path     = \"{}\";", AsLiteral(module.path));
         out.Line("    static constexpr uint32_t    ByteSize = {};", module.byteSize);
+        if (module.stage == "VK_SHADER_STAGE_COMPUTE_BIT") {
+            // The threadgroup size the entry point declares: Slang's own
+            // reflection of [numthreads] (SlangReflect.cpp). ShaderBytecode.cpp
+            // holds this constant against the cooked module's OpExecutionMode
+            // LocalSize (CatalogChecks.hpp), so it cannot drift from the bytes.
+            // Dispatch math keys off it at compile time through Vk::LocalSizeOf.
+            out.Line(
+                "    static constexpr Vk::WorkgroupSize LocalSize = {{{}, {}, {}}};", module.localSize[0], module.localSize[1], module.localSize[2]
+            );
+        }
 
         if (!module.pushes.empty()) {
             // The catalog's push view is the union of every block the module
