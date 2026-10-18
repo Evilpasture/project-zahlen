@@ -32,7 +32,7 @@ struct FullscreenPass: Vk::RenderPass<PassName, Vk::ShaderRead<InRes>..., Vk::Co
     PrepareFn                               prepare;
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-        FullscreenPassRecorder<ShaderDecl, ShaderModule>::Record(frame, ctx.Cmd(), pipeline, [&]() { return prepare(frame); });
+        FullscreenPassRecorder<ShaderDecl, ShaderModule>::Record(frame, ctx, pipeline, [&]() { return prepare(frame); });
     }
 };
 

@@ -33,7 +33,13 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
         Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::FragmentAndComputeRead<Res_DdgiIrradiance>>(frame.graphResources.ddgiIrradiance)),
         Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::FragmentAndComputeRead<Res_DdgiDistance>>(frame.graphResources.ddgiDistance))
     );
-    post.lighting.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(ctx.Cmd(), lightVariant, pc, block);
+    // Typestate: TryGet proves the variant's bounds and validity, Create the
+    // non-zero heap push -- ExecuteHeap cannot be reached with anything else.
+    if (const auto active = Vk::ActivePipeline::TryGet(post.lighting.pipelines, lightVariant)) {
+        if (const auto heap = Vk::BoundHeapPass::Create(post.lighting.heapBindings.indexPushOffset, block.slot)) {
+            post.lighting.ExecuteHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(ctx, *active, *heap, pc);
+        }
+    }
 }
 
 } // namespace ZHLN::Passes

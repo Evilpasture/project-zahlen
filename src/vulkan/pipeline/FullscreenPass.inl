@@ -116,54 +116,23 @@ auto FullscreenPass<LayoutT>::WriteHeapParameters(HeapManager& heap, const Slots
 
 template <typename LayoutT>
 template <ShaderProgram... Modules, FullscreenPushPayload T>
-void FullscreenPass<LayoutT>::ExecuteHeap(VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept {
+void FullscreenPass<LayoutT>::ExecuteHeap(RasterPassContextBase& ctx, ActivePipeline active, BoundHeapPass heap, const T& pushData) const noexcept {
     static_assert(sizeof...(Modules) > 0, "name the shader module(s) this draw is recorded for: ExecuteHeap<Shaders::Modules::X>(...)");
     static_assert(
         Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
         "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
     );
-    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "fullscreen draw");
-    ZHLN::Assert(Valid(), "Attempted to bind an invalid fullscreen pipeline.");
-    ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-    PushData(cmd, 0, pushData);
-
-    PushHeapIndex(cmd, heapBindings.indexPushOffset, blockBase.slot);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdBindPipeline(ctx.Cmd(), VK_PIPELINE_BIND_POINT_GRAPHICS, active);
+    PushData(ctx.Cmd(), 0, pushData);
+    heap.Push(ctx.Cmd());
+    vkCmdDraw(ctx.Cmd(), 3, 1, 0, 0);
 }
 
 template <typename LayoutT>
-template <ShaderProgram... Modules, FullscreenPushPayload T>
-void FullscreenPass<LayoutT>::ExecuteVariantHeap(
-    VkCommandBuffer cmd,
-    uint32_t        variantIdx,
-    const T&        pushData,
-    HeapBlockBase   blockBase
-) const noexcept {
-    static_assert(sizeof...(Modules) > 0, "name the shader modules this draw can run: ExecuteVariantHeap<Shaders::Modules::X, ...>(...)");
-    static_assert(
-        Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
-        "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
-    );
-    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "fullscreen draw");
-    ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
-    ZHLN::Assert(variantIdx < pipelines.size(), "Fullscreen pipeline variant index {} is out of bounds ({} variants).", variantIdx, pipelines.size());
-    ZHLN::Assert(pipelines[variantIdx].Valid(), "Attempted to bind an invalid fullscreen pipeline variant {}.", variantIdx);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variantIdx].Get());
-    PushData(cmd, 0, pushData);
-
-    PushHeapIndex(cmd, heapBindings.indexPushOffset, blockBase.slot);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
-}
-
-template <typename LayoutT>
-void FullscreenPass<LayoutT>::ExecuteHeap(VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept {
-    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "fullscreen draw");
-    ZHLN::Assert(Valid(), "Attempted to bind an invalid fullscreen pipeline.");
-    ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-    PushHeapIndex(cmd, heapBindings.indexPushOffset, blockBase.slot);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+void FullscreenPass<LayoutT>::ExecuteHeap(RasterPassContextBase& ctx, ActivePipeline active, BoundHeapPass heap) const noexcept {
+    vkCmdBindPipeline(ctx.Cmd(), VK_PIPELINE_BIND_POINT_GRAPHICS, active);
+    heap.Push(ctx.Cmd());
+    vkCmdDraw(ctx.Cmd(), 3, 1, 0, 0);
 }
 
 }

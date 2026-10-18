@@ -22,6 +22,9 @@ struct TonemapBlitPass:
     RenderFrameContext&   frame;
     GetSwapchainImageT    getSwapchainImage;
 
+    // Manual-scope pass (operator()(VkCommandBuffer)): the draw closure below
+    // owns its Vk::DynamicPass scope -- the swapchain target is not a graph
+    // binding, so the graph must not wrap this one in AutoCtx.
     void operator()(VkCommandBuffer cmd) const noexcept {
         using namespace Shaders;
         FullscreenPassRecorder<Blit, Modules::BlitPS>::RecordCustom(

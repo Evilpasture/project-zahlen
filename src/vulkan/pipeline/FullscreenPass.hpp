@@ -6,6 +6,9 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "ActivePipeline.hpp"
+#include "graph/RenderGraph.hpp"
+
 namespace ZHLN::Vk {
 
 template <typename T>
@@ -60,15 +63,15 @@ struct FullscreenPass {
     template <typename Declared, typename... Slots>
     [[nodiscard]] auto WriteHeapParameters(HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase;
 
+    // Recorded draws take the proofs, not the raw state: `ctx` carries the
+    // command buffer (references cannot be null), `active` a built pipeline,
+    // `heap` a non-zero heap-index push. The three asserts this used to carry
+    // are unrepresentable here -- record-time factories (ActivePipeline::TryGet,
+    // BoundHeapPass::Create) refuse to produce anything the draw cannot use.
     template <ShaderProgram... Modules, FullscreenPushPayload T>
-    void ExecuteHeap(VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept;
+    void ExecuteHeap(RasterPassContextBase& ctx, ActivePipeline active, BoundHeapPass heap, const T& pushData) const noexcept;
 
-    template <ShaderProgram... Modules, FullscreenPushPayload T>
-    void ExecuteVariantHeap(
-        VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, HeapBlockBase blockBase
-    ) const noexcept;
-
-    void ExecuteHeap(VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept;
+    void ExecuteHeap(RasterPassContextBase& ctx, ActivePipeline active, BoundHeapPass heap) const noexcept;
 };
 
 }

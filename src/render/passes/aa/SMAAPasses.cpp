@@ -26,7 +26,7 @@ static_assert(GpuAbi::ScenePassPayload<SmaaPushConstants>, "a pass payload that 
 } // namespace
 
 void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    FullscreenPassRecorder<Shaders::SmaaEdge, Shaders::Modules::SmaaEdgeVS>::Record(frame, ctx.Cmd(), aa.smaaEdge, [&]() {
+    FullscreenPassRecorder<Shaders::SmaaEdge, Shaders::Modules::SmaaEdgeVS>::Record(frame, ctx, aa.smaaEdge, [&]() {
         const auto& inputColor = frame.graphResources.hdrSceneColor;
 
         return MakeFullscreenPassArgs(MetricsOf(inputColor.extent), Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)));
@@ -34,7 +34,7 @@ void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
 }
 
 void SmaaWeightPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    FullscreenPassRecorder<Shaders::SmaaWeight, Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>::Record(frame, ctx.Cmd(), aa.smaaWeight, [&]() {
+    FullscreenPassRecorder<Shaders::SmaaWeight, Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>::Record(frame, ctx, aa.smaaWeight, [&]() {
         const auto& areaInfo   = frame.textureManager.ViewInfo(frame.postProcess.SmaaAreaTexture());
         const auto& searchInfo = frame.textureManager.ViewInfo(frame.postProcess.SmaaSearchTexture());
 
@@ -47,7 +47,7 @@ void SmaaWeightPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
 }
 
 void SmaaBlendPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    FullscreenPassRecorder<Shaders::SmaaBlend, Shaders::Modules::SmaaBlendVS, Shaders::Modules::SmaaBlendPS>::Record(frame, ctx.Cmd(), aa.smaaBlend, [&]() {
+    FullscreenPassRecorder<Shaders::SmaaBlend, Shaders::Modules::SmaaBlendVS, Shaders::Modules::SmaaBlendPS>::Record(frame, ctx, aa.smaaBlend, [&]() {
         const auto& inputColor = frame.graphResources.hdrSceneColor;
 
         return MakeFullscreenPassArgs(
