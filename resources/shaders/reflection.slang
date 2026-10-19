@@ -243,10 +243,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         return float4(texInput.SampleLevel(pointSampler, input.uv, 0).rgb, 1.0f);
     }
 
-    // Banded depth (kSkyDepthSplit): world in [0, split], background in
-    // [split, 1]. The background layer shades through the ordinary surface
-    // path below (its G-buffer is the skybox's); only pixels no layer drew
-    // fall through to the authored sky. ReconstructWorldPos undoes the band.
+    // Pixels no layer drew fall through to the authored sky.
     if (depth >= 1.0f) {
         if (frame.environmentMode == 2) {
             return float4(0.0f, 0.0f, 0.0f, 0.0f);

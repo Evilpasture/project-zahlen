@@ -607,16 +607,18 @@ auto MakeSkyboxTransform(const BSPMap& map) noexcept -> SkyboxTransform {
         return t;
     }
 
-    // Anchor: the spawn the sky_camera view corresponds to. Without a player
-    // start the world origin keeps the cluster's relative placement sane.
+    // Seed anchor: the player start at eye height. This is only the starting
+    // point -- the placed miniscape is re-centred on the map further down --
+    // but a map with no spawn keeps a sane relative placement instead of
+    // collapsing to the world origin.
     for (const BSPEntity& entity: map.entities) {
         const std::string_view cls = entity.Find("classname");
         if (cls.starts_with("info_player")) {
             ParseVec3(entity.Find("origin"), t.anchor);
             // Source composes the 3D skybox around the view origin, not around
             // the spawn's feet: the sky_camera maps to the player's EYE.
-            // Anchoring at the feet drops the whole miniscape by 64 units and
-            // is what the removed "ground" lift used to paper over.
+            // Anchoring at the feet would drop the whole miniscape by 64 units
+            // before the centring pass even runs.
             t.anchor[2] += kSourceViewHeight;
             break;
         }
@@ -661,17 +663,63 @@ auto MakeSkyboxTransform(const BSPMap& map) noexcept -> SkyboxTransform {
         }
     }
 
-    // No ground-alignment lift. Source maps the sky_camera to the player's eye
-    // and draws the miniscape 1:1 around it; the authored skybox ground sits
-    // 4..37 source units BELOW the sky_camera (gm_murder_drones: floor at
-    // z 3040..3073, camera at 3077), i.e. 1.6..15 m below the eye -- that is
-    // what keeps a skybox floor from ever rising above the horizon and cutting
-    // the backdrop. A percentile over all placed face centroids cannot express
-    // that rule: 8,845 concrete wall faces outvote the 34 floor faces, the p20
-    // lands inside the wall band, and the resulting lift (+208 u on this map)
-    // pushed the snow terrain to +273 u -- above the 193 u eye line, where the
-    // ground becomes a wall in front of the skybox city. The authored offset
-    // is the correct one; the transform only maps source space to world space.
+    // Centre the miniscape on the map, and sink it clear of the level's floor.
+    //
+    // Source composes the miniscape around the sky_camera, and a mapper places
+    // that camera where the backdrop should surround the level. Anchoring the
+    // placement on the player start instead -- the anchor set above -- carries
+    // the spawn's offset from the map's centre straight into the backdrop:
+    // gm_murder_drones' spawn sits 45 m west and 101 m north of its
+    // footprint's centre, which pushed the ring's inner blocks into the play
+    // space and left the whole city visibly off-centre around the level.
+    // Centring the placed bounds on the world's plan-view centre puts the
+    // ring's hollow where the map is: after the shift no backdrop building
+    // face meets the map's footprint, and the skyline surrounds the level
+    // evenly in every direction.
+    //
+    // Height is the one thing the authored offset gets wrong. The miniscape's
+    // ground sits a few units below the sky_camera, so placing the camera at
+    // eye height lands that ground exactly at the level's own floor
+    // (gm_murder_drones: z 129, the spawn's feet) -- a second floor cutting
+    // through the first wherever the map is open. Sinking the whole backdrop
+    // by three view heights puts its ground 4.9 m under the street and moves
+    // the skyline, which stands 130 m tall, by the same 4.9 m.
+    {
+        float placedLo[2] = {1e30f, 1e30f};
+        float placedHi[2] = {-1e30f, -1e30f};
+        for (const DFace& face: map.faces) {
+            const auto  centroid = FaceCentroidSource(map, face);
+            const float c[3] = {centroid[0], centroid[1], centroid[2]};
+            if (!IsSkyboxPoint(t, c)) {
+                continue;
+            }
+            const auto winding = FaceWinding(map, face);
+            if (!winding) {
+                continue;
+            }
+            for (const JPH::Vec3& corner: *winding) {
+                const float p[3] = {corner.GetX(), corner.GetY(), corner.GetZ()};
+                float       placed[3];
+                TransformSkyboxPoint(t, p, placed);
+                for (int k = 0; k < 2; ++k) {
+                    placedLo[k] = std::min(placedLo[k], placed[k]);
+                    placedHi[k] = std::max(placedHi[k], placed[k]);
+                }
+            }
+        }
+        if (placedHi[0] > placedLo[0] && placedHi[1] > placedLo[1]) {
+            t.anchor[0] += (t.worldMin[0] + t.worldMax[0]) * 0.5f - (placedLo[0] + placedHi[0]) * 0.5f;
+            t.anchor[1] += (t.worldMin[1] + t.worldMax[1]) * 0.5f - (placedLo[1] + placedHi[1]) * 0.5f;
+        }
+        t.anchor[2] -= 3.0f * kSourceViewHeight;
+    }
+
+    // What not to do here: fit the height to the geometry. A percentile lift
+    // over placed face centroids put the p20 inside the wall band (8,845
+    // concrete wall faces outvote the 34 floor faces) and lifted this map's
+    // snow terrain to +273 u -- above the 193 u eye line, where the ground
+    // becomes a wall in front of the city. The flat sink above is a
+    // deliberate, readable offset; a fit is not.
     return t;
 }
 
@@ -906,10 +954,10 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             // Skybox faces move from their compile cluster (around the
             // sky_camera, above the map) to their rendered world position
             // before any centroid/area work, so bake clusters, emissive
-            // proxies and bounds all see the placed geometry. Nothing is
-            // dropped: Source draws the whole miniscape and lets the world's
-            // shell occlude it, which the renderer reproduces by compositing
-            // these parts as a background layer behind the world's pixels.
+            // proxies and bounds all see the placed geometry. That transform
+            // centres the miniscape on the map and sinks it clear of the
+            // floor (MakeSkyboxTransform); nothing is dropped here, and from
+            // this point on the backdrop is ordinary scenery.
             bool skyFace = false;
             if (sky.active) {
                 const JPH::Vec3 centroid = WindingCentroid(*winding);
@@ -1200,7 +1248,21 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
             // Remember every undisplaced render face for the post-pass that
             // detects single-sheet walls (see TwinRecord).
-            if (disposition == FaceDisposition::Render && !displaced) {
+            //
+            // Background-layer faces are excluded. The audit exists because a
+            // mapper can build a room out of walls whose only face points AWAY
+            // from it, and Source then draws them from the leaffaces of the
+            // room they bound. A miniscape has no room and no leaffaces: it is
+            // a backdrop, drawn behind the world and never entered. Running the
+            // audit on it was expensive in a much worse way than that -- the
+            // verdict is stored per PART (material x layer), so one single-sheet
+            // strip inside the skybox flipped the entire material group
+            // double-sided. On gm_murder_drones 992 of the skybox's 4295 faces
+            // qualify, which double-sided all seven of its materials: the whole
+            // miniscape -- ground planes, hull walls, the thin street strips --
+            // drew from both sides, which is what puts pale slabs and ribbons
+            // across the backdrop.
+            if (disposition == FaceDisposition::Render && !displaced && !skyFace) {
                 TwinRecord rec;
                 rec.partIndex   = static_cast<size_t>(&part - result.parts.data());
                 rec.ownN[0]     = faceNormal.GetX();

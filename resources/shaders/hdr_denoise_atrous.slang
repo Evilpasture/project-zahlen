@@ -22,6 +22,21 @@ float KarisLuma(float3 c) {
     return y / (1.0f + y);
 }
 
+// Median of up to 9 values, one channel at a time (insertion sort on a fixed
+// nine-element array; cheaper than any branch-free formulation at this size).
+float MedianOf9(float v[9], uint n) {
+    for (uint a = 1u; a < n; ++a) {
+        const float key = v[a];
+        int         b   = int(a) - 1;
+        while (b >= 0 && v[b] > key) {
+            v[b + 1] = v[b];
+            --b;
+        }
+        v[b + 1] = key;
+    }
+    return (n & 1u) != 0u ? v[n / 2u] : (v[n / 2u - 1u] + v[n / 2u]) * 0.5f;
+}
+
 void AccumulateTap(
     int2 coord, float kernelW, float centerDepth, float depthTol, float3 centerNormal, float centerLuma, float lumaTol, inout float4 sum,
     inout float totalWeight
@@ -66,6 +81,50 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     int   step     = int(max(pc.stepSize, 1u));
     float depthTol = max(pc.phiDepth, 1e-4f) * max(abs(centerDepth), 1e-3f);
+
+    // Median rejection before filtering. This pass averages the composited HDR
+    // colour (ray-traced shadows and reflections land here), and its wavelet
+    // cannot remove a spike that no neighbour shares: with the centre weighted
+    // highest, an isolated 1-spp sample stays the dominant term and the result
+    // is a dot that no amount of smoothing in this kernel removes. A 3x3
+    // same-plane median is the one statistic a lone outlier does not move, so
+    // the centre enters the filter at no more than 2x it (plus a floor) when it
+    // disagrees that badly.
+    {
+        float medR[9];
+        float medG[9];
+        float medB[9];
+        uint  medCount = 0u;
+        for (int y = -1; y <= 1; ++y) {
+            for (int x = -1; x <= 1; ++x) {
+                if (x == 0 && y == 0) {
+                    continue;
+                }
+                int2  coord      = clamp(int2(tid.xy) + int2(x, y) * step, int2(0, 0), int2(frame.screenResolution) - int2(1, 1));
+                float tapDepthRaw = texDepth.Load(int3(coord, 0)).r;
+                if (tapDepthRaw >= 1.0f) {
+                    continue;
+                }
+                float3 tapNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(coord, 0)).xy * 2.0f - 1.0f);
+                if (abs(dot(centerNormal, tapNormal)) < 0.5f) {
+                    continue;
+                }
+                float4 tapValue = inColor.Load(int3(coord, 0));
+                if (tapValue.a <= 0.0f) {
+                    continue;
+                }
+                medR[medCount] = tapValue.r;
+                medG[medCount] = tapValue.g;
+                medB[medCount] = tapValue.b;
+                ++medCount;
+            }
+        }
+        if (medCount >= 2u) {
+            const float3 med = float3(MedianOf9(medR, medCount), MedianOf9(medG, medCount), MedianOf9(medB, medCount));
+            const float3 hi  = max(med * 2.0f, med + float3(1e-3f));
+            centerValue.rgb  = clamp(centerValue.rgb, float3(0.0f), hi);
+        }
+    }
 
     float4 sum         = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float  totalWeight = 0.0f;

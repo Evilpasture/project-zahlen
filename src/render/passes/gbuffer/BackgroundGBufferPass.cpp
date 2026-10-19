@@ -9,9 +9,10 @@ namespace ZHLN::Passes {
 
 // Manual scope: the pass wraps its own Vk::DynamicPass. GBufferBasePass ran
 // first and cleared the shared targets; this pass loads them and stamps the
-// background layer. The depth test does the composition: the layer's clip
-// depth is banded into [kSkyDepthSplit, 1] (BandedClipDepth), so it passes
-// only where the world left no depth -- the map wins every pixel it covers.
+// skybox scenery. That scenery is ordinary geometry in the same world, so it
+// is ordered by plain depth: it fills the pixels the map left empty and is
+// occluded wherever the map is nearer. (It used to be forced behind the world
+// by a second depth band; that split is retired.)
 void BackgroundGBufferPass::operator()(VkCommandBuffer cmd) const noexcept {
     frame.BindHeapsAndPushFrame(cmd);
 

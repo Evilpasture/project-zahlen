@@ -9,15 +9,23 @@ import gpu_buffer;
 // InstanceData.flags layout beyond the material byte (see BuildGPUInstanceData):
 // bit 8 skinned, 9 double-sided, 10 transmission, 11 unlit, 12 mirrored,
 // 13 background layer, 16 viewmodel.
+//
+// Bit 13 is METADATA ONLY. The 3D skybox is imported as ordinary geometry in
+// the same world as the map: placed where the importer authored it, occluded
+// and culled and lit like anything else. The flag stays because infrastructure
+// still needs to know a surface is scenery rather than play space -- the TLAS
+// instance mask (rays skip it, so it never lights the world) and the
+// cascade-shadow filter (a 300 m backdrop must not shade the level).
 public static const uint kInstanceFlagBackground = 1u << 13;
 
-// Source's depth-range remap for the 3D skybox: the main world's clip depth is
-// scaled into [0, kSkyDepthSplit] and the background layer compressed into
-// [kSkyDepthSplit, 1], so a background fragment can never win a depth test
-// against world geometry no matter where the skybox model sits -- the map wins
-// every pixel it covers, enforced by the rasterizer. The depth buffer stores
-// the banded value; ReconstructWorldPos undoes the band.
-public static const float kSkyDepthSplit = 0.95f;
+// Source's two-world depth remap used to live here: the main world compressed
+// into [0, 0.95] and the skybox layer into [0.95, 1], so a background fragment
+// could never win a depth test no matter where the miniscape sat. That split is
+// retired -- the backdrop is ordinary geometry in the same world now and is
+// ordered by real depth like everything else. The constant is kept at 1.0
+// rather than deleted so every encode/decode site is an identity instead of
+// quietly dividing by a stale split (or by zero).
+public static const float kSkyDepthSplit = 1.0f;
 
 public struct InstanceData {
     public float4x4 world;

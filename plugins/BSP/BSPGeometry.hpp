@@ -316,13 +316,11 @@ struct SkyboxTransform {
     // the skybox cluster from the map below it. Derived per map; see .cpp.
     float zFloor    = 0.0f;
     float xyHalf    = 4096.0f;
-    // Source renders the skybox as a backdrop the world's shell occludes. The
-    // engine now composites it the same way (DrawFlags::Background behind the
-    // world's pixels), so geometry that lands inside the world's volume is
-    // kept -- Source keeps it too. The zone is still the guard for skybox
-    // LIGHT entities: without per-light layers a buried fixture would shine
-    // out of the terrain into the play space, which Source's two-world split
-    // never allows.
+    // The world's volume, used to keep skybox LIGHT entities out of the play
+    // space: without per-light layers a buried fixture would shine out of the
+    // terrain into the play space, which Source's two-world split never
+    // allows. Geometry is not filtered by it -- the backdrop is placed to
+    // surround the map rather than cut against it (MakeSkyboxTransform).
     float worldMin[3] = {0.0f, 0.0f, 0.0f};
     float worldMax[3] = {0.0f, 0.0f, 0.0f};
     float hiddenMargin = 512.0f;

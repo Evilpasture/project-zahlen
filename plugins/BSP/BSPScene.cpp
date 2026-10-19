@@ -219,20 +219,6 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
     // play boundaries the way Source renders the sky.
     const SkyboxTransform skybox = MakeSkyboxTransform(map);
 
-    // The backdrop is authored around `skybox.anchor`, and the renderer keeps it
-    // there relative to the player: sky_camera marks where the map origin sits
-    // inside the miniscape, so the layer is drawn around the eye and never
-    // parallaxes. Declaring the anchor here (rather than leaving the layer
-    // world-locked) is what stops a player who walks below the miniscape's
-    // ground from ending up underneath it, where that ground plane replaces the
-    // whole skybox. The anchor is in Source units and Source axes, so it goes
-    // through the same ConvertPosition every skybox vertex does.
-    if (skybox.active) {
-        const JPH::Vec3 anchor = ConvertPosition(options, JPH::Vec3(skybox.anchor[0], skybox.anchor[1], skybox.anchor[2]));
-        scene.environment.skyboxAnchor       = {anchor.GetX(), anchor.GetY(), anchor.GetZ()};
-        scene.environment.skyboxFollowCamera = true;
-    }
-
     for (const BSPEntity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
         if (className.empty()) {

@@ -355,18 +355,11 @@ public extension InstanceData {
         return output;
     }
 
-    // Compress this instance's clip depth into its band (Source's depth-range
-    // remap, see kSkyDepthSplit): the main world occupies [0, kSkyDepthSplit]
-    // and the background layer [kSkyDepthSplit, 1]. Applied where SV_Position
-    // is built (EvaluateVertex returns world space; the pass entries pick the
-    // clip matrix).
+    // Was Source's depth-range remap into two bands. Retired: the backdrop is
+    // ordinary geometry and shares the world's depth range, so this is an
+    // identity kept only so the pass entry points do not have to change.
     [ForceInline]
     public float4 BandedClipDepth(float4 clipPos) {
-        if ((this.flags & kInstanceFlagBackground) != 0u) {
-            clipPos.z = clipPos.w * kSkyDepthSplit + clipPos.z * (1.0f - kSkyDepthSplit);
-        } else {
-            clipPos.z *= kSkyDepthSplit;
-        }
         return clipPos;
     }
 }

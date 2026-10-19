@@ -59,10 +59,8 @@ public float3 UnpackNormalOctahedron(float2 oct) {
 }
 
 public float3 ReconstructWorldPos(float2 uv, float depth, float4x4 invViewProj) {
-    // Undo the depth band (kSkyDepthSplit): the world stores [0, kSkyDepthSplit],
-    // the background layer [kSkyDepthSplit, 1], and 1 means neither layer
-    // rasterized the pixel.
-    depth = depth >= kSkyDepthSplit ? (depth - kSkyDepthSplit) / (1.0f - kSkyDepthSplit) : depth / kSkyDepthSplit;
+    // One world, one depth range (the band is retired): plain NDC
+    // reconstruction, where 1.0 still means no layer rasterized the pixel.
     float4 clipSpacePos  = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, depth, 1.0f);
     float4 worldSpacePos = mul(invViewProj, clipSpacePos);
     float w = worldSpacePos.w;
@@ -669,9 +667,9 @@ public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, floa
             continue;
         }
 
-        // The depth buffer holds banded depth (kSkyDepthSplit); the ray's NDC z
-        // is projected unbanded. Compare in the buffer's space.
-        float rayDepth = (ndc_z_start + ndc_z_step * (float(i) + dither)) * kSkyDepthSplit;
+        // NDC depth of the ray sample. The buffer is unbanded now, so the two
+        // sides of the comparison below are in the same space.
+        float rayDepth = ndc_z_start + ndc_z_step * (float(i) + dither);
 
         float3 currentWS = ReconstructWorldPos(currentUV, rayDepth, invViewProj);
         float3 sampledWS = ReconstructWorldPos(currentUV, sampledDepth, invViewProj);

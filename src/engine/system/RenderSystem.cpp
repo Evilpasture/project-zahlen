@@ -147,13 +147,7 @@ void UploadPosePalettes(Engine& engine) {
     engine.GetPoseUploads().Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
 }
 
-// `gfx` and `cam` are the frame's resolved view state: the background layer
-// is re-based onto the camera, so it needs the same pose the G-buffer will
-// be projected with rather than a second reading of the registry.
-void SubmitVisibleMeshes(
-    Engine& engine, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible, const GraphicsSettings& gfx,
-    const Camera& cam
-) {
+void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
     auto& rc  = engine.GetRenderContext();
     auto& reg = engine.GetRegistry();
 
@@ -209,37 +203,14 @@ void SubmitVisibleMeshes(
             scratchVbo = EnsureSkinnedScratch(rc, *skelMesh, gpuMesh.vertexCount);
         }
 
+        // The 3D skybox is ordinary geometry now: it is placed where the
+        // importer authored it and submitted with the transform it was given,
+        // like every other mesh. It used to be re-based onto the camera here
+        // (and, before that, composited into a second depth band), which is
+        // what made it occlude and parallax unlike anything else in the world.
+        // Nothing about it is special-cased in this loop any more; the flag
+        // only survives as far as the TLAS mask and the shadow filter below.
         DrawFlags drawFlags = meshComp->flags;
-        if ((drawFlags & DrawFlags::Background) != DrawFlags::None && !rc.GetInfo().rayTracingSupported) {
-            // No TLAS to composite the background layer behind the world:
-            // rasterize it as ordinary scenery rather than lose it outright.
-            // The view-follow shift below is skipped with it, and deliberately:
-            // without the banded depth buffer a backdrop drawn around the eye
-            // would be depth-tested against the world as it is, and its ground
-            // plane -- a few metres under the camera -- would win.
-            drawFlags &= ~DrawFlags::Background;
-            drawFlags |= DrawFlags::VisibleInMain;
-        }
-
-        // Source's 3D skybox travels with the view. sky_camera marks where the
-        // map origin sits inside the miniscape, so the layer is drawn around
-        // the player's eye: move the whole thing by (eye - anchor) here, before
-        // the TLAS, the GPU culling spheres or the G-buffer see it, so it stays
-        // one consistent world for every consumer. Without this the miniscape
-        // sits where it was authored -- around the spawn -- and a player who
-        // walks below its ground plane ends up underneath it, where that plane
-        // replaces the entire backdrop.
-        //
-        // prev gets the *same* shift: the layer did not move relative to the
-        // camera, so its motion vectors must carry rotation only. (Passing the
-        // previous camera's shift instead would report the miniscape as
-        // sliding across the screen every frame the player moves.)
-        if ((drawFlags & DrawFlags::Background) != DrawFlags::None && gfx.environment.skyboxFollowCamera) {
-            const JPH::Vec3 anchor(gfx.environment.skyboxAnchor[0], gfx.environment.skyboxAnchor[1], gfx.environment.skyboxAnchor[2]);
-            const JPH::Mat44 shift = JPH::Mat44::sTranslation(cam.position - anchor);
-            worldMat               = shift * worldMat;
-            prevMat                = shift * prevMat;
-        }
         if (inMain) {
             drawFlags |= DrawFlags::VisibleInMain;
         }
@@ -536,7 +507,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     UploadPosePalettes(engine);
 
     if (outPhysicsDrawMode == 0) {
-        SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities(), gfx, cam);
+        SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
 
     if (auto sim_res = gpuFrame.DispatchSimulations(scene, dt); !sim_res) {

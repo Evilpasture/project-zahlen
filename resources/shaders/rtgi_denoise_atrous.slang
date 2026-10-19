@@ -38,6 +38,22 @@ float KarisLuma(float3 c) {
     return y / (1.0f + y);
 }
 
+// Median of up to 9 values, one channel at a time (insertion sort; the array is
+// tiny and fixed, so this is cheaper than any branch-free formulation here).
+float MedianOf9(float v[9], uint n) {
+    for (uint a = 1u; a < n; ++a) {
+        const float key = v[a];
+        int         b   = int(a) - 1;
+        while (b >= 0 && v[b] > key) {
+            v[b + 1] = v[b];
+            --b;
+        }
+        v[b + 1] = key;
+    }
+    return (n & 1u) != 0u ? v[n / 2u] : (v[n / 2u - 1u] + v[n / 2u]) * 0.5f;
+}
+
+
 [numthreads(8, 8, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint halfWidth, halfHeight;
@@ -83,6 +99,11 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float4 nbMax       = float4(0.0f);
     float4 nbPlaneSum  = float4(0.0f);
     uint   nbPlane     = 0u;
+    // The 3x3 ring around the centre, kept per channel for the median below.
+    float  medR[9];
+    float  medG[9];
+    float  medB[9];
+    uint   medCount    = 0u;
 
     for (int y = -2; y <= 2; ++y) {
         for (int x = -2; x <= 2; ++x) {
@@ -133,6 +154,13 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
                 nbMax      = (nbPlane == 0u) ? sampleValue : max(nbMax, sampleValue);
                 nbPlaneSum += sampleValue;
                 ++nbPlane;
+
+                if (x >= -1 && x <= 1 && y >= -1 && y <= 1 && medCount < 9u) {
+                    medR[medCount] = sampleValue.r;
+                    medG[medCount] = sampleValue.g;
+                    medB[medCount] = sampleValue.b;
+                    ++medCount;
+                }
             }
 
             sum         += sampleValue * weight;
@@ -145,6 +173,29 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     // leave it alone rather than invent a range for it.
     const bool   clampToNeighbourhood = nbPlane >= 2u;
     const float4 planeMean            = (nbPlane > 0u) ? (nbPlaneSum / float(nbPlane)) : centerValue;
+
+    // Median rejection, before anything else touches the sample.
+    //
+    // Everything below this point is a *filter*: it can smooth an outlier that
+    // is already in the buffer, but a 1-spp spike that no neighbour shares is
+    // not smoothed by it, it is *carried* -- the centre's own weight in the
+    // wavelet is 0.375/2 and the luma term only suppresses the neighbours that
+    // disagree, so the output stays dominated by the spike and the temporal
+    // blend then keeps 85% of it on screen. The clamp box below can only bound
+    // what the neighbourhood contains, and when the spike IS the centre there
+    // is nothing to bound it against.
+    //
+    // A median over the 3x3 same-plane ring is the one statistic a single
+    // outlier cannot move. If the centre disagrees with it by more than 2x, the
+    // centre is treated as the measurement that is wrong: it enters the filter
+    // at 2x the median instead of at its own value. Two times, not one, so a
+    // genuine 1-pixel GI feature on a dark surface survives; the floor keeps
+    // near-black neighbourhoods from making the rule infinitely strict.
+    if (medCount >= 2u) {
+        const float3 med = float3(MedianOf9(medR, medCount), MedianOf9(medG, medCount), MedianOf9(medB, medCount));
+        const float3 hi  = max(med * 2.0f, med + float3(kPlaneClampFloor));
+        centerValue.rgb  = clamp(centerValue.rgb, float3(0.0f), hi);
+    }
 
     float4 filtered = (totalWeight > 1e-5f) ? (sum / totalWeight) : centerValue;
 

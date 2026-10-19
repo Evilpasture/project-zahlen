@@ -28,6 +28,14 @@ static const float PI         = 3.14159265358979323846f;
 static const float MAX_GI_LUM = 10.0f;
 
 float3 ClampFireflies(float3 color, float maxLum) {
+    // Reject non-finite samples before anything downstream sees them: NaN and
+    // Inf survive max() on some implementations and then poison the temporal
+    // history for as long as the camera dwells on the pixel. Every path in
+    // this pass writes through this function.
+    const float sanity = dot(color, float3(1.0f));
+    if (sanity != sanity || abs(sanity) > 1e30f) {
+        return float3(0.0f);
+    }
     float lum = dot(max(color, float3(0.0f)), float3(0.2126f, 0.7152f, 0.0722f));
     if (lum > maxLum) {
         color *= maxLum / max(lum, 1e-4f);

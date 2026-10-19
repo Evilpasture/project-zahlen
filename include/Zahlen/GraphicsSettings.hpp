@@ -88,11 +88,6 @@ struct EnvironmentSettings {
     std::array<float, 4> skyHorizon = {0.015f, 0.035f, 0.080f, 1.0f};
     std::array<float, 4> skyGround  = {0.001f, 0.001f, 0.003f, 1.0f};
 
-    // The 3D-skybox layer follows the view (Source's sky_camera behaviour);
-    // see SceneEnvironment::skyboxAnchor.
-    std::array<float, 3> skyboxAnchor       = {0.0f, 0.0f, 0.0f};
-    bool                 skyboxFollowCamera = false;
-
     auto operator==(const EnvironmentSettings&) const noexcept -> bool = default;
 };
 

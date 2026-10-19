@@ -35,11 +35,7 @@ void VerifyCullingResults(CullingSystem::CullingQuery query, std::span<const Ent
 
         float currentMaxScale = std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
 
-        // The background layer is always submitted (see UpdateCore: it is drawn
-        // around the camera, not at its authored position), so it counts as
-        // expected-visible regardless of the frustum.
-        if ((meshes[i].flags & DrawFlags::Background) != DrawFlags::None ||
-            frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
+        if (frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
             expectedVisible++;
         }
     }
@@ -268,12 +264,11 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
                 meshComp.cullRadius * std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
             batchTris[n]   = meshTris;
             batchHidden[n] = hidden;
-            // Source's 3D skybox is drawn around the player's eye (RenderSystem
-            // re-bases it onto the camera), so its authored position says
-            // nothing about where it lands on screen. Frustum-culling it would
-            // delete the backdrop the moment the player walks away from the
-            // spawn -- the spheres sit around the spawn anchor, not around the
-            // camera they are actually drawn from.
+            // Background scenery is culled like everything else now (it lives
+            // at its authored place in the same world). The flag is kept for
+            // one rule: a backdrop must never cast a cascade shadow -- its
+            // ground plane is hundreds of metres wide and sits inside the
+            // cascades' reach, so letting it cast would blacken the level.
             batchBackground[n] = (meshComp.flags & DrawFlags::Background) != DrawFlags::None;
 
             stats.TotalTriangles += hidden ? 0u : meshTris;
@@ -301,17 +296,12 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
                 continue;
             }
 
-            // A background-layer mesh is always submitted: it is the backdrop
-            // for every view (see batchBackground above).
-            if (mainVisible[j] || batchBackground[j]) {
+            if (mainVisible[j]) {
                 outVisible.push_back(batchEntities[j]);
                 stats.RenderedTriangles += batchTris[j];
             }
 
-            // The background layer never casts a cascade shadow. It is a
-            // backdrop, not scenery: it is drawn around the camera (see above),
-            // so once re-based its ground plane sits a few metres under the
-            // player and would shade the whole level.
+            // A backdrop never casts a cascade shadow (see batchBackground).
             if (!isFullBright && shadowVisible[j] && !batchBackground[j]) {
                 outVisibleShadow.push_back(batchEntities[j]);
             }

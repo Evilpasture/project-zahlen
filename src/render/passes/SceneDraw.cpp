@@ -8,12 +8,11 @@ namespace ZHLN::Passes {
 
 auto IsVisibleIn(DrawFlags flags, RenderPassType passType) noexcept -> bool {
     using enum DrawFlags;
-    // The background layer (Source's 3D-skybox world) rasterizes in its own
-    // G-buffer pass -- BackgroundGBufferPass -- with its clip depth remapped
-    // into the far band [kSkyDepthSplit, 1] (the main world uses
-    // [0, kSkyDepthSplit]), so the map wins every pixel it covers as a depth
-    // test, not a draw order. The layer is primary visibility only: it never
-    // casts into the shadow passes.
+    // Skybox scenery rasterizes in its own G-buffer pass --
+    // BackgroundGBufferPass -- which runs straight after the base pass and
+    // shares its depth range, so the map wins every pixel it covers as an
+    // ordinary depth test. It is primary visibility only: it never casts into
+    // the shadow passes (a 300 m backdrop would shade the whole level).
     if ((flags & Background) != None) {
         return passType == RenderPassType::Main;
     }

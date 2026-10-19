@@ -47,12 +47,12 @@ PSOutput PSMain(VSOutput input) {
 
     float depth = texDepth.SampleLevel(pointSampler, uv, 0).r;
     // Decals project onto world depth only: the background layer lives in
-    // [kSkyDepthSplit, 1] and must never receive a decal.
-    if (depth >= kSkyDepthSplit) {
+    // (the depth band is retired: no layer owns a reserved slice any more.)
+    if (depth >= 1.0f) {
         discard;
     }
     // Undo the world band before clipToLocal, which expects the unbanded clip.
-    depth /= kSkyDepthSplit;
+
 
     float4 clipPos = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, depth, 1.0f);
 
