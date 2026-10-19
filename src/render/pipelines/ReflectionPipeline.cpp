@@ -30,9 +30,7 @@ void ReflectionPipeline::Dispatch(
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ShaderRead<Res_LightingGI>>(impl.graphResources.lightingGI)),
         Vk::Slot<"texVoxelIntegrated">(Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(impl.graphResources.voxelResolved)),
         Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]), Vk::Slot<"blueNoiseTex">(inputs.blueNoise),
-        Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(impl.graphResources.rtrHalf)),
-        Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)), Vk::Slot<"texSheen">(surface.sheen),
-        Vk::Slot<"texAnisotropy">(surface.anisotropy), Vk::Slot<"tlas">(inputs.tlas),
+        Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(impl.graphResources.rtrHalf)), Vk::Slot<"tlas">(inputs.tlas),
         Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ShaderRead<Res_DdgiIrradiance>>(impl.graphResources.ddgiIrradiance)),
         Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ShaderRead<Res_DdgiDistance>>(impl.graphResources.ddgiDistance))
     );

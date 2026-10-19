@@ -391,11 +391,24 @@ public struct GBufferGeometryOutput {
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
     public nointerpolation float3 pbrFactors : TEXCOORD6;
     public nointerpolation uint alphaMode : TEXCOORD7;
+    public nointerpolation uint2 samplerCodes : TEXCOORD16;
+}
+
+// The additive deferred-emission pass samples only base/emissive material
+// inputs. Giving it a narrow interface avoids exporting the forward-only PBR
+// extension lanes from its vertex shader merely to have the fragment discard
+// them.
+public struct EmissiveGeometryOutput {
+    public float4 pos : SV_Position;
+    public float2 uv : TEXCOORD2;
+    public float2 uv1 : TEXCOORD17;
+    public nointerpolation uint instanceId : TEXCOORD18;
+    public float4 color : COLOR;
+    public nointerpolation uint4 materialIndices : TEXCOORD4;
+    public nointerpolation float4 baseColorFactor : TEXCOORD5;
+    public nointerpolation float3 pbrFactors : TEXCOORD6;
+    public nointerpolation uint alphaMode : TEXCOORD7;
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
-    public nointerpolation float4 coatParams : TEXCOORD12;
-    public nointerpolation uint4 coatTextures : TEXCOORD13;
-    public nointerpolation float2 anisotropyParams : TEXCOORD14;
-    public nointerpolation uint anisotropyTexIndex : TEXCOORD15;
     public nointerpolation uint2 samplerCodes : TEXCOORD16;
 }
 
@@ -449,13 +462,24 @@ public GBufferGeometryOutput PackGBufferOutput(SceneGeometryVertex v) {
     o.materialIndices    = v.materialIndices;
     o.baseColorFactor    = v.baseColorFactor;
     o.pbrFactors         = v.pbrFactors;
-    o.alphaMode          = v.alphaMode;
-    o.emissiveFactor     = v.emissiveFactor;
-    o.coatParams         = v.coatParams;
-    o.coatTextures       = v.coatTextures;
-    o.anisotropyParams   = v.anisotropyParams;
-    o.anisotropyTexIndex = v.anisotropyTexIndex;
-    o.samplerCodes       = v.samplerCodes;
+    o.alphaMode       = v.alphaMode;
+    o.samplerCodes    = v.samplerCodes;
+    return o;
+}
+
+public EmissiveGeometryOutput PackEmissiveOutput(SceneGeometryVertex v) {
+    EmissiveGeometryOutput o;
+    o.pos             = v.pos;
+    o.uv              = v.uv;
+    o.uv1             = v.uv1;
+    o.instanceId      = v.instanceId;
+    o.color           = v.color;
+    o.materialIndices = v.materialIndices;
+    o.baseColorFactor = v.baseColorFactor;
+    o.pbrFactors      = v.pbrFactors;
+    o.alphaMode       = v.alphaMode;
+    o.emissiveFactor  = v.emissiveFactor;
+    o.samplerCodes    = v.samplerCodes;
     return o;
 }
 
@@ -505,6 +529,13 @@ public struct ForwardPassOutput : IScenePassOutput {
     typealias Output = ForwardGeometryOutput;
     public static Output Emit(SceneGeometryVertex v, uint viewId) {
         return PackForwardOutput(v);
+    }
+}
+
+public struct EmissivePassOutput : IScenePassOutput {
+    typealias Output = EmissiveGeometryOutput;
+    public static Output Emit(SceneGeometryVertex v, uint viewId) {
+        return PackEmissiveOutput(v);
     }
 }
 

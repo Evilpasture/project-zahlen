@@ -7,10 +7,6 @@ struct PSOutput {
     float4 color : SV_Target0;
     float2 velocity : SV_Target1;
     float4 normalRoughness : SV_Target2;
-    float4 emissive : SV_Target3;
-    float4 clearcoat : SV_Target4;
-    float4 anisotropy : SV_Target5;
-    float4 sheen : SV_Target6;
 };
 
 SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
@@ -48,6 +44,14 @@ ForwardGeometryOutput VSMainForward(uint vertexId: SV_VulkanVertexID, uint insta
     SceneGeometryVertex p = BuildSceneGeometryPayload<false>(vertexId, instanceId, worldPos, activeVPPos);
     p.pos      = activeVPPos;
     return PackForwardOutput(p);
+}
+
+[shader("vertex")]
+EmissiveGeometryOutput VSMainEmissive(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInstanceID) {
+    float4 worldPos, activeVPPos;
+    SceneGeometryVertex p = BuildSceneGeometryPayload<false>(vertexId, instanceId, worldPos, activeVPPos);
+    p.pos      = activeVPPos;
+    return PackEmissiveOutput(p);
 }
 
 void PSShadow(ShadowGeometryOutput input) {
@@ -108,9 +112,9 @@ DielectricResponse ResolveDielectricResponse(InstanceData inst, float2 uv, float
 PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
     PSOutput output;
     MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
-                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+                                                        input.baseColorFactor, float4(0.0f), input.pbrFactors, input.alphaMode);
     ConfigureSceneMaterial(material, input.uv1, input.instanceId);
-    float4 albedo = SampleMaterialAlbedo<ClearCoatMaterial>(material);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
     if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
@@ -122,11 +126,7 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         // this surface in the subsequent opaque scene copy.
         float3 safeNormal = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
         output.color           = albedo;
-        output.emissive        = float4(0.0f);
         output.normalRoughness = float4(PackNormalOctahedron(safeNormal) * 0.5f + 0.5f, 1.0f, 0.0f);
-        output.clearcoat       = float4(0.0f);
-        output.anisotropy      = float4(0.0f, 0.0f, 1.0f, 1.0f); // Reserved G-buffer unlit marker.
-        output.sheen           = float4(0.0f);
     } else {
         // The masked pass used a higher floor than opaque or translucent scene
         // fragments. Keep the floor in the sampling input, not the material type.
@@ -142,44 +142,10 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         material.geometricNormal    = N * facing;
         material.tangentDirection   = T * facing;
         material.bitangentDirection = B * facing;
-        material.coatParams         = input.coatParams;
-        material.coatTextures       = input.coatTextures;
-        material.anisotropyParams   = input.anisotropyParams;
-        material.anisotropyTexIndex = input.anisotropyTexIndex;
-
-        float3 emissive = SampleMaterialEmissive<ClearCoatMaterial>(material);
-        SurfaceInteraction surface = EvaluateMaterial<ClearCoatMaterial>(material, albedo, emissive);
+        SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, float3(0.0f));
         output.color           = float4(surface.albedo, surface.alpha);
-        // Preserve the material's emissive term separately; direct, diffuse
-        // and RTGI illumination are composed in the lighting passes.
-        output.emissive        = float4(surface.emissive, 1.0f);
         float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
         output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
-        // The opaque lighting passes reconstruct F0 from albedo and metallic
-        // and cannot see a material's specular response, so the material pass
-        // carries it out in the clearcoat lanes -- which are empty for every
-        // material that has no coat. See DecodeSpecularResponse.
-        InstanceData inst = scene.g_instances[input.instanceId];
-        float4 coatOutput = surface.clearcoat;
-        if (inst.hasSpecularResponse && coatOutput.a <= 1.0f / 255.0f) {
-            DielectricResponse response = ResolveDielectricResponse(inst, input.uv, input.uv1, input.instanceId);
-            // Lane order is the one DecodeSpecularResponse reads: rgb is the
-            // response as a multiple of the 0.04 baseline -- so the eight bits
-            // keep their resolution there, and a response stronger than the
-            // baseline saturates in this lane while the forward and
-            // transmission paths read the instance and keep it exactly -- the
-            // blue lane carries the payload marker plus f90, and alpha stays
-            // cleared, which is what every other reader of this target has to
-            // keep seeing. Slang has no float4(float3, float, float) overload,
-            // so the lanes are written by name.
-            float4 payload = float4(0.0f);
-            payload.rgb    = response.f0 / kDielectricF0;
-            payload.z      = kSpecularPayloadBase + kSpecularPayloadSpan * saturate(response.f90);
-            coatOutput     = payload;
-        }
-        output.clearcoat       = coatOutput;
-        output.anisotropy      = float4(surface.anisotropy.xy, EncodeGBufferAnisotropy(surface.anisotropy.z), surface.anisotropy.w);
-        output.sheen           = surface.sheen;
     }
 
     float currW    = max(input.currClip.w, 0.0001f);
@@ -304,6 +270,21 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
     return float4(min(color, 32768.0f), 1.0f);
 }
 
+// Lit emitters still own a compact G-buffer record. This second raster pass
+// adds just their HDR radiance to LightingGI after deferred lighting, before
+// screen-space reflections consume that lighting. It deliberately shares the
+// alpha-mask test with PSMain/PSForward so discarded texels never contribute.
+float4 PSEmissive(EmissiveGeometryOutput input) : SV_Target0 {
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+    ConfigureSceneMaterial(material, input.uv1, input.instanceId);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
+        discard;
+    }
+    return float4(SampleMaterialEmissive<StandardPBRMaterial>(material) * albedo.a, 0.0f);
+}
+
 float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {
     MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
                                                         input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
@@ -313,9 +294,12 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
         discard;
     }
     // BLEND still composites by coverage; OPAQUE and MASK write full alpha.
-    // None of the lit paths (including emissive or fullBright) apply to unlit.
+    // Unlit materials are forward-only. Their base color and emission are both
+    // self-lit terms, so include the emission here instead of the deferred
+    // additive-emission pass used by ordinary lit emitters.
     if (material.isUnlit) {
-        return float4(albedo.rgb, material.alphaMode == 2u ? albedo.a : 1.0f);
+        float3 emissive = SampleMaterialEmissive<StandardPBRMaterial>(material) * albedo.a;
+        return float4(albedo.rgb + emissive, material.alphaMode == 2u ? albedo.a : 1.0f);
     }
     float3 sampledEmissive = SampleMaterialEmissive<StandardPBRMaterial>(material);
     float3 emissive = sampledEmissive * albedo.a;

@@ -14,12 +14,14 @@ names (`math.transform`, for example); the declaration inside each module is
 its simple name (`module transform;`). They carry no descriptors or push data;
 `pbr_helpers.slang` re-exports the math used by existing PBR consumers.
 
-`material_model.slang` defines the compile-time `IMaterial` contract. Scene
-G-buffer fragments specialize it for `ClearCoatMaterial` (base PBR plus optional
-coat and anisotropy layers); forward and mesh-particle fragments use
-`StandardPBRMaterial`. Shadow fragments sample only alpha. These structs are
-shader-local, not a host material ABI or runtime material-type dispatch.
-Forward transmission retains its separate refractive shading path.
+`material_model.slang` defines the compile-time `IMaterial` contract. Compact
+G-buffer fragments use `StandardPBRMaterial`; clearcoat, anisotropy, sheen and
+specular-exotic materials are routed through the forward path for their full
+evaluation. The deferred emission compositor also samples `StandardPBRMaterial`
+a second time and adds only its HDR emission. Shadow fragments sample only
+alpha. These structs are shader-local, not a host material ABI or runtime
+material-type dispatch. Forward transmission retains its separate refractive
+shading path.
 
 `gpu_buffer.slang` supplies `GPUBuffer<T>` for typed loads, stores and uint
 atomics through buffer device addresses. It is a non-owning, unchecked shader

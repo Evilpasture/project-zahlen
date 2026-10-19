@@ -77,6 +77,8 @@ class PipelineRegistry {
                         Family, VertexShaderModule, MeshShaderModule, PassContract, Vk::MaterialFlags::AdditiveBlend | Vk::MaterialFlags::DepthWrite>(
                         doubleSided
                     );
+                case 5:
+                    return CreateMaterialVariant<Family, VertexShaderModule, MeshShaderModule, PassContract, Vk::MaterialFlags::DepthWrite>(doubleSided);
                 default:
                     return std::unexpected(MaterialCreationError::PipelineCreationFailed);
             }
@@ -96,7 +98,7 @@ class PipelineRegistry {
     static constexpr size_t kGeometryPathCount = 2;
 
     static constexpr size_t kPipelineVariantCount = kFamilyCount * kGeometryPathCount * Vk::k_material_flag_variant_count;
-    static_assert(kPipelineVariantCount == 20);
+    static_assert(kPipelineVariantCount == 24);
 
     [[nodiscard]] static constexpr auto VariantIndex(MaterialPipelineFamily family, bool mesh, Vk::MaterialFlags flags) noexcept -> size_t {
         const size_t geometry = mesh ? 1U : 0U;

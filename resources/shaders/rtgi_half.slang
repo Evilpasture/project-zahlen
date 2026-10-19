@@ -13,7 +13,6 @@ RtgiHalfPushConstants pc;
 
 Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
-Texture2D<float4> texAnisotropy;
 ConstantBuffer<FrameUniforms> frame;
 StructuredBuffer<InstanceData> g_instances;
 Texture2D<float4> blueNoiseTex;
@@ -126,11 +125,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint2 fullPos = min(tid.xy * 2u, uint2(frame.screenResolution) - 1u);
     float depth = texDepth.Load(int3(fullPos, 0));
     if (depth >= 1.0f) {
-        return;
-    }
-
-    float4 anisoRaw = texAnisotropy.Load(int3(fullPos, 0));
-    if (IsGBufferUnlit(anisoRaw.z)) {
         return;
     }
 

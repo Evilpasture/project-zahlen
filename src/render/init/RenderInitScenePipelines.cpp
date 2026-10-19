@@ -12,6 +12,25 @@
 
 namespace ZHLN {
 
+auto RenderContext::Impl::BuildEmissivePipeline() -> std::expected<void, ErrorCode> {
+    return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::BasicVSEmissive>(), Vk::MakeStageSource<Shaders::Modules::EmissivePS>())
+        .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
+            return Vk::PipelineBuilder {}
+                .Shaders(shaders.View())
+                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
+                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthTest(true)
+                .DepthWrite(false)
+                .DepthCompare(VK_COMPARE_OP_LESS_OR_EQUAL)
+                .DynamicCullMode()
+                .AdditiveBlend()
+                .Binaries(&pipelineBinaries)
+                .Build(ctx.Device())
+                .transform([&](auto&& pipeline) -> auto { forward.emissive = std::forward<decltype(pipeline)>(pipeline); });
+        });
+}
+
 auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorCode> {
     auto csShader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>();
 

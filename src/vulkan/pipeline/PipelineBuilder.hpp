@@ -60,8 +60,9 @@ struct PipelineConfig {
     bool                dynamicCullMode = false;
     VkFrontFace         frontFace       = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
-    bool depthTest  = true;
-    bool depthWrite = true;
+    bool        depthTest    = true;
+    bool        depthWrite   = true;
+    VkCompareOp depthCompare = VK_COMPARE_OP_LESS;
 
     bool blendEnable   = false;
     bool additiveBlend = false;
@@ -150,6 +151,11 @@ class PipelineBuilder {
         return *this;
     }
 
+    auto DynamicCullMode(bool enabled = true) noexcept -> PipelineBuilder& {
+        _cfg.dynamicCullMode = enabled;
+        return *this;
+    }
+
     auto ViewMask(uint32_t mask) noexcept -> PipelineBuilder& {
         _cfg.viewMask = mask;
         return *this;
@@ -162,6 +168,11 @@ class PipelineBuilder {
 
     auto DepthWrite(bool v) noexcept -> PipelineBuilder& {
         _cfg.depthWrite = v;
+        return *this;
+    }
+
+    auto DepthCompare(VkCompareOp op) noexcept -> PipelineBuilder& {
+        _cfg.depthCompare = op;
         return *this;
     }
 
@@ -320,7 +331,7 @@ class PipelineBuilder {
             .sType             = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
             .depthTestEnable   = config.depthTest ? VK_TRUE : VK_FALSE,
             .depthWriteEnable  = config.depthWrite ? VK_TRUE : VK_FALSE,
-            .depthCompareOp    = VK_COMPARE_OP_LESS,
+            .depthCompareOp    = config.depthCompare,
             .stencilTestEnable = config.stencil.has_value() ? VK_TRUE : VK_FALSE,
             .front             = config.stencil.has_value() ? config.stencil->front : no_stencil,
             .back              = config.stencil.has_value() ? config.stencil->back : no_stencil,

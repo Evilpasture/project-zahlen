@@ -13,7 +13,21 @@ namespace ZHLN::Passes {
 enum class RenderPassType : uint8_t { Main, Shadow };
 
 [[nodiscard]] constexpr auto IsForwardOnly(uint32_t instanceFlags) noexcept -> bool {
-    return (instanceFlags & 0xFFu) == 2u || (instanceFlags & (1u << 10)) != 0u;
+    constexpr uint32_t kAlphaBlend   = 2u;
+    constexpr uint32_t kUnlit        = 1u << 11;
+    constexpr uint32_t kClearcoat    = 1u << 14;
+    constexpr uint32_t kAnisotropy   = 1u << 15;
+    constexpr uint32_t kSheen        = 1u << 16;
+    constexpr uint32_t kSpecular     = 1u << 18;
+    constexpr uint32_t kTransmission = 1u << 10;
+
+    return (instanceFlags & 0xFFu) == kAlphaBlend ||
+           (instanceFlags & (kTransmission | kUnlit | kClearcoat | kAnisotropy | kSheen | kSpecular)) != 0u;
+}
+
+[[nodiscard]] constexpr auto HasDeferredEmission(uint32_t instanceFlags) noexcept -> bool {
+    constexpr uint32_t kEmissive = 1u << 17;
+    return (instanceFlags & kEmissive) != 0u && !IsForwardOnly(instanceFlags);
 }
 
 [[nodiscard]] auto IsVisibleIn(DrawFlags flags, RenderPassType passType) noexcept -> bool;

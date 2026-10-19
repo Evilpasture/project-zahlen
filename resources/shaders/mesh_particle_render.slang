@@ -42,10 +42,6 @@ struct PSOutput {
     float4 color : SV_Target0;
     float2 velocity : SV_Target1;
     float4 normalRoughness : SV_Target2;
-    float4 emissive : SV_Target3;
-    float4 clearcoat : SV_Target4;
-    float4 anisotropy : SV_Target5;
-    float4 sheen : SV_Target6;
 };
 
 VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint viewId: SV_ViewID) {
@@ -146,11 +142,7 @@ PSOutput PSMain(VSOutput input) {
     if (mp_pc.unlit != 0u) {
         float3 safeNormal = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
         output.color           = albedo;
-        output.emissive        = float4(0.0f);
         output.normalRoughness = float4(PackNormalOctahedron(safeNormal) * 0.5f + 0.5f, 1.0f, 0.0f);
-        output.clearcoat       = float4(0.0f);
-        output.anisotropy      = float4(0.0f, 0.0f, 1.0f, 1.0f);
-        output.sheen           = float4(0.0f);
         float currW = max(input.currClip.w, 0.0001f);
         float prevW = max(input.prevClip.w, 0.0001f);
         output.velocity = (input.currClip.xy / currW - input.prevClip.xy / prevW) * 0.5f;
@@ -174,7 +166,6 @@ PSOutput PSMain(VSOutput input) {
     }
     SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, emissive);
     output.color           = float4(surface.albedo, surface.alpha);
-    output.emissive        = float4(surface.emissive, 1.0f);
     float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
     output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
 
@@ -184,9 +175,6 @@ PSOutput PSMain(VSOutput input) {
     float2 ndcPrev = input.prevClip.xy / prevW;
 
     output.velocity  = (ndcCurr - ndcPrev) * 0.5f;
-    output.clearcoat  = surface.clearcoat;
-    output.anisotropy = float4(surface.anisotropy.xy, EncodeGBufferAnisotropy(surface.anisotropy.z), surface.anisotropy.w);
-    output.sheen = surface.sheen;
 
     return output;
 }

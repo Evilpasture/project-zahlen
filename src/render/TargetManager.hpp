@@ -22,11 +22,7 @@ inline constexpr uint32_t kMaxGeneratedHiZMips = 7;
 using Res_SceneColor    = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Velocity      = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Emissive      = Vk::GraphImage<"Emissive", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Clearcoat     = Vk::GraphImage<"Clearcoat", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Sheen         = Vk::GraphImage<"Sheen", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 
-using Res_Anisotropy    = Vk::GraphImage<"Anisotropy", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Depth         = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
 using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
 using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
@@ -101,10 +97,6 @@ class TargetManager {
         Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32> sceneColor;
         Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>           velocityBuffer;
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          normalRoughnessBuffer;
-        Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32> emissiveBuffer;
-        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          clearcoatBuffer;
-        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          anisotropyBuffer;
-        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          sheenBuffer;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     lightingTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     hdrSceneColor;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseA;
@@ -153,10 +145,6 @@ class TargetManager {
             Res_SceneColor    sceneColor;
             Res_Velocity      velocityBuffer;
             Res_NormRough     normalRoughnessBuffer;
-            Res_Emissive      emissiveBuffer;
-            Res_Clearcoat     clearcoatBuffer;
-            Res_Anisotropy    anisotropyBuffer;
-            Res_Sheen         sheenBuffer;
             Res_Lighting      lightingTarget;
             Res_HdrSceneColor hdrSceneColor;
             Res_DenoiseA      denoiseA;

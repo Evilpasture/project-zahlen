@@ -21,6 +21,7 @@
 #include "passes/gbuffer/ViewmodelPass.hpp"
 #include "passes/lighting/AtrousDenoisePass.hpp"
 #include "passes/lighting/ClusteredLightingPass.hpp"
+#include "passes/lighting/EmissivePass.hpp"
 #include "passes/lighting/RayTracingPasses.hpp"
 #include "passes/lighting/ReflectionPass.hpp"
 #include "passes/lighting/RtgiCompositePass.hpp"
@@ -128,7 +129,8 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::AtrousDenoisePass<
             "RtgiDenoise", Shaders::RtgiDenoise, Res_RtgiHalf, Res_RtgiDenoiseA, Res_RtgiDenoiseB, Res_RtgiHistory, RtgiAtrousPushConstants,
             Passes::RtgiDenoiseGate> {.frame = self, .maxRoughness = 1.0f},
-        Passes::RtgiCompositePass {.frame = self}, OpaqueReflectionPass {.frame = self, .pc = pc}, TranslucentReflectionPass {.frame = self, .pc = pc},
+        Passes::RtgiCompositePass {.frame = self}, Passes::EmissivePass {.forward = self.forward, .frame = self},
+        OpaqueReflectionPass {.frame = self, .pc = pc}, TranslucentReflectionPass {.frame = self, .pc = pc},
         Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self},
         Passes::AtrousDenoisePass<
             "HdrDenoise", Shaders::HdrDenoise, Res_HdrSceneColor, Res_DenoiseA, Res_DenoiseB, void, HdrAtrousPushConstants, Passes::HdrDenoiseGate> {

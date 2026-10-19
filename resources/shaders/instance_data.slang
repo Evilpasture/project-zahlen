@@ -198,7 +198,7 @@ public extension InstanceData {
     public property bool isViewmodel {
         [ForceInline]
         get {
-            return ((this.flags >> 16) & 0xFFu) != 0;
+            return (this.flags & (1u << 19)) != 0;
         }
     }
     public property float transmissionFactor {

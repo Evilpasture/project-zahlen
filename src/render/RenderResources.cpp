@@ -490,6 +490,7 @@ auto RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte>
     return _impl->geometry.Update(handle, bytes.data(), bytes.size());
 }
 
+static_assert(ActiveGBuffer::count == 3, "The compact deferred path owns SceneColor, Velocity, and NormRough only.");
 static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::color_formats == ActiveGBuffer::array);
 static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_count == 1);
@@ -498,9 +499,24 @@ static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::depth_format == VK
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
     const bool transmission = !desc.unlit && desc.transmissionFactor > 0.0f;
-    const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission;
-    const bool alphaBlend   = forward && !desc.additiveBlend;
-    const bool depthWrite   = transmission;
+    const bool hasClearcoat = !desc.unlit &&
+                              (desc.clearcoatFactor > 1.0f / 255.0f || desc.clearcoatMap != TextureHandle::Invalid ||
+                               desc.clearcoatRoughnessMap != TextureHandle::Invalid || desc.clearcoatNormalMap != TextureHandle::Invalid);
+    const bool hasAnisotropy = !desc.unlit &&
+                               (desc.anisotropyStrength > 1.0f / 255.0f || desc.anisotropyMap != TextureHandle::Invalid);
+    const bool hasSheen = !desc.unlit &&
+                          (desc.sheenColorFactor.x > 1.0f / 255.0f || desc.sheenColorFactor.y > 1.0f / 255.0f ||
+                           desc.sheenColorFactor.z > 1.0f / 255.0f || desc.sheenColorMap != TextureHandle::Invalid ||
+                           desc.sheenRoughnessMap != TextureHandle::Invalid);
+    // These paths previously serialized their data through the discarded
+    // attachments. Keep their full material evaluation in ForwardPass instead.
+    // Emission is deliberately not a forward-only feature: lit emitters retain
+    // the deferred normal/AO/velocity path and get their radiance composited
+    // additively into LightingGI before the reflection pass.
+    const bool forwardOnly = desc.unlit || hasClearcoat || hasAnisotropy || hasSheen || desc.specularEnabled;
+    const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission || forwardOnly;
+    const bool alphaBlend   = !desc.additiveBlend && (desc.alphaBlend || desc.alphaMode == 2 || transmission);
+    const bool depthWrite   = transmission || (forwardOnly && !alphaBlend && !desc.additiveBlend);
 
     Vk::MaterialFlags flags = Vk::MaterialFlags::None;
     if (desc.doubleSided) {
@@ -511,12 +527,12 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     } else if (alphaBlend) {
         flags |= Vk::MaterialFlags::TranslucentBlend;
     }
-    if (depthWrite && (alphaBlend || desc.additiveBlend)) {
+    if (depthWrite) {
         flags |= Vk::MaterialFlags::DepthWrite;
     }
 
     std::expected<Material, ErrorCode> mat_res =
-        (alphaBlend || desc.additiveBlend) ?
+        forward ?
             _impl->pipelines.CreateMaterial<
                 MaterialPipelineFamily::Forward, Vk::GraphicsShaderModules<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS>,
                 Vk::GraphicsShaderModules<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshForward, Shaders::Modules::ForwardPS>, Passes::ForwardPass>(

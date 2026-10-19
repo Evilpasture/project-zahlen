@@ -111,10 +111,6 @@ struct SceneResources {
     Vk::TypedImage<ColorL> sceneColor;
     Vk::TypedImage<ColorL> velocity;
     Vk::TypedImage<ColorL> normRough;
-    Vk::TypedImage<ColorL> emissive;
-    Vk::TypedImage<ColorL> clearcoat;
-    Vk::TypedImage<ColorL> anisotropy;
-    Vk::TypedImage<ColorL> sheen;
     Vk::TypedImage<DepthL> depth;
 };
 
@@ -417,6 +413,7 @@ struct RenderContext::Impl: RenderFrameContext {
     [[nodiscard]] std::expected<void, ErrorCode> InitShadowResources();
     [[nodiscard]] std::expected<void, ErrorCode> InitCullingResources();
     [[nodiscard]] std::expected<void, ErrorCode> BuildDecalPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildEmissivePipeline();
     [[nodiscard]] std::expected<void, ErrorCode> BuildParticlePipelines();
     [[nodiscard]] std::expected<void, ErrorCode> BuildMeshParticlePipelines();
     [[nodiscard]] std::expected<void, ErrorCode> InitBindless();

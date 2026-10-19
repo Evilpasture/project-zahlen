@@ -43,7 +43,9 @@ constexpr auto operator|=(MaterialFlags& left, MaterialFlags right) noexcept -> 
     return (flags & flag) != MaterialFlags::None;
 }
 
-inline constexpr size_t k_material_flag_variant_count = 5;
+// None, translucent, translucent+depth, additive, additive+depth, opaque+depth.
+// DoubleSided only changes culling and deliberately shares these state variants.
+inline constexpr size_t k_material_flag_variant_count = 6;
 
 [[nodiscard]] constexpr auto MaterialFlagVariantIndex(MaterialFlags flags) noexcept -> size_t {
     constexpr uint8_t k_known_mask = static_cast<uint8_t>(MaterialFlags::DoubleSided) | static_cast<uint8_t>(MaterialFlags::TranslucentBlend) |
@@ -56,7 +58,7 @@ inline constexpr size_t k_material_flag_variant_count = 5;
     const bool translucent = HasFlag(flags, MaterialFlags::TranslucentBlend);
     const bool additive    = HasFlag(flags, MaterialFlags::AdditiveBlend);
     const bool depth_write = HasFlag(flags, MaterialFlags::DepthWrite);
-    if ((translucent && additive) || (depth_write && !translucent && !additive)) {
+    if (translucent && additive) {
         return k_material_flag_variant_count;
     }
 
@@ -66,7 +68,7 @@ inline constexpr size_t k_material_flag_variant_count = 5;
     if (additive) {
         return depth_write ? 4U : 3U;
     }
-    return 0;
+    return depth_write ? 5U : 0U;
 }
 
 struct PipelineCreateBindings {

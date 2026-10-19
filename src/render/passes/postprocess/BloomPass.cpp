@@ -15,7 +15,6 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
     frame.BindHeapsAndPushFrame(cmd);
 
     const auto srcHdr     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.hdrSceneColor);
-    const auto emissive   = Vk::Assume<Vk::ComputeRead<Res_Emissive>>(frame.graphResources.emissiveBuffer);
     const auto thresh     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomThresholdTarget);
     const auto down1      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomDown1);
     const auto down2      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomDown2);
@@ -47,7 +46,7 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
 
     thresholdChain.Step<BloomThreshold>(
         frame.postProcess.BloomThreshold(), frame.postProcess.BloomThresholdHeapBindings(), thresh.Extent(), thresholdPush, Vk::Slot<"texInput">(srcHdr),
-        Vk::Slot<"texEmissive">(emissive), Vk::Slot<"outImage">(thresh)
+        Vk::Slot<"outImage">(thresh)
     );
 
     Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Compute, ShaderRead);

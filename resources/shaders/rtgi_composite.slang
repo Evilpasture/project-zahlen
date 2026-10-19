@@ -13,9 +13,6 @@ Texture2D<float4> texLighting;
 Texture2D<float4> texAlbedo;
 Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
-Texture2D<float4> texAnisotropy;
-Texture2D<float4> texClearcoat;
-Texture2D<float4> texSheen;
 Texture2D<float4> texRtgiHalf;
 ConstantBuffer<FrameUniforms> frame;
 RWTexture2D<float4> outLighting;
@@ -44,12 +41,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
-    float4 anisoRaw = texAnisotropy.Load(int3(tid.xy, 0));
-    if (IsGBufferUnlit(anisoRaw.z)) {
-        outLighting[tid.xy] = baseLighting;
-        return;
-    }
-
     float4 normalRaw = texNormalRoughness.Load(int3(tid.xy, 0));
     float3 N = UnpackNormalOctahedron(normalRaw.xy * 2.0f - 1.0f);
     float3 albedo = max(texAlbedo.Load(int3(tid.xy, 0)).rgb, float3(0.0f));
@@ -61,25 +52,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 V = SafeNormalize(frame.camPos.xyz - worldPos, N);
     float NdotV = saturate(dot(N, V));
 
-    // KHR_materials_specular's dielectric response rides in the clearcoat lanes
-    // for a material that has no coat: it replaces the F0 this pass reconstructs
-    // from albedo and metallic, and it reweights the indirect diffuse term below
-    // through the Fresnel that term subtracts.
-    float4           coatRaw  = texClearcoat.Load(int3(tid.xy, 0));
-    SpecularResponse specular = DecodeSpecularResponse(coatRaw);
-    float3           F0       = lerp(float3(kDielectricF0) * specular.scale, albedo, metallic);
-    float            f90      = EffectiveF90(specular.f90, metallic);
-    float3 kD = (1.0f - SpecularFresnelRoughness(NdotV, F0, f90, roughness)) * (1.0f - metallic);
-
-    float4 sheenRaw = texSheen.Load(int3(tid.xy, 0));
-    float sheenAtt = SheenAlbedoScaling(sheenRaw.rgb, sheenRaw.a, NdotV, NdotV);
-
-    float coatAtt = 1.0f;
-    if (coatRaw.a > 1.0f / 255.0f) {
-        float3 coatNormal = UnpackNormalOctahedron(coatRaw.xy * 2.0f - 1.0f);
-        float coatFresnel = ClearcoatFresnel(saturate(dot(coatNormal, V))) * coatRaw.a;
-        coatAtt = saturate(1.0f - coatFresnel);
-    }
+    float3 F0 = lerp(float3(kDielectricF0), albedo, metallic);
+    float3 kD = (1.0f - SpecularFresnelRoughness(NdotV, F0, 1.0f, roughness)) * (1.0f - metallic);
 
     uint halfWidth, halfHeight;
     texRtgiHalf.GetDimensions(halfWidth, halfHeight);
@@ -170,7 +144,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         const float3 extent = max(abs(median), float3(1e-3f));
         incidentRadiance    = clamp(incidentRadiance, max(median - extent, float3(0.0f)), median + extent);
     }
-    float ambientOcclusion = saturate(baseLighting.a) * saturate(anisoRaw.w);
-    float3 diffuseBounce = incidentRadiance * albedo * kD * ambientOcclusion * sheenAtt * coatAtt;
+    float ambientOcclusion = saturate(baseLighting.a);
+    float3 diffuseBounce = incidentRadiance * albedo * kD * ambientOcclusion;
     outLighting[tid.xy] = float4(baseLighting.rgb + diffuseBounce * max(pc.giIntensity, 0.0f), baseLighting.a);
 }

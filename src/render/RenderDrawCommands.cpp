@@ -111,6 +111,7 @@ struct InstanceDataDesc {
     bool     isSkinned    = false;
     bool     doubleSided  = false;
     bool     unlit        = false;
+    bool     hasEmissive  = false;
 
     uint32_t vertexCount      = 0;
     uint32_t indexCount       = 0;
@@ -172,6 +173,24 @@ struct InstanceDataDesc {
     const uint32_t doubleSided     = desc.doubleSided ? 1u : 0u;
     const uint32_t hasTransmission = !desc.unlit && desc.transmissionFactor > 0.0f ? 1u : 0u;
     const uint32_t isUnlit         = desc.unlit ? 1u : 0u;
+    // Bits 14..18 are deliberately material-presence flags, rather than a
+    // sampled result: a texture can make the extension non-zero per pixel.
+    constexpr float kExtensionEpsilon = 1.0f / 255.0f;
+    const uint32_t hasClearcoat =
+        (!desc.unlit &&
+         (desc.clearcoatFactor > kExtensionEpsilon || desc.clearcoatTex != kNoFilmTexture || desc.clearcoatRoughnessTex != kNoFilmTexture ||
+          desc.clearcoatNormalTex != kNoFilmTexture)) ?
+            1u :
+            0u;
+    const uint32_t hasAnisotropy = (!desc.unlit && (desc.anisotropyStrength > kExtensionEpsilon || desc.anisotropyTex != kNoFilmTexture)) ? 1u : 0u;
+    const uint32_t hasSheen =
+        (!desc.unlit &&
+         (desc.sheenColorFactor.x > kExtensionEpsilon || desc.sheenColorFactor.y > kExtensionEpsilon || desc.sheenColorFactor.z > kExtensionEpsilon ||
+          desc.sheenColorTex != kNoFilmTexture || desc.sheenRoughnessTex != kNoFilmTexture)) ?
+            1u :
+            0u;
+    const uint32_t hasEmissive = desc.hasEmissive ? 1u : 0u;
+    const uint32_t hasSpecular = !desc.unlit && desc.specularEnabled ? 1u : 0u;
 
     const uint32_t isMirrored = desc.world.GetDeterminant3x3() < 0.0f ? 1u : 0u;
 
@@ -218,8 +237,9 @@ struct InstanceDataDesc {
         .roughnessFactor     = desc.roughnessFactor,
         .alphaCutoff         = desc.alphaCutoff,
 
-        .flags            = (isViewmodel << 16) | (isBackground << 13) | (isMirrored << 12) | (isUnlit << 11) | (hasTransmission << 10) | (doubleSided << 9) |
-                            (isSkinned << 8) | (desc.alphaMode & 0xFFu),
+        .flags            = (isViewmodel << 19) | (hasSpecular << 18) | (hasEmissive << 17) | (hasSheen << 16) | (hasAnisotropy << 15) |
+                            (hasClearcoat << 14) | (isBackground << 13) | (isMirrored << 12) | (isUnlit << 11) | (hasTransmission << 10) |
+                            (doubleSided << 9) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
         .jointOffset      = desc.jointOffset,
         .morphOffset      = desc.morphOffset,
         .activeMorphCount = desc.activeMorphCount,
@@ -387,6 +407,8 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .isSkinned                = isSkinned != 0u,
                  .doubleSided              = material.doubleSided,
                  .unlit                    = material.unlit,
+                 .hasEmissive              = material.emissiveMap != TextureHandle::Invalid || material.emissiveFactor.x > 0.0f ||
+                                             material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f,
                  .vertexCount              = resolved->posMesh->vertexCount,
                  .indexCount               = mesh.indexCount,
                  .jointOffset              = params.jointOffset,
@@ -478,6 +500,8 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .isSkinned                = isSkinned != 0u,
                     .doubleSided              = material.doubleSided,
                     .unlit                    = material.unlit,
+                    .hasEmissive              = material.emissiveMap != TextureHandle::Invalid || material.emissiveFactor.x > 0.0f ||
+                                                material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f,
                     .vertexCount              = resolved->posMesh->vertexCount,
                     .indexCount               = mesh.indexCount,
                     .jointOffset              = jointOffset,
@@ -507,6 +531,12 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .anisotropyStrength       = material.anisotropyStrength,
                     .anisotropyRotation       = material.anisotropyRotation,
                     .anisotropyTex            = OptionalTextureIndex(_impl.get(), material.anisotropyMap),
+                    .sheenColorFactor         = material.sheenColorFactor,
+                    .sheenRoughnessFactor     = material.sheenRoughnessFactor,
+                    .sheenColorTex            = OptionalTextureIndex(_impl.get(), material.sheenColorMap),
+                    .sheenRoughnessTex        = OptionalTextureIndex(_impl.get(), material.sheenRoughnessMap),
+                    .occlusionTex             = OptionalTextureIndex(_impl.get(), material.occlusionMap),
+                    .occlusionStrength        = material.occlusionStrength,
                     .specularEnabled          = material.specularEnabled,
                     .specularFactor           = material.specularFactor,
                     .specularColorFactor      = material.specularColorFactor,

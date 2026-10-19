@@ -63,6 +63,7 @@ set(RAW_RENDER_SOURCES
     passes/gbuffer/GBufferResolvePass.cpp
     passes/gbuffer/ViewmodelPass.cpp
     passes/lighting/ClusteredLightingPass.cpp
+    passes/lighting/EmissivePass.cpp
     passes/lighting/RtgiCompositePass.cpp
     passes/lighting/ShadowPass.cpp
     passes/lighting/ReflectionInputs.cpp

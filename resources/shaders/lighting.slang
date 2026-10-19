@@ -31,13 +31,9 @@ SamplerState pointSampler;
 Texture2D<float> shadowAtlas;
 StructuredBuffer<ShadowTile> shadowTiles;
 
-Texture2D<float4> texEmissive;
 
 Texture2D<float> texAo;
 
-Texture2D<float4> texClearcoat;
-Texture2D<float4> texSheen;
-Texture2D<float4> texAnisotropy;
 
 #ifndef DISABLE_RTR
 Texture2D<float> texRtShadowMask;
@@ -140,7 +136,7 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
                     if (pc.giMode == 1) {
                         occlusion += finalWeight;
                     } else if (pc.giMode == 2) {
-                        float3 sampleRadiance = texInput.SampleLevel(smp, uv_sample, 0).rgb + texEmissive.SampleLevel(smp, uv_sample, 0).rgb;
+                        float3 sampleRadiance = texInput.SampleLevel(smp, uv_sample, 0).rgb;
                         indirectLight += sampleRadiance * max(dot(N, dir), 0.0f) * finalWeight;
                     }
                 }
@@ -175,12 +171,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         discard;
 
     float4 albedoRaw = texInput.SampleLevel(pointSampler, input.uv, 0);
-    float3 emissive  = texEmissive.SampleLevel(pointSampler, input.uv, 0).rgb;
     if (frame.fullBright != 0) {
-        return float4(albedoRaw.rgb + emissive, 1.0f);
-    }
-    float4 anisoRaw = texAnisotropy.SampleLevel(pointSampler, input.uv, 0);
-    if (IsGBufferUnlit(anisoRaw.z)) {
         return float4(albedoRaw.rgb, 1.0f);
     }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(pointSampler, input.uv, 0);
@@ -195,33 +186,14 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 V    = SafeNormalize(pc.camPos.xyz - worldPos, N);
     float NdotV = saturate(dot(N, V));
 
-    // KHR_materials_specular's dielectric response rides in the clearcoat
-    // lanes for a material that has no coat: this pass keeps reconstructing F0
-    // from albedo and metallic, and cannot see a material's own response
-    // otherwise. See DecodeSpecularResponse.
-    float4           coatRaw      = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
-    SpecularResponse specular     = DecodeSpecularResponse(coatRaw);
-    float3           F0           = lerp(float3(kDielectricF0) * specular.scale, albedoRaw.rgb, metallic);
-    // Dielectrics take the extension's grazing reflectance; metals keep
-    // Schlick's 1, which the extension leaves untouched.
-    float            f90          = EffectiveF90(specular.f90, metallic);
-
-    float4 sheenRaw = texSheen.SampleLevel(pointSampler, input.uv, 0);
-    float3 sheenColor = sheenRaw.rgb;
-    float materialAo = anisoRaw.w;
-    float anisoStrength = DecodeGBufferAnisotropy(anisoRaw.z);
-    float3 T = anisoStrength > 0.0f ? UnpackAnisotropy(anisoRaw.xy, N) : float3(0.0f);
-    float3 B = cross(N, T);
-
-    float coatFactor  = coatRaw.a;
-    float coatRough   = max(coatRaw.z, 0.001f);
-    float3 Nc         = N;
-    float coatAtt     = 1.0f;
-    if (coatFactor > 1.0f / 255.0f) {
-        Nc            = UnpackNormalOctahedron(coatRaw.xy * 2.0f - 1.0f);
-        float Fc      = ClearcoatFresnel(saturate(dot(Nc, V))) * coatFactor;
-        coatAtt       = saturate(1.0f - Fc);
-    }
+    float3 F0 = lerp(float3(kDielectricF0), albedoRaw.rgb, metallic);
+    float  f90 = 1.0f;
+    // The compact deferred path is isotropic. Materials that need tangent-space
+    // extension lobes are rendered in ForwardPass.
+    float materialAo = 1.0f;
+    float anisoStrength = 0.0f;
+    float3 T = N;
+    float3 B = N;
 
     float4 ambientData         = ComputeAmbientAndAO(input.uv, uint2(input.pos.xy), N, worldPos, viewDepth);
     float3 ambientDiffuseAndGI = ambientData.rgb;
@@ -308,13 +280,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 kD_sun = (float3(1.0f, 1.0f, 1.0f) - F) * (1.0f - metallic);
 
     float3 sunRadiance = frame.sunRadiance.xyz;
-    float sheenAttSun = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotL_sun);
-    float3 sheenSun = sheenColor * SheenCharlieBRDF(N, V, L_sun, H_sun, sheenRaw.a);
-    float3 directSun   = ((kD_sun * albedoRaw.rgb / 3.14159265f + spec) * sheenAttSun + sheenSun) *
-                         coatAtt * sunRadiance * NdotL_sun * shadow;
-    if (coatFactor > 1.0f / 255.0f) {
-        directSun += ClearcoatDirectSpecular(Nc, V, L_sun, coatRough) * sunRadiance * shadow * coatFactor;
-    }
+    float3 directSun = (kD_sun * albedoRaw.rgb / 3.14159265f + spec) * sunRadiance * NdotL_sun * shadow;
 
     float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
 
@@ -345,12 +311,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
             const float shadowVisibility = 1.0f;
 
-            // Approximate the fiber lobe with the diffuse LTC integral; the
-            // point/directional branches above evaluate Charlie explicitly.
-            float areaAtt = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotV);
-            float3 sheenArea = diffLTC * SheenEnvironmentWeight(sheenColor, NdotV);
-            directPunctual += (((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) * areaAtt + sheenArea) *
-                              coatAtt * light.color * light.intensity * shadowVisibility;
+            directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) *
+                              light.color * light.intensity * shadowVisibility;
         } else {
             if (light.type == LightType::Directional || light.type == LightType::Sun)
                 continue;
@@ -416,14 +378,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                     }
                 }
 
-                float sheenAtt = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotL);
-                float3 sheenSpec = sheenColor * SheenCharlieBRDF(N, V, L_p, H, sheenRaw.a);
-                directPunctual += ((kD_p * albedoRaw.rgb / 3.14159265f + spec_p) * sheenAtt + sheenSpec) *
-                                  coatAtt * light.color * light.intensity * atten * NdotL * shadowVisibility;
-                if (coatFactor > 1.0f / 255.0f) {
-                    float3 Lcoat = SafeNormalize(L_unnorm, N);
-                    directPunctual += ClearcoatDirectSpecular(Nc, V, Lcoat, coatRough) * light.color * light.intensity * atten * shadowVisibility * coatFactor;
-                }
+                directPunctual += (kD_p * albedoRaw.rgb / 3.14159265f + spec_p) *
+                                  light.color * light.intensity * atten * NdotL * shadowVisibility;
             }
         }
     }
@@ -432,7 +388,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // it unconditionally to the specular IBL in reflection.slang made rough
     // metal look white even with physically correct exposure and no clearcoat.
     float3 kD_ambient = (1.0f - SpecularFresnelRoughness(NdotV, F0, f90, roughness)) * (1.0f - metallic);
-    float sheenAttAmbient = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotV);
     // Indirect light softens occlusion: the SH/GI term is a measured or
     // gathered bounce field that already contains interreflection, so
     // multiplying single-bounce AO in at full strength double-darkens
@@ -440,7 +395,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // level while open spaces matched). Half-strength AO keeps contact
     // darkening without erasing the GI it is supposed to modulate.
     float aoAmbient = lerp(1.0f, ao, 0.5f);
-    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * kD_ambient * aoAmbient * materialAo *
-                      sheenAttAmbient * coatAtt + directSun + directPunctual + emissive;
+    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * kD_ambient * aoAmbient * materialAo + directSun + directPunctual;
     return float4(litColor, ao);
 }

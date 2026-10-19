@@ -12,7 +12,6 @@ struct BloomPass:
     Vk::RenderPass<
         "BloomKawase",
         Vk::ComputeReadGeneral<Res_HdrSceneColor>,
-        Vk::ComputeRead<Res_Emissive>,
         Vk::ComputeWrite<Res_BloomThresh>,
         Vk::ComputeWrite<Res_BloomDown1>,
         Vk::ComputeWrite<Res_BloomDown2>,

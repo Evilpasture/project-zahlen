@@ -54,9 +54,6 @@ SamplerState blueNoiseSampler;
 
 Texture2D<float4> texRtrHalf;
 
-Texture2D<float4> texClearcoat;
-Texture2D<float4> texSheen;
-Texture2D<float4> texAnisotropy;
 
 #ifndef DISABLE_RTR
 RaytracingAccelerationStructure tlas;
@@ -276,11 +273,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         if (frame.fullBright != 0) {
             return float4(litColorRaw.rgb, 1.0f);
         }
-        float4 anisoRaw = texAnisotropy.SampleLevel(pointSampler, input.uv, 0);
-        if (IsGBufferUnlit(anisoRaw.z)) {
-            return float4(litColorRaw.rgb, 1.0f);
-        }
-
         float4 normRoughRaw = texNormalRoughness.SampleLevel(pointSampler, input.uv, 0);
         float roughness     = normRoughRaw.z;
         float metallic      = normRoughRaw.w;
@@ -292,24 +284,14 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         viewDepth       = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
         float3 V = SafeNormalize(pc.camPos.xyz - worldPos, N);
-        float strength = DecodeGBufferAnisotropy(anisoRaw.z);
-        float3 T = strength > 0.0f ? UnpackAnisotropy(anisoRaw.xy, N) : float3(0.0f);
-        float3 B = cross(N, T);
-        float3 R = AnisotropicReflection(N, V, B, roughness, strength);
+        float3 T = N;
+        float3 B = N;
+        float3 R = reflect(-V, N);
 
         float NdotV = saturate(dot(N, V));
-        // KHR_materials_specular's dielectric response rides in the clearcoat
-        // lanes for a material that has no coat. Sampling it here also feeds
-        // the coat block below, which reads the same word.
-        float4           coatRaw  = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
-        SpecularResponse specular = DecodeSpecularResponse(coatRaw);
-        float3           F0       = lerp(float3(kDielectricF0) * specular.scale, albedoRaw.rgb, metallic);
-        float2           envBRDF  = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
-        // The LUT's A/B terms already integrate Schlick Fresnel over the GGX
-        // lobe: A multiplies F0 and B the grazing value. Applying the grazing
-        // Fresnel again here can wash out dark metal and amplify white glints
-        // on masked foliage and thin chains.
-        float3 FssEss  = F0 * envBRDF.x + float3(EffectiveF90(specular.f90, metallic)) * envBRDF.y;
+        float3 F0 = lerp(float3(kDielectricF0), albedoRaw.rgb, metallic);
+        float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
+        float3 FssEss = F0 * envBRDF.x + float3(EffectiveF90(1.0f, metallic)) * envBRDF.y;
 
         float3 R_corr = R;
         float boxFade = 0.0f;
@@ -327,32 +309,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             R_corr      = lerp(R, boxR, boxFade);
         }
 
-        float ao = litColorRaw.a * anisoRaw.w;
+        float ao = litColorRaw.a;
 
-        float3 prefilteredColor = SampleAnisotropicEnvironment(texEnvMap, clampSampler, R_corr, roughness, strength) * frame.ambientExposure;
+        float3 prefilteredColor = texEnvMap.SampleLevel(clampSampler, R_corr, roughness * 5.0f).rgb * frame.ambientExposure;
         float3 baseSpecularIBL = prefilteredColor * FssEss * ao;
-
-        // Independent Charlie layer above metallic-roughness and beneath the
-        // dielectric clearcoat. The existing GGX cube is an IBL approximation;
-        // direct lighting uses Charlie's distribution and visibility.
-        float4 sheenRaw = texSheen.SampleLevel(pointSampler, input.uv, 0);
-        float sheenAtt = SheenAlbedoScaling(sheenRaw.rgb, sheenRaw.a, NdotV, NdotV);
-        float3 sheenIBL = float3(0.0f);
-        if (any(sheenRaw.rgb > 0.0f)) {
-            float3 sheenPref = texEnvMap.SampleLevel(clampSampler, reflect(-V, N), max(sheenRaw.a, 0.2f) * 5.0f).rgb;
-            sheenIBL = sheenPref * frame.ambientExposure * SheenEnvironmentWeight(sheenRaw.rgb, NdotV) * ao;
-        }
-        float coatAtt = 1.0f;
-        float3 coatIBL = float3(0.0f);
-        if (coatRaw.a > 1.0f / 255.0f) {
-            float3 Nc    = UnpackNormalOctahedron(coatRaw.xy * 2.0f - 1.0f);
-            float NcDotV = saturate(dot(Nc, V));
-            float Fc     = ClearcoatFresnel(NcDotV) * coatRaw.a;
-            coatAtt      = saturate(1.0f - Fc);
-            float3 Rc    = reflect(-V, Nc);
-            float3 coatPref = texEnvMap.SampleLevel(clampSampler, Rc, coatRaw.z * 5.0f).rgb * frame.ambientExposure;
-            coatIBL = coatPref * Fc * ao;
-        }
 
         litColor = litColorRaw.rgb;
 
@@ -366,7 +326,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 #ifndef DISABLE_RTR
             if (wantRTR && roughness < 0.04f) {
                 float3 rtrFallback = float3(0.0f, 0.0f, 0.0f);
-                float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, T, B, strength, confidence, rtrFallback, uint2(input.pos.xy));
+                float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, T, B, 0.0f, confidence, rtrFallback, uint2(input.pos.xy));
 
                 if (confidence > 0.0f) {
                     reflectionColor = rtrFallback;
@@ -397,15 +357,14 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 }
             }
 
-            float3 specReflect = (lerp(baseSpecularIBL, reflectionColor * FssEss, confidence) * sheenAtt + sheenIBL) *
-                                 coatAtt + coatIBL;
+            float3 specReflect = lerp(baseSpecularIBL, reflectionColor * FssEss, confidence);
 
             float horizonOcclusion = saturate(1.0f + dot(R, N));
             horizonOcclusion *= horizonOcclusion;
 
             litColor += specReflect * horizonOcclusion;
         } else {
-            litColor += (baseSpecularIBL * sheenAtt + sheenIBL) * coatAtt + coatIBL;
+            litColor += baseSpecularIBL;
         }
     }
 

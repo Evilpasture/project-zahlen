@@ -113,7 +113,6 @@ struct RtrHalfTraceDesc {
     using Usages               = Vk::TypeList<
         Vk::ComputeRead<Res_Depth>,
         Vk::ComputeRead<Res_NormRough>,
-        Vk::ComputeRead<Res_Anisotropy>,
         Vk::ComputeRead<Res_Lighting>,
         Vk::ComputeRead<Res_DdgiIrradiance>,
         Vk::ComputeRead<Res_DdgiDistance>,
@@ -146,7 +145,6 @@ struct RtrHalfTraceDesc {
             push, VkExtent3D {frame.graphResources.rtrHalf.extent.width, frame.graphResources.rtrHalf.extent.height, 1},
             Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.presenter.depthTarget)),
             Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
-            Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::ComputeRead<Res_Anisotropy>>(frame.graphResources.anisotropyBuffer)),
             Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(frame.graphResources.lightingTarget)),
             Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
             Vk::Slot<"blueNoiseTex">(frame.textureManager.ViewInfo(frame.blueNoiseTexIdx)),
@@ -162,7 +160,6 @@ struct RtgiHalfTraceDesc {
     using Usages               = Vk::TypeList<
         Vk::ComputeRead<Res_Depth>,
         Vk::ComputeRead<Res_NormRough>,
-        Vk::ComputeRead<Res_Anisotropy>,
         Vk::ComputeRead<Res_Lighting>,
         Vk::ComputeRead<Res_DdgiIrradiance>,
         Vk::ComputeRead<Res_DdgiDistance>,
@@ -197,7 +194,6 @@ struct RtgiHalfTraceDesc {
             push, VkExtent3D {frame.graphResources.rtgiHalf.extent.width, frame.graphResources.rtgiHalf.extent.height, 1},
             Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.presenter.depthTarget)),
             Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
-            Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::ComputeRead<Res_Anisotropy>>(frame.graphResources.anisotropyBuffer)),
             Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
             Vk::Slot<"blueNoiseTex">(frame.textureManager.ViewInfo(frame.blueNoiseTexIdx)),
             Vk::Slot<"outImage">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rtgiHalf)), Vk::Slot<"tlas">(tlas),
