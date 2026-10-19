@@ -19,7 +19,7 @@ enum class BufferCreationError : uint8_t {
 };
 
 enum class BufferMapError : uint8_t {
-    NotAllocated ZHLN_ANNOTATION(ZHLN::Description<"Buffer owns no allocation to map"> {}) = 1,
+    NotAllocated          ZHLN_ANNOTATION(ZHLN::Description<"Buffer owns no allocation to map"> {}) = 1,
     NotPersistentlyMapped ZHLN_ANNOTATION(ZHLN::Description<"Buffer was not created host-visible, so it has no persistent mapping"> {}),
 };
 
@@ -49,8 +49,8 @@ void SetGeneratedBufferName(VmaAllocator allocator, GPUAddressTracker* tracker, 
 
     VmaAllocatorInfo allocatorInfo {};
     vmaGetAllocatorInfo(allocator, &allocatorInfo);
-    const uint64_t objectHandle = reinterpret_cast<uint64_t>(buffer);
-    const std::string name = std::format("Buffer[0x{:016X},usage=0x{:08X},size={}]", objectHandle, ToVk(usage), size);
+    const uint64_t    objectHandle = reinterpret_cast<uint64_t>(buffer);
+    const std::string name         = std::format("Buffer[0x{:016X},usage=0x{:08X},size={}]", objectHandle, ToVk(usage), size);
     Debug::SetObjectName(*tracker, allocatorInfo.device, objectHandle, VK_OBJECT_TYPE_BUFFER, name);
 }
 
@@ -61,8 +61,8 @@ void SetGeneratedImageName(VmaAllocator allocator, GPUAddressTracker* tracker, V
 
     VmaAllocatorInfo allocatorInfo {};
     vmaGetAllocatorInfo(allocator, &allocatorInfo);
-    const uint64_t objectHandle = reinterpret_cast<uint64_t>(image);
-    const std::string name = std::format(
+    const uint64_t    objectHandle = reinterpret_cast<uint64_t>(image);
+    const std::string name         = std::format(
         "Image[0x{:016X},fmt={},{}x{}x{},mips={},layers={}]", objectHandle, static_cast<uint32_t>(createInfo.format), createInfo.extent.width,
         createInfo.extent.height, createInfo.extent.depth, createInfo.mipLevels, createInfo.arrayLayers
     );
@@ -395,8 +395,8 @@ auto UploadToBuffer(Allocator& allocatorRef, VkCommandBuffer cmd, Buffer& dst, c
 
 auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept -> std::expected<Image, ErrorCode> {
     using enum ImageCreationError;
-    if (!allocatorRef.Valid() || config.format == VK_FORMAT_UNDEFINED || config.extent.width == 0 || config.extent.height == 0 ||
-        config.extent.depth == 0 || config.mipLevels == 0 || config.arrayLayers == 0 || config.usage == ImageUsage::None) {
+    if (!allocatorRef.Valid() || config.format == VK_FORMAT_UNDEFINED || config.extent.width == 0 || config.extent.height == 0 || config.extent.depth == 0 ||
+        config.mipLevels == 0 || config.arrayLayers == 0 || config.usage == ImageUsage::None) {
         return std::unexpected(InvalidConfiguration);
     }
 
@@ -418,8 +418,8 @@ auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept 
             return std::unexpected(InvalidConfiguration);
     }
 
-    if (config.cubeCompatible &&
-        (config.dimension != ImageDimension::Texture2D || config.extent.width != config.extent.height || config.arrayLayers < 6 || config.arrayLayers % 6 != 0)) {
+    if (config.cubeCompatible && (config.dimension != ImageDimension::Texture2D || config.extent.width != config.extent.height || config.arrayLayers < 6 ||
+                                  config.arrayLayers % 6 != 0)) {
         return std::unexpected(InvalidConfiguration);
     }
     if (config.samples != VK_SAMPLE_COUNT_1_BIT && config.mipLevels != 1) {
@@ -427,53 +427,57 @@ auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept 
     }
 
     const VkImageCreateInfo info {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = config.cubeCompatible ? static_cast<VkImageCreateFlags>(VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) : VkImageCreateFlags {},
-        .imageType = imageType,
-        .format = config.format,
-        .extent = config.extent,
-        .mipLevels = config.mipLevels,
-        .arrayLayers = config.arrayLayers,
-        .samples = config.samples,
-        .tiling = config.tiling,
-        .usage = ToVk(config.usage),
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext                 = nullptr,
+        .flags                 = config.cubeCompatible ? static_cast<VkImageCreateFlags>(VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) : VkImageCreateFlags {},
+        .imageType             = imageType,
+        .format                = config.format,
+        .extent                = config.extent,
+        .mipLevels             = config.mipLevels,
+        .arrayLayers           = config.arrayLayers,
+        .samples               = config.samples,
+        .tiling                = config.tiling,
+        .usage                 = ToVk(config.usage),
+        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices = nullptr,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .pQueueFamilyIndices   = nullptr,
+        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
     VmaAllocator                  allocator  = allocatorRef.Handle();
     VkImage                       img        = VK_NULL_HANDLE;
     VmaAllocation                 alloc      = nullptr;
     const VmaAllocationCreateInfo alloc_info = {
-        .flags = {},
-        .usage = ToVmaUsage(config.memory),
-        .requiredFlags = {},
+        .flags          = {},
+        .usage          = ToVmaUsage(config.memory),
+        .requiredFlags  = {},
         .preferredFlags = {},
         .memoryTypeBits = {},
-        .pool = {},
-        .pUserData = {},
-        .priority = {},
-        .minAlignment = {},
+        .pool           = {},
+        .pUserData      = {},
+        .priority       = {},
+        .minAlignment   = {},
     };
 
     const VkResult res = vmaCreateImage(allocator, &info, &alloc_info, &img, &alloc, nullptr);
     if (res != VK_SUCCESS) [[unlikely]] {
         switch (res) {
-            case VK_ERROR_OUT_OF_HOST_MEMORY: return std::unexpected(OutOfHostMemory);
-            case VK_ERROR_OUT_OF_DEVICE_MEMORY: return std::unexpected(OutOfDeviceMemory);
-            case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS: return std::unexpected(InvalidCaptureAddress);
-            default: return std::unexpected(VulkanSubsystemFailure);
+            case VK_ERROR_OUT_OF_HOST_MEMORY:
+                return std::unexpected(OutOfHostMemory);
+            case VK_ERROR_OUT_OF_DEVICE_MEMORY:
+                return std::unexpected(OutOfDeviceMemory);
+            case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS:
+                return std::unexpected(InvalidCaptureAddress);
+            default:
+                return std::unexpected(VulkanSubsystemFailure);
         }
     }
 
     SetGeneratedImageName(allocator, allocatorRef._addressTracker, img, info);
     Image result;
-    result._handle = img;
+    result._handle     = img;
     result._allocation = alloc;
-    result._config = config;
+    result._config     = config;
     return result;
 }
 
@@ -485,13 +489,16 @@ auto AttachmentView::Create(VkDevice device, const VkImageViewCreateInfo& info) 
         return std::unexpected(InvalidConfiguration);
     }
 
-    VkImageView view = VK_NULL_HANDLE;
+    VkImageView    view   = VK_NULL_HANDLE;
     const VkResult result = vkCreateImageView(device, &info, nullptr, &view);
     if (result != VK_SUCCESS) {
         switch (result) {
-            case VK_ERROR_OUT_OF_HOST_MEMORY: return std::unexpected(OutOfHostMemory);
-            case VK_ERROR_OUT_OF_DEVICE_MEMORY: return std::unexpected(OutOfDeviceMemory);
-            default: return std::unexpected(CreationFailed);
+            case VK_ERROR_OUT_OF_HOST_MEMORY:
+                return std::unexpected(OutOfHostMemory);
+            case VK_ERROR_OUT_OF_DEVICE_MEMORY:
+                return std::unexpected(OutOfDeviceMemory);
+            default:
+                return std::unexpected(CreationFailed);
         }
     }
     return AttachmentView {device, view, info};
@@ -527,7 +534,7 @@ auto Image::CreateAttachmentView(
         return std::unexpected(InvalidConfiguration);
     }
 
-    VkImageViewCreateInfo info = ViewInfo(aspect, baseMip, mipCount, baseLayer, layerCount, viewType);
+    VkImageViewCreateInfo info       = ViewInfo(aspect, baseMip, mipCount, baseLayer, layerCount, viewType);
     info.subresourceRange.aspectMask = effectiveAspect;
     return AttachmentView::Create(device, info);
 }
@@ -653,6 +660,20 @@ void StagingRingBuffer::RetirePool(VkCommandPool pool, uint64_t timelineValue) n
 }
 
 auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noexcept -> Allocation {
+    // An empty ring used to accept an over-capacity allocation, advance head
+    // beyond the mapped buffer and return a non-null pointer. Callers then
+    // memcpy'd past the mapping (large authored textures exposed this first).
+    // A null allocation is the ring's established "no room" result.
+    // Ring alignment is a bit-mask round-up, so require a non-zero power of
+    // two. Its default 4-byte allocation alignment was enough for RGBA8 but
+    // not an RGBA16F VkBufferImageCopy: Vulkan requires bufferOffset to align
+    // to its 8-byte texel block. Establish 8 bytes centrally so every default
+    // ring slice is valid for every currently supported texture upload, without
+    // making the broadly included TextureUploader header a rebuild trigger.
+    if (_mappedPtr == nullptr || size == 0 || size > _capacity || alignment == 0 || (alignment & (alignment - 1u)) != 0u) {
+        return {};
+    }
+    alignment = std::max<VkDeviceSize>(alignment, 8u);
     Recycle();
 
     VkDeviceSize aligned_head = (_head + alignment - 1) & ~(alignment - 1);
@@ -787,7 +808,7 @@ void DeletionQueue::EnqueuePipeline(VkDevice device, VkPipeline pipeline) noexce
 void DeletionQueue::BeginFrame(uint32_t frameIndex) noexcept {
     Lock(_mutex, [&] {
         _currentFrameIndex = FrameSlot(frameIndex);
-        auto& queue = _queues[_currentFrameIndex];
+        auto& queue        = _queues[_currentFrameIndex];
         CleanupQueue(queue);
         queue.clear();
     });

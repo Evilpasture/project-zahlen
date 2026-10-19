@@ -174,6 +174,10 @@ struct BSPMap {
     // radiance, one ColorRGBExp32 per luxel per style, addressed by
     // DFace::lightofs. Empty on maps compiled without a bake.
     std::vector<ColorRGBExp32> lighting;
+    // True only when `lighting` came from LUMP_LIGHTING_HDR together with the
+    // matching HDR face lump. Native lightmap ingestion keeps this provenance
+    // so Source's LDR fallback is never silently treated as authored HDR.
+    bool lightingIsHdr = false;
 };
 
 // Parses a whole .bsp image. Strict on the container (ident, version window,

@@ -174,6 +174,12 @@ class ZHLN_API RenderContext {
     [[nodiscard]] auto
         CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true, bool generateMips = true) -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode>;
+    // Linear RGBA16F upload for authored radiance fields such as Source VRAD.
+    // Mip generation is opt-in because most initial imported lightmaps use
+    // exact luxel filtering with atlas gutters at mip zero.
+    [[nodiscard]] auto CreateTextureHDR(
+        std::string_view name, std::span<const std::byte> rgba16f, Extent2D extent, bool generateMips = false
+    ) -> std::expected<TextureHandle, ErrorCode>;
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
     [[nodiscard]] auto CreateTexture(std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode> {

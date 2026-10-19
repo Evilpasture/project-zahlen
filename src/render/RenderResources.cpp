@@ -553,6 +553,8 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
         .normalMap                = desc.normalMap,
         .pbrMap                   = desc.pbrMap,
         .emissiveMap              = desc.emissiveMap,
+        .bakedIrradianceMap       = desc.bakedIrradianceMap,
+        .bakedIrradianceScale     = std::max(desc.bakedIrradianceScale, 0.0f),
         .baseColorFactor          = desc.baseColor,
         .emissiveFactor           = desc.emissive,
         .metallicFactor           = desc.metallic,
@@ -637,6 +639,15 @@ auto RenderContext::CreateTexture(std::string_view name, std::span<const std::by
         return std::unexpected(TextureDataError::InvalidPixels);
     }
     return _impl->textureManager.Upload(name, rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB), generateMips);
+}
+
+auto RenderContext::CreateTextureHDR(std::string_view name, std::span<const std::byte> rgba16f, Extent2D extent, bool generateMips)
+    -> std::expected<TextureHandle, ErrorCode> {
+    const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
+    if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 8 || rgba16f.size() != static_cast<size_t>(pixels) * 8u) {
+        return std::unexpected(TextureDataError::InvalidPixels);
+    }
+    return _impl->textureManager.Upload(name, rgba16f.data(), extent.width, extent.height, VK_FORMAT_R16G16B16A16_SFLOAT, generateMips);
 }
 
 auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode> {

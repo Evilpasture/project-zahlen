@@ -379,6 +379,27 @@ auto RefineEmissiveSurfaces(const SourceVFS& vfs, std::span<EmissiveSurface> sur
 // Fills prefab->parts from imported material streams: one compiled part per
 // material group (GPU buffers, material, meshlets, BLAS, colliders), then
 // folds the invisible-but-solid tool faces into the first part collider.
+// Uploads each packed VRAD page exactly once for this imported prefab. The
+// pages remain linear RGBA16F: Source's RGBExp luxels are already linear
+// radiance and must not take the sRGB texture path or the old VPL gain.
+auto UploadVradLightmaps(RenderContext& ctx, const VradLightmapAtlas& atlas, std::string_view prefabPath) -> std::vector<TextureHandle> {
+    std::vector<TextureHandle> handles(atlas.pages.size(), TextureHandle::Invalid);
+    for (size_t pageIndex = 0; pageIndex < atlas.pages.size(); ++pageIndex) {
+        const VradLightmapPage& page = atlas.pages[pageIndex];
+        if (page.width == 0 || page.height == 0 || page.rgba16f.empty()) {
+            continue;
+        }
+        const std::string name = std::string(prefabPath) + "#vrad_lightmap_" + std::to_string(pageIndex);
+        const auto uploaded = ctx.CreateTextureHDR(name, std::as_bytes(std::span {page.rgba16f}), Extent2D {page.width, page.height});
+        if (!uploaded) {
+            LogWarning("BSP Importer: unable to upload native VRAD lightmap page {} for {}: {}", pageIndex, prefabPath, uploaded.error());
+            continue;
+        }
+        handles[pageIndex] = *uploaded;
+    }
+    return handles;
+}
+
 // Shared by the world prefab and the interactive submodel prefabs.
 void AssemblePrefabParts(
     RenderContext&         ctx,
@@ -392,6 +413,7 @@ void AssemblePrefabParts(
     // still resolves 40 identical files once. `patch` is followed through so
     // the probe sees the material the surface actually renders with.
     std::unordered_map<std::string, std::optional<VMTMaterial>> vmtCache;
+    const std::vector<TextureHandle> lightmapTextures = UploadVradLightmaps(ctx, data.lightmaps, prefabPath);
 
     for (const MaterialStreams& part: data.parts) {
         if (part.VertexCount() == 0 || part.IndexCount() == 0) {
@@ -447,7 +469,17 @@ void AssemblePrefabParts(
         }
         const VMTMaterial* vmt = vmtIt.first->second.has_value() ? &*vmtIt.first->second : nullptr;
 
-        const Material subMaterial = ctx.CreateMaterial(ResolveMaterialDesc(ctx, vfs, part, vmt)).value_or(Material {});
+        MaterialDesc materialDesc = ResolveMaterialDesc(ctx, vfs, part, vmt);
+        // Only opaque/masked lit Source surfaces own a VRAD diffuse chart.
+        // UnlitGeneric and blend materials keep their Source shader semantics;
+        // forcing a bake through a forward-only path would make it disappear
+        // from the deferred additive compositor.
+        if (part.lightmapPage < lightmapTextures.size() && lightmapTextures[part.lightmapPage] != TextureHandle::Invalid && !materialDesc.unlit &&
+            !materialDesc.alphaBlend && !materialDesc.additiveBlend && materialDesc.alphaMode != 2u) {
+            materialDesc.bakedIrradianceMap   = lightmapTextures[part.lightmapPage];
+            materialDesc.bakedIrradianceScale = options.sourceLightmapScale;
+        }
+        const Material subMaterial = ctx.CreateMaterial(materialDesc).value_or(Material {});
 
         ModelPart modelPart;
         modelPart.name            = String64(part.materialName.c_str());
@@ -602,6 +634,22 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     if (imported.stats.skyboxFacesDropped > 0) {
         Log("BSP Importer: {} -> {} 3D-skybox face(s) dropped (ImportOptions::importSkybox is off)", virtualPath, imported.stats.skyboxFacesDropped);
     }
+    if (worldOptions.useVradLightmaps) {
+        uint64_t nativeLightmapBytes = 0;
+        uint32_t largestPageWidth    = 0;
+        uint32_t largestPageHeight   = 0;
+        for (const VradLightmapPage& page: imported.lightmaps.pages) {
+            nativeLightmapBytes += static_cast<uint64_t>(page.width) * page.height * sizeof(uint16_t) * 4u;
+            if (static_cast<uint64_t>(page.width) * page.height > static_cast<uint64_t>(largestPageWidth) * largestPageHeight) {
+                largestPageWidth  = page.width;
+                largestPageHeight = page.height;
+            }
+        }
+        Log("BSP Importer: {} VRAD {} -> {} face chart(s), {} linear RGBA16F page(s), largest {}x{}, {:.1f} MiB total, {} decoded luxels, {} rejected chart(s); VPL reconstruction is {}",
+            virtualPath, imported.lightmaps.hdrSource ? "HDR" : "LDR", imported.stats.lightmapFaces, imported.stats.lightmapPages,
+            largestPageWidth, largestPageHeight, static_cast<double>(nativeLightmapBytes) / (1024.0 * 1024.0), imported.lightmaps.luxelCount,
+            imported.stats.lightmapRejectedFaces, worldOptions.ingestVradBake ? "suppressed by native lightmaps" : "disabled");
+    }
 
     auto prefab                 = std::make_unique<ModelPrefab>();
     prefab->virtualPath         = String256(virtualPath);
@@ -696,8 +744,12 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     // pivot + (worldVertex - pivot) == worldVertex, exactly as before.
     for (const InteractiveSubmodel& sub: interactiveSubmodels) {
         ImportOptions subOptions = options;
-        subOptions.onlyModel     = sub.modelIndex;
-        subOptions.gatherLights  = false;
+        subOptions.onlyModel        = sub.modelIndex;
+        subOptions.gatherLights     = false;
+        // Brush entities move at runtime; do not duplicate the world atlas or
+        // treat an incidental face lightofs as static world irradiance.
+        subOptions.useVradLightmaps = false;
+        subOptions.ingestVradBake   = false;
 
         ImportedMapData subImported = ImportMapGeometry(map, subOptions);
         if (subImported.parts.empty()) {

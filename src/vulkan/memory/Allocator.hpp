@@ -525,6 +525,9 @@ class StagingRingBuffer {
     [[nodiscard]] auto GetCurrentValue() const noexcept -> uint64_t {
         return _timelineValue;
     }
+    [[nodiscard]] auto Capacity() const noexcept -> VkDeviceSize {
+        return _capacity;
+    }
     [[nodiscard]] auto GetQueueFamily() const noexcept -> uint32_t {
         return _queueFamily;
     }

@@ -19,6 +19,7 @@
 #include <BSP/BSPGeometry.hpp>
 #include <BSP/BSPLighting.hpp>
 #include <BSP/BSPRead.hpp>
+#include <BSP/BSPVradLightmap.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Log.hpp>
@@ -900,6 +901,78 @@ struct BSPLightingTestSuite {
         }
         return {};
     }
+
+    // Native VRAD ingestion is intentionally testable without a renderer: the
+    // atlas builder owns Source RGBExp decoding, chart extents, gutters and
+    // malformed-offset rejection before any GPU upload takes place.
+    [[nodiscard]] auto native_vrad_lightmaps_decode_and_pack_charts() const -> std::expected<void, ZHLN::ErrorCode> {
+        using ZHLN::BSP::ColorRGBExp32;
+        using ZHLN::BSP::DFace;
+
+        const auto decoded = ZHLN::BSP::DecodeVradLuxel(ColorRGBExp32 {.r = 2, .g = 4, .b = 8, .exponent = 3});
+        if (!ZHLN::Test::ExpectInRange(decoded[0], 16.0f, 16.0f) || !ZHLN::Test::ExpectInRange(decoded[1], 32.0f, 32.0f) ||
+            !ZHLN::Test::ExpectInRange(decoded[2], 64.0f, 64.0f)) {
+            return Fail();
+        }
+
+        BSPMap map;
+        map.lightingIsHdr = true;
+        map.lighting = {
+            ColorRGBExp32 {.r = 10, .g = 20, .b = 30, .exponent = 0}, ColorRGBExp32 {.r = 11, .g = 21, .b = 31, .exponent = 0},
+            ColorRGBExp32 {.r = 12, .g = 22, .b = 32, .exponent = 0}, ColorRGBExp32 {.r = 13, .g = 23, .b = 33, .exponent = 0},
+        };
+        DFace valid {};
+        valid.lightofs = 0;
+        valid.styles[0] = 0;
+        valid.lightmapTextureSizeInLuxels[0] = 1; // Source stores size-1; this is a 2x2 chart.
+        valid.lightmapTextureSizeInLuxels[1] = 1;
+        map.faces.push_back(valid);
+
+        DFace malformed = valid;
+        malformed.lightofs = 4 * 64; // Well past the four available luxels.
+        map.faces.push_back(malformed);
+
+        const auto atlas = ZHLN::BSP::BuildVradLightmapAtlas(map, 8, 1);
+        const auto* chart = atlas.ChartForFace(0);
+        if (!ZHLN::Test::ExpectTrue(atlas.hdrSource) || !ZHLN::Test::ExpectEq(atlas.faceCount, 1u) || !ZHLN::Test::ExpectEq(atlas.rejectedFaceCount, 1u) ||
+            !ZHLN::Test::ExpectEq(atlas.pages.size(), 1u) || !ZHLN::Test::ExpectTrue(chart != nullptr) || !ZHLN::Test::ExpectEq(chart->width, 2u) ||
+            !ZHLN::Test::ExpectEq(chart->height, 2u) || !ZHLN::Test::ExpectEq(chart->x, 1u) || !ZHLN::Test::ExpectEq(chart->y, 1u) ||
+            !ZHLN::Test::ExpectTrue(atlas.ChartForFace(1) == nullptr)) {
+            return Fail();
+        }
+        // Four source luxels with one replicated-gutter ring occupy a 4x4
+        // used page, and RGBExp gets uploaded as four binary16 lanes.
+        if (!ZHLN::Test::ExpectEq(atlas.pages[0].width, 4u) || !ZHLN::Test::ExpectEq(atlas.pages[0].height, 4u) ||
+            !ZHLN::Test::ExpectEq(atlas.pages[0].rgba16f.size(), 64u)) {
+            return Fail();
+        }
+        // Pixel 0,0 is in the top-left gutter and must duplicate the first
+        // source luxel rather than sample a neighbouring chart. 10/20/30 and
+        // opaque alpha are respectively 0x4900/0x4D00/0x4F80/0x3C00 in IEEE
+        // binary16; this asserts the atlas payload, not only its allocation.
+        const auto& payload = atlas.pages[0].rgba16f;
+        if (!ZHLN::Test::ExpectEq(payload[0], uint16_t {0x4900}) || !ZHLN::Test::ExpectEq(payload[1], uint16_t {0x4D00}) ||
+            !ZHLN::Test::ExpectEq(payload[2], uint16_t {0x4F80}) || !ZHLN::Test::ExpectEq(payload[3], uint16_t {0x3C00})) {
+            return Fail();
+        }
+
+        // NPOT sampled images are valid in Vulkan and avoid wasting a 4x4
+        // image for this exact 3x2 chart when no mip chain is requested.
+        BSPMap npotMap;
+        npotMap.lighting.resize(6);
+        DFace npotFace {};
+        npotFace.lightofs = 0;
+        npotFace.styles[0] = 0;
+        npotFace.lightmapTextureSizeInLuxels[0] = 2; // 3 luxels wide
+        npotFace.lightmapTextureSizeInLuxels[1] = 1; // 2 luxels high
+        npotMap.faces.push_back(npotFace);
+        const auto npotAtlas = ZHLN::BSP::BuildVradLightmapAtlas(npotMap, 8, 0);
+        if (!ZHLN::Test::ExpectEq(npotAtlas.pages.size(), 1u) || !ZHLN::Test::ExpectEq(npotAtlas.pages[0].width, 3u) ||
+            !ZHLN::Test::ExpectEq(npotAtlas.pages[0].height, 2u) || !ZHLN::Test::ExpectEq(npotAtlas.pages[0].rgba16f.size(), 24u)) {
+            return Fail();
+        }
+        return {};
+    }
 };
 
 } // namespace
@@ -941,6 +1014,7 @@ auto main() -> int {
     runTest("audit_lighting_counters_are_exhaustive", [&] { return suite.audit_lighting_counters_are_exhaustive(); });
     runTest("options_gate_each_stage", [&] { return suite.options_gate_each_stage(); });
     runTest("gather_emissive_area_lights_from_faces", [&] { return suite.gather_emissive_area_lights_from_faces(); });
+    runTest("native_vrad_lightmaps_decode_and_pack_charts", [&] { return suite.native_vrad_lightmaps_decode_and_pack_charts(); });
 
     ZHLN::Println("--------------------------------------------------");
     ZHLN::Println("Summary for BSPLightingTestSuite: {} Passed, {} Failed", passed, failed);

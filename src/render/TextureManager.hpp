@@ -30,6 +30,18 @@ static constexpr uint32_t kFallbackNormalTextureIndex = 2;
     return isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
 }
 
+// The generic uploader handles only renderer-exposed RGBA texture formats.
+// Keeping the byte size beside those public formats prevents an HDR upload
+// from being silently truncated to the old four-byte RGBA8 staging size.
+[[nodiscard]] constexpr size_t TextureTexelBytes(VkFormat format) noexcept {
+    switch (format) {
+        case VK_FORMAT_R8G8B8A8_UNORM:
+        case VK_FORMAT_R8G8B8A8_SRGB: return 4u;
+        case VK_FORMAT_R16G16B16A16_SFLOAT: return 8u;
+        default: return 0u;
+    }
+}
+
 class TextureManager {
   public:
     TextureManager(

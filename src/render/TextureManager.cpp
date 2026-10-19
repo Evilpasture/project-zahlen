@@ -46,8 +46,12 @@ auto TextureManager::ReserveBindlessRegion() -> std::expected<void, ErrorCode> {
 }
 
 auto TextureManager::Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format, bool generateMips) -> std::expected<uint32_t, ErrorCode> {
+    const size_t texelBytes = TextureTexelBytes(format);
+    if (data == nullptr || texelBytes == 0u) {
+        return std::unexpected(TextureUploadError::NoPixelData);
+    }
     return Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
-        .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = generateMips})
+        .Upload2D({.data = data, .width = width, .height = height, .format = format, .texelBytes = texelBytes, .generateMips = generateMips})
         .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
             const auto index = Adopt(std::move(tex.image), tex.viewInfo);
             if (index) {
@@ -83,9 +87,10 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
     -> std::expected<TextureHandle, ErrorCode> {
     const uint64_t id         = HashAssetID(identifier);
     const auto     handle     = static_cast<TextureHandle>(id);
-    const size_t   pixelBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uint32_t);
+    const size_t   texelBytes = TextureTexelBytes(format);
+    const size_t   pixelBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * texelBytes;
 
-    ZHLN::Assert(pixels != nullptr && pixelBytes > 0, "TextureManager::Upload('{}'): no pixel data for a {}x{} texture", identifier, width, height);
+    ZHLN::Assert(pixels != nullptr && texelBytes != 0u && pixelBytes > 0, "TextureManager::Upload('{}'): no pixel data for a {}x{} texture", identifier, width, height);
     if (pixels == nullptr || pixelBytes == 0) {
         ZHLN::Log("[TextureManager] Refusing upload '{}': {}x{} with {} pixel data.", identifier, width, height, pixels == nullptr ? "no" : "empty");
         return std::unexpected(TextureUploadError::NoPixelData);

@@ -143,6 +143,14 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         material.tangentDirection   = T * facing;
         material.bitangentDirection = B * facing;
         SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, float3(0.0f));
+        // Source VRAD is composited in the dedicated additive baked-lightmap
+        // pass below. Suppress only this material's dynamic diffuse input here
+        // so the clustered path cannot multiply the authored bake by ambient
+        // again; normals/roughness/depth remain available to the rest of the
+        // deferred renderer until the stencil compute-skip stage lands.
+        if (scene.g_instances[input.instanceId].hasBakedIrradiance) {
+            surface.albedo = float3(0.0f);
+        }
         output.color           = float4(surface.albedo, surface.alpha);
         float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
         output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
@@ -282,7 +290,13 @@ float4 PSEmissive(EmissiveGeometryOutput input) : SV_Target0 {
     if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
-    return float4(SampleMaterialEmissive<StandardPBRMaterial>(material) * albedo.a, 0.0f);
+    const float3 materialEmission = SampleMaterialEmissive<StandardPBRMaterial>(material);
+    // Baked irradiance is a diffuse-light transport result, not material
+    // emission. This additive overlay is merely the compact-G-buffer transport
+    // mechanism: it restores albedo × VRAD after deferred lighting has kept
+    // the lightmapped material's diffuse input at zero.
+    const float3 bakedDiffuse = albedo.rgb * SampleBakedIrradiance(input.uv1, input.instanceId);
+    return float4((materialEmission + bakedDiffuse) * albedo.a, 0.0f);
 }
 
 float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {

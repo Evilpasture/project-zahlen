@@ -479,12 +479,15 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         map.surfEdges = std::move(*res);
     }
 
-    const LumpEntry* facesLump = &lump(Lump::Faces);
-    if (lump(Lump::FacesHDR).filelen > 0) {
-        facesLump = &lump(Lump::FacesHDR);
-    }
+    // HDR faces index the separate HDR luxel stream. Keep the pre-existing HDR
+    // face priority even on an otherwise incomplete test/map, but only select
+    // HDR *lighting* below after that matching face list was read successfully.
+    const bool       hasHdrFaces = lump(Lump::FacesHDR).filelen > 0;
+    const LumpEntry* facesLump   = hasHdrFaces ? &lump(Lump::FacesHDR) : &lump(Lump::Faces);
+    bool             usingHdrFaces = false;
     if (auto res = ReadLumpArray<DFace>(bytes, *facesLump); res) {
-        map.faces = std::move(*res);
+        map.faces     = std::move(*res);
+        usingHdrFaces = hasHdrFaces;
     } else if (facesLump != &lump(Lump::Faces)) {
         if (auto fallbackRes = ReadLumpArray<DFace>(bytes, lump(Lump::Faces)); fallbackRes) {
             map.faces = std::move(*fallbackRes);
@@ -495,16 +498,15 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         return std::unexpected(res.error());
     }
 
-    // The bake: VRAD's luxel radiance. HDR first when it carries data (v20+
-    // compiles), exactly as the face lumps are chosen above; empty is legal
-    // and simply leaves BSPBakeField with nothing to fit.
-    const LumpEntry* lightingLump = &lump(Lump::Lighting);
-    if (lump(Lump::LightingHDR).filelen > 0) {
-        lightingLump = &lump(Lump::LightingHDR);
-    }
+    // The bake: VRAD's luxel radiance. HDR is selected only with the matching
+    // HDR face list above; LDR remains the coherent fallback for a partial or
+    // malformed HDR pair. Empty lighting is legal on unbaked maps.
+    const bool       useHdrLighting = usingHdrFaces && lump(Lump::LightingHDR).filelen > 0;
+    const LumpEntry* lightingLump   = useHdrLighting ? &lump(Lump::LightingHDR) : &lump(Lump::Lighting);
     if (lightingLump->filelen > 0) {
         if (auto res = ReadLumpArray<ColorRGBExp32>(bytes, *lightingLump); res) {
-            map.lighting = std::move(*res);
+            map.lighting      = std::move(*res);
+            map.lightingIsHdr = useHdrLighting;
         }
     }
 

@@ -1510,6 +1510,11 @@ auto main(int argc, char* argv[]) -> int {
         .buildColliders       = true,
         .assetRoot            = assetRoot.string(),
         .ambientOcclusion     = false,
+        // Source's compiled VRAD atlas is the static-world baseline. The old
+        // VPL reconstruction remains deliberately off: it duplicates the bake
+        // and burns the clustered/RTGI budget this sample is meant to relieve.
+        .useVradLightmaps     = true,
+        .ingestVradBake       = false,
     };
 
     const std::string virtualPath = mapPath.string();
@@ -1733,31 +1738,31 @@ auto main(int argc, char* argv[]) -> int {
                 p.exposure        = 0.18f;
                 p.tonemapper      = 1;
                 p.ambientExposure = 1.2f;
-                // Ray-traced reflections, and -- less obviously -- the gate that
-                // makes lighting.slang *sample* the ray-traced shadow mask:
-                // RenderGraphBuild.hpp derives the shader's pc.enableRTR from
-                // post.enableRTR, so without this an enableShadows pass would
-                // trace a mask that nothing reads.
-                p.enableRTR = 1;
+                p.giMode          = 0; // No screen-space AO/GI over baked diffuse.
+                p.enableSSR       = 0;
+                // The native VRAD atlas is the static world-lighting source.
+                // Keep the Source-fidelity baseline free of RTR/RTGI work;
+                // dynamic-light experiments can opt these features back in.
+                p.enableRTR = 0;
             });
             const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::AASettingsComponent>();
             reg.Patch<ZHLN::Components::AASettingsComponent>(camera, [](auto& aa) { aa.state.mode = ZHLN::AAMode::SMAA; });
 
-            // Enable the independent one-bounce RTGI path alongside runtime
-            // BSP lights; the shared A-Trous pass handles the spatial noise.
-            //
-            // denoiserPasses > 0 is what makes RenderFrame.cpp treat rtHistoryValid
-            // as true, i.e. temporal accumulation and TAA reprojection across
-            // frames; leaving it at 0 would disable denoising but not the
-            // tracing, so it is pinned here rather than left to a default.
+            // VRAD already contains the static direct/indirect transport.
+            // Until the later stencil-mask stage selectively re-enables RT for
+            // dynamic receivers, do not trace shadows, reflections or diffuse
+            // GI for this Source baseline.
             const ZHLN::Entity rtSettings = reg.SingletonEntity<ZHLN::Components::RayTracingSettingsComponent>();
             if (rtSettings == ZHLN::Entity::Null()) {
-                reg.Create(ZHLN::Components::RayTracingSettingsComponent {.config = {.enableShadows = true, .enableDiffuseGI = true, .denoiserPasses = 2}});
+                reg.Create(ZHLN::Components::RayTracingSettingsComponent {
+                    .config = {.enableReflections = false, .enableShadows = false, .enableDiffuseGI = false, .denoiserPasses = 0}
+                });
             } else {
                 reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(rtSettings, [](auto& rt) {
-                    rt.config.enableShadows   = true;
-                    rt.config.enableDiffuseGI = true;
-                    rt.config.denoiserPasses  = 2;
+                    rt.config.enableReflections = false;
+                    rt.config.enableShadows     = false;
+                    rt.config.enableDiffuseGI   = false;
+                    rt.config.denoiserPasses    = 0;
                 });
             }
             reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [mapRadius](auto& s) {

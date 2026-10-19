@@ -16,6 +16,7 @@
 // Engine-free by design: this layer is buildable without the full renderer tree.
 
 #include "BSPRead.hpp"
+#include "BSPVradLightmap.hpp"
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Vertex.hpp>
@@ -27,13 +28,10 @@
 
 namespace ZHLN::BSP {
 
-// Display calibration for the whole ingested lighting field. VRAD luma, entity
-// `_light` brightness and the bake fit all share one radiance scale; measured
-// against the Source reference (same scene, same bands: gym floor 8.5x, wall
-// band 5.5x in display-linear), this engine's tonemap chain lands that scale
-// ~7x under the Source display. One gain, applied at the single brightness
-// chokepoint below, lifts lights, bake VPLs and (via the same constant family
-// in BSPScene) the ambient together so the Source balance is preserved.
+// Display calibration for live Source entity lights and the legacy VPL
+// approximation only. Native VRAD lightmaps bypass this gain entirely: their
+// RGBExp luxels are authored linear radiance and have their own explicit
+// `sourceLightmapScale` control below.
 inline constexpr float kIngestLevelGain = 7.0f;
 
 // Source `_light` brightness (the 4th component, typically 150-300) is in
@@ -86,17 +84,28 @@ struct ImportOptions {
     // BSPLighting.hpp's EnforceLightingFloor.
     bool enforceLightingFloor = true;
 
-    // Ingest VRAD's compiled luxel radiance (LUMP_LIGHTING) as a radiance
-    // field fitted into the engine's carriers -- an AmbientTerm plus a budget
-    // of virtual point lights -- instead of a lightmap multiply that would
-    // fight the PBR and RT pipeline. See BSPBakeField.hpp. Off restores
-    // pre-bake import exactly (the lump is still parsed; it is simply unused).
-    bool ingestVradBake = true;
-    // VPLs kept from the bake's clusters, ranked by cluster energy with a
-    // spatial quota (BSPBakeField.hpp).
-    uint32_t bakeVplBudget = 384;
-    // Damping of bake VPLs against the map's real lights and the DDGI pass.
-    float bakeVplWeight = 0.5f;
+    // Source's LUMP_LIGHTING[_HDR] is the authoritative diffuse result for
+    // compiled world faces. Build native chart atlases and bind them as baked
+    // irradiance; UV1 is remapped into those atlas pages during import.
+    // This is deliberately independent of occlusionMap and of the renderer's
+    // PBR texture slots.
+    bool     useVradLightmaps    = true;
+    // 2048² RGBA16F is 32 MiB: comfortably below the reusable 64-MiB upload
+    // ring while still grouping a full Source map into only a few pages.
+    uint32_t lightmapAtlasSize   = 2048;
+    uint32_t lightmapAtlasGutter = 2;
+    // Explicit Source-lightmap multiplier, defaulting to the authored VRAD
+    // radiance. `kIngestLevelGain` calibrates the old VPL approximation and
+    // must never be applied here.
+    float sourceLightmapScale = 1.0f;
+
+    // Compatibility-only approximation path. This must remain off whenever
+    // native VRAD lightmaps are enabled: fitting the same bake into ambient +
+    // virtual point lights double-counts authored static direct/indirect light
+    // and keeps clustered lighting needlessly expensive.
+    bool     ingestVradBake = false;
+    uint32_t bakeVplBudget  = 384;
+    float    bakeVplWeight  = 0.5f;
 
     // Restrict the import to one submodel (index into BSPMap::models); -1
     // imports every model not listed in skipModels. Interactive brush
@@ -136,6 +145,10 @@ struct MaterialStreams {
     // can carry DrawFlags::Background -- the layer that composites behind the
     // main world instead of racing it in the depth buffer.
     bool skyboxLayer = false;
+
+    // Valid page ownership is part of the batch key so one draw never samples
+    // a chart from a different VRAD atlas page.
+    uint32_t lightmapPage = kInvalidVradLightmapPage;
 
     [[nodiscard]] auto VertexCount() const noexcept -> uint32_t {
         return static_cast<uint32_t>(positions.size());
@@ -224,8 +237,11 @@ struct ImportStats {
     uint32_t emissiveFaces = 0;           // faces on a self-illuminated material (lamp panels, screens, signs)
     uint32_t emissiveSurfaces = 0;        // area-light proxies produced from them (after clustering and the cap)
     uint32_t emissiveDroppedCap = 0;      // proxies dropped because maxEmissiveLights was reached
-    uint32_t bakeLuxels = 0;              // VRAD bake samples decoded by BSPBakeField
-    uint32_t bakeVpls = 0;                // virtual point lights fitted from the bake's bright population
+    uint32_t bakeLuxels = 0;              // legacy VRAD samples decoded by BSPBakeField
+    uint32_t bakeVpls = 0;                // legacy virtual point lights fitted from the bake
+    uint32_t lightmapFaces = 0;           // native Source VRAD charts bound to render batches
+    uint32_t lightmapPages = 0;           // native linear RGBA16F atlas pages
+    uint32_t lightmapRejectedFaces = 0;   // malformed / oversized source charts skipped safely
 };
 
 // Exhaustive bookkeeping for the lighting pass, mirroring ImportStats' role for
@@ -253,6 +269,11 @@ struct LightingDiagnostics {
 struct ImportedMapData {
     std::vector<MaterialStreams> parts;
     std::vector<BspPointLight>   lights;
+
+    // Native decoded VRAD pages. Geometry parts refer to their pages through
+    // MaterialStreams::lightmapPage; BSPImporter uploads them once and binds
+    // the resulting dedicated baked-irradiance material input.
+    VradLightmapAtlas lightmaps;
 
     // Self-illuminated surfaces, clustered per material and grid cell, in
     // engine space. These are the area-light proxies the PBR path emits and

@@ -104,6 +104,8 @@ struct InstanceDataDesc {
     uint64_t surfaceAddress      = 0;
 
     BindlessIndices indices {};
+    uint32_t bakedIrradianceTex = kNoFilmTexture;
+    float    bakedIrradianceScale = 1.0f;
 
     uint32_t alphaMode    = 0;
     bool     isViewmodel  = false;
@@ -276,6 +278,8 @@ struct InstanceDataDesc {
         .specularParams          = {desc.specularColorFactor.x, desc.specularColorFactor.y, desc.specularColorFactor.z, std::max(desc.specularFactor, 0.0f)},
         .specularTexIndex        = desc.specularTex,
         .specularFlags           = (desc.specularEnabled ? 1u : 0u) | (std::min(desc.specularTexMode, 3u) << 1u),
+        .bakedIrradianceTexIndex = desc.bakedIrradianceTex,
+        .bakedIrradianceScale    = std::max(desc.bakedIrradianceScale, 0.0f),
     };
 }
 
@@ -401,14 +405,16 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .tangentFrameAddress      = resolved->frameAddr.Get(),
                  .surfaceAddress           = resolved->surfaceAddr.Get(),
                  .indices                  = tex,
+                 .bakedIrradianceTex     = OptionalTextureIndex(_impl.get(), material.bakedIrradianceMap),
+                 .bakedIrradianceScale   = material.bakedIrradianceScale,
                  .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
                  .isViewmodel              = isViewmodel != 0u,
                  .isBackground             = (params.flags & DrawFlags::Background) != DrawFlags::None,
                  .isSkinned                = isSkinned != 0u,
                  .doubleSided              = material.doubleSided,
                  .unlit                    = material.unlit,
-                 .hasEmissive              = material.emissiveMap != TextureHandle::Invalid || material.emissiveFactor.x > 0.0f ||
-                                             material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f,
+                 .hasEmissive              = material.bakedIrradianceMap != TextureHandle::Invalid || material.emissiveMap != TextureHandle::Invalid ||
+                                             material.emissiveFactor.x > 0.0f || material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f,
                  .vertexCount              = resolved->posMesh->vertexCount,
                  .indexCount               = mesh.indexCount,
                  .jointOffset              = params.jointOffset,
@@ -495,13 +501,15 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .tangentFrameAddress      = resolved->frameAddr.Get(),
                     .surfaceAddress           = resolved->surfaceAddr.Get(),
                     .indices                  = tex,
+                    .bakedIrradianceTex     = OptionalTextureIndex(_impl.get(), material.bakedIrradianceMap),
+                    .bakedIrradianceScale   = material.bakedIrradianceScale,
                     .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
                     .isBackground             = (flags & DrawFlags::Background) != DrawFlags::None,
                     .isSkinned                = isSkinned != 0u,
                     .doubleSided              = material.doubleSided,
                     .unlit                    = material.unlit,
-                    .hasEmissive              = material.emissiveMap != TextureHandle::Invalid || material.emissiveFactor.x > 0.0f ||
-                                                material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f,
+                    .hasEmissive              = material.bakedIrradianceMap != TextureHandle::Invalid || material.emissiveMap != TextureHandle::Invalid ||
+                                                material.emissiveFactor.x > 0.0f || material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f,
                     .vertexCount              = resolved->posMesh->vertexCount,
                     .indexCount               = mesh.indexCount,
                     .jointOffset              = jointOffset,

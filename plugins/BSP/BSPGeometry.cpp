@@ -239,15 +239,16 @@ enum class FaceDisposition : uint8_t { Render, CollisionOnly, Drop };
     return FaceDisposition::Render;
 }
 
-auto FindOrMakePart(ImportedMapData& result, std::string_view name, bool skyboxLayer) -> MaterialStreams& {
+auto FindOrMakePart(ImportedMapData& result, std::string_view name, bool skyboxLayer, uint32_t lightmapPage) -> MaterialStreams& {
     for (MaterialStreams& part: result.parts) {
-        if (part.materialName == name && part.skyboxLayer == skyboxLayer) {
+        if (part.materialName == name && part.skyboxLayer == skyboxLayer && part.lightmapPage == lightmapPage) {
             return part;
         }
     }
     result.parts.push_back(MaterialStreams {});
-    result.parts.back().materialName = std::string(name);
-    result.parts.back().skyboxLayer  = skyboxLayer;
+    result.parts.back().materialName  = std::string(name);
+    result.parts.back().skyboxLayer   = skyboxLayer;
+    result.parts.back().lightmapPage  = lightmapPage;
     return result.parts.back();
 }
 
@@ -425,17 +426,41 @@ void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::span<const 
 // the forward texture projection in source space. Bounds are tracked on both
 // the owning part and the whole map as positions are emitted.
 void EmitVertex(
-    MaterialStreams&      part,
-    const ImportOptions&  options,
-    const FaceProjection& projection,
-    JPH::Vec3             sourcePos,
-    JPH::Vec3             sourceNormal,
-    ImportedMapData&      result,
-    bool&                 partBoundsFirst,
-    bool&                 mapBoundsFirst
+    MaterialStreams&          part,
+    const ImportOptions&      options,
+    const FaceProjection&     projection,
+    const BSPMap&             map,
+    const DFace&              face,
+    const VradLightmapAtlas&  lightmaps,
+    const VradLightmapChart*  lightmapChart,
+    JPH::Vec3                 sourcePos,
+    JPH::Vec3                 sourceNormal,
+    ImportedMapData&          result,
+    bool&                     partBoundsFirst,
+    bool&                     mapBoundsFirst
 ) {
     const float u = (sourcePos.Dot(projection.sDir) + projection.sOffset) / projection.width;
     const float v = (sourcePos.Dot(projection.tDir) + projection.tOffset) / projection.height;
+
+    // UV1 is reserved for Source's static-lighting atlas on BSP geometry.
+    // Do this in source coordinates, where texinfo.lightmapVecs and the face's
+    // luxel mins are defined; the engine-space position may have changed axes
+    // and units already. Source samples at luxel centres, hence the half texel.
+    float lightU = 0.0f;
+    float lightV = 0.0f;
+    if (lightmapChart != nullptr && lightmapChart->page < lightmaps.pages.size() && face.texinfo >= 0 &&
+        static_cast<size_t>(face.texinfo) < map.texInfos.size()) {
+        const DTexInfo& lightInfo = map.texInfos[static_cast<size_t>(face.texinfo)];
+        const VradLightmapPage& page = lightmaps.pages[lightmapChart->page];
+        const float s = (sourcePos.GetX() * lightInfo.lightmapVecs[0][0] + sourcePos.GetY() * lightInfo.lightmapVecs[0][1] +
+                         sourcePos.GetZ() * lightInfo.lightmapVecs[0][2] + lightInfo.lightmapVecs[0][3]) * (1.0f / 16.0f);
+        const float t = (sourcePos.GetX() * lightInfo.lightmapVecs[1][0] + sourcePos.GetY() * lightInfo.lightmapVecs[1][1] +
+                         sourcePos.GetZ() * lightInfo.lightmapVecs[1][2] + lightInfo.lightmapVecs[1][3]) * (1.0f / 16.0f);
+        lightU = (static_cast<float>(lightmapChart->x) + (s - static_cast<float>(face.lightmapTextureMinsInLuxels[0])) + 0.5f) /
+                 static_cast<float>(page.width);
+        lightV = (static_cast<float>(lightmapChart->y) + (t - static_cast<float>(face.lightmapTextureMinsInLuxels[1])) + 0.5f) /
+                 static_cast<float>(page.height);
+    }
 
     const JPH::Vec3 tangent = (projection.sDir.LengthSq() > kEpsilon * kEpsilon) ? projection.sDir.Normalized() : JPH::Vec3::sAxisX();
     const JPH::Vec3 normal  = (sourceNormal.LengthSq() > kEpsilon * kEpsilon) ? sourceNormal.Normalized() : JPH::Vec3::sAxisZ();
@@ -456,7 +481,9 @@ void EmitVertex(
             Math::PackNormal(engineTangent.GetX(), engineTangent.GetY(), engineTangent.GetZ(), handedness),
         }
     );
-    part.surfaces.push_back(VertexSurface {Math::PackUV(u, v), Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f), Math::PackUV(0.0f, 0.0f)});
+    part.surfaces.push_back(
+        VertexSurface {Math::PackUV(u, v), Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f), Math::PackUV(lightU, lightV)}
+    );
 
     UpdateBounds(part.boundsMin, part.boundsMax, partBoundsFirst, enginePos);
     UpdateBounds(result.boundsMin, result.boundsMax, mapBoundsFirst, enginePos);
@@ -930,6 +957,17 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
     // panel that shares a name.
     std::vector<EmissiveSurface> emissiveFaces;
 
+    // Build the authored VRAD field before stream emission. The stream key
+    // includes the resulting page so no material ever samples a chart from a
+    // different atlas page. Keep the VPL reconstruction mutually exclusive:
+    // one compiled bake must reach the renderer through exactly one path.
+    if (options.useVradLightmaps) {
+        result.lightmaps = BuildVradLightmapAtlas(map, options.lightmapAtlasSize, options.lightmapAtlasGutter);
+        result.stats.lightmapFaces         = result.lightmaps.faceCount;
+        result.stats.lightmapPages         = static_cast<uint32_t>(result.lightmaps.pages.size());
+        result.stats.lightmapRejectedFaces = result.lightmaps.rejectedFaceCount;
+    }
+
     // 3D skybox content is authored around the sky_camera at 1/scale size and
     // floats above the map until transformed; see SkyboxTransform.
     const SkyboxTransform sky = MakeSkyboxTransform(map, options.importSkybox);
@@ -1062,9 +1100,16 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
 
             const std::string_view materialName = MaterialNameFor(map, face);
+            // Phase one keeps the old static skybox placement path intact;
+            // runtime camera-relative skybox transforms arrive in phase three.
+            // Its transformed positions cannot use Source's raw lightmap basis,
+            // so it stays unbound until that dedicated sky pass owns the basis.
+            const VradLightmapChart* lightmapChart =
+                (!skyFace && options.useVradLightmaps) ? result.lightmaps.ChartForFace(faceIndex) : nullptr;
+            const uint32_t lightmapPage = lightmapChart != nullptr ? lightmapChart->page : kInvalidVradLightmapPage;
             MaterialStreams& part = (disposition == FaceDisposition::CollisionOnly) ?
                                        result.collisionOnly :
-                                       FindOrMakePart(result, std::string(materialName), skyFace);
+                                       FindOrMakePart(result, std::string(materialName), skyFace, lightmapPage);
             if (disposition == FaceDisposition::CollisionOnly && part.VertexCount() == 0) {
                 part.materialName = std::string(materialName); // informational only; the importer does not key off it
             }
@@ -1220,7 +1265,8 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                         } else if (vertexNormal.Dot(faceNormal) < 0.0f) {
                             vertexNormal = -vertexNormal;
                         }
-                        EmitVertex(part, options, *projection, grid[static_cast<size_t>(j) * side + i], vertexNormal, result, partBoundsFirst, globalBoundsFirst);
+                        EmitVertex(part, options, *projection, map, face, result.lightmaps, lightmapChart,
+                                   grid[static_cast<size_t>(j) * side + i], vertexNormal, result, partBoundsFirst, globalBoundsFirst);
                     }
                 }
 
@@ -1245,7 +1291,8 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             } else {
                 // Fan triangulation: Source faces are convex planar polygons.
                 for (const auto& corner: *winding) {
-                    EmitVertex(part, options, *projection, corner, faceNormal, result, partBoundsFirst, globalBoundsFirst);
+                    EmitVertex(part, options, *projection, map, face, result.lightmaps, lightmapChart, corner, faceNormal, result, partBoundsFirst,
+                               globalBoundsFirst);
                 }
                 for (size_t i = 1; i + 1 < winding->size(); ++i) {
                     part.indices.push_back(baseVertex);
@@ -1380,11 +1427,11 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
     }
 
     // ------------------------------------------------------------------
-    // VRAD bake ingestion: fit LUMP_LIGHTING's radiance field into the
-    // engine's carriers (BSPBakeField.hpp). The fit lands before the floor
-    // guarantee so a map lighted only by its bake is still a lit map.
+    // Explicit legacy fallback only: fit LUMP_LIGHTING into the old ambient
+    // + VPL carriers (BSPBakeField.hpp). Native atlas import is mutually
+    // exclusive and is the default path above.
     // ------------------------------------------------------------------
-    if (options.ingestVradBake && options.gatherLights && !map.lighting.empty()) {
+    if (options.ingestVradBake && !options.useVradLightmaps && options.gatherLights && !map.lighting.empty()) {
         const BakeField field = BuildBakeField(map, options, options.bakeVplBudget, options.bakeVplWeight);
         if (field.hasBake) {
             result.ambient      = field.ambient;

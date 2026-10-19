@@ -116,6 +116,10 @@ struct Material {
     TextureHandle             normalMap                = TextureHandle::Invalid;
     TextureHandle             pbrMap                   = TextureHandle::Invalid;
     TextureHandle             emissiveMap              = TextureHandle::Invalid;
+    // Authoritative static diffuse irradiance (for example Source VRAD), not
+    // AO and not material emission. It is sampled with the mesh's UV1.
+    TextureHandle             bakedIrradianceMap       = TextureHandle::Invalid;
+    float                     bakedIrradianceScale     = 1.0f;
     JPH::Float4               baseColorFactor          = {1.0f, 1.0f, 1.0f, 1.0f};
     JPH::Float4               emissiveFactor           = {0.0f, 0.0f, 0.0f, 1.0f};
     float                     metallicFactor           = 1.0f;
@@ -231,6 +235,11 @@ struct MaterialDesc {
     TextureHandle             normalMap                = TextureHandle::Invalid;
     TextureHandle             pbrMap                   = TextureHandle::Invalid;
     TextureHandle             emissiveMap              = TextureHandle::Invalid;
+    // A linear HDR baked-diffuse input. It has a separate semantic from
+    // occlusionMap because authored irradiance and ambient occlusion are not
+    // interchangeable PBR quantities.
+    TextureHandle             bakedIrradianceMap       = TextureHandle::Invalid;
+    float                     bakedIrradianceScale     = 1.0f;
     TextureHandle             filmThicknessMap         = TextureHandle::Invalid;
     TextureHandle             iridescenceMap           = TextureHandle::Invalid;
     TextureHandle             volumeThicknessMap       = TextureHandle::Invalid;

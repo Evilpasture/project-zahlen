@@ -27,6 +27,7 @@ set(ZHLN_BSP_SOURCES
     BSPLighting.cpp
     BSPRead.cpp
     BSPScene.cpp
+    BSPVradLightmap.cpp
     SourceVFS.cpp
     StudioModelImporter.cpp
     StudioModelLoader.cpp

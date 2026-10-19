@@ -107,6 +107,12 @@ public struct InstanceData {
     public float4 specularParams; // rgb: specularColorFactor; a: specularFactor.
     public uint specularTexIndex; // 0xFFFF when absent; slot 15's sampler code and UV row.
     public uint specularFlags;    // Bit 0: the extension is declared on this material. Bits 1..2: texture mode.
+
+    // Baked diffuse irradiance has its own bindless lane rather than stealing
+    // the AO semantic or one of the sixteen glTF texture-info sampler slots.
+    // It is sampled with VertexSurface.uv1 and the clamp sampler.
+    public uint bakedIrradianceTexIndex; // 0xFFFF when absent.
+    public float bakedIrradianceScale;
 };
 
 // Field order is load-bearing: coneCutoff's 4 bytes fill 44..48 so coneAxis
@@ -233,6 +239,12 @@ public extension InstanceData {
         [ForceInline]
         get {
             return (this.specularFlags >> 1u) & 3u;
+        }
+    }
+    public property bool hasBakedIrradiance {
+        [ForceInline]
+        get {
+            return this.bakedIrradianceTexIndex != 0xFFFFu;
         }
     }
     // specularColorFactor (linear, clamped to [0, 1] by the importer).
