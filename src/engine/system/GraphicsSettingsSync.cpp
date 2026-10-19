@@ -125,9 +125,11 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
         gfx.environment.probeMin        = ToArray3(pp->probeMin);
         gfx.environment.probeMax        = ToArray3(pp->probeMax);
         gfx.environment.probePos        = ToArray3(pp->probePos);
-        gfx.environment.skyZenith       = ToArray4(pp->skyZenith);
-        gfx.environment.skyHorizon      = ToArray4(pp->skyHorizon);
-        gfx.environment.skyGround       = ToArray4(pp->skyGround);
+        gfx.environment.skyZenith          = ToArray4(pp->skyZenith);
+        gfx.environment.skyHorizon         = ToArray4(pp->skyHorizon);
+        gfx.environment.skyGround          = ToArray4(pp->skyGround);
+        gfx.environment.skyboxAnchor       = ToArray3(pp->skyboxAnchor);
+        gfx.environment.skyboxFollowCamera = pp->skyboxFollowCamera;
     }
 
     if (const Entity shadowEnt = reg.SingletonEntity<ShadowSettingsComponent>(); shadowEnt != Entity::Null()) {

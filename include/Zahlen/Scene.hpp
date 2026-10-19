@@ -105,6 +105,22 @@ struct SceneEnvironment {
     JPH::Float3 skyHorizon      = {0.015f, 0.035f, 0.080f};
     JPH::Float3 skyGround       = {0.001f, 0.001f, 0.003f};
 
+    // Source's 3D skybox does not stay where it was built: sky_camera marks
+    // where the map origin sits inside the miniscape, so as the player moves
+    // the miniscape is re-based onto their eye (at 1/scale of the motion) and
+    // the layer never parallaxes like world geometry. Without that, a player
+    // walking below the miniscape's ground ends up underneath it and the
+    // backdrop is replaced by the underside of a plane.
+    //
+    // `skyboxAnchor` is the world point the DrawFlags::Background layer was
+    // authored around (the BSP importer's SkyboxTransform anchor); with
+    // `skyboxFollowCamera` set, every background mesh is translated by
+    // (camera position - anchor) at submission time. Importers that do not
+    // build a background layer leave both at their defaults, which is exactly
+    // the previous behaviour.
+    JPH::Float3 skyboxAnchor       = {0.0f, 0.0f, 0.0f};
+    bool        skyboxFollowCamera = false;
+
     int   giMode    = 0;
     float aoRadius  = 0.5f;
     float aoBias    = 0.05f;

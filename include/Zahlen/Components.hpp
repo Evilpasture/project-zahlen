@@ -243,6 +243,15 @@ struct Components {
         JPH::Vec4 skyZenith  = JPH::Vec4(0.003f, 0.008f, 0.020f, 1.0f);
         JPH::Vec4 skyHorizon = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f);
         JPH::Vec4 skyGround  = JPH::Vec4(0.001f, 0.001f, 0.003f, 1.0f);
+
+        // Source's 3D skybox travels with the view: sky_camera marks where the
+        // map origin sits inside the miniscape, so the layer is drawn around
+        // the player's eye and never parallaxes. `skyboxAnchor` is the world
+        // point the background layer was authored around;
+        // `skyboxFollowCamera` re-bases every DrawFlags::Background mesh onto
+        // the camera each frame (see SceneEnvironment::skyboxAnchor).
+        JPH::Vec3 skyboxAnchor       = JPH::Vec3(0.0f, 0.0f, 0.0f);
+        bool      skyboxFollowCamera = false;
     };
 
     struct EnvironmentMapComponent {

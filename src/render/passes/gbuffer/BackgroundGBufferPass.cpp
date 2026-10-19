@@ -49,7 +49,13 @@ void BackgroundGBufferPass::operator()(VkCommandBuffer cmd) const noexcept {
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive(), drawCmd.material->pipeline);
+                // No pipeline override: this pass presents the same G-buffer
+                // contract as GBufferBasePass, so it must resolve the pipeline
+                // the same way. Passing drawCmd.material->pipeline here would
+                // pin the background layer to the classic vertex path and drop
+                // it off the meshlet path on GPUs that use it, for no gain --
+                // SubmitDrawInstanced already falls back to that pipeline.
+                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive());
             }
         });
 }

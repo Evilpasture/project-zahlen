@@ -45,11 +45,20 @@ void SubmitDrawInstanced(
         return;
     }
 
+    // An override is the pass's own pipeline, not a reason to skip the draw:
+    // BackgroundGBufferPass hands over the material's pipeline, DrawCSGMeshes
+    // hands over the stencil/difference/intersection pipelines, and
+    // TranslucentPrePass hands over the prepass pipeline. Only a draw that has
+    // neither an override nor a material pipeline is undrawable. This branch
+    // used to be an if/else over the *material* test, so every caller that
+    // supplied an override returned here and submitted nothing -- which is why
+    // the 3D skybox never rasterized.
     auto* pipeline = pipelineOverride;
-    if (pipeline == VK_NULL_HANDLE && nativeMat != nullptr && nativeMat->pipeline != VK_NULL_HANDLE) {
+    if (pipeline == VK_NULL_HANDLE) {
+        if (nativeMat == nullptr || nativeMat->pipeline == VK_NULL_HANDLE) {
+            return;
+        }
         pipeline = nativeMat->pipeline;
-    } else {
-        return;
     }
 
     const auto vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
