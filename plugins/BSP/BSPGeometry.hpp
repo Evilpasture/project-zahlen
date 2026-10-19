@@ -50,6 +50,12 @@ struct ImportOptions {
     bool        convertCoordinates   = true;
     float       unitScale            = 0.0254f; // Inches to meters
     bool        includeDisplacements = true;
+    // The map's 3D skybox: the miniscape authored around the sky_camera at
+    // 1/scale size. Off by default. Off means off -- its faces, props and
+    // lights are dropped from the import, and the placement pass that works
+    // out where to put them (the expensive part of the import: it walks every
+    // face's winding) never runs.
+    bool        importSkybox         = false;
     bool        gatherLights         = true;
     bool        buildColliders       = true;
     std::string assetRoot;
@@ -209,6 +215,7 @@ struct EmissiveSurface {
 struct ImportStats {
     uint32_t helperFacesDropped = 0;      // tools/ & compile-flag helpers dropped by design (fog, trigger, skip...)
     uint32_t collisionOnlyFaces = 0;      // invisible-but-solid faces kept in the physics hull
+    uint32_t skyboxFacesDropped = 0;      // 3D-skybox faces, dropped because ImportOptions::importSkybox is off
     uint32_t droppedNoWinding = 0;        // surfedge/edge/vertex indices out of range
     uint32_t droppedDegenerate = 0;       // fewer than 3 unique corners
     uint32_t droppedNoProjection = 0;     // texinfo/texdata index problems (includes tree-only kTexInfoNode faces)
@@ -300,7 +307,13 @@ struct ImportedMapData {
 // sky: world = anchor + R * (p - skyOrigin) * scale, anchored at the player
 // start so the scenery surrounds the play boundaries. All source-space.
 struct SkyboxTransform {
+    // A sky_camera exists, so the membership test below is meaningful.
     bool  active = false;
+    // Whether that content belongs in the import (ImportOptions::importSkybox).
+    // Off keeps `active` and the membership -- a caller needs them to
+    // recognise skybox content -- but nothing is placed, and callers drop
+    // whatever the membership matches.
+    bool  enabled = true;
     float origin[3] = {0.0f, 0.0f, 0.0f}; // sky_camera origin
     // World point the sky_camera maps to: the player's eye. The authored
     // skybox ground sits BELOW the sky_camera (gm_murder_drones: 4..37 u), so
@@ -326,7 +339,10 @@ struct SkyboxTransform {
     float hiddenMargin = 512.0f;
 };
 
-[[nodiscard]] auto MakeSkyboxTransform(const BSPMap& map) noexcept -> SkyboxTransform;
+// `importSkybox` false resolves the membership (which faces belong to the
+// miniscape) but stops before the placement pass, so callers can drop that
+// content without paying for it.
+[[nodiscard]] auto MakeSkyboxTransform(const BSPMap& map, bool importSkybox) noexcept -> SkyboxTransform;
 [[nodiscard]] auto IsSkyboxPoint(const SkyboxTransform& t, const float p[3]) noexcept -> bool;
 // A point in PLACED (transformed source) coordinates: inside the world volume.
 // Guards skybox light entities only; geometry uses the background layer.

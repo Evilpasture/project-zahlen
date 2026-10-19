@@ -599,6 +599,9 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         imported.faceCount, imported.parts.size(), imported.triangleCount, imported.stats.droppedNoWinding, imported.stats.droppedDegenerate,
         imported.stats.droppedNoProjection, imported.stats.helperFacesDropped, imported.stats.collisionOnlyFaces, imported.stats.displacementFallbacks,
         imported.stats.singleSidedSheets);
+    if (imported.stats.skyboxFacesDropped > 0) {
+        Log("BSP Importer: {} -> {} 3D-skybox face(s) dropped (ImportOptions::importSkybox is off)", virtualPath, imported.stats.skyboxFacesDropped);
+    }
 
     auto prefab                 = std::make_unique<ModelPrefab>();
     prefab->virtualPath         = String256(virtualPath);

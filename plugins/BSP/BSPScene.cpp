@@ -217,7 +217,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
     // 3D skybox content (background scenery + its fixture lights) is compiled
     // around the sky_camera above the map; the transform places it around the
     // play boundaries the way Source renders the sky.
-    const SkyboxTransform skybox = MakeSkyboxTransform(map);
+    const SkyboxTransform skybox = MakeSkyboxTransform(map, options.importSkybox);
 
     for (const BSPEntity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
@@ -232,6 +232,11 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         // scale^2 intensity (E = I/d^2 keeps the authored pool brightness) and
         // their derived ranges scale with the content.
         const bool      skyEntity = skybox.active && IsSkyboxPoint(skybox, originArr.data());
+        // Skybox off: its entities leave with its geometry, instead of spawning
+        // at raw compile coordinates a kilometre above the map.
+        if (skyEntity && !skybox.enabled) {
+            continue;
+        }
         float           skyScale  = 1.0f;
         float           placed[3] = {originArr[0], originArr[1], originArr[2]};
         JPH::Vec3       origin(originArr[0], originArr[1], originArr[2]);
@@ -582,6 +587,9 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         // coordinates, floating above the map) and composite as background
         // layer scenery: no physics, Source's skybox world is non-solid.
         const bool skyProp = skybox.active && IsSkyboxPoint(skybox, sp.origin.data());
+        if (skyProp && !skybox.enabled) {
+            continue; // skybox off: its props leave with its geometry
+        }
         JPH::Vec3  propOrigin(sp.origin[0], sp.origin[1], sp.origin[2]);
         if (skyProp) {
             float placed[3];

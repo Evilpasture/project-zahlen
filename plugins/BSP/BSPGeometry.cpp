@@ -576,7 +576,7 @@ namespace {
 constexpr float kSourceViewHeight = 64.0f;
 } // namespace
 
-auto MakeSkyboxTransform(const BSPMap& map) noexcept -> SkyboxTransform {
+auto MakeSkyboxTransform(const BSPMap& map, bool importSkybox) noexcept -> SkyboxTransform {
     SkyboxTransform t;
 
     for (const BSPEntity& entity: map.entities) {
@@ -600,7 +600,8 @@ auto MakeSkyboxTransform(const BSPMap& map) noexcept -> SkyboxTransform {
                 t.scale = 16.0f;
             }
         }
-        t.active = true;
+        t.active  = true;
+        t.enabled = importSkybox;
         break;
     }
     if (!t.active) {
@@ -661,6 +662,14 @@ auto MakeSkyboxTransform(const BSPMap& map) noexcept -> SkyboxTransform {
             t.worldMin[k] = map.models[0].mins[k];
             t.worldMax[k] = map.models[0].maxs[k];
         }
+    }
+
+    // Skybox off: the membership above is all a caller needs to drop the
+    // content (see ImportMapGeometry), and the pass below -- which walks every
+    // face's winding to place the miniscape -- is the expensive part of the
+    // import. Do not run it.
+    if (!importSkybox) {
+        return t;
     }
 
     // Centre the miniscape on the map, and sink it clear of the level's floor.
@@ -817,7 +826,7 @@ auto GatherEmissiveAreaLights(
     }
 
     std::vector<EmissiveSurface> faces;
-    const SkyboxTransform        sky = MakeSkyboxTransform(map);
+    const SkyboxTransform        sky = MakeSkyboxTransform(map, options.importSkybox);
 
     for (size_t modelIdx = 0; modelIdx < map.models.size(); ++modelIdx) {
         if (options.onlyModel >= 0 && static_cast<int32_t>(modelIdx) != options.onlyModel) {
@@ -923,7 +932,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
     // 3D skybox content is authored around the sky_camera at 1/scale size and
     // floats above the map until transformed; see SkyboxTransform.
-    const SkyboxTransform sky = MakeSkyboxTransform(map);
+    const SkyboxTransform sky = MakeSkyboxTransform(map, options.importSkybox);
 
     for (size_t modelIdx = 0; modelIdx < map.models.size(); ++modelIdx) {
         if (options.onlyModel >= 0 && static_cast<int32_t>(modelIdx) != options.onlyModel) {
@@ -963,6 +972,10 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 const JPH::Vec3 centroid = WindingCentroid(*winding);
                 const float    src[3] = {centroid.GetX(), centroid.GetY(), centroid.GetZ()};
                 skyFace = IsSkyboxPoint(sky, src);
+                if (skyFace && !sky.enabled) {
+                    ++result.stats.skyboxFacesDropped;
+                    continue;
+                }
                 if (skyFace) {
                     for (JPH::Vec3& corner: *winding) {
                         const float p[3] = {corner.GetX(), corner.GetY(), corner.GetZ()};

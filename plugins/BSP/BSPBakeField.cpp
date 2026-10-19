@@ -135,7 +135,7 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
     std::vector<FaceRadiance> faces;
     faces.reserve(map.faces.size());
 
-    const SkyboxTransform skybox = MakeSkyboxTransform(map);
+    const SkyboxTransform skybox = MakeSkyboxTransform(map, options.importSkybox);
 
     for (const DFace& face: map.faces) {
         if (face.lightofs < 0 || face.texinfo < 0 || static_cast<size_t>(face.texinfo) >= map.texInfos.size()) {

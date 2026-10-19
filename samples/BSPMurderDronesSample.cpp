@@ -1326,7 +1326,23 @@ JPH::BodyID                 g_voidCatcher {};
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
-    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)));
+    // The map's 3D skybox is background scenery the importer has to place into
+    // the level's own world; ImportOptions::importSkybox is off by default and
+    // this switch is what turns it back on.
+    bool importSkybox = false;
+    const std::array skyboxHandlers {
+        ZHLN::CommandHandler {
+            .key         = "--skybox",
+            .description = "Import the map's 3D skybox (background scenery; default: off)",
+            .action =
+                [&](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
+                    importSkybox = true;
+                    return {};
+                },
+        },
+    };
+
+    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)), skyboxHandlers);
     if (!optionsRes) {
         return EXIT_FAILURE;
     }
@@ -1489,6 +1505,7 @@ auto main(int argc, char* argv[]) -> int {
         .convertCoordinates   = true,
         .unitScale            = 0.0254f, // Convert inches to meters
         .includeDisplacements = true,
+        .importSkybox         = importSkybox,
         .gatherLights         = true,
         .buildColliders       = true,
         .assetRoot            = assetRoot.string(),
