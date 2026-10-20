@@ -87,10 +87,10 @@ void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<con
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)
-        .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
-        .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
-        .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
-        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
+        .ClearColor(in.sceneColor, kClearColorScene)
+        .ClearColor(in.velocity, kClearColorVelocity)
+        .ClearColor(in.normRough, kClearColorNormalRoughness)
+        .ClearDepth(in.depth, kClearDepthValue)
         .Execute(cmd, [&]() {
             passCtx.EnsureHeapState();
 
@@ -121,10 +121,10 @@ void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTarg
 
     const auto pass = Vk::DynamicPass(in.sceneColor.Extent())
                           .Viewport(sceneVp)
-                          .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
-                          .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
-                          .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
-                          .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
+                          .ClearColor(in.sceneColor, kClearColorScene)
+                          .ClearColor(in.velocity, kClearColorVelocity)
+                          .ClearColor(in.normRough, kClearColorNormalRoughness)
+                          .ClearDepth(in.depth, kClearDepthValue)
                           .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT);
     pass.Execute(cmd, [&]() {
         ctx.BindHeapsAndPushFrame(cmd);
@@ -174,10 +174,10 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
     if (drawCount == 0) {
         const auto in = GBufferSceneTargets(frame);
         Vk::DynamicPass(in.sceneColor.Extent())
-            .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
-            .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
-            .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
-            .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
+            .ClearColor(in.sceneColor, kClearColorScene)
+            .ClearColor(in.velocity, kClearColorVelocity)
+            .ClearColor(in.normRough, kClearColorNormalRoughness)
+            .ClearDepth(in.depth, kClearDepthValue)
             .Execute(cmd, []() {});
         return;
     }

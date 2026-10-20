@@ -118,7 +118,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
 
         Vk::DynamicPass(shadowMapArrayImage.Extent())
             .ViewMask(ShadowRenderer::kCascadeViewMask)
-            .AddDepth(shadowMapArrayImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, ShadowRenderer::kShadowClearDepth)
+            .ClearDepth(shadowMapArrayImage, ShadowRenderer::kShadowClearDepth)
             .Execute(cmd, [&]() {
                 const bool useMeshShadows = useMeshShadowPath && csmDrawCount > 0;
 
@@ -176,7 +176,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         const auto tiles = ctx.shadowAtlas.Tiles();
 
         Vk::DynamicPass(atlasImage.Extent())
-            .AddDepth(atlasImage, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, ShadowRenderer::kShadowClearDepth)
+            .LoadDepth(atlasImage)
             .Execute(cmd, [&]() {
                 for (uint32_t p = 0; p < placements.size(); ++p) {
                     const auto& placement = placements[p];

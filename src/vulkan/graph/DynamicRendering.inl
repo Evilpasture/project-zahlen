@@ -384,6 +384,33 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
+template <VkImageLayout Layout, VkFormat Format>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
+    const TypedImage<Layout, Format>& img,
+    ColorOp                           op
+) && noexcept -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type> {
+    return std::move(*this).AddColor(img, op.loadOp, op.storeOp, op.clearColor);
+}
+
+template <size_t ColorCount, bool HasDepth, typename Formats>
+template <typename... TypedImages>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
+    const std::tuple<TypedImages...>& imageTuple,
+    ColorOp                           op
+) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type> {
+    return std::move(*this).AddColorGroup(imageTuple, op.loadOp, op.storeOp, op.clearColor);
+}
+
+template <size_t ColorCount, bool HasDepth, typename Formats>
+template <VkImageLayout Layout, VkFormat Format>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
+    const TypedImage<Layout, Format>& img,
+    DepthOp                           op
+) && noexcept -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type> {
+    return std::move(*this).AddDepth(img, op.loadOp, op.storeOp, op.clearVal);
+}
+
+template <size_t ColorCount, bool HasDepth, typename Formats>
 constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::Flags(VkRenderingFlags flags) && noexcept -> DynamicPass<ColorCount, HasDepth, Formats>&& {
     _flags = flags;
     return std::move(*this);

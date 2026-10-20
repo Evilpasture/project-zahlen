@@ -24,7 +24,7 @@ auto RenderContext::Impl::ReconcileDestination(FrameDestinations::Window& dest, 
     const VkCommandBuffer cmd = recorder.Handle();
     Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, image.image.Handle());
     Vk::DynamicPass(image.image.Extent2D())
-        .AddColor(image.image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
+        .ClearColor(image.image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(), kClearColorScene)
         .Execute(cmd, [] {});
     image.layout = Vk::AttachmentLayout::ColorAttachment;
 

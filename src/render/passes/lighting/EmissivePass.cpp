@@ -24,8 +24,8 @@ void EmissivePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     Vk::DynamicPass(lighting.Extent())
         .Viewport(sceneVp)
-        .AddColor(lighting, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .LoadColor(lighting)
+        .LoadDepth(depth)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < ctx.queues.Draws().size(); ++i) {
                 const auto& drawCmd = ctx.queues.Draws()[i];

@@ -426,6 +426,67 @@ class ScopedTransition {
 template <typename ImageT, VkImageLayout Final>
 ScopedTransition(VkCommandBuffer, ImageT&, Vk::Tag<Final>) -> ScopedTransition<ImageT, Final>;
 
+// -----------------------------------------------------------------------------
+// Attachment Policies
+// -----------------------------------------------------------------------------
+/// The load/store pair, plus the value only a clear consumes, packaged with the
+/// intent that produced it. A pass can no longer hand a clear color to a load.
+struct ColorOp {
+    VkAttachmentLoadOp  loadOp     = VK_ATTACHMENT_LOAD_OP_LOAD;
+    VkAttachmentStoreOp storeOp    = VK_ATTACHMENT_STORE_OP_STORE;
+    ZHLN::Color4        clearColor {};
+
+    /// Clear the attachment with a color, then preserve results.
+    [[nodiscard]] static constexpr auto Clear(ZHLN::Color4 color = {}) noexcept -> ColorOp {
+        return {VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, color};
+    }
+
+    /// Load existing contents and store modified results (e.g., forward pass, blending).
+    [[nodiscard]] static constexpr auto Load() noexcept -> ColorOp {
+        return {VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, {}};
+    }
+
+    /// Do not load existing contents; every pixel will be overwritten (e.g., tonemapping blit).
+    [[nodiscard]] static constexpr auto Overwrite() noexcept -> ColorOp {
+        return {VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_STORE, {}};
+    }
+
+    /// Clear, but discard results when the pass ends (transient scratch memory on tile GPUs).
+    [[nodiscard]] static constexpr auto Transient(ZHLN::Color4 color = {}) noexcept -> ColorOp {
+        return {VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_DONT_CARE, color};
+    }
+};
+
+/// Depth half of the same idea. The clear value lives here and nowhere else, so a
+/// float depth clear cannot reach a color attachment and vice versa.
+struct DepthOp {
+    VkAttachmentLoadOp  loadOp   = VK_ATTACHMENT_LOAD_OP_LOAD;
+    VkAttachmentStoreOp storeOp  = VK_ATTACHMENT_STORE_OP_STORE;
+    float               clearVal = 1.0F;
+
+    /// Clear depth to a specific value and write/store updates.
+    [[nodiscard]] static constexpr auto Clear(float clearDepth = 1.0F) noexcept -> DepthOp {
+        return {VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, clearDepth};
+    }
+
+    /// Load previous depth and write/store updates (e.g., forward opaque pass).
+    [[nodiscard]] static constexpr auto Load() noexcept -> DepthOp {
+        return {VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, 1.0F};
+    }
+
+    /// Test against previous depth without saving updates. STORE_OP_NONE (core in
+    /// Vulkan 1.3) keeps the loaded contents intact instead of discarding them the
+    /// way DONT_CARE would.
+    [[nodiscard]] static constexpr auto ReadOnly() noexcept -> DepthOp {
+        return {VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_NONE, 1.0F};
+    }
+
+    /// Clear depth and discard on completion (transient depth buffer).
+    [[nodiscard]] static constexpr auto Transient(float clearDepth = 1.0F) noexcept -> DepthOp {
+        return {VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_DONT_CARE, clearDepth};
+    }
+};
+
 template <size_t ColorCount = 0, bool HasDepth = false, typename Formats = AttachmentFormats<VK_FORMAT_UNDEFINED>>
 class DynamicPass {
   public:
@@ -474,6 +535,54 @@ class DynamicPass {
         VkAttachmentStoreOp               storeOp  = VK_ATTACHMENT_STORE_OP_STORE,
         float                             clearVal = 1.0F
     ) && noexcept -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type>;
+
+    // -------------------------------------------------------------------------
+    // Policy-Driven Attachments (Tier 2)
+    // -------------------------------------------------------------------------
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto AddColor(const TypedImage<Layout, Format>& img, ColorOp op) && noexcept
+        -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type>;
+
+    template <typename... TypedImages>
+    constexpr auto AddColorGroup(const std::tuple<TypedImages...>& imageTuple, ColorOp op) && noexcept
+        -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type>;
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto AddDepth(const TypedImage<Layout, Format>& img, DepthOp op) && noexcept
+        -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type>;
+
+    // -------------------------------------------------------------------------
+    // Semantic Intent Shorthands (Tier 1)
+    // -------------------------------------------------------------------------
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto ClearColor(const TypedImage<Layout, Format>& img, ZHLN::Color4 clearColor) && noexcept {
+        return std::move(*this).AddColor(img, ColorOp::Clear(clearColor));
+    }
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto LoadColor(const TypedImage<Layout, Format>& img) && noexcept {
+        return std::move(*this).AddColor(img, ColorOp::Load());
+    }
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto OverwriteColor(const TypedImage<Layout, Format>& img) && noexcept {
+        return std::move(*this).AddColor(img, ColorOp::Overwrite());
+    }
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto ClearDepth(const TypedImage<Layout, Format>& img, float clearVal = 1.0F) && noexcept {
+        return std::move(*this).AddDepth(img, DepthOp::Clear(clearVal));
+    }
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto LoadDepth(const TypedImage<Layout, Format>& img) && noexcept {
+        return std::move(*this).AddDepth(img, DepthOp::Load());
+    }
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto ReadOnlyDepth(const TypedImage<Layout, Format>& img) && noexcept {
+        return std::move(*this).AddDepth(img, DepthOp::ReadOnly());
+    }
 
     constexpr auto Flags(VkRenderingFlags flags) && noexcept -> DynamicPass<ColorCount, HasDepth, Formats>&&;
 

@@ -20,10 +20,10 @@ void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     Vk::DynamicPass(norm_att.Extent())
         .Viewport(sceneVp)
-        .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
-        .AddColor(aniso_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorAnisotropy)
-        .AddColor(sheen_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorSheen)
-        .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
+        .ClearColor(norm_att, kClearColorNormalRoughness)
+        .ClearColor(aniso_att, kClearColorAnisotropy)
+        .ClearColor(sheen_att, kClearColorSheen)
+        .ClearDepth(depth_att, kClearDepthValue)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < frame.queues.Draws().size(); ++i) {
                 const auto& drawCmd = frame.queues.Draws()[i];

@@ -31,8 +31,8 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
     Vk::DynamicPass(litColor.Extent())
         .Viewport(sceneVp)
-        .AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .LoadColor(litColor)
+        .LoadDepth(depth)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < ctx.queues.Draws().size(); ++i) {
                 const auto& drawCmd = ctx.queues.Draws()[i];

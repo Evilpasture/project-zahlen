@@ -21,10 +21,10 @@ void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(frame.EffectiveViewport())
-        .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .LoadColor(in.sceneColor)
+        .LoadColor(in.velocity)
+        .LoadColor(in.normRough)
+        .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < frame.queues.Draws().size(); ++i) {
                 const auto& drawCmd = frame.queues.Draws()[i];

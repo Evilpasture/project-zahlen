@@ -63,7 +63,7 @@ struct TonemapBlitPass:
                 const auto swapchainTarget = getSwapchainImage();
 
                 drawImpl.BindHeapsAndPushFrame(drawCmd);
-                Vk::DynamicPass(swapchainTarget.Extent()).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(drawCmd, [&]() { execute(); });
+                Vk::DynamicPass(swapchainTarget.Extent()).OverwriteColor(swapchainTarget).Execute(drawCmd, [&]() { execute(); });
             }
         );
     }

@@ -283,7 +283,7 @@ template <typename... Images>
 [[nodiscard]] auto ClearAndPrepareGroup(VkCommandBuffer cmd, VkExtent2D extent, Color4 clear, Images&... imgs) {
     auto bundle = Vk::TieTargets(imgs...);
     auto atts   = bundle.template Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
-    Vk::DynamicPass(extent).AddColorGroup(atts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, clear).Execute(cmd, []() {});
+    Vk::DynamicPass(extent).AddColorGroup(atts, ColorOp::Clear(clear)).Execute(cmd, []() {});
     return TransitionAllTo<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts);
 }
 

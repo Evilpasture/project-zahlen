@@ -51,10 +51,10 @@ void RecordGpuCulled(
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)
-        .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .LoadColor(in.sceneColor)
+        .LoadColor(in.velocity)
+        .LoadColor(in.normRough)
+        .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
             passCtx.EnsureHeapState();
 
@@ -83,10 +83,10 @@ void RecordCpuCulled(PassContext& passCtx, const CsgResources& csg, const MeshPa
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(ctx.EffectiveViewport())
-        .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .LoadColor(in.sceneColor)
+        .LoadColor(in.velocity)
+        .LoadColor(in.normRough)
+        .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
             ctx.BindHeapsAndPushFrame(cmd);
             DrawCSGMeshes(passCtx, csg, in.sceneColor.Extent());

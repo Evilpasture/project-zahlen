@@ -22,16 +22,16 @@ void BackgroundGBufferPass::operator()(VkCommandBuffer cmd) const noexcept {
 
     // Vk::DynamicPass(in.sceneColor.Extent())
     //     .Viewport(sceneVp)
-    //     .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
-    //     .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
-    //     .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
-    //     .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
+    //     .ClearColor(in.sceneColor, kClearColorScene)
+    //     .ClearColor(in.velocity, kClearColorVelocity)
+    //     .ClearColor(in.normRough, kClearColorNormalRoughness)
+    //     .ClearDepth(in.depth, kClearDepthValue)
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)
-        .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
-        .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
-        .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
-        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
+        .LoadColor(in.sceneColor)
+        .LoadColor(in.velocity)
+        .LoadColor(in.normRough)
+        .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < frame.queues.Draws().size(); ++i) {
                 const auto& drawCmd = frame.queues.Draws()[i];
