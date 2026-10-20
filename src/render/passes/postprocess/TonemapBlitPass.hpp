@@ -55,7 +55,7 @@ struct TonemapBlitPass:
                 return MakeFullscreenPassArgs(
                     pc, Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<BlitInputRes<Mode>>>(blitInputImage)),
                     Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(frame.graphResources.bloomFinalTarget)),
-                    Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(frame.presenter.depthTarget)),
+                    Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(frame.ActiveDepthTarget())),
                     Vk::Unread<"frame">(frame.frames.frameUniformBuffers[fIdx])
                 );
             },

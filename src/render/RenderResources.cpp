@@ -491,7 +491,6 @@ auto RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte>
 }
 
 static_assert(ActiveGBuffer::count == 3, "The compact deferred path owns SceneColor, Velocity, and NormRough only.");
-static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::color_formats == ActiveGBuffer::array);
 static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_count == 1);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_formats[0] == VK_FORMAT_R16G16B16A16_SFLOAT);

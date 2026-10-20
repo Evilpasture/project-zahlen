@@ -244,7 +244,7 @@ struct AtrousDenoisePass:
         const auto target   = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.*(TemplatedDetail::GraphMember<TargetRes>::Ptr));
         const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.*(TemplatedDetail::GraphMember<PingRes>::Ptr));
         const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.*(TemplatedDetail::GraphMember<PongRes>::Ptr));
-        const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActivePresentation().depthTarget);
+        const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget());
         const auto normal   = Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer);
 
         const float temporalW = frame.rtHistoryValid ? 0.85f : 0.0f;

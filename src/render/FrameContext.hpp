@@ -86,6 +86,8 @@ struct RenderFrameContext {
     Vk::Buffer                                                morphDeltasBuffer;
 
     Vk::SwapchainPresenter presenter;
+    // Primary scene depth is a renderer resource, not part of presentation state.
+    Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> primaryDepthTarget;
     FrameDestinations      destinations;
 
     DrawQueueManager queues;
@@ -198,6 +200,13 @@ struct RenderFrameContext {
             return active->Presenter();
         }
         return presenter;
+    }
+
+    [[nodiscard]] auto ActiveDepthTarget() noexcept -> Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>& {
+        if (auto active = destinations.Active(); active && !active->IsPrimary()) {
+            return active->depthTarget;
+        }
+        return primaryDepthTarget;
     }
 
     [[nodiscard]] auto InheritsHeaps() const noexcept -> bool {

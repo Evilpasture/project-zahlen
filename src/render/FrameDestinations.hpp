@@ -51,6 +51,8 @@ class FrameDestinations {
         std::unique_ptr<Vk::SwapchainPresenter> ownedPresenter;
         std::optional<Acquired> acquired;
         uint64_t cachedGeneration = 0;
+        // Renderer-owned scene attachment for this secondary presentation.
+        Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> depthTarget;
 
         [[nodiscard]] auto IsPrimary() const noexcept -> bool { return ownedPresenter == nullptr; }
         [[nodiscard]] auto Presenter() const noexcept -> Vk::SwapchainPresenter& {
@@ -95,6 +97,7 @@ class FrameDestinations {
     void AbortRecordings() noexcept;
 
     void SetActive(uint64_t id) noexcept { activeWindow = id; }
+    [[nodiscard]] auto Active() noexcept -> ZHLN::Optional<Window&> { return Find(activeWindow); }
     [[nodiscard]] auto Active() const noexcept -> ZHLN::Optional<const Window&> { return Find(activeWindow); }
 
   private:

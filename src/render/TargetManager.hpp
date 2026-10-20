@@ -4,7 +4,6 @@
 #pragma once
 #include "Rendering.hpp"
 #include "graph/RenderGraph.hpp"
-#include "presentation/PresentationGraphTags.hpp"
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
@@ -23,6 +22,8 @@ inline constexpr uint32_t kMaxGeneratedHiZMips = 7;
 using Res_SceneColor = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32>;
 using Res_Velocity   = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT>;
 using Res_NormRough  = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM>;
+// The active presentation supplies backing storage; the resource identity is renderer-owned.
+using Res_Depth      = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT>;
 
 using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT>;
 using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT>;

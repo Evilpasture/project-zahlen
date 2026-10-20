@@ -14,7 +14,7 @@ namespace Vk {
 template <>
 struct ResourceResolver<Res_Depth> {
     [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
-        return MakeRef<Res_Depth>(impl.ActivePresentation().depthTarget);
+        return MakeRef<Res_Depth>(impl.ActiveDepthTarget());
     }
 };
 

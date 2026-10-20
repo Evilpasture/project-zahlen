@@ -373,6 +373,7 @@ struct RenderContext::Impl: RenderFrameContext {
         allocator.DestroyImage(ltcMatImage);
         allocator.DestroyImage(ltcAmpImage);
         targets.Clear();
+        primaryDepthTarget.Destroy(allocator);
         for (auto& history: accumulationHistory) {
             history.Destroy(allocator);
         }
@@ -437,6 +438,7 @@ struct RenderContext::Impl: RenderFrameContext {
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& settings);
 
     [[nodiscard]] std::expected<void, ErrorCode> RecreateTargets(VkExtent2D ext);
+    [[nodiscard]] std::expected<void, ErrorCode> EnsureDepthTarget(FrameDestinations::Window& destination) noexcept;
 
     void ApplySettings(GraphicsSettings incoming) noexcept;
 

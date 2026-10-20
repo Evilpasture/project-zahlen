@@ -20,7 +20,7 @@ void EmissivePass::operator()(VkCommandBuffer cmd) const noexcept {
     PassContext passCtx(cmd, frame);
     const auto  sceneVp = frame.EffectiveViewport();
     const auto  lighting = Vk::Assume<Vk::ColorWriteRGB<Res_LightingGI>>(frame.graphResources.lightingGI);
-    const auto  depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.presenter.depthTarget);
+    const auto  depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.ActiveDepthTarget());
 
     Vk::DynamicPass(lighting.Extent())
         .Viewport(sceneVp)

@@ -14,7 +14,6 @@ SwapchainPresenter::~SwapchainPresenter() noexcept {
 
 void SwapchainPresenter::Cleanup() noexcept {
     if (_alloc != nullptr) {
-        depthTarget.Destroy(*_alloc);
         headlessColorTarget.Destroy(*_alloc);
     }
 }
@@ -25,7 +24,6 @@ auto SwapchainPresenter::operator=(SwapchainPresenter&& other) noexcept -> Swapc
         surface             = std::move(other.surface);
         swapchain           = std::move(other.swapchain);
         presentSemaphores   = std::move(other.presentSemaphores);
-        depthTarget         = std::move(other.depthTarget);
         headlessColorTarget = std::move(other.headlessColorTarget);
         sync                = std::move(other.sync);
         pools               = std::move(other.pools);
@@ -69,21 +67,13 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
 
     if (surface.Get() == VK_NULL_HANDLE) {
         const VkExtent2D render_extent = {.width = width, .height = height};
-        auto             dt_res =
-            RenderTarget<Res_Depth>::Create(*_alloc, _ctx->Device(), render_extent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled});
-        if (!dt_res) {
-            return std::unexpected(dt_res.error());
-        }
         auto hct_res = FormatRenderTarget<kHeadlessColorFormat>::Create(
             *_alloc, _ctx->Device(), render_extent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
         );
         if (!hct_res) {
-            dt_res->Destroy(*_alloc);
             return std::unexpected(hct_res.error());
         }
-        depthTarget.Destroy(*_alloc);
         headlessColorTarget.Destroy(*_alloc);
-        depthTarget         = std::move(*dt_res);
         headlessColorTarget = std::move(*hct_res);
 
         ++resourceGeneration;
@@ -100,17 +90,6 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
     }
     _pacer.OnSwapchainRebuilt(_ctx->Device(), swapchain.Get().handle, swapchain.Get().imageCount, swapchain.Get().presentMode);
     presentSemaphores.Rebuild(_ctx->Device(), swapchain.Get().imageCount);
-
-    {
-        auto dt_res = RenderTarget<Res_Depth>::Create(
-            *_alloc, _ctx->Device(), swapchain.Get().extent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
-        );
-        if (!dt_res) {
-            return std::unexpected(dt_res.error());
-        }
-        depthTarget.Destroy(*_alloc);
-        depthTarget = std::move(*dt_res);
-    }
 
     ++resourceGeneration;
 
@@ -217,7 +196,7 @@ auto SwapchainPresenter::Present(
     const VkSemaphore present_sem = swapchain.Valid() ? PresentSemaphore(imageIndex) : VK_NULL_HANDLE;
 
     // 1. Tell FrameSync to generate the entire submit sync bundle
-    auto submitSync = sync.PrepareGraphicsSubmit(slot, presentSem, extraWaits);
+    auto submitSync = sync.PrepareGraphicsSubmit(slot, present_sem, extraWaits);
 
     // 2. Submit commands
     auto submitRes = Vk::QueueSubmit(graphicsQueue, std::move(cmds), submitSync.Waits(), submitSync.Signals());

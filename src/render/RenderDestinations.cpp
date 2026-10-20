@@ -59,6 +59,54 @@ namespace {
 
 } // namespace
 
+auto RenderContext::Impl::EnsureDepthTarget(FrameDestinations::Window& destination) noexcept -> std::expected<void, ErrorCode> {
+    const VkExtent2D extent = destination.Presenter().Extent();
+    if (extent.width == 0 || extent.height == 0) {
+        return std::unexpected(DestinationError::SurfaceUnusable);
+    }
+
+    auto& target = destination.IsPrimary() ? primaryDepthTarget : destination.depthTarget;
+    if (target.Valid() && target.extent.width == extent.width && target.extent.height == extent.height) {
+        return {};
+    }
+
+    auto created = Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+        allocator, ctx.Device(), extent, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
+    );
+    if (!created) {
+        return std::unexpected(created.error());
+    }
+
+    target.Destroy(allocator);
+    target = std::move(*created);
+
+    if (destination.IsPrimary()) {
+        if (auto immediate = Vk::ExecuteImmediate(
+                ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+                    constexpr VkImageAspectFlags aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
+                        cmd, target.image.Handle(), aspect
+                    );
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+                        cmd, target.image.Handle(), aspect
+                    );
+                }
+            );
+            !immediate) {
+            target.Destroy(allocator);
+            return std::unexpected(immediate.error());
+        }
+        if (decalDepthSlot.Valid()) {
+            heapManager.BindImage(decalDepthSlot, target.image.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
+        Vk::Debug::SetImageName(ctx, target.image.Handle(), "DepthTarget");
+    } else {
+        Vk::Debug::SetImageName(ctx, target.image.Handle(), "WindowDepthTarget");
+    }
+
+    return {};
+}
+
 auto RenderContext::Impl::FindOrCreateDestination(const PresentationTarget& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode> {
     if (auto existing = destinations.Find(aux)) {
         return DestinationVend {.entry = &*existing, .created = false};
@@ -136,6 +184,25 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
         ZHLN::Log("[Render] Window presenter created for {:p} (primary={}).", static_cast<const void*>(dest.target), dest.IsPrimary() ? 1 : 0);
     }
 
+    // Rebuild an auxiliary swapchain before the renderer allocates its matching
+    // scene-depth image. AcquireNext can still handle out-of-date images below.
+    if (!dest.acquired && !dest.IsPrimary() && dest.Presenter().HasSwapchain()) {
+        const Extent2D requested = aux.GetFramebufferExtent();
+        const VkExtent2D current = dest.Presenter().Extent();
+        if (requested.width != 0 && requested.height != 0 &&
+            (requested.width != current.width || requested.height != current.height)) {
+            if (auto rebuilt = dest.Presenter().Rebuild(requested.width, requested.height); !rebuilt) {
+                return std::unexpected(rebuilt.error());
+            }
+        }
+    }
+
+    if (!dest.acquired) {
+        if (auto depth = EnsureDepthTarget(dest); !depth) {
+            return std::unexpected(depth.error());
+        }
+    }
+
     const auto acquired = AcquireDestinationImage(destinations, nextAcquisition, dest, ctx.Instance());
     if (!acquired) {
         return std::unexpected(acquired.error());
@@ -207,6 +274,8 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
             ctx.Instance().IncrementDeviceLost();
         }
     }
+    destinations.AbortRecording(entry->id);
+    entry->depthTarget.Destroy(allocator);
     destinations.Detach(aux);
 }
 
@@ -214,6 +283,12 @@ void RenderContext::Impl::DestroyDestinations() noexcept {
     if (ctx.Device() != VK_NULL_HANDLE) {
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && Vk::IsDeviceLost(waited.error())) {
             ctx.Instance().IncrementDeviceLost();
+        }
+    }
+    destinations.AbortRecordings();
+    for (auto& destination: destinations.Windows()) {
+        if (!destination.IsPrimary()) {
+            destination.depthTarget.Destroy(allocator);
         }
     }
     destinations.Clear();

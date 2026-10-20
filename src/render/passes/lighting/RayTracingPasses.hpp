@@ -39,7 +39,7 @@ struct GtaoDesc {
     [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants& pc) noexcept {
         const uint32_t fIdx = frame.presenter.frameIndex;
 
-        const auto& fullExt = frame.presenter.depthTarget.extent;
+        const auto& fullExt = frame.ActiveDepthTarget().extent;
         const auto  push    = GtaoPushConstants {
                .halfRes     = {frame.graphResources.ao.extent.width, frame.graphResources.ao.extent.height},
                .rcpFullRes  = {1.0f / static_cast<float>(fullExt.width), 1.0f / static_cast<float>(fullExt.height)},
@@ -54,7 +54,7 @@ struct GtaoDesc {
 
         return MakeComputePassArgs(
             push, VkExtent3D {frame.graphResources.ao.extent.width, frame.graphResources.ao.extent.height, 1},
-            Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActivePresentation().depthTarget)),
+            Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
             Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
             Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"outAo">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.ao))
         );
@@ -97,7 +97,7 @@ struct RtShadowDesc {
 
         return MakeComputePassArgs(
             push, VkExtent3D {frame.graphResources.rtShadowMask.extent.width, frame.graphResources.rtShadowMask.extent.height, 1},
-            Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActivePresentation().depthTarget)),
+            Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
             Vk::Slot<"texNormalRoughness">(
                 Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)
             ),
@@ -143,7 +143,7 @@ struct RtrHalfTraceDesc {
 
         return MakeComputePassArgs(
             push, VkExtent3D {frame.graphResources.rtrHalf.extent.width, frame.graphResources.rtrHalf.extent.height, 1},
-            Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.presenter.depthTarget)),
+            Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
             Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
             Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(frame.graphResources.lightingTarget)),
             Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
@@ -192,7 +192,7 @@ struct RtgiHalfTraceDesc {
 
         return MakeComputePassArgs(
             push, VkExtent3D {frame.graphResources.rtgiHalf.extent.width, frame.graphResources.rtgiHalf.extent.height, 1},
-            Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.presenter.depthTarget)),
+            Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
             Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
             Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
             Vk::Slot<"blueNoiseTex">(frame.textureManager.View(frame.blueNoiseTexIdx)),

@@ -27,7 +27,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto  sceneVp = frame.EffectiveViewport();
 
     const auto litColor = Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(frame.graphResources.hdrSceneColor);
-    const auto depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.presenter.depthTarget);
+    const auto depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.ActiveDepthTarget());
 
     Vk::DynamicPass(litColor.Extent())
         .Viewport(sceneVp)

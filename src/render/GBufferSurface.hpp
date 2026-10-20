@@ -20,7 +20,7 @@ struct OpaqueSurface {
 
     [[nodiscard]] static auto Resolve(RenderFrameContext& impl) noexcept -> GBufferSurface {
         return {
-            .depth      = Vk::Assume<Vk::ShaderRead<Depth>>(impl.presenter.depthTarget).Raw(),
+            .depth      = Vk::Assume<Vk::ShaderRead<Depth>>(impl.ActiveDepthTarget()).Raw(),
             .normals    = Vk::Assume<Vk::ShaderRead<Normals>>(impl.graphResources.normalRoughnessBuffer).Raw(),
         };
     }

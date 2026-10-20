@@ -4,9 +4,17 @@
 #pragma once
 
 #include "TargetManager.hpp"
+#include "passes/gbuffer/GBufferBasePass.hpp"
 
 namespace ZHLN {
 
-using ActiveGBuffer = Vk::GBufferLayout<Res_SceneColor, Res_Velocity, Res_NormRough>;
+using GBufferPassAttachments = Vk::PassAttachmentFormats<Passes::GBufferBasePass>;
 
-}
+// Pipeline formats are derived from the renderer's pass contract, rather than
+// maintained as a second renderer-specific list in the Vulkan target layer.
+struct ActiveGBuffer {
+    static constexpr size_t count = GBufferPassAttachments::color_count;
+    static constexpr auto   array = GBufferPassAttachments::color_formats;
+};
+
+} // namespace ZHLN

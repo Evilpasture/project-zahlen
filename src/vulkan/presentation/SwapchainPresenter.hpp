@@ -7,7 +7,6 @@
 #endif
 
 #include "PresentPacer.hpp"
-#include "PresentationGraphTags.hpp"
 #include "PresentationOutcome.hpp"
 #include <Zahlen/Core/PresentTiming.hpp>
 #include <Zahlen/Error.hpp>
@@ -52,9 +51,7 @@ class SwapchainPresenter {
     Swapchain     swapchain;
     SemaphorePool presentSemaphores;
 
-    RenderTarget<Res_Depth> depthTarget;
-    // Res_Swapchain's compile-time B8 format differs from headless R8;
-    // ResourceResolver<Res_Swapchain> supplies the actual backing slice.
+    // Offscreen color is the presentation output when no swapchain exists.
     FormatRenderTarget<kHeadlessColorFormat> headlessColorTarget;
 
     FrameSync<kFramesInFlight>                         sync;
@@ -100,10 +97,6 @@ class SwapchainPresenter {
     [[nodiscard]] auto Extent() const noexcept -> VkExtent2D {
         return swapchain.Valid() ? swapchain.Get().extent : headlessColorTarget.extent;
     }
-    [[nodiscard]] auto DepthTarget() noexcept -> RenderTarget<Res_Depth>& {
-        return depthTarget;
-    }
-
     [[nodiscard]] auto SlotCommand(uint32_t slot) const noexcept -> VkCommandBuffer {
         return pools.Cmd(slot);
     }

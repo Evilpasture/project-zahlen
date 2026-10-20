@@ -130,7 +130,7 @@ class FrameSync {
 
         // 2. Add extra external waits (e.g. async compute, transfer)
         for (const auto& extra: extraWaits) {
-            ZHLN::Panic(sync.waitCount < sync.waitInfos.size(), "GraphicsSubmitSync wait capacity exceeded");
+            ZHLN::PanicIf(sync.waitCount >= sync.waitInfos.size(), "GraphicsSubmitSync wait capacity exceeded");
             if (sync.waitCount < sync.waitInfos.size()) {
                 sync.waitInfos[sync.waitCount++] = extra;
             }

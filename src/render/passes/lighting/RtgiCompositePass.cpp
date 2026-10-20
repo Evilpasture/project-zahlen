@@ -17,7 +17,7 @@ void RtgiCompositePass::operator()(VkCommandBuffer cmd) const noexcept {
         frame.postProcess.RtgiCompositeHeapBindings(), Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(frame.graphResources.lightingTarget)),
         Vk::Slot<"texLightingAo">(Vk::Assume<Vk::ComputeRead<Res_LightingAo>>(frame.graphResources.lightingAo)),
         Vk::Slot<"texAlbedo">(Vk::Assume<Vk::ComputeRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
-        Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.presenter.depthTarget)),
+        Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"texRtgiHalf">(Vk::Assume<Vk::ComputeRead<Res_RtgiHalf>>(frame.graphResources.rtgiHalf)),
         Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]),

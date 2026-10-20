@@ -232,28 +232,6 @@ void SwapBacking(RenderTarget<A>& lhs, RenderTarget<B>& rhs) noexcept {
 template <VkImageLayout TargetLayout, typename GraphTag>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<GraphTag>& rt, Tag<TargetLayout>) noexcept;
 
-template <typename T>
-struct TargetFormat {
-    static constexpr VkFormat value = T::format;
-};
-
-template <typename... Targets>
-struct GBufferLayout {
-    static constexpr size_t count = sizeof...(Targets);
-
-    template <size_t Index>
-    using TargetTypeAt = Targets...[Index];
-
-    template <size_t Index>
-        requires(Index < count)
-    static constexpr VkFormat get() {
-        static_assert(Index < count, "GBuffer layout index out of bounds.");
-        return TargetFormat<TargetTypeAt<Index>>::value;
-    }
-
-    static constexpr std::array<VkFormat, count> array = {TargetFormat<Targets>::value...};
-};
-
 template <VkImageLayout L, typename Tag>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<Tag>& rt, VkImageAspectFlags aspect = RenderTarget<Tag>::aspect) {
     return rt.AsSlice().template Assume<L>(aspect);
