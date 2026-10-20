@@ -6,8 +6,9 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "PresentationOutcome.hpp"
 #include "PresentPacer.hpp"
+#include "PresentationGraphTags.hpp"
+#include "PresentationOutcome.hpp"
 #include <Zahlen/Core/PresentTiming.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
@@ -51,8 +52,10 @@ class SwapchainPresenter {
     Swapchain     swapchain;
     SemaphorePool presentSemaphores;
 
-    RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> depthTarget;
-    RenderTarget<kHeadlessColorFormat>         headlessColorTarget;
+    RenderTarget<Res_Depth> depthTarget;
+    // Res_Swapchain's compile-time B8 format differs from headless R8;
+    // ResourceResolver<Res_Swapchain> supplies the actual backing slice.
+    FormatRenderTarget<kHeadlessColorFormat> headlessColorTarget;
 
     FrameSync<kFramesInFlight>                         sync;
     CommandPools<kFramesInFlight, QueueType::Graphics> pools;
@@ -97,7 +100,7 @@ class SwapchainPresenter {
     [[nodiscard]] auto Extent() const noexcept -> VkExtent2D {
         return swapchain.Valid() ? swapchain.Get().extent : headlessColorTarget.extent;
     }
-    [[nodiscard]] auto DepthTarget() noexcept -> RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>& {
+    [[nodiscard]] auto DepthTarget() noexcept -> RenderTarget<Res_Depth>& {
         return depthTarget;
     }
 

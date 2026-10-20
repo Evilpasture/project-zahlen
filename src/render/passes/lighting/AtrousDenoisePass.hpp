@@ -97,10 +97,8 @@ struct HdrDenoiseGate {
 
 namespace TemplatedDetail {
 
-// Maps a resource tag to the GraphResources member that holds its target. The
-// tags cannot carry the member pointer themselves: they are declared before
-// TargetManager is complete, and GraphResources::ReflectMetadata is typed in
-// them, so the binding has to live on this side of the include order.
+// Local pointer selection for the generic denoiser. Graph binding itself
+// uses the target's tag directly and does not consult this table.
 template <typename Res>
 struct GraphMember;
 

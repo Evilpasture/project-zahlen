@@ -69,13 +69,12 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
 
     if (surface.Get() == VK_NULL_HANDLE) {
         const VkExtent2D render_extent = {.width = width, .height = height};
-        auto             dt_res        = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
-            *_alloc, _ctx->Device(), render_extent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
-        );
+        auto             dt_res =
+            RenderTarget<Res_Depth>::Create(*_alloc, _ctx->Device(), render_extent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled});
         if (!dt_res) {
             return std::unexpected(dt_res.error());
         }
-        auto hct_res = RenderTarget<kHeadlessColorFormat>::Create(
+        auto hct_res = FormatRenderTarget<kHeadlessColorFormat>::Create(
             *_alloc, _ctx->Device(), render_extent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
         );
         if (!hct_res) {
@@ -103,7 +102,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
     presentSemaphores.Rebuild(_ctx->Device(), swapchain.Get().imageCount);
 
     {
-        auto dt_res = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+        auto dt_res = RenderTarget<Res_Depth>::Create(
             *_alloc, _ctx->Device(), swapchain.Get().extent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
         );
         if (!dt_res) {
@@ -204,7 +203,7 @@ auto SwapchainPresenter::Present(
     ExecutableCommands                     cmds,
     uint32_t                               imageIndex,
     std::span<const VkSemaphoreSubmitInfo> extraWaits
-    ) noexcept -> PresentationOutcome<PresentSuboptimal> {
+) noexcept -> PresentationOutcome<PresentSuboptimal> {
     if (!cmds) {
         return std::unexpected(CommandRecordingError::NotExecutable);
     }
@@ -223,14 +222,14 @@ auto SwapchainPresenter::Present(
         waits[wait_count++] = extra;
     }
 
-    const VkSemaphore present_sem = PresentSemaphore(imageIndex);
-    const uint64_t graphicsValue = sync.StepGraphicsTimeline(slot);
+    const VkSemaphore                    present_sem   = PresentSemaphore(imageIndex);
+    const uint64_t                       graphicsValue = sync.StepGraphicsTimeline(slot);
     std::array<VkSemaphoreSubmitInfo, 2> signals {
         Vk::MakeSemaphoreSubmitInfo(sync.GraphicsTimeline(slot), graphicsValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT),
         Vk::MakeSemaphoreSubmitInfo(present_sem, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT)
     };
     const uint32_t signalCount = presents ? 2u : 1u;
-    auto submit_res = Vk::QueueSubmit(
+    auto           submit_res  = Vk::QueueSubmit(
         graphicsQueue, std::move(cmds), std::span<const VkSemaphoreSubmitInfo> {waits.data(), wait_count},
         std::span<const VkSemaphoreSubmitInfo> {signals.data(), signalCount}
     );

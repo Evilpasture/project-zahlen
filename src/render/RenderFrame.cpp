@@ -547,11 +547,11 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 
     std::swap(_impl->graphResources.shadowMap, _impl->targets.ShadowMapPrev());
     _impl->targets.SwapCascadeViews();
-    std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
+    Vk::SwapBacking(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
     if (_impl->ctx.RayTracingSupported()) {
-        std::swap(_impl->graphResources.rtShadowMask, _impl->graphResources.rtShadowHistory);
-        std::swap(_impl->graphResources.rtrHalf, _impl->graphResources.rtrHistory);
-        std::swap(_impl->graphResources.rtgiHalf, _impl->graphResources.rtgiHistory);
+        Vk::SwapBacking(_impl->graphResources.rtShadowMask, _impl->graphResources.rtShadowHistory);
+        Vk::SwapBacking(_impl->graphResources.rtrHalf, _impl->graphResources.rtrHistory);
+        Vk::SwapBacking(_impl->graphResources.rtgiHalf, _impl->graphResources.rtgiHistory);
         _impl->rtHistoryValid = _impl->settings.rayTracing.denoiserPasses > 0;
     }
 

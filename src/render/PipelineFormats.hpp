@@ -3,13 +3,10 @@
 
 #pragma once
 
-#include "Rendering.hpp"
+#include "TargetManager.hpp"
 
 namespace ZHLN {
 
-using ActiveGBuffer = Vk::GBufferLayout<
-    Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>,
-    Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>,
-    Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>>;
+using ActiveGBuffer = Vk::GBufferLayout<Res_SceneColor, Res_Velocity, Res_NormRough>;
 
 }

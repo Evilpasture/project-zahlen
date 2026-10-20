@@ -79,7 +79,9 @@ struct RenderFrameContext {
     GraphResources& graphResources = targets.Graph();
 
     FrameResources                                            frames;
-    PingPong<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumulationHistory;
+    // Both halves share the same physical type; the explicit graph resolvers
+    // identify whichever half is Previous or Current on a given frame.
+    PingPong<Vk::RenderTarget<Res_AccumCurrent>> accumulationHistory;
     Vk::Buffer                                                clusterBoundsBuffer;
     Vk::Buffer                                                morphDeltasBuffer;
 
