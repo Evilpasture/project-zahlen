@@ -6,25 +6,6 @@
 namespace ZHLN::Vk {
 namespace {
 
-[[nodiscard]] auto MakeBlasGeometry(const BlasGeometryDesc& desc) noexcept -> VkAccelerationStructureGeometryKHR {
-    return VkAccelerationStructureGeometryKHR {
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-        .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-        .geometry = VkAccelerationStructureGeometryDataKHR {
-            .triangles = VkAccelerationStructureGeometryTrianglesDataKHR {
-                .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
-                .vertexFormat = desc.vertex_format,
-                .vertexData = {.deviceAddress = desc.vertex_data},
-                .vertexStride = desc.vertex_stride,
-                .maxVertex = desc.max_vertex,
-                .indexType = desc.index_type,
-                .indexData = {.deviceAddress = desc.index_data},
-            },
-        },
-        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR,
-    };
-}
-
 [[nodiscard]] auto MakeTlasGeometry(const VkDeviceAddress instanceData) noexcept -> VkAccelerationStructureGeometryKHR {
     return VkAccelerationStructureGeometryKHR {
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
@@ -87,23 +68,21 @@ void CmdBuild(
     const VkAccelerationStructureGeometryKHR& geometry,
     const VkAccelerationStructureKHR destination,
     const VkDeviceAddress scratch,
-    const uint32_t primitiveCount
+    const VkAccelerationStructureBuildRangeInfoKHR& rangeInfo
 ) noexcept {
     if (vkCmdBuildAccelerationStructuresKHR == nullptr) {
         return;
     }
     const VkAccelerationStructureBuildGeometryInfoKHR buildInfo = MakeBuildInfo(type, geometry, destination, scratch);
-    const VkAccelerationStructureBuildRangeInfoKHR rangeInfo {.primitiveCount = primitiveCount};
     const VkAccelerationStructureBuildRangeInfoKHR* ranges[] = {&rangeInfo};
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, ranges);
 }
 
 } // namespace
 
-auto GetBLASSizes(const VkDevice device, const BlasGeometryDesc& desc, const uint32_t primitiveCount) noexcept
-    -> AccelerationStructureSizes {
-    const VkAccelerationStructureGeometryKHR geometry = MakeBlasGeometry(desc);
-    return QuerySizes(device, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, geometry, primitiveCount);
+auto GetBLASSizes(const VkDevice device, const GeometryView& geometry) noexcept -> AccelerationStructureSizes {
+    const VkAccelerationStructureGeometryKHR asGeometry = geometry.AsGeometryKHR();
+    return QuerySizes(device, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, asGeometry, geometry.PrimitiveCount());
 }
 
 auto GetTLASSizes(const VkDevice device, const uint32_t instanceCount) noexcept -> AccelerationStructureSizes {
@@ -143,14 +122,13 @@ auto GetAccelerationStructureAddress(const VkDevice device, const VkAcceleration
 
 void BuildBLAS(
     const VkCommandBuffer cmd,
-    const BlasGeometryDesc& desc,
+    const GeometryView& geometry,
     const VkAccelerationStructureKHR destination,
-    const BufferSlice scratch,
-    const uint32_t primitiveCount
+    const BufferSlice scratch
 ) noexcept {
-    CmdBuild(
-        cmd, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, MakeBlasGeometry(desc), destination, scratch.Address().Get(), primitiveCount
-    );
+    const VkAccelerationStructureGeometryKHR asGeometry = geometry.AsGeometryKHR();
+    const VkAccelerationStructureBuildRangeInfoKHR range  = geometry.AsRangeInfo();
+    CmdBuild(cmd, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, asGeometry, destination, scratch.Address().Get(), range);
 }
 
 void BuildTLAS(
@@ -160,7 +138,8 @@ void BuildTLAS(
     const BufferSlice scratch,
     const uint32_t instanceCount
 ) noexcept {
-    CmdBuild(cmd, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, MakeTlasGeometry(desc.instance_data), destination, scratch.Address().Get(), instanceCount);
+    const VkAccelerationStructureBuildRangeInfoKHR range {.primitiveCount = instanceCount};
+    CmdBuild(cmd, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, MakeTlasGeometry(desc.instance_data), destination, scratch.Address().Get(), range);
 }
 
 } // namespace ZHLN::Vk

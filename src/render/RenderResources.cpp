@@ -745,18 +745,10 @@ auto RebuildSkinnedBLAS(
         return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
     }
 
-    Vk::BlasGeometryDesc geom = {
-        .vertex_data   = scratchMesh.vboAddress.Get(),
-        .vertex_stride = sizeof(VertexPosition),
-        .max_vertex    = scratchMesh.vertexCount - 1,
-        .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
-        .index_data    = drawCmd.instanceData.iboAddress,
-        .index_type    = (drawCmd.instanceData.iboAddress != 0) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR
-    };
+    const auto geometry = Vk::GeometryView::Triangles<VertexPosition>(scratchMesh.vboAddress, scratchMesh.vertexCount)
+                              .MaybeIndexed(drawCmd.instanceData.iboAddress, drawCmd.instanceData.indexCount);
 
-    const uint32_t primitiveCount = (drawCmd.instanceData.iboAddress != 0) ? drawCmd.instanceData.indexCount / 3 : scratchMesh.vertexCount / 3;
-
-    const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(ctx.Device(), geom, primitiveCount);
+    const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(ctx.Device(), geometry);
 
     const bool creatingBlas = !scratchMesh.blas;
     if (creatingBlas) {
@@ -794,7 +786,7 @@ auto RebuildSkinnedBLAS(
         return std::unexpected(scratchBufOpt.error());
     }
     Vk::Buffer scratchBuf = std::move(*scratchBufOpt);
-    Vk::BuildBLAS(cmd, geom, scratchMesh.blas.Get(), Vk::BufferSlice {scratchBuf, ctx.BufferAddress(scratchBuf.Handle())}, primitiveCount);
+    Vk::BuildBLAS(cmd, geometry, scratchMesh.blas.Get(), Vk::BufferSlice {scratchBuf, ctx.BufferAddress(scratchBuf.Handle())});
     deletionQueue.Enqueue(std::move(scratchBuf));
     return scratchMesh.blasAddress;
 }
@@ -939,16 +931,10 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     }
     auto* indexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
 
-    const Vk::BlasGeometryDesc geom {
-        .vertex_data   = posMesh->vboAddress.Get(),
-        .vertex_stride = sizeof(VertexPosition),
-        .max_vertex    = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
-        .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
-        .index_data    = indexMesh != nullptr ? indexMesh->vboAddress.Get() : 0,
-        .index_type    = indexMesh != nullptr ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR,
-    };
-    const uint32_t                       primitiveCount = indexMesh != nullptr ? mesh.indexCount / 3 : mesh.vertexCount / 3;
-    const Vk::AccelerationStructureSizes sizes          = Vk::GetBLASSizes(impl.ctx.Device(), geom, primitiveCount);
+    const auto geometry = Vk::GeometryView::Triangles<VertexPosition>(posMesh->vboAddress, mesh.vertexCount)
+                              .MaybeIndexed(indexMesh ? indexMesh->vboAddress : nullptr, mesh.indexCount);
+
+    const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(impl.ctx.Device(), geometry);
 
     auto bufferRes = Vk::Buffer::Create(
         impl.allocator, sizes.acceleration_structure_size, Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress,
@@ -986,7 +972,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         cmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,
         Vk::BarrierAccess::AccelerationStructureRead
     );
-    Vk::BuildBLAS(cmd, geom, blas.Get(), Vk::BufferSlice {*scratchRes, impl.ctx.BufferAddress(scratchRes->Handle())}, primitiveCount);
+    Vk::BuildBLAS(cmd, geometry, blas.Get(), Vk::BufferSlice {*scratchRes, impl.ctx.BufferAddress(scratchRes->Handle())});
     auto executable = std::move(*recording).End();
     if (!executable) {
         return std::unexpected(executable.error());
