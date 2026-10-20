@@ -364,6 +364,18 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     // IBL and nothing else.
     gfx.rayTracing.enableReflections = false;
     gfx.rayTracing.enableShadows     = false;
+    // Diffuse GI off as well. ApplyPreset(High) above turned it ON, and
+    // nothing below turns it back off. Left on it breaks this harness's own
+    // contract in two ways at once: the lighting pass swaps the environment
+    // SH for the DDGI probe (lighting.slang: SampleDDGIOrSH, gated on
+    // frame.ddgiParams.w) and the RTGI composite adds screen-space bounce on
+    // top of the deferred lighting. Both make a conformance capture depend on
+    // the engine's live GI instead of on the scenario's environment, which is
+    // exactly what "giMode = 0 ... leaving diffuse SH of the sunless
+    // panorama ... No screen-space bounce light is added" forbids. It also
+    // couples every golden comparison to the DDGI/RTGI shaders, so an
+    // unrelated change to the probe path moves every scenario.
+    gfx.rayTracing.enableDiffuseGI   = false;
 
     // Environment: the baked SH + prefiltered probe are scaled by
     // ambientExposure in the shading; conformance wants 1:1.

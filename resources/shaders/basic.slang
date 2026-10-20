@@ -272,7 +272,7 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
         transmission *= SampleMaterialTexture(tex.w, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerTransmission),
                                               input.samplerCodes, kSamplerTransmission).r;
     }
-    float3 diffuse = albedo * (1.0f - metallic) * scene.frame.ambientExposure * 0.5f;
+    float3 diffuse = albedo * (1.0f - metallic) * EvaluateSH(N, scene.frame.sh) * scene.frame.ambientExposure;
     float3 color = lerp(diffuse, transmitted, transmission);
     color = RgbMix(color, specular, F);
     return float4(min(color, 32768.0f), 1.0f);
@@ -342,18 +342,30 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
 
     float2 screenUV = input.pos.xy / max(scene.frame.screenResolution, float2(1.0f, 1.0f));
     float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
-    float3 V        = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
-    float NdotV     = saturate(dot(N, V));
     // Forward shading uses the interpolated normal; its transmission branch
     // applies a separate derivative-based normal map before reaching here.
     material.geometricNormal = N;
+    // The normal map is a material input, not a deferred-pass extra. The
+    // tangent frame has to reach the material evaluation here exactly as it
+    // does in the G-buffer path (basic.slang PSMain), or the shading normal of
+    // every material the pipeline routes forward stays the geometric one and
+    // the two paths disagree on every normal-mapped surface.
+    material.hasTangent         = any(input.tangent.xyz);
+    material.tangentDirection   = T;
+    material.bitangentDirection = B;
     SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, sampledEmissive);
     float roughness = surface.roughness;
     float metallic  = surface.metallic;
     float4 aniso = SampleMaterialAnisotropy(N, T, B, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerAnisotropy), input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
     float3 anisotropicT = aniso.z > 0.0f ? UnpackAnisotropy(aniso.xy, N) : T;
     float3 anisotropicB = cross(N, anisotropicT);
-    float3 R = AnisotropicReflection(N, V, anisotropicB, roughness, aniso.z);
+    // The shading normal is the normal-mapped one. The deferred path reads it
+    // back from the G-buffer, so the forward path has to use the same normal
+    // or the two paths disagree on every normal-mapped surface.
+    float3 Ns     = surface.normal;
+    float3 Vs     = SafeNormalize(scene.frame.camPos.xyz - worldPos, Ns);
+    float  NdotVs = saturate(dot(Ns, Vs));
+    float3 R      = AnisotropicReflection(Ns, Vs, anisotropicB, roughness, aniso.z);
     // KHR_materials_specular scales the dielectric reflectance and lowers the
     // grazing value; both reach the split-sum LUT's two coefficients.
     InstanceData inst   = scene.g_instances[input.instanceId];
@@ -366,22 +378,29 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     }
     float3 F0      = lerp(baseF0, albedo.rgb, metallic);
     float  f90Sum  = EffectiveF90(f90, metallic);
-    float3 F_rough = SpecularFresnelRoughness(NdotV, F0, f90Sum, roughness);
-    float2 envBRDF = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
+    float3 F_rough = SpecularFresnelRoughness(NdotVs, F0, f90Sum, roughness);
+    float2 envBRDF = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotVs, roughness), 0.0f).rg;
     // The split-sum LUT already integrates Schlick's angle-dependent Fresnel.
     // Its A coefficient multiplies F0 and its B coefficient the grazing value,
     // not a second grazing-angle evaluation. Metals keep that value at 1.
     float3 FssEss   = F0 * envBRDF.x + float3(f90Sum) * envBRDF.y;
     float3 prefiltered = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z);
     float3 specularIBL = prefiltered * scene.frame.ambientExposure * FssEss;
-    float3 diffuseIBL  = albedo.rgb * (1.0f - F_rough) * (1.0f - metallic) * scene.frame.ambientExposure * 0.5f;
+    // The diffuse irradiance is the environment's own SH, evaluated exactly as
+    // the deferred path evaluates it (lighting.slang: EvaluateSH(N, frame.sh) *
+    // frame.ambientExposure). A constant 0.5 is a mid-grey placeholder: it
+    // silently replaced the scenario's environment for every material the
+    // pipeline routes forward, which is why those materials no longer match
+    // the environment the goldens were lit with.
+    float3 irradiance  = EvaluateSH(Ns, scene.frame.sh) * scene.frame.ambientExposure;
+    float3 diffuseIBL  = albedo.rgb * (1.0f - F_rough) * (1.0f - metallic) * irradiance;
     float3 litBase = (diffuseIBL + specularIBL) * surface.occlusion;
     float3 sheenColor = surface.sheen.rgb;
     if (any(sheenColor > 0.0f)) {
-        float attenuation = SheenAlbedoScaling(sheenColor, surface.sheen.a, NdotV, NdotV);
-        float3 sheenEnv = scene.prefilteredMap.SampleLevel(scene.clampSampler, reflect(-V, N), max(surface.sheen.a, 0.2f) * 5.0f).rgb;
+        float attenuation = SheenAlbedoScaling(sheenColor, surface.sheen.a, NdotVs, NdotVs);
+        float3 sheenEnv = scene.prefilteredMap.SampleLevel(scene.clampSampler, reflect(-Vs, Ns), max(surface.sheen.a, 0.2f) * 5.0f).rgb;
         litBase = litBase * attenuation + sheenEnv * scene.frame.ambientExposure *
-                  SheenEnvironmentWeight(sheenColor, NdotV) * surface.occlusion;
+                  SheenEnvironmentWeight(sheenColor, NdotVs) * surface.occlusion;
     }
     return float4(litBase + emissive, albedo.a);
 }
