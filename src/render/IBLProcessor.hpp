@@ -124,11 +124,11 @@ class IBLProcessor {
         if (!stagedInput) {
             return std::unexpected(stagedInput.error());
         }
-        ZHLN::defer cleanupStaging([&] { stagedInput->Destroy(impl.allocator); });
+        defer cleanupStaging([&] { stagedInput->Destroy(impl.allocator); });
 
         // 4. Descriptor Heap Setups
         const auto        toFloat4 = [](std::span<const float, 4> v) { return JPH::Float4 {v[0], v[1], v[2], v[3]}; };
-        const JPH::Vec3  sunDir3 = JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized();
+        const JPH::Vec3   sunDir3  = JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized();
         const JPH::Float4 sunDir4 {sunDir3.GetX(), sunDir3.GetY(), sunDir3.GetZ(), 0.0f};
         const IBLBakePush basePush {
             .outAddr     = hasPreparedSH ? 0 : impl.ctx.BufferAddress(shBuffer.Handle()),
@@ -141,62 +141,68 @@ class IBLProcessor {
         };
 
         impl.heapManager.BeginImmediate();
-        const auto brdfBlock =
-            impl.heapManager.WriteHeapParameters<Shaders::Bake>(impl.bakeHeapBindings, Vk::Slot<"outTexture">(payload.brdfLutImage.View()));
+        const auto brdfBlock = impl.heapManager.WriteHeapParameters<Shaders::Bake>(impl.bakeHeapBindings, Vk::Slot<"outTexture">(payload.brdfLutImage.View()));
 
-        const Vk::ImageView                      radianceView = stagedInput->image.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, stagedInput->mipLevels);
-        std::array<Vk::HeapBlockBase, kMipLevels> specMipBlocks {};
-        for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-            const auto mipView = payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
-            specMipBlocks[mip] = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
-                impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(mipView), Vk::Slot<"radianceMap">(radianceView)
-            );
-        }
+        const Vk::ImageView radianceView  = stagedInput->image.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, stagedInput->mipLevels);
+        const auto          specMipBlocks = [&] {
+            std::array<Vk::HeapBlockBase, kMipLevels> blocks {};
+            for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
+                const auto mipView = payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
+                blocks[mip]        = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
+                    impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(mipView), Vk::Slot<"radianceMap">(radianceView)
+                );
+            }
+            return blocks;
+        }();
 
-        const auto shBlock =
-            !hasPreparedSH ? impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
-                                 impl.iblBakeHeapBindings,
-                                 Vk::Slot<"outTexture">(payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY)),
-                                 Vk::Slot<"radianceMap">(radianceView)
-                             ) :
-                             Vk::HeapBlockBase {};
+        const auto shBlock = !hasPreparedSH ?
+                                 impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
+                                     impl.iblBakeHeapBindings,
+                                     Vk::Slot<"outTexture">(payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY)),
+                                     Vk::Slot<"radianceMap">(radianceView)
+                                 ) :
+                                 Vk::HeapBlockBase {};
 
         // 5. Execute Bake Dispatches
-        if (auto immediate = ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) {
-            impl.heapManager.BindHeaps(cmd);
+        if (auto immediate = ExecuteImmediate(
+                impl.ctx, impl.graphicsCmdRing,
+                [&](VkCommandBuffer cmd) {
+                    impl.heapManager.BindHeaps(cmd);
 
-            stagedInput->RecordUpload(cmd, useVisualSky ? payload.visualSkyImage.Handle() : VK_NULL_HANDLE);
+                    stagedInput->RecordUpload(cmd, useVisualSky ? payload.visualSkyImage.Handle() : VK_NULL_HANDLE);
 
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, payload.brdfLutImage.Handle());
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, payload.prefilteredImage.Handle());
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, payload.brdfLutImage.Handle());
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, payload.prefilteredImage.Handle());
 
-            brdfPass->DispatchHeapIndexedThreads<Shaders::Modules::BrdfLutCS>(
-                cmd, brdfBlock, kLutSize, kLutSize, 1, BRDFLUTPush {.width = kLutSize, .height = kLutSize, .sampleCount = 128}
-            );
+                    brdfPass->DispatchHeapIndexedThreads<Shaders::Modules::BrdfLutCS>(
+                        cmd, brdfBlock, kLutSize, kLutSize, 1, BRDFLUTPush {.width = kLutSize, .height = kLutSize, .sampleCount = 128}
+                    );
 
-            if (!hasPreparedSH) {
-                shPass->DispatchHeapIndexedThreads<Shaders::Modules::IblShCS>(cmd, shBlock, 64, 1, 1, basePush);
-            }
+                    if (!hasPreparedSH) {
+                        shPass->DispatchHeapIndexedThreads<Shaders::Modules::IblShCS>(cmd, shBlock, 64, 1, 1, basePush);
+                    }
 
-            for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-                const uint32_t mipSize     = kBaseSize >> mip;
-                const uint32_t sampleCount = (mip == 0) ? 1u : (hasRadiance ? (mip >= 3 ? 1024u : 512u) : 32u);
+                    for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
+                        const uint32_t mipSize     = kBaseSize >> mip;
+                        const uint32_t sampleCount = (mip == 0) ? 1u : (hasRadiance ? (mip >= 3 ? 1024u : 512u) : 32u);
 
-                IBLBakePush push = basePush;
-                push.width       = mipSize;
-                push.height      = mipSize;
-                push.roughness   = static_cast<float>(mip) / static_cast<float>(kMipLevels - 1);
-                push.sampleCount = sampleCount;
+                        IBLBakePush push = basePush;
+                        push.width       = mipSize;
+                        push.height      = mipSize;
+                        push.roughness   = static_cast<float>(mip) / static_cast<float>(kMipLevels - 1);
+                        push.sampleCount = sampleCount;
 
-                for (uint32_t face = 0; face < 6; ++face) {
-                    push.face = face;
-                    specPass->DispatchHeapIndexedThreads<Shaders::Modules::IblSpecularCS>(cmd, specMipBlocks[mip], mipSize, mipSize, 1, push);
+                        for (uint32_t face = 0; face < 6; ++face) {
+                            push.face = face;
+                            specPass->DispatchHeapIndexedThreads<Shaders::Modules::IblSpecularCS>(cmd, specMipBlocks[mip], mipSize, mipSize, 1, push);
+                        }
+                    }
+
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.brdfLutImage.Handle());
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.prefilteredImage.Handle());
                 }
-            }
-
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.brdfLutImage.Handle());
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.prefilteredImage.Handle());
-        }); !immediate) [[unlikely]] {
+            );
+            !immediate) [[unlikely]] {
             return std::unexpected(immediate.error());
         }
 
@@ -439,10 +445,10 @@ class IBLProcessor {
         }
     }
 
-using BRDFLUTPush = Slang::BRDFLUTPush;
+    using BRDFLUTPush = Slang::BRDFLUTPush;
     static_assert(GpuAbi::ScenePassPayload<BRDFLUTPush>);
 
-using IBLBakePush = Slang::IBLBakePush;
+    using IBLBakePush = Slang::IBLBakePush;
     static_assert(GpuAbi::ScenePassPayload<IBLBakePush>);
 };
 

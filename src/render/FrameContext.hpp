@@ -30,12 +30,12 @@ namespace ZHLN {
 
 struct IBLPayload {
     Vk::Image     brdfLutImage;
-    Vk::ImageView brdfLutView {};
+    Vk::ImageView brdfLutView;
     Vk::Image     prefilteredImage;
-    Vk::ImageView prefilteredView {};
+    Vk::ImageView prefilteredView;
 
     Vk::Image                visualSkyImage;
-    Vk::ImageView            visualSkyView {};
+    Vk::ImageView            visualSkyView;
     std::array<JPH::Vec4, 9> shCoeffs {};
     VkFormat                 prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
     uint64_t                 contentHash       = 0;
