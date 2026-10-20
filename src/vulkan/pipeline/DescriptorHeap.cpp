@@ -251,11 +251,16 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
 
 struct ResourceWriteBatch::Impl {
     struct ImagePayload {
-        VkImageViewCreateInfo    viewInfo {};
+        ImageView                view {};
+        // The heap extension consumes the create info through a pointer at flush time, so the
+        // synthesized struct has to outlive the batch. Everything else stays an ImageView.
+        VkImageViewCreateInfo    info {};
         VkImageDescriptorInfoEXT descriptor {};
 
-        ImagePayload(const VkImageViewCreateInfo& info, VkImageLayout layout) noexcept:
-            viewInfo(info), descriptor {.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .pView = &viewInfo, .layout = layout} {
+        ImagePayload(const ImageView& imageView, VkImageLayout layout) noexcept:
+            view(imageView),
+            info(imageView.AsCreateInfo()),
+            descriptor {.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .pView = &info, .layout = layout} {
         }
         ImagePayload(const ImagePayload&)                    = delete;
         auto operator=(const ImagePayload&) -> ImagePayload& = delete;
@@ -272,9 +277,9 @@ struct ResourceWriteBatch::Impl {
     std::pmr::monotonic_buffer_resource arena {storage.data(), storage.size()};
     std::vector<Write>                  writes;
 
-    void AddImage(uint32_t slot, VkDescriptorType type, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) {
+    void AddImage(uint32_t slot, VkDescriptorType type, const ImageView& view, VkImageLayout layout) {
         std::pmr::polymorphic_allocator<ImagePayload> alloc {&arena};
-        auto*                                         image = alloc.new_object<ImagePayload>(viewInfo, layout);
+        auto*                                         image = alloc.new_object<ImagePayload>(view, layout);
 
         VkResourceDescriptorInfoEXT descriptor {.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .type = type, .data = {}};
         descriptor.data.pImage = &image->descriptor;
@@ -319,15 +324,15 @@ auto ResourceWriteBatch::SlotBounds() const noexcept -> std::pair<uint32_t, uint
     return {minSlot, maxSlot};
 }
 
-void ResourceWriteBatch::AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    if (handle.Valid() && viewInfo.image != VK_NULL_HANDLE) {
-        _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, viewInfo, layout);
+void ResourceWriteBatch::AddImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+    if (handle.Valid() && view.Handle() != VK_NULL_HANDLE) {
+        _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, view, layout);
     }
 }
 
-void ResourceWriteBatch::AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    if (handle.Valid() && viewInfo.image != VK_NULL_HANDLE) {
-        _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, viewInfo, layout);
+void ResourceWriteBatch::AddStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+    if (handle.Valid() && view.Handle() != VK_NULL_HANDLE) {
+        _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, view, layout);
     }
 }
 
@@ -548,21 +553,21 @@ auto HeapManager::ReserveOffsetAddressedSamplerRegion(uint32_t count) noexcept -
     return base;
 }
 
-void HeapManager::WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    if (!handle.Valid() || viewInfo.image == VK_NULL_HANDLE) {
+void HeapManager::WriteImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+    if (!handle.Valid() || view.Handle() == VK_NULL_HANDLE) {
         return;
     }
     ResourceWriteBatch batch;
-    batch.AddImage(handle, viewInfo, layout);
+    batch.AddImage(handle, view, layout);
     FlushResourceBatch(batch);
 }
 
-void HeapManager::WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    if (!handle.Valid() || viewInfo.image == VK_NULL_HANDLE) {
+void HeapManager::WriteStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+    if (!handle.Valid() || view.Handle() == VK_NULL_HANDLE) {
         return;
     }
     ResourceWriteBatch batch;
-    batch.AddStorageImage(handle, viewInfo, layout);
+    batch.AddStorageImage(handle, view, layout);
     FlushResourceBatch(batch);
 }
 

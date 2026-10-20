@@ -110,15 +110,15 @@ class TextureUploader {
             }
         }
 
-        const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, mips);
+        const ImageView view = imgRes->View(VK_IMAGE_ASPECT_COLOR_BIT, 0, mips);
 
         if (!desc.debugName.empty()) {
             Debug::SetImageName(_ctx, imgRes->Handle(), desc.debugName);
         }
 
         return TextureResource {
-            .image     = std::move(*imgRes),
-            .viewInfo = viewInfo,
+            .image  = std::move(*imgRes),
+            .view   = view,
             .extent = {desc.width, desc.height, 1}
         };
     }
@@ -159,15 +159,15 @@ class TextureUploader {
             return std::unexpected(uploaded.error());
         }
 
-        const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo();
+        const ImageView view = imgRes->View();
 
         if (!desc.debugName.empty()) {
             Debug::SetImageName(_ctx, imgRes->Handle(), desc.debugName);
         }
 
         return TextureResource {
-            .image     = std::move(*imgRes),
-            .viewInfo = viewInfo,
+            .image  = std::move(*imgRes),
+            .view   = view,
             .extent = {desc.width, desc.height, desc.depth}
         };
     }
@@ -201,15 +201,15 @@ class TextureUploader {
             return std::unexpected(uploaded.error());
         }
 
-        const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo();
+        const ImageView view = imgRes->View();
 
         if (!desc.debugName.empty()) {
             Debug::SetImageName(_ctx, imgRes->Handle(), desc.debugName);
         }
 
         return TextureResource {
-            .image     = std::move(*imgRes),
-            .viewInfo = viewInfo,
+            .image  = std::move(*imgRes),
+            .view   = view,
             .extent = {desc.size, desc.size, 1}
         };
     }

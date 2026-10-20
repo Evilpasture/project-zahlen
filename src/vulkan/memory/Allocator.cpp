@@ -481,16 +481,23 @@ auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept 
     return result;
 }
 
-auto AttachmentView::Create(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<AttachmentView, ErrorCode> {
+auto AttachmentView::Create(VkDevice device, const ImageView& view) -> std::expected<AttachmentView, ErrorCode> {
     using enum AttachmentViewCreationError;
-    if (device == VK_NULL_HANDLE || info.sType != VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO || info.image == VK_NULL_HANDLE ||
-        info.format == VK_FORMAT_UNDEFINED || info.subresourceRange.aspectMask == VK_IMAGE_ASPECT_NONE || info.subresourceRange.levelCount == 0 ||
-        info.subresourceRange.layerCount == 0) {
+    if (device == VK_NULL_HANDLE || !view.Valid() || view.Aspect() == VK_IMAGE_ASPECT_NONE) {
         return std::unexpected(InvalidConfiguration);
     }
 
-    VkImageView    view   = VK_NULL_HANDLE;
-    const VkResult result = vkCreateImageView(device, &info, nullptr, &view);
+    // The one place an attachment view needs the raw struct: vkCreateImageView.
+    VkImageViewCreateInfo info = view.AsCreateInfo();
+    // AsCreateInfo() narrows combined depth/stencil to DEPTH for descriptors; an attachment
+    // view keeps the exact aspect it was asked for (the Image::CreateAttachmentView contract).
+    info.subresourceRange.aspectMask = view.Aspect();
+    if (info.subresourceRange.levelCount == 0 || info.subresourceRange.layerCount == 0) {
+        return std::unexpected(InvalidConfiguration);
+    }
+
+    VkImageView    handle = VK_NULL_HANDLE;
+    const VkResult result = vkCreateImageView(device, &info, nullptr, &handle);
     if (result != VK_SUCCESS) {
         switch (result) {
             case VK_ERROR_OUT_OF_HOST_MEMORY:
@@ -501,7 +508,7 @@ auto AttachmentView::Create(VkDevice device, const VkImageViewCreateInfo& info) 
                 return std::unexpected(CreationFailed);
         }
     }
-    return AttachmentView {device, view, info};
+    return AttachmentView {device, handle, view};
 }
 
 auto Image::CreateAttachmentView(
@@ -534,9 +541,7 @@ auto Image::CreateAttachmentView(
         return std::unexpected(InvalidConfiguration);
     }
 
-    VkImageViewCreateInfo info       = ViewInfo(aspect, baseMip, mipCount, baseLayer, layerCount, viewType);
-    info.subresourceRange.aspectMask = effectiveAspect;
-    return AttachmentView::Create(device, info);
+    return AttachmentView::Create(device, View(effectiveAspect, baseMip, mipCount, baseLayer, layerCount, viewType));
 }
 
 StagingRingBuffer::StagingRingBuffer(StagingRingBuffer&& other) noexcept:

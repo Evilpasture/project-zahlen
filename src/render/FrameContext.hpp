@@ -29,22 +29,22 @@
 namespace ZHLN {
 
 struct IBLPayload {
-    Vk::Image             brdfLutImage;
-    VkImageViewCreateInfo brdfLutInfo {};
-    Vk::Image             prefilteredImage;
-    VkImageViewCreateInfo prefilteredInfo {};
+    Vk::Image     brdfLutImage;
+    Vk::ImageView brdfLutView {};
+    Vk::Image     prefilteredImage;
+    Vk::ImageView prefilteredView {};
 
     Vk::Image                visualSkyImage;
-    VkImageViewCreateInfo    visualSkyInfo {};
+    Vk::ImageView            visualSkyView {};
     std::array<JPH::Vec4, 9> shCoeffs {};
     VkFormat                 prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
     uint64_t                 contentHash       = 0;
     int                      environmentMode   = 0;
 
     void Destroy(Vk::Allocator& allocator) noexcept {
-        brdfLutInfo     = {};
-        prefilteredInfo = {};
-        visualSkyInfo   = {};
+        brdfLutView     = {};
+        prefilteredView = {};
+        visualSkyView   = {};
         allocator.DestroyImage(brdfLutImage);
         allocator.DestroyImage(prefilteredImage);
         allocator.DestroyImage(visualSkyImage);

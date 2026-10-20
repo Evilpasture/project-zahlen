@@ -142,12 +142,12 @@ class IBLProcessor {
 
         impl.heapManager.BeginImmediate();
         const auto brdfBlock =
-            impl.heapManager.WriteHeapParameters<Shaders::Bake>(impl.bakeHeapBindings, Vk::Slot<"outTexture">(payload.brdfLutImage.ViewInfo()));
+            impl.heapManager.WriteHeapParameters<Shaders::Bake>(impl.bakeHeapBindings, Vk::Slot<"outTexture">(payload.brdfLutImage.View()));
 
-        const auto                                radianceView = stagedInput->image.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, stagedInput->mipLevels);
+        const Vk::ImageView                      radianceView = stagedInput->image.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, stagedInput->mipLevels);
         std::array<Vk::HeapBlockBase, kMipLevels> specMipBlocks {};
         for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-            const auto mipView = payload.prefilteredImage.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
+            const auto mipView = payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
             specMipBlocks[mip] = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
                 impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(mipView), Vk::Slot<"radianceMap">(radianceView)
             );
@@ -156,7 +156,7 @@ class IBLProcessor {
         const auto shBlock =
             !hasPreparedSH ? impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
                                  impl.iblBakeHeapBindings,
-                                 Vk::Slot<"outTexture">(payload.prefilteredImage.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY)),
+                                 Vk::Slot<"outTexture">(payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY)),
                                  Vk::Slot<"radianceMap">(radianceView)
                              ) :
                              Vk::HeapBlockBase {};
@@ -214,10 +214,10 @@ class IBLProcessor {
             }
         }
 
-        payload.brdfLutInfo     = payload.brdfLutImage.ViewInfo();
-        payload.prefilteredInfo = payload.prefilteredImage.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, kMipLevels);
+        payload.brdfLutView     = payload.brdfLutImage.View();
+        payload.prefilteredView = payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, kMipLevels);
         if (useVisualSky) {
-            payload.visualSkyInfo = payload.visualSkyImage.ViewInfo();
+            payload.visualSkyView = payload.visualSkyImage.View();
         }
 
         rollback.Dismiss();

@@ -265,33 +265,12 @@ auto Swapchain::Rebuild(
     next.imageCount = static_cast<uint32_t>(next.images.size());
     next.views.resize(next.images.size(), VK_NULL_HANDLE);
 
-    const VkImageViewCreateInfo view_info_template {
-        .sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .pNext    = nullptr,
-        .flags    = 0,
-        .image    = VK_NULL_HANDLE,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format   = format.format,
-        .components =
-            {
-                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-            },
-        .subresourceRange = {
-            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel   = 0,
-            .levelCount     = 1,
-            .baseArrayLayer = 0,
-            .layerCount     = 1,
-        },
-    };
-
     for (size_t i = 0; i < next.images.size(); ++i) {
-        VkImageViewCreateInfo view_info = view_info_template;
-        view_info.image                 = next.images[i];
-        const VkResult view_created     = vkCreateImageView(device, &view_info, nullptr, &next.views[i]);
+        const ImageView swapView {next.images[i], format.format, VK_IMAGE_ASPECT_COLOR_BIT};
+        // The create info exists only across the vkCreateImageView call.
+        const VkImageViewCreateInfo view_info = swapView.AsCreateInfo();
+
+        const VkResult view_created = vkCreateImageView(device, &view_info, nullptr, &next.views[i]);
         if (view_created != VK_SUCCESS) {
             for (VkImageView view: next.views) {
                 if (view != VK_NULL_HANDLE) {

@@ -205,11 +205,11 @@ void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
 }
 
 void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
-    if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredInfo.image != VK_NULL_HANDLE) {
-        heapManager.WriteImage(iblPrefilteredSlot, iblPayload.prefilteredInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredView.Handle() != VK_NULL_HANDLE) {
+        heapManager.WriteImage(iblPrefilteredSlot, iblPayload.prefilteredView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
-    if (bindlessLayout.HasBinding(0, 8) && iblPayload.brdfLutInfo.image != VK_NULL_HANDLE) {
-        heapManager.WriteImage(iblBrdfLutSlot, iblPayload.brdfLutInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (bindlessLayout.HasBinding(0, 8) && iblPayload.brdfLutView.Handle() != VK_NULL_HANDLE) {
+        heapManager.WriteImage(iblBrdfLutSlot, iblPayload.brdfLutView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 }
 
@@ -222,7 +222,7 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
         return;
     }
 
-    heapManager.WriteImage(transLightingSlot, graphResources.transLightingTarget.image.ViewInfo(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    heapManager.WriteImage(transLightingSlot, graphResources.transLightingTarget.image.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
@@ -361,13 +361,13 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     submittedStaging = std::make_unique<Vk::SubmittedStagingWork>(std::move(*work));
     submitted        = true;
 
-    const VkImageViewCreateInfo matInfo = matImg->ViewInfo();
-    const VkImageViewCreateInfo ampInfo = ampImg->ViewInfo();
+    const Vk::ImageView matView = matImg->View();
+    const Vk::ImageView ampView = ampImg->View();
 
     ltcMatImage = std::move(*matImg);
     ltcAmpImage = std::move(*ampImg);
-    post.ltcMat = matInfo;
-    post.ltcAmp = ampInfo;
+    post.ltcMat = matView;
+    post.ltcAmp = ampView;
     ApplyImageDebugNames(*this);
     return {};
 }
@@ -416,7 +416,7 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
 
     const uint64_t hash = hasPixels ? desc.contentHash != 0 ? desc.contentHash : HashEnvironmentPixels(desc) : 0;
     const int      mode = hasPixels ? !desc.renderSkybox ? 2 : (desc.lightingRgba.empty() ? 1 : 3) : 0;
-    if (impl->iblPayload.contentHash == hash && (mode != 3 || impl->iblPayload.visualSkyInfo.image != VK_NULL_HANDLE)) {
+    if (impl->iblPayload.contentHash == hash && (mode != 3 || impl->iblPayload.visualSkyView.Handle() != VK_NULL_HANDLE)) {
         impl->iblPayload.environmentMode = mode;
         return {};
     }

@@ -166,8 +166,8 @@ class ResourceWriteBatch {
     ResourceWriteBatch(ResourceWriteBatch&& other) noexcept;
     auto operator=(ResourceWriteBatch&& other) noexcept -> ResourceWriteBatch&;
 
-    void AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
-    void AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void AddImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
+    void AddStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
     void AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
     void AddBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
     void AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
@@ -284,8 +284,8 @@ class HeapManager {
         FreeStaticSamplerSlot(handle.index);
     }
 
-    void WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
-    void WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void WriteImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
+    void WriteStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
     void WriteBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
     void WriteBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
     void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;

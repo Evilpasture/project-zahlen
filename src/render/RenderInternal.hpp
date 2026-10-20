@@ -452,10 +452,10 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
     const auto imageConfig = Vk::ImageConfig::Texture2D({width, height}, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled);
     return Vk::Image::Create(allocator, imageConfig).and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
-        defer                       _([&] { allocator.DestroyImage(image); });
-        const VkImageViewCreateInfo viewInfo = image.ViewInfo();
+        defer                   _([&] { allocator.DestroyImage(image); });
+        const Vk::ImageView     view = image.View();
         heapManager.BeginImmediate();
-        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(bakeHeapBindings, Vk::Slot<"outTexture">(viewInfo));
+        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(bakeHeapBindings, Vk::Slot<"outTexture">(view));
 
         if (auto immediate = Vk::ExecuteImmediate(
                 ctx, graphicsCmdRing,
@@ -469,7 +469,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             !immediate) [[unlikely]] {
             return std::unexpected(immediate.error());
         }
-        return textureManager.Adopt(std::move(image), viewInfo);
+        return textureManager.Adopt(std::move(image), view);
     });
 }
 

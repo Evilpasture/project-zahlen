@@ -56,10 +56,10 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
     )
         .and_then([&, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<TextureHandle, ErrorCode> {
             defer                       _([&] { allocator.DestroyImage(gpuImage); });
-            const VkImageViewCreateInfo writeInfo = gpuImage.ViewInfo();
+            const Vk::ImageView writeView = gpuImage.View();
 
             heapManager.BeginImmediate();
-            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(bakeHeapBindings, Vk::Slot<"outTexture">(writeInfo));
+            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(bakeHeapBindings, Vk::Slot<"outTexture">(writeView));
 
             if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
@@ -78,7 +78,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                 return std::unexpected(immediate.error());
             }
 
-            return textureManager.AdoptTexture(std::forward<decltype(gpuImage)>(gpuImage), writeInfo, width, height);
+            return textureManager.AdoptTexture(std::forward<decltype(gpuImage)>(gpuImage), writeView, width, height);
         });
 }
 

@@ -273,19 +273,19 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] auto ViewInfoOf(const T& resource) noexcept -> VkImageViewCreateInfo {
+[[nodiscard]] auto ViewOf(const T& resource) noexcept -> ImageView {
     if constexpr (std::is_same_v<T, ImageWrite>) {
-        return resource.viewInfo;
+        return resource.view;
     } else if constexpr (IsTypedImage<T>::value) {
-        return resource.Raw().ViewInfo();
-    } else if constexpr (requires { resource.ViewInfo(); }) {
-        return resource.ViewInfo();
-    } else if constexpr (requires { resource.image.ViewInfo(); }) {
-        return resource.image.ViewInfo();
-    } else if constexpr (std::is_same_v<T, VkImageViewCreateInfo>) {
+        return resource.Raw().View();
+    } else if constexpr (requires { resource.View(); }) {
+        return resource.View();
+    } else if constexpr (requires { resource.image.View(); }) {
+        return resource.image.View();
+    } else if constexpr (std::is_same_v<T, ImageView>) {
         return resource;
     } else {
-        return VkImageViewCreateInfo {};
+        return ImageView {};
     }
 }
 
@@ -294,8 +294,8 @@ enum class WriteSource : uint8_t { Image, Buffer, AccelerationStructure, Unknown
 template <typename T>
 [[nodiscard]] constexpr auto WriteSourceOf() noexcept -> WriteSource {
     if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice> || std::is_same_v<T, ImageWrite> ||
-                  std::is_same_v<T, VkImageViewCreateInfo> || requires { std::declval<const T&>().ViewInfo(); } ||
-                  requires { std::declval<const T&>().image.ViewInfo(); }) {
+                  std::is_same_v<T, ImageView> || requires { std::declval<const T&>().View(); } ||
+                  requires { std::declval<const T&>().image.View(); }) {
         return WriteSource::Image;
     } else if constexpr (std::is_same_v<T, AsAddressWrite>) {
         return WriteSource::AccelerationStructure;
@@ -349,15 +349,15 @@ template <typename Arg>
         if constexpr (source != WriteSource::Image) {
             return false;
         } else {
-            const VkImageViewCreateInfo viewInfo = ViewInfoOf(arg);
-            if (viewInfo.image == VK_NULL_HANDLE) {
+            const ImageView view = ViewOf(arg);
+            if (view.Handle() == VK_NULL_HANDLE) {
                 if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
                     return BorrowedSliceOf(arg).image == VK_NULL_HANDLE;
                 }
                 return true;
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                heap.WriteStorageImage(StorageImageHandle {slot}, viewInfo, VK_IMAGE_LAYOUT_GENERAL);
+                heap.WriteStorageImage(StorageImageHandle {slot}, view, VK_IMAGE_LAYOUT_GENERAL);
             } else {
                 VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                 if constexpr (IsTypedImage<T>::value) {
@@ -367,7 +367,7 @@ template <typename Arg>
                 } else if constexpr (std::is_same_v<T, ImageWrite>) {
                     layout = arg.layout;
                 }
-                heap.WriteImage(TextureHandle {slot}, viewInfo, layout);
+                heap.WriteImage(TextureHandle {slot}, view, layout);
             }
             return true;
         }

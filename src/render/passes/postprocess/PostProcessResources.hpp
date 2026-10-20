@@ -15,8 +15,8 @@ struct PostProcessResources {
     Vk::FullscreenPass<LightingLayout> lighting;
     Vk::FullscreenPass<BlitLayout>     blit;
 
-    VkImageViewCreateInfo ltcMat {};
-    VkImageViewCreateInfo ltcAmp {};
+    Vk::ImageView ltcMat {};
+    Vk::ImageView ltcAmp {};
 };
 
 } // namespace ZHLN

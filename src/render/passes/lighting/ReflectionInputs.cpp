@@ -7,14 +7,14 @@ namespace ZHLN::Passes {
 
 auto GatherReflectionInputs(RenderFrameContext& frame) noexcept -> ReflectionInputs {
     return ReflectionInputs {
-        .prefiltered = Vk::ImageWrite {frame.iblPayload.prefilteredInfo},
+        .prefiltered = Vk::ImageWrite {frame.iblPayload.prefilteredView},
         .visualSky =
             Vk::ImageWrite {
-                frame.iblPayload.visualSkyInfo.image != VK_NULL_HANDLE ? frame.iblPayload.visualSkyInfo :
-                                                                         frame.textureManager.ViewInfo(kFallbackBlackTextureIndex)
+                frame.iblPayload.visualSkyView.Handle() != VK_NULL_HANDLE ? frame.iblPayload.visualSkyView :
+                                                                             frame.textureManager.View(kFallbackBlackTextureIndex)
             },
-        .brdfLut   = Vk::ImageWrite {frame.iblPayload.brdfLutInfo},
-        .blueNoise = Vk::ImageWrite {frame.textureManager.ViewInfo(frame.blueNoiseTexIdx)},
+        .brdfLut   = Vk::ImageWrite {frame.iblPayload.brdfLutView},
+        .blueNoise = Vk::ImageWrite {frame.textureManager.View(frame.blueNoiseTexIdx)},
         .tlas      = Vk::AsAddressWrite {
                  .address = (frame.ctx.RayTracingSupported() && frame.frames.tlasAddresses[frame.presenter.frameIndex] != nullptr) ?
                                 frame.frames.tlasAddresses[frame.presenter.frameIndex].Get() :

@@ -67,7 +67,7 @@ class TextureManager {
     [[nodiscard]] auto UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true)
         -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto AdoptTexture(Vk::Image image, VkImageViewCreateInfo viewInfo, uint32_t width, uint32_t height)
+    [[nodiscard]] auto AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height)
         -> std::expected<TextureHandle, ErrorCode>;
 
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
@@ -78,16 +78,16 @@ class TextureManager {
     void Reset();
 
     [[nodiscard]] auto Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true) -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto Adopt(Vk::Image image, VkImageViewCreateInfo viewInfo) -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto Adopt(Vk::Image image, Vk::ImageView view) -> std::expected<uint32_t, ErrorCode>;
     void BeginFrame(uint32_t frameIndex) noexcept;
     void ReleaseSlot(uint32_t bindlessIndex) noexcept;
 
-    [[nodiscard]] auto                 SlotCount() const noexcept -> size_t { return _slotImages.size(); }
-    [[nodiscard]] const Vk::Image&             Image(uint32_t slot) const noexcept { return _slotImages[slot]; }
-    [[nodiscard]] const VkImageViewCreateInfo& ViewInfo(uint32_t slot) const noexcept { return _slotInfos[slot]; }
+    [[nodiscard]] auto             SlotCount() const noexcept -> size_t { return _slotImages.size(); }
+    [[nodiscard]] const Vk::Image& Image(uint32_t slot) const noexcept { return _slotImages[slot]; }
+    [[nodiscard]] const Vk::ImageView& View(uint32_t slot) const noexcept { return _slotViews[slot]; }
 
     [[nodiscard]] auto Slice(uint32_t slot, VkExtent2D extent) const noexcept -> Vk::ImageSlice {
-        return Vk::ImageSlice {_slotInfos[slot], {extent.width, extent.height, 1}};
+        return Vk::ImageSlice {_slotViews[slot], {extent.width, extent.height, 1}};
     }
     void NameSlots() noexcept;
 
@@ -104,13 +104,13 @@ class TextureManager {
     };
 
     struct ReleasedSlot {
-        uint32_t              index = 0;
-        Vk::Image             image;
-        VkImageViewCreateInfo viewInfo {};
+        uint32_t      index = 0;
+        Vk::Image     image;
+        Vk::ImageView view {};
     };
 
     [[nodiscard]] TextureHandle RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, uint32_t width, uint32_t height);
-    void WriteSlotToHeap(uint32_t bindlessIndex, const VkImageViewCreateInfo& viewInfo) noexcept;
+    void WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept;
     void RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept;
     void DestroyAllSlots() noexcept;
 
@@ -125,7 +125,7 @@ class TextureManager {
 
     ZHLN::Array<Vk::Image> _slotImages;
 
-    std::deque<VkImageViewCreateInfo> _slotInfos;
+    std::deque<Vk::ImageView> _slotViews;
     uint32_t _nextSlotIndex = 0;
     ZHLN::Array<uint32_t> _freeSlots;
     std::array<ZHLN::Array<ReleasedSlot>, Vk::kFramesInFlight> _pendingFrees;

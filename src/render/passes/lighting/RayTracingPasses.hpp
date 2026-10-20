@@ -103,7 +103,7 @@ struct RtShadowDesc {
             ),
             Vk::Slot<"outShadow">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rtShadowMask)),
             Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"tlas">(tlas),
-            Vk::Slot<"blueNoiseTex">(frame.textureManager.ViewInfo(frame.blueNoiseTexIdx))
+            Vk::Slot<"blueNoiseTex">(frame.textureManager.View(frame.blueNoiseTexIdx))
         );
     }
 };
@@ -147,7 +147,7 @@ struct RtrHalfTraceDesc {
             Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
             Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(frame.graphResources.lightingTarget)),
             Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
-            Vk::Slot<"blueNoiseTex">(frame.textureManager.ViewInfo(frame.blueNoiseTexIdx)),
+            Vk::Slot<"blueNoiseTex">(frame.textureManager.View(frame.blueNoiseTexIdx)),
             Vk::Slot<"outImage">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rtrHalf)), Vk::Slot<"tlas">(tlas),
             Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(frame.graphResources.ddgiIrradiance)),
             Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ComputeRead<Res_DdgiDistance>>(frame.graphResources.ddgiDistance))
@@ -195,7 +195,7 @@ struct RtgiHalfTraceDesc {
             Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.presenter.depthTarget)),
             Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
             Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
-            Vk::Slot<"blueNoiseTex">(frame.textureManager.ViewInfo(frame.blueNoiseTexIdx)),
+            Vk::Slot<"blueNoiseTex">(frame.textureManager.View(frame.blueNoiseTexIdx)),
             Vk::Slot<"outImage">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rtgiHalf)), Vk::Slot<"tlas">(tlas),
             Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(frame.graphResources.ddgiIrradiance)),
             Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ComputeRead<Res_DdgiDistance>>(frame.graphResources.ddgiDistance))

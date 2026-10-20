@@ -33,13 +33,13 @@ void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
 
 void SmaaWeightPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     FullscreenPassRecorder<Shaders::SmaaWeight, Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>::Record(frame, ctx, aa.smaaWeight, [&]() {
-        const auto& areaInfo   = frame.textureManager.ViewInfo(frame.postProcess.SmaaAreaTexture());
-        const auto& searchInfo = frame.textureManager.ViewInfo(frame.postProcess.SmaaSearchTexture());
+        const auto& areaView   = frame.textureManager.View(frame.postProcess.SmaaAreaTexture());
+        const auto& searchView = frame.textureManager.View(frame.postProcess.SmaaSearchTexture());
 
         return MakeFullscreenPassArgs(
             MetricsOf(frame.graphResources.smaaWeightTarget.extent),
-            Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(frame.graphResources.smaaEdgeTarget)), Vk::Slot<"areaTex">(areaInfo),
-            Vk::Slot<"searchTex">(searchInfo)
+            Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(frame.graphResources.smaaEdgeTarget)), Vk::Slot<"areaTex">(areaView),
+            Vk::Slot<"searchTex">(searchView)
         );
     });
 }

@@ -50,8 +50,8 @@ class VolumetricFogSystem {
     Vk::FixedDoubleBufferedComputePass<VolumetricIntegrationLayout> _integrate;
     Vk::FixedDoubleBufferedComputePass<VolumetricTemporalLayout>    _temporal;
 
-    Vk::Image              _noiseImage;
-    VkImageViewCreateInfo _noiseInfo {};
+    Vk::Image     _noiseImage;
+    Vk::ImageView _noiseView {};
 };
 
 }

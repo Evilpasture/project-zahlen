@@ -22,7 +22,7 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
         Vk::Slot<"shadowMap">(Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(frame.graphResources.shadowMap)), Vk::Slot<"ltc_mat">(post.ltcMat),
         Vk::Slot<"ltc_amp">(post.ltcAmp), Vk::Slot<"clusterGrid">(frame.frames.clusterGridBuffers[fIdx]),
         Vk::Slot<"clusterIndexList">(frame.frames.lightIndexListBuffers[fIdx]),
-        Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.ViewInfo(VK_IMAGE_ASPECT_DEPTH_BIT)),
+        Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.View(VK_IMAGE_ASPECT_DEPTH_BIT)),
         Vk::Slot<"shadowTiles">(frame.frames.shadowTileBuffers[fIdx]), Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(frame.graphResources.ao)),
         Vk::Slot<"texRtShadowMask">(Vk::Assume<Vk::ShaderRead<Res_RtShadowMask>>(frame.graphResources.rtShadowMask)),
         Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::FragmentAndComputeRead<Res_DdgiIrradiance>>(frame.graphResources.ddgiIrradiance)),
