@@ -293,7 +293,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
         float3 FssEss = F0 * envBRDF.x + float3(EffectiveF90(1.0f, metallic)) * envBRDF.y;
 
-        float3 R_corr = R;
+        // A rough GGX lobe gathers light around the surface normal rather than
+        // the perfect-mirror ray. Keep R for SSR/RTR; bend only the IBL lookup.
+        float3 R_ibl  = SafeNormalize(lerp(R, N, roughness * roughness), N);
+        float3 R_corr = R_ibl;
         float boxFade = 0.0f;
         if (frame.probeMin.w > 0.0f) {
             float3 boxCenter      = (frame.probeMax.xyz + frame.probeMin.xyz) * 0.5f;
@@ -305,14 +308,24 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         }
 
         if (boxFade > 0.0f) {
-            float3 boxR = BoxParallaxCorrection(worldPos, R, frame.probeMin.xyz, frame.probeMax.xyz, frame.probePos.xyz);
-            R_corr      = lerp(R, boxR, boxFade);
+            float3 boxR = BoxParallaxCorrection(worldPos, R_ibl, frame.probeMin.xyz, frame.probeMax.xyz, frame.probePos.xyz);
+            R_corr      = lerp(R_ibl, boxR, boxFade);
         }
 
         float ao = litColorRaw.a;
 
         float3 prefilteredColor = texEnvMap.SampleLevel(clampSampler, R_corr, roughness * 5.0f).rgb * frame.ambientExposure;
         float3 baseSpecularIBL = prefilteredColor * FssEss * ao;
+
+        // Single-scattering IBL loses substantial energy on fully rough metals.
+        // Return that missing energy through the cosine-weighted environment
+        // irradiance (SH stores irradiance / PI). Restrict this correction to
+        // the metallic share: the separate diffuse pass already shades the
+        // dielectric share and has not been rebalanced for multiscattering.
+        float  Ems  = saturate(1.0f - envBRDF.x - envBRDF.y);
+        float3 Favg = F0 + (1.0f - F0) * (1.0f / 21.0f);
+        float3 Fms  = FssEss * Favg / max(1.0f - Ems * Favg, float3(1e-4f));
+        float3 multiSpecularIBL = EvaluateSH(N, frame.sh) * frame.ambientExposure * Fms * Ems * ao * metallic;
 
         litColor = litColorRaw.rgb;
 
@@ -362,9 +375,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             float horizonOcclusion = saturate(1.0f + dot(R, N));
             horizonOcclusion *= horizonOcclusion;
 
-            litColor += specReflect * horizonOcclusion;
+            litColor += specReflect * horizonOcclusion + multiSpecularIBL;
         } else {
-            litColor += baseSpecularIBL;
+            litColor += baseSpecularIBL + multiSpecularIBL;
         }
     }
 

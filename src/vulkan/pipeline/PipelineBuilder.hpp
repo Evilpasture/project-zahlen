@@ -73,6 +73,8 @@ struct PipelineConfig {
 
     std::optional<StencilState> stencil;
     bool                        colorWriteEnable = true;
+    VkColorComponentFlags       colorWriteMask   = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                                   VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 };
 
 [[nodiscard]] auto FormatHasStencil(VkFormat format) noexcept -> bool;
@@ -337,8 +339,7 @@ class PipelineBuilder {
             .back              = config.stencil.has_value() ? config.stencil->back : no_stencil,
         };
 
-        const VkColorComponentFlags write_mask =
-            config.colorWriteEnable ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT : 0;
+        const VkColorComponentFlags write_mask = config.colorWriteEnable ? config.colorWriteMask : 0;
         const VkPipelineColorBlendAttachmentState blend_state {
             .blendEnable         = config.blendEnable ? VK_TRUE : VK_FALSE,
             .srcColorBlendFactor = config.additiveBlend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA,
@@ -466,6 +467,14 @@ class PipelineBuilder {
 
     auto ColorWriteEnable(bool enable) noexcept -> PipelineBuilder& {
         _cfg.colorWriteEnable = enable;
+        return *this;
+    }
+
+    // The emissive overlay adds RGB to LightingGI, whose alpha stores AO.
+    // Allow that pipeline to preserve the destination alpha without changing
+    // alpha blending for ordinary transparent or additive materials.
+    auto ColorWriteMask(VkColorComponentFlags mask) noexcept -> PipelineBuilder& {
+        _cfg.colorWriteMask = mask;
         return *this;
     }
 
