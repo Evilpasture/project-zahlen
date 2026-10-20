@@ -418,12 +418,8 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     const uint32_t slot        = _impl->presenter.frameIndex;
 
     for (const uint32_t frameSlot: {Vk::PreviousFrameSlot(slot), slot}) {
-        if (const VkResult waited = primarySync.Wait(frameSlot); waited != VK_SUCCESS) {
-            return std::unexpected(Vk::ToError(waited));
-        }
-
-        if (const VkResult waited = primarySync.WaitCompute(frameSlot); waited != VK_SUCCESS) {
-            return std::unexpected(Vk::ToError(waited));
+        if (auto res = primarySync.WaitSlotIdle(frameSlot); !res) {
+            return std::unexpected(res.error());
         }
     }
     for (auto& dest: _impl->destinations.Windows()) {
@@ -432,8 +428,8 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
         }
         auto& sess = dest.Presenter();
         for (const uint32_t frameSlot: {Vk::PreviousFrameSlot(sess.frameIndex), sess.frameIndex}) {
-            if (const VkResult waited = sess.sync.Wait(frameSlot); waited != VK_SUCCESS) {
-                return std::unexpected(Vk::ToError(waited));
+            if (auto res = sess.sync.WaitSlotIdle(frameSlot); !res) {
+                return std::unexpected(res.error());
             }
         }
     }
@@ -473,7 +469,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
         acc.meshInvocations += stats.meshInvocations;
     });
 
-    _impl->presenter.sync.StepTimeline(frame_index);
+    // compute timeline is now stepped on-demand in PrepareComputeSubmit()
 
     _impl->diagnostics.gpuProfiler.Reset(frame_index);
     _impl->computePools[frame_index].Reset();

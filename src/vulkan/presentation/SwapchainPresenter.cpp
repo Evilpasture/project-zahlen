@@ -124,6 +124,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
 
     const uint32_t slot = frameIndex;
 
+    // 1. Pre-emptive resize if extent changed
     if (allowRebuild && swapchain.Valid() && desiredExtent.width != 0 && desiredExtent.height != 0) {
         const VkExtent2D current = swapchain.Get().extent;
         if (desiredExtent.width != current.width || desiredExtent.height != current.height) {
@@ -133,12 +134,13 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
         }
     }
 
-    if (const VkResult waited = sync.Wait(slot); waited != VK_SUCCESS) {
-        return std::unexpected(ToError(waited));
+    // 2. Wait for previous work on this frame slot
+    if (auto res = sync.WaitSlotIdle(slot); !res) {
+        return std::unexpected(res.error());
     }
-    sync.MarkUnsubmitted(slot);
     pools[slot].Reset();
 
+    // 3. Headless fallback path
     if (!swapchain.Valid()) {
         auto& target = headlessColorTarget;
         if (!target.Valid()) {
@@ -153,26 +155,29 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
         };
     }
 
-    const auto&    sc          = swapchain.Get();
-    uint32_t       image_index = 0;
-    const VkResult res         = vkAcquireNextImageKHR(_ctx->Device(), sc.handle, UINT64_MAX, sync.ImageAvailable(slot), VK_NULL_HANDLE, &image_index);
-    if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
-        if (res == VK_ERROR_OUT_OF_DATE_KHR && desiredExtent.width != 0 && desiredExtent.height != 0) {
-            (void) Rebuild(desiredExtent.width, desiredExtent.height);
-        }
-        if (res == VK_ERROR_OUT_OF_DATE_KHR) {
+    // 4. Acquire from swapchain abstraction — no raw Vulkan handles leaked
+    auto acquired = swapchain.AcquireNext(sync.ImageAvailableSemaphore(slot));
+    if (!acquired) {
+        if (acquired.error().Is(SwapchainAcquireError::OutOfDate)) {
+            if (desiredExtent.width != 0 && desiredExtent.height != 0) {
+                // Properly propagate rebuild failure instead of casting to (void)
+                if (auto rebuilt = Rebuild(desiredExtent.width, desiredExtent.height); !rebuilt) {
+                    return std::unexpected(rebuilt.error());
+                }
+            }
+            // Return nullopt: skip this frame cleanly so the next iteration starts fresh
             return std::nullopt;
         }
-        return std::unexpected(ToError(res));
+        return std::unexpected(acquired.error());
     }
 
     if (_pacer.IsTimingActive()) {
-        _pacer.Observe(_ctx->Device(), sc.handle);
+        _pacer.Observe(_ctx->Device(), swapchain.Get().handle);
     }
 
     return SwapchainTarget {
-        .image       = ImageSlice {sc.images[image_index], sc.views[image_index], sc.extent, sc.format},
-        .imageIndex  = image_index,
+        .image       = acquired->image,
+        .imageIndex  = acquired->imageIndex,
         .slot        = slot,
         .generation  = resourceGeneration,
         .presentable = true,
@@ -207,38 +212,23 @@ auto SwapchainPresenter::Present(
     if (!cmds) {
         return std::unexpected(CommandRecordingError::NotExecutable);
     }
-    const bool     presents = swapchain.Valid();
-    const uint32_t slot     = frameIndex;
 
-    std::array<VkSemaphoreSubmitInfo, 4> waits {};
-    uint32_t                             wait_count = 0;
-    if (presents) {
-        waits[wait_count++] = Vk::MakeSemaphoreSubmitInfo(sync.ImageAvailable(slot), 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-    }
-    for (const VkSemaphoreSubmitInfo& extra: extraWaits) {
-        if (wait_count == waits.size()) {
-            break;
-        }
-        waits[wait_count++] = extra;
+    const uint32_t    slot        = frameIndex;
+    const VkSemaphore present_sem = swapchain.Valid() ? PresentSemaphore(imageIndex) : VK_NULL_HANDLE;
+
+    // 1. Tell FrameSync to generate the entire submit sync bundle
+    auto submitSync = sync.PrepareGraphicsSubmit(slot, presentSem, extraWaits);
+
+    // 2. Submit commands
+    auto submitRes = Vk::QueueSubmit(graphicsQueue, std::move(cmds), submitSync.Waits(), submitSync.Signals());
+    if (!submitRes) [[unlikely]] {
+        return std::unexpected(submitRes.error());
     }
 
-    const VkSemaphore                    present_sem   = PresentSemaphore(imageIndex);
-    const uint64_t                       graphicsValue = sync.StepGraphicsTimeline(slot);
-    std::array<VkSemaphoreSubmitInfo, 2> signals {
-        Vk::MakeSemaphoreSubmitInfo(sync.GraphicsTimeline(slot), graphicsValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT),
-        Vk::MakeSemaphoreSubmitInfo(present_sem, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT)
-    };
-    const uint32_t signalCount = presents ? 2u : 1u;
-    auto           submit_res  = Vk::QueueSubmit(
-        graphicsQueue, std::move(cmds), std::span<const VkSemaphoreSubmitInfo> {waits.data(), wait_count},
-        std::span<const VkSemaphoreSubmitInfo> {signals.data(), signalCount}
-    );
-    if (!submit_res) [[unlikely]] {
-        return std::unexpected(submit_res.error());
-    }
-    sync.MarkSubmitted(slot, graphicsValue);
+    // 3. Inform FrameSync that submission succeeded
+    sync.OnGraphicsSubmitted(slot, submitSync.submissionValue);
 
-    if (!presents) {
+    if (!swapchain.Valid()) {
         return {};
     }
 

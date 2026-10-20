@@ -288,6 +288,29 @@ auto Swapchain::Rebuild(
     return {};
 }
 
+auto Swapchain::AcquireNext(VkSemaphore signalSemaphore, uint64_t timeout) noexcept
+    -> std::expected<AcquiredSwapchainImage, ErrorCode> {
+    if (!Valid()) {
+        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+    }
+
+    uint32_t imageIndex = 0;
+    const VkResult res = vkAcquireNextImageKHR(_device, _data.handle, timeout, signalSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+    if (res == VK_ERROR_OUT_OF_DATE_KHR) {
+        return std::unexpected(SwapchainAcquireError::OutOfDate);
+    }
+    if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
+        return std::unexpected(ToError(res));
+    }
+
+    return AcquiredSwapchainImage {
+        .image = ImageSlice {_data.images[imageIndex], _data.views[imageIndex], _data.extent, _data.format},
+        .imageIndex = imageIndex,
+        .suboptimal = (res == VK_SUBOPTIMAL_KHR),
+    };
+}
+
 void Swapchain::Destroy() noexcept {
     if (_device != VK_NULL_HANDLE) {
         for (const VkImageView view: _data.views) {

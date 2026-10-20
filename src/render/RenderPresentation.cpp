@@ -71,10 +71,11 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
             waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(transferRingBuffer.GetSemaphore(), stagingValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
         }
 
-        const uint64_t computeValue = presenter.sync.GetTimelineValue(presenter.frameIndex);
-        const VkSemaphore computeTimeline = presenter.sync.ComputeTimeline(presenter.frameIndex);
-        if (computeTimeline != VK_NULL_HANDLE && computeValue > 0 && frameState.computeSubmitted) {
-            waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(computeTimeline, computeValue, Vk::kAsyncComputeConsumerStages);
+        // Tell-Don't-Ask: ask FrameSync for a ready-made compute dependency
+        if (frameState.computeSubmitted) {
+            if (auto dep = presenter.sync.GetComputeWaitDependency(presenter.frameIndex, Vk::kAsyncComputeConsumerStages)) {
+                waits[waitCount++] = *dep;
+            }
         }
 
         const VkImageLayout currentLayout = Vk::ToVkImageLayout(*reconciled);

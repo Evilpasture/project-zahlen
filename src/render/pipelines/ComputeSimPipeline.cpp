@@ -83,10 +83,9 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
         return std::unexpected(executable.error());
     }
 
-    const uint64_t signalValue = impl.presenter.sync.GetTimelineValue(slot);
-    auto           submitted   = Vk::QueueSubmit(
-        impl.ctx.ComputeQueue(), std::move(*executable), VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, impl.presenter.sync.ComputeTimeline(slot), signalValue,
-        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+    auto compSync = impl.presenter.sync.PrepareComputeSubmit(slot);
+    auto   submitted = Vk::QueueSubmit(
+        impl.ctx.ComputeQueue(), std::move(*executable), {}, std::span<const VkSemaphoreSubmitInfo> {&compSync.signalInfo, 1}
     );
 
     if (!submitted) [[unlikely]] {
@@ -98,7 +97,7 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
         return std::unexpected(AsFrameError(submitted.error()));
     }
 
-    impl.presenter.sync.MarkComputeSubmitted(slot);
+    impl.presenter.sync.OnComputeSubmitted(slot, compSync.timelineValue);
     impl.frameState.computeSubmitted = true;
     return {};
 }
