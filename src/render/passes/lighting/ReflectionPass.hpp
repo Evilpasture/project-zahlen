@@ -15,6 +15,7 @@ struct ReflectionPass:
         Vk::ShaderRead<typename SurfaceTag::Normals>,
         Vk::ShaderRead<typename SurfaceTag::Depth>,
         Vk::ShaderRead<Res_LightingGI>,
+        Vk::ShaderRead<Res_LightingAo>,
         Vk::ShaderRead<Res_ShadowMap>,
         Vk::ShaderRead<Res_ShadowAtlas>,
         Vk::ShaderReadGeneral<Res_VoxelResolved>,

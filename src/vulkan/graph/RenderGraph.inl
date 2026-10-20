@@ -70,7 +70,8 @@ struct CombineSameResourceUsage<Existing, Incoming> {
         Existing::access | Incoming::access,
         Existing::final_layout,
         Existing::final_stage | Incoming::final_stage,
-        Existing::final_access | Incoming::final_access>;
+        Existing::final_access | Incoming::final_access,
+        Existing::channel_mask | Incoming::channel_mask>;
 };
 
 template <typename List, typename T>

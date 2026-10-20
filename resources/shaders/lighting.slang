@@ -164,7 +164,12 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
     return float4(indirectLight, ao);
 }
 
-float4 PSMain(VSOutput input) : SV_Target0 {
+struct LightingOutput {
+    float4 color : SV_Target0;
+    float ao : SV_Target1;
+};
+
+LightingOutput PSMain(VSOutput input) {
     float depth = texDepth.SampleLevel(pointSampler, input.uv, 0);
     // One world, one depth range (the band is retired): 1.0 means empty.
     if (depth >= 1.0f)
@@ -172,7 +177,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
     float4 albedoRaw = texInput.SampleLevel(pointSampler, input.uv, 0);
     if (frame.fullBright != 0) {
-        return float4(albedoRaw.rgb, 1.0f);
+        LightingOutput outLighting;
+        outLighting.color = float4(albedoRaw.rgb, 1.0f);
+        outLighting.ao = 1.0f;
+        return outLighting;
     }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(pointSampler, input.uv, 0);
     float3 N            = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
@@ -396,5 +404,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // darkening without erasing the GI it is supposed to modulate.
     float aoAmbient = lerp(1.0f, ao, 0.5f);
     float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * kD_ambient * aoAmbient * materialAo + directSun + directPunctual;
-    return float4(litColor, ao);
+    LightingOutput outLighting;
+    outLighting.color = float4(litColor, 1.0f);
+    outLighting.ao = saturate(ao);
+    return outLighting;
 }

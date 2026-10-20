@@ -10,6 +10,7 @@ import uniforms;
 RtgiCompositePushConstants pc;
 
 Texture2D<float4> texLighting;
+Texture2D<float> texLightingAo;
 Texture2D<float4> texAlbedo;
 Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
@@ -144,7 +145,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         const float3 extent = max(abs(median), float3(1e-3f));
         incidentRadiance    = clamp(incidentRadiance, max(median - extent, float3(0.0f)), median + extent);
     }
-    float ambientOcclusion = saturate(baseLighting.a);
+    float ambientOcclusion = saturate(texLightingAo.Load(int3(tid.xy, 0)));
     float3 diffuseBounce = incidentRadiance * albedo * kD * ambientOcclusion;
-    outLighting[tid.xy] = float4(baseLighting.rgb + diffuseBounce * max(pc.giIntensity, 0.0f), baseLighting.a);
+    outLighting[tid.xy] = float4(baseLighting.rgb + diffuseBounce * max(pc.giIntensity, 0.0f), 1.0f);
 }

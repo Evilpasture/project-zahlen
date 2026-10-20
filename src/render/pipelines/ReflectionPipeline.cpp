@@ -28,6 +28,7 @@ void ReflectionPipeline::Dispatch(
         Vk::Slot<"texNormalRoughness">(surface.normals), Vk::Slot<"texEnvMap">(inputs.prefiltered), Vk::Slot<"texSkyEquirect">(inputs.visualSky),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]), Vk::Slot<"brdfLUT">(inputs.brdfLut),
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ShaderRead<Res_LightingGI>>(impl.graphResources.lightingGI)),
+        Vk::Slot<"texLightingAo">(Vk::Assume<Vk::ShaderRead<Res_LightingAo>>(impl.graphResources.lightingAo)),
         Vk::Slot<"texVoxelIntegrated">(Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(impl.graphResources.voxelResolved)),
         Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]), Vk::Slot<"blueNoiseTex">(inputs.blueNoise),
         Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(impl.graphResources.rtrHalf)), Vk::Slot<"tlas">(inputs.tlas),

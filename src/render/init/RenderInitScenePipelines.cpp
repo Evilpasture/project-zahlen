@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "../RenderInternal.hpp"
+#include "../passes/lighting/EmissivePass.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
@@ -13,6 +14,9 @@
 namespace ZHLN {
 
 auto RenderContext::Impl::BuildEmissivePipeline() -> std::expected<void, ErrorCode> {
+    static_assert(Vk::ColorAttachmentWriteMask<Passes::EmissivePass, Res_LightingGI>() ==
+                  (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT),
+                  "Deferred emission must not write LightingGI alpha");
     Vk::HeapMappingArena mappingArena {heapManager};
     const auto*           sceneMappings = mappingArena.Map(sceneHeapMappings);
     return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::BasicVSEmissive>(), Vk::MakeStageSource<Shaders::Modules::EmissivePS>())
@@ -26,11 +30,8 @@ auto RenderContext::Impl::BuildEmissivePipeline() -> std::expected<void, ErrorCo
                 .DepthWrite(false)
                 .DepthCompare(VK_COMPARE_OP_LESS_OR_EQUAL)
                 .DynamicCullMode()
-                .AdditiveBlend()
-                // LightingGI.a is ambient occlusion, not emissive opacity.
-                // PSEmissive outputs alpha=0; writing it here erased AO for
-                // every emissive mesh pixel, zeroing the following IBL pass.
-                .ColorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT)
+                .AdditiveRGBPreserveAlpha()
+                .ColorWriteMask(Vk::ColorAttachmentWriteMask<Passes::EmissivePass, Res_LightingGI>())
                 .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { forward.emissive = std::forward<decltype(pipeline)>(pipeline); });

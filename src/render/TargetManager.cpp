@@ -240,6 +240,7 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         _graph.normalRoughnessBuffer.image.Handle(),
         _graph.hdrSceneColor.image.Handle(),
         _graph.lightingTarget.image.Handle(),
+        _graph.lightingAo.image.Handle(),
         _graph.smaaEdgeTarget.image.Handle(),
         _graph.smaaWeightTarget.image.Handle(),
         _graph.transNormalBuffer.image.Handle(),

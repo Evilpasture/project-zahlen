@@ -13,7 +13,7 @@ namespace ZHLN::Passes {
 // material emission is sampled a second time and additively rasterized into
 // HDR LightingGI after GI composition, before reflection reads that target.
 struct EmissivePass:
-    Vk::RenderPass<"Emissive", Vk::ColorWrite<Res_LightingGI>, Vk::DepthStencilWrite<Res_Depth>> {
+    Vk::RenderPass<"Emissive", Vk::ColorWriteRGB<Res_LightingGI>, Vk::DepthStencilWrite<Res_Depth>> {
     using PushConstants = ObjectConstants;
 
     const ForwardResources& forward;

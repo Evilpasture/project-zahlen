@@ -46,6 +46,7 @@ ConstantBuffer<FrameUniforms> frame;
 Texture2D brdfLUT;
 SamplerState clampSampler;
 Texture2D<float4> texLighting;
+Texture2D<float> texLightingAo;
 Texture3D<float4> texVoxelIntegrated;
 StructuredBuffer<InstanceData> g_instances;
 
@@ -312,10 +313,16 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             R_corr      = lerp(R_ibl, boxR, boxFade);
         }
 
-        float ao = litColorRaw.a;
+        float ao = saturate(texLightingAo.Load(int3(uint2(input.pos.xy), 0)));
+        // AO is hemispherical visibility, not opacity. The view-dependent
+        // GGX approximation narrows the occluded part of the specular lobe;
+        // rough lobes converge to AO. If AO really is zero, this is zero at
+        // ALL angles. The separate AO target (not this formula) prevents the
+        // emissive overlay from manufacturing that zero.
+        float specAo = saturate(pow(max(NdotV + ao, 1e-4f), exp2(-16.0f * roughness - 1.0f)) - 1.0f + ao);
 
         float3 prefilteredColor = texEnvMap.SampleLevel(clampSampler, R_corr, roughness * 5.0f).rgb * frame.ambientExposure;
-        float3 baseSpecularIBL = prefilteredColor * FssEss * ao;
+        float3 baseSpecularIBL = prefilteredColor * FssEss * specAo;
 
         // Single-scattering IBL loses substantial energy on fully rough metals.
         // Return that missing energy through the cosine-weighted environment
@@ -325,7 +332,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float  Ems  = saturate(1.0f - envBRDF.x - envBRDF.y);
         float3 Favg = F0 + (1.0f - F0) * (1.0f / 21.0f);
         float3 Fms  = FssEss * Favg / max(1.0f - Ems * Favg, float3(1e-4f));
-        float3 multiSpecularIBL = EvaluateSH(N, frame.sh) * frame.ambientExposure * Fms * Ems * ao * metallic;
+        float3 multiSpecularIBL = EvaluateSH(N, frame.sh) * frame.ambientExposure * Fms * Ems * specAo * metallic;
 
         litColor = litColorRaw.rgb;
 

@@ -15,6 +15,7 @@ void RtgiCompositePass::operator()(VkCommandBuffer cmd) const noexcept {
     const bool rtgiActive = frame.ctx.RayTracingSupported() && frame.settings.rayTracing.enableDiffuseGI && frame.frames.tlasAddresses[fIdx] != nullptr;
     const auto block      = frame.heapManager.WriteHeapParameters<RtgiComposite>(
         frame.postProcess.RtgiCompositeHeapBindings(), Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(frame.graphResources.lightingTarget)),
+        Vk::Slot<"texLightingAo">(Vk::Assume<Vk::ComputeRead<Res_LightingAo>>(frame.graphResources.lightingAo)),
         Vk::Slot<"texAlbedo">(Vk::Assume<Vk::ComputeRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
         Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.presenter.depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),

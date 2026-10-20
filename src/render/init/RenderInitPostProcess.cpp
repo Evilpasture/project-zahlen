@@ -68,12 +68,12 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCo
     if (ctx.RayTracingSupported()) {
         return BuildPassVariants(
             this, post.lighting, Vk::MakeStageSource<Shaders::Modules::LightingVS>(),
-            Vk::MakeStageSource<Shaders::Modules::LightingPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+            Vk::MakeStageSource<Shaders::Modules::LightingPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R8_UNORM}, specInfos
         );
     }
     return BuildPassVariants(
         this, post.lighting, Vk::MakeStageSource<Shaders::Modules::LightingNortVS>(),
-        Vk::MakeStageSource<Shaders::Modules::LightingNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        Vk::MakeStageSource<Shaders::Modules::LightingNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R8_UNORM}, specInfos
     );
 }
 

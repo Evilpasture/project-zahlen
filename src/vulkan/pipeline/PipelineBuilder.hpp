@@ -66,6 +66,8 @@ struct PipelineConfig {
 
     bool blendEnable   = false;
     bool additiveBlend = false;
+    bool preserveBlendAlpha = false;
+    bool accumulateBlendAlpha = false;
 
     uint32_t viewMask = 0;
 
@@ -183,9 +185,33 @@ class PipelineBuilder {
         return *this;
     }
 
+    // RGB-only radiance overlay. The destination alpha is not radiance.
+    // Protect it with both blend factors AND the color write mask.
+    auto AdditiveRGBPreserveAlpha() noexcept -> PipelineBuilder& {
+        _cfg.blendEnable = true;
+        _cfg.additiveBlend = true;
+        _cfg.preserveBlendAlpha = true;
+        _cfg.accumulateBlendAlpha = false;
+        _cfg.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
+        return *this;
+    }
+
+    // Explicit alpha accumulation for attachments where alpha is radiance.
+    auto AdditiveRGBA() noexcept -> PipelineBuilder& {
+        _cfg.blendEnable = true;
+        _cfg.additiveBlend = true;
+        _cfg.preserveBlendAlpha = false;
+        _cfg.accumulateBlendAlpha = true;
+        _cfg.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        return *this;
+    }
+
+    // Historical API: RGB adds; alpha REPLACES. Avoid on semantic attachments.
     auto AdditiveBlend() noexcept -> PipelineBuilder& {
         _cfg.blendEnable   = true;
         _cfg.additiveBlend = true;
+        _cfg.preserveBlendAlpha = false;
+        _cfg.accumulateBlendAlpha = false;
         return *this;
     }
 
@@ -345,8 +371,8 @@ class PipelineBuilder {
             .srcColorBlendFactor = config.additiveBlend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA,
             .dstColorBlendFactor = config.additiveBlend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
             .colorBlendOp        = VK_BLEND_OP_ADD,
-            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-            .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+            .srcAlphaBlendFactor = config.preserveBlendAlpha ? VK_BLEND_FACTOR_ZERO : VK_BLEND_FACTOR_ONE,
+            .dstAlphaBlendFactor = (config.preserveBlendAlpha || config.accumulateBlendAlpha) ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ZERO,
             .alphaBlendOp        = VK_BLEND_OP_ADD,
             .colorWriteMask      = write_mask,
         };
@@ -470,9 +496,7 @@ class PipelineBuilder {
         return *this;
     }
 
-    // The emissive overlay adds RGB to LightingGI, whose alpha stores AO.
-    // Allow that pipeline to preserve the destination alpha without changing
-    // alpha blending for ordinary transparent or additive materials.
+    // Per-attachment mask; the render graph contract can supply this value.
     auto ColorWriteMask(VkColorComponentFlags mask) noexcept -> PipelineBuilder& {
         _cfg.colorWriteMask = mask;
         return *this;

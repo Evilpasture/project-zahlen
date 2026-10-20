@@ -39,6 +39,7 @@ enum class PBRTestError : uint8_t {
     EnvironmentBakeFailed       ZHLN_ANNOTATION(ZHLN::Description<"The prepared HDR environment could not be registered or baked."> {}),
     ShadowSideDiffuseTinted     ZHLN_ANNOTATION(ZHLN::Description<"A compact HDR emitter behind an opaque surface changed its diffuse color."> {}),
     CookedSunPolicyFailed       ZHLN_ANNOTATION(ZHLN::Description<"Cooked HDR sun was duplicated, not released, or did not cast a shadow."> {}),
+    IblEmissiveAoLost           ZHLN_ANNOTATION(ZHLN::Description<"An opaque metallic surface with a black emissive map lost its IBL reflection."> {}),
 };
 
 // ============================================================================
@@ -668,6 +669,88 @@ struct PBRTestSuite {
         // ====================================================================
         // 4. Energy Conservation & Fullbright Override
         // ====================================================================
+        // The original helmet failure only occurs when the emissive pass RUNS,
+        // even if its texture evaluates to black. Two otherwise identical
+        // metals under uniform IBL give a differential oracle without a
+        // fragile fixed luminance target or direct lights.
+        std::expected<void, ZHLN::ErrorCode> pbr_black_emissive_texture_preserves_metal_ibl() {
+            auto engine = CreateTestEngine(640, 480);
+            if (!engine) return std::unexpected(PBRTestError::EngineInitFailed);
+            ZHLN::Test::Headless::DisableTAA(*engine);
+            auto& reg = engine->GetRegistry();
+            auto& rc = engine->GetRenderContext();
+            const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
+            if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
+            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
+                pp.giMode = 0;
+                pp.fullBright = 0;
+                pp.ambientExposure = 2.0f;
+                pp.exposure = 1.0f;
+                pp.tonemapper = 3;
+                pp.enableSSR = 0;
+                pp.enableRTR = 0;
+                pp.bloomStrength = 0.0f;
+                pp.glowIntensity = 0.0f;
+                pp.vignetteIntensity = 0.0f;
+                pp.skyZenith = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                pp.skyHorizon = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                pp.skyGround = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            });
+            ZHLN::EnvironmentImage env {.width = 64, .height = 32};
+            env.rgba.resize(64u * 32u * 4u);
+            for (size_t i = 0; i < env.rgba.size(); i += 4u) {
+                env.rgba[i + 0] = 0.8f;
+                env.rgba[i + 1] = 0.65f;
+                env.rgba[i + 2] = 0.45f;
+                env.rgba[i + 3] = 1.0f;
+            }
+            ZHLN::AssetCooking::PrepareEnvironmentImage(env);
+            if (env.sun ||
+                !engine->GetAssetManager().CacheEnvironmentImage("pbr_black_emissive_flat_ibl", std::move(env)))
+                return std::unexpected(PBRTestError::EnvironmentBakeFailed);
+            ZHLN::Components::EnvironmentMapComponent map;
+            map.source.assign("pbr_black_emissive_flat_ibl");
+            reg.Add(settings, std::move(map));
+
+            const std::array<uint32_t, 1> blackRgba = {0xff000000u}; // black RGB, opaque alpha
+            auto black = rc.CreateTexture(std::span {blackRgba}, {1, 1}, true);
+            if (!black) return std::unexpected(PBRTestError::MaterialCreationFailed);
+            auto control = rc.CreateMaterial(ZHLN::MaterialDesc {
+                .metallic = 1.0f, .roughness = 0.6f, .baseColor = {0.9f, 0.7f, 0.35f, 1.0f}
+            });
+            auto mapped = rc.CreateMaterial(ZHLN::MaterialDesc {
+                .metallic = 1.0f, .roughness = 0.6f, .baseColor = {0.9f, 0.7f, 0.35f, 1.0f},
+                .emissive = {1.0f, 1.0f, 1.0f, 1.0f}, .emissiveMap = *black
+            });
+            if (!control || !mapped) return std::unexpected(PBRTestError::MaterialCreationFailed);
+            const auto camComp = reg.GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!camComp) return std::unexpected(PBRTestError::EngineInitFailed);
+            ZHLN::Camera& cam = camComp->camera;
+            cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
+            cam.yaw = -90.0f;
+            cam.pitch = 0.0f;
+            cam.fov = 60.0f;
+            ZHLN::PrefabFactory::CreateBox(*engine, JPH::Vec3(1.0f, 1.0f, 1.0f),
+                {.position = JPH::RVec3(-0.95, 1.0, 0.0), .createPhysics = false, .materialOverride = *control});
+            ZHLN::PrefabFactory::CreateBox(*engine, JPH::Vec3(1.0f, 1.0f, 1.0f),
+                {.position = JPH::RVec3(0.95, 1.0, 0.0), .createPhysics = false, .materialOverride = *mapped});
+            ZHLN::Test::Headless::TickFrames(*engine, 8);
+            if (!reg.GetEntitiesWith<ZHLN::Components::LightComponent>().empty())
+                return std::unexpected(PBRTestError::EnvironmentBakeFailed);
+            const auto image = ZHLN::Test::Headless::Capture(*engine, "headless_pbr_black_emissive_ibl.ppm");
+            if (!image.Valid()) return std::unexpected(PBRTestError::RenderOutputBlank);
+            // Central front faces only: neither sky nor edges/SSAO in either ROI.
+            const auto a = ZHLN::Test::Image::MeasureSubRegion(image, {.x0 = 0.24, .y0 = 0.48, .x1 = 0.26, .y1 = 0.52});
+            const auto b = ZHLN::Test::Image::MeasureSubRegion(image, {.x0 = 0.74, .y0 = 0.48, .x1 = 0.76, .y1 = 0.52});
+            ZHLN::Println("    [INFO] Pure IBL control={:.1f}, black-emissive={:.1f}", a.meanLuma, b.meanLuma);
+            if (a.meanLuma < 8.0 || b.meanLuma < a.meanLuma * 0.75 ||
+                std::abs(a.meanR - b.meanR) > a.meanR * 0.25 + 3.0 ||
+                std::abs(a.meanG - b.meanG) > a.meanG * 0.25 + 3.0 ||
+                std::abs(a.meanB - b.meanB) > a.meanB * 0.25 + 3.0)
+                return std::unexpected(PBRTestError::IblEmissiveAoLost);
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> pbr_fullbright_mode_override() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {

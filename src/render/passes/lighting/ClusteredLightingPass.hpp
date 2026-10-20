@@ -21,7 +21,8 @@ struct ClusteredLightingPass:
         Vk::ShaderRead<Res_RtShadowMask>,
         Vk::FragmentAndComputeRead<Res_DdgiIrradiance>,
         Vk::FragmentAndComputeRead<Res_DdgiDistance>,
-        Vk::ColorWrite<Res_Lighting>> {
+        Vk::ColorWrite<Res_Lighting>,
+        Vk::ColorWrite<Res_LightingAo>> {
     const PostProcessResources&   post;
     RenderFrameContext&           frame;
     Slang::ScenePassPushConstants pc {};
