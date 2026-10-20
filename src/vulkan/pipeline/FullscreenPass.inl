@@ -17,7 +17,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
     HeapLifecycle                   lifecycle,
     bool                            additive,
     PipelineBinaryStore*              binaries,
-    const HeapMappingBundle*        extraMappings
+    const HeapMappingTable*           extraMappings
 ) noexcept {
 
     if (!layoutInstance.Build(device, shaders)) {
@@ -28,11 +28,13 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
         return std::unexpected(built.error());
     }
 
-    // The pass's set-0 mappings, plus any shared bundle the module's other
-    // sets need (Set-1 scene block). Extras for undeclared variables are
-    // legal; missing ones are not (VUID-...-11312).
-    const HeapMappingBundle merged = HeapMappingBundle::Merge(heapBindings, extraMappings);
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mappings = merged.GetInfo();
+    // The pass's set-0 mappings, plus any shared table the module's other sets
+    // need (Set-1 scene block). Extras for undeclared variables are legal;
+    // missing ones are not (VUID-...-11312). Materialized once, for the length
+    // of this build.
+    const HeapMappingView extra    = extraMappings != nullptr ? HeapMappingView {*extraMappings} : HeapMappingView {};
+    HeapMappingArena      arena    {heap};
+    const auto*           mappings = arena.Map(heapBindings.mappings, extra);
 
     auto builder = PipelineBuilder {}
                        .Shaders(shaders)
@@ -64,7 +66,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
     HeapLifecycle                         lifecycle,
     bool                                  additive,
     PipelineBinaryStore*                    binaries,
-    const HeapMappingBundle*              extraMappings
+    const HeapMappingTable*                 extraMappings
 ) noexcept {
 
     if (!layoutInstance.Build(device, shaders)) {
@@ -75,9 +77,10 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
         return std::unexpected(built.error());
     }
 
-    // Same set-0 + shared-bundle merge as BuildHeap above.
-    const HeapMappingBundle merged = HeapMappingBundle::Merge(heapBindings, extraMappings);
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mappings = merged.GetInfo();
+    // Same set-0 + shared-table composition as BuildHeap above.
+    const HeapMappingView extra    = extraMappings != nullptr ? HeapMappingView {*extraMappings} : HeapMappingView {};
+    HeapMappingArena      arena    {heap};
+    const auto*           mappings = arena.Map(heapBindings.mappings, extra);
 
     pipelines.clear();
     pipelines.reserve(specInfos.size());

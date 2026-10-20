@@ -65,7 +65,8 @@ class IBLProcessor {
 
         // 1. Compile Bake Compute Pipelines
         auto makePass = [&](const Vk::ShaderDesc& shader, const auto& bindings) {
-            return CreateHeapComputePass(impl.ctx.Device(), shader, bindings.GetInfo(), bindings.indexPushOffset, &impl.pipelineBinaries);
+            Vk::HeapMappingArena mappingArena {impl.heapManager};
+            return CreateHeapComputePass(impl.ctx.Device(), shader, mappingArena.Map(bindings.mappings), bindings.indexPushOffset, &impl.pipelineBinaries);
         };
         auto brdfPass = makePass(Vk::CreateShaderDesc<Shaders::Modules::BrdfLutCS>(), impl.bakeHeapBindings);
         auto specPass = makePass(Vk::CreateShaderDesc<Shaders::Modules::IblSpecularCS>(), impl.iblBakeHeapBindings);

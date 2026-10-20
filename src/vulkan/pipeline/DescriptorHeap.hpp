@@ -3,6 +3,7 @@
 
 #pragma once
 #include "memory/Allocator.hpp"
+#include "DescriptorMapping.hpp"
 
 #include <Zahlen/Threading/Mutex.hpp>
 #include <utility>
@@ -324,39 +325,38 @@ class HeapManager {
 
     // -------------------------------------------------------------------------
     // Descriptor mapping. The heap owns its stride, padding and partition layout;
-    // these compute the offsets internally, so nothing outside ever calls
+    // these append semantic entries naming slots, and Materialize() is the only
+    // place that turns those slots into byte offsets. Nothing outside ever calls
     // ResourceStride()/SamplerOffset() and does the arithmetic itself.
     // -------------------------------------------------------------------------
-    void ApplySamplerMapping(
-        std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, SamplerHandle handle
-    ) const noexcept;
-    void ApplySamplerArrayMapping(
-        std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, SamplerHandle base
-    ) const noexcept;
-    void ApplySampledImageMapping(
-        std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, TextureHandle handle
-    ) const noexcept;
-    void ApplyBindlessTextureArrayMapping(
-        std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, TextureHandle base
-    ) const noexcept;
+    void ApplySamplerMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerHandle handle) const noexcept;
+    void ApplySamplerArrayMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerHandle base) const noexcept;
+    void ApplySampledImageMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, TextureHandle handle) const noexcept;
+    void ApplyBindlessTextureArrayMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, TextureHandle base) const noexcept;
     void ApplyPushIndexMapping(
-        std::vector<VkDescriptorSetAndBindingMappingEXT>& entries,
-        uint32_t                                          set,
-        uint32_t                                          binding,
-        VkSpirvResourceTypeFlagsEXT                       mask,
-        uint32_t                                          ordinal,
-        uint32_t                                          pushOffset
+        HeapMappingTable&           mappings,
+        uint32_t                    set,
+        uint32_t                    binding,
+        VkSpirvResourceTypeFlagsEXT mask,
+        uint32_t                    ordinal,
+        uint32_t                    pushOffset
     ) const noexcept;
 
     /// Allocates the sampler a reflected set binding addresses, and appends the
     /// mapping entry that points at it.
     [[nodiscard]] auto ApplyNewSamplerMapping(
-        std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, VkSpirvResourceTypeFlagsEXT mask
+        HeapMappingTable& mappings, uint32_t set, uint32_t binding, VkSpirvResourceTypeFlagsEXT mask
     ) noexcept -> std::expected<SamplerHandle, ErrorCode>;
 
     /// Pairs a freshly allocated sampler with an entry that already maps an image
     /// (COMBINED_IMAGE_SAMPLER).
-    [[nodiscard]] auto ApplyPairedSamplerMapping(VkDescriptorSetAndBindingMappingEXT& entry) noexcept -> std::expected<SamplerHandle, ErrorCode>;
+    [[nodiscard]] auto ApplyPairedSamplerMapping(DescriptorMapping& entry) noexcept -> std::expected<SamplerHandle, ErrorCode>;
+
+    /// The API boundary: writes `mappings` into `out` as the driver struct, with
+    /// this heap's offsets and strides baked in. `out` must hold
+    /// `mappings.size()` entries; the caller owns its lifetime, so the result
+    /// never outlives the pipeline build that asked for it.
+    void Materialize(HeapMappingView mappings, std::span<VkDescriptorSetAndBindingMappingEXT> out) const noexcept;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         const VkBufferDeviceAddressInfo info {
@@ -414,10 +414,6 @@ class HeapManager {
     void               LeaveImmediateScope(uint32_t baseCursor) noexcept;
     void               EnterFrame(uint32_t frameIndex) noexcept;
     void               LeaveFrame() noexcept;
-
-    [[nodiscard]] static auto MakeConstantOffsetEntry(
-        uint32_t set, uint32_t binding, VkSpirvResourceTypeFlagsEXT mask, uint32_t offset, uint32_t stride
-    ) noexcept -> VkDescriptorSetAndBindingMappingEXT;
 
     ZHLN::Mutex _writeMutex {};
 

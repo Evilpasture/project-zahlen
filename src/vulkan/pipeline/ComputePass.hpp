@@ -10,6 +10,7 @@
 #include <span>
 #include <Zahlen/Log.hpp>
 #include "HeapBindings.hpp"
+#include "HeapMappingBuilder.hpp"
 #include "SpirvLayout.hpp"
 
 namespace ZHLN::Vk {
@@ -521,7 +522,8 @@ struct DoubleBufferedComputePass {
             return std::unexpected(built.error());
         }
 
-        auto p_res = ComputePipelineBuilder().Shader(shader).HeapMappings(heapBindings.GetInfo()).Binaries(binaries).Build(device);
+        HeapMappingArena mappingArena {heap};
+        auto p_res = ComputePipelineBuilder().Shader(shader).HeapMappings(mappingArena.Map(heapBindings.mappings)).Binaries(binaries).Build(device);
         if (!p_res) {
             return std::unexpected(p_res.error());
         }

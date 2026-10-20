@@ -62,7 +62,7 @@ struct UIRenderer::Impl {
     UIVariants<SupportedUITargetFormats> pipelines;
     VkFormat                             fallbackFormat = VK_FORMAT_UNDEFINED;
     Vk::Pipeline                         fallbackPipeline;
-    Vk::HeapMappingBundle                mappings;
+    Vk::HeapMappingTable                 mappings;
 
     std::array<Vk::Buffer, Vk::kFramesInFlight>      vbos {};
     std::array<VkDeviceAddress, Vk::kFramesInFlight> vboAddresses {};
@@ -116,6 +116,11 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         return std::unexpected(uiShaders.error());
     }
 
+    // Every UI variant draws with the same two bindings: materialize them once,
+    // for the length of this init.
+    Vk::HeapMappingArena mappingArena {ctx.heapManager};
+    const auto*          mappings = mappingArena.Map(impl.mappings);
+
     impl.pipelines               = {};
     impl.fallbackPipeline        = {};
     impl.fallbackFormat          = VK_FORMAT_UNDEFINED;
@@ -124,7 +129,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         Vk::PipelineBuilder builder;
         builder.Shaders(*uiShaders)
             .Binaries(&ctx.pipelineBinaries)
-            .HeapMappings(&impl.mappings.info, &impl.mappings.info)
+            .HeapMappings(mappings, mappings)
             .AlphaBlend()
             .CullNone();
         return builder;

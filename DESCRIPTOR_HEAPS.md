@@ -106,14 +106,18 @@ byte offsets:
 | Reserve  | `ReserveSampler`, `ReserveImage`, `ReserveSamplerRange`, `ReserveImageRange` | Only when the payload cannot exist yet (a mapping baked into a pipeline precedes the image it addresses). Returns a typed handle, and it is expected to be bound. |
 | Bind     | `BindSampler`, `BindImage`, `BindStorageImage`, `BindStorageBuffer`, `BindUniformBuffer`, `BindAccelerationStructure` | Attach or refresh the payload of an existing handle. |
 
-Mapping offsets are computed by the heap (`ApplySamplerMapping`,
+Mapping tables are semantic, not Vulkan. `ApplySamplerMapping`,
 `ApplySamplerArrayMapping`, `ApplySampledImageMapping`,
-`ApplyBindlessTextureArrayMapping`, `ApplyPushIndexMapping`, and the
+`ApplyBindlessTextureArrayMapping` and `ApplyPushIndexMapping` (plus the
 allocation-carrying `ApplyNewSamplerMapping` / `ApplyPairedSamplerMapping` that
-`BuildHeapPassBindings` uses), so `HeapMappingBuilder` and the reflected-binding
-builder never see `ResourceStride()`, `SamplerStride()`, `ResourceOffset()` or
-`SamplerOffset()` — those are private to `HeapManager` now. If padding, stride
-rules or the partition layout change, nothing outside the heap changes.
+`BuildHeapPassBindings` uses) append 32-byte `DescriptorMapping` rows naming a
+heap *slot* and a push-constant offset — never a byte offset, never a
+`VkDescriptorSetAndBindingMappingEXT`. `HeapManager::Materialize` is the only
+place the 96-byte driver struct is produced, and it computes `ResourceOffset()`,
+`SamplerOffset()`, `ResourceStride()` and `SamplerStride()` itself, so those
+stay private to `HeapManager`. If padding, stride rules or the partition layout
+change, nothing outside the heap changes — and nothing persistent holds a driver
+struct or a pointer into one.
 * `globalTextures[]` slots are recycled rather than only ever appended to:
   `ReleaseBindlessTexture` parks a released slot (its descriptor keeps pointing
   at the parked image while frames that may still read it are in flight),
@@ -203,7 +207,11 @@ the old bindless set array.
   descriptor-heap mode, and the implementation chains those mappings into each
   `VkPipelineShaderStageCreateInfo` while adding
   `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` via
-  `VkPipelineCreateFlags2CreateInfoKHR`.
+  `VkPipelineCreateFlags2CreateInfoKHR`. The structs are materialized per build
+  by a build-scoped `HeapMappingArena` (`HeapMappingBuilder.hpp`) out of the
+  pass's `HeapMappingTable`; `arena.Map(a, b)` composes two tables into one
+  `pMappings` list in a single allocation, which is how a pass brings the shared
+  Set-1 scene block along without a third table.
 * Every pipeline create info uses `layout = VK_NULL_HANDLE`
   (`VUID-VkGraphicsPipelineCreateInfo-flags-11311`); no pipeline-layout handle
   is accepted or stored by the backend.

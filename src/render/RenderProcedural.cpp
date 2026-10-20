@@ -30,8 +30,9 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
     const std::array variants  = {BakeSpec {.bakeType = 0}, BakeSpec {.bakeType = 1}, BakeSpec {.bakeType = 2}};
     const auto       specInfos = bakeSpec.Infos(std::span {variants});
 
+    Vk::HeapMappingArena mappingArena {heapManager};
     auto build_res = compute.proceduralBake.BuildHeapVariants(
-        ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, &pipelineBinaries
+        ctx.Device(), shaderDesc, specInfos, mappingArena.Map(bakeHeapBindings.mappings), bakeHeapBindings.indexPushOffset, &pipelineBinaries
     );
     if (!build_res) {
         return std::unexpected(build_res.error());

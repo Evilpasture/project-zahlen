@@ -31,7 +31,7 @@ template <typename LayoutT>
     Vk::FragmentStageSource         ps,
     std::initializer_list<VkFormat> colorFormats,
     bool                            additive = false,
-    const Vk::HeapMappingBundle*    extraMappings = nullptr
+    const Vk::HeapMappingTable*     extraMappings = nullptr
 ) noexcept -> std::expected<void, ErrorCode> {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
         return pass.BuildHeap(
@@ -50,7 +50,7 @@ template <typename LayoutT>
     std::initializer_list<VkFormat>       colorFormats,
     std::span<const VkSpecializationInfo> specInfos,
     bool                                  additive = false,
-    const Vk::HeapMappingBundle*          extraMappings = nullptr
+    const Vk::HeapMappingTable*           extraMappings = nullptr
 ) noexcept -> std::expected<void, ErrorCode> {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
         return pass.BuildHeapVariants(

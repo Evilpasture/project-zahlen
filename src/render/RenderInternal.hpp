@@ -149,11 +149,11 @@ struct RenderContext::Impl: RenderFrameContext {
 
     Vk::ReflectedLayout bindlessLayout;
 
-    Vk::HeapMappingBundle sceneHeapMappings;
-    // GlobalSceneRegistry at Set 1 (see BuildSceneHeapMappings): merged into
+    Vk::HeapMappingTable sceneHeapMappings;
+    // GlobalSceneRegistry at Set 1 (see BuildSceneHeapMappings): composed into
     // any heap pass whose module references `scene` at Set 1 (decal, sky fill).
-    Vk::HeapMappingBundle sceneSet1HeapMappings;
-    Vk::HeapMappingBundle decalHeapMappings;
+    Vk::HeapMappingTable sceneSet1HeapMappings;
+    Vk::HeapMappingTable decalHeapMappings;
 
     // Depth reduction, the GPU draw cull, and the two cluster passes: one
     // family, owned by the passes that dispatch them. Takes the place of the
@@ -345,7 +345,7 @@ struct RenderContext::Impl: RenderFrameContext {
     }
 
     Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
-        presentationTarget(target), diagnostics(ctx, watcher), pipelines(ctx, pipelineBinaries, sceneHeapMappings, deletionQueue) {
+        presentationTarget(target), diagnostics(ctx, watcher), pipelines(ctx, heapManager, pipelineBinaries, sceneHeapMappings, deletionQueue) {
     }
 
     ~Impl() {

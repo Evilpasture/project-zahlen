@@ -690,99 +690,131 @@ void HeapManager::BindHeaps(VkCommandBuffer cmd) const noexcept {
     _samplerHeap.Bind(cmd);
 }
 
-auto HeapManager::MakeConstantOffsetEntry(
-    uint32_t set, uint32_t binding, VkSpirvResourceTypeFlagsEXT mask, uint32_t offset, uint32_t stride
-) noexcept -> VkDescriptorSetAndBindingMappingEXT {
-    return {
-        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
-        .pNext         = nullptr,
-        .descriptorSet = set,
-        .firstBinding  = binding,
-        .bindingCount  = 1,
-        .resourceMask  = mask,
-        .source        = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT,
-        .sourceData    = {.constantOffset = {.heapOffset = offset, .heapArrayStride = stride}},
-    };
-}
-
-void HeapManager::ApplySamplerMapping(
-    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, SamplerHandle handle
-) const noexcept {
-    entries.push_back(
-        MakeConstantOffsetEntry(set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT, static_cast<uint32_t>(SamplerOffset(handle.index)), 0)
+void HeapManager::ApplySamplerMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerHandle handle) const noexcept {
+    mappings.push_back(
+        {.descriptorSet = set,
+         .firstBinding  = binding,
+         .resourceMask  = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT,
+         .source        = MappingSource::SamplerSlot,
+         .slot          = handle.index}
     );
 }
 
-void HeapManager::ApplySamplerArrayMapping(
-    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, SamplerHandle base
-) const noexcept {
-    entries.push_back(
-        MakeConstantOffsetEntry(
-            set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT, static_cast<uint32_t>(SamplerOffset(base.index)),
-            static_cast<uint32_t>(SamplerStride())
-        )
+void HeapManager::ApplySamplerArrayMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerHandle base) const noexcept {
+    mappings.push_back(
+        {.descriptorSet = set,
+         .firstBinding  = binding,
+         .resourceMask  = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT,
+         .source        = MappingSource::SamplerSlot,
+         .slot          = base.index,
+         .array         = true}
     );
 }
 
-void HeapManager::ApplySampledImageMapping(
-    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, TextureHandle handle
-) const noexcept {
-    entries.push_back(
-        MakeConstantOffsetEntry(set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT, static_cast<uint32_t>(ResourceOffset(handle.index)), 0)
+void HeapManager::ApplySampledImageMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, TextureHandle handle) const noexcept {
+    mappings.push_back(
+        {.descriptorSet = set,
+         .firstBinding  = binding,
+         .resourceMask  = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT,
+         .source        = MappingSource::ResourceSlot,
+         .slot          = handle.index}
     );
 }
 
-void HeapManager::ApplyBindlessTextureArrayMapping(
-    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, TextureHandle base
-) const noexcept {
-    entries.push_back(
-        MakeConstantOffsetEntry(
-            set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT, static_cast<uint32_t>(ResourceOffset(base.index)),
-            static_cast<uint32_t>(ResourceStride())
-        )
+void HeapManager::ApplyBindlessTextureArrayMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, TextureHandle base) const noexcept {
+    mappings.push_back(
+        {.descriptorSet = set,
+         .firstBinding  = binding,
+         .resourceMask  = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT,
+         .source        = MappingSource::ResourceSlot,
+         .slot          = base.index,
+         .array         = true}
     );
 }
 
 void HeapManager::ApplyPushIndexMapping(
-    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries,
-    uint32_t                                          set,
-    uint32_t                                          binding,
-    VkSpirvResourceTypeFlagsEXT                       mask,
-    uint32_t                                          ordinal,
-    uint32_t                                          pushOffset
+    HeapMappingTable&           mappings,
+    uint32_t                    set,
+    uint32_t                    binding,
+    VkSpirvResourceTypeFlagsEXT mask,
+    uint32_t                    ordinal,
+    uint32_t                    pushOffset
 ) const noexcept {
-    const auto stride = static_cast<uint32_t>(ResourceStride());
-    entries.push_back(
-        {.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
-         .pNext         = nullptr,
-         .descriptorSet = set,
+    // The ordinal is a row index into the heap; the byte offset it implies is
+    // computed at Materialize() time, where the stride lives.
+    mappings.push_back(
+        {.descriptorSet = set,
          .firstBinding  = binding,
-         .bindingCount  = 1,
          .resourceMask  = mask,
-         .source        = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT,
-         .sourceData    = {.pushIndex = {.heapOffset = ordinal * stride, .pushOffset = pushOffset, .heapIndexStride = stride, .heapArrayStride = 0}}}
+         .source        = MappingSource::PushIndex,
+         .slot          = ordinal,
+         .pushOffset    = pushOffset}
     );
 }
 
-auto HeapManager::ApplyNewSamplerMapping(
-    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, VkSpirvResourceTypeFlagsEXT mask
-) noexcept -> std::expected<SamplerHandle, ErrorCode> {
-    auto slot = AllocateStaticSamplerSlot();
-    if (!slot) [[unlikely]] {
-        return std::unexpected(slot.error());
-    }
-    entries.push_back(MakeConstantOffsetEntry(set, binding, mask, static_cast<uint32_t>(SamplerOffset(*slot)), 0));
-    return SamplerHandle {*slot};
-}
-
-auto HeapManager::ApplyPairedSamplerMapping(VkDescriptorSetAndBindingMappingEXT& entry) noexcept
+auto HeapManager::ApplyNewSamplerMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, VkSpirvResourceTypeFlagsEXT mask) noexcept
     -> std::expected<SamplerHandle, ErrorCode> {
     auto slot = AllocateStaticSamplerSlot();
     if (!slot) [[unlikely]] {
         return std::unexpected(slot.error());
     }
-    entry.sourceData.pushIndex.samplerHeapOffset = static_cast<uint32_t>(SamplerOffset(*slot));
+    mappings.push_back(
+        {.descriptorSet = set, .firstBinding = binding, .resourceMask = mask, .source = MappingSource::SamplerSlot, .slot = *slot}
+    );
     return SamplerHandle {*slot};
+}
+
+auto HeapManager::ApplyPairedSamplerMapping(DescriptorMapping& entry) noexcept -> std::expected<SamplerHandle, ErrorCode> {
+    auto slot = AllocateStaticSamplerSlot();
+    if (!slot) [[unlikely]] {
+        return std::unexpected(slot.error());
+    }
+    entry.pairedSampler = true;
+    entry.samplerSlot   = *slot;
+    return SamplerHandle {*slot};
+}
+
+void HeapManager::Materialize(HeapMappingView mappings, std::span<VkDescriptorSetAndBindingMappingEXT> out) const noexcept {
+    const auto resourceStride = static_cast<uint32_t>(ResourceStride());
+    const auto samplerStride  = static_cast<uint32_t>(SamplerStride());
+    const auto count          = std::min(mappings.size(), out.size());
+
+    for (size_t i = 0; i < count; ++i) {
+        const DescriptorMapping&              m = mappings[i];
+        VkDescriptorSetAndBindingMappingEXT& e = out[i];
+
+        e               = {};
+        e.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT;
+        e.descriptorSet = m.descriptorSet;
+        e.firstBinding  = m.firstBinding;
+        e.bindingCount  = m.bindingCount;
+        e.resourceMask  = m.resourceMask;
+
+        switch (m.source) {
+            case MappingSource::SamplerSlot:
+                e.source                                    = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT;
+                e.sourceData.constantOffset.heapOffset      = static_cast<uint32_t>(SamplerOffset(m.slot));
+                e.sourceData.constantOffset.heapArrayStride = m.array ? samplerStride : 0;
+                break;
+            case MappingSource::ResourceSlot:
+                e.source                                    = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT;
+                e.sourceData.constantOffset.heapOffset      = static_cast<uint32_t>(ResourceOffset(m.slot));
+                e.sourceData.constantOffset.heapArrayStride = m.array ? resourceStride : 0;
+                break;
+            case MappingSource::PushIndex:
+                e.source                                 = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT;
+                e.sourceData.pushIndex.heapOffset        = m.slot * resourceStride;
+                e.sourceData.pushIndex.pushOffset        = m.pushOffset;
+                e.sourceData.pushIndex.heapIndexStride   = resourceStride;
+                e.sourceData.pushIndex.heapArrayStride   = m.array ? resourceStride : 0;
+                e.sourceData.pushIndex.samplerHeapOffset = m.pairedSampler ? static_cast<uint32_t>(SamplerOffset(m.samplerSlot)) : 0;
+                break;
+            case MappingSource::PushAddress:
+                e.source                       = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
+                e.sourceData.pushAddressOffset = m.pushOffset;
+                break;
+        }
+    }
 }
 
 void HeapManager::BindImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {

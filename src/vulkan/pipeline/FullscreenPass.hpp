@@ -36,7 +36,7 @@ struct FullscreenPass {
         // VUID-VkGraphicsPipelineCreateInfo-flags-11312, and extras for
         // variables a variant does not declare are legal (the decal pass has
         // carried one from day one).
-        const HeapMappingBundle*      extraMappings = nullptr
+        const HeapMappingTable*       extraMappings = nullptr
     ) noexcept;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildHeapVariants(
@@ -49,7 +49,7 @@ struct FullscreenPass {
         HeapLifecycle                         lifecycle,
         bool                                  additive = false,
         PipelineBinaryStore*                    binaries = nullptr,
-        const HeapMappingBundle*            extraMappings = nullptr
+        const HeapMappingTable*             extraMappings = nullptr
     ) noexcept;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {

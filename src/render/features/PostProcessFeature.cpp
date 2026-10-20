@@ -21,7 +21,8 @@ auto PostProcessFeature::BuildCompute(
         !built) {
         return std::unexpected(built.error());
     }
-    return pass.BuildHeap(impl.ctx.Device(), shader, bindings.GetInfo(), bindings.indexPushOffset, &impl.pipelineBinaries);
+    Vk::HeapMappingArena mappingArena {impl.heapManager};
+    return pass.BuildHeap(impl.ctx.Device(), shader, mappingArena.Map(bindings.mappings), bindings.indexPushOffset, &impl.pipelineBinaries);
 }
 
 // The typed twin of BuildCompute for Vk::TypedComputePass: the module is the
@@ -43,7 +44,8 @@ auto BuildTypedCompute(
         !built) {
         return std::unexpected(built.error());
     }
-    return pass.Init(impl.ctx.Device(), bindings.GetInfo(), bindings.indexPushOffset, &impl.pipelineBinaries);
+    Vk::HeapMappingArena mappingArena {impl.heapManager};
+    return pass.Init(impl.ctx.Device(), mappingArena.Map(bindings.mappings), bindings.indexPushOffset, &impl.pipelineBinaries);
 }
 
 auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void, ErrorCode> {
@@ -146,7 +148,10 @@ auto PostProcessFeature::BakeSMAALUTs(RenderContext::Impl& impl) -> std::expecte
 using SMAALUTPush = Slang::SMAALUTPush;
 
     const Vk::ShaderDesc shader = Vk::CreateShaderDesc<Shaders::Modules::SmaaLutCS>();
-    return Vk::CreateHeapComputePass(impl.ctx.Device(), shader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset, &impl.pipelineBinaries)
+    Vk::HeapMappingArena mappingArena {impl.heapManager};
+    return Vk::CreateHeapComputePass(
+               impl.ctx.Device(), shader, mappingArena.Map(impl.bakeHeapBindings.mappings), impl.bakeHeapBindings.indexPushOffset, &impl.pipelineBinaries
+           )
         .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, ErrorCode> {
             return impl.BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(
                        pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0}

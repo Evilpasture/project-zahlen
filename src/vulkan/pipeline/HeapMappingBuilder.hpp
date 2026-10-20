@@ -8,78 +8,72 @@
 #endif
 
 #include "DescriptorHeap.hpp"
+#include <memory>
 #include <vector>
 
 namespace ZHLN::Vk {
 
-struct HeapMappingBundle {
-    std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
-    VkShaderDescriptorSetAndBindingMappingInfoEXT    info {};
-
-    HeapMappingBundle() = default;
-    explicit HeapMappingBundle(const HeapPassBindings& b): entries(b.entries) {
-        Finalize();
+// Build-time owner of the materialized driver structs. A pipeline build that
+// needs pMappings creates one of these, asks it for the mapping info, and lets
+// it die when the build returns: the Vulkan array never outlives the call that
+// read it, and no persistent object holds a driver struct or a pointer into one.
+class HeapMappingArena {
+  public:
+    explicit HeapMappingArena(const HeapManager& heap) noexcept: _heap(heap) {
     }
 
-    // `info.pMappings` points into `entries`; copies must re-establish that
-    // link (moves are safe: the vector's buffer travels with the bundle).
-    HeapMappingBundle(const HeapMappingBundle& other): entries(other.entries) {
-        Finalize();
-    }
-    auto operator=(const HeapMappingBundle& other) -> HeapMappingBundle& {
-        entries = other.entries;
-        Finalize();
-        return *this;
-    }
-    HeapMappingBundle(HeapMappingBundle&& other) noexcept: entries(std::move(other.entries)) {
-        Finalize();
+    HeapMappingArena(const HeapMappingArena&)                        = delete;
+    auto operator=(const HeapMappingArena&) -> HeapMappingArena&     = delete;
+    HeapMappingArena(HeapMappingArena&&) noexcept                    = delete;
+    auto operator=(HeapMappingArena&&) noexcept -> HeapMappingArena& = delete;
+
+    /// Materializes `mappings`, or returns nullptr when there is nothing to map
+    /// (no mapping struct is attached to the shader stage in that case).
+    [[nodiscard]] auto Map(HeapMappingView mappings) -> const VkShaderDescriptorSetAndBindingMappingInfoEXT* {
+        return Allocate(mappings, {});
     }
 
-    auto operator=(HeapMappingBundle&& other) noexcept -> HeapMappingBundle& {
-        if (this != &other) {
-            entries = std::move(other.entries);
-            Finalize();
+    /// A pass's own set plus a shared block as one pMappings list: one
+    /// allocation, one pass over both tables, no intermediate table. Order is
+    /// preserved; unused entries are legal (VUID-...-11312 only fails on missing
+    /// ones).
+    [[nodiscard]] auto Map(HeapMappingView first, HeapMappingView second) -> const VkShaderDescriptorSetAndBindingMappingInfoEXT* {
+        return Allocate(first, second);
+    }
+
+  private:
+    // Blocks are heap-allocated and never moved, so an info pointer handed out
+    // by Map() stays valid for as long as this arena lives.
+    struct Block {
+        std::unique_ptr<VkDescriptorSetAndBindingMappingEXT[]> entries;
+        VkShaderDescriptorSetAndBindingMappingInfoEXT          info {};
+    };
+
+    [[nodiscard]] auto Allocate(HeapMappingView first, HeapMappingView second) -> const VkShaderDescriptorSetAndBindingMappingInfoEXT* {
+        const size_t count = first.size() + second.size();
+        if (count == 0) {
+            return nullptr;
         }
-        return *this;
-    }
 
-    [[nodiscard]] const VkShaderDescriptorSetAndBindingMappingInfoEXT* GetInfo() const noexcept {
-        return entries.empty() ? nullptr : &info;
-    }
+        auto block     = std::make_unique<Block>();
+        block->entries = std::make_unique<VkDescriptorSetAndBindingMappingEXT[]>(count);
 
-    // Bundle-merge idiom for multi-set layouts: a pass's own set-0 mappings
-    // plus shared bundles (e.g. the Set-1 scene block) become one pMappings
-    // list. Concatenation order is preserved; unused entries are legal
-    // (VUID-...-11312 only fails on missing ones).
-    [[nodiscard]] auto MergedWith(const HeapMappingBundle& other) const -> HeapMappingBundle {
-        HeapMappingBundle bundle;
-        bundle.entries.reserve(entries.size() + other.entries.size());
-        bundle.entries.insert(bundle.entries.end(), entries.begin(), entries.end());
-        bundle.entries.insert(bundle.entries.end(), other.entries.begin(), other.entries.end());
-        bundle.Finalize();
-        return bundle;
-    }
+        const auto storage = std::span {block->entries.get(), count};
+        _heap.Materialize(first, storage.first(first.size()));
+        _heap.Materialize(second, storage.subspan(first.size()));
 
-    [[nodiscard]] static auto Merge(const HeapPassBindings& passBindings, const HeapMappingBundle* extra) -> HeapMappingBundle {
-        HeapMappingBundle bundle;
-        const size_t      extra_count = extra != nullptr ? extra->entries.size() : 0;
-        bundle.entries.reserve(passBindings.entries.size() + extra_count);
-        bundle.entries.insert(bundle.entries.end(), passBindings.entries.begin(), passBindings.entries.end());
-        if (extra != nullptr) {
-            bundle.entries.insert(bundle.entries.end(), extra->entries.begin(), extra->entries.end());
-        }
-        bundle.Finalize();
-        return bundle;
-    }
-
-    void Finalize() noexcept {
-        info = {
+        block->info = {
             .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
             .pNext        = nullptr,
-            .mappingCount = static_cast<uint32_t>(entries.size()),
-            .pMappings    = entries.empty() ? nullptr : entries.data(),
+            .mappingCount = static_cast<uint32_t>(count),
+            .pMappings    = storage.data(),
         };
+        _blocks.push_back(std::move(block));
+        return &_blocks.back()->info;
     }
+
+    const HeapManager&                  _heap;
+    std::vector<std::unique_ptr<Block>> _blocks;
 };
 
 class HeapMappingBuilder {
@@ -88,22 +82,22 @@ class HeapMappingBuilder {
     }
 
     auto Sampler(uint32_t set, uint32_t binding, SamplerHandle handle) && noexcept -> HeapMappingBuilder&& {
-        _heap.ApplySamplerMapping(_entries, set, binding, handle);
+        _heap.ApplySamplerMapping(_mappings, set, binding, handle);
         return std::move(*this);
     }
 
     auto SamplerArray(uint32_t set, uint32_t binding, SamplerHandle base) && noexcept -> HeapMappingBuilder&& {
-        _heap.ApplySamplerArrayMapping(_entries, set, binding, base);
+        _heap.ApplySamplerArrayMapping(_mappings, set, binding, base);
         return std::move(*this);
     }
 
     auto SampledImage(uint32_t set, uint32_t binding, TextureHandle handle) && noexcept -> HeapMappingBuilder&& {
-        _heap.ApplySampledImageMapping(_entries, set, binding, handle);
+        _heap.ApplySampledImageMapping(_mappings, set, binding, handle);
         return std::move(*this);
     }
 
     auto BindlessTextureArray(uint32_t set, uint32_t binding, TextureHandle base) && noexcept -> HeapMappingBuilder&& {
-        _heap.ApplyBindlessTextureArrayMapping(_entries, set, binding, base);
+        _heap.ApplyBindlessTextureArrayMapping(_mappings, set, binding, base);
         return std::move(*this);
     }
 
@@ -124,32 +118,27 @@ class HeapMappingBuilder {
         uint32_t                    indexPushOffset,
         VkSpirvResourceTypeFlagsEXT typeMask = VK_SPIRV_RESOURCE_TYPE_ALL_EXT
     ) && noexcept -> HeapMappingBuilder&& {
-        _heap.ApplyPushIndexMapping(_entries, set, binding, typeMask, ordinal, indexPushOffset);
+        _heap.ApplyPushIndexMapping(_mappings, set, binding, typeMask, ordinal, indexPushOffset);
         return std::move(*this);
     }
 
-    [[nodiscard]] auto Build() && noexcept -> HeapMappingBundle {
-        HeapMappingBundle bundle;
-        bundle.entries = std::move(_entries);
-        bundle.Finalize();
-        return bundle;
+    [[nodiscard]] auto Build() && noexcept -> HeapMappingTable {
+        return std::move(_mappings);
     }
 
   private:
     void AddPushAddress(uint32_t set, uint32_t binding, VkSpirvResourceTypeFlagsEXT typeMask, uint32_t offset) noexcept {
-        _entries.push_back(
-            {.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
-             .descriptorSet = set,
+        _mappings.push_back(
+            {.descriptorSet = set,
              .firstBinding  = binding,
-             .bindingCount  = 1,
              .resourceMask  = typeMask,
-             .source        = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT,
-             .sourceData    = {.pushAddressOffset = offset}}
+             .source        = MappingSource::PushAddress,
+             .pushOffset    = offset}
         );
     }
 
-    const HeapManager&                               _heap;
-    std::vector<VkDescriptorSetAndBindingMappingEXT> _entries;
+    const HeapManager& _heap;
+    HeapMappingTable   _mappings;
 };
 
 } // namespace ZHLN::Vk

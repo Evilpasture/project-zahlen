@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "DescriptorMapping.hpp"
 #include "ShaderProgram.hpp"
 
 #include <Zahlen/Log.hpp>
@@ -25,8 +26,10 @@ namespace ZHLN::Vk {
 }
 
 struct HeapPassBindings {
-    std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
-    VkShaderDescriptorSetAndBindingMappingInfoEXT    info {};
+    // The mappings this set declares: semantic rows, 32 bytes each, owned here.
+    // Nothing in this header materializes them; a build site asks a
+    // HeapMappingArena for the driver struct when it creates a pipeline.
+    HeapMappingTable mappings;
 
     std::vector<uint32_t>    samplerSlots;
     std::vector<std::string> samplerNames;
@@ -66,19 +69,6 @@ struct HeapPassBindings {
     HeapLifecycle lifecycle = HeapLifecycle::Frame;
 
     uint32_t resourceBindingCount = 0;
-
-    void Finalize() noexcept {
-        info = {
-            .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
-            .pNext        = nullptr,
-            .mappingCount = static_cast<uint32_t>(entries.size()),
-            .pMappings    = entries.empty() ? nullptr : entries.data(),
-        };
-    }
-
-    [[nodiscard]] auto GetInfo() const noexcept -> const VkShaderDescriptorSetAndBindingMappingInfoEXT* {
-        return info.mappingCount > 0 ? &info : nullptr;
-    }
 };
 
 inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
@@ -93,7 +83,7 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     HeapLifecycle       lifecycle,
     HeapPassBindings&   out
 ) noexcept -> std::expected<void, ErrorCode> {
-    out.entries.clear();
+    out.mappings.clear();
     out.samplerSlots.clear();
     out.samplerNames.clear();
     out.resources.clear();
@@ -101,7 +91,6 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     out.indexPushOffset      = indexPushOffset;
     out.lifecycle            = lifecycle;
     out.resourceBindingCount = 0;
-    out.info                 = {};
 
     if (indexPushOffset == 0) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::MappingFailed);
@@ -122,7 +111,7 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
         // A sampler binding is registered by the heap itself: slot allocation and
         // the mapping that addresses it happen in one call.
         if (IsHeapSamplerType(b.descriptorType)) {
-            auto slot = heap.ApplyNewSamplerMapping(out.entries, setIndex, b.binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT);
+            auto slot = heap.ApplyNewSamplerMapping(out.mappings, setIndex, b.binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT);
             if (!slot) [[unlikely]] {
                 return std::unexpected(slot.error());
             }
@@ -155,12 +144,12 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
                 break;
         }
 
-        // The heap expands this into a push-index mapping; ordinal * stride is
-        // computed inside it, never here.
-        heap.ApplyPushIndexMapping(out.entries, setIndex, b.binding, mask, ordinal, indexPushOffset);
+        // The heap expands this into a push-index mapping; the byte offset the
+        // ordinal implies is computed at materialization, never here.
+        heap.ApplyPushIndexMapping(out.mappings, setIndex, b.binding, mask, ordinal, indexPushOffset);
 
         if (b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-            auto smp = heap.ApplyPairedSamplerMapping(out.entries.back());
+            auto smp = heap.ApplyPairedSamplerMapping(out.mappings.back());
             if (!smp) [[unlikely]] {
                 return std::unexpected(smp.error());
             }
@@ -170,7 +159,6 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
         );
         ++ordinal;
     }
-    out.Finalize();
     return {};
 }
 
