@@ -58,11 +58,11 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
             defer                       _([&] { allocator.DestroyImage(gpuImage); });
             const Vk::ImageView writeView = gpuImage.View();
 
-            heapManager.BeginImmediate();
-            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(bakeHeapBindings, Vk::Slot<"outTexture">(writeView));
+            auto                  heapScope = heapManager.CreateImmediateScope();
+            const Vk::HeapBlockBase block     = heapScope.WriteParameters<Shaders::Bake>(bakeHeapBindings, Vk::Slot<"outTexture">(writeView));
 
             if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
-                heapManager.BindHeaps(cmd);
+                heapScope.Bind(cmd);
 
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, gpuImage.Handle());
 

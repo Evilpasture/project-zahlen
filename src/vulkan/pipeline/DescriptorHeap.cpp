@@ -467,7 +467,16 @@ auto HeapManager::Init(
     return {};
 }
 
-void HeapManager::BeginFrame(uint32_t frameIndex) noexcept {
+auto HeapManager::BeginFrameScope(uint32_t frameIndex) noexcept -> HeapFrameScope {
+    EnterFrame(frameIndex);
+    return HeapFrameScope(*this, frameIndex);
+}
+
+auto HeapManager::CreateImmediateScope() noexcept -> HeapImmediateScope {
+    return HeapImmediateScope(*this);
+}
+
+void HeapManager::EnterFrame(uint32_t frameIndex) noexcept {
     if constexpr (isDev) {
         if (_frameTransientResourceCount > 0 && _frameTransientAllocated * 4 > _frameTransientResourceCount * 3) [[unlikely]] {
             ZHLN::Log(
@@ -480,8 +489,154 @@ void HeapManager::BeginFrame(uint32_t frameIndex) noexcept {
     _frameTransientAllocated = 0;
 }
 
-void HeapManager::BeginImmediate() noexcept {
-    _immediateTransientAllocated = 0;
+void HeapManager::LeaveFrame() noexcept {
+    // Nothing to undo: the next frame's transaction resets the partition, and the
+    // scope only exists so the frame's owner cannot forget that it was opened.
+}
+
+auto HeapManager::EnterImmediateScope() noexcept -> uint32_t {
+    const ZHLN::MutexGuard guard(_writeMutex);
+    return _immediateTransientAllocated;
+}
+
+void HeapManager::LeaveImmediateScope(uint32_t baseCursor) noexcept {
+    const ZHLN::MutexGuard guard(_writeMutex);
+    ZHLN::Assert(baseCursor <= _immediateTransientAllocated, "descriptor-heap immediate scopes must nest LIFO");
+    _immediateTransientAllocated = baseCursor;
+}
+
+HeapImmediateScope::HeapImmediateScope(HeapManager& owner) noexcept: _owner(&owner), _baseCursor(owner.EnterImmediateScope()) {
+}
+
+HeapImmediateScope::~HeapImmediateScope() noexcept {
+    Close();
+}
+
+HeapImmediateScope::HeapImmediateScope(HeapImmediateScope&& other) noexcept:
+    _owner(std::exchange(other._owner, nullptr)), _baseCursor(std::exchange(other._baseCursor, 0)) {
+}
+
+auto HeapImmediateScope::operator=(HeapImmediateScope&& other) noexcept -> HeapImmediateScope& {
+    if (this != &other) {
+        Close();
+        _owner      = std::exchange(other._owner, nullptr);
+        _baseCursor = std::exchange(other._baseCursor, 0);
+    }
+    return *this;
+}
+
+void HeapImmediateScope::Close() noexcept {
+    if (_owner != nullptr) {
+        _owner->LeaveImmediateScope(_baseCursor);
+        _owner = nullptr;
+    }
+}
+
+HeapFrameScope::HeapFrameScope(HeapManager& owner, uint32_t frameIndex) noexcept: _owner(&owner), _frameIndex(frameIndex) {
+}
+
+HeapFrameScope::~HeapFrameScope() noexcept {
+    Close();
+}
+
+HeapFrameScope::HeapFrameScope(HeapFrameScope&& other) noexcept:
+    _owner(std::exchange(other._owner, nullptr)), _frameIndex(std::exchange(other._frameIndex, 0)) {
+}
+
+auto HeapFrameScope::operator=(HeapFrameScope&& other) noexcept -> HeapFrameScope& {
+    if (this != &other) {
+        Close();
+        _owner      = std::exchange(other._owner, nullptr);
+        _frameIndex = std::exchange(other._frameIndex, 0);
+    }
+    return *this;
+}
+
+void HeapFrameScope::Close() noexcept {
+    if (_owner != nullptr) {
+        _owner->LeaveFrame();
+        _owner = nullptr;
+    }
+}
+
+auto HeapManager::ReserveSampler() noexcept -> std::expected<SamplerHandle, ErrorCode> {
+    return AllocateStaticSamplerSlot().transform([](uint32_t slot) { return SamplerHandle {slot}; });
+}
+
+auto HeapManager::ReserveImage() noexcept -> std::expected<TextureHandle, ErrorCode> {
+    return AllocateStaticResourceSlot().transform([](uint32_t slot) { return TextureHandle {slot}; });
+}
+
+auto HeapManager::ReserveSamplerRange(uint32_t count) noexcept -> std::expected<SamplerHandle, ErrorCode> {
+    const uint32_t base = _staticSamplerAlloc.Cursor();
+    if (count > _staticSamplerCount - base) [[unlikely]] {
+        return std::unexpected(DescriptorHeapError::SamplerSlotsExhausted);
+    }
+    _staticSamplerAlloc.Skip(count);
+    return SamplerHandle {base};
+}
+
+auto HeapManager::ReserveImageRange(uint32_t count) noexcept -> std::expected<TextureHandle, ErrorCode> {
+    const uint32_t base = _staticResourceAlloc.Cursor();
+    if (count > _staticResourceCount - base) [[unlikely]] {
+        return std::unexpected(DescriptorHeapError::ResourceSlotsExhausted);
+    }
+    _staticResourceAlloc.Skip(count);
+    return TextureHandle {base};
+}
+
+auto HeapManager::RegisterSampler(const SamplerConfig& config) noexcept -> std::expected<SamplerHandle, ErrorCode> {
+    auto handle = ReserveSampler();
+    if (!handle) [[unlikely]] {
+        return handle;
+    }
+    BindSampler(*handle, config);
+    return handle;
+}
+
+auto HeapManager::RegisterImage(const ImageView& view, VkImageLayout layout) noexcept -> std::expected<TextureHandle, ErrorCode> {
+    auto handle = ReserveImage();
+    if (!handle) [[unlikely]] {
+        return handle;
+    }
+    BindImage(*handle, view, layout);
+    return handle;
+}
+
+auto HeapManager::RegisterStorageImage(const ImageView& view, VkImageLayout layout) noexcept -> std::expected<StorageImageHandle, ErrorCode> {
+    auto slot = AllocateStaticResourceSlot();
+    if (!slot) [[unlikely]] {
+        return std::unexpected(slot.error());
+    }
+    BindStorageImage(StorageImageHandle {*slot}, view, layout);
+    return StorageImageHandle {*slot};
+}
+
+auto HeapManager::RegisterStorageBuffer(BufferSlice slice) noexcept -> std::expected<StorageBufferHandle, ErrorCode> {
+    auto slot = AllocateStaticResourceSlot();
+    if (!slot) [[unlikely]] {
+        return std::unexpected(slot.error());
+    }
+    BindStorageBuffer(StorageBufferHandle {*slot}, slice);
+    return StorageBufferHandle {*slot};
+}
+
+auto HeapManager::RegisterUniformBuffer(BufferSlice slice) noexcept -> std::expected<UniformBufferHandle, ErrorCode> {
+    auto slot = AllocateStaticResourceSlot();
+    if (!slot) [[unlikely]] {
+        return std::unexpected(slot.error());
+    }
+    BindUniformBuffer(UniformBufferHandle {*slot}, slice);
+    return UniformBufferHandle {*slot};
+}
+
+auto HeapManager::RegisterAccelerationStructure(VkDeviceAddress address) noexcept -> std::expected<AccelerationStructureHandle, ErrorCode> {
+    auto slot = AllocateStaticResourceSlot();
+    if (!slot) [[unlikely]] {
+        return std::unexpected(slot.error());
+    }
+    BindAccelerationStructure(AccelerationStructureHandle {*slot}, address);
+    return AccelerationStructureHandle {*slot};
 }
 
 auto HeapManager::AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, ErrorCode> {
@@ -535,25 +690,102 @@ void HeapManager::BindHeaps(VkCommandBuffer cmd) const noexcept {
     _samplerHeap.Bind(cmd);
 }
 
-auto HeapManager::ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode> {
-    const uint32_t base = _staticResourceAlloc.Cursor();
-    if (count > _staticResourceCount - base) [[unlikely]] {
-        return std::unexpected(DescriptorHeapError::ResourceSlotsExhausted);
-    }
-    _staticResourceAlloc.Skip(count);
-    return base;
+auto HeapManager::MakeConstantOffsetEntry(
+    uint32_t set, uint32_t binding, VkSpirvResourceTypeFlagsEXT mask, uint32_t offset, uint32_t stride
+) noexcept -> VkDescriptorSetAndBindingMappingEXT {
+    return {
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
+        .pNext         = nullptr,
+        .descriptorSet = set,
+        .firstBinding  = binding,
+        .bindingCount  = 1,
+        .resourceMask  = mask,
+        .source        = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT,
+        .sourceData    = {.constantOffset = {.heapOffset = offset, .heapArrayStride = stride}},
+    };
 }
 
-auto HeapManager::ReserveOffsetAddressedSamplerRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode> {
-    const uint32_t base = _staticSamplerAlloc.Cursor();
-    if (count > _staticSamplerCount - base) [[unlikely]] {
-        return std::unexpected(DescriptorHeapError::SamplerSlotsExhausted);
-    }
-    _staticSamplerAlloc.Skip(count);
-    return base;
+void HeapManager::ApplySamplerMapping(
+    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, SamplerHandle handle
+) const noexcept {
+    entries.push_back(
+        MakeConstantOffsetEntry(set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT, static_cast<uint32_t>(SamplerOffset(handle.index)), 0)
+    );
 }
 
-void HeapManager::WriteImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+void HeapManager::ApplySamplerArrayMapping(
+    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, SamplerHandle base
+) const noexcept {
+    entries.push_back(
+        MakeConstantOffsetEntry(
+            set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT, static_cast<uint32_t>(SamplerOffset(base.index)),
+            static_cast<uint32_t>(SamplerStride())
+        )
+    );
+}
+
+void HeapManager::ApplySampledImageMapping(
+    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, TextureHandle handle
+) const noexcept {
+    entries.push_back(
+        MakeConstantOffsetEntry(set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT, static_cast<uint32_t>(ResourceOffset(handle.index)), 0)
+    );
+}
+
+void HeapManager::ApplyBindlessTextureArrayMapping(
+    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, TextureHandle base
+) const noexcept {
+    entries.push_back(
+        MakeConstantOffsetEntry(
+            set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT, static_cast<uint32_t>(ResourceOffset(base.index)),
+            static_cast<uint32_t>(ResourceStride())
+        )
+    );
+}
+
+void HeapManager::ApplyPushIndexMapping(
+    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries,
+    uint32_t                                          set,
+    uint32_t                                          binding,
+    VkSpirvResourceTypeFlagsEXT                       mask,
+    uint32_t                                          ordinal,
+    uint32_t                                          pushOffset
+) const noexcept {
+    const auto stride = static_cast<uint32_t>(ResourceStride());
+    entries.push_back(
+        {.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
+         .pNext         = nullptr,
+         .descriptorSet = set,
+         .firstBinding  = binding,
+         .bindingCount  = 1,
+         .resourceMask  = mask,
+         .source        = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT,
+         .sourceData    = {.pushIndex = {.heapOffset = ordinal * stride, .pushOffset = pushOffset, .heapIndexStride = stride, .heapArrayStride = 0}}}
+    );
+}
+
+auto HeapManager::ApplyNewSamplerMapping(
+    std::vector<VkDescriptorSetAndBindingMappingEXT>& entries, uint32_t set, uint32_t binding, VkSpirvResourceTypeFlagsEXT mask
+) noexcept -> std::expected<SamplerHandle, ErrorCode> {
+    auto slot = AllocateStaticSamplerSlot();
+    if (!slot) [[unlikely]] {
+        return std::unexpected(slot.error());
+    }
+    entries.push_back(MakeConstantOffsetEntry(set, binding, mask, static_cast<uint32_t>(SamplerOffset(*slot)), 0));
+    return SamplerHandle {*slot};
+}
+
+auto HeapManager::ApplyPairedSamplerMapping(VkDescriptorSetAndBindingMappingEXT& entry) noexcept
+    -> std::expected<SamplerHandle, ErrorCode> {
+    auto slot = AllocateStaticSamplerSlot();
+    if (!slot) [[unlikely]] {
+        return std::unexpected(slot.error());
+    }
+    entry.sourceData.pushIndex.samplerHeapOffset = static_cast<uint32_t>(SamplerOffset(*slot));
+    return SamplerHandle {*slot};
+}
+
+void HeapManager::BindImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
     if (!handle.Valid() || view.Handle() == VK_NULL_HANDLE) {
         return;
     }
@@ -562,7 +794,7 @@ void HeapManager::WriteImage(TextureHandle handle, const ImageView& view, VkImag
     FlushResourceBatch(batch);
 }
 
-void HeapManager::WriteStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+void HeapManager::BindStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
     if (!handle.Valid() || view.Handle() == VK_NULL_HANDLE) {
         return;
     }
@@ -571,7 +803,7 @@ void HeapManager::WriteStorageImage(StorageImageHandle handle, const ImageView& 
     FlushResourceBatch(batch);
 }
 
-void HeapManager::WriteBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept {
+void HeapManager::BindStorageBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept {
     if (!handle.Valid()) {
         return;
     }
@@ -580,7 +812,7 @@ void HeapManager::WriteBuffer(StorageBufferHandle handle, BufferSlice slice) noe
     FlushResourceBatch(batch);
 }
 
-void HeapManager::WriteBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept {
+void HeapManager::BindUniformBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept {
     if (!handle.Valid()) {
         return;
     }
@@ -589,7 +821,7 @@ void HeapManager::WriteBuffer(UniformBufferHandle handle, BufferSlice slice) noe
     FlushResourceBatch(batch);
 }
 
-void HeapManager::WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept {
+void HeapManager::BindAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept {
     if (!handle.Valid()) {
         return;
     }
@@ -598,7 +830,7 @@ void HeapManager::WriteAccelerationStructure(AccelerationStructureHandle handle,
     FlushResourceBatch(batch);
 }
 
-void HeapManager::WriteSampler(SamplerHandle handle, const SamplerConfig& config) noexcept {
+void HeapManager::BindSampler(SamplerHandle handle, const SamplerConfig& config) noexcept {
     if (!handle.Valid()) {
         return;
     }

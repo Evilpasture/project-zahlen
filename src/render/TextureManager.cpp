@@ -37,11 +37,11 @@ TextureManager::TextureManager(
 }
 
 auto TextureManager::ReserveBindlessRegion() -> std::expected<void, ErrorCode> {
-    const auto base = _heaps.ReserveOffsetAddressedResourceRegion(kGlobalTextureSlots);
+    const auto base = _heaps.ReserveImageRange(kGlobalTextureSlots);
     if (!base) [[unlikely]] {
         return std::unexpected(base.error());
     }
-    _bindlessBaseSlot = *base;
+    _bindlessBaseSlot = base->index;
     return {};
 }
 
@@ -347,8 +347,7 @@ void TextureManager::NameSlots() noexcept {
 }
 
 void TextureManager::WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept {
-    const Vk::TextureHandle slot {_bindlessBaseSlot + bindlessIndex};
-    _heaps.WriteImage(slot, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    _heaps.BindImage(Vk::TextureHandle {_bindlessBaseSlot + bindlessIndex}, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 } // namespace ZHLN

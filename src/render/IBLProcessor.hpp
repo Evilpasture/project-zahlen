@@ -140,15 +140,15 @@ class IBLProcessor {
             .sunDir      = sunDir4,
         };
 
-        impl.heapManager.BeginImmediate();
-        const auto brdfBlock = impl.heapManager.WriteHeapParameters<Shaders::Bake>(impl.bakeHeapBindings, Vk::Slot<"outTexture">(payload.brdfLutImage.View()));
+        auto       heapScope   = impl.heapManager.CreateImmediateScope();
+        const auto brdfBlock   = heapScope.WriteParameters<Shaders::Bake>(impl.bakeHeapBindings, Vk::Slot<"outTexture">(payload.brdfLutImage.View()));
 
         const Vk::ImageView radianceView  = stagedInput->image.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, stagedInput->mipLevels);
         const auto          specMipBlocks = [&] {
             std::array<Vk::HeapBlockBase, kMipLevels> blocks {};
             for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                 const auto mipView = payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
-                blocks[mip]        = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
+                blocks[mip]        = heapScope.WriteParameters<Shaders::IblBake>(
                     impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(mipView), Vk::Slot<"radianceMap">(radianceView)
                 );
             }
@@ -156,7 +156,7 @@ class IBLProcessor {
         }();
 
         const auto shBlock = !hasPreparedSH ?
-                                 impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
+                                 heapScope.WriteParameters<Shaders::IblBake>(
                                      impl.iblBakeHeapBindings,
                                      Vk::Slot<"outTexture">(payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY)),
                                      Vk::Slot<"radianceMap">(radianceView)
@@ -167,7 +167,7 @@ class IBLProcessor {
         if (auto immediate = ExecuteImmediate(
                 impl.ctx, impl.graphicsCmdRing,
                 [&](VkCommandBuffer cmd) {
-                    impl.heapManager.BindHeaps(cmd);
+                    heapScope.Bind(cmd);
 
                     stagedInput->RecordUpload(cmd, useVisualSky ? payload.visualSkyImage.Handle() : VK_NULL_HANDLE);
 

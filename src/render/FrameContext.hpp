@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "DrawQueueManager.hpp"
 #include "FrameDestinations.hpp"
 #include "FrameResources.hpp"
@@ -69,6 +71,9 @@ struct RenderFrameContext {
     Vk::DeletionQueue                                   deletionQueue;
 
     Vk::HeapManager heapManager;
+    // The open frame transaction. Declared after the heap so it closes before the
+    // heap it points at is torn down.
+    std::optional<Vk::HeapFrameScope> heapFrame;
 
     TargetManager   targets;
     GraphResources& graphResources = targets.Graph();

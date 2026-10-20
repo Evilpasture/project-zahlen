@@ -80,16 +80,40 @@ sampler heap buffer: static only (scene registry + one slot per pass sampler bin
   `AlignUp(max(bufferDescriptorSize, imageDescriptorSize), max(bufferDescriptorAlignment, imageDescriptorAlignment))`
   so every slot fits every resource type and all spec alignment VUIDs hold.
 * The three dynamic groups are one bump allocator per lifecycle
-  (`HeapLifecycle::Frame` / `Immediate`), rewound by `HeapManager::BeginFrame`
-  and `BeginImmediate`. A write allocates its pass's whole block from the
-  partition of the frame being recorded, which is why a pass no longer declares
-  how many blocks per frame it needs: `BeginImmediate` is honest because the
-  out-of-frame bakes run through `ExecuteImmediate`, which waits on the fence
-  before the partition is reused.
-* `globalTextures[]` is one offset-addressed region: the reservation returns its
-  base, the set-0 mapping points at that base, and a static allocation added
-  before the reservation moves the array instead of landing inside it. The
-  hand-counted `SkipStatic*` cursors this replaced are gone.
+  (`HeapLifecycle::Frame` / `Immediate`), rewound by transactions rather than by
+  a state flag the caller has to remember to tick: `HeapManager::BeginFrameScope`
+  opens the frame partition (the renderer's frame context holds the token) and
+  `HeapManager::CreateImmediateScope` opens a bump transaction over the immediate
+  partition. A write allocates its pass's whole block from the partition of the
+  frame being recorded, which is why a pass no longer declares how many blocks
+  per frame it needs. Immediate scopes nest LIFO and each restores the cursor it
+  found on exit, so two live scopes hand out disjoint slots instead of resetting
+  each other's cursor to zero; the out-of-frame bakes stay honest because
+  `ExecuteImmediate` waits on the fence before a scope's range is reused.
+* `globalTextures[]` is one offset-addressed region: `ReserveImageRange` returns
+  its typed base handle, the set-0 mapping points at that base, and a static
+  allocation added before the reservation moves the array instead of landing
+  inside it. The hand-counted `SkipStatic*` cursors this replaced are gone.
+
+### Registration, reservation, binding
+
+`HeapManager` hands out typed capabilities, never slot indices and never raw
+byte offsets:
+
+| Operation | API | Use |
+| --------- | --- | --- |
+| Register | `RegisterSampler`, `RegisterSamplerArray`, `RegisterImage`, `RegisterStorageImage`, `RegisterStorageBuffer`, `RegisterUniformBuffer`, `RegisterAccelerationStructure` | Slot assignment and descriptor write in one call: a handle that comes back is already written. |
+| Reserve  | `ReserveSampler`, `ReserveImage`, `ReserveSamplerRange`, `ReserveImageRange` | Only when the payload cannot exist yet (a mapping baked into a pipeline precedes the image it addresses). Returns a typed handle, and it is expected to be bound. |
+| Bind     | `BindSampler`, `BindImage`, `BindStorageImage`, `BindStorageBuffer`, `BindUniformBuffer`, `BindAccelerationStructure` | Attach or refresh the payload of an existing handle. |
+
+Mapping offsets are computed by the heap (`ApplySamplerMapping`,
+`ApplySamplerArrayMapping`, `ApplySampledImageMapping`,
+`ApplyBindlessTextureArrayMapping`, `ApplyPushIndexMapping`, and the
+allocation-carrying `ApplyNewSamplerMapping` / `ApplyPairedSamplerMapping` that
+`BuildHeapPassBindings` uses), so `HeapMappingBuilder` and the reflected-binding
+builder never see `ResourceStride()`, `SamplerStride()`, `ResourceOffset()` or
+`SamplerOffset()` — those are private to `HeapManager` now. If padding, stride
+rules or the partition layout change, nothing outside the heap changes.
 * `globalTextures[]` slots are recycled rather than only ever appended to:
   `ReleaseBindlessTexture` parks a released slot (its descriptor keeps pointing
   at the parked image while frames that may still read it are in flight),

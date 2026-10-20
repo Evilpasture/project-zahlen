@@ -318,8 +318,8 @@ The write allocates the pass's whole block from the frame's transient partition
 and returns its base (`Vk::HeapBlockBase`), which the dispatch pushes into the
 mapping's index word: descriptors are written where they are consumed, one block
 per dispatch, and no pass reserves a per-frame count of variants. Bakes recorded
-outside the frame loop allocate from the immediate partition after
-`HeapManager::BeginImmediate`. Samplers are initialized once by
+outside the frame loop allocate from the immediate partition inside a
+`HeapManager::CreateImmediateScope()` transaction. Samplers are initialized once by
 `InitHeapPassSamplers` from `Vk::SamplerSlot<"name">` values, matched by name
 the same way.
 

@@ -449,7 +449,9 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     deletionQueue.BeginFrame(frame_index);
     _impl->textureManager.BeginFrame(frame_index);
     _impl->frameOpen = true;
-    _impl->heapManager.BeginFrame(frame_index);
+    // Open the frame's descriptor-heap transaction; the previous one closes as the
+    // new token replaces it.
+    _impl->heapFrame = _impl->heapManager.BeginFrameScope(frame_index);
     _impl->uiRenderer.BeginFrame();
 
     float timestampPeriod = _impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;

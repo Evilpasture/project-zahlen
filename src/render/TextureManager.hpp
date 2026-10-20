@@ -62,6 +62,9 @@ class TextureManager {
     [[nodiscard]] uint32_t BindlessBaseSlot() const noexcept {
         return _bindlessBaseSlot;
     }
+    [[nodiscard]] Vk::TextureHandle BindlessBaseHandle() const noexcept {
+        return Vk::TextureHandle {_bindlessBaseSlot};
+    }
 
     [[nodiscard]] auto Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true)
         -> std::expected<TextureHandle, ErrorCode>;
