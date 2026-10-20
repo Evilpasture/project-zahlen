@@ -8,6 +8,7 @@
 #endif
 
 #include "DescriptorHeap.hpp"
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -17,8 +18,17 @@ namespace ZHLN::Vk {
 // needs pMappings creates one of these, asks it for the mapping info, and lets
 // it die when the build returns: the Vulkan array never outlives the call that
 // read it, and no persistent object holds a driver struct or a pointer into one.
+//
+// The entries live inside the arena, not behind a pointer: Set 0 and the shared
+// Set-1 scene block together are around 19 mappings and no shader in the engine
+// maps more than 32, so a build allocates nothing at all. A set that ever
+// outgrows the inline buffer spills to one heap block rather than failing.
 class HeapMappingArena {
   public:
+    /// The widest mapping list the renderer builds: a pass's own set plus the
+    /// shared Set-1 scene block, with headroom.
+    static constexpr uint32_t kInlineMappings = 32;
+
     explicit HeapMappingArena(const HeapManager& heap) noexcept: _heap(heap) {
     }
 
@@ -33,21 +43,44 @@ class HeapMappingArena {
         return Allocate(mappings, {});
     }
 
-    /// A pass's own set plus a shared block as one pMappings list: one
-    /// allocation, one pass over both tables, no intermediate table. Order is
-    /// preserved; unused entries are legal (VUID-...-11312 only fails on missing
-    /// ones).
+    /// A pass's own set plus a shared block as one pMappings list, written
+    /// straight into the arena: no intermediate table, no concatenation. Order
+    /// is preserved; unused entries are legal (VUID-...-11312 only fails on
+    /// missing ones).
     [[nodiscard]] auto Map(HeapMappingView first, HeapMappingView second) -> const VkShaderDescriptorSetAndBindingMappingInfoEXT* {
         return Allocate(first, second);
     }
 
   private:
-    // Blocks are heap-allocated and never moved, so an info pointer handed out
-    // by Map() stays valid for as long as this arena lives.
+    /// How many Map() calls one arena serves inline. A build site needs one
+    /// (`Map(passSet, sharedBlock)`); the second is headroom for a site that
+    /// materializes two lists separately.
+    static constexpr uint32_t kInlineInfos = 2;
+
+    // Fallback for a mapping list wider than kInlineMappings. Blocks are
+    // heap-allocated and never moved, so the pointers Map() handed out stay
+    // valid for as long as this arena lives.
     struct Block {
         std::unique_ptr<VkDescriptorSetAndBindingMappingEXT[]> entries;
         VkShaderDescriptorSetAndBindingMappingInfoEXT          info {};
     };
+
+    // Writes both views into `out` in order and points `info` at it.
+    [[nodiscard]] auto Fill(
+        HeapMappingView first, HeapMappingView second, VkDescriptorSetAndBindingMappingEXT* out, VkShaderDescriptorSetAndBindingMappingInfoEXT& info
+    ) noexcept -> const VkShaderDescriptorSetAndBindingMappingInfoEXT* {
+        const auto storage = std::span {out, first.size() + second.size()};
+        _heap.Materialize(first, storage.first(first.size()));
+        _heap.Materialize(second, storage.subspan(first.size()));
+
+        info = {
+            .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
+            .pNext        = nullptr,
+            .mappingCount = static_cast<uint32_t>(storage.size()),
+            .pMappings    = storage.data(),
+        };
+        return &info;
+    }
 
     [[nodiscard]] auto Allocate(HeapMappingView first, HeapMappingView second) -> const VkShaderDescriptorSetAndBindingMappingInfoEXT* {
         const size_t count = first.size() + second.size();
@@ -55,26 +88,37 @@ class HeapMappingArena {
             return nullptr;
         }
 
-        auto block     = std::make_unique<Block>();
-        block->entries = std::make_unique<VkDescriptorSetAndBindingMappingEXT[]>(count);
+        // Common case: both the entries and the info are members of this object,
+        // so nothing is allocated and the pointers stay stable for the arena's
+        // lifetime.
+        if (_usedEntries + count <= kInlineMappings && _usedInfos < kInlineInfos) {
+            auto* entries = _inlineEntries.data() + _usedEntries;
+            auto& info    = _inlineInfos[_usedInfos];
+            _usedEntries += static_cast<uint32_t>(count);
+            ++_usedInfos;
+            return Fill(first, second, entries, info);
+        }
 
-        const auto storage = std::span {block->entries.get(), count};
-        _heap.Materialize(first, storage.first(first.size()));
-        _heap.Materialize(second, storage.subspan(first.size()));
-
-        block->info = {
-            .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
-            .pNext        = nullptr,
-            .mappingCount = static_cast<uint32_t>(count),
-            .pMappings    = storage.data(),
-        };
+        auto        block = std::make_unique<Block>();
+        block->entries    = std::make_unique<VkDescriptorSetAndBindingMappingEXT[]>(count);
+        const auto* info  = Fill(first, second, block->entries.get(), block->info);
         _blocks.push_back(std::move(block));
-        return &_blocks.back()->info;
+        return info;
     }
 
-    const HeapManager&                  _heap;
+    const HeapManager& _heap;
+
+    // Deliberately uninitialized: Fill() writes every entry it hands out, so
+    // zero-filling three kilobytes at every pipeline build would buy nothing.
+    std::array<VkDescriptorSetAndBindingMappingEXT, kInlineMappings>        _inlineEntries;
+    std::array<VkShaderDescriptorSetAndBindingMappingInfoEXT, kInlineInfos> _inlineInfos {};
+    uint32_t                                                                _usedEntries = 0;
+    uint32_t                                                                _usedInfos   = 0;
+
     std::vector<std::unique_ptr<Block>> _blocks;
 };
+
+static_assert(sizeof(HeapMappingArena) < 4096, "a build-scoped arena lives on the stack: keep the inline mapping count modest");
 
 class HeapMappingBuilder {
   public:

@@ -209,9 +209,11 @@ the old bindless set array.
   `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` via
   `VkPipelineCreateFlags2CreateInfoKHR`. The structs are materialized per build
   by a build-scoped `HeapMappingArena` (`HeapMappingBuilder.hpp`) out of the
-  pass's `HeapMappingTable`; `arena.Map(a, b)` composes two tables into one
-  `pMappings` list in a single allocation, which is how a pass brings the shared
-  Set-1 scene block along without a third table.
+  pass's `HeapMappingTable`; `arena.Map(a, b)` composes two tables straight into
+  the arena's own inline buffer, which is how a pass brings the shared Set-1
+  scene block along without a third table. The buffer holds 32 mappings — every
+  set the renderer builds is smaller, and Set 0 + Set 1 together are around 19 —
+  so a pipeline build allocates nothing; a wider set spills to one heap block.
 * Every pipeline create info uses `layout = VK_NULL_HANDLE`
   (`VUID-VkGraphicsPipelineCreateInfo-flags-11311`); no pipeline-layout handle
   is accepted or stored by the backend.
