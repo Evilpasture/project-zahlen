@@ -143,14 +143,11 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         material.tangentDirection   = T * facing;
         material.bitangentDirection = B * facing;
         SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, float3(0.0f));
-        // Source VRAD is composited in the dedicated additive baked-lightmap
-        // pass below. Suppress only this material's dynamic diffuse input here
-        // so the clustered path cannot multiply the authored bake by ambient
-        // again; normals/roughness/depth remain available to the rest of the
-        // deferred renderer until the stencil compute-skip stage lands.
-        if (scene.g_instances[input.instanceId].hasBakedIrradiance) {
-            surface.albedo = float3(0.0f);
-        }
+        // Baked surfaces keep their real G-buffer albedo: zeroing it deleted the
+        // diffuse response of every dynamic light, so flashlights and entities
+        // could only leave specular on a lightmapped wall. The authored bake is
+        // composited in PSEmissive, which subtracts the baseline SH ambient the
+        // deferred pass contributes here, so the ambient is not counted twice.
         output.color           = float4(surface.albedo, surface.alpha);
         float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
         output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
@@ -291,12 +288,21 @@ float4 PSEmissive(EmissiveGeometryOutput input) : SV_Target0 {
         discard;
     }
     const float3 materialEmission = SampleMaterialEmissive<StandardPBRMaterial>(material);
+    float3 N = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
     // Baked irradiance is a diffuse-light transport result, not material
     // emission. This additive overlay is merely the compact-G-buffer transport
-    // mechanism: it restores albedo × VRAD after deferred lighting has kept
-    // the lightmapped material's diffuse input at zero.
-    const float3 bakedDiffuse = albedo.rgb * SampleBakedIrradiance(input.uv1, SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f)), input.instanceId);
-    return float4((materialEmission + bakedDiffuse) * albedo.a, 0.0f);
+    // mechanism: it restores albedo * VRAD on top of the deferred pass, which
+    // now contributes its own ambient to those same surfaces because PSMain no
+    // longer zeroes their albedo.
+    const float3 bakedDiffuse = albedo.rgb * SampleBakedIrradiance(input.uv1, N, input.instanceId);
+    // VRAD already folded the bounce from the map's sky ambient into the bake,
+    // and lighting.slang adds that baseline SH ambient again (EvaluateSH(N, sh)
+    // * ambientExposure). Subtract exactly that term so the authored bake is not
+    // double-lit; the clamp only matters when a map was baked against a
+    // brighter ambient than the one the scene carries.
+    const float3 shAmbient = EvaluateSH(N, scene.frame.sh) * scene.frame.ambientExposure;
+    const float3 netBaked  = max(bakedDiffuse - albedo.rgb * shAmbient * (1.0f - material.metallicFactor), float3(0.0f));
+    return float4((materialEmission + netBaked) * albedo.a, 0.0f);
 }
 
 float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {

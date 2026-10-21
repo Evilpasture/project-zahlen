@@ -169,8 +169,11 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
     // The sun's direction comes from the map's light_environment, and it has to
     // be known before the entity loop reaches it (the loop builds the sun
     // SceneLight in place). EnvironmentSunDirection falls back to a 45-degree
-    // elevation when the map carries no light_environment at all.
-    const JPH::Vec3 sunDirection = EnvironmentSunDirection(map);
+    // elevation when the map carries no light_environment at all. It returns a
+    // Source (Z-up) vector, so it has to take the same ConvertDirection hop the
+    // spot branch gives its beam; unconverted, the engine's Y-up sun pointed
+    // sideways and its shadows were cast into the ground.
+    const JPH::Vec3 sunDirection = ConvertDirection(options, EnvironmentSunDirection(map));
     uint32_t        sceneLightSuppressed = 0;
 
     // The sky gradient is the light_environment's ambient term, converted the
