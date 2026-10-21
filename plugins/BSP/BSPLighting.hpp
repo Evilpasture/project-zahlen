@@ -120,12 +120,34 @@ inline constexpr float kEmissiveMaxLightIntensity = 40.0f * kIngestLevelGain;
 // panel sits 20-35 Source inches from one), so its emission is already
 // accounted for. Damp instead of dropping: a screen that happens to share a
 // room with a lamp still has to glow.
-inline constexpr float kEmissiveFixtureRadiusInches = 96.0f;
+//
+// 60 inches, not 96: the map's lamps sit on a 96-inch pitch, so a 96-inch
+// radius reached the *next* fixture's lamp and damped every other panel in a
+// runway -- the light got 10x weaker in stripes that follow the entity grid
+// rather than the fixtures. 60 inches still covers a 20-35 inch offset with
+// room for the housing, and stops well short of the neighbour.
+inline constexpr float kEmissiveFixtureRadiusInches = 60.0f;
 inline constexpr float kEmissiveFixtureDamping       = 0.1f;
 
 // Emissive faces are clustered on this grid (Source inches) so a fixture made
 // of many coplanar sheets produces one area-light proxy, not one per sheet.
+// The cell is only a cheap prefilter: two sheets of the same material that land
+// in one cell are still separate fixtures unless they also sit within
+// kEmissiveFixtureMergeInches of each other.
 inline constexpr float kEmissiveClusterCellInches = 192.0f;
+
+// How far apart two coplanar sheets of the same material may be and still count
+// as one fixture. gm_murder_drones runs 32-inch lamp panels on a 96-inch pitch
+// along every runway; without a distance test the 192-inch cell merged nine of
+// them into a single 6 m2 "area light" parked at the cell centre, which both
+// moved the light off the panels and raised its intensity with the area it
+// swallowed -- a hot pool halfway between two fixtures that no mapper authored.
+inline constexpr float kEmissiveFixtureMergeInches = 48.0f;
+
+// Cosine between two faces' normals above which they can belong to one
+// fixture. Coplanar sheets of a lamp housing are identical planes; a panel on
+// the wall and the sill under it are not.
+inline constexpr float kEmissiveFixtureCoplanarCos = 0.985f;
 
 // Hard cap on emissive proxies. Ranked by strength * area, so a map with 400
 // lamp sheets keeps the panels that actually matter.

@@ -860,15 +860,21 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
     desc.metallic  = 0.0f;
     desc.roughness = vmt.Has("$phong") ? 0.45f : (vmt.Has("$envmap") ? 0.60f : 0.85f);
 
-    // 1. Unlit by construction. UnlitGeneric has no lighting path at all --
-    // the albedo goes straight to the framebuffer -- and Source's white lamp
-    // panels (lights/white and friends) would land at luma 1.0, exactly the
-    // bloom threshold, turning every ceiling fixture into a blinding glare.
-    // Scale them to read bright but sub-threshold. Missing textures would
-    // otherwise fall back to the raw baseColor (usually pure white) and blow
-    // out wherever direct light reaches.
-    if (ShaderNameEquals(vmt.shader, "UnlitGeneric")) {
+    // 1. Unlit by construction. UnlitGeneric and its siblings have no lighting
+    // path at all: the albedo goes straight to the framebuffer. MonitorScreen
+    // and UnlitTwoTexture belong to the same family -- a screen shows its own
+    // picture and is not lit like a wall -- and leaving them out of this list
+    // shaded every display in an imported map with the world's lightmap and
+    // then added their picture on top.
+    const bool unlitByConstruction =
+        ShaderNameIn(vmt.shader, {"UnlitGeneric", "UnlitTwoTexture", "MonitorScreen", "Sprite", "SpriteCard", "Cable", "Beam"});
+    if (unlitByConstruction) {
         desc.unlit = true;
+        // Source's plain UnlitGeneric panels would otherwise land at luma 1.0
+        // -- exactly the bloom threshold -- and a missing texture would fall
+        // back to the raw baseColor (usually pure white) and blow out wherever
+        // direct light reaches. A texlight keeps this dim as well: the emission
+        // below is the panel's brightness, and the albedo is the same picture.
         desc.baseColor.x *= kUnlitDim;
         desc.baseColor.y *= kUnlitDim;
         desc.baseColor.z *= kUnlitDim;
@@ -880,19 +886,15 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
         return;
     }
 
-    // Emissive *and* unlit by construction: UnlitGeneric and the sprite-family
-    // classes put their albedo straight into the framebuffer (the lighting
-    // pass renders an unlit surface as albedo + emissive). An additive emissive
-    // factor on top of that counts the picture twice, and at the HDR gain below
-    // it whites the panel out completely -- the art survives only as a ghost
-    // under flat white. Their unlit path IS the emission; only a lit emissive
-    // surface ($selfillum on LightmappedGeneric, MonitorScreen) gets the
-    // additive term.
-    if (ShaderNameIn(vmt.shader, {"UnlitGeneric", "Sprite", "Cable", "Beam"})) {
-        desc.unlit = true;
-        return;
-    }
-
+    // 3. A self-illuminated surface by construction is Source's texlight:
+    // `lights/white` and friends are UnlitGeneric plus `$selfillum`, and Source
+    // draws the panel at full brightness with bloom. This path used to return
+    // here -- "their unlit path IS the emission" -- and that is where a map has
+    // the most of it: the recessed strips along gm_murder_drones' walkways came
+    // out as flat grey tiles beside the light pools they were casting, because
+    // the albedo was dimmed off the bloom threshold and nothing stood in for
+    // the emission. The term is the same one a lit $selfillum surface gets, so
+    // a lamp reads the same whichever shader class the mapper reached for.
     const float luma  = std::max(Rec709Luma(emission.tint), kEmissiveStrengthEpsilon);
     const float scale = emission.strength * kSourceEmissionHdrScale / luma;
     desc.emissive     = JPH::Float4(emission.tint.GetX() * scale, emission.tint.GetY() * scale, emission.tint.GetZ() * scale, 1.0f);
@@ -902,6 +904,15 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
     // with a flat wash of its average colour.
     if (desc.emissiveMap == TextureHandle::Invalid && desc.albedoMap != TextureHandle::Invalid) {
         desc.emissiveMap = desc.albedoMap;
+    }
+
+    // ...and an unlit texlight whose art does not resolve is a missing asset,
+    // not a lamp. Its factor would then apply on its own, with no texture to
+    // modulate it, painting the surface as a solid HDR blob; the albedo was
+    // already dimmed to the missing-texture grey, and that is all it should
+    // read as.
+    if (unlitByConstruction && !vmt.baseTexture.empty() && !vfs.ResolveTexture(vmt.baseTexture).has_value()) {
+        desc.emissive = JPH::Float4(0.0f, 0.0f, 0.0f, 1.0f);
     }
 }
 

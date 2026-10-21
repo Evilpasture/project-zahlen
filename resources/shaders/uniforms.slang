@@ -121,9 +121,15 @@ public struct Light {
     public float innerConeCos;
     public float outerConeCos;
     public uint twoSided;
-    // 1 when a map compile baked this light into the lightmaps. The punctual
-    // loop still shades with it, but only on pixels whose lightmap does not
-    // already own the light (lighting.slang, Res_BakedMask bit 1).
+    // Who owns this light's shading where a map compile baked it into the
+    // lightmaps (SceneLight::baked):
+    //   0 - a live light; nothing is withheld,
+    //   1 - an authored light entity: the bake owns its diffuse, its specular
+    //       stays live because no lightmap stores one,
+    //   2 - an emissive-surface proxy (a lamp panel/screen/sign the importer
+    //       turned into a point light): the bake owns both, because the proxy
+    //       itself is a reconstruction of light VRAD already integrated.
+    // The punctual loop reads it against Res_BakedMask bit 1 in lighting.slang.
     public uint baked;
     // Index of this light's first ShadowTile, or -1 when it casts no shadow.
     // The renderer owns it: the atlas allocator assigns it each frame from the

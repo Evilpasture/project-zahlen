@@ -309,8 +309,9 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // already owns it (see SceneLight::baked / Res_BakedMask). Without
             // this the whole map is lit twice -- once by the bake, once by the
             // live light -- which is exactly what a mapper sees as "the
-            // lightmap does nothing".
-            light.baked = true;
+            // lightmap does nothing". Its specular stays live: no lightmap
+            // stores a lobe, so the bake cannot replace the highlight.
+            light.baked = Scene::kBakeOwnsDiffuse;
 
             // Sun, not a point at infinity: LightComponent::direction is the
             // toward-the-sun vector -- RenderSystem places the shadow camera at
@@ -729,8 +730,13 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // and the renderer's scene-light budget cannot discard them.
             light.pinned           = true;
             // Emissive surfaces were radiosity sources in the same compile their
-            // glow is baked with, so these proxies are baked lights as well.
-            light.baked            = true;
+            // glow is baked with, so these proxies are baked lights as well --
+            // and unlike an authored light entity, they own neither term on a
+            // lightmapped pixel: the proxy is a reconstruction of a surface
+            // VRAD already integrated, standing centimetres off the panel it
+            // describes, and its punctual specular is a lobe Source's lamp
+            // faces never had. See SceneLight::baked.
+            light.baked            = Scene::kBakeOwnsAll;
             scene.lights.push_back(std::move(light));
         }
     }

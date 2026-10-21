@@ -338,9 +338,19 @@ LightingOutput PSMain(VSOutput input) {
         Light light = lights[l];
         // A light the map compiler baked owns its diffuse only where the bake
         // owns it; unbaked pixels -- props, entities, skybox scenery -- still
-        // need the live light. Specular stays live everywhere, for the same
-        // reason the sun's does.
-        const float lightDiffuseOwnership = (light.baked != 0u) ? (1.0f - bakedDirect) : 1.0f;
+        // need the live light.
+        //
+        // Specular follows the same rule for an *authored* light, for the reason
+        // the sun's does: no lightmap stores a lobe, so the highlight on a
+        // lightmapped surface has to come from here or not at all. It does not
+        // follow it for an emissive-surface proxy (baked == 2). That proxy is
+        // the importer's reconstruction of a lamp panel or screen the same
+        // compile already integrated into the same lightmap, it sits
+        // centimetres off its own mounting surface, and Source's lamp panels
+        // have no specular lobe at all -- so a live one paints a clipped GGX
+        // highlight across the floor beside every fixture in the map.
+        const float lightDiffuseOwnership  = (light.baked != 0u) ? (1.0f - bakedDirect) : 1.0f;
+        const float lightSpecularOwnership = (light.baked > 1u) ? (1.0f - bakedDirect) : 1.0f;
         if (light.type == LightType::Area) {
             float2 uv      = float2(roughness, sqrt(1.0f - NdotV));
             float4 t1      = ltc_mat.SampleLevel(clampSampler, uv, 0.0f);
@@ -357,7 +367,7 @@ LightingOutput PSMain(VSOutput input) {
 
             const float shadowVisibility = 1.0f;
 
-            directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC * lightDiffuseOwnership + specLTC) *
+            directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC * lightDiffuseOwnership + specLTC * lightSpecularOwnership) *
                               light.color * light.intensity * shadowVisibility;
         } else {
             if (light.type == LightType::Directional || light.type == LightType::Sun)
@@ -424,7 +434,7 @@ LightingOutput PSMain(VSOutput input) {
                     }
                 }
 
-                directPunctual += (kD_p * albedoRaw.rgb / 3.14159265f * lightDiffuseOwnership + spec_p) *
+                directPunctual += (kD_p * albedoRaw.rgb / 3.14159265f * lightDiffuseOwnership + spec_p * lightSpecularOwnership) *
                                   light.color * light.intensity * atten * NdotL * shadowVisibility;
             }
         }

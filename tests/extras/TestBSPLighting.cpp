@@ -473,6 +473,41 @@ struct BSPLightingTestSuite {
         return {};
     }
 
+    // ---- the pitch between fixtures ---------------------------------------
+    // gm_murder_drones runs its walkway strips on a 96-inch pitch, and they are
+    // all one material in one 192-inch cell. Merging by cell alone turned a
+    // whole runway into a single 34 m2 area light parked at the cell centre --
+    // a hot pool on the floor halfway between two fixtures that no mapper
+    // authored. Two panels a pitch apart have to stay two proxies.
+    [[nodiscard]] auto finalize_emissive_surfaces_keeps_one_pitch_apart() const -> std::expected<void, ZHLN::ErrorCode> {
+        const float                  pitchMetres = 96.0f / 39.37f;
+        std::vector<EmissiveSurface> in;
+        for (int i = 0; i < 2; ++i) {
+            EmissiveSurface surface;
+            surface.materialName     = "lights/white";
+            surface.areaSquareMetres = 1024.0f / (39.37f * 39.37f); // one 32x32 inch panel
+            surface.areaSquareInches = 1024.0f;
+            surface.faceCount        = 1;
+            surface.strength         = 0.5f;
+            surface.position         = JPH::Vec3(0.5f + pitchMetres * static_cast<float>(i), 1.0f, 0.0f);
+            surface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
+            in.push_back(surface);
+        }
+
+        const std::vector<EmissiveSurface> clustered = ZHLN::BSP::FinalizeEmissiveSurfaces(in, {}, 1.0f / 39.37f, 64u);
+        if (!ZHLN::Test::ExpectEq(clustered.size(), 2u)) {
+            return Fail();
+        }
+        for (const EmissiveSurface& surface: clustered) {
+            // Each proxy speaks for one panel: one face, one panel's area, and
+            // the panel's own centroid rather than a point between the two.
+            if (!ZHLN::Test::ExpectEq(surface.faceCount, 1u) || !ZHLN::Test::ExpectInRange(surface.areaSquareMetres, 0.659f, 0.661f)) {
+                return Fail();
+            }
+        }
+        return {};
+    }
+
     // ---- fixture damping -------------------------------------------------
     // A lamp panel with a `light` entity 24 inches away is the housing around
     // that light, not a second light: emitting a proxy at its centroid
@@ -488,7 +523,7 @@ struct BSPLightingTestSuite {
         nearSurface.areaSquareMetres = 1.0f;
         nearSurface.faceCount        = 1;
         nearSurface.strength         = 0.5f;
-        // 24 inches from the entity light: inside the 96-inch (2.44 m) fixture
+        // 24 inches from the entity light: inside the 60-inch (1.52 m) fixture
         // radius, and far enough away in X to be its own cluster.
         nearSurface.position         = JPH::Vec3(0.0f, 0.61f, 0.0f);
         nearSurface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
@@ -503,9 +538,22 @@ struct BSPLightingTestSuite {
         farSurface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
         in.push_back(farSurface);
 
+        // 80 inches out -- the next fixture's panel on the map's 96-inch pitch.
+        // The 96-inch radius that used to be here damped it, so every other
+        // panel in a runway came out 10x weaker in stripes that followed the
+        // entity grid rather than the fixtures.
+        EmissiveSurface neighbourSurface;
+        neighbourSurface.materialName     = "lights/white";
+        neighbourSurface.areaSquareMetres = 1.0f;
+        neighbourSurface.faceCount        = 1;
+        neighbourSurface.strength         = 0.5f;
+        neighbourSurface.position         = JPH::Vec3(80.0f / 39.37f, 0.61f, 0.0f);
+        neighbourSurface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
+        in.push_back(neighbourSurface);
+
         const std::array<ZHLN::BSP::BspPointLight, 1> entityLights {entity};
         const std::vector<EmissiveSurface> out = ZHLN::BSP::FinalizeEmissiveSurfaces(in, entityLights, 1.0f / 39.37f, 64u);
-        if (!ZHLN::Test::ExpectEq(out.size(), 2u)) {
+        if (!ZHLN::Test::ExpectEq(out.size(), 3u)) {
             return Fail();
         }
         for (const EmissiveSurface& surface: out) {
@@ -1021,6 +1069,7 @@ auto main() -> int {
     runTest("is_emissive_material_name_families", [&] { return suite.is_emissive_material_name_families(); });
     runTest("probe_emissive_material_damps_near_white", [&] { return suite.probe_emissive_material_damps_near_white(); });
     runTest("finalize_emissive_surfaces_clusters_and_caps", [&] { return suite.finalize_emissive_surfaces_clusters_and_caps(); });
+    runTest("finalize_emissive_surfaces_keeps_one_pitch_apart", [&] { return suite.finalize_emissive_surfaces_keeps_one_pitch_apart(); });
     runTest("finalize_emissive_surfaces_damps_nearby_entity_lights", [&] { return suite.finalize_emissive_surfaces_damps_nearby_entity_lights(); });
     runTest("emissive_light_for_scales_with_area", [&] { return suite.emissive_light_for_scales_with_area(); });
     runTest("enforce_lighting_floor_never_returns_black", [&] { return suite.enforce_lighting_floor_never_returns_black(); });
