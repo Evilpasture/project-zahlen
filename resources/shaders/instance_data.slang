@@ -17,6 +17,7 @@ import gpu_buffer;
 // instance mask (rays skip it, so it never lights the world) and the
 // cascade-shadow filter (a 300 m backdrop must not shade the level).
 public static const uint kInstanceFlagBackground = 1u << 13;
+public static const uint kInstanceFlagAmbientCube = 1u << 20;
 
 // Source's two-world depth remap used to live here: the main world compressed
 // into [0, 0.95] and the skybox layer into [0.95, 1], so a background fragment
@@ -113,6 +114,11 @@ public struct InstanceData {
     // It is sampled with VertexSurface.uv1 and the clamp sampler.
     public uint bakedIrradianceTexIndex; // 0xFFFF when absent.
     public float bakedIrradianceScale;
+
+    // Source ambient cube for props without a lightmap, +X,-X,+Y,-Y,+Z,-Z linear
+    // radiance. Read only when kInstanceFlagAmbientCube is set. Appended last so
+    // the existing field offsets stay put.
+    public float4 ambientCube[6];
 };
 
 // Field order is load-bearing: coneCutoff's 4 bytes fill 44..48 so coneAxis
@@ -201,6 +207,13 @@ public extension InstanceData {
             return (this.flags & (1u << 12)) != 0;
         }
     }
+    public property bool hasAmbientCube {
+        [ForceInline]
+        get {
+            return (this.flags & kInstanceFlagAmbientCube) != 0;
+        }
+    }
+
     public property bool isViewmodel {
         [ForceInline]
         get {

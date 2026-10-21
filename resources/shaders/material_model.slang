@@ -128,12 +128,21 @@ public float3 TransformNormalSample(float3 mapN, MaterialSampleInputs i, uint sl
 // immutable atlas UV1 coordinates and clamp sampling. It also must not travel
 // through occlusionMap, whose scalar semantics are unrelated.
 [ForceInline]
-public float3 SampleBakedIrradiance(float2 uv1, uint instanceId) {
+public float3 SampleBakedIrradiance(float2 uv1, float3 N, uint instanceId) {
     if (instanceId == 0xFFFFFFFFu) {
         return float3(0.0f);
     }
     InstanceData inst = scene.g_instances[instanceId];
     if (!inst.hasBakedIrradiance) {
+        // Props without a lightmap take their indirect term from the leaf ambient
+        // cube. Weights N*N sum to one for unit N, so the blend is a proper cosine-
+        // like average over the six faces.
+        if (inst.hasAmbientCube) {
+            const float3 w = N * N;
+            return w.x * (N.x >= 0.0f ? inst.ambientCube[0].xyz : inst.ambientCube[1].xyz) +
+                   w.y * (N.y >= 0.0f ? inst.ambientCube[2].xyz : inst.ambientCube[3].xyz) +
+                   w.z * (N.z >= 0.0f ? inst.ambientCube[4].xyz : inst.ambientCube[5].xyz);
+        }
         return float3(0.0f);
     }
     return scene.globalTextures[NonUniformResourceIndex(inst.bakedIrradianceTexIndex)].Sample(scene.clampSampler, uv1).rgb *

@@ -301,6 +301,11 @@ struct DrawParams {
 
     JPH::Float4 colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f};
     JPH::Float4 emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f};
+
+    // Optional ambient cube (+X,-X,+Y,-Y,+Z,-Z linear radiance) for meshes without
+    // baked lightmaps. Only read when hasAmbientCube is set.
+    bool                       hasAmbientCube = false;
+    std::array<JPH::Float4, 6> ambientCube {};
 };
 
 struct CSGCutterParams {

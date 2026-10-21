@@ -132,6 +132,22 @@ auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const Impo
     }
     return EngineTripletFromQuat(qEngine);
 }
+// Attaches the leaf ambient cube at a Source-space position to a prop entity.
+// The cube is raw VRAD radiance, scaled by propAmbientCubeScale. It is not on
+// the lightmap scale: see the note on ImportOptions::propAmbientCubeScale.
+static void ApplyAmbientCube(const BSPMap& map, const ImportOptions& options, std::array<float, 3> sourcePos, Scene::SceneEntity& entity) {
+    std::array<std::array<float, 3>, 6> cube {};
+    if (!SampleLeafAmbientCube(map, sourcePos, cube)) {
+        return;
+    }
+    for (size_t f = 0; f < 6; ++f) {
+        entity.ambientCube[f] = {
+            cube[f][0] * options.propAmbientCubeScale, cube[f][1] * options.propAmbientCubeScale, cube[f][2] * options.propAmbientCubeScale, 1.0f
+        };
+    }
+    entity.hasAmbientCube = true;
+}
+
 auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const ImportOptions& options) -> Scene::Scene {
     Scene::Scene scene;
     scene.name = std::string(virtualPath);
@@ -555,6 +571,10 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
             prop.transform.rotation      = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
 
+            if (!skyEntity) {
+                ApplyAmbientCube(map, options, {origin.GetX(), origin.GetY(), origin.GetZ()}, prop);
+            }
+
             if (skyEntity) {
                 // Background scenery: Source's skybox world is non-solid and
                 // composites behind the map, so no physics and the same layer
@@ -624,6 +644,13 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             sp.diffuseModulation[2] / 255.0f,
             sp.diffuseModulation[3] / 255.0f
         };
+
+        if (!skyProp) {
+            // Static props sample at lightingOrigin like the engine; fall back to
+            // the origin when the map leaves it at zero.
+            const bool hasLightingOrigin = sp.lightingOrigin[0] != 0.0f || sp.lightingOrigin[1] != 0.0f || sp.lightingOrigin[2] != 0.0f;
+            ApplyAmbientCube(map, options, hasLightingOrigin ? sp.lightingOrigin : sp.origin, propEntity);
+        }
 
         scene.entities.push_back(std::move(propEntity));
     }

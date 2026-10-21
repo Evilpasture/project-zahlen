@@ -280,9 +280,8 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
             }
         }
 
-        rc.Draw(
-            gpuMat, gpuMesh,
-            {.transform           = worldMat,
+        DrawParams drawParams {
+             .transform           = worldMat,
              .prevTransform       = prevMat,
              .cullRadius          = meshComp->cullRadius,
              .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
@@ -293,8 +292,13 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
              .flags               = drawFlags,
              .skinnedVertexBuffer = scratchVbo,
              .roughness           = roughness,
-             .metallic            = metallic}
-        );
+             .metallic            = metallic
+        };
+        if (auto ambient = reg.Get<Components::AmbientCubeComponent>(e)) {
+            drawParams.hasAmbientCube = true;
+            drawParams.ambientCube    = ambient->cube;
+        }
+        rc.Draw(gpuMat, gpuMesh, drawParams);
     }
 }
 

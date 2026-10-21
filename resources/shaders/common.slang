@@ -410,6 +410,8 @@ public struct EmissiveGeometryOutput {
     public nointerpolation uint alphaMode : TEXCOORD7;
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
     public nointerpolation uint2 samplerCodes : TEXCOORD16;
+    // World normal for the baked-overlay ambient cube term (SampleBakedIrradiance).
+    public float3 normal : TEXCOORD19;
 }
 
 public struct ForwardGeometryOutput {
@@ -480,6 +482,7 @@ public EmissiveGeometryOutput PackEmissiveOutput(SceneGeometryVertex v) {
     o.alphaMode       = v.alphaMode;
     o.emissiveFactor  = v.emissiveFactor;
     o.samplerCodes    = v.samplerCodes;
+    o.normal          = v.normal;
     return o;
 }
 

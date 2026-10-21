@@ -67,6 +67,10 @@ struct SceneEntity {
     // Draw layer for the spawned mesh parts (see DrawFlags::Background): the
     // BSP scene routes skybox entities here so they composite behind the world.
     DrawFlags     drawFlags = DrawFlags::None;
+    // Optional ambient cube (+X,-X,+Y,-Y,+Z,-Z linear radiance) sampled from the
+    // BSP leaf. Used by props that have no lightmap of their own.
+    bool                       hasAmbientCube = false;
+    std::array<JPH::Float4, 6> ambientCube {};
 };
 
 struct SceneLight {

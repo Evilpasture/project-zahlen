@@ -98,6 +98,12 @@ struct ImportOptions {
     // radiance. `kIngestLevelGain` calibrates the old VPL approximation and
     // must never be applied here.
     float sourceLightmapScale = 1.0f;
+    // Multiplier for leaf ambient cubes on props. VRAD's cube samples decode
+    // ~1500x dimmer than the lightmaps (leaf-matched median ratio, p10..p90
+    // about 160..14000; the lightmaps include direct light, so this is an
+    // upper bound on the ambient share). Tune within that range against the
+    // reference render.
+    float propAmbientCubeScale = 1500.0f;
 
     // Compatibility-only approximation path. This must remain off whenever
     // native VRAD lightmaps are enabled: fitting the same bake into ambient +

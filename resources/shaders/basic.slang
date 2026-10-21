@@ -295,7 +295,7 @@ float4 PSEmissive(EmissiveGeometryOutput input) : SV_Target0 {
     // emission. This additive overlay is merely the compact-G-buffer transport
     // mechanism: it restores albedo × VRAD after deferred lighting has kept
     // the lightmapped material's diffuse input at zero.
-    const float3 bakedDiffuse = albedo.rgb * SampleBakedIrradiance(input.uv1, input.instanceId);
+    const float3 bakedDiffuse = albedo.rgb * SampleBakedIrradiance(input.uv1, SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f)), input.instanceId);
     return float4((materialEmission + bakedDiffuse) * albedo.a, 0.0f);
 }
 

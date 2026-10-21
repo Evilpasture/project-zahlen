@@ -106,6 +106,8 @@ struct InstanceDataDesc {
     BindlessIndices indices {};
     uint32_t bakedIrradianceTex = kNoFilmTexture;
     float    bakedIrradianceScale = 1.0f;
+    bool                       hasAmbientCube = false;
+    std::array<JPH::Float4, 6> ambientCube {};
 
     uint32_t alphaMode    = 0;
     bool     isViewmodel  = false;
@@ -192,6 +194,8 @@ struct InstanceDataDesc {
             1u :
             0u;
     const uint32_t hasEmissive = desc.hasEmissive ? 1u : 0u;
+    // Bit 20: per-instance Source ambient cube present (InstanceData::ambientCube).
+    const uint32_t hasAmbientCube = desc.hasAmbientCube ? 1u : 0u;
     const uint32_t hasSpecular = !desc.unlit && desc.specularEnabled ? 1u : 0u;
 
     const uint32_t isMirrored = desc.world.GetDeterminant3x3() < 0.0f ? 1u : 0u;
@@ -239,7 +243,7 @@ struct InstanceDataDesc {
         .roughnessFactor     = desc.roughnessFactor,
         .alphaCutoff         = desc.alphaCutoff,
 
-        .flags            = (isViewmodel << 19) | (hasSpecular << 18) | (hasEmissive << 17) | (hasSheen << 16) | (hasAnisotropy << 15) |
+        .flags            = (hasAmbientCube << 20) | (isViewmodel << 19) | (hasSpecular << 18) | (hasEmissive << 17) | (hasSheen << 16) | (hasAnisotropy << 15) |
                             (hasClearcoat << 14) | (isBackground << 13) | (isMirrored << 12) | (isUnlit << 11) | (hasTransmission << 10) |
                             (doubleSided << 9) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
         .jointOffset      = desc.jointOffset,
@@ -280,6 +284,7 @@ struct InstanceDataDesc {
         .specularFlags           = (desc.specularEnabled ? 1u : 0u) | (std::min(desc.specularTexMode, 3u) << 1u),
         .bakedIrradianceTexIndex = desc.bakedIrradianceTex,
         .bakedIrradianceScale    = std::max(desc.bakedIrradianceScale, 0.0f),
+        .ambientCube             = desc.ambientCube,
     };
 }
 
@@ -407,6 +412,8 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .indices                  = tex,
                  .bakedIrradianceTex     = OptionalTextureIndex(_impl.get(), material.bakedIrradianceMap),
                  .bakedIrradianceScale   = material.bakedIrradianceScale,
+                 .hasAmbientCube         = params.hasAmbientCube,
+                 .ambientCube            = params.ambientCube,
                  .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
                  .isViewmodel              = isViewmodel != 0u,
                  .isBackground             = (params.flags & DrawFlags::Background) != DrawFlags::None,
@@ -414,7 +421,8 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .doubleSided              = material.doubleSided,
                  .unlit                    = material.unlit,
                  .hasEmissive              = material.bakedIrradianceMap != TextureHandle::Invalid || material.emissiveMap != TextureHandle::Invalid ||
-                                             material.emissiveFactor.x > 0.0f || material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f,
+                                             material.emissiveFactor.x > 0.0f || material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f ||
+                                             params.hasAmbientCube,
                  .vertexCount              = resolved->posMesh->vertexCount,
                  .indexCount               = mesh.indexCount,
                  .jointOffset              = params.jointOffset,

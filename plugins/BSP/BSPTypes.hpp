@@ -42,6 +42,8 @@ enum class Lump : uint32_t {
     Lighting                    = 8,
     Occlusion                   = 9,
     Leafs                       = 10,
+    LeafAmbientIndex            = 52,
+    LeafAmbientLighting         = 56,
     FaceIds                     = 11,
     Edges                       = 12,
     SurfEdges                   = 13,
@@ -214,6 +216,22 @@ struct DNode {
 // LUMP_LEAFS v0 (30 bytes). v1 appends two padding bytes (DLeafV1 in the
 // reference implementation); the reader consumes the lump version field to
 // pick the stride and keeps this struct as the payload.
+// dleafambientindex_t: per-leaf range into the ambient sample lump.
+struct DLeafAmbientIndex {
+    uint16_t sampleCount;
+    uint16_t firstSample;
+};
+
+// dleafambientlighting_t: six ColorRGBExp32 cube faces (+X,-X,+Y,-Y,+Z,-Z),
+// then xyz position bytes (0..255 across the leaf bounds) and padding.
+struct DLeafAmbientLighting {
+    ColorRGBExp32 cube[6];
+    uint8_t       x;
+    uint8_t       y;
+    uint8_t       z;
+    uint8_t       pad;
+};
+
 struct DLeaf {
     int32_t  contents;
     int16_t  cluster;

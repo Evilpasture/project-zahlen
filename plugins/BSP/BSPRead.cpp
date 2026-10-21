@@ -558,6 +558,14 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
     }
 
     // Leaves: support version 0 (30 bytes or 32/56 with padding/ambient) and version 1 (32 bytes).
+    // Leaf ambient cubes are optional: unbaked maps and older formats have none.
+    if (auto res = ReadLumpArray<DLeafAmbientIndex>(bytes, lump(Lump::LeafAmbientIndex)); res) {
+        map.leafAmbientIndex = std::move(*res);
+    }
+    if (auto res = ReadLumpArray<DLeafAmbientLighting>(bytes, lump(Lump::LeafAmbientLighting)); res) {
+        map.leafAmbientSamples = std::move(*res);
+    }
+
     const LumpEntry& leafLump = lump(Lump::Leafs);
     if (leafLump.filelen > 0) {
         if (leafLump.fileofs < 0 || leafLump.filelen < 0 || static_cast<size_t>(leafLump.fileofs) + static_cast<size_t>(leafLump.filelen) > bytes.size()) {

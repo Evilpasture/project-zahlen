@@ -62,6 +62,12 @@ struct Components {
         JPH::Mat44 previous = JPH::Mat44::sIdentity();
     };
 
+    // Per-entity ambient cube (see DrawParams::ambientCube). Presence enables the
+    // cube term in the material shader for this entity's mesh parts.
+    struct AmbientCubeComponent {
+        std::array<JPH::Float4, 6> cube {};
+    };
+
     struct MeshComponent {
         AssetID    meshAsset     = InvalidAssetID;
         MaterialID materialAsset = InvalidMaterialID;
