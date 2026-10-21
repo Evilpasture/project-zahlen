@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstring>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -199,15 +200,41 @@ inline auto SampleLeafAmbientCube(const BSPMap& map, const std::array<float, 3>&
         const float   d  = pl.normal[0] * p[0] + pl.normal[1] * p[1] + pl.normal[2] * p[2] - pl.dist;
         node             = n.children[d >= 0.0f ? 0 : 1];
     }
-    const size_t leafIdx = static_cast<size_t>(-node - 1);
+    size_t leafIdx = static_cast<size_t>(-node - 1);
     if (leafIdx >= map.leafs.size() || leafIdx >= map.leafAmbientIndex.size()) {
         return false;
     }
-    const DLeafAmbientIndex idx = map.leafAmbientIndex[leafIdx];
-    if (idx.sampleCount == 0) {
-        return false;
+    // About half of all leaves have no ambient samples of their own (corridors,
+    // thin spaces, leaves VRAD did not bake). Props there would otherwise stay
+    // unlit. Fall back to the nearest non-solid leaf that does have samples,
+    // measured as distance from the point to that leaf's bounding box.
+    if (map.leafAmbientIndex[leafIdx].sampleCount == 0) {
+        constexpr int32_t kContentsSolid = 0x1;
+        float             bestBox2       = std::numeric_limits<float>::max();
+        size_t            fallback       = static_cast<size_t>(-1);
+        for (size_t l = 0; l < map.leafs.size() && l < map.leafAmbientIndex.size(); ++l) {
+            if (map.leafAmbientIndex[l].sampleCount == 0 || (map.leafs[l].contents & kContentsSolid) != 0) {
+                continue;
+            }
+            float d2 = 0.0f;
+            for (size_t a = 0; a < 3; ++a) {
+                const float lo = static_cast<float>(map.leafs[l].mins[a]);
+                const float hi = static_cast<float>(map.leafs[l].maxs[a]);
+                const float d  = p[a] < lo ? lo - p[a] : (p[a] > hi ? p[a] - hi : 0.0f);
+                d2 += d * d;
+            }
+            if (d2 < bestBox2) {
+                bestBox2 = d2;
+                fallback = l;
+            }
+        }
+        if (fallback == static_cast<size_t>(-1)) {
+            return false;
+        }
+        leafIdx = fallback;
     }
-    const DLeaf& leaf = map.leafs[leafIdx];
+    const DLeafAmbientIndex idx = map.leafAmbientIndex[leafIdx];
+    const DLeaf&            leaf = map.leafs[leafIdx];
 
     size_t chosen = static_cast<size_t>(-1);
     float  bestD2 = 0.0f;

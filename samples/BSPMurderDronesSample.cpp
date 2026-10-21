@@ -448,6 +448,51 @@ inline constexpr float kFlySpeedMeters = 8.0f;
 // PlayerInputSystem static inside its frame steps.
 ZHLN::Entity g_player = ZHLN::Entity::Null();
 
+// The player's glTF rig is spawned outside the BSP importer, so its parts get no
+// ambient cube from the importer. These globals let the frame loop sample the
+// leaf cube at the player's position and write it onto the rig parts, so the
+// character follows the lighting of the room it stands in.
+std::vector<ZHLN::Entity>       g_playerRigParts;
+const ZHLN::BSP::BSPMap*        g_rigCubeMap = nullptr;
+ZHLN::BSP::ImportOptions        g_rigImportOpts {};
+
+void UpdatePlayerRigAmbientCube(ZHLN::Engine& engine) {
+    if (g_rigCubeMap == nullptr || g_player == ZHLN::Entity::Null() || g_playerRigParts.empty()) {
+        return;
+    }
+    auto& reg = engine.GetRegistry();
+    if (!reg.IsAlive(g_player)) {
+        return;
+    }
+    const auto world = reg.Get<ZHLN::Components::WorldTransformComponent>(g_player);
+    if (!world) {
+        return;
+    }
+    // Inverse of ConvertPosition (Source -> engine): engine = (x*s, z*s, -y*s).
+    const JPH::Vec3 e = world->world.GetTranslation();
+    const float     s = g_rigImportOpts.unitScale;
+    const std::array<float, 3> src = {e.GetX() / s, -e.GetZ() / s, e.GetY() / s};
+
+    std::array<std::array<float, 3>, 6> cube {};
+    if (!ZHLN::BSP::SampleLeafAmbientCube(*g_rigCubeMap, src, cube)) {
+        return;
+    }
+    std::array<JPH::Float4, 6> engineCube {};
+    for (size_t f = 0; f < 6; ++f) {
+        const float k = g_rigImportOpts.propAmbientCubeScale;
+        engineCube[f] = {cube[f][0] * k, cube[f][1] * k, cube[f][2] * k, 1.0f};
+    }
+    for (ZHLN::Entity part: g_playerRigParts) {
+        if (!reg.IsAlive(part)) {
+            continue;
+        }
+        if (!reg.Get<ZHLN::Components::AmbientCubeComponent>(part)) {
+            reg.Add<ZHLN::Components::AmbientCubeComponent>(part);
+        }
+        reg.Patch<ZHLN::Components::AmbientCubeComponent>(part, [&](auto& c) { c.cube = engineCube; });
+    }
+}
+
 // --- Procedural character -------------------------------------------------------
 
 // Ported from ProceduralAnimationSample: the same rig attach, the same layer
@@ -883,6 +928,11 @@ auto AttachCharacterRig(
         }
         if (writtenCount > 1) {
             CollectFirstPersonHeadMeshes(reg, *prefab, std::span<const ZHLN::Entity>(parts.data() + 1, writtenCount - 1), viewState);
+        }
+
+        // Keep the rig's visual parts so the frame loop can refresh their ambient cube.
+        if (writtenCount > 1) {
+            g_playerRigParts.assign(parts.begin() + 1, parts.begin() + writtenCount);
         }
 
         // Clean up the redundant prefab container root (parts[0]).
@@ -1407,6 +1457,7 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
     const auto& bspMap = *bspMapExp;
+    g_rigCubeMap       = &bspMap;
     ZHLN::Log("[BSPSample] Map version: {}", bspMap.version);
     ZHLN::Log(
         "[BSPSample] Entities: {}, Static Props: {}, Models: {}, Displacements: {}", bspMap.entities.size(), bspMap.staticProps.size(), bspMap.models.size(),
@@ -1519,7 +1570,8 @@ auto main(int argc, char* argv[]) -> int {
 
     const std::string virtualPath = mapPath.string();
     ZHLN::Log("[BSPSample] Importing BSP geometry and resolving materials...");
-    auto prefabOpt = ZHLN::BSP::LoadBSPPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bspBytes, virtualPath, importOpts);
+    g_rigImportOpts = importOpts;
+    auto prefabOpt  = ZHLN::BSP::LoadBSPPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bspBytes, virtualPath, importOpts);
     if (!prefabOpt) {
         ZHLN::LogError("[BSPSample] Failed to import BSP prefab for '{}'", virtualPath);
         return EXIT_FAILURE;
@@ -1970,6 +2022,7 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+        UpdatePlayerRigAmbientCube(*engine);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
             engine->GetPlatformHost().Close();
             break;

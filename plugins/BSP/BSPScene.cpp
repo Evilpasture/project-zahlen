@@ -452,6 +452,23 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 }
 
                 if ((isDoor || isButton) && subRecord != nullptr) {
+                    // Doors and buttons are brush submodels, not props, so they never
+                    // reached the prop path that samples ambient cubes. Sample at the
+                    // submodel's authored centre (its bounds plus the brush origin).
+                    if (modelIndex >= 0 && static_cast<size_t>(modelIndex) < map.models.size()) {
+                        const DModel& dm = map.models[static_cast<size_t>(modelIndex)];
+                        std::array<float, 3> brushOrigin {0.0f, 0.0f, 0.0f};
+                        if (const auto originKey = entity.FindVector("origin")) {
+                            brushOrigin = {(*originKey)[0], (*originKey)[1], (*originKey)[2]};
+                        }
+                        const std::array<float, 3> centre = {
+                            brushOrigin[0] + 0.5f * (dm.mins[0] + dm.maxs[0]),
+                            brushOrigin[1] + 0.5f * (dm.mins[1] + dm.maxs[1]),
+                            brushOrigin[2] + 0.5f * (dm.mins[2] + dm.maxs[2]),
+                        };
+                        ApplyAmbientCube(map, options, centre, interactive);
+                    }
+
                     interactive.shape  = Scene::ShapeKind::Prefab;
                     interactive.source = std::string(virtualPath) + "#model_" + std::to_string(modelIndex);
 
@@ -527,6 +544,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
                 const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
                 interactive.transform.position = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+                ApplyAmbientCube(map, options, {origin.GetX(), origin.GetY(), origin.GetZ()}, interactive);
             } else {
                 interactive.shape              = Scene::ShapeKind::Box;
                 const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
