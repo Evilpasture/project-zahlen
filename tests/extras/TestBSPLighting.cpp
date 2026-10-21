@@ -915,6 +915,19 @@ struct BSPLightingTestSuite {
             return Fail();
         }
 
+        // Decoding stays raw; the authored-units -> renderer-radiance conversion
+        // is an import-time calibration. BSPBakeField's VPL fit and the leaf
+        // ambient cubes read the same decoder and must not inherit a display
+        // scale, and a bake that reaches the radiance buffer unscaled renders a
+        // whole room at once-clip white. 1/30 is kSourceBrightnessToEngine
+        // without the live-light display gain; the cube multiplier carries the
+        // same factor so props keep the lightmap-relative fit it was tuned for.
+        const ZHLN::BSP::ImportOptions defaults {};
+        if (!ZHLN::Test::ExpectInRange(defaults.sourceLightmapScale, 1.0f / 30.5f, 1.0f / 29.5f) ||
+            !ZHLN::Test::ExpectInRange(defaults.propAmbientCubeScale, 49.5f, 50.5f)) {
+            return Fail();
+        }
+
         BSPMap map;
         map.lightingIsHdr = true;
         map.lighting = {

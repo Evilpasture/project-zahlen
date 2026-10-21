@@ -133,8 +133,10 @@ auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const Impo
     return EngineTripletFromQuat(qEngine);
 }
 // Attaches the leaf ambient cube at a Source-space position to a prop entity.
-// The cube is raw VRAD radiance, scaled by propAmbientCubeScale. It is not on
-// the lightmap scale: see the note on ImportOptions::propAmbientCubeScale.
+// The cube decodes raw (c * 2^e), like the lightmap lump, and is scaled by
+// propAmbientCubeScale, which carries the same kSourceLuxelToEngineRadiance
+// normalization the atlas gets -- a prop and the wall behind it therefore stay
+// on one radiance scale. See ImportOptions::propAmbientCubeScale.
 static void ApplyAmbientCube(const BSPMap& map, const ImportOptions& options, std::array<float, 3> sourcePos, Scene::SceneEntity& entity) {
     std::array<std::array<float, 3>, 6> cube {};
     if (!SampleLeafAmbientCube(map, sourcePos, cube)) {

@@ -41,6 +41,23 @@ inline constexpr float kIngestLevelGain = 7.0f;
 // brightness scale; kIngestLevelGain then lifts the pair to display parity.
 inline constexpr float kSourceBrightnessToEngine = kIngestLevelGain / 30.0f;
 
+// VRAD writes a luxel in the same Source light units `_light` brightness is
+// written in: it integrates the authored lights with a per-square-inch
+// falloff and stores the sum with an 8-bit mantissa. That is *not* the
+// renderer's radiance scale, so a bake is off by exactly the unit conversion
+// above whenever it reaches the radiance buffer. `kSourceBrightnessToEngine`
+// is that conversion plus the display gain; a bake already carries the
+// displayed result, so it takes the conversion without the gain.
+//
+// This is applied at the import boundary (ImportOptions::sourceLightmapScale),
+// not inside DecodeVradLuxel: the decoder stays a faithful `c * 2^e` reader
+// for BSPBakeField's VPL fit and for the leaf ambient cubes, while everything
+// that eventually multiplies albedo by VRAD goes through this factor. Left
+// uncalibrated, a baked surface enters the radiance buffer 30x hot, which the
+// tonemapper answers by clipping whole rooms to white and flattening the
+// authored light pools into one sheet.
+inline constexpr float kSourceLuxelToEngineRadiance = kSourceBrightnessToEngine / kIngestLevelGain; // 1 / 30
+
 // Source is Z-up and measures in inches; the engine is Y-up (glTF convention)
 // and measures in metres. The default converts; unitScale lets a caller keep
 // inches (1.0f) or feed a differently scaled world.
@@ -94,16 +111,25 @@ struct ImportOptions {
     // ring while still grouping a full Source map into only a few pages.
     uint32_t lightmapAtlasSize   = 2048;
     uint32_t lightmapAtlasGutter = 2;
-    // Explicit Source-lightmap multiplier, defaulting to the authored VRAD
-    // radiance. `kIngestLevelGain` calibrates the old VPL approximation and
-    // must never be applied here.
-    float sourceLightmapScale = 1.0f;
+    // Source-lightmap multiplier, published to the renderer as the material's
+    // bakedIrradianceScale. Defaults to the Source-units conversion above, i.e.
+    // the same authored-units -> radiance conversion every live light takes
+    // (without kIngestLevelGain, which exists to lift live lights to display
+    // parity and must never be applied to a bake). Set 1.0f to keep the
+    // authored VRAD magnitude verbatim; against the sample's exposure that
+    // reads roughly 30x hot and clips.
+    float sourceLightmapScale = kSourceLuxelToEngineRadiance;
     // Multiplier for leaf ambient cubes on props. VRAD's cube samples decode
     // ~1500x dimmer than the lightmaps (leaf-matched median ratio, p10..p90
     // about 160..14000; the lightmaps include direct light, so this is an
-    // upper bound on the ambient share). Tune within that range against the
-    // reference render.
-    float propAmbientCubeScale = 1500.0f;
+    // upper bound on the ambient share), so plain 1500 puts a cube on the
+    // lightmaps' *authored* scale. The lightmaps are then normalized by
+    // kSourceLuxelToEngineRadiance on their way to the renderer, so the cube
+    // path carries the same factor here and the prop/lightmap ratio the 1500
+    // was fitted for survives the calibration: 1500 / 30 = 50. Probes written
+    // through AmbientCubeComponent (the sample's player rig) read this same
+    // option, so they follow automatically.
+    float propAmbientCubeScale = 1500.0f * kSourceLuxelToEngineRadiance;
 
     // Compatibility-only approximation path. This must remain off whenever
     // native VRAD lightmaps are enabled: fitting the same bake into ambient +
