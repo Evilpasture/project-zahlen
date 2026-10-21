@@ -661,7 +661,8 @@ struct BSPMaterialsTestSuite {
                 ZHLN::MaterialDesc desc = ZHLN::MaterialDesc::Basic();
                 ZHLN::BSP::ApplyVmtLighting(vfs, parsed.material, desc);
                 if (!ZHLN::Test::ExpectTrue(desc.environmentReflectionEnabled) || !ZHLN::Test::ExpectTrue(desc.environmentReflectionAlphaMask) ||
-                    !ZHLN::Test::ExpectFalse(desc.specularEnabled) || !ZHLN::Test::ExpectInRange(desc.environmentReflectionFactor, 0.249f, 0.251f) ||
+                    !ZHLN::Test::ExpectEq(desc.alphaMode, uint32_t {0}) || !ZHLN::Test::ExpectFalse(desc.specularEnabled) ||
+                    !ZHLN::Test::ExpectInRange(desc.environmentReflectionFactor, 0.249f, 0.251f) ||
                     !ZHLN::Test::ExpectInRange(desc.roughness, 0.599f, 0.601f) || !ZHLN::Test::ExpectInRange(desc.metallic, 0.0f, 0.0f)) {
                     return Fail();
                 }

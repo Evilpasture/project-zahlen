@@ -335,8 +335,13 @@ float4 PSEmissive(EmissiveGeometryOutput input) : SV_Target0 {
     // pixel, so lighting.slang has already withheld the analytic SH ambient the
     // bake itself accounts for. Nothing has to be estimated or subtracted here,
     // and the result no longer depends on ambientExposure.
+    // Base alpha can instead be an envmap mask on an otherwise opaque material;
+    // it controls reflection strength, not diffuse coverage. Only BLEND uses
+    // base alpha as coverage. MASK pixels surviving RejectMaskedAlpha are full
+    // coverage too.
+    const float coverage = (material.alphaMode == 2u) ? albedo.a : 1.0f;
     const float3 bakedDiffuse = albedo.rgb * SampleBakedIrradiance(input.uv1, N, input.instanceId);
-    return float4((materialEmission + bakedDiffuse) * albedo.a, 0.0f);
+    return float4((materialEmission + bakedDiffuse) * coverage, 0.0f);
 }
 
 float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {
