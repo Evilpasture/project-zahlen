@@ -22,6 +22,23 @@ inline constexpr uint32_t kMaxGeneratedHiZMips = 7;
 using Res_SceneColor = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32>;
 using Res_Velocity   = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT>;
 using Res_NormRough  = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM>;
+// Which shading model owns the static lighting of a pixel, as a bitfield:
+//   bit 0 - a compile-time bake supplied this surface's diffuse ambient (a VRAD
+//           lightmap lump, or the leaf ambient cube that stands in for one on
+//           props), so the deferred pass's analytic SH ambient would be a
+//           second helping rather than a base layer,
+//   bit 1 - that same bake owns *direct* light too, which only a lightmap does:
+//           a cube is indirect-only, so a prop riding one keeps its live sun.
+// Zero means the analytic ambient/GI and every live light are all the pixel
+// gets, and both are applied in full.
+// Three of the compact G-buffer's channels are already spoken for (octahedral
+// normal, roughness, metallic) and a fourth (scene color) has no alpha lane, so
+// the ownership bits get their own attachment rather than stealing precision
+// from a lane that shading reads. UINT, not UNORM, because these are bits: an
+// 8-bit UNORM lane can only hold 1.0 or 0.0 without inventing an encoding, and
+// two independent flags have no exact UNORM spelling. Consumed by
+// lighting.slang only.
+using Res_BakedMask  = Vk::GraphImage<"BakedMask", VK_FORMAT_R8_UINT>;
 // The active presentation supplies backing storage; the resource identity is renderer-owned.
 using Res_Depth      = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT>;
 
@@ -93,6 +110,7 @@ class TargetManager {
         Vk::RenderTarget<Res_SceneColor> sceneColor;
         Vk::RenderTarget<Res_Velocity> velocityBuffer;
         Vk::RenderTarget<Res_NormRough> normalRoughnessBuffer;
+        Vk::RenderTarget<Res_BakedMask> bakedMask;
         Vk::RenderTarget<Res_Lighting> lightingTarget;
         Vk::RenderTarget<Res_HdrSceneColor> hdrSceneColor;
         Vk::RenderTarget<Res_DenoiseA> denoiseA;

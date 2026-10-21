@@ -42,6 +42,10 @@ struct PSOutput {
     float4 color : SV_Target0;
     float2 velocity : SV_Target1;
     float4 normalRoughness : SV_Target2;
+    // Particles share the opaque G-buffer, so they must author the ownership
+    // bits too: a particle is lit analytically, never by a VRAD bake, so both
+    // bits stay clear. See Res_BakedMask.
+    uint bakedMask : SV_Target3;
 };
 
 VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint viewId: SV_ViewID) {
@@ -143,6 +147,7 @@ PSOutput PSMain(VSOutput input) {
         float3 safeNormal = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
         output.color           = albedo;
         output.normalRoughness = float4(PackNormalOctahedron(safeNormal) * 0.5f + 0.5f, 1.0f, 0.0f);
+        output.bakedMask       = 0u;
         float currW = max(input.currClip.w, 0.0001f);
         float prevW = max(input.prevClip.w, 0.0001f);
         output.velocity = (input.currClip.xy / currW - input.prevClip.xy / prevW) * 0.5f;
@@ -168,6 +173,7 @@ PSOutput PSMain(VSOutput input) {
     output.color           = float4(surface.albedo, surface.alpha);
     float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
     output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
+    output.bakedMask       = 0u;
 
     float currW    = max(input.currClip.w, 0.0001f);
     float prevW    = max(input.prevClip.w, 0.0001f);

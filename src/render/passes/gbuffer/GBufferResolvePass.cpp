@@ -54,6 +54,7 @@ void RecordGpuCulled(
         .LoadColor(in.sceneColor)
         .LoadColor(in.velocity)
         .LoadColor(in.normRough)
+        .LoadColor(in.bakedMask)
         .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
             passCtx.EnsureHeapState();
@@ -86,6 +87,7 @@ void RecordCpuCulled(PassContext& passCtx, const CsgResources& csg, const MeshPa
         .LoadColor(in.sceneColor)
         .LoadColor(in.velocity)
         .LoadColor(in.normRough)
+        .LoadColor(in.bakedMask)
         .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
             ctx.BindHeapsAndPushFrame(cmd);

@@ -90,6 +90,7 @@ void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<con
         .ClearColor(in.sceneColor, kClearColorScene)
         .ClearColor(in.velocity, kClearColorVelocity)
         .ClearColor(in.normRough, kClearColorNormalRoughness)
+        .ClearColor(in.bakedMask, kClearColorBakedMask)
         .ClearDepth(in.depth, kClearDepthValue)
         .Execute(cmd, [&]() {
             passCtx.EnsureHeapState();
@@ -124,6 +125,7 @@ void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTarg
                           .ClearColor(in.sceneColor, kClearColorScene)
                           .ClearColor(in.velocity, kClearColorVelocity)
                           .ClearColor(in.normRough, kClearColorNormalRoughness)
+                          .ClearColor(in.bakedMask, kClearColorBakedMask)
                           .ClearDepth(in.depth, kClearDepthValue)
                           .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT);
     pass.Execute(cmd, [&]() {
@@ -177,6 +179,7 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
             .ClearColor(in.sceneColor, kClearColorScene)
             .ClearColor(in.velocity, kClearColorVelocity)
             .ClearColor(in.normRough, kClearColorNormalRoughness)
+            .ClearColor(in.bakedMask, kClearColorBakedMask)
             .ClearDepth(in.depth, kClearDepthValue)
             .Execute(cmd, []() {});
         return;

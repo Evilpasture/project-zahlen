@@ -93,6 +93,14 @@ struct SceneLight {
     // scene-light budget -- which is what used to happen to every lamp panel,
     // screen and sign in a Source map.
     bool  pinned           = false;
+    // True when the map compiler already baked this light into the lightmaps.
+    // A baked light still runs live -- props, entities and skybox scenery have
+    // no lightmap and would go dark without it -- but the deferred pass
+    // withholds its diffuse on the pixels whose lightmap owns that light, so a
+    // compiled fixture is not lit twice. See SceneLight::pinned for the other
+    // authoring flag: this one is about who owns the shading, that one about
+    // which lights survive the renderer's budget.
+    bool  baked            = false;
 };
 
 struct SceneCamera {

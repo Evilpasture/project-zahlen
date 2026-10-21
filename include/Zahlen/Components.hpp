@@ -451,6 +451,10 @@ struct Components {
         // SceneLight::pinned: LightingSystem publishes these first so the
         // renderer's scene-light budget cannot discard them.
         bool pinned = false;
+        // The map compiler baked this light into the map's lightmaps. See
+        // SceneLight::baked: the light still runs live for unbaked geometry,
+        // but deferred shading withholds its diffuse where a lightmap owns it.
+        bool baked = false;
     };
 
     // Particle components are authoring/runtime data only. Persistent simulation

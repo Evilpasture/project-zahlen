@@ -34,6 +34,15 @@ StructuredBuffer<ShadowTile> shadowTiles;
 
 Texture2D<float> texAo;
 
+// Baked-light ownership from the G-buffer (Res_BakedMask), read as a bitfield:
+//   bit 0 - a VRAD lightmap, or the leaf ambient cube standing in for one,
+//           already supplied this pixel's static ambient through the emissive
+//           overlay, so the analytic SH term below would double it,
+//   bit 1 - static *direct* light is baked here as well, which only a lightmap
+//           is: a cube carries indirect only, so a prop riding one keeps its
+//           live sun.
+Texture2D<uint> texBakedMask;
+
 
 #ifndef DISABLE_RTR
 Texture2D<float> texRtShadowMask;
@@ -57,7 +66,7 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
     return output;
 }
 
-float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos, float viewDepth) {
+float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos, float viewDepth, float bakedAmbient) {
     float  ao            = 1.0f;
     float3 indirectLight = float3(0.0f, 0.0f, 0.0f);
 
@@ -152,11 +161,24 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
         }
     }
 
-    float3 baselineAmbient = EvaluateSH(N, frame.sh) * frame.ambientExposure;
+    // Ambient is the only term this function owns, and the only one that is
+    // ownership-dependent: a baked pixel already carries the map's static
+    // ambient -- sky term and bounced light alike -- in its lightmap or leaf
+    // ambient cube, which PSEmissive adds back verbatim, so the analytic SH
+    // floor is withheld there. What survives on a baked pixel is the DDGI
+    // term's live half, added below.
+    const float3 shAmbient = EvaluateSH(N, frame.sh) * frame.ambientExposure;
+    float3       baselineAmbient = shAmbient * (1.0f - bakedAmbient);
 #ifndef DISABLE_RTR
     if (ENABLE_RTR != 0 && frame.ddgiParams.w > 0.0f) {
-        float3 V_amb    = SafeNormalize(pc.camPos.xyz - worldPos, N);
-        baselineAmbient = SampleDDGIOrSH(worldPos, N, V_amb, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
+        float3 V_amb = SafeNormalize(pc.camPos.xyz - worldPos, N);
+        // SampleDDGIOrSH resolves to max(probe field, SH floor). Only the part
+        // above that floor is live GI -- the flashlight's bounce, a door opening
+        // onto a baked wall -- and it belongs to baked and unbaked surfaces
+        // alike, because no bake ever saw it. Unbaked pixels therefore still
+        // resolve to exactly max(probes, shAmbient), i.e. the previous result.
+        const float3 probes = SampleDDGIOrSH(worldPos, N, V_amb, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
+        baselineAmbient += max(probes - shAmbient, float3(0.0f));
     }
 #endif
     indirectLight += baselineAmbient;
@@ -203,7 +225,13 @@ LightingOutput PSMain(VSOutput input) {
     float3 T = N;
     float3 B = N;
 
-    float4 ambientData         = ComputeAmbientAndAO(input.uv, uint2(input.pos.xy), N, worldPos, viewDepth);
+    // One texel fetch of the ownership field, used by both halves of this
+    // shader: the ambient gate below and the direct-light gates further down.
+    const uint  bakedBits    = texBakedMask.Load(int3(int2(input.pos.xy), 0));
+    const float bakedAmbient = float(bakedBits & 1u);
+    const float bakedDirect  = float((bakedBits >> 1u) & 1u);
+
+    float4 ambientData         = ComputeAmbientAndAO(input.uv, uint2(input.pos.xy), N, worldPos, viewDepth, bakedAmbient);
     float3 ambientDiffuseAndGI = ambientData.rgb;
     float ao                   = ambientData.a;
 
@@ -288,7 +316,12 @@ LightingOutput PSMain(VSOutput input) {
     float3 kD_sun = (float3(1.0f, 1.0f, 1.0f) - F) * (1.0f - metallic);
 
     float3 sunRadiance = frame.sunRadiance.xyz;
-    float3 directSun = (kD_sun * albedoRaw.rgb / 3.14159265f + spec) * sunRadiance * NdotL_sun * shadow;
+    // A lightmapped map's sun was compiled into the bake together with its
+    // shadows, so its diffuse is withheld wherever the lightmap owns direct
+    // light. The specular lobe is not: no lightmap stores one, so the highlight
+    // on a lightmapped surface has to come from here or not at all.
+    const float sunDiffuseOwnership = 1.0f - bakedDirect;
+    float3 directSun = (kD_sun * albedoRaw.rgb / 3.14159265f * sunDiffuseOwnership + spec) * sunRadiance * NdotL_sun * shadow;
 
     float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
 
@@ -303,6 +336,11 @@ LightingOutput PSMain(VSOutput input) {
             continue;
 
         Light light = lights[l];
+        // A light the map compiler baked owns its diffuse only where the bake
+        // owns it; unbaked pixels -- props, entities, skybox scenery -- still
+        // need the live light. Specular stays live everywhere, for the same
+        // reason the sun's does.
+        const float lightDiffuseOwnership = (light.baked != 0u) ? (1.0f - bakedDirect) : 1.0f;
         if (light.type == LightType::Area) {
             float2 uv      = float2(roughness, sqrt(1.0f - NdotV));
             float4 t1      = ltc_mat.SampleLevel(clampSampler, uv, 0.0f);
@@ -319,7 +357,7 @@ LightingOutput PSMain(VSOutput input) {
 
             const float shadowVisibility = 1.0f;
 
-            directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) *
+            directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC * lightDiffuseOwnership + specLTC) *
                               light.color * light.intensity * shadowVisibility;
         } else {
             if (light.type == LightType::Directional || light.type == LightType::Sun)
@@ -386,7 +424,7 @@ LightingOutput PSMain(VSOutput input) {
                     }
                 }
 
-                directPunctual += (kD_p * albedoRaw.rgb / 3.14159265f + spec_p) *
+                directPunctual += (kD_p * albedoRaw.rgb / 3.14159265f * lightDiffuseOwnership + spec_p) *
                                   light.color * light.intensity * atten * NdotL * shadowVisibility;
             }
         }

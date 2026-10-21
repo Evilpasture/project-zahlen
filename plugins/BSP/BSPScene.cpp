@@ -300,6 +300,15 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
             Scene::SceneLight light;
             light.name = entity.Find("targetname").empty() ? std::string(className) : std::string(entity.Find("targetname"));
+            // VRAD compiled every light entity in this map into the lightmaps
+            // that describe its surfaces, so each one is a *baked* light: it
+            // still runs live for props, entities and skybox scenery, but the
+            // deferred pass withholds its diffuse on the pixels whose lightmap
+            // already owns it (see SceneLight::baked / Res_BakedMask). Without
+            // this the whole map is lit twice -- once by the bake, once by the
+            // live light -- which is exactly what a mapper sees as "the
+            // lightmap does nothing".
+            light.baked = true;
 
             // Sun, not a point at infinity: LightComponent::direction is the
             // toward-the-sun vector -- RenderSystem places the shadow camera at
@@ -717,6 +726,9 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // Pinned, so LightingSystem ranks these ahead of every entity light
             // and the renderer's scene-light budget cannot discard them.
             light.pinned           = true;
+            // Emissive surfaces were radiosity sources in the same compile their
+            // glow is baked with, so these proxies are baked lights as well.
+            light.baked            = true;
             scene.lights.push_back(std::move(light));
         }
     }

@@ -18,7 +18,10 @@ its simple name (`module transform;`). They carry no descriptors or push data;
 G-buffer fragments use `StandardPBRMaterial`; clearcoat, anisotropy, sheen and
 specular-exotic materials are routed through the forward path for their full
 evaluation. The deferred emission compositor also samples `StandardPBRMaterial`
-a second time and adds only its HDR emission. Shadow fragments sample only
+a second time and adds its HDR emission plus the surface's baked irradiance;
+`Res_BakedMask`, which the G-buffer writes for exactly those surfaces, is what
+tells `lighting.slang` where that bake, rather than the analytic terms, owns the
+ambient and the static lights. Shadow fragments sample only
 alpha. These structs are shader-local, not a host material ABI or runtime
 material-type dispatch. Forward transmission retains its separate refractive
 shading path.

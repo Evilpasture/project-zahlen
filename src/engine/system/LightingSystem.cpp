@@ -109,6 +109,7 @@ void LightingSystem::Update(ECS::Query<const Components::LightComponent, const C
             desc.color            = light.color;
             desc.innerConeRadians = light.innerConeRadians;
             desc.outerConeRadians = light.outerConeRadians;
+            desc.baked            = light.baked;
 
             RankedLight entry {};
             entry.desc   = desc;

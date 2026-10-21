@@ -121,6 +121,10 @@ public struct Light {
     public float innerConeCos;
     public float outerConeCos;
     public uint twoSided;
+    // 1 when a map compile baked this light into the lightmaps. The punctual
+    // loop still shades with it, but only on pixels whose lightmap does not
+    // already own the light (lighting.slang, Res_BakedMask bit 1).
+    public uint baked;
     // Index of this light's first ShadowTile, or -1 when it casts no shadow.
     // The renderer owns it: the atlas allocator assigns it each frame from the
     // lights that asked to cast and the tiles that still fit.

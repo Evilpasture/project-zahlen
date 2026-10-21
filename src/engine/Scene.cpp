@@ -315,7 +315,8 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 .castsShadow = light.castsShadow,
                 .innerConeRadians = light.innerConeRadians,
                 .outerConeRadians = light.outerConeRadians,
-                .pinned = light.pinned
+                .pinned = light.pinned,
+                .baked  = light.baked
             },
             Components::SceneLightTagComponent {}
         );
@@ -456,6 +457,7 @@ namespace {
                 .range       = light.range,
                 .castsShadow = light.castsShadow,
                 .pinned      = light.pinned,
+                .baked       = light.baked,
             }
         );
     }

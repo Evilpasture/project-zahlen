@@ -95,6 +95,7 @@ auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t sha
     packed.intensity      = desc.intensity;
     packed.radius         = desc.radius;
     packed.twoSided       = desc.twoSided;
+    packed.baked          = desc.baked ? 1u : 0u;
     packed.range          = (desc.range > 0.0f) ? desc.range : 1000.0f;
     packed.shadowTileBase = shadowTileBase;
 

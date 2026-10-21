@@ -7,6 +7,15 @@ struct PSOutput {
     float4 color : SV_Target0;
     float2 velocity : SV_Target1;
     float4 normalRoughness : SV_Target2;
+    // Baked-light ownership, not a shading input. Res_BakedMask is an R8_UINT
+    // bitfield and lighting.slang is its only consumer:
+    //   bit 0 - a bake supplied this pixel's diffuse ambient,
+    //   bit 1 - that bake owns static *direct* light as well.
+    // Two bits, because the bakes differ in reach: a VRAD lightmap holds direct
+    // and indirect light, a leaf ambient cube holds indirect only. A prop rides
+    // the cube, so it must keep its live sun while still not being given the
+    // analytic SH ambient a second time.
+    uint bakedMask : SV_Target3;
 };
 
 SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
@@ -127,6 +136,9 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         float3 safeNormal = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
         output.color           = albedo;
         output.normalRoughness = float4(PackNormalOctahedron(safeNormal) * 0.5f + 0.5f, 1.0f, 0.0f);
+        // Unlit materials never consume ambient or direct light, so they own
+        // neither bit.
+        output.bakedMask       = 0u;
     } else {
         // The masked pass used a higher floor than opaque or translucent scene
         // fragments. Keep the floor in the sampling input, not the material type.
@@ -145,12 +157,27 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, float3(0.0f));
         // Baked surfaces keep their real G-buffer albedo: zeroing it deleted the
         // diffuse response of every dynamic light, so flashlights and entities
-        // could only leave specular on a lightmapped wall. The authored bake is
-        // composited in PSEmissive, which subtracts the baseline SH ambient the
-        // deferred pass contributes here, so the ambient is not counted twice.
+        // could only leave specular on a lightmapped wall. What tells the
+        // deferred pass to skip its analytic ambient instead is the ownership
+        // bit below, not a mutilated albedo: the lightmap already contains the
+        // map's static ambient, and PSEmissive adds it back verbatim.
         output.color           = float4(surface.albedo, surface.alpha);
         float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
         output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
+        // The instance flags are exactly the cases in which PSEmissive's
+        // additive overlay resolves to a non-zero baked ambient for this pixel:
+        // a VRAD atlas lookup, or the leaf ambient cube that stands in for one.
+        // Both already carry the map's static sky and bounce, so both withhold
+        // the deferred pass's analytic SH ambient; only the atlas also holds
+        // direct light, so only it claims the second bit.
+        uint bakedBits = 0u;
+        if (input.instanceId != 0xFFFFFFFFu) {
+            const InstanceData instance = scene.g_instances[input.instanceId];
+            const bool         lightmap = instance.hasBakedIrradiance;
+            const bool         anyBake  = lightmap || instance.hasAmbientCube;
+            bakedBits                   = (lightmap ? 2u : 0u) | (anyBake ? 1u : 0u);
+        }
+        output.bakedMask       = bakedBits;
     }
 
     float currW    = max(input.currClip.w, 0.0001f);
@@ -269,6 +296,8 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
         transmission *= SampleMaterialTexture(tex.w, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerTransmission),
                                               input.samplerCodes, kSamplerTransmission).r;
     }
+    // Ungated for the same reason as PSForward's irradiance: a transmitting
+    // surface is forward-only and gets no bake, so this is its whole ambient.
     float3 diffuse = albedo * (1.0f - metallic) * EvaluateSH(N, scene.frame.sh) * scene.frame.ambientExposure;
     float3 color = lerp(diffuse, transmitted, transmission);
     color = RgbMix(color, specular, F);
@@ -288,21 +317,15 @@ float4 PSEmissive(EmissiveGeometryOutput input) : SV_Target0 {
         discard;
     }
     const float3 materialEmission = SampleMaterialEmissive<StandardPBRMaterial>(material);
-    float3 N = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
+    float3       N                = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
     // Baked irradiance is a diffuse-light transport result, not material
-    // emission. This additive overlay is merely the compact-G-buffer transport
-    // mechanism: it restores albedo * VRAD on top of the deferred pass, which
-    // now contributes its own ambient to those same surfaces because PSMain no
-    // longer zeroes their albedo.
+    // emission. This overlay restores albedo * VRAD on top of the deferred
+    // pass, and it is now purely additive: PSMain wrote bakedMask = 1 for this
+    // pixel, so lighting.slang has already withheld the analytic SH ambient the
+    // bake itself accounts for. Nothing has to be estimated or subtracted here,
+    // and the result no longer depends on ambientExposure.
     const float3 bakedDiffuse = albedo.rgb * SampleBakedIrradiance(input.uv1, N, input.instanceId);
-    // VRAD already folded the bounce from the map's sky ambient into the bake,
-    // and lighting.slang adds that baseline SH ambient again (EvaluateSH(N, sh)
-    // * ambientExposure). Subtract exactly that term so the authored bake is not
-    // double-lit; the clamp only matters when a map was baked against a
-    // brighter ambient than the one the scene carries.
-    const float3 shAmbient = EvaluateSH(N, scene.frame.sh) * scene.frame.ambientExposure;
-    const float3 netBaked  = max(bakedDiffuse - albedo.rgb * shAmbient * (1.0f - material.metallicFactor), float3(0.0f));
-    return float4((materialEmission + netBaked) * albedo.a, 0.0f);
+    return float4((materialEmission + bakedDiffuse) * albedo.a, 0.0f);
 }
 
 float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {
@@ -398,6 +421,10 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     // silently replaced the scenario's environment for every material the
     // pipeline routes forward, which is why those materials no longer match
     // the environment the goldens were lit with.
+    // Deliberately not gated on the baked-ambient ownership bit that
+    // lighting.slang honors: the forward path never adds a bake, so this SH term
+    // is the only ambient these materials get. Gating it would darken a blended
+    // or transmissive surface that sits on a lightmapped wall.
     float3 irradiance  = EvaluateSH(Ns, scene.frame.sh) * scene.frame.ambientExposure;
     float3 diffuseIBL  = albedo.rgb * (1.0f - F_rough) * (1.0f - metallic) * irradiance;
     float3 litBase = (diffuseIBL + specularIBL) * surface.occlusion;

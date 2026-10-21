@@ -490,7 +490,11 @@ auto RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte>
     return _impl->geometry.Update(handle, bytes.data(), bytes.size());
 }
 
-static_assert(ActiveGBuffer::count == 3, "The compact deferred path owns SceneColor, Velocity, and NormRough only.");
+static_assert(
+    ActiveGBuffer::count == 4,
+    "The compact deferred path owns SceneColor, Velocity, NormRough and the BakedMask ownership field only."
+);
+static_assert(ActiveGBuffer::array[3] == VK_FORMAT_R8_UINT, "The baked-light ownership field is one R8 lane of bits, not a weight.");
 static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_count == 1);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_formats[0] == VK_FORMAT_R16G16B16A16_SFLOAT);

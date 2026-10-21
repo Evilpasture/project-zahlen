@@ -24,6 +24,7 @@ void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
         .LoadColor(in.sceneColor)
         .LoadColor(in.velocity)
         .LoadColor(in.normRough)
+        .LoadColor(in.bakedMask)
         .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < frame.queues.Draws().size(); ++i) {

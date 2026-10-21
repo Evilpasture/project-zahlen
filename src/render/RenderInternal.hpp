@@ -111,6 +111,7 @@ struct SceneResources {
     Vk::TypedImage<ColorL> sceneColor;
     Vk::TypedImage<ColorL> velocity;
     Vk::TypedImage<ColorL> normRough;
+    Vk::TypedImage<ColorL> bakedMask;
     Vk::TypedImage<DepthL> depth;
 };
 

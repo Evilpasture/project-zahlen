@@ -14,6 +14,7 @@ struct ClusteredLightingPass:
         "Lighting",
         Vk::FragmentAndComputeRead<Res_SceneColor>,
         Vk::FragmentAndComputeRead<Res_NormRough>,
+        Vk::FragmentAndComputeRead<Res_BakedMask>,
         Vk::FragmentAndComputeRead<Res_Depth>,
         Vk::ShaderRead<Res_ShadowMap>,
         Vk::ShaderRead<Res_ShadowAtlas>,
