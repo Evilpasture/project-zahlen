@@ -860,6 +860,17 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
     desc.metallic  = 0.0f;
     desc.roughness = vmt.Has("$phong") ? 0.45f : (vmt.Has("$envmap") ? 0.60f : 0.85f);
 
+    // Source's $envmap is a reflected environment response, not a PBR metal
+    // and not the KHR specular extension (which requires the forward path).
+    // Preserve it through the G-buffer's otherwise-unused opaque alpha lane so
+    // deferred props keep their ambient-cube lighting. The scalar projection is
+    // exact for Source's common neutral tint, including the chair's 0.25 gray.
+    if (vmt.Has("$envmap")) {
+        desc.environmentReflectionEnabled          = true;
+        desc.environmentReflectionAlphaMask = vmt.baseAlphaEnvMapMask;
+        desc.environmentReflectionFactor = std::clamp((vmt.envMapTint.x + vmt.envMapTint.y + vmt.envMapTint.z) / 3.0f, 0.0f, 1.0f);
+    }
+
     // 1. Unlit by construction. UnlitGeneric and its siblings have no lighting
     // path at all: the albedo goes straight to the framebuffer. MonitorScreen
     // and UnlitTwoTexture belong to the same family -- a screen shows its own

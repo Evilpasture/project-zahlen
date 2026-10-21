@@ -162,6 +162,11 @@ struct Material {
     // response in holds a multiple of the 0.04 baseline, and clamping once is
     // what keeps every path agreeing on the same reflectance.
     bool                      specularEnabled      = false;
+    // Scale the deferred image-based reflection independently of the glTF
+    // specular extension; optionally gate it with base-color texture alpha.
+    bool                      environmentReflectionEnabled    = false;
+    bool                      environmentReflectionAlphaMask   = false;
+    float                     environmentReflectionFactor     = 1.0f;
     float                     specularFactor       = 1.0f;
     JPH::Float3               specularColorFactor {1.0f, 1.0f, 1.0f};
     TextureHandle             specularMap          = TextureHandle::Invalid;
@@ -261,6 +266,11 @@ struct MaterialDesc {
     // See Material: `specularEnabled` is the extension's presence on this
     // material, not a deviation of the factors from their defaults.
     bool                      specularEnabled      = false;
+    // Scale the deferred image-based reflection independently of the glTF
+    // specular extension; optionally gate it with base-color texture alpha.
+    bool                      environmentReflectionEnabled    = false;
+    bool                      environmentReflectionAlphaMask   = false;
+    float                     environmentReflectionFactor     = 1.0f;
     float                     specularFactor       = 1.0f;
     JPH::Float3               specularColorFactor {1.0f, 1.0f, 1.0f};
     TextureHandle             specularMap          = TextureHandle::Invalid;

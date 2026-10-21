@@ -161,7 +161,18 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         // deferred pass to skip its analytic ambient instead is the ownership
         // bit below, not a mutilated albedo: the lightmap already contains the
         // map's static ambient, and PSEmissive adds it back verbatim.
-        output.color           = float4(surface.albedo, surface.alpha);
+        // Opaque G-buffer alpha is otherwise unused after alpha testing. Carry
+        // the optional image-based reflection scale there, modulated by the
+        // base-color texture alpha only when the material requests that mask.
+        float environmentReflectionScale = 1.0f;
+        if (input.instanceId != 0xFFFFFFFFu) {
+            const InstanceData instance = scene.g_instances[input.instanceId];
+            if (instance.hasEnvironmentReflection) {
+                environmentReflectionScale = saturate(instance.environmentReflectionFactor) *
+                                    (instance.environmentReflectionUsesAlphaMask ? saturate(albedo.a) : 1.0f);
+            }
+        }
+        output.color           = float4(surface.albedo, environmentReflectionScale);
         float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
         output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
         // The instance flags are exactly the cases in which PSEmissive's

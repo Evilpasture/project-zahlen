@@ -35,6 +35,8 @@ struct VMTMaterial {
     bool  noCull        = false; // $nocull 1
 
     JPH::Float4 baseColor {1.0f, 1.0f, 1.0f, 1.0f}; // $color / $color2
+    JPH::Float4 envMapTint {1.0f, 1.0f, 1.0f, 1.0f}; // $envmaptint, scalar use is preserved in MaterialDesc
+    bool        baseAlphaEnvMapMask = false; // $basealphaenvmapmask 1
 
     // All parameters preserved in lowercase (e.g. "$basetexture", "$surfaceprop")
     std::unordered_map<std::string, std::string> parameters;

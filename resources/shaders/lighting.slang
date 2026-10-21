@@ -216,8 +216,12 @@ LightingOutput PSMain(VSOutput input) {
     float3 V    = SafeNormalize(pc.camPos.xyz - worldPos, N);
     float NdotV = saturate(dot(N, V));
 
-    float3 F0 = lerp(float3(kDielectricF0), albedoRaw.rgb, metallic);
-    float  f90 = 1.0f;
+    // G-buffer alpha stores a per-material reflection response scale; ordinary
+    // materials write one. Scaling both dielectric reflectance endpoints keeps
+    // this feature in deferred lighting without sacrificing ambient-cube data.
+    const float environmentReflectionScale = saturate(albedoRaw.a);
+    float3 F0 = lerp(float3(kDielectricF0), albedoRaw.rgb, metallic) * environmentReflectionScale;
+    float  f90 = environmentReflectionScale;
     // The compact deferred path is isotropic. Materials that need tangent-space
     // extension lobes are rendered in ForwardPass.
     float materialAo = 1.0f;

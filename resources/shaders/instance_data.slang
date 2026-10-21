@@ -107,7 +107,7 @@ public struct InstanceData {
     // layout put it, without an implicit pad either way.
     public float4 specularParams; // rgb: specularColorFactor; a: specularFactor.
     public uint specularTexIndex; // 0xFFFF when absent; slot 15's sampler code and UV row.
-    public uint specularFlags;    // Bit 0: the extension is declared on this material. Bits 1..2: texture mode.
+    public uint specularFlags;    // Bit 0: KHR extension; bits 1..2: texture mode; bits 3..4: deferred reflection flags.
 
     // Baked diffuse irradiance has its own bindless lane rather than stealing
     // the AO semantic or one of the sixteen glTF texture-info sampler slots.
@@ -115,10 +115,14 @@ public struct InstanceData {
     public uint bakedIrradianceTexIndex; // 0xFFFF when absent.
     public float bakedIrradianceScale;
 
-    // Source ambient cube for props without a lightmap, +X,-X,+Y,-Y,+Z,-Z linear
-    // radiance. Read only when kInstanceFlagAmbientCube is set. Appended last so
-    // the existing field offsets stay put.
+    // Ambient cube for instances without a lightmap, +X,-X,+Y,-Y,+Z,-Z linear
+    // radiance. Read only when kInstanceFlagAmbientCube is set. Appended after
+    // existing instance fields so their offsets remain stable.
     public float4 ambientCube[6];
+
+    // Generic scale for the deferred image-based reflection response. Appended
+    // after the ambient cube to preserve all existing field offsets.
+    public float environmentReflectionFactor;
 };
 
 // Field order is load-bearing: coneCutoff's 4 bytes fill 44..48 so coneAxis
@@ -252,6 +256,20 @@ public extension InstanceData {
         [ForceInline]
         get {
             return (this.specularFlags >> 1u) & 3u;
+        }
+    }
+    // Optional per-material image-based reflection response, kept deferred so
+    // ambient-cube and baked-light ownership remain intact.
+    public property bool hasEnvironmentReflection {
+        [ForceInline]
+        get {
+            return (this.specularFlags & (1u << 3u)) != 0u;
+        }
+    }
+    public property bool environmentReflectionUsesAlphaMask {
+        [ForceInline]
+        get {
+            return (this.specularFlags & (1u << 4u)) != 0u;
         }
     }
     public property bool hasBakedIrradiance {

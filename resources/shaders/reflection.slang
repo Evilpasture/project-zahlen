@@ -289,10 +289,14 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float3 B = N;
         float3 R = reflect(-V, N);
 
+        // Opaque G-buffer alpha carries the optional material reflection
+        // scale, including any requested base-color alpha mask. Ordinary
+        // materials store one here.
+        const float environmentReflectionScale = saturate(albedoRaw.a);
         float NdotV = saturate(dot(N, V));
-        float3 F0 = lerp(float3(kDielectricF0), albedoRaw.rgb, metallic);
+        float3 F0 = lerp(float3(kDielectricF0), albedoRaw.rgb, metallic) * environmentReflectionScale;
         float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
-        float3 FssEss = F0 * envBRDF.x + float3(EffectiveF90(1.0f, metallic)) * envBRDF.y;
+        float3 FssEss = F0 * envBRDF.x + float3(EffectiveF90(environmentReflectionScale, metallic)) * envBRDF.y;
 
         // A rough GGX lobe gathers light around the surface normal rather than
         // the perfect-mirror ray. Keep R for SSR/RTR; bend only the IBL lookup.

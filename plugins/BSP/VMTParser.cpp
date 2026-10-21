@@ -271,6 +271,11 @@ auto DeriveVmtFields(VMTMaterial& mat) noexcept -> void {
     } else if (const auto it2 = mat.parameters.find("$color2"); it2 != mat.parameters.end()) {
         ParseColorValues(it2->second, mat.baseColor);
     }
+    mat.envMapTint = JPH::Float4 {1.0f, 1.0f, 1.0f, 1.0f};
+    if (const auto it = mat.parameters.find("$envmaptint"); it != mat.parameters.end()) {
+        ParseColorValues(it->second, mat.envMapTint);
+    }
+    mat.baseAlphaEnvMapMask = mat.parameters.contains("$basealphaenvmapmask") && mat.parameters["$basealphaenvmapmask"] == "1";
 }
 
 } // namespace

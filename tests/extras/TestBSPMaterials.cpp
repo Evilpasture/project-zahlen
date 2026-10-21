@@ -180,6 +180,9 @@ struct BSPMaterialsTestSuite {
                     "$alphatest" 0
                     "$nocull" 1
                     "$color" "[0.8 0.6 0.4]"
+                    "$envmap" "env_cubemap"
+                    "$envmaptint" "[0.25 0.25 0.25]"
+                    "$basealphaenvmapmask" "1"
                     "%keywords" "cstrike,de_dust"
 
                     "proxies"
@@ -211,6 +214,10 @@ struct BSPMaterialsTestSuite {
             ZHLN::Test::ExpectLt(std::abs(mat.baseColor.y - 0.6f), 1e-3f);
             ZHLN::Test::ExpectLt(std::abs(mat.baseColor.z - 0.4f), 1e-3f);
             ZHLN::Test::ExpectLt(std::abs(mat.baseColor.w - 1.0f), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs(mat.envMapTint.x - 0.25f), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs(mat.envMapTint.y - 0.25f), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs(mat.envMapTint.z - 0.25f), 1e-3f);
+            ZHLN::Test::ExpectTrue(mat.baseAlphaEnvMapMask);
 
             ZHLN::Test::ExpectTrue(mat.Has("$basetexture"));
             ZHLN::Test::ExpectEq(mat.Get("$surfaceprop"), "brick");
@@ -226,6 +233,8 @@ struct BSPMaterialsTestSuite {
             if (windowsPath) {
                 ZHLN::Test::ExpectEq(windowsPath->baseTexture, "models\\props\\de_nuke\\light_wall");
                 ZHLN::Test::ExpectEq(*windowsPath->Find("$BASETEXTURE"), "models\\props\\de_nuke\\light_wall");
+                ZHLN::Test::ExpectFalse(windowsPath->baseAlphaEnvMapMask);
+                ZHLN::Test::ExpectLt(std::abs(windowsPath->envMapTint.x - 1.0f), 1e-3f);
                 ZHLN::Test::ExpectTrue(windowsPath->Find("$color2").has_value());
             }
 
@@ -567,7 +576,17 @@ struct BSPMaterialsTestSuite {
                 f << "UnlitGeneric\n{\n\t\"$basetexture\" \"lights/white_panel\"\n\t\"$selfillum\" \"1\"\n}\n";
             }
 
-            // 7. A texlight whose art is not on disk: the emission factor would
+            // 7. A Source prop with a tinted, base-alpha-masked envmap.
+            {
+                std::ofstream f(tempRoot / "materials" / "models" / "props" / "de_nuke" / "chair_env.vmt");
+                f << R"(VertexLitGeneric
+{
+    "$envmap" "env_cubemap"
+    "$envmaptint" "[0.25 0.25 0.25]"
+    "$basealphaenvmapmask" "1"
+})";
+            }
+            // 8. A texlight whose art is not on disk: the emission factor would
             //    apply with no texture to modulate it, so it has to be dropped
             //    and the surface left at the missing-texture grey.
             {
@@ -630,6 +649,23 @@ struct BSPMaterialsTestSuite {
                 }
                 return out;
             };
+
+            // The prop envmap material must retain its tint and base-alpha mask
+            // in the deferred material description without opting into the
+            // KHR specular extension's forward-only route.
+            {
+                const Parsed parsed = parseMaterial("models/props/de_nuke/chair_env");
+                if (!ZHLN::Test::ExpectTrue(parsed.ok)) {
+                    return Fail();
+                }
+                ZHLN::MaterialDesc desc = ZHLN::MaterialDesc::Basic();
+                ZHLN::BSP::ApplyVmtLighting(vfs, parsed.material, desc);
+                if (!ZHLN::Test::ExpectTrue(desc.environmentReflectionEnabled) || !ZHLN::Test::ExpectTrue(desc.environmentReflectionAlphaMask) ||
+                    !ZHLN::Test::ExpectFalse(desc.specularEnabled) || !ZHLN::Test::ExpectInRange(desc.environmentReflectionFactor, 0.249f, 0.251f) ||
+                    !ZHLN::Test::ExpectInRange(desc.roughness, 0.599f, 0.601f) || !ZHLN::Test::ExpectInRange(desc.metallic, 0.0f, 0.0f)) {
+                    return Fail();
+                }
+            }
 
             // `$selfillum 1` on VertexLitGeneric: full self-illumination scaled
             // by the shader class (0.55) and lifted into HDR radiance so it

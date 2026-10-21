@@ -160,6 +160,9 @@ struct InstanceDataDesc {
     uint32_t                  occlusionTex         = kNoFilmTexture;
     float                     occlusionStrength    = 1.0f;
     bool                      specularEnabled      = false;
+    bool                      environmentReflectionEnabled  = false;
+    bool                      environmentReflectionAlphaMask = false;
+    float                     environmentReflectionFactor = 1.0f;
     float                     specularFactor       = 1.0f;
     JPH::Float3               specularColorFactor {1.0f, 1.0f, 1.0f};
     uint32_t                  specularTex     = kNoFilmTexture;
@@ -281,10 +284,12 @@ struct InstanceDataDesc {
         .uvRow1                  = uvRow1,
         .specularParams          = {desc.specularColorFactor.x, desc.specularColorFactor.y, desc.specularColorFactor.z, std::max(desc.specularFactor, 0.0f)},
         .specularTexIndex        = desc.specularTex,
-        .specularFlags           = (desc.specularEnabled ? 1u : 0u) | (std::min(desc.specularTexMode, 3u) << 1u),
+        .specularFlags           = (desc.specularEnabled ? 1u : 0u) | (std::min(desc.specularTexMode, 3u) << 1u) |
+                                  (desc.environmentReflectionEnabled ? 1u << 3u : 0u) | (desc.environmentReflectionAlphaMask ? 1u << 4u : 0u),
         .bakedIrradianceTexIndex = desc.bakedIrradianceTex,
         .bakedIrradianceScale    = std::max(desc.bakedIrradianceScale, 0.0f),
         .ambientCube             = desc.ambientCube,
+        .environmentReflectionFactor = desc.environmentReflectionFactor,
     };
 }
 
@@ -463,6 +468,9 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .occlusionTex             = OptionalTextureIndex(_impl.get(), material.occlusionMap),
                  .occlusionStrength        = material.occlusionStrength,
                  .specularEnabled          = material.specularEnabled,
+                 .environmentReflectionEnabled  = material.environmentReflectionEnabled,
+                 .environmentReflectionAlphaMask = material.environmentReflectionAlphaMask,
+                 .environmentReflectionFactor = material.environmentReflectionFactor,
                  .specularFactor           = material.specularFactor,
                  .specularColorFactor      = material.specularColorFactor,
                  .specularTex              = OptionalTextureIndex(_impl.get(), material.specularMap),
@@ -554,6 +562,9 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .occlusionTex             = OptionalTextureIndex(_impl.get(), material.occlusionMap),
                     .occlusionStrength        = material.occlusionStrength,
                     .specularEnabled          = material.specularEnabled,
+                    .environmentReflectionEnabled  = material.environmentReflectionEnabled,
+                    .environmentReflectionAlphaMask = material.environmentReflectionAlphaMask,
+                    .environmentReflectionFactor = material.environmentReflectionFactor,
                     .specularFactor           = material.specularFactor,
                     .specularColorFactor      = material.specularColorFactor,
                     .specularTex              = OptionalTextureIndex(_impl.get(), material.specularMap),
