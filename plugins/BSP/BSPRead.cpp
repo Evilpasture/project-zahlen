@@ -498,10 +498,12 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         return std::unexpected(res.error());
     }
 
-    // The bake: VRAD's luxel radiance. HDR is selected only with the matching
-    // HDR face list above; LDR remains the coherent fallback for a partial or
-    // malformed HDR pair. Empty lighting is legal on unbaked maps.
-    const bool       useHdrLighting = usingHdrFaces && lump(Lump::LightingHDR).filelen > 0;
+    // The bake: VRAD's luxel radiance. Faces read from LUMP_FACES_HDR carry
+    // lightofs values that address LUMP_LIGHTING_HDR only, so they must never
+    // be paired with the LDR lump. If the HDR luxel lump is missing or empty,
+    // the faces get no static lighting rather than wrong-lump lighting.
+    // LDR faces keep the LDR lump. Empty lighting is legal on unbaked maps.
+    const bool       useHdrLighting = usingHdrFaces;
     const LumpEntry* lightingLump   = useHdrLighting ? &lump(Lump::LightingHDR) : &lump(Lump::Lighting);
     if (lightingLump->filelen > 0) {
         if (auto res = ReadLumpArray<ColorRGBExp32>(bytes, *lightingLump); res) {

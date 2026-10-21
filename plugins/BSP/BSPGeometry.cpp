@@ -452,10 +452,13 @@ void EmitVertex(
         static_cast<size_t>(face.texinfo) < map.texInfos.size()) {
         const DTexInfo& lightInfo = map.texInfos[static_cast<size_t>(face.texinfo)];
         const VradLightmapPage& page = lightmaps.pages[lightmapChart->page];
-        const float s = (sourcePos.GetX() * lightInfo.lightmapVecs[0][0] + sourcePos.GetY() * lightInfo.lightmapVecs[0][1] +
-                         sourcePos.GetZ() * lightInfo.lightmapVecs[0][2] + lightInfo.lightmapVecs[0][3]) * (1.0f / 16.0f);
-        const float t = (sourcePos.GetX() * lightInfo.lightmapVecs[1][0] + sourcePos.GetY() * lightInfo.lightmapVecs[1][1] +
-                         sourcePos.GetZ() * lightInfo.lightmapVecs[1][2] + lightInfo.lightmapVecs[1][3]) * (1.0f / 16.0f);
+        // lightmapVecs are luxels per world unit (Source's lightmapVecsLuxelsPerWorldUnits),
+        // so dot + offset is already a luxel coordinate. Dividing by 16 here
+        // shrinks every face's sample grid and mis-addresses the chart.
+        const float s = sourcePos.GetX() * lightInfo.lightmapVecs[0][0] + sourcePos.GetY() * lightInfo.lightmapVecs[0][1] +
+                        sourcePos.GetZ() * lightInfo.lightmapVecs[0][2] + lightInfo.lightmapVecs[0][3];
+        const float t = sourcePos.GetX() * lightInfo.lightmapVecs[1][0] + sourcePos.GetY() * lightInfo.lightmapVecs[1][1] +
+                        sourcePos.GetZ() * lightInfo.lightmapVecs[1][2] + lightInfo.lightmapVecs[1][3];
         lightU = (static_cast<float>(lightmapChart->x) + (s - static_cast<float>(face.lightmapTextureMinsInLuxels[0])) + 0.5f) /
                  static_cast<float>(page.width);
         lightV = (static_cast<float>(lightmapChart->y) + (t - static_cast<float>(face.lightmapTextureMinsInLuxels[1])) + 0.5f) /
