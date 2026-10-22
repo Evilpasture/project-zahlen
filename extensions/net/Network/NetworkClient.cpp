@@ -38,7 +38,9 @@ module;
 #include <unistd.h>
 #endif
 
+#include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>
 #include <cstdint>
@@ -189,12 +191,28 @@ auto RecvSome(SocketHandle fd, uint8_t* destination, size_t capacity, size_t& ou
     }
 }
 
-auto ToOptional(std::expected<void, ErrorCode> result) -> std::optional<ErrorCode> {
-    if (result.has_value()) {
-        return std::nullopt;
-    }
-    return result.error();
-}
+// Which socket a message arrived on. The same envelope over the stream and over
+// a datagram are different failures -- a frame that desynchronised the stream
+// against a datagram that simply went bad -- and worth telling apart in a log.
+enum class Channel : uint8_t { Tcp, Udp };
+
+/// One message that arrived whole and still could not be applied, and why.
+struct MessageMiss {
+    Channel channel = Channel::Tcp;
+    //: The envelope's type, absent when the envelope itself did not decode.
+    std::optional<MessageType> type {};
+    ErrorCode                  error {};
+    //: What the decoder said, when a decoder is what refused it.
+    std::string detail;
+};
+
+/// Every message a poll applied, and every one it did not: the types that went
+/// in against the misses that did not. This replaces an
+/// `std::optional<ErrorCode>` chain in which a frame that failed to replicate
+/// and a corrupt datagram behind it were the same value, the second one was
+/// silently dropped, and everything after the first failure went unread until
+/// the next poll -- if the caller looked at the error at all.
+using MessageBatch = BatchResult<MessageType, MessageMiss>;
 
 // Reads exactly one complete TCP frame (blocking with timeout).
 auto RecvExactFrame(SocketHandle fd, Wire::Buffer& stream, int timeoutMs) -> Wire::Result<std::vector<uint8_t>> {
@@ -296,26 +314,40 @@ struct NetworkClient::Impl {
         tcpStream.Clear();
     }
 
-    auto DispatchMessage(Engine& engine, std::span<const uint8_t> payload) -> std::optional<ErrorCode> {
-        auto envelope = DecodeEnvelope(payload);
-        if (!envelope) {
-            Log("Net: undecodable message — {}", envelope.error().Format());
-            return ErrorCode(NetworkError::InvalidPayload);
-        }
-        switch (envelope->type) {
+    // One message in, one batch out: the type it applied, or the miss that
+    // stopped it. The caller merges these into the poll's ledger, so a message
+    // that fails no longer decides for every message behind it.
+    auto ApplyMessage(Engine& engine, const MessageEnvelope& envelope, Channel channel) -> MessageBatch {
+        MessageBatch applied;
+        const auto   record = [&applied, &envelope, channel](const std::expected<void, ErrorCode>& outcome) {
+            if (outcome) {
+                applied.AddSuccess(envelope.type);
+                return;
+            }
+            applied.EmplaceError(MessageMiss {.channel = channel, .type = envelope.type, .error = outcome.error()});
+        };
+        switch (envelope.type) {
             case MessageType::InitialSnapshot:
-                return ToOptional(replicator->ApplyInitialObjects(engine, envelope->payload));
+                record(replicator->ApplyInitialObjects(engine, envelope.payload));
+                break;
             case MessageType::PhysicsBatch:
-                return ToOptional(replicator->ApplyPhysicsBatch(engine, envelope->payload));
+                record(replicator->ApplyPhysicsBatch(engine, envelope.payload));
+                break;
             case MessageType::ClientHello:
             case MessageType::ServerWelcome:
             case MessageType::ClientInput:
-                return std::nullopt; // not client-bound; ignore
+                // Not client-bound: nothing was applied and nothing went wrong,
+                // so the batch stays empty -- which is a complete success.
+                break;
         }
-        return std::nullopt;
+        return applied;
     }
 
-    auto PumpTcp(Engine& engine) -> std::optional<ErrorCode> {
+    // The transport half of a poll: a stream that desynchronised is a frame-level
+    // failure -- the socket is closed, nothing after it can be trusted -- so the
+    // error comes back as the return value. What each individual message did is
+    // the ledger's business.
+    auto PumpTcp(Engine& engine, MessageBatch& ledger) -> ErrorCode {
         uint8_t chunk[RECV_CHUNK_BYTES];
         while (true) {
             size_t got = 0;
@@ -361,19 +393,23 @@ struct NetworkClient::Impl {
                 CloseSockets();
                 return ErrorCode(NetworkError::InvalidPayload);
             }
-            if (auto failure = DispatchMessage(engine, *payload); failure.has_value()) {
-                return failure;
+            auto envelope = DecodeEnvelope(*payload);
+            if (!envelope) {
+                ledger.EmplaceError(
+                    MessageMiss {.channel = Channel::Tcp, .error = ErrorCode(NetworkError::InvalidPayload), .detail = envelope.error().Format()}
+                );
+                continue;
             }
+            ledger.Merge(ApplyMessage(engine, *envelope, Channel::Tcp));
         }
-        return std::nullopt;
+        return {};
     }
 
-    auto PumpUdp(Engine& engine) -> std::optional<ErrorCode> {
+    auto PumpUdp(Engine& engine, MessageBatch& ledger) -> ErrorCode {
         if (udpSocket == kInvalid) {
-            return std::nullopt;
+            return {};
         }
-        std::optional<ErrorCode> failure;
-        uint8_t              datagram[RECV_CHUNK_BYTES];
+        uint8_t datagram[RECV_CHUNK_BYTES];
         while (true) {
             size_t got = 0;
             const RecvStatus status = RecvSome(udpSocket, datagram, sizeof datagram, got);
@@ -386,23 +422,27 @@ struct NetworkClient::Impl {
 
             auto payload = DecodeDatagram({datagram, got});
             if (!payload) {
-                Log("Net: dropping corrupt datagram — {}", payload.error().Format());
+                ledger.EmplaceError(
+                    MessageMiss {.channel = Channel::Udp, .error = ErrorCode(NetworkError::InvalidPayload), .detail = payload.error().Format()}
+                );
                 continue; // datagrams are self-contained; keep draining
             }
             auto envelope = DecodeEnvelope(*payload);
             if (!envelope) {
-                Log("Net: dropping undecodable datagram — {}", envelope.error().Format());
+                ledger.EmplaceError(
+                    MessageMiss {.channel = Channel::Udp, .error = ErrorCode(NetworkError::InvalidPayload), .detail = envelope.error().Format()}
+                );
                 continue;
             }
+            // Only the realtime channel's one message type is read from a
+            // datagram; anything else on that socket is still ignored, not
+            // quietly promoted to a message the stream is meant to carry.
             if (envelope->type == MessageType::PhysicsBatch) {
                 isRealtimeReady = true;
-                if (auto error = ToOptional(replicator->ApplyPhysicsBatch(engine, envelope->payload)); error.has_value()
-                    && !failure.has_value()) {
-                    failure = error;
-                }
+                ledger.Merge(ApplyMessage(engine, *envelope, Channel::Udp));
             }
         }
-        return failure;
+        return {};
     }
 };
 
@@ -552,12 +592,32 @@ auto NetworkClient::PollEvents(Engine& engine) noexcept -> std::expected<void, E
     if (!_impl->isConnected || _impl->tcpSocket == kInvalid) {
         return {};
     }
-    std::optional<ErrorCode> failure = _impl->PumpTcp(engine);
-    if (const auto udpFailure = _impl->PumpUdp(engine); udpFailure.has_value() && !failure.has_value()) {
-        failure = udpFailure;
+    // Both channels drain into one ledger, and every message that did not make
+    // it is reported once, with the channel and the type that produced it. The
+    // frame still fails on the first of them, which is what the public signature
+    // promises; what changed is that the failures behind the first are no longer
+    // thrown away with it.
+    MessageBatch    applied;
+    const ErrorCode tcpFailure = _impl->PumpTcp(engine, applied);
+    const ErrorCode udpFailure = _impl->PumpUdp(engine, applied);
+
+    applied.ForEachError([](const MessageMiss& miss) {
+        const char* carrier = miss.channel == Channel::Udp ? "datagram" : "stream frame";
+        if (miss.type.has_value()) {
+            Log("Net: {} carrying {} was received but not applied — {}", carrier, *miss.type, miss.error);
+            return;
+        }
+        Log("Net: {} carrying an undecodable message was dropped — {}: {}", carrier, miss.error, miss.detail);
+    });
+
+    if (tcpFailure) {
+        return std::unexpected(tcpFailure);
     }
-    if (failure.has_value()) {
-        return std::unexpected(*failure);
+    if (udpFailure) {
+        return std::unexpected(udpFailure);
+    }
+    if (const auto* first = applied.FirstError(); first != nullptr) {
+        return std::unexpected(first->error);
     }
     return {};
 }

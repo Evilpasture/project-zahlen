@@ -5,13 +5,16 @@
 
 #include <HTTP/HTTP.hpp>
 #include <RemoteAsset/DiskCache.hpp>
+#include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
+#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <iomanip>
@@ -88,11 +91,17 @@ inline constexpr std::string_view kTempMarker       = ".tmp-";
     return std::filesystem::is_regular_file(std::filesystem::symlink_status(file, ec));
 }
 
-void RemoveRegularFile(const std::filesystem::path& file) {
-    if (IsRegularFile(file)) {
-        std::error_code ec;
-        std::filesystem::remove(file, ec);
+// A removal that hands back the filesystem's reason instead of dropping it. An
+// absent file is not a failure: removal is how a file becomes absent, and every
+// caller here asks for that end state rather than for a particular transition --
+// so a caller with nothing to say about the reason simply ignores the result.
+auto RemoveRegularFile(const std::filesystem::path& file) -> std::error_code {
+    if (!IsRegularFile(file)) {
+        return {};
     }
+    std::error_code ec;
+    std::filesystem::remove(file, ec);
+    return ec;
 }
 
 [[nodiscard]] auto IsExpired(std::filesystem::file_time_type written, std::filesystem::file_time_type now, std::chrono::seconds maxAge) -> bool {
@@ -130,9 +139,40 @@ inline constexpr size_t           kMaxMetadataBytes = 32 * 1024;
     return std::filesystem::path(file.string() + std::string(kMetadataSuffix));
 }
 
-void RemoveEntry(const std::filesystem::path& file) {
-    RemoveRegularFile(file);
-    RemoveRegularFile(MetadataFile(file));
+// The body first, then its sidecar: a body that would not go keeps its metadata
+// with it, so a torn pair is never left behind as a trusted entry.
+auto RemoveEntry(const std::filesystem::path& file) -> std::error_code {
+    if (const std::error_code body = RemoveRegularFile(file); body) {
+        return body;
+    }
+    return RemoveRegularFile(MetadataFile(file));
+}
+
+/// One cache entry that maintenance tried to remove and the filesystem refused.
+struct EvictionFailure {
+    std::filesystem::path file;
+    std::error_code       code;
+};
+
+/// What one sweep did: the entries it removed, and the ones it tried to remove
+/// and could not. Maintenance is best effort and its callers carry on either
+/// way -- but a cache that cannot shed bytes it is not allowed to keep is the one
+/// thing worth saying out loud, and the silent removals this replaces could not
+/// tell that apart from an eviction that worked.
+using EvictionBatch = BatchResult<std::filesystem::path, EvictionFailure>;
+
+/// Says what a sweep could not finish, for the callers that have just changed the
+/// cache and so care whether the budget it restored is real. The read path calls
+/// sweeps too, and a warning per read is not worth the recovery it would buy, so
+/// those call sites drop the batch where they stand.
+void ReportEvictions(const EvictionBatch& evictions, const std::filesystem::path& root, std::string_view after) {
+    if (!evictions.HasErrors()) {
+        return;
+    }
+    ZHLN::LogWarning(
+        "DiskCache: {} entr{} under '{}' could not be evicted after {}; the cache may exceed its budget.", evictions.ErrorCount(),
+        evictions.ErrorCount() == 1 ? "y" : "ies", root.string(), after
+    );
 }
 
 [[nodiscard]] auto BodyHash(std::span<const uint8_t> bytes) noexcept -> uint64_t {
@@ -317,12 +357,29 @@ struct DiskCache::State {
         return true;
     }
 
-    void Sweep(bool force, const std::filesystem::path& protectedFile = {}) {
-        const auto tick = std::chrono::steady_clock::now();
+    auto Sweep(bool force, const std::filesystem::path& protectedFile = {}) -> EvictionBatch {
+        EvictionBatch evictions;
+        const auto    tick = std::chrono::steady_clock::now();
         if (!force && lastSweep && std::chrono::duration<long double>(tick - *lastSweep) < policy.cleanupInterval) {
-            return;
+            return evictions;
         }
         lastSweep = tick;
+
+        // Every removal in this pass goes through one of these, so a deletion the
+        // filesystem refused is recorded rather than assumed. What the byte
+        // budget below needs to know is simply whether the file is still there,
+        // and that is now the answer to the removal instead of a second look at
+        // the directory.
+        const auto record = [&evictions](const std::filesystem::path& file, std::error_code ec) {
+            if (ec) {
+                evictions.EmplaceError(EvictionFailure {.file = file, .code = ec});
+            } else {
+                evictions.AddSuccess(file);
+            }
+            return !ec;
+        };
+        const auto evictEntry = [&record](const std::filesystem::path& file) { return record(file, RemoveEntry(file)); };
+        const auto evictFile  = [&record](const std::filesystem::path& file) { return record(file, RemoveRegularFile(file)); };
 
         struct Entry {
             std::filesystem::path           file;
@@ -347,7 +404,7 @@ struct DiskCache::State {
             if (file.filename().string().find(kTempMarker) != std::string::npos) {
                 // Never evict a recent/in-progress staging file for capacity.
                 if (written <= now && IsExpired(written, now, kAbandonedTempAge)) {
-                    RemoveRegularFile(file);
+                    evictFile(file);
                 }
                 continue;
             }
@@ -355,16 +412,15 @@ struct DiskCache::State {
                 auto body = file;
                 body.replace_extension();
                 if (!IsRegularFile(body)) {
-                    RemoveRegularFile(file); // Orphan metadata left by an interrupted removal.
+                    evictFile(file); // Orphan metadata left by an interrupted removal.
                 }
                 continue; // Metadata is accounted for with its body, not independently.
             }
-            if (file != protectedFile && IsExpired(written, now, policy.maxAge)) {
-                RemoveEntry(file);
-                // If removal failed, still account for it in the byte budget.
-                if (!IsRegularFile(file)) {
-                    continue;
-                }
+            // An entry that expired and did go away has nothing left to account
+            // for; one the filesystem refused to remove falls through to the byte
+            // budget below, because it is still on disk and still costs space.
+            if (file != protectedFile && IsExpired(written, now, policy.maxAge) && evictEntry(file)) {
+                continue;
             }
             if (policy.maxBytes != 0) {
                 if (const auto size = EntrySize(file)) {
@@ -395,9 +451,10 @@ struct DiskCache::State {
                 remaining -= entry.size;
             } else {
                 full = true;
-                RemoveEntry(entry.file);
+                evictEntry(entry.file);
             }
         }
+        return evictions;
     }
 };
 
@@ -426,7 +483,7 @@ namespace Validators {
 
 DiskCache::DiskCache(std::filesystem::path rootDir, CachePolicy policy): m_state(std::make_shared<State>(std::move(rootDir), policy)) {
     const std::lock_guard lock(*m_state->mutex);
-    m_state->Sweep(true);
+    ReportEvictions(m_state->Sweep(true), m_state->root, "construction");
 }
 
 [[nodiscard]] auto DiskCache::Read(std::string_view cacheFileName, ValidatorFn validator) const -> std::optional<std::vector<uint8_t>> {
@@ -442,7 +499,7 @@ DiskCache::DiskCache(std::filesystem::path rootDir, CachePolicy policy): m_state
         return std::nullopt;
     }
     const std::lock_guard lock(*m_state->mutex);
-    m_state->Sweep(false);
+    m_state->Sweep(false); // hygiene only: a read has nothing to do with a cache that could not shed an entry
     const auto file = m_state->root / std::string(cacheFileName);
     MigrateLegacySpelling(file);
     if (!m_state->IsUsable(file)) {
@@ -523,7 +580,7 @@ DiskCache::DiskCache(std::filesystem::path rootDir, CachePolicy policy): m_state
     }
     // Two renames cannot be one cross-process transaction. The size/checksum
     // association makes a torn pair a miss, never a trusted conditional hit.
-    m_state->Sweep(true, file);
+    ReportEvictions(m_state->Sweep(true, file), m_state->root, std::format("writing '{}'", cacheFileName));
     return true;
 }
 
@@ -557,7 +614,7 @@ DiskCache::DiskCache(std::filesystem::path rootDir, CachePolicy policy): m_state
     if (!StageFile(meta, BytesOf(metadata), temp) || !CommitFile(temp, meta)) {
         return false;
     }
-    m_state->Sweep(true, file);
+    ReportEvictions(m_state->Sweep(true, file), m_state->root, std::format("revalidating '{}'", cacheFileName));
     return true;
 }
 
