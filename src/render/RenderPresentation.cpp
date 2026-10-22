@@ -64,11 +64,11 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
 
         const bool presents = destPresenter.HasSwapchain();
 
-        std::array<VkSemaphoreSubmitInfo, 3> waits {};
+        std::array<Vk::SemaphoreSubmit, 3> waits {};
         uint32_t waitCount = 0;
         const uint64_t stagingValue = transferRingBuffer.GetCurrentValue();
         if (transferRingBuffer.GetSemaphore() != VK_NULL_HANDLE && stagingValue > 0) {
-            waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(transferRingBuffer.GetSemaphore(), stagingValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+            waits[waitCount++] = Vk::SemaphoreSubmit::Timeline(transferRingBuffer.GetSemaphore(), stagingValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
         }
 
         // Tell-Don't-Ask: ask FrameSync for a ready-made compute dependency
@@ -93,7 +93,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         }
         auto presented = destPresenter.Present(
             ctx.GraphicsQueue(), ctx.PresentQueue(), std::move(*executable), dest.acquired->imageIndex,
-            std::span<const VkSemaphoreSubmitInfo> {waits.data(), waitCount}
+            std::span<const Vk::SemaphoreSubmit> {waits.data(), waitCount}
         );
         if (!presented) {
             if (Vk::IsDeviceLost(presented.error())) {

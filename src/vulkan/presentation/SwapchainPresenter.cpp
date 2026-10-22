@@ -182,11 +182,11 @@ void SwapchainPresenter::PreparePresent(CommandRecorder& recorder, uint32_t imag
 }
 
 auto SwapchainPresenter::Present(
-    VkQueue                                graphicsQueue,
-    VkQueue                                presentQueue,
-    ExecutableCommands                     cmds,
-    uint32_t                               imageIndex,
-    std::span<const VkSemaphoreSubmitInfo> extraWaits
+    VkQueue                          graphicsQueue,
+    VkQueue                          presentQueue,
+    ExecutableCommands               cmds,
+    uint32_t                         imageIndex,
+    std::span<const SemaphoreSubmit> extraWaits
 ) noexcept -> PresentationOutcome<PresentSuboptimal> {
     if (!cmds) {
         return std::unexpected(CommandRecordingError::NotExecutable);

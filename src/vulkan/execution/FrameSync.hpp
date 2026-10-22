@@ -26,26 +26,39 @@ template <uint32_t N>
     requires(N > 0)
 class FrameSync {
   public:
+    /// Semaphore sync bundle for a graphics queue submission.
+    /// 256 bytes: exactly four 64-byte cache lines, no dead Vulkan struct padding.
     struct GraphicsSubmitSync {
-        // TODO(Evilpasture): I need an object for VkSemaphoreSubmitInfo instead of C struct.
-        std::array<VkSemaphoreSubmitInfo, 8> waitInfos {};
-        uint32_t                             waitCount = 0;
-        std::array<VkSemaphoreSubmitInfo, 2> signalInfos {};
-        uint32_t                             signalCount     = 0;
-        uint64_t                             submissionValue = 0;
+        static constexpr size_t kMaxWaits   = 8;
+        static constexpr size_t kMaxSignals = 2;
 
-        [[nodiscard]] auto Waits() const noexcept -> std::span<const VkSemaphoreSubmitInfo> {
+        std::array<SemaphoreSubmit, kMaxWaits>   waitInfos {};   // 192 bytes
+        std::array<SemaphoreSubmit, kMaxSignals> signalInfos {}; // 48 bytes
+        uint32_t                                 waitCount       = 0;
+        uint32_t                                 signalCount     = 0;
+        uint64_t                                 submissionValue = 0;
+
+        [[nodiscard]] auto Waits() const noexcept -> std::span<const SemaphoreSubmit> {
             return {waitInfos.data(), waitCount};
         }
-        [[nodiscard]] auto Signals() const noexcept -> std::span<const VkSemaphoreSubmitInfo> {
+        [[nodiscard]] auto Signals() const noexcept -> std::span<const SemaphoreSubmit> {
             return {signalInfos.data(), signalCount};
         }
     };
 
+    static_assert(sizeof(GraphicsSubmitSync) == 256, "GraphicsSubmitSync must fit exactly four cache lines.");
+
+    /// Semaphore sync bundle for an async compute queue submission (32 bytes).
     struct ComputeSubmitSync {
-        VkSemaphoreSubmitInfo signalInfo {};
-        uint64_t              timelineValue = 0;
+        SemaphoreSubmit signal {}; // 24 bytes
+        uint64_t        timelineValue = 0;
+
+        [[nodiscard]] auto Signal() const noexcept -> std::span<const SemaphoreSubmit> {
+            return {&signal, 1};
+        }
     };
+
+    static_assert(sizeof(ComputeSubmitSync) == 32, "ComputeSubmitSync must be exactly 32 bytes.");
 
     FrameSync() noexcept = default;
     ~FrameSync() noexcept;
@@ -118,20 +131,20 @@ class FrameSync {
     // @param presentWaitSemaphore If non-null, the swapchain present semaphore to signal and the
     //        imageAvailable semaphore to wait on; pass VK_NULL_HANDLE for headless (offscreen) submits.
     [[nodiscard]] auto
-        PrepareGraphicsSubmit(uint32_t slot, VkSemaphore presentWaitSemaphore = VK_NULL_HANDLE, std::span<const VkSemaphoreSubmitInfo> extraWaits = {}) noexcept
+        PrepareGraphicsSubmit(uint32_t slot, VkSemaphore presentWaitSemaphore = VK_NULL_HANDLE, std::span<const SemaphoreSubmit> extraWaits = {}) noexcept
         -> GraphicsSubmitSync {
         const uint32_t     s = slot % N;
         GraphicsSubmitSync sync {};
 
         // 1. Wait on swapchain acquire (imageAvailable) — only when presenting to swapchain
         if (presentWaitSemaphore != VK_NULL_HANDLE && _frames[s].imageAvailable != VK_NULL_HANDLE) {
-            sync.waitInfos[sync.waitCount++] = MakeSubmitInfo(_frames[s].imageAvailable, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            sync.waitInfos[sync.waitCount++] = SemaphoreSubmit::Binary(_frames[s].imageAvailable, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
         }
 
         // 2. Add extra external waits (e.g. async compute, transfer)
         for (const auto& extra: extraWaits) {
-            ZHLN::PanicIf(sync.waitCount >= sync.waitInfos.size(), "GraphicsSubmitSync wait capacity exceeded");
-            if (sync.waitCount < sync.waitInfos.size()) {
+            ZHLN::PanicIf(sync.waitCount >= GraphicsSubmitSync::kMaxWaits, "GraphicsSubmitSync wait capacity exceeded");
+            if (sync.waitCount < GraphicsSubmitSync::kMaxWaits) {
                 sync.waitInfos[sync.waitCount++] = extra;
             }
         }
@@ -139,11 +152,14 @@ class FrameSync {
         // 3. Step timeline and prepare signals
         const uint64_t next_value            = ++_graphicsTimelineValues[s];
         sync.submissionValue                 = next_value;
-        sync.signalInfos[sync.signalCount++] = MakeSubmitInfo(_frames[s].graphicsTimeline, next_value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+        sync.signalInfos[sync.signalCount++] = SemaphoreSubmit::Timeline(_frames[s].graphicsTimeline, next_value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 
         // 4. Signal present semaphore if swapchain is active
         if (presentWaitSemaphore != VK_NULL_HANDLE) {
-            sync.signalInfos[sync.signalCount++] = MakeSubmitInfo(presentWaitSemaphore, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+            ZHLN::PanicIf(sync.signalCount >= GraphicsSubmitSync::kMaxSignals, "GraphicsSubmitSync signal capacity exceeded");
+            if (sync.signalCount < GraphicsSubmitSync::kMaxSignals) {
+                sync.signalInfos[sync.signalCount++] = SemaphoreSubmit::Binary(presentWaitSemaphore, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+            }
         }
 
         return sync;
@@ -159,7 +175,7 @@ class FrameSync {
         const uint32_t s   = slot % N;
         const uint64_t val = ++_timelineValues[s];
         return ComputeSubmitSync {
-            .signalInfo    = MakeSubmitInfo(_frames[s].computeTimeline, val, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
+            .signal        = SemaphoreSubmit::Timeline(_frames[s].computeTimeline, val, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
             .timelineValue = val,
         };
     }
@@ -169,27 +185,16 @@ class FrameSync {
     }
 
     /// Builds a dependency for a stage waiting on compute simulation.
-    [[nodiscard]] auto GetComputeWaitDependency(uint32_t slot, VkPipelineStageFlags2 stage) const noexcept -> std::optional<VkSemaphoreSubmitInfo> {
+    [[nodiscard]] auto GetComputeWaitDependency(uint32_t slot, VkPipelineStageFlags2 stage) const noexcept -> std::optional<SemaphoreSubmit> {
         const uint32_t s   = slot % N;
         const uint64_t val = _computeValuesSubmitted[s];
         if (val > 0 && _frames[s].computeTimeline != VK_NULL_HANDLE) {
-            return MakeSubmitInfo(_frames[s].computeTimeline, val, stage);
+            return SemaphoreSubmit::Timeline(_frames[s].computeTimeline, val, stage);
         }
         return std::nullopt;
     }
 
   private:
-    [[nodiscard]] static constexpr auto MakeSubmitInfo(VkSemaphore sem, uint64_t value, VkPipelineStageFlags2 stage) noexcept -> VkSemaphoreSubmitInfo {
-        return VkSemaphoreSubmitInfo {
-            .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .pNext       = nullptr,
-            .semaphore   = sem,
-            .value       = value,
-            .stageMask   = stage,
-            .deviceIndex = 0,
-        };
-    }
-
     void Reset() noexcept;
 
     VkDevice                     _device = VK_NULL_HANDLE;

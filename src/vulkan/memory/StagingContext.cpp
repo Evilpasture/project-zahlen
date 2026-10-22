@@ -169,8 +169,8 @@ auto StagingContext::ExecuteAsync() && -> std::expected<SubmittedStagingWork, Er
     if (vkCreateSemaphore(_ctx->Device(), &semaphoreInfo, nullptr, &timeline) != VK_SUCCESS) {
         return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
-    const auto signal = MakeSemaphoreSubmitInfo(timeline, 1, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
-    if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::move(*executable), {}, std::span<const VkSemaphoreSubmitInfo>{&signal, 1}); !result) {
+    const auto signal = SemaphoreSubmit::Timeline(timeline, 1, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+    if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::move(*executable), {}, std::span<const SemaphoreSubmit> {&signal, 1}); !result) {
         vkDestroySemaphore(_ctx->Device(), timeline, nullptr);
         const auto idle = Vk::WaitIdle(_ctx->GraphicsQueue());
         if (!idle) {

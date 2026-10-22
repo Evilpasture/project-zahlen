@@ -83,10 +83,8 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
         return std::unexpected(executable.error());
     }
 
-    auto compSync = impl.presenter.sync.PrepareComputeSubmit(slot);
-    auto   submitted = Vk::QueueSubmit(
-        impl.ctx.ComputeQueue(), std::move(*executable), {}, std::span<const VkSemaphoreSubmitInfo> {&compSync.signalInfo, 1}
-    );
+    auto compSync  = impl.presenter.sync.PrepareComputeSubmit(slot);
+    auto submitted = Vk::QueueSubmit(impl.ctx.ComputeQueue(), std::move(*executable), {}, compSync.Signal());
 
     if (!submitted) [[unlikely]] {
         if (Vk::IsDeviceLost(submitted.error())) {

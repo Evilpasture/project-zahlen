@@ -73,11 +73,11 @@ class SwapchainPresenter {
     void PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept;
 
     [[nodiscard]] auto Present(
-        VkQueue                                graphicsQueue,
-        VkQueue                                presentQueue,
-        ExecutableCommands                     cmds,
-        uint32_t                               imageIndex,
-        std::span<const VkSemaphoreSubmitInfo> extraWaits = {}
+        VkQueue                          graphicsQueue,
+        VkQueue                          presentQueue,
+        ExecutableCommands               cmds,
+        uint32_t                         imageIndex,
+        std::span<const SemaphoreSubmit> extraWaits = {}
     ) noexcept -> PresentationOutcome<PresentSuboptimal>;
 
     void AdvanceFrame() noexcept {

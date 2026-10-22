@@ -9,6 +9,11 @@
 
 #include "CommandRecorder.hpp"
 #include <Zahlen/Error.hpp>
+#include <array>
+#include <cstdint>
+#include <span>
+#include <type_traits>
+#include <vector>
 
 namespace ZHLN::Vk {
 
@@ -28,23 +33,67 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 
-[[nodiscard]] constexpr auto MakeSemaphoreSubmitInfo(
-    VkSemaphore semaphore, uint64_t value, VkPipelineStageFlags2 stage
-) noexcept -> VkSemaphoreSubmitInfo {
-    return {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = semaphore,
-        .value = value,
-        .stageMask = stage,
-    };
-}
+// Compact 24-byte representation of a semaphore synchronization point.
+//
+// Mirrors the ImageView/GeometryView design: only semantic state is stored and
+// the 48-byte VkSemaphoreSubmitInfo (sType/pNext/deviceIndex + padding = 24 dead
+// bytes) is synthesized on the stack at the vkQueueSubmit2 boundary.
+struct SemaphoreSubmit {
+    VkSemaphore           semaphore = VK_NULL_HANDLE;                       // 8 bytes
+    uint64_t              value     = 0;                                    // 8 bytes (0 => binary semaphore)
+    VkPipelineStageFlags2 stage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; // 8 bytes
 
-[[nodiscard]] auto QueueSubmit(
-    VkQueue queue,
-    ExecutableCommands cmds,
-    std::span<const VkSemaphoreSubmitInfo> waits = {},
-    std::span<const VkSemaphoreSubmitInfo> signals = {}
-) noexcept -> std::expected<void, ErrorCode>;
+    // -------------------------------------------------------------------------
+    // "Tell, Don't Ask" Factories
+    // -------------------------------------------------------------------------
+    [[nodiscard]] static constexpr auto
+        Binary(VkSemaphore sem, VkPipelineStageFlags2 stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept -> SemaphoreSubmit {
+        return {.semaphore = sem, .value = 0, .stage = stageMask};
+    }
+
+    [[nodiscard]] static constexpr auto
+        Timeline(VkSemaphore sem, uint64_t val, VkPipelineStageFlags2 stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept -> SemaphoreSubmit {
+        return {.semaphore = sem, .value = val, .stage = stageMask};
+    }
+
+    // -------------------------------------------------------------------------
+    // Observers
+    // -------------------------------------------------------------------------
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return semaphore != VK_NULL_HANDLE;
+    }
+    explicit constexpr operator bool() const noexcept {
+        return Valid();
+    }
+
+    [[nodiscard]] constexpr auto IsTimeline() const noexcept -> bool {
+        return value != 0;
+    }
+
+    // -------------------------------------------------------------------------
+    // JIT Stack Synthesis
+    // -------------------------------------------------------------------------
+    /// Synthesizes the C struct on the stack; Vulkan only borrows it for the call.
+    [[nodiscard]] constexpr auto AsSubmitInfo() const noexcept -> VkSemaphoreSubmitInfo {
+        return {
+            .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .pNext       = nullptr,
+            .semaphore   = semaphore,
+            .value       = value,
+            .stageMask   = stage,
+            .deviceIndex = 0,
+        };
+    }
+
+    friend constexpr auto operator==(const SemaphoreSubmit&, const SemaphoreSubmit&) noexcept -> bool = default;
+};
+
+static_assert(sizeof(SemaphoreSubmit) == 24, "SemaphoreSubmit must be exactly 24 bytes.");
+static_assert(std::is_trivially_copyable_v<SemaphoreSubmit>);
+
+[[nodiscard]] auto
+    QueueSubmit(VkQueue queue, ExecutableCommands cmds, std::span<const SemaphoreSubmit> waits = {}, std::span<const SemaphoreSubmit> signals = {}) noexcept
+    -> std::expected<void, ErrorCode>;
 
 [[nodiscard]] auto QueueSubmit(
     VkQueue queue,

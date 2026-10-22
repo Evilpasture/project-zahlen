@@ -7,6 +7,39 @@
 namespace ZHLN::Vk {
 namespace {
 
+/// Maximum number of wait/signal semaphores the engine ever submits in one call.
+/// Anything beyond this falls back to heap storage ([[unlikely]], never hit today).
+inline constexpr size_t kInlineSemaphoreSubmitCapacity = 8;
+
+/// Synthesizes VkSemaphoreSubmitInfo records on the stack for the duration of a
+/// vkQueueSubmit2 call. Vulkan only borrows the array, so nothing here outlives
+/// the submit; the common path performs no heap allocation at all.
+class SemaphoreSubmitInfoScratch {
+  public:
+    explicit SemaphoreSubmitInfoScratch(const std::span<const SemaphoreSubmit> submits) noexcept {
+        _count = submits.size();
+        if (_count > kInlineSemaphoreSubmitCapacity) [[unlikely]] {
+            _heap.resize(_count);
+            _storage = _heap.data();
+        } else {
+            _storage = _inline.data();
+        }
+        for (size_t i = 0; i < _count; ++i) {
+            _storage[i] = submits[i].AsSubmitInfo();
+        }
+    }
+
+    [[nodiscard]] auto Infos() const noexcept -> std::span<const VkSemaphoreSubmitInfo> {
+        return {_storage, _count};
+    }
+
+  private:
+    std::array<VkSemaphoreSubmitInfo, kInlineSemaphoreSubmitCapacity> _inline {};
+    std::vector<VkSemaphoreSubmitInfo> _heap;
+    VkSemaphoreSubmitInfo*             _storage = nullptr;
+    size_t                             _count   = 0;
+};
+
 std::expected<void, ErrorCode> SubmitInfos(
     const VkQueue queue,
     const std::span<const VkCommandBufferSubmitInfo> commands,
@@ -41,19 +74,24 @@ std::expected<void, ErrorCode> WaitIdle(const VkQueue queue) noexcept {
 }
 
 std::expected<void, ErrorCode> QueueSubmit(
-    const VkQueue queue,
-    ExecutableCommands commands,
-    const std::span<const VkSemaphoreSubmitInfo> waits,
-    const std::span<const VkSemaphoreSubmitInfo> signals
+    const VkQueue                          queue,
+    ExecutableCommands                     commands,
+    const std::span<const SemaphoreSubmit> waits,
+    const std::span<const SemaphoreSubmit> signals
 ) noexcept {
     if (!commands) {
         return std::unexpected(CommandRecordingError::NotExecutable);
     }
+
+    // JIT synthesis on the stack: the semantic values become C structs only here.
+    const SemaphoreSubmitInfoScratch waitInfos(waits);
+    const SemaphoreSubmitInfoScratch signalInfos(signals);
+
     const VkCommandBufferSubmitInfo commandInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
         .commandBuffer = commands.Handle(),
     };
-    return SubmitInfos(queue, std::span<const VkCommandBufferSubmitInfo> {&commandInfo, 1}, waits, signals);
+    return SubmitInfos(queue, std::span<const VkCommandBufferSubmitInfo> {&commandInfo, 1}, waitInfos.Infos(), signalInfos.Infos());
 }
 
 std::expected<void, ErrorCode> QueueSubmit(
@@ -66,15 +104,11 @@ std::expected<void, ErrorCode> QueueSubmit(
     const uint64_t signalValue,
     const VkPipelineStageFlags2 signalStage
 ) noexcept {
-    const VkSemaphoreSubmitInfo waitInfo = MakeSemaphoreSubmitInfo(waitSemaphore, waitValue, waitStage);
-    const VkSemaphoreSubmitInfo signalInfo = MakeSemaphoreSubmitInfo(signalSemaphore, signalValue, signalStage);
+    const SemaphoreSubmit waitInfo   = SemaphoreSubmit::Timeline(waitSemaphore, waitValue, waitStage);
+    const SemaphoreSubmit signalInfo = SemaphoreSubmit::Timeline(signalSemaphore, signalValue, signalStage);
     return QueueSubmit(
-        queue,
-        std::move(command),
-        waitSemaphore != VK_NULL_HANDLE ? std::span<const VkSemaphoreSubmitInfo> {&waitInfo, 1}
-                                       : std::span<const VkSemaphoreSubmitInfo> {},
-        signalSemaphore != VK_NULL_HANDLE ? std::span<const VkSemaphoreSubmitInfo> {&signalInfo, 1}
-                                          : std::span<const VkSemaphoreSubmitInfo> {}
+        queue, std::move(command), waitSemaphore != VK_NULL_HANDLE ? std::span<const SemaphoreSubmit> {&waitInfo, 1} : std::span<const SemaphoreSubmit> {},
+        signalSemaphore != VK_NULL_HANDLE ? std::span<const SemaphoreSubmit> {&signalInfo, 1} : std::span<const SemaphoreSubmit> {}
     );
 }
 
