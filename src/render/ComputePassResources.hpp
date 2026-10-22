@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include "features/PostProcessFeature.hpp"
+#include "Rendering.hpp"
+#include "pipeline/ComputePass.hpp"
 
 namespace ZHLN {
 

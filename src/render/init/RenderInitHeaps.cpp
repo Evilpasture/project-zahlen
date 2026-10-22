@@ -254,7 +254,23 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, antiAliasing.smaaBlend.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, post.blit.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
 
-    postProcess.InitSamplers(*this);
+    // Lighting and post-process samplers are registered here with every other
+    // pass's, reading each bundle's bindings directly.
+    Vk::InitHeapPassSamplers<Shaders::Gtao>(heapManager, lighting.gtao.Bindings(), Vk::SamplerSlot<"pointSampler">(pointConfig));
+    Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(heapManager, post.bloomThreshold.Bindings(), Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::BloomDown>(heapManager, post.bloomDown.Bindings(), Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::BloomUp>(heapManager, post.bloomUp.Bindings(), Vk::SamplerSlot<"smp">(defaultConfig));
+    if (ctx.RayTracingSupported()) {
+        Vk::InitHeapPassSamplers<Shaders::RtShadow>(heapManager, lighting.rtShadow.Bindings(), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig));
+        Vk::InitHeapPassSamplers<Shaders::RtrHalf>(
+            heapManager, lighting.rtrHalf.Bindings(), Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
+            Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+        );
+        Vk::InitHeapPassSamplers<Shaders::RtgiHalf>(
+            heapManager, lighting.rtgiHalf.Bindings(), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig), Vk::SamplerSlot<"clampSampler">(clampConfig)
+        );
+        Vk::InitHeapPassSamplers<Shaders::DdgiTrace>(heapManager, lighting.ddgiTrace.Bindings(), Vk::SamplerSlot<"clampSampler">(clampConfig));
+    }
     fog.InitSamplers(*this);
 }
 

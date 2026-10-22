@@ -155,52 +155,40 @@ struct GraphMember<Res_DenoiseB> {
     static constexpr auto Ptr = &TargetManager::GraphResources::denoiseB;
 };
 
-// Maps a descriptor set to the pipeline and heap bindings PostProcessFeature
-// owns for it. The RTR chain reuses the RTGI set (same shader), which is why
-// the mapping keys on the declared set and not on the graph pass name.
+// Maps a descriptor set to the resource that owns it. The RTR chain reuses the
+// RTGI set (same shader), which is why the mapping keys on the declared set and
+// not on the graph pass name. Each resource is a bundle, so the chain gets the
+// pipeline and its heap bindings from one lookup -- the lighting denoisers live
+// in LightingResources and the HDR wavelet in PostProcessResources.
 template <typename Declared>
 struct DenoiseAccess;
 
 template <>
 struct DenoiseAccess<Shaders::ShadowDenoise> {
-    [[nodiscard]] static auto Pass(RenderFrameContext& frame) noexcept -> Vk::DynamicComputePass& {
-        return frame.postProcess.ShadowDenoise();
-    }
-    [[nodiscard]] static auto Bindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.postProcess.ShadowDenoiseHeapBindings();
+    [[nodiscard]] static auto Resource(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::DynamicComputePass>& {
+        return frame.lighting.shadowDenoise;
     }
 };
 
 template <>
 struct DenoiseAccess<Shaders::RtgiDenoise> {
-    [[nodiscard]] static auto Pass(RenderFrameContext& frame) noexcept -> Vk::DynamicComputePass& {
-        return frame.postProcess.RtgiDenoise();
-    }
-    [[nodiscard]] static auto Bindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.postProcess.RtgiDenoiseHeapBindings();
+    [[nodiscard]] static auto Resource(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::DynamicComputePass>& {
+        return frame.lighting.rtgiDenoise;
     }
 };
 
 template <>
 struct DenoiseAccess<Shaders::HdrDenoise> {
-    [[nodiscard]] static auto Pass(RenderFrameContext& frame) noexcept -> Vk::DynamicComputePass& {
-        return frame.postProcess.HdrDenoise();
-    }
-    [[nodiscard]] static auto Bindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.postProcess.HdrDenoiseHeapBindings();
+    [[nodiscard]] static auto Resource(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::DynamicComputePass>& {
+        return frame.post.hdrDenoise;
     }
 };
 
 } // namespace TemplatedDetail
 
 template <typename Declared>
-[[nodiscard]] auto GetPass(RenderFrameContext& frame) noexcept -> Vk::DynamicComputePass& {
-    return TemplatedDetail::DenoiseAccess<Declared>::Pass(frame);
-}
-
-template <typename Declared>
-[[nodiscard]] auto GetBindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-    return TemplatedDetail::DenoiseAccess<Declared>::Bindings(frame);
+[[nodiscard]] auto GetResource(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::DynamicComputePass>& {
+    return TemplatedDetail::DenoiseAccess<Declared>::Resource(frame);
 }
 
 // One à-trous wavelet chain for every denoiser the frame graph runs. Each
@@ -253,9 +241,7 @@ struct AtrousDenoisePass:
         const auto       Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize, float tempWeight) noexcept {
             const auto push = MakeAtrousPush<PushT>(stepSize, tempWeight, maxRoughness);
             const auto Step = [&](auto&&... slots) noexcept {
-                atrousChain.template Step<ShaderDecl>(
-                    GetPass<ShaderDecl>(frame), GetBindings<ShaderDecl>(frame), dst.Extent(), push, slots...
-                );
+                atrousChain.template Step<ShaderDecl>(GetResource<ShaderDecl>(frame), dst.Extent(), push, slots...);
             };
 
             if constexpr (!std::is_void_v<HistoryRes>) {

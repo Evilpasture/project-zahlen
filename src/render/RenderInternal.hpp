@@ -24,7 +24,6 @@
 #include "TextureManager.hpp"
 #include "diagnostics/GPUDiagnostics.hpp"
 #include "diagnostics/GpuProfiler.hpp"
-#include "features/PostProcessFeature.hpp"
 #include "features/ShadowAtlas.hpp"
 #include "features/ShadowRenderer.hpp"
 #include "features/VolumetricFogSystem.hpp"
@@ -192,9 +191,6 @@ struct RenderContext::Impl: RenderFrameContext {
 
     // The six AA pipelines, owned as one group by the passes that read them.
     AntiAliasingResources antiAliasing;
-
-    // The two fullscreen passes, plus the LTC lookup-table view infos they read.
-    PostProcessResources post;
 
     // The three standalone compute passes, dispatched from Impl itself.
     ComputePassResources compute;
@@ -419,6 +415,13 @@ struct RenderContext::Impl: RenderFrameContext {
     [[nodiscard]] std::expected<void, ErrorCode> BuildParticlePipelines();
     [[nodiscard]] std::expected<void, ErrorCode> BuildMeshParticlePipelines();
     [[nodiscard]] std::expected<void, ErrorCode> InitBindless();
+    // Builds every LightingResources bundle: the GTAO, shadow, reflection and
+    // GI dispatches and their denoisers. Splitting this from the bloom chain is
+    // what lets each domain own its own heap rows.
+    [[nodiscard]] std::expected<void, ErrorCode> BuildLightingResources();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildPostProcessResources();
+    [[nodiscard]] std::expected<void, ErrorCode> BakeSMAALUTs();
+
     [[nodiscard]] std::expected<void, ErrorCode> BuildTAAPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> BuildFXAAPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> BuildMLAAPipeline();

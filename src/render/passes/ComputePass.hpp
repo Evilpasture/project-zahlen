@@ -48,11 +48,11 @@ template <typename... Slots>
 
 namespace TemplatedDetail {
 
-// The two compute-pass shapes the engine dispatches. PostProcessFeature owns
-// heap-indexed dynamic passes dispatched by thread count; VolumetricFogSystem
-// owns double-buffered fixed-domain passes whose dispatch size is reflected
-// from the shader. A descriptor names its pass and the template records the
-// matching dispatch.
+// The two compute-pass shapes the engine dispatches. LightingResources and
+// PostProcessResources own heap-indexed dynamic passes dispatched by thread
+// count; VolumetricFogSystem owns double-buffered fixed-domain passes whose
+// dispatch size is reflected from the shader. A descriptor names its pass and
+// the template records the matching dispatch.
 template <typename T>
 struct IsDoubleBufferedPass: std::false_type {};
 template <typename LayoutT, Vk::ComputeDomain Domain>
@@ -73,10 +73,15 @@ struct IsDoubleBufferedPass<Vk::DoubleBufferedComputePass<LayoutT, Domain>>: std
 //   using ShaderDecl                   = Shaders::X;  // descriptor set
 //   using ShaderModule                 = Shaders::Modules::X;
 //   using PushConstants                = T | void;
-//   static auto GetPass(frame)         -> pass&;      // pipeline
-//   static auto GetBindings(frame)     -> heap bindings&
+//   static auto GetPass(frame)         -> resource&;  // pipeline + its bindings
 //   static auto Prepare(frame, pc)     -> ComputePassArgs<...>;
 //   static bool ShouldRun(frame);                     // optional early-out
+//
+// GetPass returns a resource that carries both halves of what a dispatch needs:
+// a Vk::BoundComputePass bundle, or a double-buffered pass that already owns its
+// heapBindings. There is no second lookup for the bindings -- a descriptor that
+// had to name them separately could name a set that does not belong to the
+// pipeline it just returned, and nothing would catch it.
 template <typename Desc>
 struct ComputePass: TemplatedDetail::RenderPassOf<Desc::name, typename Desc::Usages> {
     static_assert(TemplatedDetail::kNameProfilesAsStage<Desc::name>, "the pass name has no Stage enumerator, so the GPU profiler would never time it");
@@ -104,14 +109,17 @@ struct ComputePass: TemplatedDetail::RenderPassOf<Desc::name, typename Desc::Usa
             return;
         }
 
-        const auto block = std::apply(
+        // One question: the resource answers with the pipeline and the heap rows
+        // it dispatches through, whichever bundle shape it has.
+        auto&      resource = Desc::GetPass(frame);
+        const auto block    = std::apply(
             [&](const auto&... slots) noexcept {
-                return frame.heapManager.template WriteHeapParameters<typename Desc::ShaderDecl>(Desc::GetBindings(frame), slots...);
+                return frame.heapManager.template WriteHeapParameters<typename Desc::ShaderDecl>(Vk::TemplatedDetail::BindingsOf(resource), slots...);
             },
             args.slots
         );
 
-        auto& pass = Desc::GetPass(frame);
+        auto& pass = Vk::TemplatedDetail::PassOf(resource);
         if constexpr (TemplatedDetail::IsDoubleBufferedPass<std::remove_cvref_t<decltype(pass)>>::value) {
             // Fixed domain: the dispatch size comes from the shader, so the
             // extent is recorded but not consumed.

@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <optional>
-
 #include "DrawQueueManager.hpp"
 #include "FrameDestinations.hpp"
 #include "FrameResources.hpp"
@@ -15,10 +13,11 @@
 #include "TargetManager.hpp"
 #include "TextureManager.hpp"
 #include "core/FrameStorage.hpp"
-#include "features/PostProcessFeature.hpp"
 #include "features/ShadowAtlas.hpp"
 #include "features/ShadowRenderer.hpp"
 #include "features/VolumetricFogSystem.hpp"
+#include "passes/lighting/LightingResources.hpp"
+#include "passes/postprocess/PostProcessResources.hpp"
 #include "pipelines/ReflectionPipeline.hpp"
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Atomic.hpp>
@@ -27,6 +26,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <optional>
 
 namespace ZHLN {
 
@@ -98,7 +98,13 @@ struct RenderFrameContext {
     ShadowRenderer      shadows;
     ShadowAtlas         shadowAtlas;
     VolumetricFogSystem fog;
-    PostProcessFeature  postProcess;
+    // Ray-traced and screen-space lighting: shadows, reflections, GI, DDGI, GTAO
+    // and their denoisers, each a pipeline bundled with its heap bindings.
+    LightingResources lighting;
+    // What runs after the scene is lit: the two fullscreen passes, the LTC
+    // lookup-table views, and the bloom/HDR chain. Both groups are addressed the
+    // same way -- one member per pass, pipeline and bindings together.
+    PostProcessResources post;
     ReflectionPipeline  reflectionPipeline;
 
     uint32_t viewportX = 0;

@@ -15,6 +15,11 @@ namespace ZHLN::Passes {
 // the same skeleton Passes::ComputePass records, with only the gate, the slot
 // writes and the push payload differing between them. Bodies are the former
 // per-pass operator() definitions, verbatim.
+//
+// Each descriptor names its resource once. GetPass returns the LightingResources
+// bundle -- pipeline and heap bindings together -- so the executor reads both
+// halves off a single answer instead of asking for the pass and then asking
+// again for the bindings that belong to it.
 
 struct GtaoDesc {
     static constexpr auto name = Vk::ResourceName("GTAO");
@@ -28,12 +33,9 @@ struct GtaoDesc {
         return giMode == 3 || giMode == 4;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::GtaoCS, GtaoPushConstants>& {
-        return frame.postProcess.Gtao();
-    }
-
-    [[nodiscard]] static auto GetBindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.postProcess.GtaoHeapBindings();
+    [[nodiscard]] static auto
+        GetPass(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::GtaoCS, GtaoPushConstants>>& {
+        return frame.lighting.gtao;
     }
 
     [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants& pc) noexcept {
@@ -77,12 +79,9 @@ struct RtShadowDesc {
         return frame.ctx.RayTracingSupported() && wantRT && frame.settings.environment.fullBright == 0 && frame.frames.tlasAddresses[fIdx] != nullptr;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::RtShadowCS, RTShadowPushConstants>& {
-        return frame.postProcess.RtShadow();
-    }
-
-    [[nodiscard]] static auto GetBindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.postProcess.RtShadowHeapBindings();
+    [[nodiscard]] static auto
+        GetPass(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::RtShadowCS, RTShadowPushConstants>>& {
+        return frame.lighting.rtShadow;
     }
 
     [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
@@ -125,12 +124,9 @@ struct RtrHalfTraceDesc {
         return frame.ctx.RayTracingSupported() && frame.settings.rayTracing.enableReflections && frame.settings.post.enableRTR;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::RtrHalfCS, RtrHalfPushConstants>& {
-        return frame.postProcess.RtrHalf();
-    }
-
-    [[nodiscard]] static auto GetBindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.postProcess.RtrHalfHeapBindings();
+    [[nodiscard]] static auto
+        GetPass(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::RtrHalfCS, RtrHalfPushConstants>>& {
+        return frame.lighting.rtrHalf;
     }
 
     [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
@@ -174,12 +170,9 @@ struct RtgiHalfTraceDesc {
                frame.frames.tlasAddresses[fIdx] != nullptr;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::RtgiHalfCS, RtgiHalfPushConstants>& {
-        return frame.postProcess.RtgiHalf();
-    }
-
-    [[nodiscard]] static auto GetBindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.postProcess.RtgiHalfHeapBindings();
+    [[nodiscard]] static auto
+        GetPass(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::RtgiHalfCS, RtgiHalfPushConstants>>& {
+        return frame.lighting.rtgiHalf;
     }
 
     [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
@@ -222,12 +215,9 @@ struct DdgiTraceDesc {
                frame.frames.tlasAddresses[fIdx] != nullptr;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::DdgiTraceCS, DdgiTracePushConstants>& {
-        return frame.postProcess.DdgiTrace();
-    }
-
-    [[nodiscard]] static auto GetBindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.postProcess.DdgiTraceHeapBindings();
+    [[nodiscard]] static auto
+        GetPass(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::DdgiTraceCS, DdgiTracePushConstants>>& {
+        return frame.lighting.ddgiTrace;
     }
 
     [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
@@ -273,12 +263,9 @@ struct DdgiUpdateDesc {
                frame.frames.tlasAddresses[fIdx] != nullptr;
     }
 
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::TypedComputePass<Shaders::Modules::DdgiUpdateIrradianceCS, DdgiUpdatePushConstants>& {
-        return frame.postProcess.DdgiUpdate();
-    }
-
-    [[nodiscard]] static auto GetBindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.postProcess.DdgiUpdateHeapBindings();
+    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept
+        -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::DdgiUpdateIrradianceCS, DdgiUpdatePushConstants>>& {
+        return frame.lighting.ddgiUpdate;
     }
 
     [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {

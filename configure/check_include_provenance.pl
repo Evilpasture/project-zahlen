@@ -138,6 +138,11 @@ my %FIRST_PARTY = (
     Hash64           => ['include/Zahlen/Core/Hash.hpp'],
     Hash32           => ['include/Zahlen/Core/Hash.hpp'],
     HashCombine      => ['include/Zahlen/Core/Hash.hpp'],
+    # Reached by accident when PostProcessFeature -- the only header including
+    # pipeline/ComputePass.hpp -- stopped being the renderer's compute-pass bag.
+    DynamicComputePass => ['src/vulkan/pipeline/ComputePass.hpp'],
+    FixedComputePass   => ['src/vulkan/pipeline/ComputePass.hpp'],
+    BoundComputePass   => ['src/vulkan/pipeline/ComputePass.hpp'],
 );
 
 my %THIRD_PARTY = (

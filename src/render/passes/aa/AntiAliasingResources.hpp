@@ -22,6 +22,12 @@ struct AntiAliasingResources {
     Vk::FullscreenPass<SMAAEdgeLayout>   smaaEdge;
     Vk::FullscreenPass<SMAAWeightLayout> smaaWeight;
     Vk::FullscreenPass<SMAABlendLayout>  smaaBlend;
+
+    // SMAA's area and search lookup tables are generated on the GPU at startup;
+    // the weight pass is the only reader, so they live with it rather than in a
+    // post-process object two domains away.
+    uint32_t smaaAreaTexIdx   = 0;
+    uint32_t smaaSearchTexIdx = 0;
 };
 
 } // namespace ZHLN

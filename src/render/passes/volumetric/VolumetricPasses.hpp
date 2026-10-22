@@ -29,10 +29,6 @@ struct VolumetricFogInjectDesc {
         return frame.fog.FogInject();
     }
 
-    [[nodiscard]] static auto GetBindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.fog.FogInject().heapBindings;
-    }
-
     [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
         const uint32_t fIdx = frame.presenter.frameIndex;
 
@@ -53,10 +49,6 @@ struct VolumetricLightInjectDesc {
 
     [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::FixedDoubleBufferedComputePass<VolumetricLightInjectLayout>& {
         return frame.fog.LightInject();
-    }
-
-    [[nodiscard]] static auto GetBindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.fog.LightInject().heapBindings;
     }
 
     [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
@@ -85,10 +77,6 @@ struct VolumetricIntegrationDesc {
         return frame.fog.Integrate();
     }
 
-    [[nodiscard]] static auto GetBindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.fog.Integrate().heapBindings;
-    }
-
     [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
         const uint32_t fIdx = frame.presenter.frameIndex;
 
@@ -110,10 +98,6 @@ struct VolumetricTemporalDesc {
 
     [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept -> Vk::FixedDoubleBufferedComputePass<VolumetricTemporalLayout>& {
         return frame.fog.Temporal();
-    }
-
-    [[nodiscard]] static auto GetBindings(RenderFrameContext& frame) noexcept -> Vk::HeapPassBindings& {
-        return frame.fog.Temporal().heapBindings;
     }
 
     [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {

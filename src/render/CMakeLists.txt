@@ -46,7 +46,6 @@ set(RAW_RENDER_SOURCES
     pipelines/DeferredPbrPipeline.cpp
     pipelines/UIPipeline.cpp
     pipelines/ReflectionPipeline.cpp
-    features/PostProcessFeature.cpp
     features/ShadowRenderer.cpp
     features/VolumetricFogSystem.cpp
     features/ShadowAtlas.cpp

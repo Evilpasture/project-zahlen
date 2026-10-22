@@ -624,6 +624,76 @@ using DynamicDoubleBufferedComputePass = DoubleBufferedComputePass<LayoutT, Comp
 template <typename LayoutT>
 using FixedDoubleBufferedComputePass = DoubleBufferedComputePass<LayoutT, ComputeDomain::Fixed>;
 
+namespace TemplatedDetail {
+
+// A pass resource answers "what do I dispatch, and through which heap rows" in
+// one value. Two shapes satisfy that: the BoundComputePass bundle below, and the
+// double-buffered passes, which already carry a heapBindings member. These two
+// readers let every executor -- the graph ComputePass, ComputeChain, and any
+// bespoke recorder -- treat both shapes identically.
+template <typename ResourceT>
+[[nodiscard]] constexpr auto PassOf(ResourceT& resource) noexcept -> auto& {
+    if constexpr (requires { resource.pass; }) {
+        return resource.pass;
+    } else {
+        return resource;
+    }
+}
+
+template <typename ResourceT>
+[[nodiscard]] constexpr auto BindingsOf(ResourceT& resource) noexcept -> auto& {
+    if constexpr (requires { resource.bindings; }) {
+        return resource.bindings;
+    } else {
+        return resource.heapBindings;
+    }
+}
+
+} // namespace TemplatedDetail
+
+// A compute pipeline and the heap bindings it dispatches through, held as one
+// value.
+//
+// DynamicComputePass and TypedComputePass deliberately do not own their heap
+// bindings, which left every resource that owned both exposing them as two
+// parallel fields: the owner stored the pass and the bindings separately, and
+// each dispatch site had to ask for the pass, then ask again for the bindings
+// that belong to it. Bundling them makes that one question with one answer, and
+// it is the shape DoubleBufferedComputePass already had.
+template <typename PassT>
+struct BoundComputePass {
+    PassT            pass;
+    HeapPassBindings bindings;
+
+    [[nodiscard]] auto Pass() noexcept -> PassT& {
+        return pass;
+    }
+    [[nodiscard]] auto Pass() const noexcept -> const PassT& {
+        return pass;
+    }
+    [[nodiscard]] auto Bindings() noexcept -> HeapPassBindings& {
+        return bindings;
+    }
+    [[nodiscard]] auto Bindings() const noexcept -> const HeapPassBindings& {
+        return bindings;
+    }
+
+    [[nodiscard]] auto Valid() const noexcept -> bool {
+        return pass.Valid();
+    }
+    explicit operator bool() const noexcept {
+        return Valid();
+    }
+
+    // Writes this pass's own heap rows and dispatches it: the caller names the
+    // set and the slots and never touches the pipeline or the bindings.
+    template <typename Declared, typename PushT, typename... Slots>
+    void DispatchIndexed(VkCommandBuffer cmd, HeapManager& heap, uint32_t x, uint32_t y, uint32_t z, const PushT& push, const Slots&... slots) noexcept {
+        const HeapBlockBase blockBase = heap.template WriteHeapParameters<Declared>(bindings, slots...);
+        Declared::DispatchHeapIndexed(pass, cmd, blockBase, x, y, z, push);
+    }
+};
+
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
 [[nodiscard]] inline auto CreateHeapComputePass(VkDevice device, const ShaderDesc& shader, PipelineBinaryStore* binaries = nullptr) noexcept
     -> std::expected<ComputePass<Domain>, ErrorCode> {
@@ -666,14 +736,13 @@ class ComputeChain {
     constexpr ComputeChain(HeapManager& heap, VkCommandBuffer cmd) noexcept: _heap(heap), _cmd(cmd) {
     }
 
-    template <typename Declared, typename PushT, typename... Slots>
-    [[gnu::always_inline]] void
-        Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, const Slots&... slots) noexcept {
+    template <typename Declared, typename ResourceT, typename PushT, typename... Slots>
+    [[gnu::always_inline]] void Step(ResourceT& resource, VkExtent3D extent, const PushT& push, const Slots&... slots) noexcept {
         if (_step++ > 0) {
             MemoryBarrier(_cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
         }
-        const HeapBlockBase blockBase = _heap.template WriteHeapParameters<Declared>(bindings, slots...);
-        Declared::DispatchHeapIndexed(pass, _cmd, blockBase, extent.width, extent.height, 1, push);
+        const HeapBlockBase blockBase = _heap.template WriteHeapParameters<Declared>(TemplatedDetail::BindingsOf(resource), slots...);
+        Declared::DispatchHeapIndexed(TemplatedDetail::PassOf(resource), _cmd, blockBase, extent.width, extent.height, 1, push);
     }
 
     [[nodiscard]] constexpr auto StepCount() const noexcept -> uint32_t {
