@@ -22,6 +22,7 @@
 #include "ShaderReloadRegistry.hpp"
 #include "TargetManager.hpp"
 #include "TextureManager.hpp"
+#include "Zahlen/Core/BatchResult.hpp"
 #include "diagnostics/GPUDiagnostics.hpp"
 #include "diagnostics/GpuProfiler.hpp"
 #include "features/ShadowAtlas.hpp"
@@ -396,11 +397,7 @@ struct RenderContext::Impl: RenderFrameContext {
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
 
-    struct SkinnedBlasOutcome {
-        ZHLN::Array<SkinnedBlasEntry> addresses;
-        std::optional<ErrorCode>      failure;
-    };
-    [[nodiscard]] auto DispatchSkinningPasses(VkCommandBuffer cmd) -> SkinnedBlasOutcome;
+    [[nodiscard]] auto DispatchSkinningPasses(VkCommandBuffer cmd) -> BatchResult<SkinnedBlasEntry, ErrorCode>;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildProceduralBakePipeline();
     [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
@@ -459,8 +456,8 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
     const auto imageConfig = Vk::ImageConfig::Texture2D({width, height}, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled);
     return Vk::Image::Create(allocator, imageConfig).and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
         defer                   _([&] { allocator.DestroyImage(image); });
-        const Vk::ImageView     view = image.View();
-        auto                  heapScope = heapManager.CreateImmediateScope();
+        const Vk::ImageView     view      = image.View();
+        auto                    heapScope = heapManager.CreateImmediateScope();
         const Vk::HeapBlockBase block     = heapScope.WriteParameters<Declared>(bakeHeapBindings, Vk::Slot<"outTexture">(view));
 
         if (auto immediate = Vk::ExecuteImmediate(

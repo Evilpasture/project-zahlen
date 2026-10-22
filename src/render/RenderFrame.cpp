@@ -12,6 +12,7 @@
 #include <ShaderBindings.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/SceneData.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -51,7 +52,7 @@ template <typename... Ptrs>
 
 auto RenderFrameContext::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> {
     std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> addresses {};
-    for (const auto& entry : Slang::kFrameAddressMeta) {
+    for (const auto& entry: Slang::kFrameAddressMeta) {
         // Engine policy: which CPU resource serves each named field. Field
         // placement (offset, binding, order) is generated metadata; this
         // choice is not.
@@ -96,8 +97,8 @@ auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
     return size;
 }
 
-auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> SkinnedBlasOutcome {
-    SkinnedBlasOutcome outcome;
+auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> BatchResult<SkinnedBlasEntry, ErrorCode> {
+    BatchResult<SkinnedBlasEntry, ErrorCode> outcome;
     if (!frameState.hasSkinned || cmd == VK_NULL_HANDLE) {
         return outcome;
     }
@@ -154,7 +155,7 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> Skinned
             }
 
             const bool alreadyRebuilt =
-                std::ranges::any_of(outcome.addresses, [&](const SkinnedBlasEntry& entry) { return entry.scratch == drawCmd.skinnedVertexBuffer; });
+                std::ranges::any_of(outcome.successes, [&](const SkinnedBlasEntry& entry) { return entry.scratch == drawCmd.skinnedVertexBuffer; });
             if (alreadyRebuilt) {
                 continue;
             }
@@ -162,12 +163,13 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> Skinned
             if (scratchMesh == nullptr) {
                 continue;
             }
-            const auto rebuilt = RebuildSkinnedBLAS(cmd, ctx, allocator, deletionQueue, drawCmd, *scratchMesh);
-            if (rebuilt) {
-                outcome.addresses.push_back({.scratch = drawCmd.skinnedVertexBuffer, .address = *rebuilt});
-            } else if (!outcome.failure.has_value()) {
-                outcome.failure = rebuilt.error();
-            }
+
+            auto rebuilt = RebuildSkinnedBLAS(cmd, ctx, allocator, deletionQueue, drawCmd, *scratchMesh);
+
+            // BatchResult::Add accepts std::expected<T, E>.
+            // .transform() maps Vk::DeviceAddress<> to SkinnedBlasEntry on success,
+            // while preserving the ErrorCode on failure.
+            outcome.Add(rebuilt.transform([&](auto addr) -> SkinnedBlasEntry { return {.scratch = drawCmd.skinnedVertexBuffer, .address = addr}; }));
         }
 
         Vk::MemoryBarrier(
@@ -218,7 +220,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
                 }
                 return m;
             }(),
-            .instanceCustomIndex                    = i,
+            .instanceCustomIndex = i,
             // kRayMaskSkyboxLayer / kRayMaskWorld in uniforms.slang: the
             // background layer shares the TLAS with the main world but under
             // its own bit, so shadow rays can ignore it and the sky composite
@@ -286,9 +288,9 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
 void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept {
     ApplySceneView(view);
 
-    const SkinnedBlasOutcome skinnedBlas = DispatchSkinningPasses(cmd);
-    if (skinnedBlas.failure.has_value() && diagnostics.invalidDrawWarningCount.fetch_add(1, std::memory_order::relaxed) < 5) {
-        ZHLN::LogWarning("PrepareSceneFrame: skinned BLAS rebuild failed: {}", skinnedBlas.failure.value());
+    const auto skinnedBlas = DispatchSkinningPasses(cmd);
+    if (skinnedBlas.HasErrors() && diagnostics.invalidDrawWarningCount.fetch_add(1, std::memory_order::relaxed) < 5) {
+        ZHLN::LogWarning("PrepareSceneFrame: skinned BLAS rebuild failed: {}", *skinnedBlas.FirstError());
     }
 
     if (queues.Draws().size() > kGpuCullingMaxInstances) {
@@ -352,7 +354,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
             }
         }
     }
-    BuildTLAS(cmd, skinnedBlas.addresses);
+    BuildTLAS(cmd, skinnedBlas.SuccessView());
 }
 
 namespace {
@@ -741,10 +743,14 @@ auto RenderContext::Impl::ProvokeDeviceLostInternal() const -> std::expected<voi
         compute.hangGpu.Bind(cmd);
         compute.hangGpu.DispatchGroups(cmd, 1, 1, 1);
     } else {
-        if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto immediateCmd) -> auto {
-            compute.hangGpu.Bind(immediateCmd);
-            compute.hangGpu.DispatchGroups(immediateCmd, 1, 1, 1);
-        }); !immediate) [[unlikely]] {
+        if (auto immediate = Vk::ExecuteImmediate(
+                ctx, graphicsCmdRing,
+                [&](auto immediateCmd) -> auto {
+                    compute.hangGpu.Bind(immediateCmd);
+                    compute.hangGpu.DispatchGroups(immediateCmd, 1, 1, 1);
+                }
+            );
+            !immediate) [[unlikely]] {
             return std::unexpected(immediate.error());
         }
     }
