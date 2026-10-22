@@ -14,8 +14,6 @@ void ParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
         return;
     }
 
-    frame.BindHeapsAndPushFrame(cmd);
-
     for (const auto& emitter: frame.queues.ParticleEmitters()) {
         if (!emitter.simulate) {
             continue;

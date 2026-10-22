@@ -64,8 +64,8 @@ struct IsDoubleBufferedPass<Vk::DoubleBufferedComputePass<LayoutT, Domain>>: std
 // descriptor (GtaoDesc, VolumetricFogInjectDesc, ...) states what differs
 // between passes: the graph name and usage list, the descriptor set and
 // module, the push payload, the early-out, the heap bindings, and the slot
-// writes; this template records the shared skeleton -- gate, bind heaps,
-// write the heap block, dispatch.
+// writes; this template records the shared skeleton -- gate, write the heap
+// block, dispatch.
 //
 // The descriptor contract:
 //   static constexpr auto              name;          // matches a Stage enumerator
@@ -99,8 +99,6 @@ struct ComputePass: TemplatedDetail::RenderPassOf<Desc::name, typename Desc::Usa
                 return;
             }
         }
-
-        frame.BindHeapsAndPushFrame(cmd);
 
         const auto args = Desc::Prepare(frame, pc);
 

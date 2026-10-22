@@ -8,8 +8,6 @@
 namespace ZHLN::Passes {
 
 void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
-    frame.BindHeapsAndPushFrame(cmd);
-
     PassContext passCtx(cmd, frame);
     const auto  sceneVp = frame.EffectiveViewport();
 

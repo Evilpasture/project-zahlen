@@ -222,6 +222,17 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
             dest.acquired.reset();
             return std::unexpected(recording.error());
         }
+
+        // This is where a window's graphics command stream begins, so this is
+        // where its heap state is established: both heap segments bound and the
+        // frame address block pushed, once, for everything that records into
+        // the stream afterwards -- the scene graph, its fork secondaries' setup,
+        // the Blit pass and the UI pass. The state survives until the buffer is
+        // reset because neither heap is ever rebound with different contents:
+        // HeapManager writes into one pair of device-addressable buffers that
+        // are created once.
+        BindHeapsAndPushFrame(recording->Handle());
+
         destinations.AddRecording(dest.id, std::move(*recording));
     }
     destinations.SetActive(dest.id);

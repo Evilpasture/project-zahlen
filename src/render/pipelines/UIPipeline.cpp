@@ -102,7 +102,6 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
         const auto pass = ConfigureViewport(Vk::DynamicPass(extent), view.viewport)
             .AddColor(image, firstTouch ? Vk::ColorOp::Clear(ZHLN::Color4 {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 1.0F}) : Vk::ColorOp::Load());
         pass.Execute(cmd, [&]() {
-            impl.BindHeapsAndPushFrame(cmd);
             Vk::CommandEncoder encoder(cmd);
             record(pass, encoder);
         });

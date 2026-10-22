@@ -199,6 +199,30 @@ struct RenderFrameContext {
 
     [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
 
+    // Establishes the descriptor-heap state of one command stream: binds both
+    // heap segments and pushes the device-address block that the shaders'
+    // `ParameterBlock<GlobalSceneRegistry> scene` dereferences directly, with no
+    // descriptor table behind it.
+    //
+    // This is state of the STREAM, not of any pass in it, so it is called once
+    // per command stream, at the one moment the stream begins recording:
+    //
+    //   * RenderContext::Impl::AcquireTarget  -- a window's graphics stream, the
+    //     one the scene graph, the Blit pass and the UI pass all record into;
+    //   * Pipelines::ComputeSimPipeline::Submit -- the async-compute stream.
+    //
+    // A pass must never call this. A pass that re-establishes state its
+    // predecessors already established is a pass that only works because of
+    // what happens to run before it: it keeps working when the graph is
+    // reordered or the pass is forked onto another queue, until the day it
+    // does not. configure/check_heap_state_roots.py rejects any call outside
+    // the two roots above.
+    //
+    // Secondary command buffers inherit neither the heap bindings nor the push
+    // range from the primary they are executed in, so the parallel recorders
+    // re-establish this state for every slot they begin, from
+    // FrameHeapAddresses() (see Vk::ParallelCommandRecorder::SetHeapState and
+    // RenderContext::Impl::ForkReplayer::ExecuteFork).
     void BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
 
     [[nodiscard]] auto ActivePresentation() noexcept -> Vk::SwapchainPresenter& {
@@ -213,10 +237,6 @@ struct RenderFrameContext {
             return active->depthTarget;
         }
         return primaryDepthTarget;
-    }
-
-    [[nodiscard]] auto InheritsHeaps() const noexcept -> bool {
-        return frameState.inForkSecondary;
     }
 };
 

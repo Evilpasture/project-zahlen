@@ -9,7 +9,6 @@ namespace ZHLN::Passes {
 
 void RtgiCompositePass::operator()(VkCommandBuffer cmd) const noexcept {
     using namespace Shaders;
-    frame.BindHeapsAndPushFrame(cmd);
 
     const auto fIdx       = frame.presenter.frameIndex;
     const bool rtgiActive = frame.ctx.RayTracingSupported() && frame.settings.rayTracing.enableDiffuseGI && frame.frames.tlasAddresses[fIdx] != nullptr;

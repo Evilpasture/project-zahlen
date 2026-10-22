@@ -57,8 +57,6 @@ void RecordGpuCulled(
         .LoadColor(in.bakedMask)
         .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
-            passCtx.EnsureHeapState();
-
             for (const auto& group: groups) {
                 if (group.material->pipeline == VK_NULL_HANDLE) {
                     continue;
@@ -90,7 +88,6 @@ void RecordCpuCulled(PassContext& passCtx, const CsgResources& csg, const MeshPa
         .LoadColor(in.bakedMask)
         .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
-            ctx.BindHeapsAndPushFrame(cmd);
             DrawCSGMeshes(passCtx, csg, in.sceneColor.Extent());
             Draw3DParticles(passCtx, particles);
         });

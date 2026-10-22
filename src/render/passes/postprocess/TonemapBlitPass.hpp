@@ -59,10 +59,8 @@ struct TonemapBlitPass:
                     Vk::Unread<"frame">(frame.frames.frameUniformBuffers[fIdx])
                 );
             },
-            [this](RenderFrameContext& drawImpl, VkCommandBuffer drawCmd, auto&& execute) {
+            [this](RenderFrameContext&, VkCommandBuffer drawCmd, auto&& execute) {
                 const auto swapchainTarget = getSwapchainImage();
-
-                drawImpl.BindHeapsAndPushFrame(drawCmd);
                 Vk::DynamicPass(swapchainTarget.Extent()).OverwriteColor(swapchainTarget).Execute(drawCmd, [&]() { execute(); });
             }
         );

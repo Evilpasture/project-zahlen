@@ -227,8 +227,6 @@ struct AtrousDenoisePass:
         const uint32_t fIdx   = frame.presenter.frameIndex;
         const uint32_t passes = frame.settings.rayTracing.denoiserPasses;
 
-        frame.BindHeapsAndPushFrame(cmd);
-
         const auto target   = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.*(TemplatedDetail::GraphMember<TargetRes>::Ptr));
         const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.*(TemplatedDetail::GraphMember<PingRes>::Ptr));
         const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.*(TemplatedDetail::GraphMember<PongRes>::Ptr));

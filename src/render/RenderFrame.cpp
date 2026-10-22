@@ -379,8 +379,9 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
         return;
     }
 
-    self.BindHeapsAndPushFrame(cmd);
-
+    // The secondaries are new command buffers, so they do not inherit the
+    // primary's heap state: the recorder re-establishes both heap segments (as
+    // inheritance info) and the frame address block for every slot it records.
     auto& rec = self.parallelRecorders[self.presenter.frameIndex];
 
     const auto samplerBind  = self.heapManager.GetSamplerHeapBindInfo();

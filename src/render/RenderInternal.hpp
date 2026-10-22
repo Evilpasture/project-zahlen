@@ -479,22 +479,21 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
     });
 }
 
+// A pass's view of the frame: the encoder to record into and the frame it is
+// recording. There is deliberately nothing here about descriptor-heap state --
+// the heaps and the frame address block belong to the command stream and were
+// established when it began (RenderFrameContext::BindHeapsAndPushFrame), so a
+// pass never has to know, or prove, whether it runs on the primary, in a fork
+// secondary or on the compute queue.
 struct PassContext {
     Vk::CommandEncoder  encoder;
     RenderFrameContext& ctx;
-    bool                heapsInherited;
 
-    PassContext(VkCommandBuffer cmd, RenderFrameContext& impl, bool inherited = false) noexcept: encoder(cmd), ctx(impl), heapsInherited(inherited) {
+    PassContext(VkCommandBuffer cmd, RenderFrameContext& impl) noexcept: encoder(cmd), ctx(impl) {
     }
 
     [[nodiscard]] auto Cmd() const noexcept -> VkCommandBuffer {
         return encoder.cmd;
-    }
-
-    void EnsureHeapState() noexcept {
-        if (!heapsInherited) {
-            ctx.BindHeapsAndPushFrame(Cmd());
-        }
     }
 };
 

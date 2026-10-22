@@ -14,8 +14,6 @@ namespace ZHLN::Passes {
 // occluded wherever the map is nearer. (It used to be forced behind the world
 // by a second depth band; that split is retired.)
 void BackgroundGBufferPass::operator()(VkCommandBuffer cmd) const noexcept {
-    frame.BindHeapsAndPushFrame(cmd);
-
     PassContext passCtx(cmd, frame);
     const auto  sceneVp = frame.EffectiveViewport();
     const auto  in      = GBufferSceneTargets(frame);

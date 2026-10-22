@@ -14,8 +14,6 @@ void MeshParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
         return;
     }
 
-    frame.BindHeapsAndPushFrame(cmd);
-
     for (const auto& emitter: frame.queues.MeshParticleEmitters()) {
         auto* buffer = frame.geometry.Resolve(emitter.gpuBuffer);
         if (buffer == nullptr) {

@@ -16,8 +16,6 @@ void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
         return;
     }
 
-    frame.BindHeapsAndPushFrame(cmd);
-
     PassContext passCtx(cmd, frame);
     passCtx.encoder.BindPipeline(decals.pass.Get());
 

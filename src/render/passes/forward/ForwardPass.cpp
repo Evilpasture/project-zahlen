@@ -21,8 +21,6 @@ using LinePushConstants = Slang::LinePushConstants;
 void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
     auto& ctx = frame;
 
-    ctx.BindHeapsAndPushFrame(cmd);
-
     PassContext passCtx(cmd, frame);
     const auto  sceneVp = frame.EffectiveViewport();
 

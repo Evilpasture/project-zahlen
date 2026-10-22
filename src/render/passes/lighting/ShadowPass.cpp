@@ -26,11 +26,9 @@ constexpr uint32_t kFirstAtlasSlot = 1;
 } // namespace
 
 void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
-    PassContext    passCtx(cmd, frame, frame.InheritsHeaps());
+    PassContext    passCtx(cmd, frame);
     auto&          ctx        = passCtx.ctx;
     const uint32_t frameIndex = ctx.presenter.frameIndex;
-
-    passCtx.EnsureHeapState();
 
     std::array<Frustum, TargetManager::kCascades> cascadeFrustums {};
     for (uint32_t c = 0; c < TargetManager::kCascades; ++c) {

@@ -15,7 +15,6 @@ void EmissivePass::operator()(VkCommandBuffer cmd) const noexcept {
     }
 
     auto& ctx = frame;
-    ctx.BindHeapsAndPushFrame(cmd);
 
     PassContext passCtx(cmd, frame);
     const auto  sceneVp = frame.EffectiveViewport();

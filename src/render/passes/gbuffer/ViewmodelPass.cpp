@@ -14,8 +14,6 @@ void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
         return;
     }
 
-    frame.BindHeapsAndPushFrame(cmd);
-
     PassContext passCtx(cmd, frame);
     const auto  in = GBufferSceneTargets(frame);
 

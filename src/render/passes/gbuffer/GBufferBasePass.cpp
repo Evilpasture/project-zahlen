@@ -93,8 +93,6 @@ void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<con
         .ClearColor(in.bakedMask, kClearColorBakedMask)
         .ClearDepth(in.depth, kClearDepthValue)
         .Execute(cmd, [&]() {
-            passCtx.EnsureHeapState();
-
             for (const auto& group: groups) {
                 if (group.material->pipeline == VK_NULL_HANDLE) {
                     continue;
@@ -129,7 +127,6 @@ void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTarg
                           .ClearDepth(in.depth, kClearDepthValue)
                           .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT);
     pass.Execute(cmd, [&]() {
-        ctx.BindHeapsAndPushFrame(cmd);
         const auto frameAddresses = ctx.FrameHeapAddresses();
         const auto samplerBind    = ctx.heapManager.GetSamplerHeapBindInfo();
         const auto resourceBind   = ctx.heapManager.GetResourceHeapBindInfo();

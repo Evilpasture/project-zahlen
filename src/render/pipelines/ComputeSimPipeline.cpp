@@ -38,7 +38,6 @@ void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
 
 void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt) noexcept {
     const uint32_t fIdx = impl.presenter.frameIndex;
-    impl.BindHeapsAndPushFrame(cmd);
     RebuildClusterBounds(impl, cmd, fIdx);
 
     auto computeGraph = Vk::MakePassPack(
@@ -77,6 +76,12 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
     if (!recording) {
         return std::unexpected(recording.error());
     }
+
+    // The async compute buffer is its own command stream, so it establishes its
+    // own heap state here, before the first dispatch: nothing on the graphics
+    // stream carries over, and nothing on this one carries back.
+    impl.BindHeapsAndPushFrame(recording->Handle());
+
     RecordComputeFrame(impl, recording->Handle(), dt);
     auto executable = std::move(*recording).End();
     if (!executable) {

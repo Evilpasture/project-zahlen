@@ -55,9 +55,35 @@ push-constant fallback path.
 
 Within a command buffer, heap/push-data commands and legacy
 descriptor-set/push-constant commands **invalidate each other**. The renderer
-now records only heap/push-data commands; every pass calls
-`RenderContext::Impl::BindHeapsAndPushFrame(cmd)` at the start of its segment
-(bind both heaps + push the per-frame device-address block).
+now records only heap/push-data commands.
+
+### Heap state is command-stream state, bound once per stream
+
+The heap bindings and the per-frame device-address block are **state of the
+command stream**, so they are established once, where the stream begins
+recording, and never from pass code:
+
+| Stream                           | Establishes heap state at                                                          |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| a window's graphics stream       | `RenderContext::Impl::AcquireTarget`, when the recording's command buffer begins    |
+| the async-compute stream         | `Pipelines::ComputeSimPipeline::Submit`, right after the recorder begins            |
+| fork / parallel-draw secondaries | `Vk::ParallelCommandRecorder::SetHeapState` (heap inheritance info + address push per slot) |
+
+Nothing in the stream re-establishes it: `HeapManager` writes into one pair of
+device-addressable heap buffers that are created once and never grow or move, so
+the bound ranges stay valid for the life of the command buffer. Pass payloads
+cannot clobber the address block either -- `GpuAbi::kScenePushLayout` guarantees
+the address window begins after the pass-payload prefix
+(`kScenePassPayloadBytes`), and every push is written at its own offset
+(`vkCmdPushDataEXT`), never as one whole-block write.
+
+`configure/check_heap_state_roots.py` enforces this at configure time: a call to
+`RenderFrameContext::BindHeapsAndPushFrame` outside the roots above fails the
+build. The rule it protects is the reason the bind moved out of the passes: a
+pass that binds heaps for itself only works because of what happens to run
+before it on the same buffer, and that is exactly the property that stops
+holding the day the pass is reordered, moved to the front of the frame, or
+forked onto another queue.
 
 ---
 

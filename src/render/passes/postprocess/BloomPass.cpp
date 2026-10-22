@@ -12,7 +12,6 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
     using enum Vk::BarrierStage;
     using enum Vk::BarrierAccess;
     using namespace Shaders;
-    frame.BindHeapsAndPushFrame(cmd);
 
     const auto srcHdr     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.hdrSceneColor);
     const auto thresh     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomThresholdTarget);
