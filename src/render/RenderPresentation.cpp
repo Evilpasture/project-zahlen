@@ -38,20 +38,27 @@ auto RenderContext::Impl::ReconcileDestination(FrameDestinations::Window& dest, 
     return image.layout;
 }
 
-auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal> {
-    std::optional<PresentSuboptimal> result {};
-    std::optional<ErrorCode> firstError {};
+auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
+    PresentBatch presented;
 
+    // One window, one entry. A window that cannot present does not take the
+    // others with it: its failure goes in the batch and the loop carries on, so
+    // a session with three windows and one broken swapchain still shows the
+    // other two. The batch is also why nothing has to be "remembered": the old
+    // shape kept `std::optional<ErrorCode> firstError` alongside the frame
+    // result, which silently dropped every failure after the first.
     for (auto& dest: destinations.Windows()) {
         if (!dest.acquired) {
             continue;
         }
+        const uint64_t          windowId      = dest.id;
         Vk::SwapchainPresenter& destPresenter = dest.Presenter();
-        auto recording = destinations.FindRecording(dest.id);
+        auto                    recording     = destinations.FindRecording(windowId);
         if (!recording || !recording->recorder.IsRecording()) {
             ZHLN::Log("[Render] Window target has no command stream to present.");
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
+            presented.EmplaceSuccess(PresentOutcome {.windowId = windowId, .disposition = PresentDisposition::NotRecorded});
             continue;
         }
         const auto reconciled = ReconcileDestination(dest, recording->recorder);
@@ -59,6 +66,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
             ZHLN::Log("[Render] Window target cannot be presented: {}.", reconciled.error());
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
+            presented.EmplaceSuccess(PresentOutcome {.windowId = windowId, .disposition = PresentDisposition::NotReconcilable});
             continue;
         }
 
@@ -82,30 +90,36 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         destPresenter.PreparePresent(recording->recorder, dest.acquired->imageIndex, currentLayout);
         auto executable = std::move(recording->recorder).End();
         if (!executable) {
-            if (Vk::IsDeviceLost(executable.error())) {
+            const bool lost = Vk::IsDeviceLost(executable.error());
+            if (lost) {
                 ctx.Instance().IncrementDeviceLost();
-                return std::unexpected(AsFrameError(executable.error()));
             }
-            if (!firstError) { firstError = AsFrameError(executable.error()); }
+            presented.EmplaceError(PresentFailure {.windowId = windowId, .error = AsFrameError(executable.error())});
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
+            if (lost) {
+                // Every remaining window would fail the same way on the same
+                // device, so the loop ends here; the batch keeps the failure.
+                break;
+            }
             continue;
         }
-        auto presented = destPresenter.Present(
+        auto result = destPresenter.Present(
             ctx.GraphicsQueue(), ctx.PresentQueue(), std::move(*executable), dest.acquired->imageIndex,
             std::span<const Vk::SemaphoreSubmit> {waits.data(), waitCount}
         );
-        if (!presented) {
-            if (Vk::IsDeviceLost(presented.error())) {
+        if (!result) {
+            const bool lost = Vk::IsDeviceLost(result.error());
+            if (lost) {
                 ctx.Instance().IncrementDeviceLost();
-                return std::unexpected(AsFrameError(presented.error()));
             }
-            if (!firstError) {
-                firstError = presented.error();
-            }
-            ZHLN::Log("[Render] Present for window {:p} failed ({}); presenting other windows.", static_cast<const void*>(dest.target), presented.error());
+            ZHLN::Log("[Render] Present for window {:p} failed ({}); presenting other windows.", static_cast<const void*>(dest.target), result.error());
+            presented.EmplaceError(PresentFailure {.windowId = windowId, .error = AsFrameError(result.error())});
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
+            if (lost) {
+                break;
+            }
             continue;
         }
 
@@ -123,7 +137,11 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
             }
         }
 
-        if (presented->has_value()) {
+        // An engaged optional from Present() is the swapchain saying "that went
+        // out, but rebuild me" -- as opposed to a plain empty one, which is the
+        // same present with nothing to ask for.
+        const bool suboptimal = result->has_value();
+        if (suboptimal) {
             const Extent2D size = dest.target != nullptr ? dest.target->GetFramebufferExtent() : Extent2D {};
             if (size.width != 0 && size.height != 0) {
                 if (!destPresenter.Rebuild(size.width, size.height)) {
@@ -133,16 +151,15 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
 
             dest.acquired.reset();
             dest.cachedGeneration = destPresenter.resourceGeneration;
-            result = PresentSuboptimal {};
         }
 
+        presented.EmplaceSuccess(
+            PresentOutcome {.windowId = windowId, .disposition = suboptimal ? PresentDisposition::Suboptimal : PresentDisposition::Presented}
+        );
         destPresenter.AdvanceFrame();
     }
 
-    if (firstError) {
-        return std::unexpected(*firstError);
-    }
-    return result;
+    return presented;
 }
 
-}
+} // namespace ZHLN

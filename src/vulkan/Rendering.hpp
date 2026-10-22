@@ -82,6 +82,7 @@
 #include "memory/TextureUploader.hpp"
 #include "presentation/PresentPacer.hpp"
 #include "presentation/SwapchainPresenter.hpp"
+#include "execution/RecordingBatch.hpp"
 #include "execution/ParallelRecorder.hpp"
 #include "execution/ParallelDraw.hpp"
 // clang-format on

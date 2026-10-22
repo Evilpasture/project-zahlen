@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Rendering.hpp"
+#include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Error.hpp>
@@ -21,6 +22,38 @@
 namespace ZHLN {
 
 class PresentationTarget;
+
+// What became of one window's present attempt.
+//
+// Presented and Suboptimal are frames that reached a surface. The two Skipped
+// values are windows that had nothing to present: the destination was acquired
+// and then never recorded into, or its target could not be reconciled. They are
+// not failures -- the frame is fine, and the previous code logged them and moved
+// on -- but they belong in the batch all the same, because a caller asking "what
+// happened to the four windows I opened?" deserves four answers, not two.
+enum class PresentDisposition : uint8_t {
+    Presented       ZHLN_ANNOTATION(ZHLN::Description<"The image reached the surface as asked"> {}),
+    Suboptimal      ZHLN_ANNOTATION(ZHLN::Description<"The image reached the surface, and the swapchain has been rebuilt for it"> {}),
+    NotRecorded     ZHLN_ANNOTATION(ZHLN::Description<"The window was acquired but nothing was recorded into it"> {}),
+    NotReconcilable ZHLN_ANNOTATION(ZHLN::Description<"The window's target could not be reconciled, so nothing was submitted"> {}),
+};
+
+/// One window that finished its present attempt without a Vulkan error.
+struct PresentOutcome {
+    uint64_t           windowId    = 0;
+    PresentDisposition disposition = PresentDisposition::Presented;
+};
+
+/// One window whose present attempt failed, with the window that failed.
+struct PresentFailure {
+    uint64_t  windowId = 0;
+    ErrorCode error {};
+};
+
+/// Every window this frame touched: one entry per window, in either bucket.
+/// A frame that presented three windows and failed one carries four entries, so
+/// nothing is collapsed to "the first thing that went wrong".
+using PresentBatch = BatchResult<PresentOutcome, PresentFailure>;
 
 enum class DestinationError : uint8_t {
     TooManyWindows ZHLN_ANNOTATION(ZHLN::Description<"No room for another window presenter">{}) = 1,

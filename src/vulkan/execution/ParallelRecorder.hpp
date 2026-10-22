@@ -6,6 +6,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "RecordingBatch.hpp"
+
 namespace ZHLN::Vk {
 
 struct RecordingSlot {
@@ -47,8 +49,10 @@ class ParallelCommandRecorder {
         }
     }
 
+    // One item per callable, one entry per slot in the batch: the slots that
+    // came back executable, and the ones that did not, each with its error.
     template <typename SchedulerPolicy, typename... Callables>
-    [[nodiscard]] auto Record(SchedulerPolicy&& scheduler, Callables&&... callables) -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto Record(SchedulerPolicy&& scheduler, Callables&&... callables) -> RecordingBatch;
 
     [[nodiscard]] constexpr auto GetCommandBuffers() const noexcept -> std::span<const VkCommandBuffer, ConcurrentSlots> {
         return _cmds;
@@ -60,8 +64,7 @@ class ParallelCommandRecorder {
 
   private:
     template <typename SchedulerPolicy, size_t... Is, typename... Callables>
-    [[nodiscard]] auto RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...> , Callables&&... callables)
-        -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...>, Callables&&... callables) -> RecordingBatch;
 
     VkDevice                                                      _device = VK_NULL_HANDLE;
     std::array<CommandPool<QueueType::Graphics>, ConcurrentSlots> _pools;

@@ -4,6 +4,7 @@
 #include "passes/gbuffer/GBufferBasePass.hpp"
 #include "passes/SceneDraw.hpp"
 #include <ShaderBindings.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <tuple>
@@ -135,7 +136,7 @@ void RecordCpuCulled(RenderFrameContext& ctx, VkCommandBuffer cmd, uint32_t draw
         const auto samplerBind    = ctx.heapManager.GetSamplerHeapBindInfo();
         const auto resourceBind   = ctx.heapManager.GetResourceHeapBindInfo();
 
-        Vk::ParallelDrawDispatch(
+        const auto chunks = Vk::ParallelDrawDispatch(
             cmd,
             pass.GetSecondaryInheritance(
                 &samplerBind, &resourceBind, GpuAbi::kScenePushLayout.UsedFrameAddresses(),
@@ -165,6 +166,14 @@ void RecordCpuCulled(RenderFrameContext& ctx, VkCommandBuffer cmd, uint32_t draw
                 SubmitDrawInstanced(encoder, drawCmd, i, ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive());
             }
         );
+
+        // The batch never executes with an error in it -- a pass split across
+        // secondaries cannot run half of its draws -- and what it adds is which
+        // chunk failed and why. A chunk is one worker's slice of the draw range,
+        // so this also says how much of the pass was lost.
+        chunks.ForEachError([](const Vk::RecordingFailure& failure) {
+            ZHLN::Log("[Render] Parallel G-buffer chunk {} could not be recorded ({}); the batch was not submitted.", failure.index, failure.error);
+        });
     });
 }
 

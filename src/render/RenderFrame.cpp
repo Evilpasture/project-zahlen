@@ -360,8 +360,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
 namespace {
 
 template <typename Recorder, typename Scheduler, size_t... Is>
-auto RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::ForkCall> bodies, std::index_sequence<Is...>) noexcept
-    -> std::expected<void, ErrorCode> {
+auto RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::ForkCall> bodies, std::index_sequence<Is...>) noexcept -> Vk::RecordingBatch {
     return rec.Record(scheduler, ([&body = bodies[Is]](Vk::RecordingSlot slot) noexcept { body(slot.cmd); })...);
 }
 
@@ -403,8 +402,8 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     const bool previousInheritance  = self.frameState.inForkSecondary;
     self.frameState.inForkSecondary = true;
 
-    TaskSystemScheduler            scheduler;
-    std::expected<void, ErrorCode> recorded;
+    TaskSystemScheduler scheduler;
+    Vk::RecordingBatch  recorded;
     if (count == 2) {
         recorded = RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<2> {});
     } else if constexpr (kSlots >= 3) {
@@ -417,7 +416,13 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 
     self.frameState.inForkSecondary = previousInheritance;
     if (!recorded) {
-        ZHLN::Log("[Render] Secondary command recording failed ({}); skipping this fork.", recorded.error());
+        // A fork executes its secondaries as one unit or not at all, so every
+        // failed slot sinks the whole fork -- which is why the batch reports all
+        // of them: one message per broken slot says whether the command pool ran
+        // dry once or whether the fork is simply too wide for this frame.
+        recorded.ForEachError([](const Vk::RecordingFailure& failure) {
+            ZHLN::Log("[Render] Fork secondary {} failed to record ({}); skipping this fork.", failure.index, failure.error);
+        });
         return;
     }
     Vk::ExecuteCommands(cmd, rec.GetCommandBuffers().first(bodies.size()));
@@ -517,6 +522,35 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     return FrameScope {*this};
 }
 
+namespace {
+
+// One answer for the frame out of the per-window batch.
+//
+// Device loss outranks every other window's failure: it is the only one a
+// caller can act on (recreate the device), and it explains the rest. After that
+// the first failure in window order decides -- the batch is per window, but this
+// entry point has always spoken for the frame, and one failure is enough to make
+// the frame a failure. A frame in which every window merely presented, or was
+// skipped, is a frame that went out; it reports Suboptimal only if some window
+// asked for its swapchain to be rebuilt, which is what EndFrame meant before.
+[[nodiscard]] auto SummarizePresentations(const PresentBatch& windows) noexcept -> FrameOutcome<PresentSuboptimal> {
+    const auto deviceLost = std::ranges::find_if(windows.errors, [](const PresentFailure& failure) { return failure.error.Is(FrameResult::DeviceLost); });
+    if (deviceLost != windows.errors.end()) {
+        return std::unexpected(deviceLost->error);
+    }
+    if (const auto* first = windows.FirstError(); first != nullptr) {
+        return std::unexpected(first->error);
+    }
+    const bool rebuilt =
+        std::ranges::any_of(windows.successes, [](const PresentOutcome& window) { return window.disposition == PresentDisposition::Suboptimal; });
+    if (!rebuilt) {
+        return std::optional<PresentSuboptimal> {};
+    }
+    return PresentSuboptimal {};
+}
+
+} // namespace
+
 auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     struct EndFrameGuard {
         RenderContext::Impl* impl;
@@ -539,7 +573,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     } frameGuard {_impl.get()};
 
     const uint32_t primarySlotBefore = _impl->presenter.frameIndex;
-    auto           presented         = _impl->PresentUsedWindows();
+    const auto     windows           = _impl->PresentUsedWindows();
     if (_impl->presenter.frameIndex == primarySlotBefore) {
         _impl->presenter.AdvanceFrame();
     }
@@ -561,7 +595,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
         _impl->rtHistoryValid = _impl->settings.rayTracing.denoiserPasses > 0;
     }
 
-    return presented;
+    return SummarizePresentations(windows);
 }
 
 auto RenderContext::AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<FrameTarget> {

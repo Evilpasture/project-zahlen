@@ -6,8 +6,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include <Zahlen/Log.hpp>
-#include <atomic>
+#include "RecordingBatch.hpp"
+#include <Zahlen/Error.hpp>
 
 namespace ZHLN::Vk {
 
@@ -21,8 +21,15 @@ struct ParallelForCallback {
 template <typename S>
 concept ParallelScheduler = requires(S&& s, uint32_t count, uint32_t chunkSize) { s.ParallelFor(count, chunkSize, detail::ParallelForCallback {}); };
 
+// Records `drawCount` draws across `num_chunks` secondaries, one chunk per
+// worker, and hands back one entry per chunk: the ones whose commands came back
+// executable, and the ones that did not, each with its error. A batch with any
+// error in it is not executed at all -- a pass whose draws are split across
+// secondaries cannot run half of them -- but the caller still learns which chunk
+// failed and why, which the previous `std::atomic<bool> recordingFailed` could
+// not say.
 template <ParallelScheduler SchedulerT, typename CmdProviderFn, typename RecordFn>
-inline void ParallelDrawDispatch(
+inline auto ParallelDrawDispatch(
     VkCommandBuffer             primaryCmd,
     const SecondaryInheritance& inheritDesc,
     uint32_t                    drawCount,
@@ -30,15 +37,16 @@ inline void ParallelDrawDispatch(
     SchedulerT&&                scheduler,
     CmdProviderFn&&             cmdProvider,
     RecordFn&&                  recordFn
-) {
+) -> RecordingBatch {
     uint32_t num_chunks = (drawCount + chunkSize - 1) / chunkSize;
     if (num_chunks == 0) {
-        return;
+        return {};
     }
 
+    // One element per chunk, written only by that chunk's worker; the batch is
+    // assembled after the parallel section has joined.
     std::vector<VkCommandBuffer> secondaries(num_chunks, VK_NULL_HANDLE);
-    std::atomic<bool> recordingFailed {false};
-    std::atomic<uint32_t> recordedCount {0};
+    std::vector<ErrorCode>       errors(num_chunks);
 
     const VkCommandBufferInheritanceDescriptorHeapInfoEXT heap_inherit = {
         .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
@@ -81,7 +89,7 @@ inline void ParallelDrawDispatch(
             sec_cmd, VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, &p_inherit
         );
         if (!recording) {
-            recordingFailed.store(true, std::memory_order_relaxed);
+            errors[chunkIdx] = recording.error();
             return;
         }
 
@@ -105,21 +113,29 @@ inline void ParallelDrawDispatch(
 
         auto executable = std::move(*recording).End();
         if (!executable) {
-            recordingFailed.store(true, std::memory_order_relaxed);
+            errors[chunkIdx] = executable.error();
             return;
         }
         secondaries[chunkIdx] = executable->Handle();
-        recordedCount.fetch_add(1, std::memory_order_relaxed);
     });
 
-    if (recordingFailed.load(std::memory_order_relaxed)) {
-        ZHLN::Log("[Vk] Secondary command recording failed; skipping parallel draw batch.");
-        return;
+    RecordingBatch recorded;
+    recorded.Reserve(num_chunks, num_chunks);
+    for (uint32_t chunk = 0; chunk < num_chunks; ++chunk) {
+        if (secondaries[chunk] != VK_NULL_HANDLE) {
+            recorded.AddSuccess(chunk);
+        } else {
+            recorded.EmplaceError(RecordingFailure {.index = chunk, .error = errors[chunk]});
+        }
     }
 
-    if (const uint32_t count = recordedCount.load(std::memory_order_relaxed); count > 0) {
-        Vk::ExecuteCommands(primaryCmd, std::span<const VkCommandBuffer> {secondaries.data(), count});
+    // A batch that lost a chunk is not executed: a pass split across secondaries
+    // cannot run half of its draws. The batch says which chunk failed and why, so
+    // the caller can log it -- that used to be a single anonymous warning here.
+    if (!recorded) {
+        return recorded;
     }
+    Vk::ExecuteCommands(primaryCmd, std::span<const VkCommandBuffer> {secondaries.data(), secondaries.size()});
+    return recorded;
 }
-
 }

@@ -317,7 +317,7 @@ struct RenderContext::Impl: RenderFrameContext {
     void               EvictInactiveEmitters() noexcept;
     void               ClearEmitterBuffers() noexcept;
 
-    [[nodiscard]] auto PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal>;
+    [[nodiscard]] auto PresentUsedWindows() noexcept -> PresentBatch;
 
     std::optional<Vk::ImageSlice> sceneTarget;
 
