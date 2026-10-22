@@ -9,7 +9,8 @@ CompileFlags:
     - "-fannotation-attributes"
     - "-fparameter-reflection"
     - "-D__cpp_impl_reflection=202603L"
-    - "-D__glibcxx_want_reflection"
+    - "-stdlib=libc++"
+    # - "-D__glibcxx_want_reflection" # libstdc++ only
     - "-DJPH_DOUBLE_PRECISION"
 
 Diagnostics:
