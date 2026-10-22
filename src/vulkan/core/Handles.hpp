@@ -7,6 +7,10 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Core/ErrorCode.hpp>
+#include <cstdint>
+#include <expected>
+#include <type_traits>
 #include <utility>
 
 namespace ZHLN::Vk {
@@ -83,9 +87,25 @@ class DeviceHandle {
     T        _raw    = VK_NULL_HANDLE;
 };
 
+/// Owning, move-only semaphore. This is the resource side of semaphore
+/// synchronization; the submission side is the non-owning SemaphoreSubmit value
+/// type in execution/RenderQueue.hpp, which stores a borrowed VkSemaphore.
+class Semaphore: public DeviceHandle<VkSemaphore, DestroySemaphore> {
+  public:
+    using DeviceHandle::DeviceHandle;
+
+    /// Creates a binary semaphore (unsignaled).
+    [[nodiscard]] static auto CreateBinary(VkDevice device) noexcept -> std::expected<Semaphore, ErrorCode>;
+
+    /// Creates a timeline semaphore starting at `initialValue`.
+    [[nodiscard]] static auto CreateTimeline(VkDevice device, uint64_t initialValue = 0) noexcept -> std::expected<Semaphore, ErrorCode>;
+};
+
+static_assert(!std::is_copy_constructible_v<Semaphore> && !std::is_copy_assignable_v<Semaphore>);
+static_assert(std::is_nothrow_move_constructible_v<Semaphore> && std::is_nothrow_move_assignable_v<Semaphore>);
+
 using Pipeline              = DeviceHandle<VkPipeline, DestroyPipeline>;
 using PipelineBinary        = DeviceHandle<VkPipelineBinaryKHR, DestroyPipelineBinary>;
-using Semaphore             = DeviceHandle<VkSemaphore, DestroySemaphore>;
 using AttachmentViewHandle  = DeviceHandle<VkImageView, DestroyAttachmentView>;
 using AccelerationStructure = DeviceHandle<VkAccelerationStructureKHR, DestroyAccelerationStructure>;
 

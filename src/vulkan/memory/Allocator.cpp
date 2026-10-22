@@ -583,17 +583,11 @@ auto StagingRingBuffer::Init(Allocator& allocator, VkDevice device, VkQueue queu
     _queueFamily = queueFamily;
     _capacity    = capacity;
 
-    VkSemaphoreTypeCreateInfo type_info = {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .pNext = nullptr, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0
-    };
-    VkSemaphoreCreateInfo sem_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &type_info, .flags = 0};
-
-    VkSemaphore raw_sem = VK_NULL_HANDLE;
-    auto        res     = vkCreateSemaphore(_device, &sem_info, nullptr, &raw_sem);
-    if (res != VK_SUCCESS) {
+    auto timeline = Semaphore::CreateTimeline(_device);
+    if (!timeline) [[unlikely]] {
         return std::unexpected(StagingRingBufferError::OutOfHostMemory);
     }
-    _timelineSemaphore = Semaphore(_device, raw_sem);
+    _timelineSemaphore = std::move(*timeline);
 
     auto staging_res = Buffer::Create(*_allocator, _capacity, BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
     if (!staging_res.has_value()) {

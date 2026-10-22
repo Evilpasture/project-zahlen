@@ -1,8 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Rendering.hpp"
 #include "RenderQueue.hpp"
+#include "Rendering.hpp"
+#include <memory>
 
 namespace ZHLN::Vk {
 namespace {
@@ -19,8 +20,8 @@ class SemaphoreSubmitInfoScratch {
     explicit SemaphoreSubmitInfoScratch(const std::span<const SemaphoreSubmit> submits) noexcept {
         _count = submits.size();
         if (_count > kInlineSemaphoreSubmitCapacity) [[unlikely]] {
-            _heap.resize(_count);
-            _storage = _heap.data();
+            _heapStorage = std::make_unique<VkSemaphoreSubmitInfo[]>(_count);
+            _storage     = _heapStorage.get();
         } else {
             _storage = _inline.data();
         }
@@ -34,10 +35,12 @@ class SemaphoreSubmitInfoScratch {
     }
 
   private:
-    std::array<VkSemaphoreSubmitInfo, kInlineSemaphoreSubmitCapacity> _inline {};
-    std::vector<VkSemaphoreSubmitInfo> _heap;
-    VkSemaphoreSubmitInfo*             _storage = nullptr;
-    size_t                             _count   = 0;
+    // Deliberately not value-initialized: the constructor writes every element
+    // below _count before Infos() exposes the array, so zeroing would be wasted work.
+    std::array<VkSemaphoreSubmitInfo, kInlineSemaphoreSubmitCapacity> _inline;
+    std::unique_ptr<VkSemaphoreSubmitInfo[]> _heapStorage;
+    VkSemaphoreSubmitInfo*                   _storage = nullptr;
+    size_t                                   _count   = 0;
 };
 
 std::expected<void, ErrorCode> SubmitInfos(

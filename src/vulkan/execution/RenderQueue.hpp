@@ -7,13 +7,13 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../core/Handles.hpp"
 #include "CommandRecorder.hpp"
 #include <Zahlen/Error.hpp>
 #include <array>
 #include <cstdint>
 #include <span>
 #include <type_traits>
-#include <vector>
 
 namespace ZHLN::Vk {
 
@@ -54,6 +54,17 @@ struct SemaphoreSubmit {
     [[nodiscard]] static constexpr auto
         Timeline(VkSemaphore sem, uint64_t val, VkPipelineStageFlags2 stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept -> SemaphoreSubmit {
         return {.semaphore = sem, .value = val, .stage = stageMask};
+    }
+
+    // Owning handles are only borrowed here: submitting never takes ownership.
+    [[nodiscard]] static constexpr auto
+        Binary(const Semaphore& sem, VkPipelineStageFlags2 stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept -> SemaphoreSubmit {
+        return Binary(sem.Get(), stageMask);
+    }
+
+    [[nodiscard]] static constexpr auto
+        Timeline(const Semaphore& sem, uint64_t val, VkPipelineStageFlags2 stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept -> SemaphoreSubmit {
+        return Timeline(sem.Get(), val, stageMask);
     }
 
     // -------------------------------------------------------------------------

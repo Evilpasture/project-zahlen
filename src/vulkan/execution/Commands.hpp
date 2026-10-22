@@ -79,7 +79,7 @@ class CommandRing {
     CommandRing(const CommandRing&)                    = delete;
     auto operator=(const CommandRing&) -> CommandRing& = delete;
     CommandRing(CommandRing&& other) noexcept:
-        _device(std::exchange(other._device, VK_NULL_HANDLE)), _timeline(std::exchange(other._timeline, VK_NULL_HANDLE)), _pools(std::move(other._pools)),
+        _device(std::exchange(other._device, VK_NULL_HANDLE)), _timeline(std::move(other._timeline)), _pools(std::move(other._pools)),
         _cmds(std::move(other._cmds)), _completionValues(std::exchange(other._completionValues, {})), _nextValue(other._nextValue.exchange(0)),
         _index(other._index.exchange(0)) {
     }
@@ -87,7 +87,7 @@ class CommandRing {
         if (this != &other) {
             [[maybe_unused]] auto cleanup = Cleanup();
             _device                       = std::exchange(other._device, VK_NULL_HANDLE);
-            _timeline                     = std::exchange(other._timeline, VK_NULL_HANDLE);
+            _timeline                     = std::move(other._timeline);
             _pools                        = std::move(other._pools);
             _cmds                         = std::move(other._cmds);
             _completionValues             = std::exchange(other._completionValues, {});
@@ -97,13 +97,12 @@ class CommandRing {
         return *this;
     }
     [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
-        _device = device;
-        const VkSemaphoreTypeCreateInfo type {
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0
-        };
-        const VkSemaphoreCreateInfo info {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &type};
-        if (vkCreateSemaphore(device, &info, nullptr, &_timeline) != VK_SUCCESS)
+        _device       = device;
+        auto timeline = Semaphore::CreateTimeline(device);
+        if (!timeline) [[unlikely]] {
             return std::unexpected(CommandRingError::TimelineCreationFailed);
+        }
+        _timeline = std::move(*timeline);
         for (size_t i = 0; i < Capacity; ++i) {
             _pools[i] = CommandPool<QType>(device, queueFamily);
             auto a    = _pools[i].Allocate(1);
@@ -138,11 +137,8 @@ class CommandRing {
             _pools[i] = {};
             _cmds[i]  = {};
         }
-        if (_timeline != VK_NULL_HANDLE) {
-            vkDestroySemaphore(_device, _timeline, nullptr);
-        }
+        _timeline.Reset();
         _device           = VK_NULL_HANDLE;
-        _timeline         = VK_NULL_HANDLE;
         _completionValues = {};
         return {};
     }
@@ -154,7 +150,8 @@ class CommandRing {
     [[nodiscard]] auto WaitValue(uint64_t value) const noexcept -> VkResult {
         if (value == 0)
             return VK_SUCCESS;
-        const VkSemaphoreWaitInfo w {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &_timeline, .pValues = &value};
+        const VkSemaphore         raw = _timeline.Get();
+        const VkSemaphoreWaitInfo w {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &raw, .pValues = &value};
         return vkWaitSemaphores(_device, &w, UINT64_MAX);
     }
     [[nodiscard]] auto Acquire() noexcept -> std::expected<Slot, ErrorCode> {
@@ -186,8 +183,8 @@ class CommandRing {
     }
 
   private:
-    VkDevice                                   _device   = VK_NULL_HANDLE;
-    VkSemaphore                                _timeline = VK_NULL_HANDLE;
+    VkDevice                                   _device = VK_NULL_HANDLE;
+    Semaphore                                  _timeline;
     std::array<CommandPool<QType>, Capacity>   _pools {};
     std::array<CommandBuffer<QType>, Capacity> _cmds {};
     std::array<uint64_t, Capacity>             _completionValues {};

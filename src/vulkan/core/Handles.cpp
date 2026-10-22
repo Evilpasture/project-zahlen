@@ -30,6 +30,38 @@ void DestroyAttachmentView::operator()(const VkDevice device, const VkImageView 
     }
 }
 
+auto Semaphore::CreateBinary(const VkDevice device) noexcept -> std::expected<Semaphore, ErrorCode> {
+    const VkSemaphoreCreateInfo info {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+    };
+    VkSemaphore handle = VK_NULL_HANDLE;
+    if (const VkResult result = vkCreateSemaphore(device, &info, nullptr, &handle); result != VK_SUCCESS) [[unlikely]] {
+        return std::unexpected(ToError(result));
+    }
+    return Semaphore {device, handle};
+}
+
+auto Semaphore::CreateTimeline(const VkDevice device, const uint64_t initialValue) noexcept -> std::expected<Semaphore, ErrorCode> {
+    const VkSemaphoreTypeCreateInfo typeInfo {
+        .sType         = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+        .pNext         = nullptr,
+        .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+        .initialValue  = initialValue,
+    };
+    const VkSemaphoreCreateInfo info {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = &typeInfo,
+        .flags = 0,
+    };
+    VkSemaphore handle = VK_NULL_HANDLE;
+    if (const VkResult result = vkCreateSemaphore(device, &info, nullptr, &handle); result != VK_SUCCESS) [[unlikely]] {
+        return std::unexpected(ToError(result));
+    }
+    return Semaphore {device, handle};
+}
+
 void DestroyAccelerationStructure::operator()(
     const VkDevice device,
     const VkAccelerationStructureKHR handle
