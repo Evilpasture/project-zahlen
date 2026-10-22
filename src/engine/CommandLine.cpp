@@ -23,7 +23,7 @@ namespace ZHLN {
 auto GetGitCommitHash() noexcept -> std::string_view {
     return ZHLN_GIT_COMMIT_HASH;
 }
-}
+} // namespace ZHLN
 
 namespace {
 
@@ -38,7 +38,7 @@ namespace Ansi {
 [[maybe_unused]] constexpr std::string_view Cyan    = "\033[36m";
 [[maybe_unused]] constexpr std::string_view BCyan   = "\033[1;36m";
 [[maybe_unused]] constexpr std::string_view Gray    = "\033[90m";
-}
+} // namespace Ansi
 
 struct Token {
     std::string_view key;
@@ -406,7 +406,7 @@ void PrintHelp(std::string_view exeName, std::span<const ZHLN::CommandHandler> a
     std::println("");
 }
 
-}
+} // namespace
 
 namespace ZHLN {
 
@@ -436,11 +436,11 @@ std::expected<CommandLineOptions, ErrorCode> HandleCommandLine(std::span<char* c
     std::vector<Token> tokens = Tokenize(args);
 
     for (const auto& tok: tokens) {
-        const auto* it = std::ranges::find_if(Handlers, [&](const auto& handler) { return MatchesHandler(handler, tok.key); });
+        const auto*           it      = std::ranges::find_if(Handlers, [&](const auto& handler) { return MatchesHandler(handler, tok.key); });
         const CommandHandler* handler = it != Handlers.end() ? &*it : nullptr;
         if (handler == nullptr) {
             const auto appIt = std::ranges::find_if(appHandlers, [&](const auto& appHandler) { return MatchesHandler(appHandler, tok.key); });
-            handler = appIt != appHandlers.end() ? &*appIt : nullptr;
+            handler          = appIt != appHandlers.end() ? &*appIt : nullptr;
         }
 
         if (handler != nullptr) {
@@ -462,4 +462,4 @@ std::expected<CommandLineOptions, ErrorCode> HandleCommandLine(std::span<char* c
     }
     return options;
 }
-}
+} // namespace ZHLN

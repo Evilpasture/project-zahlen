@@ -4,8 +4,8 @@
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/SignalManager.hpp>
 #include <atomic>
-#include <cstddef>
 #include <csignal>
+#include <cstddef>
 #include <cstring>
 #include <mutex>
 
@@ -28,13 +28,13 @@ struct HandlerSlot {
     Signal                         signal {};
     SignalManager::Handler         fn {nullptr};
     SignalManager::StatefulHandler stateful {nullptr};
-    alignas(16) unsigned char      state[kStateBytes] {};
+    alignas(16) std::array<unsigned char, kStateBytes> state {};
 };
 
-HandlerSlot               s_slots[kMaxHandlers] {};
-std::atomic<uint32_t>     s_nextId {1};
-std::atomic<bool>         s_installed {false};
-std::mutex                s_mu;
+std::array<HandlerSlot, kMaxHandlers> s_slots {};
+std::atomic<uint32_t>                 s_nextId {1};
+std::atomic<bool>                     s_installed {false};
+std::mutex                            s_mu;
 
 auto CurrentNativeThreadId() noexcept -> uint64_t {
 #ifdef _WIN32
@@ -52,7 +52,7 @@ auto CurrentNativeThreadId() noexcept -> uint64_t {
 
 #ifndef _WIN32
 
-constexpr int kPosixSignals[] = {SIGINT, SIGTERM, SIGQUIT, SIGUSR1, SIGUSR2, SIGSEGV, SIGILL, SIGFPE, SIGBUS, SIGABRT};
+constexpr std::array kPosixSignals = {SIGINT, SIGTERM, SIGQUIT, SIGUSR1, SIGUSR2, SIGSEGV, SIGILL, SIGFPE, SIGBUS, SIGABRT};
 
 auto FromNative(int sig) noexcept -> Signal {
     switch (sig) {
@@ -99,10 +99,10 @@ auto IsKnownNative(int sig) noexcept -> bool {
     }
 }
 
-struct sigaction s_previous[sizeof(kPosixSignals) / sizeof(kPosixSignals[0])] {};
-bool             s_havePrevious[sizeof(kPosixSignals) / sizeof(kPosixSignals[0])] {};
+std::array<struct sigaction, sizeof(kPosixSignals) / sizeof(kPosixSignals[0])> s_previous {};
+std::array<bool, sizeof(kPosixSignals) / sizeof(kPosixSignals[0])>             s_havePrevious {};
 
-void PosixHandler(int sig, siginfo_t* info, void* ) {
+void PosixHandler(int sig, siginfo_t* info, void* /*unused*/) {
     if (!IsKnownNative(sig)) {
         return;
     }
@@ -116,7 +116,7 @@ void PosixHandler(int sig, siginfo_t* info, void* ) {
 
 #else
 
-PVOID s_veh = nullptr;
+PVOID s_veh           = nullptr;
 bool  s_consoleHooked = false;
 
 BOOL WINAPI ConsoleCtrlHandler(DWORD type) {
@@ -171,7 +171,7 @@ LONG WINAPI VectoredCrashHandler(PEXCEPTION_POINTERS info) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-void WinAbortHandler(int ) {
+void WinAbortHandler(int) {
     const SignalEvent ev {
         .signal       = Signal::Abort,
         .faultAddress = nullptr,
@@ -190,7 +190,7 @@ auto AllocateId() noexcept -> uint32_t {
     return id;
 }
 
-}
+} // namespace
 
 void SignalManager::Install() noexcept {
     const std::lock_guard lock(s_mu);
@@ -199,7 +199,7 @@ void SignalManager::Install() noexcept {
     }
 
 #ifdef _WIN32
-    s_veh = AddVectoredExceptionHandler(1, VectoredCrashHandler);
+    s_veh           = AddVectoredExceptionHandler(1, VectoredCrashHandler);
     s_consoleHooked = SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE) != 0;
     std::signal(SIGABRT, WinAbortHandler);
 #else
@@ -251,14 +251,14 @@ auto SignalManager::RegisterHandlerInternal(Signal sig, Handler handler) -> uint
         return InvalidId;
     }
     const std::lock_guard lock(s_mu);
-    for (uint32_t i = 0; i < kMaxHandlers; ++i) {
+    for (auto& s_slot: s_slots) {
         uint32_t expected = 0;
-        if (s_slots[i].id.compare_exchange_strong(expected, 0xFFFFFFFFu, std::memory_order::acq_rel)) {
-            s_slots[i].signal   = sig;
-            s_slots[i].fn       = handler;
-            s_slots[i].stateful = nullptr;
-            const uint32_t id   = AllocateId();
-            s_slots[i].id.store(id, std::memory_order::release);
+        if (s_slot.id.compare_exchange_strong(expected, 0xFFFFFFFFu, std::memory_order::acq_rel)) {
+            s_slot.signal     = sig;
+            s_slot.fn         = handler;
+            s_slot.stateful   = nullptr;
+            const uint32_t id = AllocateId();
+            s_slot.id.store(id, std::memory_order::release);
             return id;
         }
     }
@@ -270,15 +270,15 @@ auto SignalManager::RegisterStatefulInternal(Signal sig, StatefulHandler handler
         return InvalidId;
     }
     const std::lock_guard lock(s_mu);
-    for (uint32_t i = 0; i < kMaxHandlers; ++i) {
+    for (auto& s_slot: s_slots) {
         uint32_t expected = 0;
-        if (s_slots[i].id.compare_exchange_strong(expected, 0xFFFFFFFFu, std::memory_order::acq_rel)) {
-            s_slots[i].signal   = sig;
-            s_slots[i].fn       = nullptr;
-            s_slots[i].stateful = handler;
-            std::memcpy(s_slots[i].state, state, size);
+        if (s_slot.id.compare_exchange_strong(expected, 0xFFFFFFFFu, std::memory_order::acq_rel)) {
+            s_slot.signal   = sig;
+            s_slot.fn       = nullptr;
+            s_slot.stateful = handler;
+            std::memcpy(s_slot.state.data(), state, size);
             const uint32_t id = AllocateId();
-            s_slots[i].id.store(id, std::memory_order::release);
+            s_slot.id.store(id, std::memory_order::release);
             return id;
         }
     }
@@ -290,34 +290,34 @@ void SignalManager::Unregister(uint32_t id) noexcept {
         return;
     }
     const std::lock_guard lock(s_mu);
-    for (uint32_t i = 0; i < kMaxHandlers; ++i) {
-        if (s_slots[i].id.load(std::memory_order::acquire) == id) {
-            s_slots[i].fn       = nullptr;
-            s_slots[i].stateful = nullptr;
-            s_slots[i].id.store(0, std::memory_order::release);
+    for (auto& s_slot: s_slots) {
+        if (s_slot.id.load(std::memory_order::acquire) == id) {
+            s_slot.fn       = nullptr;
+            s_slot.stateful = nullptr;
+            s_slot.id.store(0, std::memory_order::release);
             return;
         }
     }
 }
 
 void SignalManager::Dispatch(const SignalEvent& ev) noexcept {
-    for (uint32_t i = 0; i < kMaxHandlers; ++i) {
-        const uint32_t id = s_slots[i].id.load(std::memory_order::acquire);
+    for (auto& s_slot: s_slots) {
+        const uint32_t id = s_slot.id.load(std::memory_order::acquire);
         if (id == InvalidId || id == 0xFFFFFFFFu) {
             continue;
         }
-        if (s_slots[i].signal != ev.signal) {
+        if (s_slot.signal != ev.signal) {
             continue;
         }
-        if (s_slots[i].id.load(std::memory_order::acquire) != id) {
+        if (s_slot.id.load(std::memory_order::acquire) != id) {
             continue;
         }
-        if (s_slots[i].fn != nullptr) {
-            s_slots[i].fn(ev);
-        } else if (s_slots[i].stateful != nullptr) {
-            s_slots[i].stateful(ev, s_slots[i].state);
+        if (s_slot.fn != nullptr) {
+            s_slot.fn(ev);
+        } else if (s_slot.stateful != nullptr) {
+            s_slot.stateful(ev, s_slot.state.data());
         }
     }
 }
 
-}
+} // namespace ZHLN

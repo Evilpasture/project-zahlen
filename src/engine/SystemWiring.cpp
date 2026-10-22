@@ -2,9 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "SystemWiring.hpp"
-
-#include "LODSystem.hpp"
-#include "NativeScriptModule.hpp"
 #include "AnimationSystem.hpp"
 #include "ArticulationSystem.hpp"
 #include "AudioSystem.hpp"
@@ -12,6 +9,7 @@
 #include "CullingSystem.hpp"
 #include "DecalSystem.hpp"
 #include "EnvironmentSunSystem.hpp"
+#include "LODSystem.hpp"
 #include "LightingSystem.hpp"
 #include "PhysicsStateSystem.hpp"
 #include "PhysicsSystem.hpp"
@@ -22,40 +20,34 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
+#include <Zahlen/Frame.hpp>
 #include <Zahlen/FramePlan.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scripting.hpp>
-#include <Zahlen/Frame.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/gui/GUI.hpp>
-#include <algorithm>
-#include <filesystem>
-#include <format>
 #include <string_view>
 
 namespace ZHLN {
-namespace {
+namespace { namespace Steps {
 
-namespace Steps {
-
-
-void HostUICallback(Engine& engine, float , FrameContext& ) {
+void HostUICallback(Engine& engine, float, FrameContext&) {
     if (const auto cb = engine.GetUICallback(); cb && static_cast<bool>(*cb)) {
         (*cb)(engine);
     }
 }
 
-void HotReload(Engine& engine, float , FrameContext& ) {
+void HotReload(Engine& engine, float, FrameContext&) {
     engine.GetFileSystemWatcher().DispatchEvents();
 }
 
-void Physics(Engine& engine, float dt, FrameContext& ) {
+void Physics(Engine& engine, float dt, FrameContext&) {
     PhysicsSystem::Update(engine, dt, engine.GetPhysicsAccumulator());
 }
 
@@ -86,7 +78,7 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
     }
 }
 
-void UpdateGraph(Engine& engine, float dt, FrameContext& ) {
+void UpdateGraph(Engine& engine, float dt, FrameContext&) {
     // Before Execute, and on this thread: the scratch arenas are per-worker and
     // this is the last point at which no worker holds a pointer into one.
     engine.ResetWorkerScratch();
@@ -94,25 +86,25 @@ void UpdateGraph(Engine& engine, float dt, FrameContext& ) {
     engine.GetUpdateGraph().Execute(frame);
 }
 
-void CommandPlayback(Engine& engine, float , FrameContext& ) {
+void CommandPlayback(Engine& engine, float, FrameContext&) {
     engine.GetMainECB().Playback();
 }
 
-void CleanupScene(Engine& engine, float , FrameContext& ) {
+void CleanupScene(Engine& engine, float, FrameContext&) {
     engine.ProcessPendingDestroy();
 }
 
-void Camera(Engine& engine, float dt, FrameContext& ) {
+void Camera(Engine& engine, float dt, FrameContext&) {
     // No instance and no function-local static: the pass is stateless, and the
     // camera it projects is component data.
     CameraSystem::Update(engine, dt, engine.GetCurrentAlpha());
 }
 
-void LOD(Engine& engine, float , FrameContext& ) {
+void LOD(Engine& engine, float, FrameContext&) {
     LODSystem::Update(engine);
 }
 
-void RenderGraph(Engine& engine, float dt, FrameContext& ) {
+void RenderGraph(Engine& engine, float dt, FrameContext&) {
     engine.GetSceneData().Clear();
     engine.ResetWorkerScratch();
     const Frame frame = engine.MakeFrame(dt);
@@ -133,15 +125,12 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
     }
 }
 
-
-void TransformHistory(Engine& engine, float , FrameContext& ) {
-    ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
+void TransformHistory(Engine& engine, float, FrameContext&) {
+    ZHLN::ScopedTimer profTimer("ECS System: Update Transform History");
     TransformSystem::UpdateTransformHistory(engine.GetRegistry());
 }
 
-}
-
-}
+}} // namespace ::Steps
 
 // Core's own steps, and the names modules anchor to.
 //
@@ -220,9 +209,7 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 
-    reg.Create(
-        Components::MainCameraTagComponent {}, Components::CameraComponent {}, Components::AASettingsComponent {}
-    );
+    reg.Create(Components::MainCameraTagComponent {}, Components::CameraComponent {}, Components::AASettingsComponent {});
 
     // A scene reset clears the registry, so the engine-level singletons World::Create()
     // seeds are re-seeded here alongside the rest of the scene's settings.
@@ -243,4 +230,4 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
     return true;
 }
 
-}
+} // namespace ZHLN
