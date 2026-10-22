@@ -217,23 +217,23 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
         }
     } else {
         Vk::SwapchainPresenter& destPresenter = dest.Presenter();
-        auto                    recording     = Vk::CommandRecorder::Begin(destPresenter.SlotCommand(destPresenter.frameIndex));
+
+        // This is where a window's graphics command stream begins -- one stream
+        // carrying the scene graph, its fork secondaries' setup, the Blit pass
+        // and the UI pass -- so this is where BeginStream establishes its heap
+        // state: both segments bound and the frame address block pushed, before
+        // the first command. The state survives until the buffer is reset,
+        // because HeapManager writes into one pair of device-addressable heap
+        // buffers that are created once and never rebound with other contents.
+        auto recording = BeginStream(destPresenter.SlotCommand(destPresenter.frameIndex));
         if (!recording) {
             dest.acquired.reset();
             return std::unexpected(recording.error());
         }
 
-        // This is where a window's graphics command stream begins, so this is
-        // where its heap state is established: both heap segments bound and the
-        // frame address block pushed, once, for everything that records into
-        // the stream afterwards -- the scene graph, its fork secondaries' setup,
-        // the Blit pass and the UI pass. The state survives until the buffer is
-        // reset because neither heap is ever rebound with different contents:
-        // HeapManager writes into one pair of device-addressable buffers that
-        // are created once.
-        BindHeapsAndPushFrame(recording->Handle());
-
-        destinations.AddRecording(dest.id, std::move(*recording));
+        // From here on the stream is the destination table's, and it only needs
+        // the handle: the heap state lives on the command buffer, not in the type.
+        destinations.AddRecording(dest.id, std::move(*recording).Release());
     }
     destinations.SetActive(dest.id);
     return FrameTarget {rendererId, frameSerial, dest.id, dest.acquired->serial};

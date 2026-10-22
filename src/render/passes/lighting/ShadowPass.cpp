@@ -26,9 +26,9 @@ constexpr uint32_t kFirstAtlasSlot = 1;
 } // namespace
 
 void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
-    PassContext    passCtx(cmd, frame);
-    auto&          ctx        = passCtx.ctx;
-    const uint32_t frameIndex = ctx.presenter.frameIndex;
+    Vk::CommandEncoder encoder(cmd);
+    auto&              ctx        = frame;
+    const uint32_t     frameIndex = ctx.presenter.frameIndex;
 
     std::array<Frustum, TargetManager::kCascades> cascadeFrustums {};
     for (uint32_t c = 0; c < TargetManager::kCascades; ++c) {
@@ -128,7 +128,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         }
                         const auto& shadowDraw = ctx.queues.Draws()[instanceIdx];
                         if (shadowDraw.instanceData.meshletCount == 0) {
-                            passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
+                            encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
                                 {.pipeline      = ctx.shadows.CascadePipeline(),
                                  .vertexCount   = indirectCmdsBase[IndirectOffsetForSlot(kCascadeSlot) + d].vertexCount,
                                  .instanceCount = 1,
@@ -139,7 +139,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                             continue;
                         }
 
-                        passCtx.encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
+                        encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
                             {.pipeline    = ctx.shadows.CascadeMeshPipeline(),
                              .groupCountX = TaskGroupCount(shadowDraw.instanceData.meshletCount),
                              .groupCountY = 1,
@@ -148,7 +148,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         );
                     }
                 } else if (csmDrawCount > 0) {
-                    passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
+                    encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
                         {.pipeline       = ctx.shadows.CascadePipeline(),
                          .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                          .offset         = Vk::DrawIndirectState::OffsetForIndex(IndirectOffsetForSlot(kCascadeSlot)),
@@ -158,7 +158,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                 }
 
                 if (hasMeshParticles) {
-                    Draw3DParticleShadows(passCtx, particles);
+                    Draw3DParticleShadows(ctx, encoder, particles);
                 }
             });
     }
@@ -206,17 +206,15 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                             continue;
                         }
 
-                        passCtx.encoder.SetViewport(
+                        encoder.SetViewport(
                             VkViewport {
                                 static_cast<float>(rect.x), static_cast<float>(rect.y), static_cast<float>(rect.size), static_cast<float>(rect.size), 0.0f, 1.0f
                             }
                         );
-                        passCtx.encoder.SetScissor(
-                            VkRect2D {.offset = {static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y)}, .extent = {rect.size, rect.size}}
-                        );
+                        encoder.SetScissor(VkRect2D {.offset = {static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y)}, .extent = {rect.size, rect.size}});
 
                         const ShadowTilePush push {tile.viewProj};
-                        passCtx.encoder.DrawIndirect<Shaders::Modules::ShadowAtlasVS>(
+                        encoder.DrawIndirect<Shaders::Modules::ShadowAtlasVS>(
                             {.pipeline       = ctx.shadows.AtlasPipeline(),
                              .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                              .offset         = Vk::DrawIndirectState::OffsetForIndex(IndirectOffsetForSlot(kFirstAtlasSlot + p)),

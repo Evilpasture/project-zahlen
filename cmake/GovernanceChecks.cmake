@@ -153,15 +153,3 @@ zhln_run_governance_check("check_error_ordinals.py")
 # rather than at the end of a long build.
 zhln_run_governance_check("check_include_provenance.pl" INTERPRETER
                           "${ZHLN_PERL_EXECUTABLE}")
-
-# Heap state is command-stream state. RenderFrameContext::BindHeapsAndPushFrame
-# binds both descriptor heap segments and pushes the device-address block the
-# shaders' scene ParameterBlock dereferences with no descriptor table behind it;
-# both stay in effect for the rest of the command buffer, identically for every
-# pass recorded into it. So it is called once per stream, where the stream
-# begins -- AcquireTarget for a window's graphics stream, ComputeSimPipeline::
-# Submit for the async-compute one -- and secondaries get it from
-# Vk::ParallelCommandRecorder, which cannot inherit it. This check keeps the
-# call from creeping back into pass code, where it would only ever work because
-# of what happens to be recorded earlier on the same buffer.
-zhln_run_governance_check("check_heap_state_roots.py")

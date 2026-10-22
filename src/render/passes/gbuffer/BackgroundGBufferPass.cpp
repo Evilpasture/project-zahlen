@@ -14,7 +14,7 @@ namespace ZHLN::Passes {
 // occluded wherever the map is nearer. (It used to be forced behind the world
 // by a second depth band; that split is retired.)
 void BackgroundGBufferPass::operator()(VkCommandBuffer cmd) const noexcept {
-    PassContext passCtx(cmd, frame);
+    Vk::CommandEncoder encoder(cmd);
     const auto  sceneVp = frame.EffectiveViewport();
     const auto  in      = GBufferSceneTargets(frame);
 
@@ -47,7 +47,7 @@ void BackgroundGBufferPass::operator()(VkCommandBuffer cmd) const noexcept {
                 // pin the background layer to the classic vertex path and drop
                 // it off the meshlet path on GPUs that use it, for no gain --
                 // SubmitDrawInstanced already falls back to that pipeline.
-                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive());
+                SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive());
             }
         });
 }

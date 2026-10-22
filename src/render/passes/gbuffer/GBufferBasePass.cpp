@@ -50,11 +50,17 @@ struct TaskSystemSchedulerAdapter {
     }
 };
 
-void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
+void RecordGpuCulled(
+    RenderFrameContext&         ctx,
+    Vk::CommandEncoder&         encoder,
+    CullingResources&           cull,
+    std::span<const GroupRange> groups,
+    uint32_t                    drawCount,
+    const GBufferTargets&       in
+) noexcept {
     using enum Vk::BarrierStage;
     using enum Vk::BarrierAccess;
-    auto* const cmd        = passCtx.Cmd();
-    auto&       ctx        = passCtx.ctx;
+    auto* const cmd        = encoder.cmd;
     const auto  frameIndex = ctx.presenter.frameIndex;
 
     Vk::BufferBarrier(cmd, ctx.frames.secondPassCountBuffers[frameIndex].Handle(), Compute | Indirect, ShaderWrite | IndirectRead, Clear, TransferWrite);
@@ -97,8 +103,8 @@ void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<con
                 if (group.material->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
-                passCtx.encoder.SetCullMode(group.cullMode);
-                passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
+                encoder.SetCullMode(group.cullMode);
+                encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                     {
                         .pipeline       = group.material->pipeline,
                         .argumentBuffer = ctx.frames.indirectCommandsBuffers[frameIndex].Handle(),
@@ -111,10 +117,8 @@ void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<con
         });
 }
 
-void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTargets& in) noexcept {
+void RecordCpuCulled(RenderFrameContext& ctx, VkCommandBuffer cmd, uint32_t drawCount, const GBufferTargets& in) noexcept {
     using enum DrawFlags;
-    auto* const    cmd        = passCtx.Cmd();
-    auto&          ctx        = passCtx.ctx;
     const uint32_t frameIndex = ctx.presenter.frameIndex;
     const auto     sceneVp    = ctx.EffectiveViewport();
 
@@ -167,7 +171,7 @@ void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTarg
 } // namespace
 
 void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
-    PassContext passCtx(cmd, frame);
+    Vk::CommandEncoder encoder(cmd);
 
     const auto drawCount = static_cast<uint32_t>(frame.queues.Draws().size());
     if (drawCount == 0) {
@@ -186,9 +190,9 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto in     = GBufferSceneTargets(frame);
     if (cull.cullingPass.pipeline.Valid() && frame.frames.indirectCommandsBuffers[frame.presenter.frameIndex].Valid() &&
         (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !frame.MeshShadingActive()) {
-        RecordGpuCulled(passCtx, cull, groups, drawCount, in);
+        RecordGpuCulled(frame, encoder, cull, groups, drawCount, in);
     } else {
-        RecordCpuCulled(passCtx, drawCount, in);
+        RecordCpuCulled(frame, cmd, drawCount, in);
     }
 }
 

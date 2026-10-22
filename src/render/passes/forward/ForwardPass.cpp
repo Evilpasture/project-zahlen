@@ -21,7 +21,7 @@ using LinePushConstants = Slang::LinePushConstants;
 void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
     auto& ctx = frame;
 
-    PassContext passCtx(cmd, frame);
+    Vk::CommandEncoder encoder(cmd);
     const auto  sceneVp = frame.EffectiveViewport();
 
     const auto litColor = Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(frame.graphResources.hdrSceneColor);
@@ -41,7 +41,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
+                SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
 
             if (forward.particles.Valid() && !ctx.queues.ParticleEmitters().empty()) {
@@ -57,7 +57,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
                         .textureIndex       = emitter.params.textureIndex
                     };
 
-                    passCtx.encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
+                    encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
                         {.pipeline = forward.particles.Get(), .vertexCount = 6, .instanceCount = emitter.maxParticles, .firstVertex = 0, .firstInstance = 0}, pc
                     );
                 }
@@ -66,7 +66,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
             if (forward.line.Valid() && ctx.activeLineVertexCount > 0) {
                 const LinePushConstants pc = {.viewProj = ctx.current_view_proj, .vertexBufferAddress = ctx.frames.lineVboAddresses[ctx.presenter.frameIndex]};
 
-                passCtx.encoder.DrawInstanced<Shaders::Modules::DebugLineVS, Shaders::Modules::DebugLinePS>(
+                encoder.DrawInstanced<Shaders::Modules::DebugLineVS, Shaders::Modules::DebugLinePS>(
                     {.pipeline = forward.line.Get(), .vertexCount = ctx.activeLineVertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = 0}, pc
                 );
             }

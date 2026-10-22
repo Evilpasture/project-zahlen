@@ -63,10 +63,10 @@ The heap bindings and the per-frame device-address block are **state of the
 command stream**, so they are established once, where the stream begins
 recording, and never from pass code:
 
-| Stream                           | Establishes heap state at                                                          |
+| Stream                           | Begins at                                                                          |
 | -------------------------------- | ---------------------------------------------------------------------------------- |
-| a window's graphics stream       | `RenderContext::Impl::AcquireTarget`, when the recording's command buffer begins    |
-| the async-compute stream         | `Pipelines::ComputeSimPipeline::Submit`, right after the recorder begins            |
+| a window's graphics stream       | `RenderFrameContext::BeginStream`, in `RenderContext::Impl::AcquireTarget`           |
+| the async-compute stream         | `RenderFrameContext::BeginStream`, in `Pipelines::ComputeSimPipeline::Submit`        |
 | fork / parallel-draw secondaries | `Vk::ParallelCommandRecorder::SetHeapState` (heap inheritance info + address push per slot) |
 
 Nothing in the stream re-establishes it: `HeapManager` writes into one pair of
@@ -77,13 +77,21 @@ the address window begins after the pass-payload prefix
 (`kScenePassPayloadBytes`), and every push is written at its own offset
 (`vkCmdPushDataEXT`), never as one whole-block write.
 
-`configure/check_heap_state_roots.py` enforces this at configure time: a call to
-`RenderFrameContext::BindHeapsAndPushFrame` outside the roots above fails the
-build. The rule it protects is the reason the bind moved out of the passes: a
-pass that binds heaps for itself only works because of what happens to run
-before it on the same buffer, and that is exactly the property that stops
-holding the day the pass is reordered, moved to the front of the frame, or
-forked onto another queue.
+The type system carries the rule, so nothing has to remember it. A stream is
+begun by `RenderFrameContext::BeginStream`, which returns a
+`Vk::StreamCommandRecorder`: a recorder that cannot exist without the heap state,
+because the factory that produces it takes the establishing step as an argument
+and runs it before handing the recorder back. `BindHeapsAndPushFrame` is private
+to the frame context on top of that -- `BeginStream` is the one thing that can
+call it -- so "this stream began without its heap state" is not a state the code
+can be written in, rather than a rule someone has to check.
+
+The reason it moved out of the passes is worth keeping in view: a pass that
+binds heaps for itself only works because of what happens to run before it on the
+same buffer, which is exactly the property that stops holding the day the pass is
+reordered, moved to the front of the frame, or forked onto another queue. A pass
+is handed a frame and a `Vk::CommandEncoder` and nothing else, so the coupling
+has no way back in.
 
 ---
 

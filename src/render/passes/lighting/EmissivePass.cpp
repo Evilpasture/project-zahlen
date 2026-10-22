@@ -16,7 +16,7 @@ void EmissivePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     auto& ctx = frame;
 
-    PassContext passCtx(cmd, frame);
+    Vk::CommandEncoder encoder(cmd);
     const auto  sceneVp = frame.EffectiveViewport();
     const auto  lighting = Vk::Assume<Vk::ColorWriteRGB<Res_LightingGI>>(frame.graphResources.lightingGI);
     const auto  depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.ActiveDepthTarget());
@@ -33,7 +33,7 @@ void EmissivePass::operator()(VkCommandBuffer cmd) const noexcept {
                 }
 
                 SubmitDrawInstanced(
-                    passCtx.encoder, drawCmd, static_cast<uint32_t>(i), ObjectConstants {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0},
+                    encoder, drawCmd, static_cast<uint32_t>(i), ObjectConstants {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0},
                     ctx.MeshShadingActive(), forward.emissive.Get()
                 );
             }

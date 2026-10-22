@@ -82,11 +82,11 @@ void SubmitDrawInstanced(
     );
 }
 
-void DrawCSGMeshes(PassContext& passCtx, const CsgResources& csg, VkExtent3D extent) noexcept;
+void DrawCSGMeshes(RenderFrameContext& ctx, Vk::CommandEncoder& encoder, const CsgResources& csg, VkExtent3D extent) noexcept;
 
-void Draw3DParticles(PassContext& passCtx, const MeshParticlePipelines& particles) noexcept;
+void Draw3DParticles(RenderFrameContext& ctx, Vk::CommandEncoder& encoder, const MeshParticlePipelines& particles) noexcept;
 
-void Draw3DParticleShadows(PassContext& passCtx, const MeshParticlePipelines& particles) noexcept;
+void Draw3DParticleShadows(RenderFrameContext& ctx, Vk::CommandEncoder& encoder, const MeshParticlePipelines& particles) noexcept;
 
 using GBufferTargets = SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>;
 

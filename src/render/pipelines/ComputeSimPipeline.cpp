@@ -72,16 +72,13 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
     const uint32_t slot = impl.presenter.frameIndex;
 
     impl.currentDt = dt;
-    auto recording = Vk::CommandRecorder::Begin(impl.computePools[slot][0]);
+    // The async compute buffer is its own command stream, so it begins with its
+    // own heap state: nothing on the graphics stream carries over to it, and
+    // nothing on it carries back.
+    auto recording = impl.BeginStream(impl.computePools[slot][0]);
     if (!recording) {
         return std::unexpected(recording.error());
     }
-
-    // The async compute buffer is its own command stream, so it establishes its
-    // own heap state here, before the first dispatch: nothing on the graphics
-    // stream carries over, and nothing on this one carries back.
-    impl.BindHeapsAndPushFrame(recording->Handle());
-
     RecordComputeFrame(impl, recording->Handle(), dt);
     auto executable = std::move(*recording).End();
     if (!executable) {

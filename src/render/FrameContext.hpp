@@ -199,31 +199,36 @@ struct RenderFrameContext {
 
     [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
 
-    // Establishes the descriptor-heap state of one command stream: binds both
-    // heap segments and pushes the device-address block that the shaders'
-    // `ParameterBlock<GlobalSceneRegistry> scene` dereferences directly, with no
-    // descriptor table behind it.
+    // Begins a frame command stream, with its heap state established before the
+    // first command is recorded into it. The stream comes back as a
+    // Vk::StreamCommandRecorder, a type that cannot be obtained any other way and
+    // that is the only thing here which can bind the heaps -- so "the stream
+    // began without its heap state" is not a state the code can be in.
     //
-    // This is state of the STREAM, not of any pass in it, so it is called once
-    // per command stream, at the one moment the stream begins recording:
+    // What it establishes: both heap segments bound, and the per-frame
+    // device-address block pushed. The shaders' `ParameterBlock<GlobalSceneRegistry>
+    // scene` reads `scene.frame`, `scene.lights`, `scene.g_instances` and
+    // `scene.g_joints` as raw 64-bit addresses out of the push range, with no
+    // descriptor table behind them, so a stream that begins without the block
+    // does not misrender: it faults at address zero or reads the buffer the
+    // previous recording left behind.
     //
-    //   * RenderContext::Impl::AcquireTarget  -- a window's graphics stream, the
+    // Two streams begin per frame, and both begin here:
+    //
+    //   * a window's graphics stream -- RenderContext::Impl::AcquireTarget, the
     //     one the scene graph, the Blit pass and the UI pass all record into;
-    //   * Pipelines::ComputeSimPipeline::Submit -- the async-compute stream.
+    //   * the async-compute stream   -- Pipelines::ComputeSimPipeline::Submit.
     //
-    // A pass must never call this. A pass that re-establishes state its
-    // predecessors already established is a pass that only works because of
-    // what happens to run before it: it keeps working when the graph is
-    // reordered or the pass is forked onto another queue, until the day it
-    // does not. configure/check_heap_state_roots.py rejects any call outside
-    // the two roots above.
+    // Passes cannot reach it, and no longer need to: a pass is handed its frame
+    // and a Vk::CommandEncoder, and neither begins a stream.
     //
-    // Secondary command buffers inherit neither the heap bindings nor the push
-    // range from the primary they are executed in, so the parallel recorders
-    // re-establish this state for every slot they begin, from
-    // FrameHeapAddresses() (see Vk::ParallelCommandRecorder::SetHeapState and
+    // Secondary command buffers inherit neither the bindings nor the push range
+    // from the primary they are executed in, so they are not begun this way: the
+    // parallel recorders take the state as inheritance info and push the rows
+    // into every slot they begin, from FrameHeapAddresses() (see
+    // Vk::ParallelCommandRecorder::SetHeapState and
     // RenderContext::Impl::ForkReplayer::ExecuteFork).
-    void BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
+    [[nodiscard]] auto BeginStream(VkCommandBuffer cmd) const noexcept -> std::expected<Vk::StreamCommandRecorder, ErrorCode>;
 
     [[nodiscard]] auto ActivePresentation() noexcept -> Vk::SwapchainPresenter& {
         if (const auto active = destinations.Active()) {
@@ -238,6 +243,15 @@ struct RenderFrameContext {
         }
         return primaryDepthTarget;
     }
+
+  private:
+    // The heap bindings and the push-address block, on the command buffer, once.
+    // Private because there is exactly one moment where this is the right thing
+    // to do -- the moment a stream begins -- and BeginStream is that moment. Any
+    // other caller would be establishing state that only stays correct because
+    // of what happens to be recorded before or after it on the same buffer,
+    // which is the coupling this type exists to remove.
+    void BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
 };
 
 } // namespace ZHLN

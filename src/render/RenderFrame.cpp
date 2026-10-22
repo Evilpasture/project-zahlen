@@ -81,6 +81,13 @@ void RenderFrameContext::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexce
     Vk::PushHeapFrameAddresses(cmd, GpuAbi::kScenePushLayout, addresses);
 }
 
+auto RenderFrameContext::BeginStream(VkCommandBuffer cmd) const noexcept -> std::expected<Vk::StreamCommandRecorder, ErrorCode> {
+    // The establishing step is passed in as the factory's argument rather than
+    // called before or after it: that is what makes a stream without heap state
+    // unrepresentable, instead of merely unlikely.
+    return Vk::StreamCommandRecorder::Begin(cmd, [this](VkCommandBuffer stream) noexcept { BindHeapsAndPushFrame(stream); });
+}
+
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
     Extent2D size = _impl->presentationTarget.GetFramebufferExtent();
     if (size.width == 0 || size.height == 0) {

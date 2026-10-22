@@ -8,7 +8,7 @@
 namespace ZHLN::Passes {
 
 void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
-    PassContext passCtx(cmd, frame);
+    Vk::CommandEncoder encoder(cmd);
     const auto  sceneVp = frame.EffectiveViewport();
 
     const auto norm_att  = Vk::Assume<Vk::ColorWrite<Res_TransNorm>>(frame.graphResources.transNormalBuffer);
@@ -30,7 +30,7 @@ void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
                 }
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive(), drawCmd.prePassMaterial->pipeline);
+                SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive(), drawCmd.prePassMaterial->pipeline);
             }
         });
 }

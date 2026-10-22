@@ -14,7 +14,7 @@ void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
         return;
     }
 
-    PassContext passCtx(cmd, frame);
+    Vk::CommandEncoder encoder(cmd);
     const auto  in = GBufferSceneTargets(frame);
 
     Vk::DynamicPass(in.sceneColor.Extent())
@@ -33,7 +33,7 @@ void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
                 }
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
-                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive());
+                SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive());
             }
         });
 }
