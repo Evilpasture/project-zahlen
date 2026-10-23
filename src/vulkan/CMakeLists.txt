@@ -26,7 +26,6 @@ add_library(
   pipeline/PipelineBuilder.cpp
   pipeline/PipelineBinaries.cpp
   pipeline/DescriptorHeap.cpp
-  pipeline/SamplerConfig.cpp
   pipeline/ShaderStages.cpp
   pipeline/ReflectedLayout.cpp
   pipeline/ComputePass.cpp

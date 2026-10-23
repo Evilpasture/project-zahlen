@@ -9,7 +9,7 @@ This project's renderer proudly has zero:
 - `VkDescriptorSetLayout`: Killed by descriptor heaps.
 - `VkDescriptorPool`: Killed by descriptor heaps.
 - `VkDescriptorSet`: Killed by descriptor heaps.
-- `VkSampler`: Avoided by using descriptor heaps.
+- `VkSampler` handles: Avoided by using descriptor heaps; the create info goes straight to `vkWriteSamplerDescriptorsEXT`.
 - `VkPipelineLayout`: Killed by descriptor heaps.
 - `VkShaderModule`: Deprecated in Vulkan 1.4 and killed by VK_KHR_maintenance5.
 - `VkPipelineCache`: Killed by pipeline binaries.

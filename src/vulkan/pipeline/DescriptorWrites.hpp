@@ -89,17 +89,17 @@ struct NamedSampler {
     static constexpr auto literal = Name;
     static constexpr bool unread = IsUnread;
 
-    SamplerConfig value {};
+    Sampler value {};
 };
 
 template <ZHLN::StringLiteral Name>
-[[nodiscard]] constexpr auto SamplerSlot(SamplerConfig config) noexcept -> NamedSampler<Name> {
-    return {.value = config};
+[[nodiscard]] constexpr auto SamplerSlot(Sampler sampler) noexcept -> NamedSampler<Name> {
+    return {.value = sampler};
 }
 
 template <ZHLN::StringLiteral Name>
-[[nodiscard]] constexpr auto UnreadSampler(SamplerConfig config) noexcept -> NamedSampler<Name, true> {
-    return {.value = config};
+[[nodiscard]] constexpr auto UnreadSampler(Sampler sampler) noexcept -> NamedSampler<Name, true> {
+    return {.value = sampler};
 }
 
 }

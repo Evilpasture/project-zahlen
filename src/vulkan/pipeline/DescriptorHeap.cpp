@@ -18,6 +18,12 @@ namespace ZHLN::Vk {
 
 namespace {
 
+// How many sampler create infos a flush synthesizes at a time. The batch holds
+// Samplers (16 bytes of description each); the VkSamplerCreateInfo array the
+// extension consumes never exists beyond this stack buffer, so a flush of nine
+// material variants and a flush of nine hundred cost the same scratch.
+inline constexpr uint32_t kSamplerWriteChunk = 16;
+
 [[nodiscard]] auto BatchFitsHeap(uint32_t maxSlot, uint32_t capacity, uint32_t count, const char* heapName) noexcept -> bool {
     if (maxSlot < capacity) {
         return true;
@@ -247,6 +253,62 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
             FlushHostCache(flushOffset, flushSize);
         }
     }
+}
+
+struct SamplerWriteBatch::Impl {
+    // Descriptions, not create infos: the driver struct is synthesized per chunk
+    // at flush time (see Flush), so nothing here is an 80-byte VkSamplerCreateInfo.
+    std::vector<Sampler>  samplers;
+    std::vector<uint32_t> slots;
+};
+
+SamplerWriteBatch::SamplerWriteBatch() noexcept: _impl(std::make_unique<Impl>()) {
+}
+SamplerWriteBatch::~SamplerWriteBatch() noexcept = default;
+
+SamplerWriteBatch::SamplerWriteBatch(SamplerWriteBatch&& other) noexcept = default;
+auto SamplerWriteBatch::operator=(SamplerWriteBatch&& other) noexcept -> SamplerWriteBatch& = default;
+
+auto SamplerWriteBatch::Empty() const noexcept -> bool {
+    return _impl->slots.empty();
+}
+
+auto SamplerWriteBatch::SlotCount() const noexcept -> uint32_t {
+    return static_cast<uint32_t>(_impl->slots.size());
+}
+
+auto SamplerWriteBatch::SlotsData() const noexcept -> const uint32_t* {
+    return _impl->slots.data();
+}
+
+void SamplerWriteBatch::AddSampler(SamplerHandle handle, const Sampler& sampler) noexcept {
+    if (!handle.Valid()) {
+        return;
+    }
+    _impl->samplers.push_back(sampler);
+    _impl->slots.push_back(handle.index);
+}
+
+void SamplerWriteBatch::Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept {
+    const auto totalCount = static_cast<uint32_t>(_impl->slots.size());
+    if (totalCount == 0) {
+        return;
+    }
+
+    std::array<VkSamplerCreateInfo, kSamplerWriteChunk>   createInfos {};
+    std::array<VkHostAddressRangeEXT, kSamplerWriteChunk> ranges {};
+    auto* const                                           base = static_cast<uint8_t*>(mappedPtr);
+    for (uint32_t first = 0; first < totalCount; first += kSamplerWriteChunk) {
+        const uint32_t count = std::min(kSamplerWriteChunk, totalCount - first);
+        for (uint32_t i = 0; i < count; ++i) {
+            const uint32_t slot = _impl->slots[first + i];
+            createInfos[i]      = _impl->samplers[first + i].AsCreateInfo();
+            ranges[i]           = {.address = base + (static_cast<VkDeviceSize>(slot) * stride), .size = stride};
+        }
+        vkWriteSamplerDescriptorsEXT(device, count, createInfos.data(), ranges.data());
+    }
+    _impl->samplers.clear();
+    _impl->slots.clear();
 }
 
 struct ResourceWriteBatch::Impl {
@@ -585,12 +647,12 @@ auto HeapManager::ReserveImageRange(uint32_t count) noexcept -> std::expected<Te
     return TextureHandle {base};
 }
 
-auto HeapManager::RegisterSampler(const SamplerConfig& config) noexcept -> std::expected<SamplerHandle, ErrorCode> {
+auto HeapManager::RegisterSampler(const Sampler& sampler) noexcept -> std::expected<SamplerHandle, ErrorCode> {
     auto handle = ReserveSampler();
     if (!handle) [[unlikely]] {
         return handle;
     }
-    BindSampler(*handle, config);
+    BindSampler(*handle, sampler);
     return handle;
 }
 
@@ -862,12 +924,12 @@ void HeapManager::BindAccelerationStructure(AccelerationStructureHandle handle, 
     FlushResourceBatch(batch);
 }
 
-void HeapManager::BindSampler(SamplerHandle handle, const SamplerConfig& config) noexcept {
+void HeapManager::BindSampler(SamplerHandle handle, const Sampler& sampler) noexcept {
     if (!handle.Valid()) {
         return;
     }
     SamplerWriteBatch batch;
-    batch.AddSampler(handle, config);
+    batch.AddSampler(handle, sampler);
     FlushSamplerBatch(batch);
 }
 

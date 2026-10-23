@@ -20,7 +20,7 @@ class SamplerWriteBatch;
 class HeapManager;
 class HeapImmediateScope;
 class HeapFrameScope;
-struct SamplerConfig;
+class Sampler;
 struct HeapPassBindings;
 
 enum class DescriptorHeapType : uint8_t {
@@ -199,7 +199,7 @@ class SamplerWriteBatch {
     SamplerWriteBatch(SamplerWriteBatch&& other) noexcept;
     auto operator=(SamplerWriteBatch&& other) noexcept -> SamplerWriteBatch&;
 
-    void AddSampler(SamplerHandle handle, const SamplerConfig& config) noexcept;
+    void AddSampler(SamplerHandle handle, const Sampler& sampler) noexcept;
 
     void Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept;
 
@@ -276,16 +276,18 @@ class HeapManager {
     // Registration: slot assignment and descriptor write are one operation, so a
     // handle that exists is a handle that is already written.
     // -------------------------------------------------------------------------
-    [[nodiscard]] auto RegisterSampler(const SamplerConfig& config) noexcept -> std::expected<SamplerHandle, ErrorCode>;
+    [[nodiscard]] auto RegisterSampler(const Sampler& sampler) noexcept -> std::expected<SamplerHandle, ErrorCode>;
 
-    template <typename ConfigAt>
-    [[nodiscard]] auto RegisterSamplerArray(uint32_t count, ConfigAt&& configAt) noexcept -> std::expected<SamplerHandle, ErrorCode> {
+    // `SamplerAt(i)` builds the i-th variant, so the caller describes the array
+    // (the nine material address-mode combinations) instead of materializing one.
+    template <typename SamplerAt>
+    [[nodiscard]] auto RegisterSamplerArray(uint32_t count, SamplerAt&& samplerAt) noexcept -> std::expected<SamplerHandle, ErrorCode> {
         auto base = ReserveSamplerRange(count);
         if (!base) [[unlikely]] {
             return base;
         }
         for (uint32_t i = 0; i < count; ++i) {
-            BindSampler(SamplerHandle {base->index + i}, configAt(i));
+            BindSampler(SamplerHandle {base->index + i}, samplerAt(i));
         }
         return base;
     }
@@ -309,7 +311,7 @@ class HeapManager {
     // -------------------------------------------------------------------------
     // Binding a payload to a handle, registered or reserved.
     // -------------------------------------------------------------------------
-    void BindSampler(SamplerHandle handle, const SamplerConfig& config) noexcept;
+    void BindSampler(SamplerHandle handle, const Sampler& sampler) noexcept;
     void BindImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
     void BindStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
     void BindStorageBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;

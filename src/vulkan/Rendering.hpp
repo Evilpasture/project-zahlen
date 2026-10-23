@@ -60,7 +60,7 @@
 #include "pipeline/PipelineTypes.hpp"
 #include "core/RenderCore.hpp"
 #include "graph/DynamicRendering.hpp"
-#include "pipeline/SamplerConfig.hpp"
+#include "pipeline/Sampler.hpp"
 #include "pipeline/DescriptorWrites.hpp"
 #include "pipeline/ReflectedLayout.hpp"
 #include "pipeline/PushDataLayout.hpp"

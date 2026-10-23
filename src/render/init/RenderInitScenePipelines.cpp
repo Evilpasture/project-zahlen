@@ -171,7 +171,7 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
 }
 
 auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode> {
-    shadowSamplerConfig = Vk::SamplerConfig::LinearClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).WithDepthCompare();
+    shadowSampler = Vk::Sampler::Shadow();
 
     return targets
         .InitShadows()

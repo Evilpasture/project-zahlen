@@ -254,10 +254,10 @@ auto RenderContext::Impl::BuildSpecializedLightingPipelines() -> std::expected<v
 #endif
 
 auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode> {
-    defaultSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
-    pointSamplerConfig   = Vk::SamplerConfig::NearestRepeat().WithAddressMode(Vk::SamplerAddressMode::ClampToEdge);
+    defaultSampler = Vk::Sampler::LinearClampToEdge();
+    pointSampler   = Vk::Sampler::NearestClampToEdge();
 
-    WritePointSamplerToHeap(pointSamplerConfig);
+    WritePointSamplerToHeap(pointSampler);
     return std::expected<void, ErrorCode> {}
         .and_then([&]() -> std::expected<void, ErrorCode> {
             auto passes = std::make_tuple(

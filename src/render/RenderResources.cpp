@@ -729,8 +729,8 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 
     Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
 
-    blueNoiseSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithLodRange(0.0F, 0.0F);
-    auto blueNoiseIdx      = textureManager.Adopt(std::move(image), view);
+    blueNoiseSampler  = Vk::Sampler::NearestRepeat().WithoutMips();
+    auto blueNoiseIdx = textureManager.Adopt(std::move(image), view);
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());
     }

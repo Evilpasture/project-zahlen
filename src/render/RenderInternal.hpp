@@ -4,28 +4,20 @@
 #pragma once
 #include "ComputePassResources.hpp"
 #include "DrawCommands.hpp"
-#include "DrawQueueManager.hpp"
 #include "FrameContext.hpp"
 #include "FrameDestinations.hpp"
 #include "FrameResources.hpp"
-#include "GenerationalPool.hpp"
 #include "GeometryManager.hpp"
-#include "GpuAbi.hpp"
 #include "GpuLayout.hpp"
-#include "PassPayloads.hpp"
-#include "PipelineFormats.hpp"
 #include "PipelineRegistry.hpp"
 #include "PresentationTarget.hpp"
-#include "RenderConstants.hpp"
 #include "RenderDiagnostics.hpp"
 #include "Rendering.hpp"
-#include "ShaderReloadRegistry.hpp"
 #include "TargetManager.hpp"
 #include "TextureManager.hpp"
 #include "Zahlen/Core/BatchResult.hpp"
 #include "diagnostics/GPUDiagnostics.hpp"
 #include "diagnostics/GpuProfiler.hpp"
-#include "features/ShadowAtlas.hpp"
 #include "features/ShadowRenderer.hpp"
 #include "features/VolumetricFogSystem.hpp"
 #include "graph/RenderGraph.hpp"
@@ -56,19 +48,14 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <algorithm>
-#include <array>
 #include <atomic>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <functional>
-#include <initializer_list>
 #include <memory>
 #include <span>
-#include <string>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
@@ -174,12 +161,12 @@ struct RenderContext::Impl: RenderFrameContext {
     Vk::HeapPassBindings  volumetricIntegrationHeapBindings;
     Vk::HeapPassBindings  volumetricTemporalHeapBindings;
 
-    Vk::SamplerConfig globalSamplerConfig {};
-    Vk::SamplerConfig clampSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
-    Vk::SamplerConfig shadowSamplerConfig {};
-    Vk::SamplerConfig defaultSamplerConfig {};
-    Vk::SamplerConfig pointSamplerConfig {};
-    Vk::SamplerConfig blueNoiseSamplerConfig {};
+    Vk::Sampler globalSampler;
+    Vk::Sampler clampSampler = Vk::Sampler::LinearClampToEdge();
+    Vk::Sampler shadowSampler;
+    Vk::Sampler defaultSampler;
+    Vk::Sampler pointSampler;
+    Vk::Sampler blueNoiseSampler;
 
     Vk::SamplerHandle globalSamplerSlot;
     Vk::SamplerHandle materialSamplerBaseSlot; // Nine contiguous S/T wrap combinations.
@@ -212,20 +199,20 @@ struct RenderContext::Impl: RenderFrameContext {
     // Decals, and the forward pass's lines and billboard particles.
     DecalResources               decals;
     ForwardResources             forward;
-    std::span<const LineSegment> pendingLines {};
+    std::span<const LineSegment> pendingLines;
 
     std::expected<void, ErrorCode> BuildLinePipeline();
     std::expected<void, ErrorCode> InitLineBuffers() noexcept;
 
     std::expected<void, ErrorCode> AllocateLineVertexBuffers(size_t maxVertices, PerFrame<Vk::Buffer>& bufs, PerFrame<VkDeviceAddress>& addrs) noexcept;
 
-    std::expected<void, ErrorCode> InitSceneHeaps(const Vk::SamplerConfig& globalSamplerValue, const Vk::SamplerConfig& clampSamplerValue) noexcept;
-    void                           BuildSceneHeapMappings() noexcept;
-    void                           BuildDecalHeapMappings() noexcept;
-    void                           WriteSceneStaticImageDescriptors() noexcept;
-    void                           WritePointSamplerToHeap(const Vk::SamplerConfig& config) noexcept;
-    void                           WriteTransLightingToHeap() noexcept;
-    void                           InitPassSamplerDescriptors() noexcept;
+    std::expected<void, ErrorCode>               InitSceneHeaps(const Vk::Sampler& globalSamplerValue, const Vk::Sampler& clampSamplerValue) noexcept;
+    void                                         BuildSceneHeapMappings() noexcept;
+    void                                         BuildDecalHeapMappings() noexcept;
+    void                                         WriteSceneStaticImageDescriptors() noexcept;
+    void                                         WritePointSamplerToHeap(const Vk::Sampler& config) noexcept;
+    void                                         WriteTransLightingToHeap() noexcept;
+    void                                         InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
     template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
@@ -260,7 +247,7 @@ struct RenderContext::Impl: RenderFrameContext {
     UIRenderer uiRenderer;
 
     struct RenderTexture {
-        Vk::ImageSlice image {};
+        Vk::ImageSlice image;
 
         Vk::AttachmentView   attachmentView;
         Vk::AttachmentLayout layout = Vk::AttachmentLayout::Undefined;
@@ -284,7 +271,7 @@ struct RenderContext::Impl: RenderFrameContext {
     static_assert(Vk::ForkRecorder<ForkReplayer>);
     std::unique_ptr<ForkReplayer> forkReplayer;
 
-    [[nodiscard]] auto ForkExecutor() noexcept -> ForkReplayer* {
+    [[nodiscard]] auto ForkExecutor() const noexcept -> ForkReplayer* {
         return forkReplayer.get();
     }
 
@@ -528,8 +515,9 @@ template <typename T = Vk::Buffer, typename... Args>
     static_assert(std::is_same_v<T, Vk::Buffer>, "VMA per-frame resources need an explicit cleanup policy");
     PerFrame<T> resources;
     defer       _([&] {
-        for (auto& resource: resources)
+        for (auto& resource: resources) {
             alloc.DestroyBuffer(resource);
+        }
     });
     for (auto& resource: resources) {
         auto created = T::Create(alloc, args...);

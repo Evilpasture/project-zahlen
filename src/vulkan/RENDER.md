@@ -324,7 +324,18 @@ per dispatch, and no pass reserves a per-frame count of variants. Bakes recorded
 outside the frame loop allocate from the immediate partition inside a
 `HeapManager::CreateImmediateScope()` transaction. Samplers are initialized once by
 `InitHeapPassSamplers` from `Vk::SamplerSlot<"name">` values, matched by name
-the same way.
+the same way. A sampler is a value (`Vk::Sampler`, `pipeline/Sampler.hpp`):
+sixteen bytes of description -- filter, the three address modes, border colour,
+compare op and the two switches packed into one state word, beside the LOD
+window and the anisotropy bound -- with builders that return the new value
+(`WithAddressModes`, `WithAnisotropy` raises the filter because Vulkan requires
+it, `Shadow()` is the depth-comparison trio in one call). It answers behavioural
+questions (`Mipmapped()`, `ClampsToBorder()`, `DepthCompare()`, `Valid()`) and
+never hands a field back, so no pass can dismantle a sampler and re-make its
+decision; the packing stays an implementation detail. The 80-byte
+`VkSamplerCreateInfo` is synthesized on the stack by `AsCreateInfo()` only inside
+`SamplerWriteBatch::Flush`, which walks a batch of descriptions sixteen at a
+time, so nothing between the call site and the extension holds a driver struct.
 
 A name that matches nothing is skipped at runtime, which is right for a binding
 a configuration dropped and wrong for a typo -- so the names are also checked
