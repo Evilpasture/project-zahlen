@@ -275,6 +275,20 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
 # plugins/json there. As a subproject simdjson turns its developer mode and
 # install rules off by itself; BUILD_SHARED_LIBS is OFF project-wide, so its
 # simdjson target is a static archive, aliased as simdjson::simdjson.
+#
+# simdjson's own C++26 static-reflection APIs stay OFF, even though the engine
+# is built with -freflection. Since simdjson 5.0 they are auto-detected from
+# the feature-test macros (see simdjson/compiler_check.h) in every TU that
+# includes <simdjson.h>, and simdjson/annotations.h reports misuse with
+# `throw std::meta::exception(...)` in consteval functions. GCC rejects any
+# throw-expression under the project's -fno-exceptions, consteval or not, so
+# plugins/json/JSON.cpp fails to compile despite only using the DOM parser.
+# Zahlen does its own reflection-driven serialisation (JSONSchema.hpp) and
+# never uses simdjson's reflected (de)serialisation, so opt out through
+# upstream's switch: MODE=OFF makes the simdjson target export
+# SIMDJSON_STATIC_REFLECTION=0 PUBLIC, keeping the definition identical for
+# simdjson.cpp and for its consumers.
+set(SIMDJSON_STATIC_REFLECTION_MODE "OFF" CACHE STRING "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/simdjson EXCLUDE_FROM_ALL SYSTEM)
 
 # --- test-harness toggles for vendor projects ---
