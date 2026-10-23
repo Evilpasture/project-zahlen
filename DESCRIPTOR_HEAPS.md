@@ -194,15 +194,15 @@ Set-0 bindings map as follows (baked by `BuildSceneHeapMappings`):
 
 `resources/shaders/descriptor_heap_layout.slang` is the layout authority. Its
 `DescriptorHeapPushData` type places the largest ordinary per-pass block first,
-then the six frame addresses and the descriptor index. slangc compiles that
-type into the `gpu_abi` SPIR-V blob, and `src/render/GpuAbi.hpp` reads the field
-offsets out of that bytecode at compile time (`Vk::SpirvTypes`, see
-`src/vulkan/pipeline/SpirvLayout.hpp`) -- deriving `GpuAbi::kScenePushLayout`,
-so an edit to the struct lands in the engine automatically instead of needing
-a hand-kept copy. Both mapping creation and `vkCmdPushDataEXT` then use the
-derived offsets, including any padding selected by slangc's SPIR-V layout
-rules; `src/vulkan` supplies only the generic container (`Vk::HeapPushDataLayout`)
-and writes what it is handed. `src/vulkan` never sees the `.slang` source, and
+then the six frame addresses and the descriptor index. `tools/zshader` compiles
+that type in-process and reflects its field offsets into the generated header as
+`Slang::kScenePushLayout`, which `src/render/GpuAbi.cpp` exports as
+`GpuAbi::kScenePushLayout` -- so an edit to the struct lands in the engine on
+the next build instead of needing a hand-kept copy, and nothing re-reads the
+module's SPIR-V to derive it. Both mapping creation and `vkCmdPushDataEXT` then
+use the derived offsets, including any padding selected by the shader
+compiler's layout rules; `src/vulkan` supplies only the generic container
+(`Vk::HeapPushDataLayout`) and writes what it is handed. `src/vulkan` never sees the `.slang` source, and
 the scene's blob prefix -- `GpuAbi::kScenePassPayloadBytes` and the
 `ScenePassPayload` bound on every pass payload -- is policy the render layer
 asserts about itself, never a constant the RHI carries.

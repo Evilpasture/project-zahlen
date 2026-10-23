@@ -116,7 +116,9 @@ add_dependencies(zahlen_render zahlen_shader_catalog)
 target_include_directories(zahlen_render PRIVATE "${CMAKE_BINARY_DIR}/generated_shaders")
 add_dependencies(zahlen_render zahlen_gpu_types)
 
-target_compile_definitions(zahlen_render PRIVATE ZHLN_GPU_ABI_MODULE="${SHADER_GPU_ABI_CS_PATH}")
+# No ZHLN_GPU_ABI_MODULE: nothing here #embeds the ABI module's SPIR-V. The
+# generated header (GeneratedGpuTypes.hpp) is the ABI, and GpuAbi.cpp only
+# exports the scene push layout out of it.
 
 target_link_libraries(zahlen_render PRIVATE zahlen_warnings)
 

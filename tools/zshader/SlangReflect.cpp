@@ -12,8 +12,9 @@
 // name, column-major matrices, the -D defines -- except it omits -O, as the
 // cooks pass no -O flag either. The walk trusts Slang for every name, type,
 // offset and size; the usage table trusts Slang for which (set, binding)
-// slots the emitted entry point binds. No SPIR-V decoding -- the cooked
-// bytes are the engine's proof (CatalogChecks.hpp), never the tool's input.
+// slots the emitted entry point binds. No SPIR-V decoding: the compiles are
+// the only description of the modules the catalog carries, and nothing
+// downstream re-reads the cooked bytes to second-guess them.
 
 #include "SlangReflect.hpp"
 

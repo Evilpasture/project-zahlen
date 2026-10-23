@@ -7,10 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "PushDataLayout.hpp"
-
 #include <Zahlen/Core/Description.hpp>
-#include <Zahlen/Core/Reflection/Structs.hpp>
 
 #include <array>
 #include <cstdint>
@@ -57,6 +54,9 @@ struct SamplerBindings {
     using Of = typename Program::Samplers;
 };
 
+// One member of a push block the module declares, as Slang reflected it. Kept
+// as the record of what the shader takes; nothing compares it against a host
+// struct any more (see PushConstantLayoutMatchesAll).
 struct PushMember {
     const char* name   = nullptr;
     uint32_t    offset = 0;
@@ -69,41 +69,6 @@ concept DeclaresPushBlock = requires {
     Module::Push;
 };
 
-template <typename CppPush, typename Module>
-[[nodiscard]] consteval auto PushConstantLayoutMatches() noexcept -> bool {
-    if constexpr (!DeclaresPushBlock<Module>) {
-        return false;
-    } else {
-        constexpr uint32_t kMembers = static_cast<uint32_t>(sizeof(Module::Push) / sizeof(Module::Push[0]));
-#if ZHLN_REFLECTION_AVAILABLE
-        bool         ok     = true;
-        uint32_t     extent = 0;
-        Reflect::ForEachFieldInfo<CppPush>([&]<typename FieldType>(std::string_view name, std::size_t offset) {
-            const uint32_t begin = static_cast<uint32_t>(offset);
-            const uint32_t end   = begin + static_cast<uint32_t>(sizeof(FieldType));
-            bool           found = false;
-            bool           hole  = true;
-            for (uint32_t i = 0; i < kMembers; ++i) {
-                const PushMember& member = Module::Push[i];
-                if (name == member.name && begin == member.offset && sizeof(FieldType) == member.size) {
-                    found = true;
-                    extent  = extent > member.offset + member.size ? extent : member.offset + member.size;
-                }
-                hole = hole && !(begin < member.offset + member.size && member.offset < end);
-            }
-            ok = ok && (found || hole);
-        });
-        ok = ok && sizeof(CppPush) == ::ZHLN::Vk::AlignUp(extent, static_cast<uint32_t>(alignof(CppPush)));
-        return ok;
-#else
-        return sizeof(CppPush) == ::ZHLN::Vk::AlignUp(Module::PushSize, static_cast<uint32_t>(alignof(CppPush)));
-#endif
-    }
-}
-
-struct SpirvBinding;
-class SpirvBindings;
-
 template <typename... Slots>
 struct BindingList {
     static constexpr size_t count = sizeof...(Slots);
@@ -111,8 +76,6 @@ struct BindingList {
     [[nodiscard]] static constexpr auto Declares([[maybe_unused]] std::string_view name) noexcept -> bool {
         return ((Slots::name == name) || ...);
     }
-
-    [[nodiscard]] static constexpr auto Spells(const SpirvBindings& declarations, const SpirvBinding& candidate, uint32_t set) noexcept -> bool;
 };
 
 template <typename List>
@@ -137,22 +100,27 @@ concept ShaderProgram = requires {
     { T::Bytes() } -> std::same_as<std::span<const uint8_t>>;
 };
 
-template <typename CppPush, ShaderProgram Module>
-[[nodiscard]] consteval auto PushConstantLayoutMatchesOne() noexcept -> bool {
-    if constexpr (!DeclaresPushBlock<Module>) {
-        return true;
-    } else {
-        return PushConstantLayoutMatches<CppPush, Module>();
-    }
-}
-
+// The one check left at a push site: the payload is a byte copyable GPU type.
+//
+// It used to be a layout comparison -- every field of the host struct matched
+// by name, offset and size against the push block Slang reflected. That
+// comparison could only fail when the struct was written by hand, and the
+// structs are not: PassPayloads.hpp aliases the generated types, so the engine
+// was checking Slang's reflection against Slang's reflection. What a host
+// struct can still get wrong is being unsafe to hand to vkCmdPushDataEXT, and
+// that is what this asserts.
+//
+// The payload's size bound is not a property of the RHI and does not live here:
+// it is the scene blob's prefix, GpuAbi::ScenePassPayload (src/render/GpuAbi.hpp),
+// asserted where each payload type is declared.
 template <typename CppPush, ShaderProgram... Modules>
 [[nodiscard]] consteval auto PushConstantLayoutMatchesAll() noexcept -> bool {
     static_assert(
         sizeof...(Modules) > 0, "name the shader module(s) this push struct is written for: PushConstantLayoutMatchesAll<PushT, Shaders::Modules::X>()"
     );
     static_assert((DeclaresPushBlock<Modules> || ...), "none of the named shader modules declares a push-constant block: the bytes would be written for no one");
-    return (PushConstantLayoutMatchesOne<CppPush, Modules>() && ...);
+    static_assert(GpuTriviallyCopyable<CppPush>, "a push payload is copied to the device as bytes: it must be trivially copyable and standard-layout");
+    return true;
 }
 
 namespace TemplatedDetail {
@@ -294,7 +262,7 @@ struct ShaderSet {
 
     template <typename CppPush>
     [[nodiscard]] static consteval auto PushLayoutMatches() -> bool {
-        return (PushConstantLayoutMatchesOne<CppPush, Programs>() && ...);
+        return PushConstantLayoutMatchesAll<CppPush, Programs...>();
     }
 
     template <typename Pass, typename... Args>

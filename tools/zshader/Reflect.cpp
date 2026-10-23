@@ -12,8 +12,8 @@
 // The Slang kinds arrive as Slang spells them; the switches below are what
 // turn them into the descriptor types and stages the engine builds pipelines
 // for. Anything they cannot place is a build error naming the binding, not a
-// guess: the generated header holds every kind against the module's own
-// bytes (ModuleMatchesBytes), so a guess would fail there instead of here.
+// guess: the catalog is the only record of what the modules declare, so an
+// unnamed kind would reach the engine as a slot nobody can write.
 //
 // Reflection is a property of the build: a compiler without it compiles the
 // engine's stand-ins, which name every value "Unknown". Rather than generate a

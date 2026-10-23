@@ -11,7 +11,8 @@
 #include <Zahlen/Log.hpp>
 #include "HeapBindings.hpp"
 #include "HeapMappingBuilder.hpp"
-#include "SpirvLayout.hpp"
+#include "PushDataLayout.hpp" // SpirvLayoutError
+#include "SpirvLayout.hpp"    // WorkgroupSize, LocalSizeOf
 
 namespace ZHLN::Vk {
 

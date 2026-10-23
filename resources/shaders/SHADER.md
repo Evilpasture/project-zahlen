@@ -43,11 +43,13 @@ array) must stay LAST.
 
 GPU types, cluster math, vertex unpacking, particle state, descriptor-heap
 push-data layout, and IBL / SMAA / BRDF LUT generation are also Slang-owned.
-The host checks its C++ structs against the compiled `gpu_abi` SPIR-V at compile
-time (`src/render/GpuAbi.hpp`, which the renderer compiles, plus
-`Vk::PushConstantLayoutMatchesAll` in every dispatch that writes a payload) and
-dispatches the bake / cluster-bounds compute kernels instead of re-authoring the
-layouts or integrators in C++. One deliberately narrow exception is a prepared
+The host does not carry its own copy of any of it: `tools/zshader` reflects
+`gpu_abi.slang` into the C++ structs and the scene push layout
+(`GeneratedGpuTypes.hpp`, see `src/render/GpuAbi.hpp`), and the only thing a
+dispatch that writes a payload asserts is that the payload is byte-copyable
+(`Vk::PushConstantLayoutMatchesAll`). The host dispatches the bake /
+cluster-bounds compute kernels rather than re-authoring the layouts or
+integrators in C++. One deliberately narrow exception is a prepared
 float HDR panorama dominated by one compact emitter: the host integrates the
 *smooth remainder* into diffuse SH with exact source-texel solid angles, and
 stores the emitter's direction and cosine-convolved RGB in the otherwise-unused
@@ -56,10 +58,10 @@ avoiding the negative SH ringing caused by a point-like HDR sun. Ordinary HDRs,
 procedural skies, the BRDF LUT and the specular cube remain GPU-baked. The
 pre-filtered specular cube always uses the original, complete panorama.
 
-`zshader --abi <gpu_abi.spv> --out-gpu-types ...` additionally reflects that
-same module into the generated host structs (`GeneratedGpuTypes.hpp`, re-exported
-by `src/render/GpuLayout.hpp`, which is renderer-internal -- nothing under
-`include/` reaches it). Every struct is emitted, including the five the engine and
+`zshader --slang-module gpu_abi --out-gpu-types ...` additionally reflects that
+same module into the generated host structs and the scene push layout
+(`GeneratedGpuTypes.hpp`, re-exported by `src/render/GpuLayout.hpp`, which is
+renderer-internal -- nothing under `include/` reaches it). Every struct is emitted, including the five the engine and
 the shaders share (`Particle`, `ParticleEmitterParams`, `MeshParticleEmitterParams`,
 `Light`, `FrameUniforms`): one definition per concept, and it is this one.
 `ShadowTile` (`uniforms.slang`) generates with them: the shadow atlas hands
