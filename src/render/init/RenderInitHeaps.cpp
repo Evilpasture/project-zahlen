@@ -97,7 +97,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
         });
 }
 
-auto RenderContext::Impl::InitSceneHeaps(const Vk::Sampler& globalSamplerValue, const Vk::Sampler& clampSamplerValue) noexcept
+auto RenderContext::Impl::InitSceneHeaps(Vk::Sampler globalSamplerValue, Vk::Sampler clampSamplerValue) noexcept
     -> std::expected<void, ErrorCode> {
     globalSampler = globalSamplerValue;
     clampSampler  = clampSamplerValue;
@@ -214,7 +214,7 @@ void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
     }
 }
 
-void RenderContext::Impl::WritePointSamplerToHeap(const Vk::Sampler& pointSamplerValue) noexcept {
+void RenderContext::Impl::WritePointSamplerToHeap(Vk::Sampler pointSamplerValue) noexcept {
     heapManager.BindSampler(pointSamplerSlot, pointSamplerValue);
 }
 

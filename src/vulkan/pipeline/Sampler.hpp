@@ -37,6 +37,11 @@ enum class SamplerAddressMode : uint8_t {
 // create infos, so a batch that describes nine material variants, or nine
 // hundred, is a description list rather than a driver-struct array.
 //
+// It travels by value: trivially copyable and register-sized, so no API takes a
+// Sampler by reference. There is no owner to alias and no lifetime to reason
+// about -- a copy is two words in registers on the common ABIs, and the builders
+// already return new values.
+//
 // Tell, don't ask -- and that includes the read side:
 //   * builders return the new value (WithFilter, WithLodRange, ...), so a
 //     configuration is one expression with no half-built object in it;
@@ -231,7 +236,7 @@ class Sampler {
         };
     }
 
-    friend constexpr auto operator==(const Sampler&, const Sampler&) noexcept -> bool = default;
+    friend constexpr auto operator==(Sampler, Sampler) noexcept -> bool = default;
 
   private:
     // The state word: four two-bit lanes and two three-bit lanes hold every

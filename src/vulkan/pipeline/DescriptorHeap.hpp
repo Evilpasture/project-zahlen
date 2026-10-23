@@ -199,7 +199,7 @@ class SamplerWriteBatch {
     SamplerWriteBatch(SamplerWriteBatch&& other) noexcept;
     auto operator=(SamplerWriteBatch&& other) noexcept -> SamplerWriteBatch&;
 
-    void AddSampler(SamplerHandle handle, const Sampler& sampler) noexcept;
+    void AddSampler(SamplerHandle handle, Sampler sampler) noexcept;
 
     void Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept;
 
@@ -276,7 +276,7 @@ class HeapManager {
     // Registration: slot assignment and descriptor write are one operation, so a
     // handle that exists is a handle that is already written.
     // -------------------------------------------------------------------------
-    [[nodiscard]] auto RegisterSampler(const Sampler& sampler) noexcept -> std::expected<SamplerHandle, ErrorCode>;
+    [[nodiscard]] auto RegisterSampler(Sampler sampler) noexcept -> std::expected<SamplerHandle, ErrorCode>;
 
     // `SamplerAt(i)` builds the i-th variant, so the caller describes the array
     // (the nine material address-mode combinations) instead of materializing one.
@@ -311,7 +311,7 @@ class HeapManager {
     // -------------------------------------------------------------------------
     // Binding a payload to a handle, registered or reserved.
     // -------------------------------------------------------------------------
-    void BindSampler(SamplerHandle handle, const Sampler& sampler) noexcept;
+    void BindSampler(SamplerHandle handle, Sampler sampler) noexcept;
     void BindImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
     void BindStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
     void BindStorageBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;

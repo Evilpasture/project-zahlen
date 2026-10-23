@@ -281,7 +281,7 @@ auto SamplerWriteBatch::SlotsData() const noexcept -> const uint32_t* {
     return _impl->slots.data();
 }
 
-void SamplerWriteBatch::AddSampler(SamplerHandle handle, const Sampler& sampler) noexcept {
+void SamplerWriteBatch::AddSampler(SamplerHandle handle, Sampler sampler) noexcept {
     if (!handle.Valid()) {
         return;
     }
@@ -647,7 +647,7 @@ auto HeapManager::ReserveImageRange(uint32_t count) noexcept -> std::expected<Te
     return TextureHandle {base};
 }
 
-auto HeapManager::RegisterSampler(const Sampler& sampler) noexcept -> std::expected<SamplerHandle, ErrorCode> {
+auto HeapManager::RegisterSampler(Sampler sampler) noexcept -> std::expected<SamplerHandle, ErrorCode> {
     auto handle = ReserveSampler();
     if (!handle) [[unlikely]] {
         return handle;
@@ -924,7 +924,7 @@ void HeapManager::BindAccelerationStructure(AccelerationStructureHandle handle, 
     FlushResourceBatch(batch);
 }
 
-void HeapManager::BindSampler(SamplerHandle handle, const Sampler& sampler) noexcept {
+void HeapManager::BindSampler(SamplerHandle handle, Sampler sampler) noexcept {
     if (!handle.Valid()) {
         return;
     }

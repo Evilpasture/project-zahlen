@@ -206,11 +206,11 @@ struct RenderContext::Impl: RenderFrameContext {
 
     std::expected<void, ErrorCode> AllocateLineVertexBuffers(size_t maxVertices, PerFrame<Vk::Buffer>& bufs, PerFrame<VkDeviceAddress>& addrs) noexcept;
 
-    std::expected<void, ErrorCode>               InitSceneHeaps(const Vk::Sampler& globalSamplerValue, const Vk::Sampler& clampSamplerValue) noexcept;
+    std::expected<void, ErrorCode>               InitSceneHeaps(Vk::Sampler globalSamplerValue, Vk::Sampler clampSamplerValue) noexcept;
     void                                         BuildSceneHeapMappings() noexcept;
     void                                         BuildDecalHeapMappings() noexcept;
     void                                         WriteSceneStaticImageDescriptors() noexcept;
-    void                                         WritePointSamplerToHeap(const Vk::Sampler& pointSamplerValue) noexcept;
+    void                                         WritePointSamplerToHeap(Vk::Sampler pointSamplerValue) noexcept;
     void                                         WriteTransLightingToHeap() noexcept;
     void                                         InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
