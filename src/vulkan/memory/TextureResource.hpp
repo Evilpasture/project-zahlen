@@ -10,22 +10,22 @@
 namespace ZHLN::Vk {
 
 struct TextureResource {
-    Image                 image;
-    VkImageViewCreateInfo viewInfo {};
-    VkExtent3D            extent {};
+    Image      image;
+    ImageView  view {};
+    VkExtent3D extent {};
 
     void Destroy(Allocator& allocator) noexcept {
-        viewInfo = {};
+        view = {};
         allocator.DestroyImage(image);
         extent = {};
     }
 
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
-        return ImageSlice {viewInfo, extent};
+        return ImageSlice {view, extent};
     }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
-        return image.Valid() && viewInfo.image != VK_NULL_HANDLE;
+        return image.Valid() && view.Handle() != VK_NULL_HANDLE;
     }
     explicit operator bool() const noexcept {
         return Valid();

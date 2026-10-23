@@ -214,12 +214,13 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
             continue;
         }
 
-        JPH::RVec3 charPos;
-        if (!pc.TryGetBodyPosition(phys->physicsHandle, charPos)) {
+        const auto charPosition = pc.BodyPosition(phys->physicsHandle);
+        if (!charPosition) {
             // The character may be queued for destruction; nothing to push.
             continue;
         }
 
+        const JPH::RVec3& charPos = *charPosition;
         const JPH::Vec3 charVel = pc.GetCharacterVelocity(phys->physicsHandle);
         if (charVel.LengthSq() < 0.01f) {
             continue; // Not moving: there is no momentum to impart.
@@ -233,12 +234,12 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
                 continue;
             }
 
-            JPH::RVec3 otherPos;
-            if (!pc.TryGetBodyPosition(other, otherPos)) {
+            const auto otherPosition = pc.BodyPosition(other);
+            if (!otherPosition) {
                 continue;
             }
 
-            JPH::Vec3 delta = JPH::Vec3(charPos - otherPos);
+            JPH::Vec3 delta = JPH::Vec3(charPos - *otherPosition);
             const float len = delta.Length();
             if (len < 1e-4f) {
                 continue;

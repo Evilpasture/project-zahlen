@@ -237,6 +237,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
     std::array<float, kBatch>   batchScaledRadii {};
     std::array<uint32_t, kBatch> batchTris {};
     std::array<bool, kBatch>    batchHidden {};
+    std::array<bool, kBatch>    batchBackground {};
     std::array<bool, 4>         mainVisible {};
     std::array<bool, 4>         shadowVisible {};
 
@@ -263,6 +264,12 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
                 meshComp.cullRadius * std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
             batchTris[n]   = meshTris;
             batchHidden[n] = hidden;
+            // Background scenery is culled like everything else now (it lives
+            // at its authored place in the same world). The flag is kept for
+            // one rule: a backdrop must never cast a cascade shadow -- its
+            // ground plane is hundreds of metres wide and sits inside the
+            // cascades' reach, so letting it cast would blacken the level.
+            batchBackground[n] = (meshComp.flags & DrawFlags::Background) != DrawFlags::None;
 
             stats.TotalTriangles += hidden ? 0u : meshTris;
 
@@ -294,7 +301,8 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
                 stats.RenderedTriangles += batchTris[j];
             }
 
-            if (!isFullBright && shadowVisible[j]) {
+            // A backdrop never casts a cascade shadow (see batchBackground).
+            if (!isFullBright && shadowVisible[j] && !batchBackground[j]) {
                 outVisibleShadow.push_back(batchEntities[j]);
             }
         }

@@ -15,19 +15,16 @@
 //     entry-point metadata, never from a decode of the modules;
 //
 //   * ShaderBytecode.cpp -- the translation unit that `#embed`s every cooked
-//     module the catalog carries. It defines each module's `Bytes()`, the byte
-//     spans the rest of the engine reads, and one `static_assert` per module
-//     holding the generated lists against the module's own bytes with the
-//     independent reader in ShaderProgram.hpp. A module the catalog does not
-//     carry -- gpu_abi.slang, which no pipeline loads -- is not passed to
-//     `--bytes` at all: its only reader is the compile-time ABI check, which
-//     embeds it (src/render/GpuAbi.hpp, where that check lives).
+//     module the catalog carries and defines each module's `Bytes()`. A module
+//     the catalog does not carry -- gpu_abi.slang, which no pipeline loads --
+//     is not passed to `--bytes` at all: it is nobody's bytes, only the module
+//     the host types are reflected out of (GpuTypes.cpp).
 //
-// The tool is deliberately the second opinion, not the only one: it compiles
-// the catalog's modules from Slang in-process, and the assertion in the
-// generated source -- which reads the cooked bytes -- is what keeps those
-// compiles honest. The size in `module.byteSize` is the only fact the tool
-// takes from the cooked file itself.
+// The tool is the only opinion: it compiles the catalog's modules from Slang
+// in-process and writes down what the compiler said. Nothing downstream reads
+// the cooked bytes back to confirm it -- that would be a second source of
+// truth, and the whole point is that there is one. The size in
+// `module.byteSize` is the only fact the tool takes from the cooked file.
 //
 // Usage (the catalog):
 //

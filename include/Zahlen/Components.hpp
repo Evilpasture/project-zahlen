@@ -62,6 +62,12 @@ struct Components {
         JPH::Mat44 previous = JPH::Mat44::sIdentity();
     };
 
+    // Per-entity ambient cube (see DrawParams::ambientCube). Presence enables the
+    // cube term in the material shader for this entity's mesh parts.
+    struct AmbientCubeComponent {
+        std::array<JPH::Float4, 6> cube {};
+    };
+
     struct MeshComponent {
         AssetID    meshAsset     = InvalidAssetID;
         MaterialID materialAsset = InvalidMaterialID;
@@ -243,6 +249,7 @@ struct Components {
         JPH::Vec4 skyZenith  = JPH::Vec4(0.003f, 0.008f, 0.020f, 1.0f);
         JPH::Vec4 skyHorizon = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f);
         JPH::Vec4 skyGround  = JPH::Vec4(0.001f, 0.001f, 0.003f, 1.0f);
+
     };
 
     struct EnvironmentMapComponent {
@@ -444,6 +451,11 @@ struct Components {
         // SceneLight::pinned: LightingSystem publishes these first so the
         // renderer's scene-light budget cannot discard them.
         bool pinned = false;
+        // The map compiler baked this light into the map's lightmaps. See
+        // SceneLight::baked: the light still runs live for unbaked geometry,
+        // but deferred shading withholds what the bake already owns there.
+        // Scene::kBakeOwnsNone / Scene::kBakeOwnsDiffuse / Scene::kBakeOwnsAll.
+        uint32_t baked = 0;
     };
 
     // Particle components are authoring/runtime data only. Persistent simulation

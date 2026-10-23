@@ -48,7 +48,7 @@ struct Image {
 };
 
 // ---------------------------------------------------------------------------
-// PPM (P6, binary) — the output of RenderContext::CaptureScreenshotPPM.
+// PPM (P6, binary) — the encoder's default output (ZHLN::Netpbm::EncodePPM).
 // ---------------------------------------------------------------------------
 
 // Reads a P6 PPM and expands it to RGBA (alpha 255). Tolerates '#' comments in

@@ -8,6 +8,7 @@
 #endif
 
 #include <Zahlen/Core/Defer.hpp>
+#include <cstddef>
 
 namespace ZHLN::Vk {
 
@@ -16,6 +17,7 @@ struct Upload2DDesc {
     uint32_t         width;
     uint32_t         height;
     VkFormat         format;
+    size_t           texelBytes = 4;
     bool             generateMips = true;
     std::string_view debugName    = {};
 };
@@ -47,7 +49,7 @@ class TextureUploader {
         : _ctx(ctx), _allocator(allocator), _staging(staging), _cmdRing(cmdRing) {}
 
     [[nodiscard]] auto Upload2D(const Upload2DDesc& desc) const noexcept -> std::expected<TextureResource, ErrorCode> {
-        const size_t     byteSize = static_cast<size_t>(desc.width) * desc.height * 4;
+        const size_t     byteSize = static_cast<size_t>(desc.width) * desc.height * desc.texelBytes;
         const uint32_t   mips     = desc.generateMips ? GetMipLevels(desc.width, desc.height) : 1;
         const ImageUsage usage    = ImageUsage::Sampled | ImageUsage::TransferDst | (desc.generateMips ? ImageUsage::TransferSrc : ImageUsage::None);
 
@@ -56,47 +58,67 @@ class TextureUploader {
         if (!imgRes) return std::unexpected(imgRes.error());
         ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
-        auto stagingAlloc = _staging.Allocate(byteSize);
-        if (stagingAlloc.mappedData == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
-        std::memcpy(stagingAlloc.mappedData, desc.data, byteSize);
-
-        if (auto uploaded = ExecuteImmediate(_ctx, _cmdRing, _staging, [&](VkCommandBuffer cmd) {
-            TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-                cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, mips
-            );
-
-            const VkBufferImageCopy2 region = {
-                .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-                .pNext             = nullptr,
-                .bufferOffset      = stagingAlloc.slice.offset,
-                .bufferRowLength   = 0,
-                .bufferImageHeight = 0,
-                .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
-                .imageOffset       = {0, 0, 0},
-                .imageExtent       = {desc.width, desc.height, 1},
-            };
-            CopyBufferToImage(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), region);
-
-            if (desc.generateMips && mips > 1) {
-                GenerateMipmaps(cmd, imgRes->Handle(), desc.width, desc.height);
-            } else {
-                TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                    cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
-                );
+        if (byteSize > _staging.Capacity()) {
+            // Do not turn a legitimate large image into an out-of-bounds memcpy
+            // merely because it exceeds the reusable ring. The dedicated path
+            // owns its CPU-visible buffer until the synchronous copy completes.
+            auto dedicated = StagingContext::Begin(_allocator, _ctx);
+            if (!dedicated) {
+                return std::unexpected(dedicated.error());
             }
-        }); !uploaded) [[unlikely]] {
-            return std::unexpected(uploaded.error());
+            if (auto copied = dedicated->UploadImage2D(imgRes->Handle(), desc.width, desc.height, mips, desc.data, byteSize); !copied) {
+                return std::unexpected(copied.error());
+            }
+            auto submitted = std::move(*dedicated).ExecuteAsync();
+            if (!submitted) {
+                return std::unexpected(submitted.error());
+            }
+            submitted->Wait();
+        } else {
+            auto stagingAlloc = _staging.Allocate(byteSize);
+            if (stagingAlloc.mappedData == nullptr) {
+                return std::unexpected(StagingError::StagingSpaceExhausted);
+            }
+            std::memcpy(stagingAlloc.mappedData, desc.data, byteSize);
+
+            if (auto uploaded = ExecuteImmediate(_ctx, _cmdRing, _staging, [&](VkCommandBuffer cmd) {
+                TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+                    cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, mips
+                );
+
+                const VkBufferImageCopy2 region = {
+                    .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+                    .pNext             = nullptr,
+                    .bufferOffset      = stagingAlloc.slice.offset,
+                    .bufferRowLength   = 0,
+                    .bufferImageHeight = 0,
+                    .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+                    .imageOffset       = {0, 0, 0},
+                    .imageExtent       = {desc.width, desc.height, 1},
+                };
+                CopyBufferToImage(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), region);
+
+                if (desc.generateMips && mips > 1) {
+                    GenerateMipmaps(cmd, imgRes->Handle(), desc.width, desc.height);
+                } else {
+                    TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+                        cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
+                    );
+                }
+            }); !uploaded) [[unlikely]] {
+                return std::unexpected(uploaded.error());
+            }
         }
 
-        const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, mips);
+        const ImageView view = imgRes->View(VK_IMAGE_ASPECT_COLOR_BIT, 0, mips);
 
         if (!desc.debugName.empty()) {
             Debug::SetImageName(_ctx, imgRes->Handle(), desc.debugName);
         }
 
         return TextureResource {
-            .image     = std::move(*imgRes),
-            .viewInfo = viewInfo,
+            .image  = std::move(*imgRes),
+            .view   = view,
             .extent = {desc.width, desc.height, 1}
         };
     }
@@ -137,15 +159,15 @@ class TextureUploader {
             return std::unexpected(uploaded.error());
         }
 
-        const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo();
+        const ImageView view = imgRes->View();
 
         if (!desc.debugName.empty()) {
             Debug::SetImageName(_ctx, imgRes->Handle(), desc.debugName);
         }
 
         return TextureResource {
-            .image     = std::move(*imgRes),
-            .viewInfo = viewInfo,
+            .image  = std::move(*imgRes),
+            .view   = view,
             .extent = {desc.width, desc.height, desc.depth}
         };
     }
@@ -179,15 +201,15 @@ class TextureUploader {
             return std::unexpected(uploaded.error());
         }
 
-        const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo();
+        const ImageView view = imgRes->View();
 
         if (!desc.debugName.empty()) {
             Debug::SetImageName(_ctx, imgRes->Handle(), desc.debugName);
         }
 
         return TextureResource {
-            .image     = std::move(*imgRes),
-            .viewInfo = viewInfo,
+            .image  = std::move(*imgRes),
+            .view   = view,
             .extent = {desc.size, desc.size, 1}
         };
     }

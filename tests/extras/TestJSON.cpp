@@ -89,7 +89,7 @@ static_assert(kStaticParsed.window.height == 1080);
 
 struct JSONTestSuite {
     enum class JSONTestError : uint8_t {
-        ParseFailed ZHLN_ANNOTATION(ZHLN::Description<"ReflectJSON::TryParse rejected a document that should have deserialized."> {}) = 1,
+        ParseFailed ZHLN_ANNOTATION(ZHLN::Description<"ReflectJSON::Parse rejected a document that should have deserialized."> {}) = 1,
     };
 
     struct Tests {
@@ -131,7 +131,7 @@ struct JSONTestSuite {
                 "itemSlots": [1001, 1002, 2005]
             })";
 
-            auto parseResult = ZHLN::ReflectJSON::TryParse<ActorConfig>(json);
+            auto parseResult = ZHLN::ReflectJSON::Parse<ActorConfig>(json);
             if (!ZHLN::Test::ExpectTrue(parseResult.has_value())) {
                 return std::unexpected(JSONTestError::ParseFailed);
             }
@@ -163,7 +163,7 @@ struct JSONTestSuite {
         std::expected<void, ZHLN::ErrorCode> runtime_error_invalid_json() {
             std::string_view invalidJson = R"({ "name": "Broken", "health": )"; // Incomplete / syntax error
 
-            auto parseResult = ZHLN::ReflectJSON::TryParse<ActorConfig>(invalidJson);
+            auto parseResult = ZHLN::ReflectJSON::Parse<ActorConfig>(invalidJson);
             ZHLN::Test::ExpectFalse(parseResult.has_value());
 
             if (!parseResult) {
@@ -181,7 +181,7 @@ struct JSONTestSuite {
                 "health": 100
             })"; // Missing 'speed', 'isInvulnerable', 'spawnPosition', etc.
 
-            auto parseResult = ZHLN::ReflectJSON::TryParse<ActorConfig>(missingFieldJson);
+            auto parseResult = ZHLN::ReflectJSON::Parse<ActorConfig>(missingFieldJson);
             ZHLN::Test::ExpectFalse(parseResult.has_value());
 
             if (!parseResult) {
@@ -204,7 +204,7 @@ struct JSONTestSuite {
                 "itemSlots": []
             })";
 
-            auto parseResult = ZHLN::ReflectJSON::TryParse<ActorConfig>(typeMismatchJson);
+            auto parseResult = ZHLN::ReflectJSON::Parse<ActorConfig>(typeMismatchJson);
             ZHLN::Test::ExpectFalse(parseResult.has_value());
 
             if (!parseResult) {
@@ -251,10 +251,10 @@ struct JSONTestSuite {
         std::expected<void, ZHLN::ErrorCode> parse_json_missing_keys_keep_defaults() {
             // A document with every optional key omitted is valid under the
             // convention; without the option it remains a MissingField error.
-            auto strict = ZHLN::ReflectJSON::TryParse<OmittedDocument>(R"({})");
+            auto strict = ZHLN::ReflectJSON::Parse<OmittedDocument>(R"({})");
             ZHLN::Test::ExpectFalse(strict.has_value());
 
-            auto relaxed = ZHLN::ReflectJSON::TryParse<OmittedDocument>(R"({})", {.omitEmpty = true});
+            auto relaxed = ZHLN::ReflectJSON::Parse<OmittedDocument>(R"({})", {.omitEmpty = true});
             ZHLN::Test::ExpectTrue(relaxed.has_value());
             if (relaxed) {
                 ZHLN::Test::ExpectTrue(!relaxed->mesh.has_value());
@@ -264,7 +264,7 @@ struct JSONTestSuite {
             }
 
             // Present keys still parse normally under the option.
-            auto present = ZHLN::ReflectJSON::TryParse<OmittedDocument>(
+            auto present = ZHLN::ReflectJSON::Parse<OmittedDocument>(
                 R"({ "assetVersion": "2.0", "mesh": 5, "min": [0.5, 1.5], "extensionsUsed": ["ZHLN_procedural_shader"] })", {.omitEmpty = true}
             );
             ZHLN::Test::ExpectTrue(present.has_value());
@@ -276,7 +276,7 @@ struct JSONTestSuite {
 
             // JSON null is what the default mode writes for a disengaged
             // optional; reading it back yields a disengaged optional.
-            auto nullable = ZHLN::ReflectJSON::TryParse<OmittedDocument>(R"({
+            auto nullable = ZHLN::ReflectJSON::Parse<OmittedDocument>(R"({
                 "assetVersion": "2.0",
                 "mesh": null,
                 "min": [],

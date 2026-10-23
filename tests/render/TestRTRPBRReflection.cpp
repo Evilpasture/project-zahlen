@@ -34,8 +34,6 @@
 #include <cmath>
 #include <cstdint>
 #include <expected>
-#include <filesystem>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -51,15 +49,8 @@ enum class RTRPBRError : uint8_t {
 
 namespace {
 
-struct RgbImage {
-    int                  width  = 0;
-    int                  height = 0;
-    std::vector<uint8_t> rgb;
-
-    [[nodiscard]] bool Valid() const noexcept {
-        return width > 0 && height > 0 && rgb.size() == static_cast<size_t>(width) * static_cast<size_t>(height) * 3u;
-    }
-};
+using RgbImage = ZHLN::Test::Image::RgbImage;
+using ZHLN::Test::Image::Luma;
 
 struct NormRect {
     double x0 = 0.0, y0 = 0.0, x1 = 1.0, y1 = 1.0;
@@ -76,31 +67,6 @@ struct RegionStats {
     uint32_t greenDom = 0;
     uint32_t yellow   = 0;
 };
-
-[[nodiscard]] RgbImage LoadPPM(std::string_view path) {
-    RgbImage      img;
-    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
-    if (!ppm.is_open()) {
-        return img;
-    }
-    std::string header;
-    int         maxColor = 0;
-    ppm >> header >> img.width >> img.height >> maxColor;
-    ppm.get();
-    if (header != "P6" || img.width <= 0 || img.height <= 0) {
-        return {};
-    }
-    img.rgb.resize(static_cast<size_t>(img.width) * static_cast<size_t>(img.height) * 3u);
-    ppm.read(reinterpret_cast<char*>(img.rgb.data()), static_cast<std::streamsize>(img.rgb.size()));
-    if (ppm.gcount() != static_cast<std::streamsize>(img.rgb.size())) {
-        return {};
-    }
-    return img;
-}
-
-[[nodiscard]] double Luma(double r, double g, double b) noexcept {
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
 
 [[nodiscard]] RegionStats MeasureRegion(const RgbImage& img, const NormRect& nr) {
     RegionStats s;
@@ -294,10 +260,7 @@ struct RTRPBRReflectionTestSuite {
     }
 
     static auto Capture(ZHLN::Engine& engine, std::string_view path) -> RgbImage {
-        if (!engine.GetRenderContext().CaptureScreenshotPPM(path)) {
-            return {};
-        }
-        return LoadPPM(path);
+        return ZHLN::Test::Headless::Capture(engine, path);
     }
 
     // Headless captures the tonemapped presentation target (including ambient

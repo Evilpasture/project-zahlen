@@ -14,8 +14,8 @@ static_assert(std::same_as<decltype(std::declval<Vk::ImageSlice>().MatchFormat<V
                            std::optional<LdrImage>>);
 using LdrPass = decltype(Vk::DynamicPass(VkExtent2D {}).AddColor(std::declval<LdrImage>()));
 static_assert(std::same_as<LdrPass, UIColorPass<VK_FORMAT_R8G8B8A8_UNORM>>);
-static_assert(!std::is_constructible_v<LdrImage, VkImage, VkImageView, VkExtent3D, VkImageAspectFlags, const VkImageViewCreateInfo&>);
-static_assert(!std::is_constructible_v<LdrImage, VkImage, VkImageView, VkExtent3D, VkImageAspectFlags, const VkImageViewCreateInfo*>);
+static_assert(!std::is_constructible_v<LdrImage, VkImage, VkImageView, VkExtent3D, VkImageAspectFlags, const Vk::ImageView&>);
+static_assert(!std::is_constructible_v<LdrImage, VkImage, VkImageView, VkExtent3D, VkImageAspectFlags, const Vk::ImageView*>);
 static_assert(!std::is_constructible_v<LdrImage, Vk::ImageSlice>);
 static_assert(!std::is_constructible_v<LdrPass, VkExtent2D>);
 static_assert(!std::is_constructible_v<LdrPass, UIColorPass<VK_FORMAT_R8G8B8A8_SRGB>&&>);
@@ -100,12 +100,8 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
     const VkExtent2D extent = target.image.Extent2D();
     auto Draw = [&](const auto& image, auto&& record) -> FrameOutcome<FrameSkipped> {
         const auto pass = ConfigureViewport(Vk::DynamicPass(extent), view.viewport)
-            .AddColor(
-                image, firstTouch ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE,
-                ZHLN::Color4 {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 1.0F}
-            );
+            .AddColor(image, firstTouch ? Vk::ColorOp::Clear(ZHLN::Color4 {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 1.0F}) : Vk::ColorOp::Load());
         pass.Execute(cmd, [&]() {
-            impl.BindHeapsAndPushFrame(cmd);
             Vk::CommandEncoder encoder(cmd);
             record(pass, encoder);
         });

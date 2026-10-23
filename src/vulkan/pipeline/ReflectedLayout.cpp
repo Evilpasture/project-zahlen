@@ -53,7 +53,7 @@ auto ReflectComputeThreadGroupSize(const ShaderDesc& shader) noexcept -> std::op
         }
     }
 
-    const auto isConcreteSize = [](uint32_t value) { return value > 0 && value != SPV_REFLECT_EXECUTION_MODE_SPEC_CONSTANT; };
+    const auto isConcreteSize = [](uint32_t value) { return value > 0 && value != static_cast<uint32_t>(SPV_REFLECT_EXECUTION_MODE_SPEC_CONSTANT); };
 
     std::optional<std::array<uint32_t, 3>> result;
     if (entry_point != nullptr && entry_point->shader_stage == SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT && isConcreteSize(entry_point->local_size.x) &&

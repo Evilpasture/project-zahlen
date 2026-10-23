@@ -37,19 +37,23 @@ TextureManager::TextureManager(
 }
 
 auto TextureManager::ReserveBindlessRegion() -> std::expected<void, ErrorCode> {
-    const auto base = _heaps.ReserveOffsetAddressedResourceRegion(kGlobalTextureSlots);
+    const auto base = _heaps.ReserveImageRange(kGlobalTextureSlots);
     if (!base) [[unlikely]] {
         return std::unexpected(base.error());
     }
-    _bindlessBaseSlot = *base;
+    _bindlessBaseSlot = base->index;
     return {};
 }
 
-auto TextureManager::Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format) -> std::expected<uint32_t, ErrorCode> {
+auto TextureManager::Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format, bool generateMips) -> std::expected<uint32_t, ErrorCode> {
+    const size_t texelBytes = TextureTexelBytes(format);
+    if (data == nullptr || texelBytes == 0u) {
+        return std::unexpected(TextureUploadError::NoPixelData);
+    }
     return Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
-        .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = true})
+        .Upload2D({.data = data, .width = width, .height = height, .format = format, .texelBytes = texelBytes, .generateMips = generateMips})
         .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
-            const auto index = Adopt(std::move(tex.image), tex.viewInfo);
+            const auto index = Adopt(std::move(tex.image), tex.view);
             if (index) {
                 Vk::Debug::SetImageName(_ctx, _slotImages[*index].Handle(), std::format("BindlessTexture{:03}", *index));
             }
@@ -63,7 +67,7 @@ auto TextureManager::UploadCube(const void* const* faceData, uint32_t size) -> s
     return Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
         .UploadCube({.faceData = faces, .size = size, .format = VK_FORMAT_R8G8B8A8_UNORM})
         .and_then([&](Vk::TextureResource tex) -> std::expected<TextureHandle, ErrorCode> {
-            auto index = Adopt(std::move(tex.image), tex.viewInfo);
+            auto index = Adopt(std::move(tex.image), tex.view);
             return index.transform([&](uint32_t slot) {
                 Vk::Debug::SetImageName(_ctx, _slotImages[slot].Handle(), std::format("BindlessCubeTexture{:03}", slot));
                 return RegisterAnonymous(slot, VK_FORMAT_R8G8B8A8_UNORM, size, size);
@@ -71,21 +75,22 @@ auto TextureManager::UploadCube(const void* const* faceData, uint32_t size) -> s
         });
 }
 
-auto TextureManager::UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format) -> std::expected<TextureHandle, ErrorCode> {
-    return Upload2D(pixels, width, height, format).transform([&](uint32_t slot) { return RegisterAnonymous(slot, format, width, height); });
+auto TextureManager::UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips) -> std::expected<TextureHandle, ErrorCode> {
+    return Upload2D(pixels, width, height, format, generateMips).transform([&](uint32_t slot) { return RegisterAnonymous(slot, format, width, height); });
 }
 
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
 
-auto TextureManager::Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format)
+auto TextureManager::Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips)
     -> std::expected<TextureHandle, ErrorCode> {
     const uint64_t id         = HashAssetID(identifier);
     const auto     handle     = static_cast<TextureHandle>(id);
-    const size_t   pixelBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uint32_t);
+    const size_t   texelBytes = TextureTexelBytes(format);
+    const size_t   pixelBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * texelBytes;
 
-    ZHLN::Assert(pixels != nullptr && pixelBytes > 0, "TextureManager::Upload('{}'): no pixel data for a {}x{} texture", identifier, width, height);
+    ZHLN::Assert(pixels != nullptr && texelBytes != 0u && pixelBytes > 0, "TextureManager::Upload('{}'): no pixel data for a {}x{} texture", identifier, width, height);
     if (pixels == nullptr || pixelBytes == 0) {
         ZHLN::Log("[TextureManager] Refusing upload '{}': {}x{} with {} pixel data.", identifier, width, height, pixels == nullptr ? "no" : "empty");
         return std::unexpected(TextureUploadError::NoPixelData);
@@ -119,7 +124,7 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
         return handle;
     }
 
-    auto uploaded = Upload2D(pixels, width, height, format);
+    auto uploaded = Upload2D(pixels, width, height, format, generateMips);
     if (!uploaded) {
         return std::unexpected(uploaded.error());
     }
@@ -240,10 +245,10 @@ TextureManager::~TextureManager() {
 }
 
 void TextureManager::DestroyAllSlots() noexcept {
-    _slotInfos.clear();
+    _slotViews.clear();
     for (auto& pending: _pendingFrees) {
         for (auto& released: pending) {
-            released.viewInfo = {};
+            released.view = {};
         }
     }
     for (auto& image: _slotImages) {
@@ -266,12 +271,12 @@ void TextureManager::Reset() {
     Lock(_mutex, [&] { _textures.ForEach([&](uint64_t, TextureRecord& record) { record.gpuBindlessIndex = kFallbackWhiteTextureIndex; }); });
 }
 
-auto TextureManager::AdoptTexture(Vk::Image image, VkImageViewCreateInfo viewInfo, uint32_t width, uint32_t height) -> std::expected<TextureHandle, ErrorCode> {
-    const VkFormat format = viewInfo.format;
-    return Adopt(std::move(image), viewInfo).transform([&](uint32_t slot) { return RegisterAnonymous(slot, format, width, height); });
+auto TextureManager::AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height) -> std::expected<TextureHandle, ErrorCode> {
+    const VkFormat format = view.Format();
+    return Adopt(std::move(image), view).transform([&](uint32_t slot) { return RegisterAnonymous(slot, format, width, height); });
 }
 
-auto TextureManager::Adopt(Vk::Image image, VkImageViewCreateInfo viewInfo) -> std::expected<uint32_t, ErrorCode> {
+auto TextureManager::Adopt(Vk::Image image, Vk::ImageView view) -> std::expected<uint32_t, ErrorCode> {
     uint32_t index = 0;
     if (!_freeSlots.empty()) {
         index = _freeSlots.back();
@@ -280,7 +285,6 @@ auto TextureManager::Adopt(Vk::Image image, VkImageViewCreateInfo viewInfo) -> s
         if (_nextSlotIndex >= kGlobalTextureSlots) [[unlikely]] {
             ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
 
-            viewInfo = {};
             _allocator.DestroyImage(image);
             return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
         }
@@ -289,19 +293,19 @@ auto TextureManager::Adopt(Vk::Image image, VkImageViewCreateInfo viewInfo) -> s
 
     if (_slotImages.size() <= index) {
         _slotImages.resize(static_cast<size_t>(index) + 1);
-        _slotInfos.resize(static_cast<size_t>(index) + 1);
+        _slotViews.resize(static_cast<size_t>(index) + 1);
     }
 
-    WriteSlotToHeap(index, viewInfo);
-    _slotInfos[index]  = viewInfo;
+    WriteSlotToHeap(index, view);
+    _slotViews[index]  = view;
     _slotImages[index] = std::move(image);
     return index;
 }
 
 void TextureManager::RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept {
     for (auto& released: pending) {
-        WriteSlotToHeap(released.index, _slotInfos[kFallbackWhiteTextureIndex]);
-        released.viewInfo = {};
+        WriteSlotToHeap(released.index, _slotViews[kFallbackWhiteTextureIndex]);
+        released.view = {};
         _allocator.DestroyImage(released.image);
         _freeSlots.push_back(released.index);
     }
@@ -329,7 +333,7 @@ void TextureManager::ReleaseSlot(uint32_t bindlessIndex) noexcept {
     }
 
     _pendingFrees[_frameIndex].push_back(
-        ReleasedSlot {.index = bindlessIndex, .image = std::move(_slotImages[bindlessIndex]), .viewInfo = _slotInfos[bindlessIndex]}
+        ReleasedSlot {.index = bindlessIndex, .image = std::move(_slotImages[bindlessIndex]), .view = _slotViews[bindlessIndex]}
     );
 }
 
@@ -342,9 +346,8 @@ void TextureManager::NameSlots() noexcept {
     }
 }
 
-void TextureManager::WriteSlotToHeap(uint32_t bindlessIndex, const VkImageViewCreateInfo& viewInfo) noexcept {
-    const Vk::TextureHandle slot {_bindlessBaseSlot + bindlessIndex};
-    _heaps.WriteImage(slot, viewInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+void TextureManager::WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept {
+    _heaps.BindImage(Vk::TextureHandle {_bindlessBaseSlot + bindlessIndex}, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 } // namespace ZHLN

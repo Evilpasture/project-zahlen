@@ -37,7 +37,10 @@ float TraceVisibility(float3 origin, float3 direction, float tMax) {
     ray.TMax      = tMax;
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-    q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+    // Shadow rays see the main world only: Source's skybox world never casts
+    // into the map, and the scaled miniscape around it would throw
+    // kilometre-long wrong shadows across the play space at low sun.
+    q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
     while (q.Proceed()) {
     }
     return q.CommittedStatus() != COMMITTED_TRIANGLE_HIT ? 1.0f : 0.0f;

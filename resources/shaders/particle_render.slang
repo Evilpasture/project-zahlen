@@ -1,4 +1,5 @@
 
+import gpu_push_constants;
 import common;
 import gpu_buffer;
 import uniforms;
@@ -10,13 +11,8 @@ struct Particle {
     float4 params;
 };
 
-struct RenderPushConstants {
-    uint64_t particleBufferAddr;
-    ParticleAlignment alignment;
-    uint textureIndex;
-};
 [vk::push_constant]
-RenderPushConstants pc;
+ParticleRenderPushConstants pc;
 
 
 struct ParticleVSOutput {
@@ -61,6 +57,7 @@ ParticleVSOutput VSMain(uint vertexID: SV_VertexID, uint instanceID: SV_Instance
     }
 
     output.pos   = mul(scene.frame.viewProj, float4(worldPos, 1.0f));
+    output.pos.z *= kSkyDepthSplit; // world band (particles are never background)
     output.uv    = uv;
     output.color = p.color;
     return output;

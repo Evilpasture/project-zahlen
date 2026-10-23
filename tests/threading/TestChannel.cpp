@@ -9,8 +9,8 @@
 #include <expected>
 
 enum class ChannelTestError : uint32_t {
-    FifoOrderingViolated ZHLN_ANNOTATION(ZHLN::Description<"Channel popped messages out of chronological order.">{}) = 1,
-    MessageLost ZHLN_ANNOTATION(ZHLN::Description<"One or more messages were dropped during channel push/pop.">{}),
+    FifoOrderingViolated ZHLN_ANNOTATION(ZHLN::Description<"Channel popped messages out of chronological order."> {}) = 1,
+    MessageLost          ZHLN_ANNOTATION(ZHLN::Description<"One or more messages were dropped during channel push/pop."> {}),
 };
 
 struct ChannelTestSuite {
@@ -25,7 +25,7 @@ struct ChannelTestSuite {
 
     struct Tests {
         // --- 1. Basic Push, TryPop & Size ---
-        std::expected<void, ZHLN::ErrorCode> basic_push_try_pop() {
+        static std::expected<void, ZHLN::ErrorCode> basic_push_try_pop() {
             ZHLN::Channel<int> chan;
 
             ZHLN::Test::ExpectEq(chan.Size(), static_cast<size_t>(0));
@@ -36,25 +36,33 @@ struct ChannelTestSuite {
 
             ZHLN::Test::ExpectEq(chan.Size(), static_cast<size_t>(3));
 
-            int val = 0;
-            ZHLN::Test::ExpectTrue(chan.TryPop(val));
-            ZHLN::Test::ExpectEq(val, 10);
+            auto val = chan.TryPop();
+            ZHLN::Test::ExpectTrue(val.has_value());
+            if (val) {
+                ZHLN::Test::ExpectEq(*val, 10);
+            }
 
-            ZHLN::Test::ExpectTrue(chan.TryPop(val));
-            ZHLN::Test::ExpectEq(val, 20);
+            val = chan.TryPop();
+            ZHLN::Test::ExpectTrue(val.has_value());
+            if (val) {
+                ZHLN::Test::ExpectEq(*val, 20);
+            }
 
-            ZHLN::Test::ExpectTrue(chan.TryPop(val));
-            ZHLN::Test::ExpectEq(val, 30);
+            val = chan.TryPop();
+            ZHLN::Test::ExpectTrue(val.has_value());
+            if (val) {
+                ZHLN::Test::ExpectEq(*val, 30);
+            }
 
             // Pop on empty channel should safely fail without stalling
-            ZHLN::Test::ExpectFalse(chan.TryPop(val));
+            ZHLN::Test::ExpectFalse(chan.TryPop().has_value());
             ZHLN::Test::ExpectEq(chan.Size(), static_cast<size_t>(0));
 
             return {};
         }
 
         // --- 2. Concurrent Producer-Consumer over TaskSystem ---
-        std::expected<void, ZHLN::ErrorCode> concurrent_channel_streaming() {
+        static std::expected<void, ZHLN::ErrorCode> concurrent_channel_streaming() {
             ZHLN::Channel<int> chan;
             constexpr int      kTotalMessages = 1000;
             std::atomic<int>   receivedSum {0};
@@ -69,17 +77,15 @@ struct ChannelTestSuite {
 
             // Consume in parallel
             ZHLN::TaskSystem::ParallelFor(kTotalMessages, 64, [&](uint32_t, uint32_t, uint32_t) {
-                int outVal = 0;
-                if (chan.TryPop(outVal)) {
-                    receivedSum.fetch_add(outVal, std::memory_order::relaxed);
+                if (auto outVal = chan.TryPop()) {
+                    receivedSum.fetch_add(*outVal, std::memory_order::relaxed);
                     receivedCount.fetch_add(1, std::memory_order::relaxed);
                 }
             });
 
             // Drain any remaining messages sequentially
-            int outVal = 0;
-            while (chan.TryPop(outVal)) {
-                receivedSum.fetch_add(outVal, std::memory_order::relaxed);
+            while (auto outVal = chan.TryPop()) {
+                receivedSum.fetch_add(*outVal, std::memory_order::relaxed);
                 receivedCount.fetch_add(1, std::memory_order::relaxed);
             }
 
@@ -96,4 +102,3 @@ struct ChannelTestSuite {
 auto RunChannelSuite() -> ZHLN::Test::TestStats {
     return ZHLN::Test::RunSuite<ChannelTestSuite>();
 }
-

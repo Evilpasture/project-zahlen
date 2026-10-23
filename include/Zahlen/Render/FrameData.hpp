@@ -86,6 +86,12 @@ struct LightDesc {
     // allocated one, so a scene's shadow cost stays an authored decision.
     bool       castsShadow = false;
     uint32_t   twoSided = 0;
+    // The map compiler baked this light into the map's lightmaps. The renderer
+    // still shades with it -- unbaked geometry needs it -- but withholds what
+    // the bake already holds where the lightmap owns the surface (src/render
+    // Res_BakedMask). Scene::kBakeOwnsNone / kBakeOwnsDiffuse / kBakeOwnsAll:
+    // an authored light keeps its specular, an emissive proxy does not.
+    uint32_t   baked = 0;
     // Spot cone angles in radians from the axis (0 = no authored cone).
     float innerConeRadians = 0.0f;
     float outerConeRadians = 0.0f;

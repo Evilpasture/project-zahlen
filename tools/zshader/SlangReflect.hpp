@@ -24,9 +24,9 @@
 // a parameter fed only to legalized-away code stays "used" while its binding
 // is not emitted (basic_mesh.slang's forward entry and scene.g_prevJoints) --
 // the catalog keeps the table's word: an extra entry names a heap slot the
-// scene declares anyway, and the engine's ModuleMatchesBytes check holds the
-// direction that matters to the runtime (every binding the bytes declare is
-// in the catalog) as a compile-time assert.
+// scene declares anyway, and that is the harmless direction -- a binding the
+// bytes declare but the catalog omits is the one that would go unwritten, and
+// the usage table never drops those.
 //
 // Slots: Slang's per-variable (set, binding) for ParameterBlock members
 // arrives block-relative and collides with the globals'; the walk composes
@@ -42,6 +42,7 @@
 #include <slang.h>
 
 #include <cstdint>
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
@@ -94,6 +95,7 @@ struct SlangPushBlock {
 struct SlangEntryInfo {
     std::string                   entryPoint {};
     SlangStage                    stage = SLANG_STAGE_NONE;
+    std::array<uint32_t, 3>       localSize {1, 1, 1}; // compute: [numthreads], straight from Slang's reflection
     std::vector<SlangBinding>     bindings {};
     std::vector<SlangPushBlock>   pushes {};
 };
@@ -149,8 +151,8 @@ auto ReflectSlangEntry(slang::IComponentType* linked, std::string_view file, std
 
 // Compile + reflect for one catalog module: the linked program's records,
 // exactly as Slang's layout and usage table describe them. No bytes -- the
-// cooked file is the engine's proof, not the tool's input (the catalog mode
-// sizes the module from the file; the check lives in CatalogChecks.hpp).
+// cooked file is never the tool's input (the catalog mode only sizes the
+// module from it).
 auto ReflectCatalogModule(const SlangCompileArgs& args) -> SlangEntryInfo;
 
 } // namespace ZHLN::ZShader

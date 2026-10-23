@@ -1476,8 +1476,8 @@ auto BuildModelPrefab(
         std::vector<CSGModifier> csgModifiers;
         if (node->extras.start_offset != node->extras.end_offset) {
             const std::string_view extras_json(data->json + node->extras.start_offset, node->extras.end_offset - node->extras.start_offset);
-            if (const auto extras_res = ZHLN::ReflectJSON::TryParse<NodeExtras>(extras_json)) {
-                if (auto csg_res = ZHLN::ReflectJSON::TryParse<std::vector<CSGModifier>>(extras_res->csg_data)) {
+            if (const auto extras_res = ZHLN::ReflectJSON::Parse<NodeExtras>(extras_json)) {
+                if (auto csg_res = ZHLN::ReflectJSON::Parse<std::vector<CSGModifier>>(extras_res->csg_data)) {
                     csgModifiers = std::move(*csg_res);
                 }
             }

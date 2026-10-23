@@ -1,4 +1,6 @@
 
+import gpu_push_constants;
+
 #ifndef SMAA_THRESHOLD
 #define SMAA_THRESHOLD 0.1f
 #endif
@@ -27,12 +29,8 @@ static const float2 SMAA_SEARCHTEX_SIZE         = float2(66.0f, 33.0f);
 static const float2 SMAA_SEARCHTEX_PACKED_SIZE  = float2(64.0f, 16.0f);
 static const float SMAA_CORNER_ROUNDING_NORM    = float(SMAA_CORNER_ROUNDING) / 100.0f;
 
-struct PushConstants {
-    float4 rtMetrics;
-};
-
 [vk::push_constant]
-PushConstants pc;
+SmaaPushConstants pc;
 
 #define SMAA_RT_METRICS pc.rtMetrics
 

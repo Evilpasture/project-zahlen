@@ -1,18 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_push_constants;
 import ddgi_common;
 import gpu_buffer;
 import instance_data;
 import pbr_helpers;
 import uniforms;
 
-struct DdgiTracePushConstants {
-    uint  totalProbes;
-    uint  raysPerProbe;
-    float maxRayDistance;
-    uint  _pad;
-};
 [vk::push_constant]
 DdgiTracePushConstants pc;
 
@@ -49,7 +44,9 @@ float3 DirectSunProbeHit(float3 hitPos, float3 hitNormal, float3 diffuseReflecta
     shadowRay.TMax      = 300.0f;
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> shadowQuery;
-    shadowQuery.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, shadowRay);
+    // World only: the background layer is scenery the rasterizer composites,
+    // so it must not shadow a probe's sun sample.
+    shadowQuery.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, shadowRay);
     while (shadowQuery.Proceed()) {
     }
 
@@ -80,7 +77,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     ray.TMax      = max(pc.maxRayDistance, ddgi.probeSpacing * 2.5f);
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-    q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+    // World only, for the same reason as the RTGI pass: a probe that hits the
+    // miniscape records its distance and darkens the sky in that direction.
+    q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
     while (q.Proceed()) {
     }
 

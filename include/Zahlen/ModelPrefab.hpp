@@ -57,6 +57,11 @@ struct ModelPart {
     JPH::ShapeRefC meshCollider = nullptr;
     JPH::ShapeRefC boxCollider  = nullptr;
 
+    // Background-layer parts (Source's 3D-skybox scenery) carry
+    // DrawFlags::Background so their instances composite behind the main
+    // world instead of racing it in the shared depth buffer.
+    DrawFlags drawFlags = DrawFlags::None;
+
     std::vector<CSGModifier> csgModifiers;
 };
 

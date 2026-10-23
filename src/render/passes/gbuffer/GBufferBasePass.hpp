@@ -15,10 +15,7 @@ struct GBufferBasePass:
         Vk::ColorWrite<Res_SceneColor>,
         Vk::ColorWrite<Res_Velocity>,
         Vk::ColorWrite<Res_NormRough>,
-        Vk::ColorWrite<Res_Emissive>,
-        Vk::ColorWrite<Res_Clearcoat>,
-        Vk::ColorWrite<Res_Anisotropy>,
-        Vk::ColorWrite<Res_Sheen>,
+        Vk::ColorWrite<Res_BakedMask>,
         Vk::DepthStencilWrite<Res_Depth>> {
     using PushConstants = ObjectConstants;
 

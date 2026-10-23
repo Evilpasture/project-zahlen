@@ -22,6 +22,9 @@ struct TonemapBlitPass:
     RenderFrameContext&   frame;
     GetSwapchainImageT    getSwapchainImage;
 
+    // Manual-scope pass (operator()(VkCommandBuffer)): the draw closure below
+    // owns its Vk::DynamicPass scope -- the swapchain target is not a graph
+    // binding, so the graph must not wrap this one in AutoCtx.
     void operator()(VkCommandBuffer cmd) const noexcept {
         using namespace Shaders;
         FullscreenPassRecorder<Blit, Modules::BlitPS>::RecordCustom(
@@ -52,15 +55,13 @@ struct TonemapBlitPass:
                 return MakeFullscreenPassArgs(
                     pc, Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<BlitInputRes<Mode>>>(blitInputImage)),
                     Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(frame.graphResources.bloomFinalTarget)),
-                    Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(frame.presenter.depthTarget)),
+                    Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(frame.ActiveDepthTarget())),
                     Vk::Unread<"frame">(frame.frames.frameUniformBuffers[fIdx])
                 );
             },
-            [this](RenderFrameContext& drawImpl, VkCommandBuffer drawCmd, auto&& execute) {
+            [this](RenderFrameContext&, VkCommandBuffer drawCmd, auto&& execute) {
                 const auto swapchainTarget = getSwapchainImage();
-
-                drawImpl.BindHeapsAndPushFrame(drawCmd);
-                Vk::DynamicPass(swapchainTarget.Extent()).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(drawCmd, [&]() { execute(); });
+                Vk::DynamicPass(swapchainTarget.Extent()).OverwriteColor(swapchainTarget).Execute(drawCmd, [&]() { execute(); });
             }
         );
     }

@@ -19,6 +19,7 @@
 #include <BSP/BSPGeometry.hpp>
 #include <BSP/BSPLighting.hpp>
 #include <BSP/BSPRead.hpp>
+#include <BSP/BSPVradLightmap.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Log.hpp>
@@ -472,6 +473,41 @@ struct BSPLightingTestSuite {
         return {};
     }
 
+    // ---- the pitch between fixtures ---------------------------------------
+    // gm_murder_drones runs its walkway strips on a 96-inch pitch, and they are
+    // all one material in one 192-inch cell. Merging by cell alone turned a
+    // whole runway into a single 34 m2 area light parked at the cell centre --
+    // a hot pool on the floor halfway between two fixtures that no mapper
+    // authored. Two panels a pitch apart have to stay two proxies.
+    [[nodiscard]] auto finalize_emissive_surfaces_keeps_one_pitch_apart() const -> std::expected<void, ZHLN::ErrorCode> {
+        const float                  pitchMetres = 96.0f / 39.37f;
+        std::vector<EmissiveSurface> in;
+        for (int i = 0; i < 2; ++i) {
+            EmissiveSurface surface;
+            surface.materialName     = "lights/white";
+            surface.areaSquareMetres = 1024.0f / (39.37f * 39.37f); // one 32x32 inch panel
+            surface.areaSquareInches = 1024.0f;
+            surface.faceCount        = 1;
+            surface.strength         = 0.5f;
+            surface.position         = JPH::Vec3(0.5f + pitchMetres * static_cast<float>(i), 1.0f, 0.0f);
+            surface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
+            in.push_back(surface);
+        }
+
+        const std::vector<EmissiveSurface> clustered = ZHLN::BSP::FinalizeEmissiveSurfaces(in, {}, 1.0f / 39.37f, 64u);
+        if (!ZHLN::Test::ExpectEq(clustered.size(), 2u)) {
+            return Fail();
+        }
+        for (const EmissiveSurface& surface: clustered) {
+            // Each proxy speaks for one panel: one face, one panel's area, and
+            // the panel's own centroid rather than a point between the two.
+            if (!ZHLN::Test::ExpectEq(surface.faceCount, 1u) || !ZHLN::Test::ExpectInRange(surface.areaSquareMetres, 0.659f, 0.661f)) {
+                return Fail();
+            }
+        }
+        return {};
+    }
+
     // ---- fixture damping -------------------------------------------------
     // A lamp panel with a `light` entity 24 inches away is the housing around
     // that light, not a second light: emitting a proxy at its centroid
@@ -487,7 +523,7 @@ struct BSPLightingTestSuite {
         nearSurface.areaSquareMetres = 1.0f;
         nearSurface.faceCount        = 1;
         nearSurface.strength         = 0.5f;
-        // 24 inches from the entity light: inside the 96-inch (2.44 m) fixture
+        // 24 inches from the entity light: inside the 60-inch (1.52 m) fixture
         // radius, and far enough away in X to be its own cluster.
         nearSurface.position         = JPH::Vec3(0.0f, 0.61f, 0.0f);
         nearSurface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
@@ -502,9 +538,22 @@ struct BSPLightingTestSuite {
         farSurface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
         in.push_back(farSurface);
 
+        // 80 inches out -- the next fixture's panel on the map's 96-inch pitch.
+        // The 96-inch radius that used to be here damped it, so every other
+        // panel in a runway came out 10x weaker in stripes that followed the
+        // entity grid rather than the fixtures.
+        EmissiveSurface neighbourSurface;
+        neighbourSurface.materialName     = "lights/white";
+        neighbourSurface.areaSquareMetres = 1.0f;
+        neighbourSurface.faceCount        = 1;
+        neighbourSurface.strength         = 0.5f;
+        neighbourSurface.position         = JPH::Vec3(80.0f / 39.37f, 0.61f, 0.0f);
+        neighbourSurface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
+        in.push_back(neighbourSurface);
+
         const std::array<ZHLN::BSP::BspPointLight, 1> entityLights {entity};
         const std::vector<EmissiveSurface> out = ZHLN::BSP::FinalizeEmissiveSurfaces(in, entityLights, 1.0f / 39.37f, 64u);
-        if (!ZHLN::Test::ExpectEq(out.size(), 2u)) {
+        if (!ZHLN::Test::ExpectEq(out.size(), 3u)) {
             return Fail();
         }
         for (const EmissiveSurface& surface: out) {
@@ -900,6 +949,91 @@ struct BSPLightingTestSuite {
         }
         return {};
     }
+
+    // Native VRAD ingestion is intentionally testable without a renderer: the
+    // atlas builder owns Source RGBExp decoding, chart extents, gutters and
+    // malformed-offset rejection before any GPU upload takes place.
+    [[nodiscard]] auto native_vrad_lightmaps_decode_and_pack_charts() const -> std::expected<void, ZHLN::ErrorCode> {
+        using ZHLN::BSP::ColorRGBExp32;
+        using ZHLN::BSP::DFace;
+
+        const auto decoded = ZHLN::BSP::DecodeVradLuxel(ColorRGBExp32 {.r = 2, .g = 4, .b = 8, .exponent = 3});
+        if (!ZHLN::Test::ExpectInRange(decoded[0], 16.0f, 16.0f) || !ZHLN::Test::ExpectInRange(decoded[1], 32.0f, 32.0f) ||
+            !ZHLN::Test::ExpectInRange(decoded[2], 64.0f, 64.0f)) {
+            return Fail();
+        }
+
+        // Decoding stays raw; the authored-units -> renderer-radiance conversion
+        // is an import-time calibration. BSPBakeField's VPL fit and the leaf
+        // ambient cubes read the same decoder and must not inherit a display
+        // scale, and a bake that reaches the radiance buffer unscaled renders a
+        // whole room at once-clip white. 1/30 is kSourceBrightnessToEngine
+        // without the live-light display gain; the cube multiplier carries the
+        // same factor so props keep the lightmap-relative fit it was tuned for.
+        const ZHLN::BSP::ImportOptions defaults {};
+        if (!ZHLN::Test::ExpectInRange(defaults.sourceLightmapScale, 1.0f / 30.5f, 1.0f / 29.5f) ||
+            !ZHLN::Test::ExpectInRange(defaults.propAmbientCubeScale, 49.5f, 50.5f)) {
+            return Fail();
+        }
+
+        BSPMap map;
+        map.lightingIsHdr = true;
+        map.lighting = {
+            ColorRGBExp32 {.r = 10, .g = 20, .b = 30, .exponent = 0}, ColorRGBExp32 {.r = 11, .g = 21, .b = 31, .exponent = 0},
+            ColorRGBExp32 {.r = 12, .g = 22, .b = 32, .exponent = 0}, ColorRGBExp32 {.r = 13, .g = 23, .b = 33, .exponent = 0},
+        };
+        DFace valid {};
+        valid.lightofs = 0;
+        valid.styles[0] = 0;
+        valid.lightmapTextureSizeInLuxels[0] = 1; // Source stores size-1; this is a 2x2 chart.
+        valid.lightmapTextureSizeInLuxels[1] = 1;
+        map.faces.push_back(valid);
+
+        DFace malformed = valid;
+        malformed.lightofs = 4 * 64; // Well past the four available luxels.
+        map.faces.push_back(malformed);
+
+        const auto atlas = ZHLN::BSP::BuildVradLightmapAtlas(map, 8, 1);
+        const auto* chart = atlas.ChartForFace(0);
+        if (!ZHLN::Test::ExpectTrue(atlas.hdrSource) || !ZHLN::Test::ExpectEq(atlas.faceCount, 1u) || !ZHLN::Test::ExpectEq(atlas.rejectedFaceCount, 1u) ||
+            !ZHLN::Test::ExpectEq(atlas.pages.size(), 1u) || !ZHLN::Test::ExpectTrue(chart != nullptr) || !ZHLN::Test::ExpectEq(chart->width, 2u) ||
+            !ZHLN::Test::ExpectEq(chart->height, 2u) || !ZHLN::Test::ExpectEq(chart->x, 1u) || !ZHLN::Test::ExpectEq(chart->y, 1u) ||
+            !ZHLN::Test::ExpectTrue(atlas.ChartForFace(1) == nullptr)) {
+            return Fail();
+        }
+        // Four source luxels with one replicated-gutter ring occupy a 4x4
+        // used page, and RGBExp gets uploaded as four binary16 lanes.
+        if (!ZHLN::Test::ExpectEq(atlas.pages[0].width, 4u) || !ZHLN::Test::ExpectEq(atlas.pages[0].height, 4u) ||
+            !ZHLN::Test::ExpectEq(atlas.pages[0].rgba16f.size(), 64u)) {
+            return Fail();
+        }
+        // Pixel 0,0 is in the top-left gutter and must duplicate the first
+        // source luxel rather than sample a neighbouring chart. 10/20/30 and
+        // opaque alpha are respectively 0x4900/0x4D00/0x4F80/0x3C00 in IEEE
+        // binary16; this asserts the atlas payload, not only its allocation.
+        const auto& payload = atlas.pages[0].rgba16f;
+        if (!ZHLN::Test::ExpectEq(payload[0], uint16_t {0x4900}) || !ZHLN::Test::ExpectEq(payload[1], uint16_t {0x4D00}) ||
+            !ZHLN::Test::ExpectEq(payload[2], uint16_t {0x4F80}) || !ZHLN::Test::ExpectEq(payload[3], uint16_t {0x3C00})) {
+            return Fail();
+        }
+
+        // NPOT sampled images are valid in Vulkan and avoid wasting a 4x4
+        // image for this exact 3x2 chart when no mip chain is requested.
+        BSPMap npotMap;
+        npotMap.lighting.resize(6);
+        DFace npotFace {};
+        npotFace.lightofs = 0;
+        npotFace.styles[0] = 0;
+        npotFace.lightmapTextureSizeInLuxels[0] = 2; // 3 luxels wide
+        npotFace.lightmapTextureSizeInLuxels[1] = 1; // 2 luxels high
+        npotMap.faces.push_back(npotFace);
+        const auto npotAtlas = ZHLN::BSP::BuildVradLightmapAtlas(npotMap, 8, 0);
+        if (!ZHLN::Test::ExpectEq(npotAtlas.pages.size(), 1u) || !ZHLN::Test::ExpectEq(npotAtlas.pages[0].width, 3u) ||
+            !ZHLN::Test::ExpectEq(npotAtlas.pages[0].height, 2u) || !ZHLN::Test::ExpectEq(npotAtlas.pages[0].rgba16f.size(), 24u)) {
+            return Fail();
+        }
+        return {};
+    }
 };
 
 } // namespace
@@ -935,12 +1069,14 @@ auto main() -> int {
     runTest("is_emissive_material_name_families", [&] { return suite.is_emissive_material_name_families(); });
     runTest("probe_emissive_material_damps_near_white", [&] { return suite.probe_emissive_material_damps_near_white(); });
     runTest("finalize_emissive_surfaces_clusters_and_caps", [&] { return suite.finalize_emissive_surfaces_clusters_and_caps(); });
+    runTest("finalize_emissive_surfaces_keeps_one_pitch_apart", [&] { return suite.finalize_emissive_surfaces_keeps_one_pitch_apart(); });
     runTest("finalize_emissive_surfaces_damps_nearby_entity_lights", [&] { return suite.finalize_emissive_surfaces_damps_nearby_entity_lights(); });
     runTest("emissive_light_for_scales_with_area", [&] { return suite.emissive_light_for_scales_with_area(); });
     runTest("enforce_lighting_floor_never_returns_black", [&] { return suite.enforce_lighting_floor_never_returns_black(); });
     runTest("audit_lighting_counters_are_exhaustive", [&] { return suite.audit_lighting_counters_are_exhaustive(); });
     runTest("options_gate_each_stage", [&] { return suite.options_gate_each_stage(); });
     runTest("gather_emissive_area_lights_from_faces", [&] { return suite.gather_emissive_area_lights_from_faces(); });
+    runTest("native_vrad_lightmaps_decode_and_pack_charts", [&] { return suite.native_vrad_lightmaps_decode_and_pack_charts(); });
 
     ZHLN::Println("--------------------------------------------------");
     ZHLN::Println("Summary for BSPLightingTestSuite: {} Passed, {} Failed", passed, failed);

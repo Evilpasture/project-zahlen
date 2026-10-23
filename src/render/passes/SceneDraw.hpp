@@ -13,7 +13,21 @@ namespace ZHLN::Passes {
 enum class RenderPassType : uint8_t { Main, Shadow };
 
 [[nodiscard]] constexpr auto IsForwardOnly(uint32_t instanceFlags) noexcept -> bool {
-    return (instanceFlags & 0xFFu) == 2u || (instanceFlags & (1u << 10)) != 0u;
+    constexpr uint32_t kAlphaBlend   = 2u;
+    constexpr uint32_t kUnlit        = 1u << 11;
+    constexpr uint32_t kClearcoat    = 1u << 14;
+    constexpr uint32_t kAnisotropy   = 1u << 15;
+    constexpr uint32_t kSheen        = 1u << 16;
+    constexpr uint32_t kSpecular     = 1u << 18;
+    constexpr uint32_t kTransmission = 1u << 10;
+
+    return (instanceFlags & 0xFFu) == kAlphaBlend ||
+           (instanceFlags & (kTransmission | kUnlit | kClearcoat | kAnisotropy | kSheen | kSpecular)) != 0u;
+}
+
+[[nodiscard]] constexpr auto HasDeferredEmission(uint32_t instanceFlags) noexcept -> bool {
+    constexpr uint32_t kEmissive = 1u << 17;
+    return (instanceFlags & kEmissive) != 0u && !IsForwardOnly(instanceFlags);
 }
 
 [[nodiscard]] auto IsVisibleIn(DrawFlags flags, RenderPassType passType) noexcept -> bool;
@@ -45,11 +59,20 @@ void SubmitDrawInstanced(
         return;
     }
 
+    // An override is the pass's own pipeline, not a reason to skip the draw:
+    // BackgroundGBufferPass hands over the material's pipeline, DrawCSGMeshes
+    // hands over the stencil/difference/intersection pipelines, and
+    // TranslucentPrePass hands over the prepass pipeline. Only a draw that has
+    // neither an override nor a material pipeline is undrawable. This branch
+    // used to be an if/else over the *material* test, so every caller that
+    // supplied an override returned here and submitted nothing -- which is why
+    // the 3D skybox never rasterized.
     auto* pipeline = pipelineOverride;
-    if (pipeline == VK_NULL_HANDLE && nativeMat != nullptr && nativeMat->pipeline != VK_NULL_HANDLE) {
+    if (pipeline == VK_NULL_HANDLE) {
+        if (nativeMat == nullptr || nativeMat->pipeline == VK_NULL_HANDLE) {
+            return;
+        }
         pipeline = nativeMat->pipeline;
-    } else {
-        return;
     }
 
     const auto vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
@@ -59,11 +82,11 @@ void SubmitDrawInstanced(
     );
 }
 
-void DrawCSGMeshes(PassContext& passCtx, const CsgResources& csg, VkExtent3D extent) noexcept;
+void DrawCSGMeshes(RenderFrameContext& ctx, Vk::CommandEncoder& encoder, const CsgResources& csg, VkExtent3D extent) noexcept;
 
-void Draw3DParticles(PassContext& passCtx, const MeshParticlePipelines& particles) noexcept;
+void Draw3DParticles(RenderFrameContext& ctx, Vk::CommandEncoder& encoder, const MeshParticlePipelines& particles) noexcept;
 
-void Draw3DParticleShadows(PassContext& passCtx, const MeshParticlePipelines& particles) noexcept;
+void Draw3DParticleShadows(RenderFrameContext& ctx, Vk::CommandEncoder& encoder, const MeshParticlePipelines& particles) noexcept;
 
 using GBufferTargets = SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>;
 

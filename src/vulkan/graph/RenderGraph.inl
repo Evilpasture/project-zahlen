@@ -70,7 +70,8 @@ struct CombineSameResourceUsage<Existing, Incoming> {
         Existing::access | Incoming::access,
         Existing::final_layout,
         Existing::final_stage | Incoming::final_stage,
-        Existing::final_access | Incoming::final_access>;
+        Existing::final_access | Incoming::final_access,
+        Existing::channel_mask | Incoming::channel_mask>;
 };
 
 template <typename List, typename T>
@@ -468,21 +469,6 @@ constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
 
 }
 
-namespace TemplatedDetail {
-
-template <typename Tag, typename GraphResT>
-consteval auto ReflectedMemberName() -> std::string_view {
-    constexpr auto names = Reflect::FieldNames<GraphResT>();
-    for (std::size_t i = 0; i < names.size(); ++i) {
-        if (Reflect::HasTag<Tag, GraphResT>(names[i])) {
-            return names[i];
-        }
-    }
-    return {};
-}
-
-}
-
 template <typename ResourceList>
 template <typename Image>
 constexpr void ResourceBinder<ResourceList>::Bind(ImageSlice slice) noexcept {
@@ -493,27 +479,24 @@ constexpr void ResourceBinder<ResourceList>::Bind(ImageSlice slice) noexcept {
 template <typename ResourceList>
 template <typename ContextImpl>
 constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcept {
-    using GraphResT = typename ContextImpl::GraphResources;
-
-    [&]<typename... Tags>(TypeList<Tags...>) noexcept {
-        (
-            [&]() noexcept {
-                using Tag = Tags;
-
-                if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
-                    auto ref = ResourceResolver<Tag>::Resolve(impl);
-                    this->template Bind<Tag>(ref);
-                } else {
-
-                    constexpr std::string_view member = TemplatedDetail::ReflectedMemberName<Tag, GraphResT>();
-                    Reflect::VisitFieldByName(impl.graphResources, member, [&](auto& image) noexcept {
-                        auto ref = MakeRef<Tag>(image);
-                        this->template Bind<Tag>(ref);
-                    });
-                }
-            }(),
-            ...);
+    // Explicit resolvers cover presentation depth, swapchain, history and
+    // shadow views (which need more than the graph target's default view).
+    [&]<typename... Resources>(TypeList<Resources...>) noexcept {
+        ([&] noexcept {
+            if constexpr (requires { ResourceResolver<Resources>::Resolve(impl); })
+                this->template Bind<Resources>(ResourceResolver<Resources>::Resolve(impl));
+        }(), ...);
     }(ResourceList {});
+
+    // C++26 field reflection visits the members at compile time. Type identity
+    // selects only requested targets; there is no per-frame string lookup.
+    Reflect::ForEachField(impl.graphResources, [&]<typename Target>(const Target& rt) noexcept {
+        using Resource = typename Target::TagType;
+        if constexpr (IsInList<ResourceList, Resource>::value &&
+                      !requires { ResourceResolver<Resource>::Resolve(impl); }) {
+            this->template Bind<Resource>(rt.AsSlice());
+        }
+    });
 }
 
 template <typename ResourceList>

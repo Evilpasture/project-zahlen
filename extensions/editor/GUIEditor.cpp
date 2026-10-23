@@ -11,18 +11,18 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Input.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
-#include <Zahlen/gui/GUI.hpp>
-#include <editor/GUIEditor.hpp>
+#include <Zahlen/Engine.hpp>
+#include <Zahlen/Input.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <editor/GUIEditor.hpp>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -58,13 +58,12 @@ consteval auto MakeComponentKind() -> ComponentKind {
     static_assert(std::is_default_constructible_v<C>, "an addable component must be default-constructible");
     static_assert(std::is_trivially_copyable_v<C>, "an addable component must be trivially copyable");
 
-    return ComponentKind {
-        // The same spelling the registry registers the component under, so the
-        // dropdown and Registry::DebugDumpEntity cannot disagree about a name.
-        .name   = ZHLN::ECS::BoxedName<C>(),
-        .has    = [](const ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity).has_value(); },
-        .add    = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Add<C>(entity, C {}); },
-        .remove = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Remove<C>(entity); }
+    return ComponentKind {// The same spelling the registry registers the component under, so the
+                          // dropdown and Registry::DebugDumpEntity cannot disagree about a name.
+                          .name   = ZHLN::ECS::BoxedName<C>(),
+                          .has    = [](const ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity).has_value(); },
+                          .add    = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Add<C>(entity, C {}); },
+                          .remove = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Remove<C>(entity); }
     };
 }
 
@@ -79,12 +78,8 @@ consteval auto MakeComponentKinds() -> std::array<ComponentKind, sizeof...(Cs)> 
 // static type, which the transpiler fallback requires (see the invariant note
 // in DrawInspectorPanel), and a table-driven version would make that type
 // dependent and flatten to zero rows.
-constexpr auto kComponentKinds = MakeComponentKinds<
-    Comp::NameComponent,
-    Comp::TransformComponent,
-    Comp::PBRComponent,
-    Comp::LightComponent,
-    Comp::PostProcessSettingsComponent>();
+constexpr auto kComponentKinds =
+    MakeComponentKinds<Comp::NameComponent, Comp::TransformComponent, Comp::PBRComponent, Comp::LightComponent, Comp::PostProcessSettingsComponent>();
 
 // The editor and the edited scene share one registry, so the hierarchy
 // has to know which subtree is chrome. Walk HierarchyComponent upward
@@ -216,7 +211,7 @@ auto ComponentKinds() noexcept -> std::span<const ComponentKind> {
 auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name) -> ZHLN::Entity {
     const ZHLN::Entity entity = reg.Create();
 
-    std::array<char, 64> nameBuf {};
+    std::array<char, 64>   nameBuf {};
     const std::string_view label = name.empty() ? ZHLN::FormatTo(nameBuf, "Entity {}", entity.index) : name;
 
     // The world transform is written here rather than left for
@@ -233,7 +228,7 @@ auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name) -> ZHLN::Enti
 }
 
 void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
-    auto&               reg    = engine.GetRegistry();
+    auto&              reg    = engine.GetRegistry();
     const ZHLN::Entity victim = state.selectedEntity;
 
     // Cleared first: if the handle turns out to be stale the editor must not be
@@ -266,17 +261,28 @@ auto ReadTransformInput(ZHLN::Optional<const Comp::InputStateComponent&> input) 
     }
     TransformInput bits = TransformInput::None;
     auto           key  = [&](ZHLN::KeyCode k) -> bool { return input->IsKeyDownRaw(static_cast<uint8_t>(k)); };
-    if (key(ZHLN::KeyCode::G)) bits |= TransformInput::G;
-    if (key(ZHLN::KeyCode::R)) bits |= TransformInput::R;
-    if (key(ZHLN::KeyCode::S)) bits |= TransformInput::S;
-    if (key(ZHLN::KeyCode::X)) bits |= TransformInput::X;
-    if (key(ZHLN::KeyCode::Y)) bits |= TransformInput::Y;
-    if (key(ZHLN::KeyCode::Z)) bits |= TransformInput::Z;
-    if (key(ZHLN::KeyCode::Enter)) bits |= TransformInput::Enter;
-    if (key(ZHLN::KeyCode::Escape)) bits |= TransformInput::Esc;
-    if (key(ZHLN::KeyCode::LControl) || key(ZHLN::KeyCode::RControl)) bits |= TransformInput::Ctrl;
-    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton))) bits |= TransformInput::LMB;
-    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) bits |= TransformInput::RMB;
+    if (key(ZHLN::KeyCode::G))
+        bits |= TransformInput::G;
+    if (key(ZHLN::KeyCode::R))
+        bits |= TransformInput::R;
+    if (key(ZHLN::KeyCode::S))
+        bits |= TransformInput::S;
+    if (key(ZHLN::KeyCode::X))
+        bits |= TransformInput::X;
+    if (key(ZHLN::KeyCode::Y))
+        bits |= TransformInput::Y;
+    if (key(ZHLN::KeyCode::Z))
+        bits |= TransformInput::Z;
+    if (key(ZHLN::KeyCode::Enter))
+        bits |= TransformInput::Enter;
+    if (key(ZHLN::KeyCode::Escape))
+        bits |= TransformInput::Esc;
+    if (key(ZHLN::KeyCode::LControl) || key(ZHLN::KeyCode::RControl))
+        bits |= TransformInput::Ctrl;
+    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)))
+        bits |= TransformInput::LMB;
+    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)))
+        bits |= TransformInput::RMB;
     return bits;
 }
 
@@ -309,9 +315,9 @@ auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp,
     if (nearW.GetW() <= 0.0f || farW.GetW() <= 0.0f) {
         return false;
     }
-    origin = JPH::Vec3(nearW.GetX() / nearW.GetW(), nearW.GetY() / nearW.GetW(), nearW.GetZ() / nearW.GetW());
+    origin               = JPH::Vec3(nearW.GetX() / nearW.GetW(), nearW.GetY() / nearW.GetW(), nearW.GetZ() / nearW.GetW());
     const JPH::Vec3 farP = JPH::Vec3(farW.GetX() / farW.GetW(), farW.GetY() / farW.GetW(), farW.GetZ() / farW.GetW());
-    dir    = (farP - origin).Normalized();
+    dir                  = (farP - origin).Normalized();
     return true;
 }
 
@@ -345,10 +351,14 @@ auto WorldToScreen(const Camera& camera, const SceneViewport& r, const JPH::Vec3
 
 auto AxisVector(EditorState::TransformAxis axis) noexcept -> JPH::Vec3 {
     switch (axis) {
-        case EditorState::TransformAxis::X: return JPH::Vec3::sAxisX();
-        case EditorState::TransformAxis::Y: return JPH::Vec3::sAxisY();
-        case EditorState::TransformAxis::Z: return JPH::Vec3::sAxisZ();
-        case EditorState::TransformAxis::None: break;
+        case EditorState::TransformAxis::X:
+            return JPH::Vec3::sAxisX();
+        case EditorState::TransformAxis::Y:
+            return JPH::Vec3::sAxisY();
+        case EditorState::TransformAxis::Z:
+            return JPH::Vec3::sAxisZ();
+        case EditorState::TransformAxis::None:
+            break;
     }
     return JPH::Vec3::sZero();
 }
@@ -361,9 +371,7 @@ auto SpawnShapeNames() noexcept -> std::span<const std::string_view> {
     return kSpawnShapeNames;
 }
 
-void UpdateTransformMode(
-    ZHLN::ECS::Registry& reg, EditorState& state, const Camera& camera, const SceneViewport& viewport, bool uiOwnsInput
-) noexcept {
+void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Camera& camera, const SceneViewport& viewport, bool uiOwnsInput) noexcept {
     const auto input = reg.GetSingleton<Comp::InputStateComponent>();
     if (uiOwnsInput) {
         // Keep the edge detector honest across the capture window, so a key
@@ -392,9 +400,9 @@ void UpdateTransformMode(
         if (mode != EditorState::TransformMode::None) {
             const auto t = reg.Get<Comp::TransformComponent>(state.selectedEntity);
             if (t) {
-                state.transformMode        = mode;
-                state.transformAxis        = EditorState::TransformAxis::None;
-                state.transformEntity      = state.selectedEntity;
+                state.transformMode          = mode;
+                state.transformAxis          = EditorState::TransformAxis::None;
+                state.transformEntity        = state.selectedEntity;
                 state.transformStartPosition = t->position;
                 state.transformStartRotation = t->rotation;
                 state.transformStartScale    = t->scale;
@@ -463,11 +471,10 @@ void UpdateTransformMode(
                         // free axis therefore points AT the viewer (the negated
                         // camera forward), making a positive seen delta a
                         // positive right-handed turn about it.
-                        const float angle = std::atan2(oy - my, mx - ox);
-                        const JPH::Vec3 axis = (state.transformAxis != EditorState::TransformAxis::None) ?
-                                                   AxisVector(state.transformAxis) :
-                                                   state.transformPlaneNormal * -1.0f;
-                        const JPH::Quat turn = JPH::Quat::sRotation(axis, angle - state.transformStartAngle);
+                        const float     angle  = std::atan2(oy - my, mx - ox);
+                        const JPH::Vec3 axis   = (state.transformAxis != EditorState::TransformAxis::None) ? AxisVector(state.transformAxis) :
+                                                                                                             state.transformPlaneNormal * -1.0f;
+                        const JPH::Quat turn   = JPH::Quat::sRotation(axis, angle - state.transformStartAngle);
                         const JPH::Quat newRot = turn * state.transformStartRotation;
                         reg.Patch<Comp::TransformComponent>(e, [&newRot](Comp::TransformComponent& t) -> void { t.rotation = newRot; });
                     }
@@ -478,12 +485,12 @@ void UpdateTransformMode(
                     if (WorldToScreen(camera, viewport, state.transformStartPosition, ox, oy)) {
                         // Screen-space distance ratio, like Blender's uniform
                         // scale: pull away from the object and it grows.
-                        const float   dist   = std::max(std::hypot(mx - ox, my - oy), 1e-3f);
-                        const float   factor = std::max(dist / state.transformStartDist, 1e-3f);
-                        const JPH::Vec3 start = state.transformStartScale;
-                        JPH::Vec3       next  = start * factor;
+                        const float     dist   = std::max(std::hypot(mx - ox, my - oy), 1e-3f);
+                        const float     factor = std::max(dist / state.transformStartDist, 1e-3f);
+                        const JPH::Vec3 start  = state.transformStartScale;
+                        JPH::Vec3       next   = start * factor;
                         if (state.transformAxis != EditorState::TransformAxis::None) {
-                            next = start;
+                            next               = start;
                             const float scaled = (state.transformAxis == EditorState::TransformAxis::X) ? start.GetX() * factor :
                                                  (state.transformAxis == EditorState::TransformAxis::Y) ? start.GetY() * factor :
                                                                                                           start.GetZ() * factor;
@@ -557,8 +564,7 @@ void DrawHierarchyPanel(GUI::Context& gui, ZHLN::Engine& engine, EditorState& st
     if (gui.Button("New Entity", JPH::Vec4(0.16f, 0.30f, 0.20f, 0.95f))) {
         state.selectedEntity = CreateEntity(reg);
     }
-    if (state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity) &&
-        gui.Button("Delete", JPH::Vec4(0.42f, 0.16f, 0.16f, 0.95f))) {
+    if (state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity) && gui.Button("Delete", JPH::Vec4(0.42f, 0.16f, 0.16f, 0.95f))) {
         DestroySelected(engine, state);
     }
     gui.EndRow();
@@ -567,8 +573,8 @@ void DrawHierarchyPanel(GUI::Context& gui, ZHLN::Engine& engine, EditorState& st
     // an Engine (GPU mesh, material), which the panel deliberately does not
     // see. The host consumes requestedSpawn after drawing and resets it.
     std::array<std::string_view, 8> spawnOptions {};
-    spawnOptions[0] = "Add Shape...";
-    size_t          spawnCount = 1;
+    spawnOptions[0]   = "Add Shape...";
+    size_t spawnCount = 1;
     for (const std::string_view name: kSpawnShapeNames) {
         spawnOptions[spawnCount++] = name;
     }
@@ -588,9 +594,7 @@ void DrawHierarchyPanel(GUI::Context& gui, ZHLN::Engine& engine, EditorState& st
                                           state.transformAxis == EditorState::TransformAxis::Y ? "Y" :
                                           state.transformAxis == EditorState::TransformAxis::Z ? "Z" :
                                                                                                  "free";
-        gui.Text(
-            ZHLN::FormatTo(modeBuf, "{} [{}] - LMB/Enter confirm, Esc/RMB cancel", modeName, axisName), 12.0f, {0.9f, 0.8f, 0.4f, 1.0f}
-        );
+        gui.Text(ZHLN::FormatTo(modeBuf, "{} [{}] - LMB/Enter confirm, Esc/RMB cancel", modeName, axisName), 12.0f, {0.9f, 0.8f, 0.4f, 1.0f});
     }
 
     for (const Row& row: rows) {
@@ -687,9 +691,9 @@ void DrawInspectorPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
     //
     // Offered after the sections, so the dropdown's option list is built once
     // every Remove above has already run and cannot be contradicted by it.
-    std::array<std::string_view, 32>      options {};
-    std::array<const ComponentKind*, 32>  kinds {};
-    size_t                                count = 0;
+    std::array<std::string_view, 32>     options {};
+    std::array<const ComponentKind*, 32> kinds {};
+    size_t                               count = 0;
 
     // Index 0 is a prompt rather than a choice. Dropdown reports a change only
     // when `selected` moves, and this panel rebuilds `picked` at 0 every frame,
@@ -701,8 +705,8 @@ void DrawInspectorPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
         if (count >= options.size() || kind.has(reg, sel)) {
             continue;
         }
-        options[count]       = kind.name;
-        kinds[count - 1]     = &kind;
+        options[count]   = kind.name;
+        kinds[count - 1] = &kind;
         ++count;
     }
 

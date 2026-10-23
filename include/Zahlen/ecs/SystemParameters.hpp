@@ -12,49 +12,66 @@
 #include <array>
 #include <cstdint>
 #include <functional>
-#include <ranges>
 #include <span>
 #include <tuple>
 #include <type_traits>
-#include <vector>
 #include <utility>
+#include <vector>
 
 namespace ZHLN {
 
 // Unlike float/uint64_t, these ambient values cannot be confused with one
 // another by the system parameter resolver.
 struct FrameDt {
-    float value;
-    constexpr operator float() const noexcept { return value; }
+    float     value;
+    constexpr operator float() const noexcept {
+        return value;
+    }
 };
 struct FrameAlpha {
-    float value;
-    constexpr operator float() const noexcept { return value; }
+    float     value;
+    constexpr operator float() const noexcept {
+        return value;
+    }
 };
 struct FrameIndex {
-    uint64_t value;
-    constexpr operator uint64_t() const noexcept { return value; }
+    uint64_t  value;
+    constexpr operator uint64_t() const noexcept {
+        return value;
+    }
 };
 
 namespace ECS {
 
 template <typename T>
 struct Res {
-    using Target = T;
-    const T* ptr = nullptr;
-    [[nodiscard]] const T* operator->() const noexcept { return ptr; }
-    [[nodiscard]] const T& operator*() const noexcept { return *ptr; }
-    [[nodiscard]] bool Valid() const noexcept { return ptr != nullptr; }
+    using Target               = T;
+    const T*               ptr = nullptr;
+    [[nodiscard]] const T* operator->() const noexcept {
+        return ptr;
+    }
+    [[nodiscard]] const T& operator*() const noexcept {
+        return *ptr;
+    }
+    [[nodiscard]] bool Valid() const noexcept {
+        return ptr != nullptr;
+    }
 };
 
 template <typename T>
 struct ResMut {
     using Target = T;
     static_assert(!std::is_const_v<T>, "ResMut<T> requires a mutable resource");
-    T* ptr = nullptr;
-    [[nodiscard]] T* operator->() const noexcept { return ptr; }
-    [[nodiscard]] T& operator*() const noexcept { return *ptr; }
-    [[nodiscard]] bool Valid() const noexcept { return ptr != nullptr; }
+    T*               ptr = nullptr;
+    [[nodiscard]] T* operator->() const noexcept {
+        return ptr;
+    }
+    [[nodiscard]] T& operator*() const noexcept {
+        return *ptr;
+    }
+    [[nodiscard]] bool Valid() const noexcept {
+        return ptr != nullptr;
+    }
 };
 
 // Nullable services (for example, audio in an ECS-only/headless graph).
@@ -85,15 +102,23 @@ using OptionRes = ZHLN::Optional<T&>;
 template <typename T>
 struct Local {
     using Target = T;
-    static_assert(!std::is_const_v<T> && !std::is_reference_v<T>,
-                  "Local<T> owns a T: pass the state type, not a reference, and keep it mutable so the system can advance it");
+    static_assert(
+        !std::is_const_v<T> && !std::is_reference_v<T>,
+        "Local<T> owns a T: pass the state type, not a reference, and keep it mutable so the system can advance it"
+    );
     static_assert(std::is_object_v<T>, "Local<T> stores a T");
 
     T* ptr = nullptr;
 
-    [[nodiscard]] T* operator->() const noexcept { return ptr; }
-    [[nodiscard]] T& operator*() const noexcept { return *ptr; }
-    [[nodiscard]] bool Valid() const noexcept { return ptr != nullptr; }
+    [[nodiscard]] T* operator->() const noexcept {
+        return ptr;
+    }
+    [[nodiscard]] T& operator*() const noexcept {
+        return *ptr;
+    }
+    [[nodiscard]] bool Valid() const noexcept {
+        return ptr != nullptr;
+    }
 };
 
 // A per-worker scratch block of parallel streams, resolved from the worker's own
@@ -165,7 +190,7 @@ namespace TemplatedDetail {
 // asked for rather than a runtime null check.
 template <typename Param>
 concept OptionalResourceParam = requires { typename Param::value_type; } && std::is_object_v<typename Param::value_type> &&
-    std::is_same_v<Param, ZHLN::Optional<typename Param::value_type&>>;
+                                std::is_same_v<Param, ZHLN::Optional<typename Param::value_type&>>;
 
 template <typename T>
 using RawComponent = std::remove_cvref_t<T>;
@@ -174,8 +199,7 @@ template <typename... Ts>
 struct UniqueComponents: std::true_type {};
 
 template <typename T, typename... Ts>
-struct UniqueComponents<T, Ts...>:
-    std::bool_constant<(!std::is_same_v<RawComponent<T>, RawComponent<Ts>> && ...) && UniqueComponents<Ts...>::value> {};
+struct UniqueComponents<T, Ts...>: std::bool_constant<(!std::is_same_v<RawComponent<T>, RawComponent<Ts>> && ...) && UniqueComponents<Ts...>::value> {};
 
 // Is this parameter a Local<...>? Answered on the written type, like every other
 // parameter classification in the resolver table.
@@ -205,7 +229,9 @@ struct LocalLayout {
     size_t                     size  = 0;
     size_t                     align = 1;
 
-    [[nodiscard]] bool Empty() const noexcept { return slots.empty(); }
+    [[nodiscard]] bool Empty() const noexcept {
+        return slots.empty();
+    }
 };
 
 } // namespace TemplatedDetail
@@ -219,23 +245,26 @@ struct LocalLayout {
 template <typename... Comps>
 class Query {
     static_assert(sizeof...(Comps) > 0, "Query needs at least one component");
-    static_assert(((!std::is_pointer_v<TemplatedDetail::RawComponent<Comps>> && !std::is_rvalue_reference_v<Comps> &&
-                    !std::is_volatile_v<std::remove_reference_t<Comps>>) && ...),
-                  "Query arguments must be component types or lvalue references");
+    static_assert(
+        ((!std::is_pointer_v<TemplatedDetail::RawComponent<Comps>> && !std::is_rvalue_reference_v<Comps> &&
+          !std::is_volatile_v<std::remove_reference_t<Comps>>) &&
+         ...),
+        "Query arguments must be component types or lvalue references"
+    );
     static_assert(TemplatedDetail::UniqueComponents<Comps...>::value, "Query cannot contain the same component twice");
 
     template <typename T>
     static constexpr bool Declared = (std::is_same_v<T, TemplatedDetail::RawComponent<Comps>> || ...);
 
     template <typename T>
-    static constexpr bool ReadOnly =
-        ((std::is_same_v<T, TemplatedDetail::RawComponent<Comps>> && std::is_const_v<std::remove_reference_t<Comps>>) || ...);
+    static constexpr bool ReadOnly = ((std::is_same_v<T, TemplatedDetail::RawComponent<Comps>> && std::is_const_v<std::remove_reference_t<Comps>>) || ...);
 
     template <typename T>
     using Element = std::conditional_t<ReadOnly<T>, const T, T>;
 
   public:
-    explicit Query(Registry& registry) noexcept: _registry(&registry) {}
+    explicit Query(Registry& registry) noexcept: _registry(&registry) {
+    }
 
     template <typename T>
         requires Declared<T>
@@ -246,7 +275,9 @@ class Query {
     // Alias for helpers shared with Registry (which has the same named API).
     template <typename T>
         requires Declared<T>
-    [[nodiscard]] auto GetEntitiesWith() const noexcept -> std::span<const Entity> { return Entities<T>(); }
+    [[nodiscard]] auto GetEntitiesWith() const noexcept -> std::span<const Entity> {
+        return Entities<T>();
+    }
 
     template <typename T>
         requires Declared<T>
@@ -274,9 +305,14 @@ class Query {
     // Project a larger query into a smaller view without exposing Registry&.
     // Projection may drop write access but cannot manufacture it.
     template <typename... Subset>
-        requires (sizeof...(Subset) > 0 && ((Declared<TemplatedDetail::RawComponent<Subset>> &&
-                   (!ReadOnly<TemplatedDetail::RawComponent<Subset>> || std::is_const_v<std::remove_reference_t<Subset>>)) && ...))
-    [[nodiscard]] auto Select() const noexcept -> Query<Subset...> { return Query<Subset...>(*_registry); }
+        requires(
+            sizeof...(Subset) > 0 && ((Declared<TemplatedDetail::RawComponent<Subset>> &&
+                                       (!ReadOnly<TemplatedDetail::RawComponent<Subset>> || std::is_const_v<std::remove_reference_t<Subset>>) ) &&
+                                      ...)
+        )
+    [[nodiscard]] auto Select() const noexcept -> Query<Subset...> {
+        return Query<Subset...>(*_registry);
+    }
 
     template <typename T>
         requires Declared<T>
@@ -284,15 +320,19 @@ class Query {
         return _registry->GetRawArray<T>();
     }
 
-    [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool { return _registry->IsAlive(entity); }
-    [[nodiscard]] auto AliveQuery() const noexcept -> EntityAliveQuery { return _registry->AliveQuery(); }
+    [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool {
+        return _registry->IsAlive(entity);
+    }
+    [[nodiscard]] auto AliveQuery() const noexcept -> EntityAliveQuery {
+        return _registry->AliveQuery();
+    }
 
     template <typename Fn>
     void ForEach(Fn&& fn) const {
         // The smallest set bounds the iteration even when a query has many
         // components; a missing set makes the intersection empty.
         const std::array sets {Entities<TemplatedDetail::RawComponent<Comps>>()...};
-        const auto& primary = *std::ranges::min_element(sets, {}, &std::span<const Entity>::size);
+        const auto&      primary = *std::ranges::min_element(sets, {}, &std::span<const Entity>::size);
         for (Entity entity: primary) {
             const std::tuple<ZHLN::Optional<Element<TemplatedDetail::RawComponent<Comps>>&>...> components {
                 Get<TemplatedDetail::RawComponent<Comps>>(entity)...

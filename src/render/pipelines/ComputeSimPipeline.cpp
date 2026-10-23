@@ -2,13 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ComputeSimPipeline.hpp"
+#include "../passes/ComputePass.hpp"
 #include "../passes/culling/ClusterCullingPass.hpp"
 #include "../passes/simulation/MeshParticleUpdatePass.hpp"
 #include "../passes/simulation/ParticleUpdatePass.hpp"
-#include "../passes/volumetric/VolumetricFogInjectPass.hpp"
-#include "../passes/volumetric/VolumetricIntegrationPass.hpp"
-#include "../passes/volumetric/VolumetricLightInjectPass.hpp"
-#include "../passes/volumetric/VolumetricTemporalPass.hpp"
+#include "../passes/volumetric/VolumetricPasses.hpp"
 #include "graph/RenderGraph.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Log.hpp>
@@ -40,13 +38,14 @@ void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
 
 void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt) noexcept {
     const uint32_t fIdx = impl.presenter.frameIndex;
-    impl.BindHeapsAndPushFrame(cmd);
     RebuildClusterBounds(impl, cmd, fIdx);
 
     auto computeGraph = Vk::MakePassPack(
-                            Passes::ClusterCullingPass {.cull = impl.culling, .frame = impl}, Passes::VolumetricFogInjectPass {.frame = impl},
-                            Passes::VolumetricLightInjectPass {.frame = impl}, Passes::VolumetricIntegrationPass {.frame = impl},
-                            Passes::VolumetricTemporalPass {.frame = impl},
+                            Passes::ClusterCullingPass {.cull = impl.culling, .frame = impl},
+                            Passes::ComputePass<Passes::VolumetricFogInjectDesc> {.frame = impl},
+                            Passes::ComputePass<Passes::VolumetricLightInjectDesc> {.frame = impl},
+                            Passes::ComputePass<Passes::VolumetricIntegrationDesc> {.frame = impl},
+                            Passes::ComputePass<Passes::VolumetricTemporalDesc> {.frame = impl},
                             Passes::ParticleUpdatePass {.particles = impl.particleUpdate, .frame = impl, .dt = dt},
                             Passes::MeshParticleUpdatePass {.particles = impl.particleUpdate, .frame = impl, .dt = dt}
     )
@@ -73,7 +72,10 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
     const uint32_t slot = impl.presenter.frameIndex;
 
     impl.currentDt = dt;
-    auto recording = Vk::CommandRecorder::Begin(impl.computePools[slot][0]);
+    // The async compute buffer is its own command stream, so it begins with its
+    // own heap state: nothing on the graphics stream carries over to it, and
+    // nothing on it carries back.
+    auto recording = impl.BeginStream(impl.computePools[slot][0]);
     if (!recording) {
         return std::unexpected(recording.error());
     }
@@ -83,11 +85,8 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
         return std::unexpected(executable.error());
     }
 
-    const uint64_t signalValue = impl.presenter.sync.GetTimelineValue(slot);
-    auto           submitted   = Vk::QueueSubmit(
-        impl.ctx.ComputeQueue(), std::move(*executable), VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, impl.presenter.sync.ComputeTimeline(slot), signalValue,
-        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
-    );
+    auto compSync  = impl.presenter.sync.PrepareComputeSubmit(slot);
+    auto submitted = Vk::QueueSubmit(impl.ctx.ComputeQueue(), std::move(*executable), {}, compSync.Signal());
 
     if (!submitted) [[unlikely]] {
         if (Vk::IsDeviceLost(submitted.error())) {
@@ -98,7 +97,7 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
         return std::unexpected(AsFrameError(submitted.error()));
     }
 
-    impl.presenter.sync.MarkComputeSubmitted(slot);
+    impl.presenter.sync.OnComputeSubmitted(slot, compSync.timelineValue);
     impl.frameState.computeSubmitted = true;
     return {};
 }

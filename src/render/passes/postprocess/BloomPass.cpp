@@ -12,10 +12,8 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
     using enum Vk::BarrierStage;
     using enum Vk::BarrierAccess;
     using namespace Shaders;
-    frame.BindHeapsAndPushFrame(cmd);
 
     const auto srcHdr     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.hdrSceneColor);
-    const auto emissive   = Vk::Assume<Vk::ComputeRead<Res_Emissive>>(frame.graphResources.emissiveBuffer);
     const auto thresh     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomThresholdTarget);
     const auto down1      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomDown1);
     const auto down2      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomDown2);
@@ -45,39 +43,22 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
         .exposure      = std::max(frame.settings.post.exposure, 1e-4f)
     };
 
-    thresholdChain.Step<BloomThreshold>(
-        frame.postProcess.BloomThreshold(), frame.postProcess.BloomThresholdHeapBindings(), thresh.Extent(), thresholdPush, Vk::Slot<"texInput">(srcHdr),
-        Vk::Slot<"texEmissive">(emissive), Vk::Slot<"outImage">(thresh)
-    );
+    thresholdChain.Step<BloomThreshold>(frame.post.bloomThreshold, thresh.Extent(), thresholdPush, Vk::Slot<"texInput">(srcHdr), Vk::Slot<"outImage">(thresh));
 
     Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Compute, ShaderRead);
 
-    downChain.Step<BloomDown>(
-        frame.postProcess.BloomDown(), frame.postProcess.BloomDownHeapBindings(), down1.Extent(), Kawase(0, thresh), Vk::Slot<"texInput">(thresh),
-        Vk::Slot<"outImage">(down1)
-    );
-    downChain.Step<BloomDown>(
-        frame.postProcess.BloomDown(), frame.postProcess.BloomDownHeapBindings(), down2.Extent(), Kawase(0, down1), Vk::Slot<"texInput">(down1),
-        Vk::Slot<"outImage">(down2)
-    );
-    downChain.Step<BloomDown>(
-        frame.postProcess.BloomDown(), frame.postProcess.BloomDownHeapBindings(), down3.Extent(), Kawase(0, down2), Vk::Slot<"texInput">(down2),
-        Vk::Slot<"outImage">(down3)
-    );
+    downChain.Step<BloomDown>(frame.post.bloomDown, down1.Extent(), Kawase(0, thresh), Vk::Slot<"texInput">(thresh), Vk::Slot<"outImage">(down1));
+    downChain.Step<BloomDown>(frame.post.bloomDown, down2.Extent(), Kawase(0, down1), Vk::Slot<"texInput">(down1), Vk::Slot<"outImage">(down2));
+    downChain.Step<BloomDown>(frame.post.bloomDown, down3.Extent(), Kawase(0, down2), Vk::Slot<"texInput">(down2), Vk::Slot<"outImage">(down3));
 
     Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Compute, ShaderRead);
 
     upChain.Step<BloomUp>(
-        frame.postProcess.BloomUp(), frame.postProcess.BloomUpHeapBindings(), up2.Extent(), Kawase(1, down3), Vk::Slot<"texInput">(down3),
-        Vk::Slot<"texLow">(down2), Vk::Slot<"outImage">(up2)
+        frame.post.bloomUp, up2.Extent(), Kawase(1, down3), Vk::Slot<"texInput">(down3), Vk::Slot<"texLow">(down2), Vk::Slot<"outImage">(up2)
     );
+    upChain.Step<BloomUp>(frame.post.bloomUp, up1.Extent(), Kawase(1, up2), Vk::Slot<"texInput">(up2), Vk::Slot<"texLow">(down1), Vk::Slot<"outImage">(up1));
     upChain.Step<BloomUp>(
-        frame.postProcess.BloomUp(), frame.postProcess.BloomUpHeapBindings(), up1.Extent(), Kawase(1, up2), Vk::Slot<"texInput">(up2),
-        Vk::Slot<"texLow">(down1), Vk::Slot<"outImage">(up1)
-    );
-    upChain.Step<BloomUp>(
-        frame.postProcess.BloomUp(), frame.postProcess.BloomUpHeapBindings(), bloomFinal.Extent(), Kawase(1, up1), Vk::Slot<"texInput">(up1),
-        Vk::Slot<"texLow">(thresh), Vk::Slot<"outImage">(bloomFinal)
+        frame.post.bloomUp, bloomFinal.Extent(), Kawase(1, up1), Vk::Slot<"texInput">(up1), Vk::Slot<"texLow">(thresh), Vk::Slot<"outImage">(bloomFinal)
     );
 }
 

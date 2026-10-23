@@ -31,13 +31,18 @@ SamplerState pointSampler;
 Texture2D<float> shadowAtlas;
 StructuredBuffer<ShadowTile> shadowTiles;
 
-Texture2D<float4> texEmissive;
 
 Texture2D<float> texAo;
 
-Texture2D<float4> texClearcoat;
-Texture2D<float4> texSheen;
-Texture2D<float4> texAnisotropy;
+// Baked-light ownership from the G-buffer (Res_BakedMask), read as a bitfield:
+//   bit 0 - a VRAD lightmap, or the leaf ambient cube standing in for one,
+//           already supplied this pixel's static ambient through the emissive
+//           overlay, so the analytic SH term below would double it,
+//   bit 1 - static *direct* light is baked here as well, which only a lightmap
+//           is: a cube carries indirect only, so a prop riding one keeps its
+//           live sun.
+Texture2D<uint> texBakedMask;
+
 
 #ifndef DISABLE_RTR
 Texture2D<float> texRtShadowMask;
@@ -61,7 +66,7 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
     return output;
 }
 
-float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos, float viewDepth) {
+float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos, float viewDepth, float bakedAmbient) {
     float  ao            = 1.0f;
     float3 indirectLight = float3(0.0f, 0.0f, 0.0f);
 
@@ -140,7 +145,7 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
                     if (pc.giMode == 1) {
                         occlusion += finalWeight;
                     } else if (pc.giMode == 2) {
-                        float3 sampleRadiance = texInput.SampleLevel(smp, uv_sample, 0).rgb + texEmissive.SampleLevel(smp, uv_sample, 0).rgb;
+                        float3 sampleRadiance = texInput.SampleLevel(smp, uv_sample, 0).rgb;
                         indirectLight += sampleRadiance * max(dot(N, dir), 0.0f) * finalWeight;
                     }
                 }
@@ -156,11 +161,24 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
         }
     }
 
-    float3 baselineAmbient = EvaluateSH(N, frame.sh) * frame.ambientExposure;
+    // Ambient is the only term this function owns, and the only one that is
+    // ownership-dependent: a baked pixel already carries the map's static
+    // ambient -- sky term and bounced light alike -- in its lightmap or leaf
+    // ambient cube, which PSEmissive adds back verbatim, so the analytic SH
+    // floor is withheld there. What survives on a baked pixel is the DDGI
+    // term's live half, added below.
+    const float3 shAmbient = EvaluateSH(N, frame.sh) * frame.ambientExposure;
+    float3       baselineAmbient = shAmbient * (1.0f - bakedAmbient);
 #ifndef DISABLE_RTR
     if (ENABLE_RTR != 0 && frame.ddgiParams.w > 0.0f) {
-        float3 V_amb    = SafeNormalize(pc.camPos.xyz - worldPos, N);
-        baselineAmbient = SampleDDGIOrSH(worldPos, N, V_amb, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
+        float3 V_amb = SafeNormalize(pc.camPos.xyz - worldPos, N);
+        // SampleDDGIOrSH resolves to max(probe field, SH floor). Only the part
+        // above that floor is live GI -- the flashlight's bounce, a door opening
+        // onto a baked wall -- and it belongs to baked and unbaked surfaces
+        // alike, because no bake ever saw it. Unbaked pixels therefore still
+        // resolve to exactly max(probes, shAmbient), i.e. the previous result.
+        const float3 probes = SampleDDGIOrSH(worldPos, N, V_amb, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
+        baselineAmbient += max(probes - shAmbient, float3(0.0f));
     }
 #endif
     indirectLight += baselineAmbient;
@@ -168,19 +186,23 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
     return float4(indirectLight, ao);
 }
 
-float4 PSMain(VSOutput input) : SV_Target0 {
+struct LightingOutput {
+    float4 color : SV_Target0;
+    float ao : SV_Target1;
+};
+
+LightingOutput PSMain(VSOutput input) {
     float depth = texDepth.SampleLevel(pointSampler, input.uv, 0);
+    // One world, one depth range (the band is retired): 1.0 means empty.
     if (depth >= 1.0f)
         discard;
 
     float4 albedoRaw = texInput.SampleLevel(pointSampler, input.uv, 0);
-    float3 emissive  = texEmissive.SampleLevel(pointSampler, input.uv, 0).rgb;
     if (frame.fullBright != 0) {
-        return float4(albedoRaw.rgb + emissive, 1.0f);
-    }
-    float4 anisoRaw = texAnisotropy.SampleLevel(pointSampler, input.uv, 0);
-    if (IsGBufferUnlit(anisoRaw.z)) {
-        return float4(albedoRaw.rgb, 1.0f);
+        LightingOutput outLighting;
+        outLighting.color = float4(albedoRaw.rgb, 1.0f);
+        outLighting.ao = 1.0f;
+        return outLighting;
     }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(pointSampler, input.uv, 0);
     float3 N            = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
@@ -194,35 +216,26 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 V    = SafeNormalize(pc.camPos.xyz - worldPos, N);
     float NdotV = saturate(dot(N, V));
 
-    // KHR_materials_specular's dielectric response rides in the clearcoat
-    // lanes for a material that has no coat: this pass keeps reconstructing F0
-    // from albedo and metallic, and cannot see a material's own response
-    // otherwise. See DecodeSpecularResponse.
-    float4           coatRaw      = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
-    SpecularResponse specular     = DecodeSpecularResponse(coatRaw);
-    float3           F0           = lerp(float3(kDielectricF0) * specular.scale, albedoRaw.rgb, metallic);
-    // Dielectrics take the extension's grazing reflectance; metals keep
-    // Schlick's 1, which the extension leaves untouched.
-    float            f90          = EffectiveF90(specular.f90, metallic);
+    // G-buffer alpha stores a per-material reflection response scale; ordinary
+    // materials write one. Scaling both dielectric reflectance endpoints keeps
+    // this feature in deferred lighting without sacrificing ambient-cube data.
+    const float environmentReflectionScale = saturate(albedoRaw.a);
+    float3 F0 = lerp(float3(kDielectricF0), albedoRaw.rgb, metallic) * environmentReflectionScale;
+    float  f90 = environmentReflectionScale;
+    // The compact deferred path is isotropic. Materials that need tangent-space
+    // extension lobes are rendered in ForwardPass.
+    float materialAo = 1.0f;
+    float anisoStrength = 0.0f;
+    float3 T = N;
+    float3 B = N;
 
-    float4 sheenRaw = texSheen.SampleLevel(pointSampler, input.uv, 0);
-    float3 sheenColor = sheenRaw.rgb;
-    float materialAo = anisoRaw.w;
-    float anisoStrength = DecodeGBufferAnisotropy(anisoRaw.z);
-    float3 T = anisoStrength > 0.0f ? UnpackAnisotropy(anisoRaw.xy, N) : float3(0.0f);
-    float3 B = cross(N, T);
+    // One texel fetch of the ownership field, used by both halves of this
+    // shader: the ambient gate below and the direct-light gates further down.
+    const uint  bakedBits    = texBakedMask.Load(int3(int2(input.pos.xy), 0));
+    const float bakedAmbient = float(bakedBits & 1u);
+    const float bakedDirect  = float((bakedBits >> 1u) & 1u);
 
-    float coatFactor  = coatRaw.a;
-    float coatRough   = max(coatRaw.z, 0.001f);
-    float3 Nc         = N;
-    float coatAtt     = 1.0f;
-    if (coatFactor > 1.0f / 255.0f) {
-        Nc            = UnpackNormalOctahedron(coatRaw.xy * 2.0f - 1.0f);
-        float Fc      = ClearcoatFresnel(saturate(dot(Nc, V))) * coatFactor;
-        coatAtt       = saturate(1.0f - Fc);
-    }
-
-    float4 ambientData         = ComputeAmbientAndAO(input.uv, uint2(input.pos.xy), N, worldPos, viewDepth);
+    float4 ambientData         = ComputeAmbientAndAO(input.uv, uint2(input.pos.xy), N, worldPos, viewDepth, bakedAmbient);
     float3 ambientDiffuseAndGI = ambientData.rgb;
     float ao                   = ambientData.a;
 
@@ -307,13 +320,12 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 kD_sun = (float3(1.0f, 1.0f, 1.0f) - F) * (1.0f - metallic);
 
     float3 sunRadiance = frame.sunRadiance.xyz;
-    float sheenAttSun = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotL_sun);
-    float3 sheenSun = sheenColor * SheenCharlieBRDF(N, V, L_sun, H_sun, sheenRaw.a);
-    float3 directSun   = ((kD_sun * albedoRaw.rgb / 3.14159265f + spec) * sheenAttSun + sheenSun) *
-                         coatAtt * sunRadiance * NdotL_sun * shadow;
-    if (coatFactor > 1.0f / 255.0f) {
-        directSun += ClearcoatDirectSpecular(Nc, V, L_sun, coatRough) * sunRadiance * shadow * coatFactor;
-    }
+    // A lightmapped map's sun was compiled into the bake together with its
+    // shadows, so its diffuse is withheld wherever the lightmap owns direct
+    // light. The specular lobe is not: no lightmap stores one, so the highlight
+    // on a lightmapped surface has to come from here or not at all.
+    const float sunDiffuseOwnership = 1.0f - bakedDirect;
+    float3 directSun = (kD_sun * albedoRaw.rgb / 3.14159265f * sunDiffuseOwnership + spec) * sunRadiance * NdotL_sun * shadow;
 
     float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
 
@@ -328,6 +340,21 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             continue;
 
         Light light = lights[l];
+        // A light the map compiler baked owns its diffuse only where the bake
+        // owns it; unbaked pixels -- props, entities, skybox scenery -- still
+        // need the live light.
+        //
+        // Specular follows the same rule for an *authored* light, for the reason
+        // the sun's does: no lightmap stores a lobe, so the highlight on a
+        // lightmapped surface has to come from here or not at all. It does not
+        // follow it for an emissive-surface proxy (baked == 2). That proxy is
+        // the importer's reconstruction of a lamp panel or screen the same
+        // compile already integrated into the same lightmap, it sits
+        // centimetres off its own mounting surface, and Source's lamp panels
+        // have no specular lobe at all -- so a live one paints a clipped GGX
+        // highlight across the floor beside every fixture in the map.
+        const float lightDiffuseOwnership  = (light.baked != 0u) ? (1.0f - bakedDirect) : 1.0f;
+        const float lightSpecularOwnership = (light.baked > 1u) ? (1.0f - bakedDirect) : 1.0f;
         if (light.type == LightType::Area) {
             float2 uv      = float2(roughness, sqrt(1.0f - NdotV));
             float4 t1      = ltc_mat.SampleLevel(clampSampler, uv, 0.0f);
@@ -344,12 +371,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
             const float shadowVisibility = 1.0f;
 
-            // Approximate the fiber lobe with the diffuse LTC integral; the
-            // point/directional branches above evaluate Charlie explicitly.
-            float areaAtt = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotV);
-            float3 sheenArea = diffLTC * SheenEnvironmentWeight(sheenColor, NdotV);
-            directPunctual += (((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) * areaAtt + sheenArea) *
-                              coatAtt * light.color * light.intensity * shadowVisibility;
+            directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC * lightDiffuseOwnership + specLTC * lightSpecularOwnership) *
+                              light.color * light.intensity * shadowVisibility;
         } else {
             if (light.type == LightType::Directional || light.type == LightType::Sun)
                 continue;
@@ -415,14 +438,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                     }
                 }
 
-                float sheenAtt = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotL);
-                float3 sheenSpec = sheenColor * SheenCharlieBRDF(N, V, L_p, H, sheenRaw.a);
-                directPunctual += ((kD_p * albedoRaw.rgb / 3.14159265f + spec_p) * sheenAtt + sheenSpec) *
-                                  coatAtt * light.color * light.intensity * atten * NdotL * shadowVisibility;
-                if (coatFactor > 1.0f / 255.0f) {
-                    float3 Lcoat = SafeNormalize(L_unnorm, N);
-                    directPunctual += ClearcoatDirectSpecular(Nc, V, Lcoat, coatRough) * light.color * light.intensity * atten * shadowVisibility * coatFactor;
-                }
+                directPunctual += (kD_p * albedoRaw.rgb / 3.14159265f * lightDiffuseOwnership + spec_p * lightSpecularOwnership) *
+                                  light.color * light.intensity * atten * NdotL * shadowVisibility;
             }
         }
     }
@@ -431,8 +448,16 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // it unconditionally to the specular IBL in reflection.slang made rough
     // metal look white even with physically correct exposure and no clearcoat.
     float3 kD_ambient = (1.0f - SpecularFresnelRoughness(NdotV, F0, f90, roughness)) * (1.0f - metallic);
-    float sheenAttAmbient = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotV);
-    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * kD_ambient * ao * materialAo *
-                      sheenAttAmbient * coatAtt + directSun + directPunctual + emissive;
-    return float4(litColor, ao);
+    // Indirect light softens occlusion: the SH/GI term is a measured or
+    // gathered bounce field that already contains interreflection, so
+    // multiplying single-bounce AO in at full strength double-darkens
+    // enclosed rooms (small rooms crushed to a fraction of their baked
+    // level while open spaces matched). Half-strength AO keeps contact
+    // darkening without erasing the GI it is supposed to modulate.
+    float aoAmbient = lerp(1.0f, ao, 0.5f);
+    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * kD_ambient * aoAmbient * materialAo + directSun + directPunctual;
+    LightingOutput outLighting;
+    outLighting.color = float4(litColor, 1.0f);
+    outLighting.ao = saturate(ao);
+    return outLighting;
 }

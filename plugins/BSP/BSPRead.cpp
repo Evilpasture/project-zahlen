@@ -479,12 +479,15 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         map.surfEdges = std::move(*res);
     }
 
-    const LumpEntry* facesLump = &lump(Lump::Faces);
-    if (lump(Lump::FacesHDR).filelen > 0) {
-        facesLump = &lump(Lump::FacesHDR);
-    }
+    // HDR faces index the separate HDR luxel stream. Keep the pre-existing HDR
+    // face priority even on an otherwise incomplete test/map, but only select
+    // HDR *lighting* below after that matching face list was read successfully.
+    const bool       hasHdrFaces = lump(Lump::FacesHDR).filelen > 0;
+    const LumpEntry* facesLump   = hasHdrFaces ? &lump(Lump::FacesHDR) : &lump(Lump::Faces);
+    bool             usingHdrFaces = false;
     if (auto res = ReadLumpArray<DFace>(bytes, *facesLump); res) {
-        map.faces = std::move(*res);
+        map.faces     = std::move(*res);
+        usingHdrFaces = hasHdrFaces;
     } else if (facesLump != &lump(Lump::Faces)) {
         if (auto fallbackRes = ReadLumpArray<DFace>(bytes, lump(Lump::Faces)); fallbackRes) {
             map.faces = std::move(*fallbackRes);
@@ -495,10 +498,23 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         return std::unexpected(res.error());
     }
 
+    // The bake: VRAD's luxel radiance. Faces read from LUMP_FACES_HDR carry
+    // lightofs values that address LUMP_LIGHTING_HDR only, so they must never
+    // be paired with the LDR lump. If the HDR luxel lump is missing or empty,
+    // the faces get no static lighting rather than wrong-lump lighting.
+    // LDR faces keep the LDR lump. Empty lighting is legal on unbaked maps.
+    const bool       useHdrLighting = usingHdrFaces;
+    const LumpEntry* lightingLump   = useHdrLighting ? &lump(Lump::LightingHDR) : &lump(Lump::Lighting);
+    if (lightingLump->filelen > 0) {
+        if (auto res = ReadLumpArray<ColorRGBExp32>(bytes, *lightingLump); res) {
+            map.lighting      = std::move(*res);
+            map.lightingIsHdr = useHdrLighting;
+        }
+    }
+
     if (auto res = ReadLumpArray<DTexInfo>(bytes, lump(Lump::TexInfo)); !res) {
         return std::unexpected(res.error());
-    } else {
-        map.texInfos = std::move(*res);
+    } else {        map.texInfos = std::move(*res);
     }
     if (auto res = ReadLumpArray<DTexData>(bytes, lump(Lump::TexData)); !res) {
         return std::unexpected(res.error());
@@ -542,6 +558,14 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
     }
 
     // Leaves: support version 0 (30 bytes or 32/56 with padding/ambient) and version 1 (32 bytes).
+    // Leaf ambient cubes are optional: unbaked maps and older formats have none.
+    if (auto res = ReadLumpArray<DLeafAmbientIndex>(bytes, lump(Lump::LeafAmbientIndex)); res) {
+        map.leafAmbientIndex = std::move(*res);
+    }
+    if (auto res = ReadLumpArray<DLeafAmbientLighting>(bytes, lump(Lump::LeafAmbientLighting)); res) {
+        map.leafAmbientSamples = std::move(*res);
+    }
+
     const LumpEntry& leafLump = lump(Lump::Leafs);
     if (leafLump.filelen > 0) {
         if (leafLump.fileofs < 0 || leafLump.filelen < 0 || static_cast<size_t>(leafLump.fileofs) + static_cast<size_t>(leafLump.filelen) > bytes.size()) {

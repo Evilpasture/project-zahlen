@@ -88,6 +88,8 @@ static_assert(
 
         .emissiveVirtualLights = entity.material.emissiveVirtualLights,
 
+        .drawFlags = entity.drawFlags,
+
         .roughness = entity.material.roughness,
         .metallic  = entity.material.metallic,
         .color     = JPH::Vec4::sLoadFloat4(&entity.material.baseColor)
@@ -221,6 +223,14 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 NameEntity(registry, parts[0], entity.name);
                 StampSource(registry, parts[0], entity);
 
+                // Every mesh part of a prop carries the same leaf ambient cube.
+                if (entity.hasAmbientCube) {
+                    for (uint32_t i = 0; i < recorded; ++i) {
+                        registry.Add<Components::AmbientCubeComponent>(parts[i]);
+                        registry.Patch<Components::AmbientCubeComponent>(parts[i], [&](auto& c) { c.cube = entity.ambientCube; });
+                    }
+                }
+
                 if (kinematicRootCollider) {
                     // Collider extent: union of the prefab's part bounds when
                     // available (correct for BSP submodel prefabs and .mdl
@@ -305,7 +315,8 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 .castsShadow = light.castsShadow,
                 .innerConeRadians = light.innerConeRadians,
                 .outerConeRadians = light.outerConeRadians,
-                .pinned = light.pinned
+                .pinned = light.pinned,
+                .baked  = light.baked
             },
             Components::SceneLightTagComponent {}
         );
@@ -446,6 +457,7 @@ namespace {
                 .range       = light.range,
                 .castsShadow = light.castsShadow,
                 .pinned      = light.pinned,
+                .baked       = light.baked,
             }
         );
     }

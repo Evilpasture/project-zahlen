@@ -25,6 +25,43 @@ using BlitPushConstants = Slang::BlitPushConstants;
 
 using ScenePassPushConstants = Slang::ScenePassPushConstants;
 
+// Slang owns these payloads (resources/shaders/gpu_push_constants.slang); the
+// generated definitions are the ABI. The aliases keep the pass-side names.
+using ShadowAtrousPushConstants = Slang::ShadowAtrousPushConstants;
+static_assert(GpuAbi::ScenePassPayload<ShadowAtrousPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+using FXAAPushConstants = Slang::FXAAPushConstants;
+static_assert(GpuAbi::ScenePassPayload<FXAAPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+using MLAAPushConstants = Slang::MLAAPushConstants;
+static_assert(GpuAbi::ScenePassPayload<MLAAPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+using TAAPushConstants = Slang::TAAPushConstants;
+static_assert(GpuAbi::ScenePassPayload<TAAPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+using RtrHalfPushConstants = Slang::RtrHalfPushConstants;
+static_assert(GpuAbi::ScenePassPayload<RtrHalfPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+using RtgiHalfPushConstants = Slang::RtgiHalfPushConstants;
+static_assert(GpuAbi::ScenePassPayload<RtgiHalfPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+using DdgiTracePushConstants = Slang::DdgiTracePushConstants;
+static_assert(GpuAbi::ScenePassPayload<DdgiTracePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+using DdgiUpdatePushConstants = Slang::DdgiUpdatePushConstants;
+static_assert(GpuAbi::ScenePassPayload<DdgiUpdatePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+using VolumetricFogPushConstants = Slang::VolumetricFogPushConstants;
+static_assert(GpuAbi::ScenePassPayload<VolumetricFogPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+using VolumetricLightInjectPushConstants = Slang::VolumetricLightInjectPushConstants;
+static_assert(
+    GpuAbi::ScenePassPayload<VolumetricLightInjectPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared"
+);
+
+using VolumetricTemporalPushConstants = Slang::VolumetricTemporalPushConstants;
+static_assert(GpuAbi::ScenePassPayload<VolumetricTemporalPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
 static_assert(
     (GpuAbi::ScenePassPayload<ObjectConstants> && GpuAbi::ScenePassPayload<UIObjectConstants> &&
      GpuAbi::ScenePassPayload<CullingConstants> && GpuAbi::ScenePassPayload<MeshParticleRenderPush> &&

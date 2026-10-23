@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Rendering.hpp"
+#include "pipeline/ComputePass.hpp"
 
 namespace ZHLN {
 

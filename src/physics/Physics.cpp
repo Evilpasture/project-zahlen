@@ -939,41 +939,42 @@ void PhysicsContext::AddRagdollImpulse(Physics::RagdollHandle handle, uint32_t j
     });
 }
 
-auto PhysicsContext::TryGetBodyPosition(Physics::BodyHandle handle, JPH::RVec3& outPosition) const noexcept -> bool {
+auto PhysicsContext::BodyPosition(Physics::BodyHandle handle) const noexcept -> std::optional<JPH::RVec3> {
     const auto& world = _impl->world;
-    return ZHLN::Lock(world.sync.shadowLock, [&] -> bool {
+    return ZHLN::Lock(world.sync.shadowLock, [&] -> std::optional<JPH::RVec3> {
         if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
-            return false;
+            return std::nullopt;
         }
         if (!Physics::GetSlotPredicate(world.LoadSlotState(handle.index)).isActive) {
-            return false;
+            return std::nullopt;
         }
         const uint32_t dense = world.slotToDense[handle.index];
         if (dense >= world.count.load(std::memory_order::acquire)) {
-            return false;
+            return std::nullopt;
         }
         const size_t base = static_cast<size_t>(dense) * 4;
-        outPosition       = JPH::RVec3(world.positions[base], world.positions[base + 1], world.positions[base + 2]);
-        return true;
+        return JPH::RVec3(world.positions[base], world.positions[base + 1], world.positions[base + 2]);
     });
 }
 
-auto PhysicsContext::TryGetBodyState(Physics::BodyHandle handle, Physics::BodyStateSnapshot& outState) const noexcept -> bool {
+auto PhysicsContext::BodyState(Physics::BodyHandle handle) const noexcept -> std::optional<Physics::BodyStateSnapshot> {
     const auto& world = _impl->world;
-    return ZHLN::Lock(world.sync.shadowLock, [&] -> bool {
+    return ZHLN::Lock(world.sync.shadowLock, [&] -> std::optional<Physics::BodyStateSnapshot> {
         if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
-            return false;
+            return std::nullopt;
         }
 
         const Physics::SlotState slotState = world.LoadSlotState(handle.index);
         if (!Physics::GetSlotPredicate(slotState).isActive) {
-            return false;
+            return std::nullopt;
         }
 
         const uint32_t dense = world.slotToDense[handle.index];
         if (dense >= world.count.load(std::memory_order::acquire)) {
-            return false;
+            return std::nullopt;
         }
+
+        Physics::BodyStateSnapshot outState {};
 
         const size_t base         = static_cast<size_t>(dense) * 4;
         outState.previousPosition = JPH::Vec3(
@@ -986,7 +987,7 @@ auto PhysicsContext::TryGetBodyState(Physics::BodyHandle handle, Physics::BodySt
         outState.currentRotation = JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
         outState.isCharacter     = slotState == Physics::SlotState::Character;
         outState.valid           = true;
-        return true;
+        return outState;
     });
 }
 

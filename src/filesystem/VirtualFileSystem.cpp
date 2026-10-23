@@ -195,9 +195,8 @@ bool VirtualFileSystem::LoadSync(LoadRequest& request) {
     return request.success;
 }
 
-bool VirtualFileSystem::TryLoadFromDirectories(LoadRequest* req) const {
-    (void)req;
-    return false;
+void VirtualFileSystem::LoadFromDirectories(LoadRequest& req) const {
+    req.success = false;
 }
 
 void VirtualFileSystem::ExecuteLoad(LoadRequest* req) {

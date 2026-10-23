@@ -4,12 +4,14 @@
 #include <HTTP/HTTP.hpp>
 #include <RemoteAsset/AsyncAssetFetcher.hpp>
 #include <RemoteAsset/URLResolver.hpp>
+#include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <cstddef>
 #include <format>
 #include <span>
 #include <utility>
@@ -171,6 +173,29 @@ struct ResponsePolicy {
     return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
 }
 
+// A job keeps a bounded message: it lives on the job and is handed to a caller
+// that may log it, and a candidate list can be long.
+inline constexpr std::size_t kMaxFailureDetailBytes = 400;
+
+/// One candidate URL that did not produce the bytes, and what it answered.
+struct CandidateMiss {
+    std::string url;
+    ErrorCode   error {};
+    //: The answer, already formatted: a status, a transfer category, a
+    //: validator's byte count. Kept beside its own candidate, because the message
+    //: the job reports is made of these.
+    std::string detail;
+};
+
+/// Every candidate a job asked for its bytes: the URL that served them, and the
+/// ones that did not, each with its own error.
+///
+/// This replaces a `std::string` capped at 400 bytes plus a single `ErrorCode`
+/// overwritten by every attempt. The two could describe different candidates --
+/// the code was the last one's, the message started with the first one's -- and a
+/// candidate that failed in between left no trace at all.
+using CandidateBatch = BatchResult<FetchPayload, CandidateMiss>;
+
 } // namespace
 
 AsyncAssetFetcher::AsyncAssetFetcher(DiskCache cache, uint32_t timeoutSeconds)
@@ -289,26 +314,20 @@ void AsyncAssetFetcher::ExecuteJob(FetchJob* job) noexcept {
         return;
     }
 
-    std::string detail;
-    ErrorCode   lastErrorCode = HTTP::HTTPError::ConnectionFailed;
-    const auto  note = [&detail](std::string text) {
-        if (detail.size() >= 400) {
-            return;
-        }
-        if (!detail.empty()) {
-            detail += "; ";
-        }
-        detail += std::move(text);
-    };
+    // One item per candidate, until one of them answers: the payload in the
+    // success bucket ends the search, and the misses explain why it took a mirror.
+    CandidateBatch attempts;
 
     for (const auto& url: job->candidates) {
+        const auto miss = [&attempts, &url](ErrorCode error, std::string detail) {
+            attempts.EmplaceError(CandidateMiss {.url = url, .error = error, .detail = std::move(detail)});
+        };
         bool conditional = job->cached && job->cached->origin.url == url && (EntityTag(job->cached->origin.etag) || !job->cached->origin.lastModified.empty());
         // At most one unconditional retry: a redirect, unusable 304, or a cache
         // entry evicted/replaced while the request was in flight needs bytes.
         for (int attempt = 0; attempt < 2; ++attempt) {
             if (job->cancelSignal.load(std::memory_order::relaxed)) {
-                note("cancelled");
-                lastErrorCode = HTTP::HTTPError::TransferFailed;
+                miss(HTTP::HTTPError::TransferFailed, "cancelled");
                 break;
             }
             HTTP::Request req {
@@ -328,14 +347,12 @@ void AsyncAssetFetcher::ExecuteJob(FetchJob* job) noexcept {
             }
             auto resp = HTTP::Fetch(req);
             if (!resp) {
-                lastErrorCode   = resp.error();
                 const Error err = resp.error();
-                note(std::format("{}: {} ({})", url, err.Category(), err.Message()));
+                miss(resp.error(), std::format("{} ({})", err.Category(), err.Message()));
                 break;
             }
             if (job->cancelSignal.load(std::memory_order::relaxed)) {
-                note("cancelled");
-                lastErrorCode = HTTP::HTTPError::TransferFailed;
+                miss(HTTP::HTTPError::TransferFailed, "cancelled");
                 break;
             }
             if (conditional && IsRedirect(resp->statusCode)) {
@@ -351,43 +368,39 @@ void AsyncAssetFetcher::ExecuteJob(FetchJob* job) noexcept {
                 if (matches) {
                     const auto policy = OriginFor(*resp, url, &job->cached->origin);
                     if (m_cache.MarkRevalidated(job->canonicalKey, *job->cached, policy.origin, !policy.noStore)) {
-                        job->result = FetchPayload {
-                            .data           = std::move(job->cached->data),
-                            .localCachePath = policy.noStore ? std::filesystem::path {} : m_cache.Root() / job->canonicalKey,
-                            .fromCache      = true,
-                            .sourceUrl      = url,
-                        };
-                        job->cached.reset();
-                        job->isDone.store(true, std::memory_order::release);
-                        return;
+                        attempts.EmplaceSuccess(
+                            FetchPayload {
+                                .data           = std::move(job->cached->data),
+                                .localCachePath = policy.noStore ? std::filesystem::path {} : m_cache.Root() / job->canonicalKey,
+                                .fromCache      = true,
+                                .sourceUrl      = url,
+                            }
+                        );
+                        break;
                     }
                 }
                 if (conditional) {
                     conditional = false;
                     continue;
                 }
-                lastErrorCode = FetchError::HTTPStatus;
-                note(std::format("{}: unsolicited HTTP 304 without a usable cached representation", url));
+                miss(FetchError::HTTPStatus, "unsolicited HTTP 304 without a usable cached representation");
                 break;
             }
             if (resp->statusCode == 404 || resp->statusCode == 410) {
                 if (!job->cached || job->cached->origin.url.empty() || job->cached->origin.url == url) {
                     m_cache.Invalidate(job->canonicalKey);
                 }
-                lastErrorCode = resp->statusCode == 404 ? FetchError::NotFound : FetchError::HTTPStatus;
-                note(std::format("{}: HTTP {}", url, resp->statusCode));
+                miss(resp->statusCode == 404 ? FetchError::NotFound : FetchError::HTTPStatus, std::format("HTTP {}", resp->statusCode));
                 break;
             }
             // A full GET must yield a complete representation, never a 206
             // partial response or an empty 204 mistaken for an asset.
             if (resp->statusCode != 200) {
-                lastErrorCode = FetchError::HTTPStatus;
-                note(std::format("{}: HTTP {}", url, resp->statusCode));
+                miss(FetchError::HTTPStatus, std::format("HTTP {}", resp->statusCode));
                 break;
             }
             if (job->validator != nullptr && !job->validator(resp->body)) {
-                lastErrorCode = FetchError::Rejected;
-                note(std::format("{}: {} byte(s) the validator rejected", url, resp->body.size()));
+                miss(FetchError::Rejected, std::format("{} byte(s) the validator rejected", resp->body.size()));
                 break;
             }
 
@@ -398,24 +411,43 @@ void AsyncAssetFetcher::ExecuteJob(FetchJob* job) noexcept {
             } else {
                 writeOk = m_cache.WriteAtomic(job->canonicalKey, resp->body, policy.origin);
             }
-            job->result = FetchPayload {
-                .data           = std::move(resp->body),
-                .localCachePath = writeOk ? m_cache.Root() / job->canonicalKey : std::filesystem::path {},
-                .fromCache      = false,
-                .sourceUrl      = url,
-            };
-            job->cached.reset();
-            job->isDone.store(true, std::memory_order::release);
-            return;
+            attempts.EmplaceSuccess(
+                FetchPayload {
+                    .data           = std::move(resp->body),
+                    .localCachePath = writeOk ? m_cache.Root() / job->canonicalKey : std::filesystem::path {},
+                    .fromCache      = false,
+                    .sourceUrl      = url,
+                }
+            );
+            break;
         }
-        if (job->cancelSignal.load(std::memory_order::relaxed)) {
+        if (attempts.HasSuccesses() || job->cancelSignal.load(std::memory_order::relaxed)) {
             break;
         }
     }
 
     job->cached.reset();
-    job->lastError = detail.empty() ? std::string("no candidate answered") : std::move(detail);
-    job->result    = std::unexpected(lastErrorCode);
+
+    // A candidate answered, or none did; either way the batch is the whole story.
+    // The error code comes from the first miss -- the primary URL's -- while the
+    // message names every candidate that was tried, so a mirror's failure can no
+    // longer replace the reason the primary one failed.
+    if (!attempts.successes.empty()) {
+        job->result = std::move(attempts.successes.front());
+    } else {
+        std::string detail;
+        attempts.ForEachError([&detail](const CandidateMiss& candidate) {
+            if (detail.size() >= kMaxFailureDetailBytes) {
+                return;
+            }
+            if (!detail.empty()) {
+                detail += "; ";
+            }
+            detail += std::format("{}: {}", candidate.url, candidate.detail);
+        });
+        job->lastError = detail.empty() ? std::string("no candidate answered") : std::move(detail);
+        job->result    = std::unexpected(attempts.FirstError() != nullptr ? attempts.FirstError()->error : ErrorCode(HTTP::HTTPError::ConnectionFailed));
+    }
     job->isDone.store(true, std::memory_order::release);
 }
 

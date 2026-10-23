@@ -12,15 +12,15 @@
 namespace ZHLN::Vk {
 
 struct ImageWrite {
-    VkImageViewCreateInfo viewInfo {};
-    VkImageLayout         layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    ImageView     view {};
+    VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     ImageWrite() = default;
-    explicit ImageWrite(const VkImageViewCreateInfo& info, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
-        viewInfo(info), layout(imageLayout) {
+    explicit ImageWrite(const ImageView& imageView, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
+        view(imageView), layout(imageLayout) {
     }
     explicit ImageWrite(const ImageSlice& source, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
-        viewInfo(source.ViewInfo()), layout(imageLayout) {
+        view(source.View()), layout(imageLayout) {
     }
 };
 
@@ -49,7 +49,7 @@ namespace TemplatedDetail {
 template <ZHLN::StringLiteral Name, bool IsUnread, typename T>
 [[nodiscard]] constexpr auto MakeNamedSlot(T&& value) noexcept {
     using U = std::remove_cvref_t<T>;
-    if constexpr (std::is_same_v<U, VkImageViewCreateInfo>) {
+    if constexpr (std::is_same_v<U, ImageView>) {
         return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value}};
     } else if constexpr (std::is_same_v<U, ImageSlice>) {
         return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value}};
@@ -57,10 +57,10 @@ template <ZHLN::StringLiteral Name, bool IsUnread, typename T>
         return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.Raw()}};
     } else if constexpr (requires(const U& resource) { resource.AsSlice(); }) {
         return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.AsSlice()}};
-    } else if constexpr (requires(const U& resource) { resource.ViewInfo(); }) {
-        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.ViewInfo()}};
-    } else if constexpr (requires(const U& resource) { resource.image.ViewInfo(); }) {
-        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.image.ViewInfo()}};
+    } else if constexpr (requires(const U& resource) { resource.View(); }) {
+        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.View()}};
+    } else if constexpr (requires(const U& resource) { resource.image.View(); }) {
+        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.image.View()}};
     } else if constexpr (requires(const U& buffer) {
                              buffer.Handle();
                              buffer.Size();
@@ -89,17 +89,17 @@ struct NamedSampler {
     static constexpr auto literal = Name;
     static constexpr bool unread = IsUnread;
 
-    SamplerConfig value {};
+    Sampler value {};
 };
 
 template <ZHLN::StringLiteral Name>
-[[nodiscard]] constexpr auto SamplerSlot(SamplerConfig config) noexcept -> NamedSampler<Name> {
-    return {.value = config};
+[[nodiscard]] constexpr auto SamplerSlot(Sampler sampler) noexcept -> NamedSampler<Name> {
+    return {.value = sampler};
 }
 
 template <ZHLN::StringLiteral Name>
-[[nodiscard]] constexpr auto UnreadSampler(SamplerConfig config) noexcept -> NamedSampler<Name, true> {
-    return {.value = config};
+[[nodiscard]] constexpr auto UnreadSampler(Sampler sampler) noexcept -> NamedSampler<Name, true> {
+    return {.value = sampler};
 }
 
 }

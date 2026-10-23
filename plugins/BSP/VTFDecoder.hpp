@@ -37,10 +37,20 @@ struct DecodedImage {
     uint32_t               width  = 0;
     uint32_t               height = 0;
     std::vector<std::byte> rgba8; // 4 bytes per pixel: R, G, B, A
+    VTFImageFormat         sourceFormat = VTFImageFormat::None; // high-res format the pixels were decoded from
 };
 
 // Decodes a Valve Texture Format (.vtf) buffer to RGBA8 pixels.
 // Extracts the highest-resolution mipmap (mip 0).
 [[nodiscard]] auto DecodeVTF(std::span<const std::byte> vtfBytes) -> std::expected<DecodedImage, ErrorCode>;
+
+// Rewrites a decoded bumpmap into straight tangent-space RGB normals in place.
+// Source's DXT5 bumpmaps use the DXT5nm convention -- X in alpha, Y in green,
+// Z reconstructed -- because the BC3 alpha block is the only channel with the
+// precision a normal needs. Sampling those pixels as RGB yields near-flat
+// garbage, so the swizzle happens once at decode, before upload. Bumpmaps the
+// format cannot encode that way (DXT1, uncompressed) are already RGB and are
+// left untouched.
+void ConvertSourceNormalInPlace(DecodedImage& image) noexcept;
 
 } // namespace ZHLN::BSP

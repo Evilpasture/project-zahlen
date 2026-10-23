@@ -56,6 +56,7 @@
 #include <AssetCooking/RadianceDecoder.hpp>
 #include <glTF/GLTFImporter.hpp>
 #include <json/JSONSchema.hpp>
+#include <netpbm/PpmEncoder.hpp>
 
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Vec3.h>
@@ -153,7 +154,7 @@ std::string GetString(const ZHLN::ReflectJSON::ValueReader& reader, std::string_
     return std::string(field->GetString().value_or(""));
 }
 
-// A raw ValueReader walk rather than ReflectJSON::TryParse<FidelityScenario>:
+// A raw ValueReader walk rather than ReflectJSON::Parse<FidelityScenario>:
 // the reflected parser treats a missing key as an error by default, and the
 // suite's scenario files are not guaranteed to carry every key this harness
 // knows. Reading each field with a default accepts all of them.
@@ -224,6 +225,18 @@ auto ReadFileBytes(std::string_view path) -> std::optional<std::vector<uint8_t>>
         return std::nullopt;
     }
     return bytes;
+}
+
+// The capture's encoder produces bytes; the harness is the layer that owns a
+// path, so the file I/O lives here rather than in the renderer.
+[[nodiscard]] bool WriteBytes(std::string_view path, std::span<const uint8_t> bytes) {
+    std::ofstream file {std::string(path), std::ios::binary};
+    if (!file) {
+        ZHLN::Log("[Fidelity] Cannot open '{}' for writing.", path);
+        return false;
+    }
+    file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    return file.good();
 }
 
 // Imports bytes and spawns the parts. Returns the number of spawned entities,
@@ -364,6 +377,18 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     // IBL and nothing else.
     gfx.rayTracing.enableReflections = false;
     gfx.rayTracing.enableShadows     = false;
+    // Diffuse GI off as well. ApplyPreset(High) above turned it ON, and
+    // nothing below turns it back off. Left on it breaks this harness's own
+    // contract in two ways at once: the lighting pass swaps the environment
+    // SH for the DDGI probe (lighting.slang: SampleDDGIOrSH, gated on
+    // frame.ddgiParams.w) and the RTGI composite adds screen-space bounce on
+    // top of the deferred lighting. Both make a conformance capture depend on
+    // the engine's live GI instead of on the scenario's environment, which is
+    // exactly what "giMode = 0 ... leaving diffuse SH of the sunless
+    // panorama ... No screen-space bounce light is added" forbids. It also
+    // couples every golden comparison to the DDGI/RTGI shaders, so an
+    // unrelated change to the probe path moves every scenario.
+    gfx.rayTracing.enableDiffuseGI   = false;
 
     // Environment: the baked SH + prefiltered probe are scaled by
     // ambientExposure in the shading; conformance wants 1:1.
@@ -858,12 +883,25 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
 
-    const auto capture = engine->GetRenderContext().CaptureScreenshotPPM(config.outputPath);
+    const auto capture = engine->GetRenderContext().CaptureFrame();
     if (!capture) {
         ZHLN::Log("[Fidelity] Capture failed: {}", capture.error());
         return EXIT_FAILURE;
     }
 
-    ZHLN::Log("[Fidelity] Wrote {}.", config.outputPath);
+    // Alpha is the caller's choice, not the renderer's: a `.pam` output asks
+    // for the RGBA form so omit-background pixels survive to the comparison;
+    // anything else stays opaque P6.
+    const bool                 outputKeepsAlpha = std::string_view(config.outputPath).ends_with(".pam");
+    const std::vector<uint8_t> encoded          = ZHLN::Netpbm::EncodePPM(*capture, outputKeepsAlpha);
+    if (encoded.empty()) {
+        ZHLN::Log("[Fidelity] Capture produced no encodable pixels.");
+        return EXIT_FAILURE;
+    }
+    if (!WriteBytes(config.outputPath, encoded)) {
+        return EXIT_FAILURE;
+    }
+
+    ZHLN::Log("[Fidelity] Wrote {} ({}x{}, {} bytes).", config.outputPath, capture->extent.width, capture->extent.height, encoded.size());
     return EXIT_SUCCESS;
 }

@@ -3,6 +3,9 @@
 
 module gpu_push_constants;
 
+import particles;
+import uniforms;
+
 // Push-constant payloads shared by the shaders and the generated C++ GPU ABI.
 // Keep every host-visible field public so gpu_abi.slang can reflect each type.
 
@@ -144,4 +147,171 @@ public struct BlitPushConstants {
     public int tonemapper;
     public float3 colorFilter;
     public float _padding;
+};
+
+// --- The remaining push-payload exports (migrated 2026-10-18 from the host
+// mirrors in src/render/PassPayloads.hpp and the individual pass files).
+// Names are the host-visible C++ names; each replaces a per-shader local
+// struct that duplicated this layout in C++.
+
+public struct ShadowAtrousPushConstants {
+    public uint  stepSize;
+    public float phiDepth;
+    public float phiNormal;
+    public float temporalWeight;
+};
+
+public struct FXAAPushConstants {
+    public float rcpFrameX;
+    public float rcpFrameY;
+    public float subpix;
+    public float edgeThreshold;
+    public float edgeThresholdMin;
+    public float _pad;
+};
+
+public struct MLAAPushConstants {
+    public float rcpFrameX;
+    public float rcpFrameY;
+    public float threshold;
+    public uint  maxSearchSteps;
+};
+
+public struct TAAPushConstants {
+    public float feedback;
+};
+
+public struct RtrHalfPushConstants {
+    public uint2 halfRes;
+    public uint2 _pad;
+};
+
+public struct RtgiHalfPushConstants {
+    public uint2 halfRes;
+    public uint2 _pad;
+};
+
+public struct DdgiTracePushConstants {
+    public uint  totalProbes;
+    public uint  raysPerProbe;
+    public float maxRayDistance;
+    public uint  _pad;
+};
+
+public struct DdgiUpdatePushConstants {
+    public uint  totalProbes;
+    public uint  raysPerProbe;
+    public float hysteresis;
+    public float depthSharpness;
+};
+
+public struct VolumetricFogPushConstants {
+    public float density;
+    public float heightFalloff;
+    public float heightOffset;
+    public float anisotropy;
+
+    public float3 scatteringColor;
+    public float noiseScale;
+
+    public float3 absorptionColor;
+    public float noiseSpeed;
+
+    public float3 emissiveColor;
+    public float noiseIntensity;
+
+    public uint _pad0;
+    public uint enableNoise;
+    public uint _pad1;
+    public uint _pad2;
+};
+
+public struct VolumetricLightInjectPushConstants {
+    public float scatteringIntensity;
+    public float ambientIntensity;
+    public float phaseAnisotropy;
+    public uint  enableShadows;
+};
+
+public struct VolumetricTemporalPushConstants {
+    public float temporalWeight;
+    public float clampStrength;
+    public uint  resetHistory;
+    public uint  _pad;
+};
+
+public struct BRDFLUTPush {
+    public uint width;
+    public uint height;
+    public uint sampleCount;
+};
+
+public struct IBLBakePush {
+    public uint64_t outAddr;
+    public uint     width;
+    public uint     height;
+    public float    roughness;
+    public uint     face;
+    public uint     sampleCount;
+    public uint     hasRadiance;
+    public float4   skyZenith;
+    public float4   skyHorizon;
+    public float4   skyGround;
+    public float4   sunDir;
+};
+
+public struct SMAALUTPush {
+    public uint width;
+    public uint height;
+    public uint mode;
+};
+
+public struct SmaaPushConstants {
+    public float4 rtMetrics;
+};
+
+public struct HiZPushConstants {
+    public float rcpSrcWidth;
+    public float rcpSrcHeight;
+    public uint  srcWidth;
+    public uint  srcHeight;
+    public uint  isFirstPass;
+};
+
+public struct ParticleRenderPushConstants {
+    public uint64_t         particleBufferAddr;
+    public ParticleAlignment alignment;
+    public uint             textureIndex;
+};
+
+public struct LinePushConstants {
+    public float4x4 viewProj;
+    public uint64_t vertexBufferAddress;
+};
+
+public struct DecalPushConstants {
+    public float4x4 worldMatrix;
+    public float4x4 clipToLocal;
+    public uint     albedoIndex;
+    public uint     normalIndex;
+    public float    roughness;
+    public float    metallic;
+};
+
+public struct ShadowTilePush {
+    public float4x4 viewProj;
+};
+
+public struct MeshParticleComputePush {
+    public uint64_t                particleBufferAddr;
+    public uint                    particleCount;
+    public float                   deltaTime;
+    public MeshParticleEmitterParams p;
+};
+
+public struct ComputePushConstants {
+    public uint64_t            particleBufferAddr;
+    public uint                particleCount;
+    public float               deltaTime;
+    public ParticleEmitterParams p;
 };

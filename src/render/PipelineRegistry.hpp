@@ -28,13 +28,17 @@ enum class MaterialPipelineFamily : uint8_t { Deferred, Forward };
 class PipelineRegistry {
   public:
     PipelineRegistry(
-        Vk::Context&           ctx,
+        Vk::Context&             ctx,
+        Vk::HeapManager&         heapManager,
         Vk::PipelineBinaryStore& pipelineBinaries,
-        Vk::HeapMappingBundle& sceneHeapMappings,
-        Vk::GPUDiagnostics&    gpuDiagnostics,
-        Vk::DeletionQueue&     deletionQueue
+        Vk::HeapMappingTable&    sceneHeapMappings,
+        Vk::DeletionQueue&       deletionQueue
     ) noexcept:
-        _ctx(ctx), _pipelineBinaries(pipelineBinaries), _heapMappings(sceneHeapMappings), _diagnostics(gpuDiagnostics), _deletionQueue(deletionQueue) {
+        _ctx(ctx),
+        _heapManager(heapManager),
+        _pipelineBinaries(pipelineBinaries),
+        _heapMappings(sceneHeapMappings),
+        _deletionQueue(deletionQueue) {
     }
     ~PipelineRegistry() {
         RetireAll();
@@ -79,6 +83,8 @@ class PipelineRegistry {
                         Family, VertexShaderModule, MeshShaderModule, PassContract, Vk::MaterialFlags::AdditiveBlend | Vk::MaterialFlags::DepthWrite>(
                         doubleSided
                     );
+                case 5:
+                    return CreateMaterialVariant<Family, VertexShaderModule, MeshShaderModule, PassContract, Vk::MaterialFlags::DepthWrite>(doubleSided);
                 default:
                     return std::unexpected(MaterialCreationError::PipelineCreationFailed);
             }
@@ -98,7 +104,7 @@ class PipelineRegistry {
     static constexpr size_t kGeometryPathCount = 2;
 
     static constexpr size_t kPipelineVariantCount = kFamilyCount * kGeometryPathCount * Vk::k_material_flag_variant_count;
-    static_assert(kPipelineVariantCount == 20);
+    static_assert(kPipelineVariantCount == 24);
 
     [[nodiscard]] static constexpr auto VariantIndex(MaterialPipelineFamily family, bool mesh, Vk::MaterialFlags flags) noexcept -> size_t {
         const size_t geometry = mesh ? 1U : 0U;
@@ -129,10 +135,14 @@ class PipelineRegistry {
             _meshVariantAttempted[index] = true;
         }
 
-        RegisterShaderModules<ShaderModule>();
+        // The shared scene block is materialized per build, not stored: the
+        // registry keeps the 32-byte rows, the arena keeps the driver structs
+        // alive for exactly as long as the pipeline creation reads them.
+        Vk::HeapMappingArena arena {_heapManager};
+        const auto*          mapping = arena.Map(_heapMappings);
         const Vk::PipelineCreateBindings bindings {
-            .vertexMapping   = &_heapMappings.info,
-            .fragmentMapping = &_heapMappings.info,
+            .vertexMapping   = mapping,
+            .fragmentMapping = mapping,
         };
         auto created = Vk::GraphicsPipeline<ShaderModule, PassContract, Flags>::Create(_ctx.Device(), bindings, &_pipelineBinaries);
         if (!created) {
@@ -183,21 +193,13 @@ class PipelineRegistry {
         };
     }
 
-    template <Vk::GraphicsShaderModule ShaderModule>
-    void RegisterShaderModules() const noexcept {
-        ShaderModule::ForEachModule([this](auto moduleTag) {
-            using Module = typename decltype(moduleTag)::type;
-            _diagnostics.RegisterShader(Vk::CreateShaderDesc<Module>(), Module::EntryPoint);
-        });
-    }
-
     void LogMeshPipelineFallback(ErrorCode error) const noexcept;
 
-    Vk::Context&           _ctx;
-    Vk::PipelineBinaryStore& _pipelineBinaries;
-    Vk::HeapMappingBundle& _heapMappings;
-    Vk::GPUDiagnostics&    _diagnostics;
-    Vk::DeletionQueue&     _deletionQueue;
+    Vk::Context&                                    _ctx;
+    Vk::HeapManager&                                _heapManager;
+    Vk::PipelineBinaryStore&                        _pipelineBinaries;
+    Vk::HeapMappingTable&                           _heapMappings;
+    Vk::DeletionQueue&                              _deletionQueue;
     std::array<Vk::Pipeline, kPipelineVariantCount> _sharedPipelines {};
     std::array<bool, kPipelineVariantCount>         _meshVariantAttempted {};
 

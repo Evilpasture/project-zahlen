@@ -6,6 +6,28 @@ module instance_data;
 import vertex_format;
 import gpu_buffer;
 
+// InstanceData.flags layout beyond the material byte (see BuildGPUInstanceData):
+// bit 8 skinned, 9 double-sided, 10 transmission, 11 unlit, 12 mirrored,
+// 13 background layer, 16 viewmodel.
+//
+// Bit 13 is METADATA ONLY. The 3D skybox is imported as ordinary geometry in
+// the same world as the map: placed where the importer authored it, occluded
+// and culled and lit like anything else. The flag stays because infrastructure
+// still needs to know a surface is scenery rather than play space -- the TLAS
+// instance mask (rays skip it, so it never lights the world) and the
+// cascade-shadow filter (a 300 m backdrop must not shade the level).
+public static const uint kInstanceFlagBackground = 1u << 13;
+public static const uint kInstanceFlagAmbientCube = 1u << 20;
+
+// Source's two-world depth remap used to live here: the main world compressed
+// into [0, 0.95] and the skybox layer into [0.95, 1], so a background fragment
+// could never win a depth test no matter where the miniscape sat. That split is
+// retired -- the backdrop is ordinary geometry in the same world now and is
+// ordered by real depth like everything else. The constant is kept at 1.0
+// rather than deleted so every encode/decode site is an identity instead of
+// quietly dividing by a stale split (or by zero).
+public static const float kSkyDepthSplit = 1.0f;
+
 public struct InstanceData {
     public float4x4 world;
     public float4x4 prevWorld;
@@ -85,7 +107,22 @@ public struct InstanceData {
     // layout put it, without an implicit pad either way.
     public float4 specularParams; // rgb: specularColorFactor; a: specularFactor.
     public uint specularTexIndex; // 0xFFFF when absent; slot 15's sampler code and UV row.
-    public uint specularFlags;    // Bit 0: the extension is declared on this material. Bits 1..2: texture mode.
+    public uint specularFlags;    // Bit 0: KHR extension; bits 1..2: texture mode; bits 3..4: deferred reflection flags.
+
+    // Baked diffuse irradiance has its own bindless lane rather than stealing
+    // the AO semantic or one of the sixteen glTF texture-info sampler slots.
+    // It is sampled with VertexSurface.uv1 and the clamp sampler.
+    public uint bakedIrradianceTexIndex; // 0xFFFF when absent.
+    public float bakedIrradianceScale;
+
+    // Ambient cube for instances without a lightmap, +X,-X,+Y,-Y,+Z,-Z linear
+    // radiance. Read only when kInstanceFlagAmbientCube is set. Appended after
+    // existing instance fields so their offsets remain stable.
+    public float4 ambientCube[6];
+
+    // Generic scale for the deferred image-based reflection response. Appended
+    // after the ambient cube to preserve all existing field offsets.
+    public float environmentReflectionFactor;
 };
 
 // Field order is load-bearing: coneCutoff's 4 bytes fill 44..48 so coneAxis
@@ -174,10 +211,17 @@ public extension InstanceData {
             return (this.flags & (1u << 12)) != 0;
         }
     }
+    public property bool hasAmbientCube {
+        [ForceInline]
+        get {
+            return (this.flags & kInstanceFlagAmbientCube) != 0;
+        }
+    }
+
     public property bool isViewmodel {
         [ForceInline]
         get {
-            return ((this.flags >> 16) & 0xFFu) != 0;
+            return (this.flags & (1u << 19)) != 0;
         }
     }
     public property float transmissionFactor {
@@ -212,6 +256,26 @@ public extension InstanceData {
         [ForceInline]
         get {
             return (this.specularFlags >> 1u) & 3u;
+        }
+    }
+    // Optional per-material image-based reflection response, kept deferred so
+    // ambient-cube and baked-light ownership remain intact.
+    public property bool hasEnvironmentReflection {
+        [ForceInline]
+        get {
+            return (this.specularFlags & (1u << 3u)) != 0u;
+        }
+    }
+    public property bool environmentReflectionUsesAlphaMask {
+        [ForceInline]
+        get {
+            return (this.specularFlags & (1u << 4u)) != 0u;
+        }
+    }
+    public property bool hasBakedIrradiance {
+        [ForceInline]
+        get {
+            return this.bakedIrradianceTexIndex != 0xFFFFu;
         }
     }
     // specularColorFactor (linear, clamped to [0, 1] by the importer).

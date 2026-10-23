@@ -16,6 +16,7 @@
 // Engine-free by design: this layer is buildable without the full renderer tree.
 
 #include "BSPRead.hpp"
+#include "BSPVradLightmap.hpp"
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Vertex.hpp>
@@ -27,14 +28,35 @@
 
 namespace ZHLN::BSP {
 
+// Display calibration for live Source entity lights and the legacy VPL
+// approximation only. Native VRAD lightmaps bypass this gain entirely: their
+// RGBExp luxels are authored linear radiance and have their own explicit
+// `sourceLightmapScale` control below.
+inline constexpr float kIngestLevelGain = 7.0f;
+
 // Source `_light` brightness (the 4th component, typically 150-300) is in
-// Source lighting units, not renderer intensity. Passed through raw, every
-// point/spot light lands ~30x too hot (intensity 200 against an engine
-// convention of single digits for point/spot lights and 3-28 for suns) and
-// blows the scene out to white. Dividing by ~30 calibrates a stock
-// brightness-200 room light to engine intensity ~6.7, matching the physical
-// inches->metres rescale (unitScale^2) and Source's authored brightness scale.
-inline constexpr float kSourceBrightnessToEngine = 1.0f / 30.0f;
+// Source lighting units, not renderer intensity. Dividing by ~30 calibrates a
+// stock brightness-200 room light to engine intensity ~6.7, matching the
+// physical inches->metres rescale (unitScale^2) and Source's authored
+// brightness scale; kIngestLevelGain then lifts the pair to display parity.
+inline constexpr float kSourceBrightnessToEngine = kIngestLevelGain / 30.0f;
+
+// VRAD writes a luxel in the same Source light units `_light` brightness is
+// written in: it integrates the authored lights with a per-square-inch
+// falloff and stores the sum with an 8-bit mantissa. That is *not* the
+// renderer's radiance scale, so a bake is off by exactly the unit conversion
+// above whenever it reaches the radiance buffer. `kSourceBrightnessToEngine`
+// is that conversion plus the display gain; a bake already carries the
+// displayed result, so it takes the conversion without the gain.
+//
+// This is applied at the import boundary (ImportOptions::sourceLightmapScale),
+// not inside DecodeVradLuxel: the decoder stays a faithful `c * 2^e` reader
+// for BSPBakeField's VPL fit and for the leaf ambient cubes, while everything
+// that eventually multiplies albedo by VRAD goes through this factor. Left
+// uncalibrated, a baked surface enters the radiance buffer 30x hot, which the
+// tonemapper answers by clipping whole rooms to white and flattening the
+// authored light pools into one sheet.
+inline constexpr float kSourceLuxelToEngineRadiance = kSourceBrightnessToEngine / kIngestLevelGain; // 1 / 30
 
 // Source is Z-up and measures in inches; the engine is Y-up (glTF convention)
 // and measures in metres. The default converts; unitScale lets a caller keep
@@ -43,6 +65,12 @@ struct ImportOptions {
     bool        convertCoordinates   = true;
     float       unitScale            = 0.0254f; // Inches to meters
     bool        includeDisplacements = true;
+    // The map's 3D skybox: the miniscape authored around the sky_camera at
+    // 1/scale size. Off by default. Off means off -- its faces, props and
+    // lights are dropped from the import, and the placement pass that works
+    // out where to put them (the expensive part of the import: it walks every
+    // face's winding) never runs.
+    bool        importSkybox         = false;
     bool        gatherLights         = true;
     bool        buildColliders       = true;
     std::string assetRoot;
@@ -72,6 +100,44 @@ struct ImportOptions {
     // synthesise a fill light when the map offers no light at all. See
     // BSPLighting.hpp's EnforceLightingFloor.
     bool enforceLightingFloor = true;
+
+    // Source's LUMP_LIGHTING[_HDR] is the authoritative diffuse result for
+    // compiled world faces. Build native chart atlases and bind them as baked
+    // irradiance; UV1 is remapped into those atlas pages during import.
+    // This is deliberately independent of occlusionMap and of the renderer's
+    // PBR texture slots.
+    bool     useVradLightmaps    = true;
+    // 2048² RGBA16F is 32 MiB: comfortably below the reusable 64-MiB upload
+    // ring while still grouping a full Source map into only a few pages.
+    uint32_t lightmapAtlasSize   = 2048;
+    uint32_t lightmapAtlasGutter = 2;
+    // Source-lightmap multiplier, published to the renderer as the material's
+    // bakedIrradianceScale. Defaults to the Source-units conversion above, i.e.
+    // the same authored-units -> radiance conversion every live light takes
+    // (without kIngestLevelGain, which exists to lift live lights to display
+    // parity and must never be applied to a bake). Set 1.0f to keep the
+    // authored VRAD magnitude verbatim; against the sample's exposure that
+    // reads roughly 30x hot and clips.
+    float sourceLightmapScale = kSourceLuxelToEngineRadiance;
+    // Multiplier for leaf ambient cubes on props. VRAD's cube samples decode
+    // ~1500x dimmer than the lightmaps (leaf-matched median ratio, p10..p90
+    // about 160..14000; the lightmaps include direct light, so this is an
+    // upper bound on the ambient share), so plain 1500 puts a cube on the
+    // lightmaps' *authored* scale. The lightmaps are then normalized by
+    // kSourceLuxelToEngineRadiance on their way to the renderer, so the cube
+    // path carries the same factor here and the prop/lightmap ratio the 1500
+    // was fitted for survives the calibration: 1500 / 30 = 50. Probes written
+    // through AmbientCubeComponent (the sample's player rig) read this same
+    // option, so they follow automatically.
+    float propAmbientCubeScale = 1500.0f * kSourceLuxelToEngineRadiance;
+
+    // Compatibility-only approximation path. This must remain off whenever
+    // native VRAD lightmaps are enabled: fitting the same bake into ambient +
+    // virtual point lights double-counts authored static direct/indirect light
+    // and keeps clustered lighting needlessly expensive.
+    bool     ingestVradBake = false;
+    uint32_t bakeVplBudget  = 384;
+    float    bakeVplWeight  = 0.5f;
 
     // Restrict the import to one submodel (index into BSPMap::models); -1
     // imports every model not listed in skipModels. Interactive brush
@@ -105,6 +171,16 @@ struct MaterialStreams {
     // leaf on their back side). The whole material group renders double-sided
     // so those walls stop being invisible from the room side.
     bool forceDoubleSided = false;
+
+    // Source's 3D-skybox scenery. Faces land here placed (SkyboxTransform),
+    // and the stream is emitted as its own part per material so the instance
+    // can carry DrawFlags::Background -- the layer that composites behind the
+    // main world instead of racing it in the depth buffer.
+    bool skyboxLayer = false;
+
+    // Valid page ownership is part of the batch key so one draw never samples
+    // a chart from a different VRAD atlas page.
+    uint32_t lightmapPage = kInvalidVradLightmapPage;
 
     [[nodiscard]] auto VertexCount() const noexcept -> uint32_t {
         return static_cast<uint32_t>(positions.size());
@@ -184,6 +260,7 @@ struct EmissiveSurface {
 struct ImportStats {
     uint32_t helperFacesDropped = 0;      // tools/ & compile-flag helpers dropped by design (fog, trigger, skip...)
     uint32_t collisionOnlyFaces = 0;      // invisible-but-solid faces kept in the physics hull
+    uint32_t skyboxFacesDropped = 0;      // 3D-skybox faces, dropped because ImportOptions::importSkybox is off
     uint32_t droppedNoWinding = 0;        // surfedge/edge/vertex indices out of range
     uint32_t droppedDegenerate = 0;       // fewer than 3 unique corners
     uint32_t droppedNoProjection = 0;     // texinfo/texdata index problems (includes tree-only kTexInfoNode faces)
@@ -192,6 +269,11 @@ struct ImportStats {
     uint32_t emissiveFaces = 0;           // faces on a self-illuminated material (lamp panels, screens, signs)
     uint32_t emissiveSurfaces = 0;        // area-light proxies produced from them (after clustering and the cap)
     uint32_t emissiveDroppedCap = 0;      // proxies dropped because maxEmissiveLights was reached
+    uint32_t bakeLuxels = 0;              // legacy VRAD samples decoded by BSPBakeField
+    uint32_t bakeVpls = 0;                // legacy virtual point lights fitted from the bake
+    uint32_t lightmapFaces = 0;           // native Source VRAD charts bound to render batches
+    uint32_t lightmapPages = 0;           // native linear RGBA16F atlas pages
+    uint32_t lightmapRejectedFaces = 0;   // malformed / oversized source charts skipped safely
 };
 
 // Exhaustive bookkeeping for the lighting pass, mirroring ImportStats' role for
@@ -219,6 +301,11 @@ struct LightingDiagnostics {
 struct ImportedMapData {
     std::vector<MaterialStreams> parts;
     std::vector<BspPointLight>   lights;
+
+    // Native decoded VRAD pages. Geometry parts refer to their pages through
+    // MaterialStreams::lightmapPage; BSPImporter uploads them once and binds
+    // the resulting dedicated baked-irradiance material input.
+    VradLightmapAtlas lightmaps;
 
     // Self-illuminated surfaces, clustered per material and grid cell, in
     // engine space. These are the area-light proxies the PBR path emits and
@@ -263,6 +350,60 @@ struct ImportedMapData {
 // which is what makes it usable as an emissive gate. Exposed so the importer
 // adapter can run the same probe the geometry pass does.
 [[nodiscard]] auto TexDataReflectivityLuma(const BSPMap& map, const DFace& face) noexcept -> float;
+
+// Source's 3D skybox: background scenery compiled at 1/scale size around the
+// `sky_camera` entity, rendered by the engine at full size around the player's
+// eye. Importing it at its raw compile coordinates leaves the whole cluster
+// floating above the map (for gm_murder_drones: ~7k faces at source z 2500+,
+// 78 m over the play space) and parks its fixture lights in the void. The
+// transform maps skybox points into world space the way the engine draws the
+// sky: world = anchor + R * (p - skyOrigin) * scale, anchored at the player
+// start so the scenery surrounds the play boundaries. All source-space.
+struct SkyboxTransform {
+    // A sky_camera exists, so the membership test below is meaningful.
+    bool  active = false;
+    // Whether that content belongs in the import (ImportOptions::importSkybox).
+    // Off keeps `active` and the membership -- a caller needs them to
+    // recognise skybox content -- but nothing is placed, and callers drop
+    // whatever the membership matches.
+    bool  enabled = true;
+    float origin[3] = {0.0f, 0.0f, 0.0f}; // sky_camera origin
+    // World point the sky_camera maps to: the player's eye. The authored
+    // skybox ground sits BELOW the sky_camera (gm_murder_drones: 4..37 u), so
+    // the miniscape's floor always ends up below the eye and never crosses the
+    // horizon in front of the backdrop. Keep it that way -- lifting the anchor
+    // to "ground" the miniscape puts its terrain above the eye, where it
+    // rasterizes as a wall across the skybox and, being in the TLAS, falsely
+    // shadows the world's sun rays.
+    float anchor[3] = {0.0f, 0.0f, 0.0f};
+    float rot[9]    = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // sky_camera angles
+    float scale     = 16.0f;
+    // Membership: near the sky_camera in X/Y and above the z gap that separates
+    // the skybox cluster from the map below it. Derived per map; see .cpp.
+    float zFloor    = 0.0f;
+    float xyHalf    = 4096.0f;
+    // The world's volume, used to keep skybox LIGHT entities out of the play
+    // space: without per-light layers a buried fixture would shine out of the
+    // terrain into the play space, which Source's two-world split never
+    // allows. Geometry is not filtered by it -- the backdrop is placed to
+    // surround the map rather than cut against it (MakeSkyboxTransform).
+    float worldMin[3] = {0.0f, 0.0f, 0.0f};
+    float worldMax[3] = {0.0f, 0.0f, 0.0f};
+    float hiddenMargin = 512.0f;
+};
+
+// `importSkybox` false resolves the membership (which faces belong to the
+// miniscape) but stops before the placement pass, so callers can drop that
+// content without paying for it.
+[[nodiscard]] auto MakeSkyboxTransform(const BSPMap& map, bool importSkybox) noexcept -> SkyboxTransform;
+[[nodiscard]] auto IsSkyboxPoint(const SkyboxTransform& t, const float p[3]) noexcept -> bool;
+// A point in PLACED (transformed source) coordinates: inside the world volume.
+// Guards skybox light entities only; geometry uses the background layer.
+[[nodiscard]] auto IsSkyboxHidden(const SkyboxTransform& t, const float placed[3]) noexcept -> bool;
+void TransformSkyboxPoint(const SkyboxTransform& t, const float p[3], float out[3]) noexcept;
+void TransformSkyboxVector(const SkyboxTransform& t, const float v[3], float out[3]) noexcept; // rotate only
+// A point already known to be skybox content: transform or copy through.
+void SkyboxMapPoint(const SkyboxTransform& t, const float p[3], float out[3]) noexcept;
 
 // One interactive brush submodel (func_door / func_button family) recovered
 // from the entity lump: its model index, whether the entity rotates about a

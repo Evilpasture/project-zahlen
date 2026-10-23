@@ -162,19 +162,6 @@ class SoABlock {
     size_t  _capacity = 0;
 };
 
-#else
-
-// Without P2996 the stream structs cannot be synthesized at all: there is no
-// member list to transform, and the transpiler fallback only rewrites the named
-// field-walking helpers, not aggregate definition. Rather than publish a block
-// that silently moves nothing, this stands in and fails where a caller
-// instantiates it -- the same shape SystemGraph's resolver table uses for a
-// parameter it does not recognize.
-template <typename T>
-class SoABlock {
-    static_assert(!std::is_same_v<T, T>, "SoABlock requires C++26 static reflection (-freflection); this build has none");
-};
-
 #endif
 
 } // namespace ZHLN

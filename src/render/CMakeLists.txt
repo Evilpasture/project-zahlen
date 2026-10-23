@@ -2,6 +2,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 
+# The renderer's translation units. The templated pass families -- the à-trous
+# denoisers, the fullscreen AA nodes and the single-dispatch compute passes --
+# are header-only by design (AtrousDenoisePass.hpp, FullscreenPass.hpp,
+# ComputePass.hpp and their domain descriptor headers) and deliberately do not
+# appear here; every instantiation is compiled through RenderGraphBuild.hpp and
+# pipelines/ComputeSimPipeline.cpp. Shader hot-reload registration lives in
+# init/RenderInitPostProcess.cpp and is unaffected by pass file layout.
 set(RAW_RENDER_SOURCES
     GpuAbi.cpp
     GpuPack.cpp
@@ -39,45 +46,29 @@ set(RAW_RENDER_SOURCES
     pipelines/DeferredPbrPipeline.cpp
     pipelines/UIPipeline.cpp
     pipelines/ReflectionPipeline.cpp
-    features/PostProcessFeature.cpp
     features/ShadowRenderer.cpp
     features/VolumetricFogSystem.cpp
     features/ShadowAtlas.cpp
     passes/SceneDraw.cpp
-    passes/aa/FXAAPass.cpp
-    passes/aa/MLAAPass.cpp
     passes/aa/SMAAPasses.cpp
-    passes/aa/TAAPass.cpp
     passes/culling/ClusterCullingPass.cpp
     passes/culling/HiZGeneratePass.cpp
     passes/forward/ForwardPass.cpp
     passes/forward/OpaqueSceneCopyPass.cpp
     passes/forward/TranslucentPrePass.cpp
     passes/gbuffer/DecalPass.cpp
+    passes/gbuffer/BackgroundGBufferPass.cpp
     passes/gbuffer/GBufferBasePass.cpp
     passes/gbuffer/GBufferResolvePass.cpp
     passes/gbuffer/ViewmodelPass.cpp
     passes/lighting/ClusteredLightingPass.cpp
-    passes/lighting/GtaoPass.cpp
-    passes/lighting/RtShadowPass.cpp
-    passes/lighting/ShadowDenoisePass.cpp
-    passes/lighting/RtrHalfTracePass.cpp
-    passes/lighting/RtrDenoisePass.cpp
-    passes/lighting/RtgiHalfTracePass.cpp
-    passes/lighting/RtgiDenoisePass.cpp
+    passes/lighting/EmissivePass.cpp
     passes/lighting/RtgiCompositePass.cpp
-    passes/lighting/DdgiRayTracePass.cpp
-    passes/lighting/DdgiUpdateAtlasPass.cpp
     passes/lighting/ShadowPass.cpp
     passes/lighting/ReflectionInputs.cpp
     passes/postprocess/BloomPass.cpp
-    passes/postprocess/HdrDenoisePass.cpp
     passes/simulation/MeshParticleUpdatePass.cpp
     passes/simulation/ParticleUpdatePass.cpp
-    passes/volumetric/VolumetricFogInjectPass.cpp
-    passes/volumetric/VolumetricIntegrationPass.cpp
-    passes/volumetric/VolumetricLightInjectPass.cpp
-    passes/volumetric/VolumetricTemporalPass.cpp
 )
 
 zahlen_transpile_sources(RENDER_SOURCES ${RAW_RENDER_SOURCES})
@@ -125,7 +116,9 @@ add_dependencies(zahlen_render zahlen_shader_catalog)
 target_include_directories(zahlen_render PRIVATE "${CMAKE_BINARY_DIR}/generated_shaders")
 add_dependencies(zahlen_render zahlen_gpu_types)
 
-target_compile_definitions(zahlen_render PRIVATE ZHLN_GPU_ABI_MODULE="${SHADER_GPU_ABI_CS_PATH}")
+# No ZHLN_GPU_ABI_MODULE: nothing here #embeds the ABI module's SPIR-V. The
+# generated header (GeneratedGpuTypes.hpp) is the ABI, and GpuAbi.cpp only
+# exports the scene push layout out of it.
 
 target_link_libraries(zahlen_render PRIVATE zahlen_warnings)
 

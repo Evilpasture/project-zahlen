@@ -259,6 +259,55 @@ constexpr float Worley(float x, float y) {
     return Clamp(min_dist, 0.0F, 1.0F);
 }
 
+// ============================================================================
+// Capture Pixel Math
+// ============================================================================
+
+// Decoding a half-float and shaping a linear HDR value for display are
+// arithmetic, so they live with the rest of it. The renderer, the Netpbm
+// encoder and the tests all read the same two functions: they had three copies
+// once, and the copies had drifted. Both are `inline` rather than `constexpr`
+// -- std::ldexp and std::isfinite are not required to be usable in a constant
+// expression, and nothing here needs them to be.
+
+/// Half-float to float, by the IEEE 754 binary16 layout.
+[[nodiscard]] inline auto HalfToFloat(uint16_t bits) noexcept -> float {
+    const uint32_t sign     = (bits >> 15) & 0x0001U;
+    const uint32_t exponent = (bits >> 10) & 0x001FU;
+    const uint32_t mantissa = bits & 0x03FFU;
+
+    if (exponent == 0) {
+        // Subnormal (and zero): no implicit leading 1.
+        return mantissa == 0 ? (sign != 0 ? -0.0F : 0.0F) : (sign != 0 ? -1.0F : 1.0F) * std::ldexp(static_cast<float>(mantissa), -24);
+    }
+    if (exponent == 31) {
+        return sign != 0 ? -INFINITY : INFINITY;
+    }
+    return (sign != 0 ? -1.0F : 1.0F) * std::ldexp(static_cast<float>(mantissa | 0x0400U), static_cast<int>(exponent) - 15 - 10);
+}
+
+/// The filmic curve a linear HDR capture is shown through.
+///
+/// Non-finite inputs are answered explicitly rather than left to IEEE
+/// arithmetic: a half-float readback can legitimately hold +inf (a specular
+/// highlight, or a sun the scene never clamps), and inf/inf in the rational
+/// below is NaN -- which compounds into NaN, then into a cast.
+[[nodiscard]] inline auto AcesFilm(float x) noexcept -> float {
+    if (!(x > 0.0F)) {
+        // Negative, zero, and NaN all sit at the bottom of the film curve.
+        return 0.0F;
+    }
+    if (!std::isfinite(x)) {
+        return 1.0F;
+    }
+    constexpr float a = 2.51F;
+    constexpr float b = 0.03F;
+    constexpr float c = 2.43F;
+    constexpr float d = 0.59F;
+    constexpr float e = 0.14F;
+    return Clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0F, 1.0F);
+}
+
 template <typename T>
 [[nodiscard]] constexpr T Lerp(T a, T b, T t) noexcept {
     if consteval {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/AssetManager.hpp>
+#include <optional>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -109,7 +110,11 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::O
         rgbaPixels[i] = (static_cast<uint32_t>(asset->coverage[i]) << 24) | 0x00FFFFFF;
     }
 
-    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", {asset->atlasWidth, asset->atlasHeight}, rgbaPixels, false);
+    // No mip chain: the atlas packs glyphs side by side, so a generated mip
+    // averages neighbours into each other and any sampled LOD above zero
+    // smears text together. Single-level also pins the sampler at mip 0 no
+    // matter the LOD range the scene sampler uses.
+    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", {asset->atlasWidth, asset->atlasHeight}, rgbaPixels, false, false);
 
     FontAtlas& font     = uiSettings->fontAtlas;
     font                = FontAtlas {};
@@ -325,6 +330,8 @@ auto InstantiateMeshPart(
 
     Entity    e     = reg.Create();
     DrawFlags flags = DrawFlags::None;
+    flags |= part.drawFlags;
+    flags |= params.drawFlags;
     if (part.isSkinned && params.isAnimated) {
         flags |= DrawFlags::Skinned;
     }
@@ -400,9 +407,11 @@ auto InstantiateMeshPart(
     return e;
 }
 
-auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult, float emissiveFactorScale) -> Entity {
+// Conditional policy lives in the call site (whether to spawn at all); the
+// optional is whether a light was created -- no Entity::Null() sentinel.
+auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult, float emissiveFactorScale) -> std::optional<Entity> {
     if (part.defaultMaterial.unlit)
-        return Entity::Null(); // KHR_materials_unlit ignores emissive factors.
+        return std::nullopt; // KHR_materials_unlit ignores emissive factors.
     // Virtual lights approximate authored emission, not the presentation
     // boost chosen by the importer. Fidelity captures never opt into them.
     const float        invImportScale = 1.0f / emissiveFactorScale;
@@ -411,7 +420,7 @@ auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity paren
 
     float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
-        return Entity::Null();
+        return std::nullopt;
     }
 
     JPH::Vec3 localCenter(
@@ -723,11 +732,12 @@ auto InstantiatePrefab(
         }
         spawnedCount++;
 
-        Entity glowEnt = params.emissiveVirtualLights ? TrySpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult, prefab.emissiveFactorScale) :
-                                                        Entity::Null();
-        if (glowEnt != Entity::Null()) {
+        const auto glowEnt = params.emissiveVirtualLights ?
+                                 SpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult, prefab.emissiveFactorScale) :
+                                 std::optional<Entity> {};
+        if (glowEnt) {
             if (outBuffer != nullptr && spawnedCount < maxCount) {
-                outBuffer[spawnedCount] = glowEnt;
+                outBuffer[spawnedCount] = *glowEnt;
             }
             spawnedCount++;
         }

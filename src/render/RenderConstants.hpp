@@ -24,6 +24,12 @@ inline constexpr uint32_t kPassStaticSamplerSlots          = 64;
 
 inline constexpr Color4 kClearColorScene      = {.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f};
 inline constexpr Color4 kClearColorVelocity   = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+// Zero is "no bake owns this pixel": the G-buffer sets a bit only where a VRAD
+// lightmap -- or the leaf ambient cube standing in for one on a prop -- already
+// supplied the ambient, and only a lightmap sets the direct-light bit
+// (Res_BakedMask). Clearing an R8_UINT attachment with a zero Color4 is exact:
+// the bit pattern is 0 whichever member of the clear-value union reads it.
+inline constexpr Color4 kClearColorBakedMask  = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 inline constexpr Color4 kClearColorEmissive   = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 inline constexpr Color4 kClearColorClearcoat  = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 inline constexpr Color4 kClearColorAnisotropy = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f};
@@ -40,6 +46,7 @@ inline constexpr uint32_t kMaxSceneLights = 4096;
 
 enum class Stage : uint8_t {
     MainPass1,
+    SkyboxGBuffer,
     HiZGenerate,
     ClusterCulling,
     MainPass2,
@@ -75,6 +82,12 @@ enum class Stage : uint8_t {
     // absence. These twelve were in that state; the ray-traced lighting stack is
     // most of the GPU's work on this class of hardware and none of it was
     // visible. Stage count must stay <= 64 (see GpuProfiler).
+    //
+    // The templated pass families (AtrousDenoisePass, FullscreenPass,
+    // ComputePass) now assert this lookup at compile time, through
+    // Passes::Detail::kNameProfilesAsStage, so renaming an instantiation fails
+    // the build instead of silently dropping its timing row. Hand-written
+    // passes still rely on this list being kept current by hand.
     OpaqueSceneCopy,
     GTAO,
     DdgiRayTrace,

@@ -1,7 +1,9 @@
 
+import common;
 import ddgi_common;
 import gpu_buffer;
 import instance_data;
+import material_model;
 import math.transform;
 import pbr_helpers;
 import uniforms;
@@ -27,7 +29,7 @@ struct PushConstants {
     int giSamples;
     int enableSSR;
     int enableRTR;
-    int _pad;
+    int translucentSurface;
 };
 [vk::push_constant]
 PushConstants pc;
@@ -44,6 +46,7 @@ ConstantBuffer<FrameUniforms> frame;
 Texture2D brdfLUT;
 SamplerState clampSampler;
 Texture2D<float4> texLighting;
+Texture2D<float> texLightingAo;
 Texture3D<float4> texVoxelIntegrated;
 StructuredBuffer<InstanceData> g_instances;
 
@@ -52,9 +55,6 @@ SamplerState blueNoiseSampler;
 
 Texture2D<float4> texRtrHalf;
 
-Texture2D<float4> texClearcoat;
-Texture2D<float4> texSheen;
-Texture2D<float4> texAnisotropy;
 
 #ifndef DISABLE_RTR
 RaytracingAccelerationStructure tlas;
@@ -101,8 +101,16 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, float3 
     ray.TMax      = maxDist;
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-    q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+    // World first, background layer on miss: the map wins every reflection
+    // pixel it covers even where skybox scenery sits nearer (Source's two
+    // worlds never race in one depth buffer).
+    q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
     while (q.Proceed()) {
+    }
+    if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
+        q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskSkyboxLayer, ray);
+        while (q.Proceed()) {
+        }
     }
 
     if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
@@ -225,6 +233,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 litColor;
     float viewDepth = 250.0f;
 
+    // The translucent composite exists only where the prepass drew a
+    // translucent surface. Everywhere else its job is to mirror the opaque
+    // scene (what a transmitted ray sees behind the glass), never to
+    // re-shade the sky fill -- the opaque pass already composited that.
+    if (pc.translucentSurface != 0 && depth >= 1.0f) {
+        return float4(texInput.SampleLevel(pointSampler, input.uv, 0).rgb, 1.0f);
+    }
+
+    // Pixels no layer drew fall through to the authored sky.
     if (depth >= 1.0f) {
         if (frame.environmentMode == 2) {
             return float4(0.0f, 0.0f, 0.0f, 0.0f);
@@ -233,6 +250,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float3 worldPos = ReconstructWorldPos(input.uv, 1.0f, pc.invViewProj);
         float3 rayDir   = SafeNormalize(worldPos - pc.camPos.xyz);
 
+        // No layer covered the pixel: the authored sky (equirect HDR, env map
+        // or gradient) is the floor of the composite.
         if (frame.environmentMode == 3) {
             // Equirectangular convention matches ibl_bake.slang. The original
             // high-energy disk remains visible, but never enters specular IBL.
@@ -255,11 +274,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         if (frame.fullBright != 0) {
             return float4(litColorRaw.rgb, 1.0f);
         }
-        float4 anisoRaw = texAnisotropy.SampleLevel(pointSampler, input.uv, 0);
-        if (IsGBufferUnlit(anisoRaw.z)) {
-            return float4(litColorRaw.rgb, 1.0f);
-        }
-
         float4 normRoughRaw = texNormalRoughness.SampleLevel(pointSampler, input.uv, 0);
         float roughness     = normRoughRaw.z;
         float metallic      = normRoughRaw.w;
@@ -271,26 +285,23 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         viewDepth       = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
         float3 V = SafeNormalize(pc.camPos.xyz - worldPos, N);
-        float strength = DecodeGBufferAnisotropy(anisoRaw.z);
-        float3 T = strength > 0.0f ? UnpackAnisotropy(anisoRaw.xy, N) : float3(0.0f);
-        float3 B = cross(N, T);
-        float3 R = AnisotropicReflection(N, V, B, roughness, strength);
+        float3 T = N;
+        float3 B = N;
+        float3 R = reflect(-V, N);
 
+        // Opaque G-buffer alpha carries the optional material reflection
+        // scale, including any requested base-color alpha mask. Ordinary
+        // materials store one here.
+        const float environmentReflectionScale = saturate(albedoRaw.a);
         float NdotV = saturate(dot(N, V));
-        // KHR_materials_specular's dielectric response rides in the clearcoat
-        // lanes for a material that has no coat. Sampling it here also feeds
-        // the coat block below, which reads the same word.
-        float4           coatRaw  = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
-        SpecularResponse specular = DecodeSpecularResponse(coatRaw);
-        float3           F0       = lerp(float3(kDielectricF0) * specular.scale, albedoRaw.rgb, metallic);
-        float2           envBRDF  = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
-        // The LUT's A/B terms already integrate Schlick Fresnel over the GGX
-        // lobe: A multiplies F0 and B the grazing value. Applying the grazing
-        // Fresnel again here can wash out dark metal and amplify white glints
-        // on masked foliage and thin chains.
-        float3 FssEss  = F0 * envBRDF.x + float3(EffectiveF90(specular.f90, metallic)) * envBRDF.y;
+        float3 F0 = lerp(float3(kDielectricF0), albedoRaw.rgb, metallic) * environmentReflectionScale;
+        float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
+        float3 FssEss = F0 * envBRDF.x + float3(EffectiveF90(environmentReflectionScale, metallic)) * envBRDF.y;
 
-        float3 R_corr = R;
+        // A rough GGX lobe gathers light around the surface normal rather than
+        // the perfect-mirror ray. Keep R for SSR/RTR; bend only the IBL lookup.
+        float3 R_ibl  = SafeNormalize(lerp(R, N, roughness * roughness), N);
+        float3 R_corr = R_ibl;
         float boxFade = 0.0f;
         if (frame.probeMin.w > 0.0f) {
             float3 boxCenter      = (frame.probeMax.xyz + frame.probeMin.xyz) * 0.5f;
@@ -302,36 +313,30 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         }
 
         if (boxFade > 0.0f) {
-            float3 boxR = BoxParallaxCorrection(worldPos, R, frame.probeMin.xyz, frame.probeMax.xyz, frame.probePos.xyz);
-            R_corr      = lerp(R, boxR, boxFade);
+            float3 boxR = BoxParallaxCorrection(worldPos, R_ibl, frame.probeMin.xyz, frame.probeMax.xyz, frame.probePos.xyz);
+            R_corr      = lerp(R_ibl, boxR, boxFade);
         }
 
-        float ao = litColorRaw.a * anisoRaw.w;
+        float ao = saturate(texLightingAo.Load(int3(uint2(input.pos.xy), 0)));
+        // AO is hemispherical visibility, not opacity. The view-dependent
+        // GGX approximation narrows the occluded part of the specular lobe;
+        // rough lobes converge to AO. If AO really is zero, this is zero at
+        // ALL angles. The separate AO target (not this formula) prevents the
+        // emissive overlay from manufacturing that zero.
+        float specAo = saturate(pow(max(NdotV + ao, 1e-4f), exp2(-16.0f * roughness - 1.0f)) - 1.0f + ao);
 
-        float3 prefilteredColor = SampleAnisotropicEnvironment(texEnvMap, clampSampler, R_corr, roughness, strength) * frame.ambientExposure;
-        float3 baseSpecularIBL = prefilteredColor * FssEss * ao;
+        float3 prefilteredColor = texEnvMap.SampleLevel(clampSampler, R_corr, roughness * 5.0f).rgb * frame.ambientExposure;
+        float3 baseSpecularIBL = prefilteredColor * FssEss * specAo;
 
-        // Independent Charlie layer above metallic-roughness and beneath the
-        // dielectric clearcoat. The existing GGX cube is an IBL approximation;
-        // direct lighting uses Charlie's distribution and visibility.
-        float4 sheenRaw = texSheen.SampleLevel(pointSampler, input.uv, 0);
-        float sheenAtt = SheenAlbedoScaling(sheenRaw.rgb, sheenRaw.a, NdotV, NdotV);
-        float3 sheenIBL = float3(0.0f);
-        if (any(sheenRaw.rgb > 0.0f)) {
-            float3 sheenPref = texEnvMap.SampleLevel(clampSampler, reflect(-V, N), max(sheenRaw.a, 0.2f) * 5.0f).rgb;
-            sheenIBL = sheenPref * frame.ambientExposure * SheenEnvironmentWeight(sheenRaw.rgb, NdotV) * ao;
-        }
-        float coatAtt = 1.0f;
-        float3 coatIBL = float3(0.0f);
-        if (coatRaw.a > 1.0f / 255.0f) {
-            float3 Nc    = UnpackNormalOctahedron(coatRaw.xy * 2.0f - 1.0f);
-            float NcDotV = saturate(dot(Nc, V));
-            float Fc     = ClearcoatFresnel(NcDotV) * coatRaw.a;
-            coatAtt      = saturate(1.0f - Fc);
-            float3 Rc    = reflect(-V, Nc);
-            float3 coatPref = texEnvMap.SampleLevel(clampSampler, Rc, coatRaw.z * 5.0f).rgb * frame.ambientExposure;
-            coatIBL = coatPref * Fc * ao;
-        }
+        // Single-scattering IBL loses substantial energy on fully rough metals.
+        // Return that missing energy through the cosine-weighted environment
+        // irradiance (SH stores irradiance / PI). Restrict this correction to
+        // the metallic share: the separate diffuse pass already shades the
+        // dielectric share and has not been rebalanced for multiscattering.
+        float  Ems  = saturate(1.0f - envBRDF.x - envBRDF.y);
+        float3 Favg = F0 + (1.0f - F0) * (1.0f / 21.0f);
+        float3 Fms  = FssEss * Favg / max(1.0f - Ems * Favg, float3(1e-4f));
+        float3 multiSpecularIBL = EvaluateSH(N, frame.sh) * frame.ambientExposure * Fms * Ems * specAo * metallic;
 
         litColor = litColorRaw.rgb;
 
@@ -345,7 +350,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 #ifndef DISABLE_RTR
             if (wantRTR && roughness < 0.04f) {
                 float3 rtrFallback = float3(0.0f, 0.0f, 0.0f);
-                float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, T, B, strength, confidence, rtrFallback, uint2(input.pos.xy));
+                float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, T, B, 0.0f, confidence, rtrFallback, uint2(input.pos.xy));
 
                 if (confidence > 0.0f) {
                     reflectionColor = rtrFallback;
@@ -376,15 +381,14 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 }
             }
 
-            float3 specReflect = (lerp(baseSpecularIBL, reflectionColor * FssEss, confidence) * sheenAtt + sheenIBL) *
-                                 coatAtt + coatIBL;
+            float3 specReflect = lerp(baseSpecularIBL, reflectionColor * FssEss, confidence);
 
             float horizonOcclusion = saturate(1.0f + dot(R, N));
             horizonOcclusion *= horizonOcclusion;
 
-            litColor += specReflect * horizonOcclusion;
+            litColor += specReflect * horizonOcclusion + multiSpecularIBL;
         } else {
-            litColor += (baseSpecularIBL * sheenAtt + sheenIBL) * coatAtt + coatIBL;
+            litColor += baseSpecularIBL + multiSpecularIBL;
         }
     }
 

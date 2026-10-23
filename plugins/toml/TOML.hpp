@@ -26,7 +26,7 @@
 // Reflection-driven TOML
 //
 //   const std::string text = ZHLN::ReflectTOML::SerializeTOML(scene);
-//   const auto         back = ZHLN::ReflectTOML::TryParse<Scene>(text);
+//   const auto         back = ZHLN::ReflectTOML::Parse<Scene>(text);
 //
 // Same contract as plugins/json/JSONSchema.hpp -- field names come from the
 // themselves, so the type is the schema and there is no second definition to
@@ -389,7 +389,7 @@ auto ParseObject(Value reader) -> std::expected<T, ErrorCode> {
 }
 
 template <typename T>
-auto TryParse(std::string_view tomlText) -> std::expected<T, ErrorCode> {
+auto Parse(std::string_view tomlText) -> std::expected<T, ErrorCode> {
     auto doc = Document::Parse(tomlText);
     if (!doc) {
         return std::unexpected(doc.error());
@@ -398,10 +398,10 @@ auto TryParse(std::string_view tomlText) -> std::expected<T, ErrorCode> {
 }
 
 // Panics on a malformed document. For call sites where a bad document is a
-// programming error (baked-in defaults, tests); use TryParse for user files.
+// programming error (baked-in defaults, tests); use Parse for user files.
 template <typename T>
-auto Parse(std::string_view tomlText) -> T {
-    auto res = TryParse<T>(tomlText);
+auto ParseOrPanic(std::string_view tomlText) -> T {
+    auto res = Parse<T>(tomlText);
     if (!res) [[unlikely]] {
         ZHLN::Panic("Failed to parse TOML for type '{}': {}", ZHLN::Reflect::TypeName<T>(), res.error());
     }

@@ -13,14 +13,13 @@
 // clang-format on
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Arena.hpp>
-#include <Zahlen/Entity.hpp>
 #include <Zahlen/EngineServices.hpp>
+#include <Zahlen/Entity.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
 #include <array>
 #include <cstddef>
 #include <memory>
-#include <vector>
 
 struct cgltf_data;
 struct cgltf_node;
@@ -74,11 +73,20 @@ class ZHLN_API AnimationSystem {
 
     // The optional pose callback uses a raw Registry&, so the graph treats
     // this pass as a structural/wildcard writer even if no callback is set.
-    static void Update(ECS::Query<Components::AnimatorComponent&, const Components::SkeletalMeshComponent,
-                                  const Components::HierarchyComponent, const Components::MeshComponent,
-                                  Components::MorphTargetComponent&, Components::TransformComponent&> query,
-                       ECS::Registry& registry, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt,
-                       ECS::Res<PosePostProcessorPipeline> posePostProcessors, ECS::Local<ScratchStorage> scratchStorage);
+    static void Update(
+        ECS::Query<
+            Components::AnimatorComponent&,
+            const Components::SkeletalMeshComponent,
+            const Components::HierarchyComponent,
+            const Components::MeshComponent,
+            Components::MorphTargetComponent&,
+            Components::TransformComponent&> query,
+        ECS::Registry&                       registry,
+        ECS::ResMut<PoseUploadQueue>         poseUploads,
+        FrameDt                              frameDt,
+        ECS::Res<PosePostProcessorPipeline>  posePostProcessors,
+        ECS::Local<ScratchStorage>           scratchStorage
+    );
 
   private:
     void UpdateAnimatorState(Components::AnimatorComponent& anim, cgltf_data* data, float dt) const noexcept;
@@ -95,4 +103,4 @@ class ZHLN_API AnimationSystem {
     ) const noexcept;
 };
 
-}
+} // namespace ZHLN

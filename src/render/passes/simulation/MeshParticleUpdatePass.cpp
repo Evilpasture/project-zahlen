@@ -6,20 +6,13 @@
 
 namespace ZHLN::Passes {
 
-struct alignas(16) MeshParticleComputePush {
-    VkDeviceAddress           particleBufferAddr;
-    uint32_t                  particleCount;
-    float                     deltaTime;
-    MeshParticleEmitterParams p;
-};
+using MeshParticleComputePush = Slang::MeshParticleComputePush;
 static_assert(GpuAbi::ScenePassPayload<MeshParticleComputePush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void MeshParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
     if (!particles.mesh.pipeline.Valid() || frame.queues.MeshParticleEmitters().empty()) {
         return;
     }
-
-    frame.BindHeapsAndPushFrame(cmd);
 
     for (const auto& emitter: frame.queues.MeshParticleEmitters()) {
         auto* buffer = frame.geometry.Resolve(emitter.gpuBuffer);

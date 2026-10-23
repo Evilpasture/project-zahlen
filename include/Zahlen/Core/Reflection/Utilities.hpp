@@ -62,20 +62,6 @@ consteval auto GetFloatFieldsCount() -> std::size_t {
     return members.size();
 }
 
-#else
-
-template <typename E>
-    requires std::is_enum_v<E>
-constexpr std::string_view EnumToFlagsString(E , std::string& out_buffer) {
-    out_buffer.clear();
-    return "";
-}
-
-template <typename T>
-consteval std::size_t GetFloatFieldsCount() {
-    return 0;
-}
-
 #endif
 
 template <typename T>

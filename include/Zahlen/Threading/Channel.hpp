@@ -8,6 +8,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <cstddef>
+#include <optional>
 #include <cstdlib>
 #include <new>
 #include <queue>
@@ -82,14 +83,17 @@ class Channel {
         return result;
     }
 
-    bool TryPop(T& outMsg) {
-        return ZHLN::Lock(_mutex, [&] {
+    // TryPop keeps its name: `Try` states the waiting policy -- hand back
+    // empty instead of waiting for an item (the blocking counterpart waits).
+    // The optional is what the queue produced, not a duplicate of that policy.
+    auto TryPop() -> std::optional<T> {
+        return ZHLN::Lock(_mutex, [&] -> std::optional<T> {
             if (_queue.empty()) {
-                return false;
+                return std::nullopt;
             }
-            outMsg = std::move(_queue.front());
+            T msg = std::move(_queue.front());
             _queue.pop();
-            return true;
+            return msg;
         });
     }
 

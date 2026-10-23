@@ -1,4 +1,5 @@
 
+import gpu_push_constants;
 import hash;
 import uniforms;
 import volumetric_grid;
@@ -8,27 +9,6 @@ namespace Dispatch {
     [[vk::constant_id(1001)]] const uint SizeY = Volumetric.Height;
     [[vk::constant_id(1002)]] const uint SizeZ = Volumetric.Depth;
 }
-
-struct VolumetricFogPushConstants {
-    float density;
-    float heightFalloff;
-    float heightOffset;
-    float anisotropy;
-
-    float3 scatteringColor;
-    float noiseScale;
-
-    float3 absorptionColor;
-    float noiseSpeed;
-
-    float3 emissiveColor;
-    float noiseIntensity;
-
-    uint _pad0;
-    uint enableNoise;
-    uint _pad1;
-    uint _pad2;
-};
 
 [vk::push_constant]
 VolumetricFogPushConstants fogPC;

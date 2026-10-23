@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "GraphImage.hpp"
 #include <Zahlen/Core/FunctionRef.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <array>
@@ -14,22 +15,6 @@
 #include <string_view>
 
 namespace ZHLN::Vk {
-
-template <size_t N>
-struct ResourceName {
-    std::array<char, N> value {};
-
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
-    constexpr ResourceName(const char (&str)[N]) {
-        for (size_t i = 0; i < N; ++i) {
-            value[i] = str[i];
-        }
-    }
-
-    [[nodiscard]] constexpr std::string_view string_view() const noexcept {
-        return std::string_view(value.data(), N > 0 && value[N - 1] == '\0' ? N - 1 : N);
-    }
-};
 
 template <typename... Ts>
 struct TypeList {
@@ -67,26 +52,9 @@ struct TypeList<> {
 };
 
 template <
-    ResourceName       Name,
-    VkFormat           Format,
-    VkImageAspectFlags Aspect,
-    bool               IsSwapchain  = false,
-    bool               IsPersistent = false,
-    uint32_t           ScaleDivisor = 1,
-    bool               Is3D         = false>
-struct GraphImage {
-    static constexpr auto               name          = Name;
-    static constexpr VkFormat           format        = Format;
-    static constexpr VkImageAspectFlags aspect        = Aspect;
-    static constexpr bool               is_swapchain  = IsSwapchain;
-    static constexpr bool               is_persistent = IsPersistent;
-    static constexpr uint32_t           scale_divisor = ScaleDivisor;
-    static constexpr bool               is_3d         = Is3D;
-};
-
-template <
     typename Image, VkImageLayout Layout, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
-    VkImageLayout FinalLayout = Layout, VkPipelineStageFlags2 FinalStage = Stage, VkAccessFlags2 FinalAccess = Access>
+    VkImageLayout FinalLayout = Layout, VkPipelineStageFlags2 FinalStage = Stage, VkAccessFlags2 FinalAccess = Access,
+    VkColorComponentFlags ChannelMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT>
 struct Usage {
     using Resource                                      = Image;
     static constexpr VkImageLayout         layout       = Layout;
@@ -95,6 +63,7 @@ struct Usage {
     static constexpr VkImageLayout         final_layout = FinalLayout;
     static constexpr VkPipelineStageFlags2 final_stage  = FinalStage;
     static constexpr VkAccessFlags2        final_access = FinalAccess;
+    static constexpr VkColorComponentFlags channel_mask = ChannelMask;
 };
 
 template <typename Image>
@@ -103,6 +72,17 @@ using ColorWrite = Usage<
     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT>;
+
+// Full Vulkan image synchronization is still required: this mask only
+// constrains the pipeline's color writes, not barriers or shader declarations.
+template <typename Image>
+using ColorWriteRGB = Usage<
+    Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT>;
 
 template <typename Image>
 using ShaderRead = Usage<Image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
@@ -227,16 +207,16 @@ struct IsColorAttachment: std::false_type {};
 
 template <
     typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
-    VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess>
-struct IsColorAttachment<Usage<Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess>>: std::true_type {};
+    VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess, VkColorComponentFlags Mask>
+struct IsColorAttachment<Usage<Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess, Mask>>: std::true_type {};
 
 template <typename U>
 struct IsDepthAttachment: std::false_type {};
 
 template <
     typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
-    VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess>
-struct IsDepthAttachment<Usage<Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess>>: std::true_type {};
+    VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess, VkColorComponentFlags Mask>
+struct IsDepthAttachment<Usage<Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess, Mask>>: std::true_type {};
 
 template <typename InList, typename OutList, template <typename> class Predicate>
 struct FilterImpl;
@@ -439,6 +419,17 @@ struct AutoForkRuns;
 template <typename Resources, typename List>
 struct FirstRunOfList;
 
+}
+
+// Public graph contract for pipeline setup. Keep internal traversal details in
+// TemplatedDetail so render code never depends on its implementation namespace.
+template <typename Pass, typename Image>
+consteval VkColorComponentFlags ColorAttachmentWriteMask() {
+    return []<typename... Us>(TypeList<Us...>) consteval -> VkColorComponentFlags {
+        constexpr size_t matches = (size_t(std::is_same_v<typename Us::Resource, Image> && TemplatedDetail::IsColorAttachment<Us>::value) + ... + 0u);
+        static_assert(matches == 1u, "Pass must declare exactly one color write for this attachment");
+        return ((std::is_same_v<typename Us::Resource, Image> && TemplatedDetail::IsColorAttachment<Us>::value ? Us::channel_mask : 0u) | ... | 0u);
+    }(typename Pass::Usages {});
 }
 
 template <typename... Passes>

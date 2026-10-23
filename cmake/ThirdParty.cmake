@@ -265,8 +265,29 @@ set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/meshoptimizer EXCLUDE_FROM_ALL SYSTEM)
 set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-# --- SPIRV-Reflect (tracked in third_party/) ---
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
+# --- SPIRV-Reflect (vendored at extern/SPIRV-Reflect) ---
+# Reflection of compiled SPIR-V for zahlen_vulkan's pipeline layout builder.
+# Upstream's CMake builds its spirv-reflect command-line tools (and install
+# rules) by default; zahlen only embeds the static library, so everything
+# else is forced off before the upstream CMakeLists runs. The static target
+# upstream provides is spirv-reflect-static, not the spirv_reflect target
+# the old third_party/ wrapper defined, so consumers link that name.
+set(SPIRV_REFLECT_EXECUTABLE OFF CACHE BOOL "" FORCE)
+set(SPIRV_REFLECT_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SPIRV_REFLECT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(SPIRV_REFLECT_STATIC_LIB ON CACHE BOOL "" FORCE)
+set(SPIRV_REFLECT_SHARED_LIB OFF CACHE BOOL "" FORCE)
+set(SPIRV_REFLECT_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/extern/SPIRV-Reflect EXCLUDE_FROM_ALL SYSTEM)
+# The old vendored wrapper built this as C11 + PIC; upstream's static target
+# sets neither. PIC is required: the archive is linked into the shared
+# zahlen_engine (through the static zahlen_vulkan).
+set_target_properties(spirv-reflect-static PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON
+)
 
 # --- simdjson (vendored at extern/simdjson) ---
 # plugins/json is its only consumer. Provisioned here like every other extern/
@@ -275,6 +296,20 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
 # plugins/json there. As a subproject simdjson turns its developer mode and
 # install rules off by itself; BUILD_SHARED_LIBS is OFF project-wide, so its
 # simdjson target is a static archive, aliased as simdjson::simdjson.
+#
+# simdjson's own C++26 static-reflection APIs stay OFF, even though the engine
+# is built with -freflection. Since simdjson 5.0 they are auto-detected from
+# the feature-test macros (see simdjson/compiler_check.h) in every TU that
+# includes <simdjson.h>, and simdjson/annotations.h reports misuse with
+# `throw std::meta::exception(...)` in consteval functions. GCC rejects any
+# throw-expression under the project's -fno-exceptions, consteval or not, so
+# plugins/json/JSON.cpp fails to compile despite only using the DOM parser.
+# Zahlen does its own reflection-driven serialisation (JSONSchema.hpp) and
+# never uses simdjson's reflected (de)serialisation, so opt out through
+# upstream's switch: MODE=OFF makes the simdjson target export
+# SIMDJSON_STATIC_REFLECTION=0 PUBLIC, keeping the definition identical for
+# simdjson.cpp and for its consumers.
+set(SIMDJSON_STATIC_REFLECTION_MODE "OFF" CACHE STRING "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/simdjson EXCLUDE_FROM_ALL SYSTEM)
 
 # --- test-harness toggles for vendor projects ---

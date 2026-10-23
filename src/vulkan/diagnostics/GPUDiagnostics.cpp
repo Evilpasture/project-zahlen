@@ -1,56 +1,19 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Rendering.hpp"
 #include "GPUDiagnostics.hpp"
 #include "GPUAddressTracker.hpp"
+#include "Rendering.hpp"
 #include <Zahlen/Log.hpp>
+#include <algorithm>
+#include <array>
 #include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
-#include <string>
 #include <vector>
 
 namespace ZHLN::Vk {
-
-#if !defined(ZHLN_CUSTOM_GPU_DIAGNOSTICS_BACKEND)
-GPUCrashTrackerCallbacks CreateConfiguredGPUCrashTracker(
-    GPUVendor ,
-    VkDevice ,
-    VkPhysicalDevice ,
-    DiagnosticConfig
-) {
-    return {};
-}
-#endif
-
-DebugUtilsTracker::DebugUtilsTracker(VkDevice inDevice, DiagnosticConfig inConfig): config(inConfig), device(inDevice) {
-}
-
-void DebugUtilsTracker::WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const {
-    if (!config.enableMarkers || vkCmdInsertDebugUtilsLabelEXT == nullptr || cmd == VK_NULL_HANDLE || name.empty()) {
-        return;
-    }
-
-    const VkDebugUtilsLabelEXT label = {
-        .sType      = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
-        .pNext      = nullptr,
-        .pLabelName = name.data(),
-        .color      = {0.20F, 0.65F, 1.0F, 1.0F},
-    };
-    vkCmdInsertDebugUtilsLabelEXT(cmd, &label);
-}
-
-void DebugUtilsTracker::RegisterShader(std::span<const uint32_t> , std::string_view ) const {
-}
-
-void DebugUtilsTracker::OnDeviceLost() const {
-}
-
-void DebugUtilsTracker::Shutdown() {
-    device = VK_NULL_HANDLE;
-}
 
 namespace {
 
@@ -59,9 +22,7 @@ void LogFaultAddress(GPUAddressTracker* tracker, std::string_view label, const V
         return;
     }
 
-    ZHLN::Log(
-        "  {}: 0x{:016X} ±{} ({})", label, address.reportedAddress, address.addressPrecision, ZHLN::Reflect::EnumToString(address.addressType)
-    );
+    ZHLN::Log("  {}: 0x{:016X} ±{} ({})", label, address.reportedAddress, address.addressPrecision, ZHLN::Reflect::EnumToString(address.addressType));
 
     if (tracker == nullptr || !tracker->Enabled()) {
         return;
@@ -69,19 +30,17 @@ void LogFaultAddress(GPUAddressTracker* tracker, std::string_view label, const V
 
     const auto symbols = tracker->Resolve(address.reportedAddress);
     if (symbols.empty()) {
-        ZHLN::Log("    -> No live device-address binding covers this address (possibly already unbound).");
+        ZHLN::Log("    -> No live device-address binding covers this address (possibly freed or out-of-bounds).");
         return;
     }
 
     for (const GpuAllocationSymbol& symbol: symbols) {
-        const std::string_view name = symbol.name.empty()
-            ? (symbol.isDriverInternal ? "[Driver-Internal Object]" : "[Unnamed Vulkan Object]")
-            : std::string_view(symbol.name);
+        const std::string_view name   = symbol.name.empty() ? (symbol.isDriverInternal ? "[Driver-Internal Object]" : "[Unnamed Vulkan Object]") :
+                                                              std::string_view(symbol.name);
         const std::string_view origin = symbol.isDriverInternal ? "driver-internal" : "application";
         ZHLN::Log(
-            "    -> {} ({}, type={}, handle=0x{:016X}, base=0x{:016X}, size={} bytes, offset=+0x{:X})",
-            name, origin, ZHLN::Reflect::EnumToString(symbol.objectType), symbol.objectHandle, symbol.baseAddress, symbol.size,
-            address.reportedAddress - symbol.baseAddress
+            "    -> {} ({}, type={}, handle=0x{:016X}, base=0x{:016X}, size={} bytes, offset=+0x{:X})", name, origin,
+            ZHLN::Reflect::EnumToString(symbol.objectType), symbol.objectHandle, symbol.baseAddress, symbol.size, address.reportedAddress - symbol.baseAddress
         );
     }
 }
@@ -121,10 +80,10 @@ void LogShaderAbortMessages(const void* data, uint64_t size) noexcept {
         return;
     }
 
-    const auto*       bytes = static_cast<const uint8_t*>(data);
-    const uint8_t*    cursor = bytes;
-    const uint8_t*    end    = bytes + size;
-    uint32_t          index  = 0;
+    const auto*    bytes  = static_cast<const uint8_t*>(data);
+    const uint8_t* cursor = bytes;
+    const uint8_t* end    = bytes + size;
+    uint32_t       index  = 0;
 
     while (static_cast<uint64_t>(end - cursor) >= sizeof(uint64_t)) {
         uint64_t length = 0;
@@ -165,13 +124,11 @@ void DumpKhrDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string
         ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultReportsKHR count query failed ({})", ZHLN::Reflect::EnumToString(res));
         return;
     }
+
     if (count == 0) {
         ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultReportsKHR returned 0 reports");
     } else {
-        std::vector<VkDeviceFaultInfoKHR> reports(count);
-        for (auto& report: reports) {
-            report.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_KHR;
-        }
+        std::vector<VkDeviceFaultInfoKHR> reports(count, VkDeviceFaultInfoKHR {.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_KHR});
         res = vkGetDeviceFaultReportsKHR(device, 0, &count, reports.data());
         if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
             ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultReportsKHR payload query failed ({})", ZHLN::Reflect::EnumToString(res));
@@ -195,30 +152,33 @@ void DumpKhrDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string
         return;
     }
 
-    VkDeviceFaultShaderAbortMessageInfoKHR abortInfo = {.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_SHADER_ABORT_MESSAGE_INFO_KHR};
-    VkDeviceFaultDebugInfoKHR              debug     = {
-                     .sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_DEBUG_INFO_KHR,
-                     .pNext = &abortInfo,
+    VkDeviceFaultShaderAbortMessageInfoKHR abortInfo {.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_SHADER_ABORT_MESSAGE_INFO_KHR};
+    VkDeviceFaultDebugInfoKHR              debugInfo {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_DEBUG_INFO_KHR,
+        .pNext = &abortInfo,
     };
-    res = vkGetDeviceFaultDebugInfoKHR(device, &debug);
+
+    res = vkGetDeviceFaultDebugInfoKHR(device, &debugInfo);
     if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
         return;
     }
-    if (debug.vendorBinarySize == 0 && abortInfo.messageDataSize == 0) {
+    if (debugInfo.vendorBinarySize == 0 && abortInfo.messageDataSize == 0) {
         return;
     }
 
-    std::vector<uint8_t> binary(debug.vendorBinarySize);
+    std::vector<uint8_t> binary(debugInfo.vendorBinarySize);
     std::vector<uint8_t> abortBytes(abortInfo.messageDataSize);
-    debug.pVendorBinaryData = binary.empty() ? nullptr : binary.data();
-    abortInfo.pMessageData  = abortBytes.empty() ? nullptr : abortBytes.data();
-    res                     = vkGetDeviceFaultDebugInfoKHR(device, &debug);
+    debugInfo.pVendorBinaryData = binary.empty() ? nullptr : binary.data();
+    abortInfo.pMessageData      = abortBytes.empty() ? nullptr : abortBytes.data();
+
+    res = vkGetDeviceFaultDebugInfoKHR(device, &debugInfo);
     if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
         ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultDebugInfoKHR payload query failed ({})", ZHLN::Reflect::EnumToString(res));
         return;
     }
+
     LogShaderAbortMessages(abortInfo.pMessageData, abortInfo.messageDataSize);
-    WriteVendorBinary(debug.pVendorBinaryData, debug.vendorBinarySize, crashDumpPath);
+    WriteVendorBinary(debugInfo.pVendorBinaryData, debugInfo.vendorBinarySize, crashDumpPath);
 }
 
 void DumpExtDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string_view crashDumpPath) noexcept {
@@ -226,8 +186,8 @@ void DumpExtDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string
         return;
     }
 
-    VkDeviceFaultCountsEXT counts = {.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT};
-    VkResult               res    = vkGetDeviceFaultInfoEXT(device, &counts, nullptr);
+    VkDeviceFaultCountsEXT counts {.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT};
+    VkResult               res = vkGetDeviceFaultInfoEXT(device, &counts, nullptr);
     if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
         ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultInfoEXT count query failed ({})", ZHLN::Reflect::EnumToString(res));
         return;
@@ -237,7 +197,7 @@ void DumpExtDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string
     std::vector<VkDeviceFaultVendorInfoEXT>  vendorInfos(counts.vendorInfoCount);
     std::vector<uint8_t>                     vendorBinary(counts.vendorBinarySize);
 
-    VkDeviceFaultInfoEXT info = {
+    VkDeviceFaultInfoEXT info {
         .sType             = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT,
         .pAddressInfos     = addressInfos.empty() ? nullptr : addressInfos.data(),
         .pVendorInfos      = vendorInfos.empty() ? nullptr : vendorInfos.data(),
@@ -260,18 +220,43 @@ void DumpExtDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string
     WriteVendorBinary(info.pVendorBinaryData, counts.vendorBinarySize, crashDumpPath);
 }
 
+} // namespace
+
+void GPUDiagnostics::Create(VkDevice device, GPUAddressTracker* addressTracker, DiagnosticConfig config) noexcept {
+    Shutdown();
+    _device         = device;
+    _addressTracker = addressTracker;
+    _config         = std::move(config);
+    _markersActive  = _config.enableMarkers && vkCmdInsertDebugUtilsLabelEXT != nullptr && _device != VK_NULL_HANDLE;
 }
 
-void DeviceFaultTracker::OnDeviceLost() const noexcept {
-    if (device == VK_NULL_HANDLE) {
+void GPUDiagnostics::Shutdown() noexcept {
+    _device         = VK_NULL_HANDLE;
+    _addressTracker = nullptr;
+    _markersActive  = false;
+    _config         = {};
+}
+
+void GPUDiagnostics::WriteCheckpointSlow(VkCommandBuffer cmd, std::string_view name) const noexcept {
+    const VkDebugUtilsLabelEXT label {
+        .sType      = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pNext      = nullptr,
+        .pLabelName = String128(name),
+        .color      = {0.20F, 0.65F, 1.0F, 1.0F},
+    };
+    vkCmdInsertDebugUtilsLabelEXT(cmd, &label);
+}
+
+void GPUDiagnostics::OnDeviceLost() const noexcept {
+    if (_device == VK_NULL_HANDLE || !_config.enableCrashDumps) {
         return;
     }
 
     if (vkGetDeviceFaultReportsKHR != nullptr) {
-        DumpKhrDeviceFault(device, addressTracker, crashDumpPath);
-        return;
+        DumpKhrDeviceFault(_device, _addressTracker, _config.crashDumpPath);
+    } else if (vkGetDeviceFaultInfoEXT != nullptr) {
+        DumpExtDeviceFault(_device, _addressTracker, _config.crashDumpPath);
     }
-    DumpExtDeviceFault(device, addressTracker, crashDumpPath);
 }
 
-}
+} // namespace ZHLN::Vk

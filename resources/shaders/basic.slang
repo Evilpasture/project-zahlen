@@ -7,10 +7,15 @@ struct PSOutput {
     float4 color : SV_Target0;
     float2 velocity : SV_Target1;
     float4 normalRoughness : SV_Target2;
-    float4 emissive : SV_Target3;
-    float4 clearcoat : SV_Target4;
-    float4 anisotropy : SV_Target5;
-    float4 sheen : SV_Target6;
+    // Baked-light ownership, not a shading input. Res_BakedMask is an R8_UINT
+    // bitfield and lighting.slang is its only consumer:
+    //   bit 0 - a bake supplied this pixel's diffuse ambient,
+    //   bit 1 - that bake owns static *direct* light as well.
+    // Two bits, because the bakes differ in reach: a VRAD lightmap holds direct
+    // and indirect light, a leaf ambient cube holds indirect only. A prop rides
+    // the cube, so it must keep its live sun while still not being given the
+    // analytic SH ambient a second time.
+    uint bakedMask : SV_Target3;
 };
 
 SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
@@ -22,7 +27,7 @@ SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     SceneGeometryVertex output = inst.EvaluateVertex<withMotion>(inst.fetchRasterIndex(vertexId), worldPos);
     output.instanceId = instId;
     float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
-    activeVPPos = mul(activeVP, worldPos);
+    activeVPPos = inst.BandedClipDepth(mul(activeVP, worldPos));
     return output;
 }
 
@@ -48,6 +53,14 @@ ForwardGeometryOutput VSMainForward(uint vertexId: SV_VulkanVertexID, uint insta
     SceneGeometryVertex p = BuildSceneGeometryPayload<false>(vertexId, instanceId, worldPos, activeVPPos);
     p.pos      = activeVPPos;
     return PackForwardOutput(p);
+}
+
+[shader("vertex")]
+EmissiveGeometryOutput VSMainEmissive(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInstanceID) {
+    float4 worldPos, activeVPPos;
+    SceneGeometryVertex p = BuildSceneGeometryPayload<false>(vertexId, instanceId, worldPos, activeVPPos);
+    p.pos      = activeVPPos;
+    return PackEmissiveOutput(p);
 }
 
 void PSShadow(ShadowGeometryOutput input) {
@@ -108,9 +121,9 @@ DielectricResponse ResolveDielectricResponse(InstanceData inst, float2 uv, float
 PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
     PSOutput output;
     MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
-                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+                                                        input.baseColorFactor, float4(0.0f), input.pbrFactors, input.alphaMode);
     ConfigureSceneMaterial(material, input.uv1, input.instanceId);
-    float4 albedo = SampleMaterialAlbedo<ClearCoatMaterial>(material);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
     if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
@@ -122,11 +135,10 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         // this surface in the subsequent opaque scene copy.
         float3 safeNormal = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
         output.color           = albedo;
-        output.emissive        = float4(0.0f);
         output.normalRoughness = float4(PackNormalOctahedron(safeNormal) * 0.5f + 0.5f, 1.0f, 0.0f);
-        output.clearcoat       = float4(0.0f);
-        output.anisotropy      = float4(0.0f, 0.0f, 1.0f, 1.0f); // Reserved G-buffer unlit marker.
-        output.sheen           = float4(0.0f);
+        // Unlit materials never consume ambient or direct light, so they own
+        // neither bit.
+        output.bakedMask       = 0u;
     } else {
         // The masked pass used a higher floor than opaque or translucent scene
         // fragments. Keep the floor in the sampling input, not the material type.
@@ -142,44 +154,41 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         material.geometricNormal    = N * facing;
         material.tangentDirection   = T * facing;
         material.bitangentDirection = B * facing;
-        material.coatParams         = input.coatParams;
-        material.coatTextures       = input.coatTextures;
-        material.anisotropyParams   = input.anisotropyParams;
-        material.anisotropyTexIndex = input.anisotropyTexIndex;
-
-        float3 emissive = SampleMaterialEmissive<ClearCoatMaterial>(material);
-        SurfaceInteraction surface = EvaluateMaterial<ClearCoatMaterial>(material, albedo, emissive);
-        output.color           = float4(surface.albedo, surface.alpha);
-        // Preserve the material's emissive term separately; direct, diffuse
-        // and RTGI illumination are composed in the lighting passes.
-        output.emissive        = float4(surface.emissive, 1.0f);
+        SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, float3(0.0f));
+        // Baked surfaces keep their real G-buffer albedo: zeroing it deleted the
+        // diffuse response of every dynamic light, so flashlights and entities
+        // could only leave specular on a lightmapped wall. What tells the
+        // deferred pass to skip its analytic ambient instead is the ownership
+        // bit below, not a mutilated albedo: the lightmap already contains the
+        // map's static ambient, and PSEmissive adds it back verbatim.
+        // Opaque G-buffer alpha is otherwise unused after alpha testing. Carry
+        // the optional image-based reflection scale there, modulated by the
+        // base-color texture alpha only when the material requests that mask.
+        float environmentReflectionScale = 1.0f;
+        if (input.instanceId != 0xFFFFFFFFu) {
+            const InstanceData instance = scene.g_instances[input.instanceId];
+            if (instance.hasEnvironmentReflection) {
+                environmentReflectionScale = saturate(instance.environmentReflectionFactor) *
+                                    (instance.environmentReflectionUsesAlphaMask ? saturate(albedo.a) : 1.0f);
+            }
+        }
+        output.color           = float4(surface.albedo, environmentReflectionScale);
         float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
         output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
-        // The opaque lighting passes reconstruct F0 from albedo and metallic
-        // and cannot see a material's specular response, so the material pass
-        // carries it out in the clearcoat lanes -- which are empty for every
-        // material that has no coat. See DecodeSpecularResponse.
-        InstanceData inst = scene.g_instances[input.instanceId];
-        float4 coatOutput = surface.clearcoat;
-        if (inst.hasSpecularResponse && coatOutput.a <= 1.0f / 255.0f) {
-            DielectricResponse response = ResolveDielectricResponse(inst, input.uv, input.uv1, input.instanceId);
-            // Lane order is the one DecodeSpecularResponse reads: rgb is the
-            // response as a multiple of the 0.04 baseline -- so the eight bits
-            // keep their resolution there, and a response stronger than the
-            // baseline saturates in this lane while the forward and
-            // transmission paths read the instance and keep it exactly -- the
-            // blue lane carries the payload marker plus f90, and alpha stays
-            // cleared, which is what every other reader of this target has to
-            // keep seeing. Slang has no float4(float3, float, float) overload,
-            // so the lanes are written by name.
-            float4 payload = float4(0.0f);
-            payload.rgb    = response.f0 / kDielectricF0;
-            payload.z      = kSpecularPayloadBase + kSpecularPayloadSpan * saturate(response.f90);
-            coatOutput     = payload;
+        // The instance flags are exactly the cases in which PSEmissive's
+        // additive overlay resolves to a non-zero baked ambient for this pixel:
+        // a VRAD atlas lookup, or the leaf ambient cube that stands in for one.
+        // Both already carry the map's static sky and bounce, so both withhold
+        // the deferred pass's analytic SH ambient; only the atlas also holds
+        // direct light, so only it claims the second bit.
+        uint bakedBits = 0u;
+        if (input.instanceId != 0xFFFFFFFFu) {
+            const InstanceData instance = scene.g_instances[input.instanceId];
+            const bool         lightmap = instance.hasBakedIrradiance;
+            const bool         anyBake  = lightmap || instance.hasAmbientCube;
+            bakedBits                   = (lightmap ? 2u : 0u) | (anyBake ? 1u : 0u);
         }
-        output.clearcoat       = coatOutput;
-        output.anisotropy      = float4(surface.anisotropy.xy, EncodeGBufferAnisotropy(surface.anisotropy.z), surface.anisotropy.w);
-        output.sheen           = surface.sheen;
+        output.bakedMask       = bakedBits;
     }
 
     float currW    = max(input.currClip.w, 0.0001f);
@@ -298,10 +307,41 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
         transmission *= SampleMaterialTexture(tex.w, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerTransmission),
                                               input.samplerCodes, kSamplerTransmission).r;
     }
-    float3 diffuse = albedo * (1.0f - metallic) * scene.frame.ambientExposure * 0.5f;
+    // Ungated for the same reason as PSForward's irradiance: a transmitting
+    // surface is forward-only and gets no bake, so this is its whole ambient.
+    float3 diffuse = albedo * (1.0f - metallic) * EvaluateSH(N, scene.frame.sh) * scene.frame.ambientExposure;
     float3 color = lerp(diffuse, transmitted, transmission);
     color = RgbMix(color, specular, F);
     return float4(min(color, 32768.0f), 1.0f);
+}
+
+// Lit emitters still own a compact G-buffer record. This second raster pass
+// adds just their HDR radiance to LightingGI after deferred lighting, before
+// screen-space reflections consume that lighting. It deliberately shares the
+// alpha-mask test with PSMain/PSForward so discarded texels never contribute.
+float4 PSEmissive(EmissiveGeometryOutput input) : SV_Target0 {
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+    ConfigureSceneMaterial(material, input.uv1, input.instanceId);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
+        discard;
+    }
+    const float3 materialEmission = SampleMaterialEmissive<StandardPBRMaterial>(material);
+    float3       N                = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
+    // Baked irradiance is a diffuse-light transport result, not material
+    // emission. This overlay restores albedo * VRAD on top of the deferred
+    // pass, and it is now purely additive: PSMain wrote bakedMask = 1 for this
+    // pixel, so lighting.slang has already withheld the analytic SH ambient the
+    // bake itself accounts for. Nothing has to be estimated or subtracted here,
+    // and the result no longer depends on ambientExposure.
+    // Base alpha can instead be an envmap mask on an otherwise opaque material;
+    // it controls reflection strength, not diffuse coverage. Only BLEND uses
+    // base alpha as coverage. MASK pixels surviving RejectMaskedAlpha are full
+    // coverage too.
+    const float coverage = (material.alphaMode == 2u) ? albedo.a : 1.0f;
+    const float3 bakedDiffuse = albedo.rgb * SampleBakedIrradiance(input.uv1, N, input.instanceId);
+    return float4((materialEmission + bakedDiffuse) * coverage, 0.0f);
 }
 
 float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {
@@ -313,9 +353,12 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
         discard;
     }
     // BLEND still composites by coverage; OPAQUE and MASK write full alpha.
-    // None of the lit paths (including emissive or fullBright) apply to unlit.
+    // Unlit materials are forward-only. Their base color and emission are both
+    // self-lit terms, so include the emission here instead of the deferred
+    // additive-emission pass used by ordinary lit emitters.
     if (material.isUnlit) {
-        return float4(albedo.rgb, material.alphaMode == 2u ? albedo.a : 1.0f);
+        float3 emissive = SampleMaterialEmissive<StandardPBRMaterial>(material) * albedo.a;
+        return float4(albedo.rgb + emissive, material.alphaMode == 2u ? albedo.a : 1.0f);
     }
     float3 sampledEmissive = SampleMaterialEmissive<StandardPBRMaterial>(material);
     float3 emissive = sampledEmissive * albedo.a;
@@ -344,18 +387,30 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
 
     float2 screenUV = input.pos.xy / max(scene.frame.screenResolution, float2(1.0f, 1.0f));
     float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
-    float3 V        = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
-    float NdotV     = saturate(dot(N, V));
     // Forward shading uses the interpolated normal; its transmission branch
     // applies a separate derivative-based normal map before reaching here.
     material.geometricNormal = N;
+    // The normal map is a material input, not a deferred-pass extra. The
+    // tangent frame has to reach the material evaluation here exactly as it
+    // does in the G-buffer path (basic.slang PSMain), or the shading normal of
+    // every material the pipeline routes forward stays the geometric one and
+    // the two paths disagree on every normal-mapped surface.
+    material.hasTangent         = any(input.tangent.xyz);
+    material.tangentDirection   = T;
+    material.bitangentDirection = B;
     SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, sampledEmissive);
     float roughness = surface.roughness;
     float metallic  = surface.metallic;
     float4 aniso = SampleMaterialAnisotropy(N, T, B, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerAnisotropy), input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
     float3 anisotropicT = aniso.z > 0.0f ? UnpackAnisotropy(aniso.xy, N) : T;
     float3 anisotropicB = cross(N, anisotropicT);
-    float3 R = AnisotropicReflection(N, V, anisotropicB, roughness, aniso.z);
+    // The shading normal is the normal-mapped one. The deferred path reads it
+    // back from the G-buffer, so the forward path has to use the same normal
+    // or the two paths disagree on every normal-mapped surface.
+    float3 Ns     = surface.normal;
+    float3 Vs     = SafeNormalize(scene.frame.camPos.xyz - worldPos, Ns);
+    float  NdotVs = saturate(dot(Ns, Vs));
+    float3 R      = AnisotropicReflection(Ns, Vs, anisotropicB, roughness, aniso.z);
     // KHR_materials_specular scales the dielectric reflectance and lowers the
     // grazing value; both reach the split-sum LUT's two coefficients.
     InstanceData inst   = scene.g_instances[input.instanceId];
@@ -368,22 +423,33 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     }
     float3 F0      = lerp(baseF0, albedo.rgb, metallic);
     float  f90Sum  = EffectiveF90(f90, metallic);
-    float3 F_rough = SpecularFresnelRoughness(NdotV, F0, f90Sum, roughness);
-    float2 envBRDF = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
+    float3 F_rough = SpecularFresnelRoughness(NdotVs, F0, f90Sum, roughness);
+    float2 envBRDF = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotVs, roughness), 0.0f).rg;
     // The split-sum LUT already integrates Schlick's angle-dependent Fresnel.
     // Its A coefficient multiplies F0 and its B coefficient the grazing value,
     // not a second grazing-angle evaluation. Metals keep that value at 1.
     float3 FssEss   = F0 * envBRDF.x + float3(f90Sum) * envBRDF.y;
     float3 prefiltered = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z);
     float3 specularIBL = prefiltered * scene.frame.ambientExposure * FssEss;
-    float3 diffuseIBL  = albedo.rgb * (1.0f - F_rough) * (1.0f - metallic) * scene.frame.ambientExposure * 0.5f;
+    // The diffuse irradiance is the environment's own SH, evaluated exactly as
+    // the deferred path evaluates it (lighting.slang: EvaluateSH(N, frame.sh) *
+    // frame.ambientExposure). A constant 0.5 is a mid-grey placeholder: it
+    // silently replaced the scenario's environment for every material the
+    // pipeline routes forward, which is why those materials no longer match
+    // the environment the goldens were lit with.
+    // Deliberately not gated on the baked-ambient ownership bit that
+    // lighting.slang honors: the forward path never adds a bake, so this SH term
+    // is the only ambient these materials get. Gating it would darken a blended
+    // or transmissive surface that sits on a lightmapped wall.
+    float3 irradiance  = EvaluateSH(Ns, scene.frame.sh) * scene.frame.ambientExposure;
+    float3 diffuseIBL  = albedo.rgb * (1.0f - F_rough) * (1.0f - metallic) * irradiance;
     float3 litBase = (diffuseIBL + specularIBL) * surface.occlusion;
     float3 sheenColor = surface.sheen.rgb;
     if (any(sheenColor > 0.0f)) {
-        float attenuation = SheenAlbedoScaling(sheenColor, surface.sheen.a, NdotV, NdotV);
-        float3 sheenEnv = scene.prefilteredMap.SampleLevel(scene.clampSampler, reflect(-V, N), max(surface.sheen.a, 0.2f) * 5.0f).rgb;
+        float attenuation = SheenAlbedoScaling(sheenColor, surface.sheen.a, NdotVs, NdotVs);
+        float3 sheenEnv = scene.prefilteredMap.SampleLevel(scene.clampSampler, reflect(-Vs, Ns), max(surface.sheen.a, 0.2f) * 5.0f).rgb;
         litBase = litBase * attenuation + sheenEnv * scene.frame.ambientExposure *
-                  SheenEnvironmentWeight(sheenColor, NdotV) * surface.occlusion;
+                  SheenEnvironmentWeight(sheenColor, NdotVs) * surface.occlusion;
     }
     return float4(litBase + emissive, albedo.a);
 }

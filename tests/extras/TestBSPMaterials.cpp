@@ -180,6 +180,9 @@ struct BSPMaterialsTestSuite {
                     "$alphatest" 0
                     "$nocull" 1
                     "$color" "[0.8 0.6 0.4]"
+                    "$envmap" "env_cubemap"
+                    "$envmaptint" "[0.25 0.25 0.25]"
+                    "$basealphaenvmapmask" "1"
                     "%keywords" "cstrike,de_dust"
 
                     "proxies"
@@ -211,6 +214,10 @@ struct BSPMaterialsTestSuite {
             ZHLN::Test::ExpectLt(std::abs(mat.baseColor.y - 0.6f), 1e-3f);
             ZHLN::Test::ExpectLt(std::abs(mat.baseColor.z - 0.4f), 1e-3f);
             ZHLN::Test::ExpectLt(std::abs(mat.baseColor.w - 1.0f), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs(mat.envMapTint.x - 0.25f), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs(mat.envMapTint.y - 0.25f), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs(mat.envMapTint.z - 0.25f), 1e-3f);
+            ZHLN::Test::ExpectTrue(mat.baseAlphaEnvMapMask);
 
             ZHLN::Test::ExpectTrue(mat.Has("$basetexture"));
             ZHLN::Test::ExpectEq(mat.Get("$surfaceprop"), "brick");
@@ -226,6 +233,8 @@ struct BSPMaterialsTestSuite {
             if (windowsPath) {
                 ZHLN::Test::ExpectEq(windowsPath->baseTexture, "models\\props\\de_nuke\\light_wall");
                 ZHLN::Test::ExpectEq(*windowsPath->Find("$BASETEXTURE"), "models\\props\\de_nuke\\light_wall");
+                ZHLN::Test::ExpectFalse(windowsPath->baseAlphaEnvMapMask);
+                ZHLN::Test::ExpectLt(std::abs(windowsPath->envMapTint.x - 1.0f), 1e-3f);
                 ZHLN::Test::ExpectTrue(windowsPath->Find("$color2").has_value());
             }
 
@@ -559,6 +568,31 @@ struct BSPMaterialsTestSuite {
                 std::ofstream f(tempRoot / "materials" / "models" / "props" / "de_nuke" / "concrete.vmt");
                 f << "VertexLitGeneric\n{\n\t\"$surfaceprop\" \"concrete\"\n}\n";
             }
+            // 6. The lamp material a map actually ships: UnlitGeneric plus
+            //    `$selfillum 1`, which is what `lights/white` and `/white007`
+            //    are -- every recessed strip and wall sconce in gm_murder_drones.
+            {
+                std::ofstream f(tempRoot / "materials" / "lights" / "walkway_strip.vmt");
+                f << "UnlitGeneric\n{\n\t\"$basetexture\" \"lights/white_panel\"\n\t\"$selfillum\" \"1\"\n}\n";
+            }
+
+            // 7. A Source prop with a tinted, base-alpha-masked envmap.
+            {
+                std::ofstream f(tempRoot / "materials" / "models" / "props" / "de_nuke" / "chair_env.vmt");
+                f << R"(VertexLitGeneric
+{
+    "$envmap" "env_cubemap"
+    "$envmaptint" "[0.25 0.25 0.25]"
+    "$basealphaenvmapmask" "1"
+})";
+            }
+            // 8. A texlight whose art is not on disk: the emission factor would
+            //    apply with no texture to modulate it, so it has to be dropped
+            //    and the surface left at the missing-texture grey.
+            {
+                std::ofstream f(tempRoot / "materials" / "lights" / "orphan_panel.vmt");
+                f << "UnlitGeneric\n{\n\t\"$basetexture\" \"lights/not_on_disk\"\n\t\"$selfillum\" \"1\"\n}\n";
+            }
 
             // One 4x4 BC1 `lights/white_panel.vtf`: white endpoints, so every
             // sampled texel is 255 and the measured luma is 1.0.
@@ -616,9 +650,29 @@ struct BSPMaterialsTestSuite {
                 return out;
             };
 
+            // The prop envmap material must retain its tint and base-alpha mask
+            // in the deferred material description without opting into the
+            // KHR specular extension's forward-only route.
+            {
+                const Parsed parsed = parseMaterial("models/props/de_nuke/chair_env");
+                if (!ZHLN::Test::ExpectTrue(parsed.ok)) {
+                    return Fail();
+                }
+                ZHLN::MaterialDesc desc = ZHLN::MaterialDesc::Basic();
+                ZHLN::BSP::ApplyVmtLighting(vfs, parsed.material, desc);
+                if (!ZHLN::Test::ExpectTrue(desc.environmentReflectionEnabled) || !ZHLN::Test::ExpectTrue(desc.environmentReflectionAlphaMask) ||
+                    !ZHLN::Test::ExpectEq(desc.alphaMode, uint32_t {0}) || !ZHLN::Test::ExpectFalse(desc.specularEnabled) ||
+                    !ZHLN::Test::ExpectInRange(desc.environmentReflectionFactor, 0.249f, 0.251f) ||
+                    !ZHLN::Test::ExpectInRange(desc.roughness, 0.599f, 0.601f) || !ZHLN::Test::ExpectInRange(desc.metallic, 0.0f, 0.0f)) {
+                    return Fail();
+                }
+            }
+
             // `$selfillum 1` on VertexLitGeneric: full self-illumination scaled
-            // by the shader class (0.55), emitted untinted, and the material is
-            // still lit (a lamp housing receives light like anything else).
+            // by the shader class (0.55) and lifted into HDR radiance so it
+            // survives PBR exposure next to a baked albedo (0.55 * 4), emitted
+            // untinted. The material is still lit: a lamp housing receives
+            // light like anything else.
             for (const std::string_view name: {"models/props/de_nuke/light_wall", "models/props/de_nuke/wall_lamp_lower"}) {
                 const Parsed parsed = parseMaterial(name);
                 if (!ZHLN::Test::ExpectTrue(parsed.ok)) {
@@ -634,17 +688,20 @@ struct BSPMaterialsTestSuite {
 
                 ZHLN::MaterialDesc desc = ZHLN::MaterialDesc::Basic();
                 ZHLN::BSP::ApplyVmtLighting(vfs, parsed.material, desc);
-                if (!ZHLN::Test::ExpectInRange(desc.emissive.x, 0.549f, 0.551f) ||
-                    !ZHLN::Test::ExpectInRange(desc.emissive.y, 0.549f, 0.551f) ||
-                    !ZHLN::Test::ExpectInRange(desc.emissive.z, 0.549f, 0.551f) ||
+                if (!ZHLN::Test::ExpectInRange(desc.emissive.x, 2.199f, 2.201f) ||
+                    !ZHLN::Test::ExpectInRange(desc.emissive.y, 2.199f, 2.201f) ||
+                    !ZHLN::Test::ExpectInRange(desc.emissive.z, 2.199f, 2.201f) ||
                     !ZHLN::Test::ExpectInRange(desc.emissive.w, 0.999f, 1.001f) || !ZHLN::Test::ExpectEq(desc.unlit, false)) {
                     return Fail();
                 }
             }
 
-            // An UnlitGeneric panel is emissive by construction and unlit: no
-            // lighting path at all, dimmed off the bloom threshold, and the
-            // emission comes from the measured texel luminance (1.0 here).
+            // An UnlitGeneric panel is a texlight: unlit (no lighting path at
+            // all), albedo dimmed off the bloom threshold, and the emission
+            // term carried at full HDR strength from its own texel luminance
+            // (1.0 here). The panel used to come out with the dim and no
+            // emission at all, which is what turned every recessed strip in an
+            // imported map into a flat grey tile.
             {
                 const Parsed parsed = parseMaterial("lights/white_panel");
                 if (!ZHLN::Test::ExpectTrue(parsed.ok)) {
@@ -652,8 +709,50 @@ struct BSPMaterialsTestSuite {
                 }
                 ZHLN::MaterialDesc desc = ZHLN::MaterialDesc::Basic();
                 ZHLN::BSP::ApplyVmtLighting(vfs, parsed.material, desc);
-                if (!ZHLN::Test::ExpectEq(desc.unlit, true) || !ZHLN::Test::ExpectInRange(desc.emissive.x, 0.99f, 1.01f) ||
+                if (!ZHLN::Test::ExpectEq(desc.unlit, true) || !ZHLN::Test::ExpectInRange(desc.emissive.x, 3.99f, 4.01f) ||
                     !ZHLN::Test::ExpectInRange(desc.baseColor.x, 0.549f, 0.551f)) {
+                    return Fail();
+                }
+            }
+
+            // A texlight -- UnlitGeneric plus `$selfillum 1`, the map's own
+            // `lights/white` -- keeps the unlit path and the dimmed albedo, and
+            // now also carries the same HDR emission a lit self-illuminated
+            // surface gets. The dropped term is what left every walkway strip
+            // in an imported map as a flat grey tile beside the light pool it
+            // was casting.
+            {
+                const Parsed parsed = parseMaterial("lights/walkway_strip");
+                if (!ZHLN::Test::ExpectTrue(parsed.ok)) {
+                    return Fail();
+                }
+                const auto emission = ZHLN::BSP::ResolveVmtEmission(vfs, parsed.material);
+                if (!ZHLN::Test::ExpectInRange(emission.strength, 0.999f, 1.001f)) {
+                    return Fail();
+                }
+                ZHLN::MaterialDesc desc = ZHLN::MaterialDesc::Basic();
+                ZHLN::BSP::ApplyVmtLighting(vfs, parsed.material, desc);
+                if (!ZHLN::Test::ExpectEq(desc.unlit, true) || !ZHLN::Test::ExpectInRange(desc.emissive.x, 3.99f, 4.01f) ||
+                    !ZHLN::Test::ExpectInRange(desc.emissive.y, 3.99f, 4.01f) ||
+                    !ZHLN::Test::ExpectInRange(desc.emissive.z, 3.99f, 4.01f) ||
+                    !ZHLN::Test::ExpectInRange(desc.baseColor.x, 0.549f, 0.551f)) {
+                    return Fail();
+                }
+            }
+
+            // A texlight whose texture does not resolve emits nothing: with no
+            // picture to modulate it, the factor alone would paint a solid HDR
+            // blob where a missing asset lives.
+            {
+                const Parsed parsed = parseMaterial("lights/orphan_panel");
+                if (!ZHLN::Test::ExpectTrue(parsed.ok)) {
+                    return Fail();
+                }
+                ZHLN::MaterialDesc desc = ZHLN::MaterialDesc::Basic();
+                ZHLN::BSP::ApplyVmtLighting(vfs, parsed.material, desc);
+                if (!ZHLN::Test::ExpectEq(desc.unlit, true) || !ZHLN::Test::ExpectInRange(desc.emissive.x, 0.0f, 0.0f) ||
+                    !ZHLN::Test::ExpectInRange(desc.emissive.y, 0.0f, 0.0f) ||
+                    !ZHLN::Test::ExpectInRange(desc.emissive.z, 0.0f, 0.0f)) {
                     return Fail();
                 }
             }

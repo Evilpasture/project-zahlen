@@ -6,18 +6,17 @@
 // The vertex shader reads one interleaved buffer through its device address
 // and transforms by a view-projection that arrives in the push block, which
 // leaves this shader with no descriptor set at all -- no heap mapping, no
-// binding table, nothing for the host to reflect.
+// binding table, nothing for the host to reflect. It does import the depth
+// constants: the clip it writes must land in the same world band as the scene
+// (kSkyDepthSplit) or the line fails the depth test against world geometry.
 
+import gpu_push_constants;
 import gpu_buffer;
+import instance_data;
 
 struct LineVertex {
     float3 position;
     uint   color; // packed RGBA8, host side Math::PackColor
-};
-
-struct LinePushConstants {
-    float4x4 viewProj;
-    uint64_t vertexBufferAddress;
 };
 
 [vk::push_constant]
@@ -44,6 +43,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID) {
     LineVertex v = vertices.load(vertexId);
 
     output.pos   = mul(pc.viewProj, float4(v.position, 1.0f));
+    output.pos.z *= kSkyDepthSplit; // world band (kSkyDepthSplit)
     output.color = UnpackRGBA8(v.color);
     return output;
 }

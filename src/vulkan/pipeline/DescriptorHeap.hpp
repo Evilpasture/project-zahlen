@@ -3,9 +3,11 @@
 
 #pragma once
 #include "memory/Allocator.hpp"
+#include "DescriptorMapping.hpp"
 
 #include <Zahlen/Threading/Mutex.hpp>
 #include <utility>
+#include <vector>
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
@@ -13,10 +15,55 @@
 
 namespace ZHLN::Vk {
 
+/// Descriptor heap state as a secondary command buffer sees it: two pointers to
+/// binding state it must inherit, because a secondary does not inherit the
+/// bindings of the primary it is executed in.
+///
+/// Both pointers address a DescriptorHeap's own `_bindInfo`, so they stay valid
+/// for as long as the manager that produced them exists, and this type is cheap
+/// enough to pass around while that is true.
+class HeapInheritance {
+  public:
+    constexpr HeapInheritance() noexcept = default;
+
+    constexpr HeapInheritance(const VkBindHeapInfoEXT* samplerBind, const VkBindHeapInfoEXT* resourceBind) noexcept:
+        _samplerBind(samplerBind), _resourceBind(resourceBind) {
+    }
+
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return _samplerBind != nullptr || _resourceBind != nullptr;
+    }
+    explicit constexpr operator bool() const noexcept {
+        return Valid();
+    }
+
+    /// Tells the inheritance chain to link the descriptor heap state, and returns
+    /// the head of the chain. `storage` is only read by the vkBeginCommandBuffer
+    /// this feeds.
+    [[nodiscard]] auto Link(void* pNext, VkCommandBufferInheritanceDescriptorHeapInfoEXT& storage) const noexcept -> void* {
+        if (!Valid()) {
+            return pNext;
+        }
+        storage = {
+            .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
+            .pNext                 = pNext,
+            .pSamplerHeapBindInfo  = _samplerBind,
+            .pResourceHeapBindInfo = _resourceBind,
+        };
+        return &storage;
+    }
+
+  private:
+    const VkBindHeapInfoEXT* _samplerBind  = nullptr;
+    const VkBindHeapInfoEXT* _resourceBind = nullptr;
+};
+
 class ResourceWriteBatch;
 class SamplerWriteBatch;
 class HeapManager;
-struct SamplerConfig;
+class HeapImmediateScope;
+class HeapFrameScope;
+class Sampler;
 struct HeapPassBindings;
 
 enum class DescriptorHeapType : uint8_t {
@@ -101,10 +148,6 @@ class DescriptorHeap {
 
     void Bind(VkCommandBuffer cmd) const noexcept;
 
-    [[nodiscard]] auto GetBindInfo() const noexcept -> VkBindHeapInfoEXT {
-        return _bindInfo;
-    }
-
     void Flush(ResourceWriteBatch& batch) noexcept
         requires(Type == DescriptorHeapType::Resources);
     void Flush(SamplerWriteBatch& batch) noexcept
@@ -166,8 +209,8 @@ class ResourceWriteBatch {
     ResourceWriteBatch(ResourceWriteBatch&& other) noexcept;
     auto operator=(ResourceWriteBatch&& other) noexcept -> ResourceWriteBatch&;
 
-    void AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
-    void AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void AddImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
+    void AddStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
     void AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
     void AddBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
     void AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
@@ -195,7 +238,7 @@ class SamplerWriteBatch {
     SamplerWriteBatch(SamplerWriteBatch&& other) noexcept;
     auto operator=(SamplerWriteBatch&& other) noexcept -> SamplerWriteBatch&;
 
-    void AddSampler(SamplerHandle handle, const SamplerConfig& config) noexcept;
+    void AddSampler(SamplerHandle handle, Sampler sampler) noexcept;
 
     void Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept;
 
@@ -251,45 +294,110 @@ class HeapManager {
         uint32_t       immediateTransientResourceCount
     ) noexcept -> std::expected<void, ErrorCode>;
 
-    void BeginFrame(uint32_t frameIndex) noexcept;
-
-    void BeginImmediate() noexcept;
-
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _resourceHeap.Valid() && _samplerHeap.Valid();
     }
 
-    [[nodiscard]] auto ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto ReserveOffsetAddressedSamplerRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
+    // -------------------------------------------------------------------------
+    // Frame and immediate transactions
+    // -------------------------------------------------------------------------
+    /// Opens one frame's transient partition. The frame owner holds the token for
+    /// the frame's duration; passes never tick the cursor by hand and never see the
+    /// reset, so an early-returning frame cannot leave it stale.
+    [[nodiscard]] auto BeginFrameScope(uint32_t frameIndex) noexcept -> HeapFrameScope;
 
+    /// Opens a bump transaction over the immediate partition. The cursor is
+    /// restored to the value it had on construction, so two live scopes hand out
+    /// disjoint slots instead of silently overwriting each other's descriptors.
+    [[nodiscard]] auto CreateImmediateScope() noexcept -> HeapImmediateScope;
+
+    // -------------------------------------------------------------------------
+    // Registration: slot assignment and descriptor write are one operation, so a
+    // handle that exists is a handle that is already written.
+    // -------------------------------------------------------------------------
+    [[nodiscard]] auto RegisterSampler(Sampler sampler) noexcept -> std::expected<SamplerHandle, ErrorCode>;
+
+    // `SamplerAt(i)` builds the i-th variant, so the caller describes the array
+    // (the nine material address-mode combinations) instead of materializing one.
+    template <typename SamplerAt>
+    [[nodiscard]] auto RegisterSamplerArray(uint32_t count, SamplerAt&& samplerAt) noexcept -> std::expected<SamplerHandle, ErrorCode> {
+        auto base = ReserveSamplerRange(count);
+        if (!base) [[unlikely]] {
+            return base;
+        }
+        for (uint32_t i = 0; i < count; ++i) {
+            BindSampler(SamplerHandle {base->index + i}, samplerAt(i));
+        }
+        return base;
+    }
+
+    [[nodiscard]] auto RegisterImage(const ImageView& view, VkImageLayout layout) noexcept -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] auto RegisterStorageImage(const ImageView& view, VkImageLayout layout) noexcept -> std::expected<StorageImageHandle, ErrorCode>;
+    [[nodiscard]] auto RegisterStorageBuffer(BufferSlice slice) noexcept -> std::expected<StorageBufferHandle, ErrorCode>;
+    [[nodiscard]] auto RegisterUniformBuffer(BufferSlice slice) noexcept -> std::expected<UniformBufferHandle, ErrorCode>;
+    [[nodiscard]] auto RegisterAccelerationStructure(VkDeviceAddress address) noexcept -> std::expected<AccelerationStructureHandle, ErrorCode>;
+
+    // -------------------------------------------------------------------------
+    // Reservation: only for handles whose payload cannot exist yet, because the
+    // mapping that addresses them is baked into a pipeline first. The result is a
+    // typed capability, never a slot index, and it is expected to be bound.
+    // -------------------------------------------------------------------------
+    [[nodiscard]] auto ReserveSampler() noexcept -> std::expected<SamplerHandle, ErrorCode>;
+    [[nodiscard]] auto ReserveImage() noexcept -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] auto ReserveSamplerRange(uint32_t count) noexcept -> std::expected<SamplerHandle, ErrorCode>;
+    [[nodiscard]] auto ReserveImageRange(uint32_t count) noexcept -> std::expected<TextureHandle, ErrorCode>;
+
+    // -------------------------------------------------------------------------
+    // Binding a payload to a handle, registered or reserved.
+    // -------------------------------------------------------------------------
+    void BindSampler(SamplerHandle handle, Sampler sampler) noexcept;
+    void BindImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
+    void BindStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
+    void BindStorageBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
+    void BindUniformBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
+    void BindAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
+
+    void ReleaseSampler(SamplerHandle handle) noexcept;
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>
-    [[nodiscard]] auto AllocateStaticResource() noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resources, Type>, ErrorCode> {
-        return AllocateStaticResourceSlot().transform([](uint32_t idx) { return HeapHandle<DescriptorHeapType::Resources, Type> {idx}; });
-    }
-
-    [[nodiscard]] auto AllocateStaticSampler() noexcept -> std::expected<SamplerHandle, ErrorCode> {
-        return AllocateStaticSamplerSlot().transform([](uint32_t idx) { return SamplerHandle {idx}; });
-    }
-
-    [[nodiscard]] auto AllocateTransientResourceRange(uint32_t count, HeapLifecycle lifecycle) noexcept
-        -> std::expected<uint32_t, ErrorCode>;
-
-    template <VkDescriptorType Type>
-    void FreeStaticResource(HeapHandle<DescriptorHeapType::Resources, Type> handle) noexcept {
+    void ReleaseResource(HeapHandle<DescriptorHeapType::Resources, Type> handle) noexcept {
         FreeStaticResourceSlot(handle.index);
     }
 
-    void FreeStaticSampler(SamplerHandle handle) noexcept {
-        FreeStaticSamplerSlot(handle.index);
-    }
+    // -------------------------------------------------------------------------
+    // Descriptor mapping. The heap owns its stride, padding and partition layout;
+    // these append semantic entries naming slots, and Materialize() is the only
+    // place that turns those slots into byte offsets. Nothing outside ever calls
+    // ResourceStride()/SamplerOffset() and does the arithmetic itself.
+    // -------------------------------------------------------------------------
+    void ApplySamplerMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerHandle handle) const noexcept;
+    void ApplySamplerArrayMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerHandle base) const noexcept;
+    void ApplySampledImageMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, TextureHandle handle) const noexcept;
+    void ApplyBindlessTextureArrayMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, TextureHandle base) const noexcept;
+    void ApplyPushIndexMapping(
+        HeapMappingTable&           mappings,
+        uint32_t                    set,
+        uint32_t                    binding,
+        VkSpirvResourceTypeFlagsEXT mask,
+        uint32_t                    ordinal,
+        uint32_t                    pushOffset
+    ) const noexcept;
 
-    void WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
-    void WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
-    void WriteBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
-    void WriteBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
-    void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
-    void WriteSampler(SamplerHandle handle, const SamplerConfig& config) noexcept;
+    /// Allocates the sampler a reflected set binding addresses, and appends the
+    /// mapping entry that points at it.
+    [[nodiscard]] auto ApplyNewSamplerMapping(
+        HeapMappingTable& mappings, uint32_t set, uint32_t binding, VkSpirvResourceTypeFlagsEXT mask
+    ) noexcept -> std::expected<SamplerHandle, ErrorCode>;
+
+    /// Pairs a freshly allocated sampler with an entry that already maps an image
+    /// (COMBINED_IMAGE_SAMPLER).
+    [[nodiscard]] auto ApplyPairedSamplerMapping(DescriptorMapping& entry) noexcept -> std::expected<SamplerHandle, ErrorCode>;
+
+    /// The API boundary: writes `mappings` into `out` as the driver struct, with
+    /// this heap's offsets and strides baked in. `out` must hold
+    /// `mappings.size()` entries; the caller owns its lifetime, so the result
+    /// never outlives the pipeline build that asked for it.
+    void Materialize(HeapMappingView mappings, std::span<VkDescriptorSetAndBindingMappingEXT> out) const noexcept;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         const VkBufferDeviceAddressInfo info {
@@ -301,6 +409,32 @@ class HeapManager {
 
     template <typename Declared, typename... Slots>
     [[nodiscard]] auto WriteHeapParameters(const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase;
+
+    [[nodiscard]] auto PushDataMaxSize() const noexcept -> VkDeviceSize {
+        return _maxPushDataSize;
+    }
+
+    void BindHeaps(VkCommandBuffer cmd) const noexcept;
+
+    /// A handle on where the heap binding state lives, so a secondary command
+    /// buffer can inherit it. The pointers address the two heaps' own
+    /// `_bindInfo` members, which move only when the manager does -- never a
+    /// copy on the caller's stack, which is what this used to hand out.
+    [[nodiscard]] auto GetInheritance() const noexcept -> HeapInheritance {
+        return HeapInheritance {&_samplerHeap._bindInfo, &_resourceHeap._bindInfo};
+    }
+
+  private:
+    friend class HeapImmediateScope;
+    friend class HeapFrameScope;
+
+    [[nodiscard]] auto AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, ErrorCode>;
+    void               FreeStaticResourceSlot(uint32_t slot) noexcept;
+    [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, ErrorCode>;
+    void               FreeStaticSamplerSlot(uint32_t slot) noexcept;
+
+    [[nodiscard]] auto AllocateTransientResourceRange(uint32_t count, HeapLifecycle lifecycle) noexcept
+        -> std::expected<uint32_t, ErrorCode>;
 
     void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;
     void FlushSamplerBatch(SamplerWriteBatch& batch) noexcept;
@@ -317,24 +451,11 @@ class HeapManager {
     [[nodiscard]] auto SamplerOffset(uint32_t slot) const noexcept -> VkDeviceSize {
         return _samplerHeap.SlotOffset(slot);
     }
-    [[nodiscard]] auto PushDataMaxSize() const noexcept -> VkDeviceSize {
-        return _maxPushDataSize;
-    }
 
-    void BindHeaps(VkCommandBuffer cmd) const noexcept;
-
-    [[nodiscard]] auto GetResourceHeapBindInfo() const noexcept -> VkBindHeapInfoEXT {
-        return _resourceHeap.GetBindInfo();
-    }
-    [[nodiscard]] auto GetSamplerHeapBindInfo() const noexcept -> VkBindHeapInfoEXT {
-        return _samplerHeap.GetBindInfo();
-    }
-
-  private:
-    [[nodiscard]] auto AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, ErrorCode>;
-    void               FreeStaticResourceSlot(uint32_t slot) noexcept;
-    [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, ErrorCode>;
-    void               FreeStaticSamplerSlot(uint32_t slot) noexcept;
+    [[nodiscard]] auto EnterImmediateScope() noexcept -> uint32_t;
+    void               LeaveImmediateScope(uint32_t baseCursor) noexcept;
+    void               EnterFrame(uint32_t frameIndex) noexcept;
+    void               LeaveFrame() noexcept;
 
     ZHLN::Mutex _writeMutex {};
 
@@ -354,6 +475,69 @@ class HeapManager {
 
     uint32_t _frameTransientAllocated     = 0;
     uint32_t _immediateTransientAllocated = 0;
+};
+
+/// RAII transaction over the immediate transient partition. Allocation inside the
+/// scope bumps the partition; dropping the scope puts the cursor back where the
+/// scope found it. Scopes are LIFO, so overlapping passes get disjoint slot
+/// ranges instead of resetting each other's cursor to zero.
+class HeapImmediateScope {
+  public:
+    explicit HeapImmediateScope(HeapManager& owner) noexcept;
+    ~HeapImmediateScope() noexcept;
+
+    HeapImmediateScope(const HeapImmediateScope&)                    = delete;
+    auto operator=(const HeapImmediateScope&) -> HeapImmediateScope& = delete;
+
+    HeapImmediateScope(HeapImmediateScope&& other) noexcept;
+    auto operator=(HeapImmediateScope&& other) noexcept -> HeapImmediateScope&;
+
+    template <typename Declared, typename... Slots>
+    [[nodiscard]] auto WriteParameters(const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase {
+        return _owner->template WriteHeapParameters<Declared>(b, slots...);
+    }
+
+    void Bind(VkCommandBuffer cmd) const noexcept {
+        _owner->BindHeaps(cmd);
+    }
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return _owner != nullptr;
+    }
+
+  private:
+    void Close() noexcept;
+
+    HeapManager* _owner      = nullptr;
+    uint32_t     _baseCursor = 0;
+};
+
+/// RAII transaction for one frame's transient partition. The renderer's frame
+/// scope opens it and drops it when the frame ends; nothing below it resets the
+/// frame cursor.
+class HeapFrameScope {
+  public:
+    HeapFrameScope(HeapManager& owner, uint32_t frameIndex) noexcept;
+    ~HeapFrameScope() noexcept;
+
+    HeapFrameScope(const HeapFrameScope&)                    = delete;
+    auto operator=(const HeapFrameScope&) -> HeapFrameScope& = delete;
+
+    HeapFrameScope(HeapFrameScope&& other) noexcept;
+    auto operator=(HeapFrameScope&& other) noexcept -> HeapFrameScope&;
+
+    [[nodiscard]] auto FrameIndex() const noexcept -> uint32_t {
+        return _frameIndex;
+    }
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return _owner != nullptr;
+    }
+
+  private:
+    void Close() noexcept;
+
+    HeapManager* _owner      = nullptr;
+    uint32_t     _frameIndex = 0;
 };
 
 }

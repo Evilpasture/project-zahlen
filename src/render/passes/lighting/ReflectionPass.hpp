@@ -13,11 +13,9 @@ struct ReflectionPass:
         PassName,
         Vk::ShaderRead<Res_SceneColor>,
         Vk::ShaderRead<typename SurfaceTag::Normals>,
-        Vk::ShaderRead<Res_Clearcoat>,
-        Vk::ShaderRead<typename SurfaceTag::Sheen>,
-        Vk::ShaderRead<typename SurfaceTag::Anisotropy>,
         Vk::ShaderRead<typename SurfaceTag::Depth>,
         Vk::ShaderRead<Res_LightingGI>,
+        Vk::ShaderRead<Res_LightingAo>,
         Vk::ShaderRead<Res_ShadowMap>,
         Vk::ShaderRead<Res_ShadowAtlas>,
         Vk::ShaderReadGeneral<Res_VoxelResolved>,
@@ -29,7 +27,9 @@ struct ReflectionPass:
     Slang::ScenePassPushConstants pc {};
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-        frame.reflectionPipeline.Dispatch(ctx, SurfaceTag::Resolve(frame), pc);
+        Slang::ScenePassPushConstants push = pc;
+        push.translucentSurface = SurfaceTag::kTranslucentSurface;
+        frame.reflectionPipeline.Dispatch(ctx, SurfaceTag::Resolve(frame), push);
     }
 };
 

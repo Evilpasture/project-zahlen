@@ -64,7 +64,45 @@ struct SceneEntity {
     // Source prop_physics "Start Asleep" behaviour.
     bool          startsAsleep = false;
     SceneMaterial material;
+    // Draw layer for the spawned mesh parts (see DrawFlags::Background): the
+    // BSP scene routes skybox entities here so they composite behind the world.
+    DrawFlags     drawFlags = DrawFlags::None;
+    // Optional ambient cube (+X,-X,+Y,-Y,+Z,-Z linear radiance) sampled from the
+    // BSP leaf. Used by props that have no lightmap of their own.
+    bool                       hasAmbientCube = false;
+    std::array<JPH::Float4, 6> ambientCube {};
 };
+
+// SceneLight::baked ownership classes. A map compile can bake a light in two
+// different ways, and they do not own the same terms:
+//
+//   kBakeOwnsNone     - a live light. Nothing is withheld.
+//   kBakeOwnsDiffuse  - an authored light entity (Source `light`, `light_spot`,
+//                       `light_environment`). VRAD integrated its diffuse --
+//                       direct and shadowed -- into the lightmap, but no
+//                       lightmap stores a specular lobe, so the highlight on a
+//                       lightmapped surface has to stay live or it vanishes.
+//   kBakeOwnsAll      - an emissive-surface proxy: a lamp panel, screen or sign
+//                       the importer turned into a point light. The proxy is a
+//                       *reconstruction* of a surface the same compile already
+//                       integrated, and its diffuse and specular are both
+//                       stand-ins, so the deferred pass withholds both wherever
+//                       the lightmap owns the pixel.
+//
+// The distinction matters at close range: a proxy sits centimetres off its own
+// mounting surface, which is exactly where a punctual GGX lobe is largest. Left
+// live, every lamp in a map paints a clipped highlight on the floor beside it.
+inline constexpr uint32_t kBakeOwnsNone    = 0u;
+inline constexpr uint32_t kBakeOwnsDiffuse = 1u;
+inline constexpr uint32_t kBakeOwnsAll     = 2u;
+
+// uniforms.slang turns the class into the two masks the deferred pass uses
+// (`bakedDirect = baked > 0`, `specularOwned = baked > 1`), so the ordering is
+// part of the shader ABI, not an implementation detail.
+static_assert(
+    kBakeOwnsNone < kBakeOwnsDiffuse && kBakeOwnsDiffuse < kBakeOwnsAll,
+    "SceneLight::baked classes are compared, not tested for equality: keep them ordered."
+);
 
 struct SceneLight {
     std::string name;
@@ -86,6 +124,15 @@ struct SceneLight {
     // scene-light budget -- which is what used to happen to every lamp panel,
     // screen and sign in a Source map.
     bool  pinned           = false;
+    // Who owns this light's shading, when a map compiler has already baked it
+    // into the world's lightmaps (kBakeOwnsNone / kBakeOwnsDiffuse /
+    // kBakeOwnsAll above). A baked light still runs live -- props, entities and
+    // skybox scenery have no lightmap and would go dark without it -- but the
+    // deferred pass withholds what the bake already holds, so a compiled
+    // fixture is not lit twice. See SceneLight::pinned for the other authoring
+    // flag: this one is about who owns the shading, that one about which lights
+    // survive the renderer's budget.
+    uint32_t baked          = 0;
 };
 
 struct SceneCamera {

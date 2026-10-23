@@ -181,8 +181,10 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         const JPH::Skeleton* skel = ragdoll->GetRagdollSettings()->GetSkeleton();
 
         JPH::RVec3 capsuleWorldPos = JPH::RVec3::sZero();
-        if (phys && !pc.TryGetBodyPosition(phys->physicsHandle, capsuleWorldPos)) {
-            capsuleWorldPos = JPH::RVec3::sZero();
+        if (phys) {
+            if (const auto bodyPos = pc.BodyPosition(phys->physicsHandle)) {
+                capsuleWorldPos = *bodyPos;
+            }
         }
 
         JPH::SkeletonPose animPose;

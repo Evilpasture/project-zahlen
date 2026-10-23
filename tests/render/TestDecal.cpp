@@ -18,7 +18,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -206,25 +205,15 @@ struct DecalTestSuite {
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
-            // 6. Screenshot capture & pixel validation
-            const std::string ppmPath    = "headless_decal_output.ppm";
-            const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
-            if (!captureRes) {
+            // 6. Frame capture & pixel validation
+            // In memory: the .ppm mirror is for inspection only.
+            const std::string ppmPath = "headless_decal_output.ppm";
+            const auto        frame   = ZHLN::Test::Headless::Capture(*engine, ppmPath);
+            if (!frame.Valid()) {
                 return std::unexpected(DecalTestError::RenderOutputBlank);
             }
 
-            std::ifstream ppm(ppmPath, std::ios::binary);
-            if (!ppm.is_open()) {
-                return std::unexpected(DecalTestError::RenderOutputBlank);
-            }
-
-            std::string header;
-            int         width = 0, height = 0, maxColor = 0;
-            ppm >> header >> width >> height >> maxColor;
-            ppm.get(); // consume newline
-
-            std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
-            ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+            const std::vector<uint8_t>& pixels = frame.rgb;
 
             uint32_t projectedRedPixels = 0;
             uint32_t darkWallPixels     = 0;

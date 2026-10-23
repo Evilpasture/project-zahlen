@@ -12,8 +12,9 @@
 // name, column-major matrices, the -D defines -- except it omits -O, as the
 // cooks pass no -O flag either. The walk trusts Slang for every name, type,
 // offset and size; the usage table trusts Slang for which (set, binding)
-// slots the emitted entry point binds. No SPIR-V decoding -- the cooked
-// bytes are the engine's proof (CatalogChecks.hpp), never the tool's input.
+// slots the emitted entry point binds. No SPIR-V decoding: the compiles are
+// the only description of the modules the catalog carries, and nothing
+// downstream re-reads the cooked bytes to second-guess them.
 
 #include "SlangReflect.hpp"
 
@@ -398,6 +399,22 @@ auto ReflectSlangEntry(slang::IComponentType* linked, std::string_view file, std
     SlangEntryInfo info;
     info.entryPoint = pointName;
     info.stage      = point->getStage();
+    if (info.stage == SLANG_STAGE_COMPUTE) {
+        // The threadgroup size the entry point declares, straight from Slang's
+        // reflection of [numthreads] -- the compiler is the authority here.
+        // ShaderBytecode.cpp still holds the generated constant against the
+        // cooked module's own OpExecutionMode LocalSize.
+        SlangUInt workgroup[3] = {0, 0, 0};
+        (void)point->getComputeThreadGroupSize(3, workgroup);
+        if (workgroup[0] == 0 || workgroup[1] == 0 || workgroup[2] == 0) {
+            Fail("'{}' entry '{}': Slang reports no threadgroup size for a compute entry point", file, entry);
+        }
+        info.localSize = {
+            static_cast<uint32_t>(workgroup[0]),
+            static_cast<uint32_t>(workgroup[1]),
+            static_cast<uint32_t>(workgroup[2]),
+        };
+    }
     for (const unsigned i : std::views::iota(0U, point->getParameterCount())) {
         slang::VariableLayoutReflection* param = point->getParameterByIndex(i);
         slang::TypeReflection*            type  = param->getType();

@@ -23,10 +23,13 @@
 namespace ZHLN::BSP {
 namespace {
 
-auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true) -> TextureHandle {
+auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureHandle {
     if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
         auto vtfExp = DecodeVTF(bytes);
         if (vtfExp.has_value()) {
+            if (sourceNormal) {
+                ConvertSourceNormalInPlace(*vtfExp);
+            }
             auto texRes = ctx.CreateTexture(name, vtfExp->rgba8, Extent2D {vtfExp->width, vtfExp->height}, isSRGB);
             if (texRes.has_value()) {
                 return *texRes;
@@ -65,7 +68,16 @@ auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string
     }
 
     const std::string_view vmtText(reinterpret_cast<const char*>(vmtBytes->data()), vmtBytes->size());
-    const auto             vmtMatExp = ParseVMT(vmtText);
+    const auto             vmtMatExp = ResolveVmtMaterial(
+        vmtText,
+        [&vfs](std::string_view includePath) -> std::optional<std::string> {
+            const auto includeBytes = vfs.ReadFile(std::string(includePath));
+            if (!includeBytes.has_value() || includeBytes->empty()) {
+                return std::nullopt;
+            }
+            return std::string(reinterpret_cast<const char*>(includeBytes->data()), includeBytes->size());
+        }
+    );
     if (!vmtMatExp.has_value()) {
         return desc;
     }
@@ -96,7 +108,7 @@ auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string
         if (bumpPath.has_value()) {
             const auto bumpBytes = vfs.ReadFile(*bumpPath);
             if (bumpBytes.has_value()) {
-                desc.normalMap = LoadTextureFromBytes(ctx, vmt.bumpMap, *bumpBytes, false);
+                desc.normalMap = LoadTextureFromBytes(ctx, vmt.bumpMap, *bumpBytes, false, true);
             }
         }
     }

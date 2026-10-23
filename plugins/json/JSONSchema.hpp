@@ -7,7 +7,7 @@
 //
 // The serialisation / schema layer for JSON. Two halves:
 //
-//   * Runtime, reflection-driven: GetJSONValue, ParseObject, TryParse and
+//   * Runtime, reflection-driven: GetJSONValue, ParseObject, Parse and
 //     Parse read a document (plugins/json/JSON.hpp -- simdjson behind an
 //     opaque handle) into any reflected type, and ReflectJSON::SerializeJSON
 //     writes one back out. Field names come from the declarations themselves,
@@ -43,7 +43,7 @@ namespace ReflectJSON {
 // omitEmpty models glTF's "optional by omission" convention on both sides:
 //   * SerializeJSON skips a disengaged std::optional (or an empty map/range)
 //     member entirely instead of writing null / [].
-//   * TryParse/ParseObject treat a missing member key as "leave the default"
+//   * Parse/ParseObject treat a missing member key as "leave the default"
 //     (a disengaged optional, an empty container) instead of MissingField.
 //
 // The default (false) keeps the historical behaviour in both directions:
@@ -199,7 +199,7 @@ auto ParseObject(ValueReader reader, Options options) -> std::expected<T, ErrorC
 }
 
 template <typename T>
-auto TryParse(std::string_view jsonString, Options options = {}) -> std::expected<T, ErrorCode> {
+auto Parse(std::string_view jsonString, Options options = {}) -> std::expected<T, ErrorCode> {
     auto doc = Document::Parse(jsonString);
     if (!doc) {
         return std::unexpected(doc.error());
@@ -208,8 +208,8 @@ auto TryParse(std::string_view jsonString, Options options = {}) -> std::expecte
 }
 
 template <typename T>
-auto Parse(std::string_view jsonString, Options options = {}) -> T {
-    auto res = TryParse<T>(jsonString, options);
+auto ParseOrPanic(std::string_view jsonString, Options options = {}) -> T {
+    auto res = Parse<T>(jsonString, options);
     if (!res) [[unlikely]] {
         ZHLN::Panic("Failed to parse JSON for type '{}': {}", ZHLN::Reflect::TypeName<T>(), res.error());
     }

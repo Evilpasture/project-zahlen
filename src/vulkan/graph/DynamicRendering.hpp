@@ -8,8 +8,12 @@
 #endif
 
 #include "../pipeline/PipelineTypes.hpp"
+#include <algorithm>
+#include <array>
 #include <concepts>
+#include <cstdint>
 #include <optional>
+#include <span>
 #include <type_traits>
 
 namespace ZHLN::Vk {
@@ -348,48 +352,89 @@ static constexpr size_t kMaxColorAttachments = 8;
 template <size_t ColorCount, bool HasDepth, typename Formats>
 class DynamicPass;
 
-class SecondaryInheritance {
+// The viewport/scissor pair a pass applies to whatever it begins, primary or
+// secondary. Both paths set it, from the same viewport, so it lives here once.
+inline void ApplyViewportAndScissor(VkCommandBuffer cmd, VkViewport viewport) noexcept {
+    const VkRect2D scissor = {
+        .offset = {.x = static_cast<int32_t>(viewport.x), .y = static_cast<int32_t>(viewport.y)},
+        .extent = {.width = static_cast<uint32_t>(viewport.width), .height = static_cast<uint32_t>(viewport.height)}
+    };
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+}
+
+/// What a secondary command buffer inherits about the dynamic rendering it will
+/// record into: the attachment formats, the view mask and the viewport.
+///
+/// A value, and a closed one: the formats are copied in at construction and the
+/// struct the driver reads is produced by Link() on demand, so nothing outside
+/// asks this object for a format and re-assembles the inheritance itself. A
+/// default-constructed inheritance is inactive -- it links nothing -- which is
+/// what a non-raster secondary (a compute fork) wants.
+class RenderingInheritance {
     template <size_t, bool, typename>
     friend class DynamicPass;
 
-    std::array<VkFormat, kMaxColorAttachments> _colorFormats {};
-    uint32_t                                   _colorFormatCount;
+  public:
+    constexpr RenderingInheritance() noexcept = default;
 
-    constexpr SecondaryInheritance(
-        std::span<const VkFormat>        colorFormats,
-        VkFormat                         depth,
-        VkFormat                         stencil,
-        uint32_t                         mask,
-        const VkBindHeapInfoEXT*         samplerHeap,
-        const VkBindHeapInfoEXT*         resourceHeap,
-        std::span<const uint32_t>        pushOffsets,
-        std::span<const VkDeviceAddress> pushAddresses,
-        VkViewport                       effectiveViewport
+    constexpr RenderingInheritance(
+        std::span<const VkFormat> colorFormats, VkFormat depth, VkFormat stencil, uint32_t viewMask, VkViewport viewport
     ) noexcept:
-        _colorFormatCount(static_cast<uint32_t>(colorFormats.size())), depthFormat(depth), stencilFormat(stencil), viewMask(mask),
-        samplerHeapBindInfo(samplerHeap), resourceHeapBindInfo(resourceHeap), pushDataFrameOffsets(pushOffsets), pushDataFrameAddresses(pushAddresses),
-        viewport(effectiveViewport) {
-        for (size_t i = 0; i < colorFormats.size(); ++i) {
+        _colorFormatCount(static_cast<uint32_t>(std::min(colorFormats.size(), _colorFormats.size()))), _depthFormat(depth),
+        _stencilFormat(stencil), _viewMask(viewMask), _viewport(viewport), _active(true) {
+        for (size_t i = 0; i < _colorFormatCount; ++i) {
             _colorFormats[i] = colorFormats[i];
         }
     }
 
-  public:
-    [[nodiscard]] constexpr auto ColorFormats() const noexcept -> std::span<const VkFormat> {
-        return {_colorFormats.data(), _colorFormatCount};
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return _active;
+    }
+    explicit constexpr operator bool() const noexcept {
+        return Valid();
     }
 
-    const VkFormat                         depthFormat;
-    const VkFormat                         stencilFormat;
-    const uint32_t                         viewMask;
-    const VkBindHeapInfoEXT* const         samplerHeapBindInfo;
-    const VkBindHeapInfoEXT* const         resourceHeapBindInfo;
-    const std::span<const uint32_t>        pushDataFrameOffsets;
-    const std::span<const VkDeviceAddress> pushDataFrameAddresses;
-    const VkViewport                       viewport;
+    /// Tells the inheritance chain to link this rendering state, and returns the
+    /// head of the chain. `storage` must outlive the vkBeginCommandBuffer this
+    /// feeds -- which SecondaryPassContext::Begin guarantees.
+    [[nodiscard]] constexpr auto Link(void* pNext, VkCommandBufferInheritanceRenderingInfo& storage) const noexcept -> void* {
+        if (!_active) {
+            return pNext;
+        }
+        storage = {
+            .sType                   = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+            .pNext                   = pNext,
+            .flags                   = 0,
+            .viewMask                = _viewMask,
+            .colorAttachmentCount    = _colorFormatCount,
+            .pColorAttachmentFormats = _colorFormatCount > 0 ? _colorFormats.data() : nullptr,
+            .depthAttachmentFormat   = _depthFormat,
+            .stencilAttachmentFormat = _stencilFormat,
+            .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT,
+        };
+        return &storage;
+    }
+
+    /// Tells the secondary command buffer to adopt the viewport this pass
+    /// renders at; a non-raster inheritance has none to give.
+    void ApplyViewportAndScissor(VkCommandBuffer cmd) const noexcept {
+        if (_active) {
+            ::ZHLN::Vk::ApplyViewportAndScissor(cmd, _viewport);
+        }
+    }
+
+  private:
+    std::array<VkFormat, kMaxColorAttachments> _colorFormats {};
+    uint32_t                                   _colorFormatCount = 0;
+    VkFormat                                   _depthFormat      = VK_FORMAT_UNDEFINED;
+    VkFormat                                   _stencilFormat    = VK_FORMAT_UNDEFINED;
+    uint32_t                                   _viewMask         = 0;
+    VkViewport                                 _viewport {};
+    bool                                       _active = false;
 };
 
-static_assert(!std::is_aggregate_v<SecondaryInheritance> && !std::is_default_constructible_v<SecondaryInheritance>);
+static_assert(!std::is_aggregate_v<RenderingInheritance>, "RenderingInheritance is a value with an invariant, not a field bag.");
 
 template <VkImageLayout Layout>
 struct Tag {};
@@ -425,6 +470,67 @@ class ScopedTransition {
 
 template <typename ImageT, VkImageLayout Final>
 ScopedTransition(VkCommandBuffer, ImageT&, Vk::Tag<Final>) -> ScopedTransition<ImageT, Final>;
+
+// -----------------------------------------------------------------------------
+// Attachment Policies
+// -----------------------------------------------------------------------------
+/// The load/store pair, plus the value only a clear consumes, packaged with the
+/// intent that produced it. A pass can no longer hand a clear color to a load.
+struct ColorOp {
+    VkAttachmentLoadOp  loadOp     = VK_ATTACHMENT_LOAD_OP_LOAD;
+    VkAttachmentStoreOp storeOp    = VK_ATTACHMENT_STORE_OP_STORE;
+    ZHLN::Color4        clearColor {};
+
+    /// Clear the attachment with a color, then preserve results.
+    [[nodiscard]] static constexpr auto Clear(ZHLN::Color4 color = {}) noexcept -> ColorOp {
+        return {VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, color};
+    }
+
+    /// Load existing contents and store modified results (e.g., forward pass, blending).
+    [[nodiscard]] static constexpr auto Load() noexcept -> ColorOp {
+        return {VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, {}};
+    }
+
+    /// Do not load existing contents; every pixel will be overwritten (e.g., tonemapping blit).
+    [[nodiscard]] static constexpr auto Overwrite() noexcept -> ColorOp {
+        return {VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_STORE, {}};
+    }
+
+    /// Clear, but discard results when the pass ends (transient scratch memory on tile GPUs).
+    [[nodiscard]] static constexpr auto Transient(ZHLN::Color4 color = {}) noexcept -> ColorOp {
+        return {VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_DONT_CARE, color};
+    }
+};
+
+/// Depth half of the same idea. The clear value lives here and nowhere else, so a
+/// float depth clear cannot reach a color attachment and vice versa.
+struct DepthOp {
+    VkAttachmentLoadOp  loadOp   = VK_ATTACHMENT_LOAD_OP_LOAD;
+    VkAttachmentStoreOp storeOp  = VK_ATTACHMENT_STORE_OP_STORE;
+    float               clearVal = 1.0F;
+
+    /// Clear depth to a specific value and write/store updates.
+    [[nodiscard]] static constexpr auto Clear(float clearDepth = 1.0F) noexcept -> DepthOp {
+        return {VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, clearDepth};
+    }
+
+    /// Load previous depth and write/store updates (e.g., forward opaque pass).
+    [[nodiscard]] static constexpr auto Load() noexcept -> DepthOp {
+        return {VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, 1.0F};
+    }
+
+    /// Test against previous depth without saving updates. STORE_OP_NONE (core in
+    /// Vulkan 1.3) keeps the loaded contents intact instead of discarding them the
+    /// way DONT_CARE would.
+    [[nodiscard]] static constexpr auto ReadOnly() noexcept -> DepthOp {
+        return {VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_NONE, 1.0F};
+    }
+
+    /// Clear depth and discard on completion (transient depth buffer).
+    [[nodiscard]] static constexpr auto Transient(float clearDepth = 1.0F) noexcept -> DepthOp {
+        return {VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_DONT_CARE, clearDepth};
+    }
+};
 
 template <size_t ColorCount = 0, bool HasDepth = false, typename Formats = AttachmentFormats<VK_FORMAT_UNDEFINED>>
 class DynamicPass {
@@ -475,14 +581,60 @@ class DynamicPass {
         float                             clearVal = 1.0F
     ) && noexcept -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type>;
 
+    // -------------------------------------------------------------------------
+    // Policy-Driven Attachments (Tier 2)
+    // -------------------------------------------------------------------------
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto AddColor(const TypedImage<Layout, Format>& img, ColorOp op) && noexcept
+        -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type>;
+
+    template <typename... TypedImages>
+    constexpr auto AddColorGroup(const std::tuple<TypedImages...>& imageTuple, ColorOp op) && noexcept
+        -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type>;
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto AddDepth(const TypedImage<Layout, Format>& img, DepthOp op) && noexcept
+        -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type>;
+
+    // -------------------------------------------------------------------------
+    // Semantic Intent Shorthands (Tier 1)
+    // -------------------------------------------------------------------------
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto ClearColor(const TypedImage<Layout, Format>& img, ZHLN::Color4 clearColor) && noexcept {
+        return std::move(*this).AddColor(img, ColorOp::Clear(clearColor));
+    }
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto LoadColor(const TypedImage<Layout, Format>& img) && noexcept {
+        return std::move(*this).AddColor(img, ColorOp::Load());
+    }
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto OverwriteColor(const TypedImage<Layout, Format>& img) && noexcept {
+        return std::move(*this).AddColor(img, ColorOp::Overwrite());
+    }
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto ClearDepth(const TypedImage<Layout, Format>& img, float clearVal = 1.0F) && noexcept {
+        return std::move(*this).AddDepth(img, DepthOp::Clear(clearVal));
+    }
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto LoadDepth(const TypedImage<Layout, Format>& img) && noexcept {
+        return std::move(*this).AddDepth(img, DepthOp::Load());
+    }
+
+    template <VkImageLayout Layout, VkFormat Format>
+    constexpr auto ReadOnlyDepth(const TypedImage<Layout, Format>& img) && noexcept {
+        return std::move(*this).AddDepth(img, DepthOp::ReadOnly());
+    }
+
     constexpr auto Flags(VkRenderingFlags flags) && noexcept -> DynamicPass<ColorCount, HasDepth, Formats>&&;
 
-    [[nodiscard]] constexpr auto GetSecondaryInheritance(
-        const VkBindHeapInfoEXT*         samplerHeap   = nullptr,
-        const VkBindHeapInfoEXT*         resourceHeap  = nullptr,
-        std::span<const uint32_t>        pushOffsets   = {},
-        std::span<const VkDeviceAddress> pushAddresses = {}
-    ) const noexcept -> SecondaryInheritance;
+    /// What a secondary command buffer must inherit to record this pass: the
+    /// attachment formats, the view mask and the effective viewport. Nothing
+    /// else -- descriptor heaps and frame rows are not this pass's to know.
+    [[nodiscard]] constexpr auto GetInheritance() const noexcept -> RenderingInheritance;
 
     template <typename Func>
     void Execute(VkCommandBuffer cmd, Func&& func) const;

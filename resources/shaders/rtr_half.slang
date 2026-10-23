@@ -1,20 +1,16 @@
 
+import gpu_push_constants;
 import ddgi_common;
 import gpu_buffer;
 import instance_data;
 import pbr_helpers;
 import uniforms;
 
-struct RtrHalfPushConstants {
-    uint2 halfRes;
-    uint2 _pad;
-};
 [vk::push_constant]
 RtrHalfPushConstants pc;
 
 Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
-Texture2D<float4> texAnisotropy;
 Texture2D<float4> texLighting;
 SamplerState smp;
 SamplerState pointSampler;
@@ -42,10 +38,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
-    float4 anisoRaw = texAnisotropy.Load(int3(fullPos, 0));
-    if (IsGBufferUnlit(anisoRaw.z)) {
-        return;
-    }
     float4 normRough = texNormalRoughness.Load(int3(fullPos, 0));
     float  roughness = normRough.z;
     if (roughness < 0.04f || roughness > 0.4f) {
@@ -61,16 +53,15 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
-    float strength = DecodeGBufferAnisotropy(anisoRaw.z);
-    float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
-    float3 tangentX  = strength > 1.0f / 255.0f ? UnpackAnisotropy(anisoRaw.xy, N) : normalize(cross(up, N));
-    float3 tangentY  = cross(N, tangentX);
+    float3 up       = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
+    float3 tangentX = normalize(cross(up, N));
+    float3 tangentY = cross(N, tangentX);
     float3x3 toLocal = float3x3(tangentX, tangentY, N);
     float3x3 toWorld = transpose(toLocal);
 
     float3 V_local = mul(toLocal, V);
     float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, fullPos, WrapFrameIndex(frame.frameIndex)).zw;
-    float2 alpha   = strength > 1.0f / 255.0f ? AnisotropicAlphas(roughness, strength) : float2(max(roughness * roughness, 1e-5f));
+    float2 alpha   = float2(max(roughness * roughness, 1e-5f));
     float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
     float3 H       = normalize(mul(toWorld, H_local));
 
@@ -86,8 +77,15 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     ray.TMax      = lerp(50.0f, 16.0f, roughness);
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-    q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+    // World first, background layer on miss (two-world rule): the map wins
+    // the reflection even where skybox scenery sits nearer the ray.
+    q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
     while (q.Proceed()) {
+    }
+    if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
+        q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskSkyboxLayer, ray);
+        while (q.Proceed()) {
+        }
     }
     if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
         return;

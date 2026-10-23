@@ -62,16 +62,15 @@ public static const uint kSamplerOcclusion          = 13u;
 public static const uint kSamplerTransmission       = 14u;
 // The fifteenth slot is KHR_materials_specular's; it occupies the last free
 // four-bit code, the high nibble of the second sampler word.
-public static const uint kSamplerSpecular           = 15u;
+public static const uint kSamplerSpecular = 15u;
 
 [ForceInline]
 public float4 SampleMaterialTexture(uint index, float2 uv, uint2 codes, uint slot) {
     uint packed = slot < 8u ? codes.x : codes.y;
-    uint code = (packed >> ((slot & 7u) * 4u)) & 0xFu;
+    uint code   = (packed >> ((slot & 7u) * 4u)) & 0xFu;
     // An absent sampler encodes Repeat/Repeat (0). Both image and sampler
     // indices may differ across materials in the same wavefront.
-    return scene.globalTextures[NonUniformResourceIndex(index)]
-        .Sample(scene.materialSamplers[NonUniformResourceIndex(min(code, 8u))], uv);
+    return scene.globalTextures[NonUniformResourceIndex(index)].Sample(scene.materialSamplers[NonUniformResourceIndex(min(code, 8u))], uv);
 }
 
 [vk::push_constant]
@@ -172,8 +171,6 @@ public float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOf
 
     return displacement;
 }
-
-
 
 public bool SphereFrustumVisible(float4x4 viewProj, float3 center, float radius) {
     float4 r0 = float4(viewProj._m00, viewProj._m01, viewProj._m02, viewProj._m03);
@@ -278,14 +275,14 @@ public extension InstanceData {
 
         if (this.tangentFrameAddress != 0) {
             VertexTangentFrame frame = this.fetchTangentFrame(actualVertexId);
-            localNormal = frame.unpackedNormal.xyz;
-            localTangent = frame.unpackedTangent;
+            localNormal              = frame.unpackedNormal.xyz;
+            localTangent             = frame.unpackedTangent;
         }
         if (this.surfaceAddress != 0) {
             VertexSurface surface = this.fetchSurface(actualVertexId);
-            localUV = surface.unpackedUV;
-            localUV1 = surface.unpackedUV1;
-            localColor = surface.unpackedColor;
+            localUV               = surface.unpackedUV;
+            localUV1              = surface.unpackedUV1;
+            localColor            = surface.unpackedColor;
         }
 
         float4 localPos = float4(position, 1.0f);
@@ -352,10 +349,18 @@ public extension InstanceData {
                 prevWorldPos = mul(prevWorldMatrix, localPos);
             }
             float4x4 velocityVP = this.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.unjitteredViewProj;
-            output.currClip = mul(velocityVP, worldPos);
-            output.prevClip = mul(scene.frame.prevUnjitteredViewProj, prevWorldPos);
+            output.currClip     = this.BandedClipDepth(mul(velocityVP, worldPos));
+            output.prevClip     = this.BandedClipDepth(mul(scene.frame.prevUnjitteredViewProj, prevWorldPos));
         }
         return output;
+    }
+
+    // Was Source's depth-range remap into two bands. Retired: the backdrop is
+    // ordinary geometry and shares the world's depth range, so this is an
+    // identity kept only so the pass entry points do not have to change.
+    [ForceInline]
+    public float4 BandedClipDepth(float4 clipPos) {
+        return clipPos;
     }
 }
 
@@ -386,12 +391,27 @@ public struct GBufferGeometryOutput {
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
     public nointerpolation float3 pbrFactors : TEXCOORD6;
     public nointerpolation uint alphaMode : TEXCOORD7;
-    public nointerpolation float4 emissiveFactor : TEXCOORD8;
-    public nointerpolation float4 coatParams : TEXCOORD12;
-    public nointerpolation uint4 coatTextures : TEXCOORD13;
-    public nointerpolation float2 anisotropyParams : TEXCOORD14;
-    public nointerpolation uint anisotropyTexIndex : TEXCOORD15;
     public nointerpolation uint2 samplerCodes : TEXCOORD16;
+}
+
+// The additive deferred-emission pass samples only base/emissive material
+// inputs. Giving it a narrow interface avoids exporting the forward-only PBR
+// extension lanes from its vertex shader merely to have the fragment discard
+// them.
+public struct EmissiveGeometryOutput {
+    public float4 pos : SV_Position;
+    public float2 uv : TEXCOORD2;
+    public float2 uv1 : TEXCOORD17;
+    public nointerpolation uint instanceId : TEXCOORD18;
+    public float4 color : COLOR;
+    public nointerpolation uint4 materialIndices : TEXCOORD4;
+    public nointerpolation float4 baseColorFactor : TEXCOORD5;
+    public nointerpolation float3 pbrFactors : TEXCOORD6;
+    public nointerpolation uint alphaMode : TEXCOORD7;
+    public nointerpolation float4 emissiveFactor : TEXCOORD8;
+    public nointerpolation uint2 samplerCodes : TEXCOORD16;
+    // World normal for the baked-overlay ambient cube term (SampleBakedIrradiance).
+    public float3 normal : TEXCOORD19;
 }
 
 public struct ForwardGeometryOutput {
@@ -417,63 +437,75 @@ public struct ForwardGeometryOutput {
 
 public ShadowGeometryOutput PackShadowOutput(SceneGeometryVertex v) {
     ShadowGeometryOutput o;
-    o.pos              = v.pos;
-    o.uv               = v.uv;
-    o.uv1 = v.uv1;
-    o.instanceId = v.instanceId;
-    o.color            = v.color;
-    o.materialIndices  = v.materialIndices;
-    o.baseColorFactor  = v.baseColorFactor;
-    o.pbrFactors       = v.pbrFactors;
-    o.alphaMode        = v.alphaMode;
-    o.samplerCodes     = v.samplerCodes;
+    o.pos             = v.pos;
+    o.uv              = v.uv;
+    o.uv1             = v.uv1;
+    o.instanceId      = v.instanceId;
+    o.color           = v.color;
+    o.materialIndices = v.materialIndices;
+    o.baseColorFactor = v.baseColorFactor;
+    o.pbrFactors      = v.pbrFactors;
+    o.alphaMode       = v.alphaMode;
+    o.samplerCodes    = v.samplerCodes;
     return o;
 }
 
 public GBufferGeometryOutput PackGBufferOutput(SceneGeometryVertex v) {
     GBufferGeometryOutput o;
-    o.pos              = v.pos;
-    o.currClip         = v.currClip;
-    o.prevClip         = v.prevClip;
-    o.normal           = v.normal;
-    o.tangent          = v.tangent;
-    o.uv               = v.uv;
-    o.uv1 = v.uv1;
-    o.instanceId = v.instanceId;
-    o.color            = v.color;
-    o.materialIndices  = v.materialIndices;
-    o.baseColorFactor  = v.baseColorFactor;
-    o.pbrFactors       = v.pbrFactors;
-    o.alphaMode        = v.alphaMode;
-    o.emissiveFactor      = v.emissiveFactor;
-    o.coatParams          = v.coatParams;
-    o.coatTextures        = v.coatTextures;
-    o.anisotropyParams    = v.anisotropyParams;
-    o.anisotropyTexIndex  = v.anisotropyTexIndex;
-    o.samplerCodes        = v.samplerCodes;
+    o.pos                = v.pos;
+    o.currClip           = v.currClip;
+    o.prevClip           = v.prevClip;
+    o.normal             = v.normal;
+    o.tangent            = v.tangent;
+    o.uv                 = v.uv;
+    o.uv1                = v.uv1;
+    o.instanceId         = v.instanceId;
+    o.color              = v.color;
+    o.materialIndices    = v.materialIndices;
+    o.baseColorFactor    = v.baseColorFactor;
+    o.pbrFactors         = v.pbrFactors;
+    o.alphaMode       = v.alphaMode;
+    o.samplerCodes    = v.samplerCodes;
+    return o;
+}
+
+public EmissiveGeometryOutput PackEmissiveOutput(SceneGeometryVertex v) {
+    EmissiveGeometryOutput o;
+    o.pos             = v.pos;
+    o.uv              = v.uv;
+    o.uv1             = v.uv1;
+    o.instanceId      = v.instanceId;
+    o.color           = v.color;
+    o.materialIndices = v.materialIndices;
+    o.baseColorFactor = v.baseColorFactor;
+    o.pbrFactors      = v.pbrFactors;
+    o.alphaMode       = v.alphaMode;
+    o.emissiveFactor  = v.emissiveFactor;
+    o.samplerCodes    = v.samplerCodes;
+    o.normal          = v.normal;
     return o;
 }
 
 public ForwardGeometryOutput PackForwardOutput(SceneGeometryVertex v) {
     ForwardGeometryOutput o;
-    o.pos                 = v.pos;
-    o.normal              = v.normal;
-    o.uv                  = v.uv;
-    o.uv1 = v.uv1;
-    o.instanceId = v.instanceId;
-    o.color               = v.color;
-    o.materialIndices     = v.materialIndices;
-    o.baseColorFactor     = v.baseColorFactor;
-    o.pbrFactors          = v.pbrFactors;
-    o.alphaMode           = v.alphaMode;
-    o.emissiveFactor         = v.emissiveFactor;
-    o.transmissionParams     = v.transmissionParams;
-    o.volumeParams           = v.volumeParams;
-    o.transmissionTextures   = v.transmissionTextures;
-    o.tangent                = v.tangent;
-    o.anisotropyParams       = v.anisotropyParams;
-    o.anisotropyTexIndex     = v.anisotropyTexIndex;
-    o.samplerCodes           = v.samplerCodes;
+    o.pos                  = v.pos;
+    o.normal               = v.normal;
+    o.uv                   = v.uv;
+    o.uv1                  = v.uv1;
+    o.instanceId           = v.instanceId;
+    o.color                = v.color;
+    o.materialIndices      = v.materialIndices;
+    o.baseColorFactor      = v.baseColorFactor;
+    o.pbrFactors           = v.pbrFactors;
+    o.alphaMode            = v.alphaMode;
+    o.emissiveFactor       = v.emissiveFactor;
+    o.transmissionParams   = v.transmissionParams;
+    o.volumeParams         = v.volumeParams;
+    o.transmissionTextures = v.transmissionTextures;
+    o.tangent              = v.tangent;
+    o.anisotropyParams     = v.anisotropyParams;
+    o.anisotropyTexIndex   = v.anisotropyTexIndex;
+    o.samplerCodes         = v.samplerCodes;
     return o;
 }
 
@@ -500,6 +532,13 @@ public struct ForwardPassOutput : IScenePassOutput {
     typealias Output = ForwardGeometryOutput;
     public static Output Emit(SceneGeometryVertex v, uint viewId) {
         return PackForwardOutput(v);
+    }
+}
+
+public struct EmissivePassOutput : IScenePassOutput {
+    typealias Output = EmissiveGeometryOutput;
+    public static Output Emit(SceneGeometryVertex v, uint viewId) {
+        return PackEmissiveOutput(v);
     }
 }
 

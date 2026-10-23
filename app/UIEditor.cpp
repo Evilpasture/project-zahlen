@@ -710,7 +710,7 @@ void LoadTree(Session& session, std::string_view path) {
         return;
     }
     const std::string text {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-    auto              parsed = ZHLN::ReflectTOML::TryParse<GUI::UINode>(text);
+    auto              parsed = ZHLN::ReflectTOML::Parse<GUI::UINode>(text);
     if (!parsed) {
         ZHLN::Log("[UIEditor] '{}' did not parse as a UINode", path);
         return;

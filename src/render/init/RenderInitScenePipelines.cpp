@@ -2,20 +2,51 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "../RenderInternal.hpp"
+#include "../passes/lighting/EmissivePass.hpp"
+#include <PipelineFormats.hpp>
 #include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstring>
 #include <format>
 #include <span>
-#include <vector>
 
 namespace ZHLN {
+
+auto RenderContext::Impl::BuildEmissivePipeline() -> std::expected<void, ErrorCode> {
+    static_assert(
+        Vk::ColorAttachmentWriteMask<Passes::EmissivePass, Res_LightingGI>() ==
+            (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT),
+        "Deferred emission must not write LightingGI alpha"
+    );
+    Vk::HeapMappingArena mappingArena {heapManager};
+    const auto*          sceneMappings = mappingArena.Map(sceneHeapMappings);
+    return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::BasicVSEmissive>(), Vk::MakeStageSource<Shaders::Modules::EmissivePS>())
+        .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
+            return Vk::PipelineBuilder {}
+                .Shaders(shaders.View())
+                .HeapMappings(sceneMappings, sceneMappings)
+                .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
+                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthTest(true)
+                .DepthWrite(false)
+                .DepthCompare(VK_COMPARE_OP_LESS_OR_EQUAL)
+                .DynamicCullMode()
+                .AdditiveRGBPreserveAlpha()
+                .ColorWriteMask(Vk::ColorAttachmentWriteMask<Passes::EmissivePass, Res_LightingGI>())
+                .Binaries(&pipelineBinaries)
+                .Build(ctx.Device())
+                .transform([&](auto&& pipeline) -> auto { forward.emissive = std::forward<decltype(pipeline)>(pipeline); });
+        });
+}
 
 auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorCode> {
     auto csShader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>();
 
-    if (auto built = particleUpdate.particles.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, &pipelineBinaries); !built) {
+    Vk::HeapMappingArena mappingArena {heapManager};
+    const auto*          sceneMappings = mappingArena.Map(sceneHeapMappings);
+
+    if (auto built = particleUpdate.particles.BuildHeap(ctx.Device(), csShader, sceneMappings, 0, &pipelineBinaries); !built) {
         return std::unexpected(built.error());
     }
 
@@ -23,7 +54,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
                 .Shaders(shaders.View())
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                .HeapMappings(sceneMappings, sceneMappings)
                 .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
@@ -40,7 +71,10 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
 auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, ErrorCode> {
     auto csMeshShader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>();
 
-    if (!particleUpdate.mesh.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info, 0, &pipelineBinaries)) {
+    Vk::HeapMappingArena mappingArena {heapManager};
+    const auto*          sceneMappings = mappingArena.Map(sceneHeapMappings);
+
+    if (!particleUpdate.mesh.BuildHeap(ctx.Device(), csMeshShader, sceneMappings, 0, &pipelineBinaries)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -48,7 +82,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(shaders.View())
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                .HeapMappings(sceneMappings, sceneMappings)
                 .ColorFormats(ActiveGBuffer::array)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
@@ -65,7 +99,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                 .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
                     return Vk::PipelineBuilder<0, true> {}
                         .Shaders(shaders.View())
-                        .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                        .HeapMappings(sceneMappings, sceneMappings)
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
                         .ViewMask(ShadowRenderer::kCascadeViewMask)
@@ -86,15 +120,11 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCo
     }
 
     const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
-    diagnostics.gpuDiagnostics.RegisterShader(shader, "CSMain");
     return compute.skinning.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
 }
 
-auto RenderContext::Impl::AllocateLineVertexBuffers(
-    size_t                     maxVertices,
-    PerFrame<Vk::Buffer>&      bufs,
-    PerFrame<VkDeviceAddress>& addrs
-) noexcept -> std::expected<void, ErrorCode> {
+auto RenderContext::Impl::AllocateLineVertexBuffers(size_t maxVertices, PerFrame<Vk::Buffer>& bufs, PerFrame<VkDeviceAddress>& addrs) noexcept
+    -> std::expected<void, ErrorCode> {
     const size_t              bufferSize = maxVertices * sizeof(LineVertex);
     PerFrame<Vk::Buffer>      created;
     PerFrame<VkDeviceAddress> createdAddresses;
@@ -104,8 +134,7 @@ auto RenderContext::Impl::AllocateLineVertexBuffers(
         }
     });
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
-        auto res =
-            Vk::Buffer::Create(allocator, bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
+        auto res = Vk::Buffer::Create(allocator, bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
         if (!res) {
             return std::unexpected(res.error());
         }
@@ -128,7 +157,6 @@ auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, Erro
 auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> {
     return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::DebugLineVS>(), Vk::MakeStageSource<Shaders::Modules::DebugLinePS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
-
             return Vk::PipelineBuilder<1, true> {}
                 .Shaders(shaders.View())
                 .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
@@ -145,9 +173,10 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
 }
 
 auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode> {
-    shadowSamplerConfig = Vk::SamplerConfig::LinearClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).WithDepthCompare();
+    shadowSampler = Vk::Sampler::Shadow();
 
-    return targets.InitShadows()
+    return targets
+        .InitShadows()
 
         .and_then([&]() -> std::expected<void, ErrorCode> { return shadows.InitResources(*this); })
 
@@ -158,15 +187,17 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
 
         .and_then([&](auto&& fub) -> auto {
             frames.frameUniformBuffers = std::forward<decltype(fub)>(fub);
-            return CreatePerFrame(allocator, sizeof(Light) * kMaxSceneLights, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU)
+            return CreatePerFrame(
+                       allocator, sizeof(Light) * kMaxSceneLights, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
+            )
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
         .and_then([&](auto&& lsb) -> auto {
             frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb);
             return CreatePerFrame(
-                allocator, sizeof(ShadowTile) * ShadowAtlas::kMaxTiles, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
-                Vk::MemoryUsage::CPUToGPU
+                       allocator, sizeof(ShadowTile) * ShadowAtlas::kMaxTiles, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+                       Vk::MemoryUsage::CPUToGPU
             )
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
@@ -186,21 +217,16 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
     }
     BuildDecalHeapMappings();
 
-    std::vector<VkDescriptorSetAndBindingMappingEXT> mergedEntries;
-    mergedEntries.insert(mergedEntries.end(), decalHeapMappings.entries.begin(), decalHeapMappings.entries.end());
-    mergedEntries.insert(mergedEntries.end(), decalSceneHeapMappings.entries.begin(), decalSceneHeapMappings.entries.end());
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT mergedInfo = {
-        .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
-        .pNext        = nullptr,
-        .mappingCount = static_cast<uint32_t>(mergedEntries.size()),
-        .pMappings    = mergedEntries.empty() ? nullptr : mergedEntries.data(),
-    };
+    // Set 0 (the decal's own depth + point sampler) followed by the shared Set-1
+    // scene block, materialized into one pMappings list.
+    Vk::HeapMappingArena mappingArena {heapManager};
+    const auto*          decalMappings = mappingArena.Map(decalHeapMappings, sceneSet1HeapMappings);
 
     return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::DecalVS>(), Vk::MakeStageSource<Shaders::Modules::DecalPS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<2, true> {}
                 .Shaders(shaders.View())
-                .HeapMappings(&mergedInfo, &mergedInfo)
+                .HeapMappings(decalMappings, decalMappings)
                 .ColorFormats(decalFormats)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
@@ -220,9 +246,14 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
     }
 
     const auto stages = shaders->View();
+
+    // Three stencil variants, one mapping table: materialize once.
+    Vk::HeapMappingArena mappingArena {heapManager};
+    const auto*          sceneMappings = mappingArena.Map(sceneHeapMappings);
+
     return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
         .Shaders(stages)
-        .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+        .HeapMappings(sceneMappings, sceneMappings)
         .ColorFormats(ActiveGBuffer::array)
         .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
         .DepthTest(true)
@@ -237,7 +268,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(stages)
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                .HeapMappings(sceneMappings, sceneMappings)
                 .ColorFormats(ActiveGBuffer::array)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
@@ -253,7 +284,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(stages)
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                .HeapMappings(sceneMappings, sceneMappings)
                 .ColorFormats(ActiveGBuffer::array)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
@@ -288,7 +319,6 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
         }
 
         const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
-        diagnostics.gpuDiagnostics.RegisterShader(shader, "CSMain");
         return compute.hangGpu.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
     }();
     if (!built) {
@@ -310,7 +340,10 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
         return std::unexpected(built.error());
     }
 
-    return culling.hizGeneratePass.BuildHeap(ctx.Device(), shader, culling.hizHeapBindings.GetInfo(), culling.hizHeapBindings.indexPushOffset, &pipelineBinaries);
+    Vk::HeapMappingArena mappingArena {heapManager};
+    return culling.hizGeneratePass.BuildHeap(
+        ctx.Device(), shader, mappingArena.Map(culling.hizHeapBindings.mappings), culling.hizHeapBindings.indexPushOffset, &pipelineBinaries
+    );
 }
 
 auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCode> {
@@ -365,7 +398,11 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .transform([&](auto&& spcnt) { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return culling.cullingPass.BuildHeap(ctx.Device(), cullingShader, culling.cullingHeapBindings.GetInfo(), culling.cullingHeapBindings.indexPushOffset, &pipelineBinaries);
+            Vk::HeapMappingArena mappingArena {heapManager};
+            return culling.cullingPass.BuildHeap(
+                ctx.Device(), cullingShader, mappingArena.Map(culling.cullingHeapBindings.mappings), culling.cullingHeapBindings.indexPushOffset,
+                &pipelineBinaries
+            );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             const auto&             physInfo     = ctx.PhysicalInfo();
@@ -427,10 +464,13 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .and_then([&](auto&& gcb) -> std::expected<void, ErrorCode> {
                     frames.globalCounterBuffers = std::forward<decltype(gcb)>(gcb);
                     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
-                        if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-                                Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
-                                Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
-                            });
+                        if (auto immediate = Vk::ExecuteImmediate(
+                                ctx, graphicsCmdRing,
+                                [&](VkCommandBuffer cmd) -> void {
+                                    Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
+                                    Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
+                                }
+                            );
                             !immediate) [[unlikely]] {
                             return std::unexpected(immediate.error());
                         }
@@ -450,13 +490,17 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 !built) {
                 return std::unexpected(built.error());
             }
+            Vk::HeapMappingArena mappingArena {heapManager};
             return culling.clusterBoundsPass.BuildHeap(
-                ctx.Device(), bDesc, culling.clusterBoundsHeapBindings.GetInfo(), culling.clusterBoundsHeapBindings.indexPushOffset, &pipelineBinaries
+                ctx.Device(), bDesc, mappingArena.Map(culling.clusterBoundsHeapBindings.mappings), culling.clusterBoundsHeapBindings.indexPushOffset,
+                &pipelineBinaries
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
+            Vk::HeapMappingArena mappingArena {heapManager};
             return culling.clusterCullingPass.BuildHeap(
-                ctx.Device(), clusterCullingShader, culling.clusterCullingHeapBindings.GetInfo(), culling.clusterCullingHeapBindings.indexPushOffset, &pipelineBinaries
+                ctx.Device(), clusterCullingShader, mappingArena.Map(culling.clusterCullingHeapBindings.mappings),
+                culling.clusterCullingHeapBindings.indexPushOffset, &pipelineBinaries
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

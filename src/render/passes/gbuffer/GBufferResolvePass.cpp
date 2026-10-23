@@ -11,7 +11,8 @@ namespace ZHLN::Passes {
 namespace {
 
 void RecordGpuCulled(
-    PassContext&                 passCtx,
+    RenderFrameContext&          ctx,
+    Vk::CommandEncoder&          encoder,
     CullingResources&            cull,
     const CsgResources&          csg,
     const MeshParticlePipelines& particles,
@@ -21,8 +22,7 @@ void RecordGpuCulled(
 ) noexcept {
     using enum Vk::BarrierStage;
     using enum Vk::BarrierAccess;
-    auto* const    cmd        = passCtx.Cmd();
-    auto&          ctx        = passCtx.ctx;
+    auto* const    cmd        = encoder.cmd;
     const uint32_t frameIndex = ctx.presenter.frameIndex;
 
     Vk::BufferBarrier(cmd, ctx.frames.indirectCommandsBuffersPass2[frameIndex].Handle(), Compute | Indirect, ShaderWrite | IndirectRead, Clear, TransferWrite);
@@ -51,22 +51,17 @@ void RecordGpuCulled(
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)
-        .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.emissive, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.clearcoat, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.anisotropy, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.sheen, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .LoadColor(in.sceneColor)
+        .LoadColor(in.velocity)
+        .LoadColor(in.normRough)
+        .LoadColor(in.bakedMask)
+        .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
-            passCtx.EnsureHeapState();
-
             for (const auto& group: groups) {
                 if (group.material->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
-                passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
+                encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                     {
                         .pipeline       = group.material->pipeline,
                         .argumentBuffer = ctx.frames.indirectCommandsBuffersPass2[frameIndex].Handle(),
@@ -76,36 +71,37 @@ void RecordGpuCulled(
                     ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
                 );
             }
-            DrawCSGMeshes(passCtx, csg, in.sceneColor.Extent());
-            Draw3DParticles(passCtx, particles);
+            DrawCSGMeshes(ctx, encoder, csg, in.sceneColor.Extent());
+            Draw3DParticles(ctx, encoder, particles);
         });
 }
 
-void RecordCpuCulled(PassContext& passCtx, const CsgResources& csg, const MeshParticlePipelines& particles, const GBufferTargets& in) noexcept {
-    auto* const cmd = passCtx.Cmd();
-    const auto& ctx = passCtx.ctx;
+void RecordCpuCulled(
+    RenderFrameContext&          ctx,
+    Vk::CommandEncoder&          encoder,
+    const CsgResources&          csg,
+    const MeshParticlePipelines& particles,
+    const GBufferTargets&        in
+) noexcept {
+    auto* const cmd = encoder.cmd;
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(ctx.EffectiveViewport())
-        .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.emissive, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.clearcoat, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.anisotropy, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddColor(in.sheen, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .LoadColor(in.sceneColor)
+        .LoadColor(in.velocity)
+        .LoadColor(in.normRough)
+        .LoadColor(in.bakedMask)
+        .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
-            ctx.BindHeapsAndPushFrame(cmd);
-            DrawCSGMeshes(passCtx, csg, in.sceneColor.Extent());
-            Draw3DParticles(passCtx, particles);
+            DrawCSGMeshes(ctx, encoder, csg, in.sceneColor.Extent());
+            Draw3DParticles(ctx, encoder, particles);
         });
 }
 
 } // namespace
 
 void GBufferResolvePass::operator()(VkCommandBuffer cmd) const noexcept {
-    PassContext passCtx(cmd, frame);
+    Vk::CommandEncoder encoder(cmd);
 
     const auto drawCount = static_cast<uint32_t>(frame.queues.Draws().size());
     if (drawCount == 0 && frame.queues.MeshParticleEmitters().empty() && frame.queues.CsgDraws().empty()) {
@@ -116,9 +112,9 @@ void GBufferResolvePass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto in     = GBufferSceneTargets(frame);
     if (cull.cullingPass.pipeline.Valid() && frame.frames.indirectCommandsBuffers[frame.presenter.frameIndex].Valid() &&
         (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !frame.MeshShadingActive()) {
-        RecordGpuCulled(passCtx, cull, csg, particles, groups, drawCount, in);
+        RecordGpuCulled(frame, encoder, cull, csg, particles, groups, drawCount, in);
     } else {
-        RecordCpuCulled(passCtx, csg, particles, in);
+        RecordCpuCulled(frame, encoder, csg, particles, in);
     }
 }
 

@@ -6,8 +6,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "PresentationOutcome.hpp"
 #include "PresentPacer.hpp"
+#include "PresentationOutcome.hpp"
 #include <Zahlen/Core/PresentTiming.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
@@ -51,8 +51,8 @@ class SwapchainPresenter {
     Swapchain     swapchain;
     SemaphorePool presentSemaphores;
 
-    RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> depthTarget;
-    RenderTarget<kHeadlessColorFormat>         headlessColorTarget;
+    // Offscreen color is the presentation output when no swapchain exists.
+    FormatRenderTarget<kHeadlessColorFormat> headlessColorTarget;
 
     FrameSync<kFramesInFlight>                         sync;
     CommandPools<kFramesInFlight, QueueType::Graphics> pools;
@@ -73,11 +73,11 @@ class SwapchainPresenter {
     void PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept;
 
     [[nodiscard]] auto Present(
-        VkQueue                                graphicsQueue,
-        VkQueue                                presentQueue,
-        ExecutableCommands                     cmds,
-        uint32_t                               imageIndex,
-        std::span<const VkSemaphoreSubmitInfo> extraWaits = {}
+        VkQueue                          graphicsQueue,
+        VkQueue                          presentQueue,
+        ExecutableCommands               cmds,
+        uint32_t                         imageIndex,
+        std::span<const SemaphoreSubmit> extraWaits = {}
     ) noexcept -> PresentationOutcome<PresentSuboptimal>;
 
     void AdvanceFrame() noexcept {
@@ -97,10 +97,6 @@ class SwapchainPresenter {
     [[nodiscard]] auto Extent() const noexcept -> VkExtent2D {
         return swapchain.Valid() ? swapchain.Get().extent : headlessColorTarget.extent;
     }
-    [[nodiscard]] auto DepthTarget() noexcept -> RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>& {
-        return depthTarget;
-    }
-
     [[nodiscard]] auto SlotCommand(uint32_t slot) const noexcept -> VkCommandBuffer {
         return pools.Cmd(slot);
     }

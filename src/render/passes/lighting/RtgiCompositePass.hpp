@@ -14,10 +14,8 @@ struct RtgiCompositePass:
         Vk::ComputeRead<Res_SceneColor>,
         Vk::ComputeRead<Res_Depth>,
         Vk::ComputeRead<Res_NormRough>,
-        Vk::ComputeRead<Res_Anisotropy>,
-        Vk::ComputeRead<Res_Clearcoat>,
-        Vk::ComputeRead<Res_Sheen>,
         Vk::ComputeRead<Res_Lighting>,
+        Vk::ComputeRead<Res_LightingAo>,
         Vk::ComputeRead<Res_RtgiHalf>,
         Vk::ComputeWrite<Res_LightingGI>> {
     RenderFrameContext& frame;

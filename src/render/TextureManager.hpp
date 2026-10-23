@@ -3,7 +3,6 @@
 
 #pragma once
 #include "Rendering.hpp"
-
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Error.hpp>
@@ -14,7 +13,6 @@
 #include <cstdint>
 #include <deque>
 #include <expected>
-#include <optional>
 #include <string>
 #include <string_view>
 
@@ -28,6 +26,21 @@ static constexpr uint32_t kFallbackNormalTextureIndex = 2;
 
 [[nodiscard]] constexpr VkFormat Rgba8Format(bool isSRGB) noexcept {
     return isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+}
+
+// The generic uploader handles only renderer-exposed RGBA texture formats.
+// Keeping the byte size beside those public formats prevents an HDR upload
+// from being silently truncated to the old four-byte RGBA8 staging size.
+[[nodiscard]] constexpr size_t TextureTexelBytes(VkFormat format) noexcept {
+    switch (format) {
+        case VK_FORMAT_R8G8B8A8_UNORM:
+        case VK_FORMAT_R8G8B8A8_SRGB:
+            return 4u;
+        case VK_FORMAT_R16G16B16A16_SFLOAT:
+            return 8u;
+        default:
+            return 0u;
+    }
 }
 
 class TextureManager {
@@ -49,40 +62,49 @@ class TextureManager {
     [[nodiscard]] uint32_t BindlessBaseSlot() const noexcept {
         return _bindlessBaseSlot;
     }
+    [[nodiscard]] Vk::TextureHandle BindlessBaseHandle() const noexcept {
+        return Vk::TextureHandle {_bindlessBaseSlot};
+    }
 
-    [[nodiscard]] auto Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format)
+    [[nodiscard]] auto Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true)
         -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format)
+    [[nodiscard]] auto UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true)
         -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto AdoptTexture(Vk::Image image, VkImageViewCreateInfo viewInfo, uint32_t width, uint32_t height)
-        -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] auto AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height) -> std::expected<TextureHandle, ErrorCode>;
 
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
-    void Unload(TextureHandle handle);
-    void Clear();
+    void                   Unload(TextureHandle handle);
+    void                   Clear();
 
     void RetireAll() noexcept;
     void Reset();
 
-    [[nodiscard]] auto Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format) -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto Adopt(Vk::Image image, VkImageViewCreateInfo viewInfo) -> std::expected<uint32_t, ErrorCode>;
-    void BeginFrame(uint32_t frameIndex) noexcept;
-    void ReleaseSlot(uint32_t bindlessIndex) noexcept;
+    [[nodiscard]] auto
+        Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true) -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto Adopt(Vk::Image image, Vk::ImageView view) -> std::expected<uint32_t, ErrorCode>;
+    void               BeginFrame(uint32_t frameIndex) noexcept;
+    void               ReleaseSlot(uint32_t bindlessIndex) noexcept;
 
-    [[nodiscard]] auto                 SlotCount() const noexcept -> size_t { return _slotImages.size(); }
-    [[nodiscard]] const Vk::Image&             Image(uint32_t slot) const noexcept { return _slotImages[slot]; }
-    [[nodiscard]] const VkImageViewCreateInfo& ViewInfo(uint32_t slot) const noexcept { return _slotInfos[slot]; }
+    [[nodiscard]] auto SlotCount() const noexcept -> size_t {
+        return _slotImages.size();
+    }
+    [[nodiscard]] const Vk::Image& Image(uint32_t slot) const noexcept {
+        return _slotImages[slot];
+    }
+    [[nodiscard]] const Vk::ImageView& View(uint32_t slot) const noexcept {
+        return _slotViews[slot];
+    }
 
     [[nodiscard]] auto Slice(uint32_t slot, VkExtent2D extent) const noexcept -> Vk::ImageSlice {
-        return Vk::ImageSlice {_slotInfos[slot], {extent.width, extent.height, 1}};
+        return Vk::ImageSlice {_slotViews[slot], {extent.width, extent.height, 1}};
     }
     void NameSlots() noexcept;
 
   private:
     struct TextureRecord {
-        TextureHandle handle           = TextureHandle::Invalid;
-        std::string   identifier {};
+        TextureHandle handle = TextureHandle::Invalid;
+        std::string   identifier;
         bool          named            = false;
         VkFormat      format           = VK_FORMAT_UNDEFINED;
         uint32_t      width            = 0;
@@ -92,15 +114,15 @@ class TextureManager {
     };
 
     struct ReleasedSlot {
-        uint32_t              index = 0;
-        Vk::Image             image;
-        VkImageViewCreateInfo viewInfo {};
+        uint32_t      index = 0;
+        Vk::Image     image;
+        Vk::ImageView view;
     };
 
     [[nodiscard]] TextureHandle RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, uint32_t width, uint32_t height);
-    void WriteSlotToHeap(uint32_t bindlessIndex, const VkImageViewCreateInfo& viewInfo) noexcept;
-    void RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept;
-    void DestroyAllSlots() noexcept;
+    void                        WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept;
+    void                        RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept;
+    void                        DestroyAllSlots() noexcept;
 
     Vk::Context&                                 _ctx;
     Vk::Allocator&                               _allocator;
@@ -109,20 +131,20 @@ class TextureManager {
     Vk::HeapManager&                             _heaps;
 
     uint32_t _bindlessBaseSlot = 0;
-    uint32_t _frameIndex = 0;
+    uint32_t _frameIndex       = 0;
 
     ZHLN::Array<Vk::Image> _slotImages;
 
-    std::deque<VkImageViewCreateInfo> _slotInfos;
-    uint32_t _nextSlotIndex = 0;
-    ZHLN::Array<uint32_t> _freeSlots;
+    std::deque<Vk::ImageView>                                  _slotViews;
+    uint32_t                                                   _nextSlotIndex = 0;
+    ZHLN::Array<uint32_t>                                      _freeSlots;
     std::array<ZHLN::Array<ReleasedSlot>, Vk::kFramesInFlight> _pendingFrees;
 
     HashMap<uint64_t, TextureRecord> _textures;
 
-    uint64_t                         _nextAnonymousHandle = 1ull << 63;
-    mutable Mutex                    _mutex {};
-    mutable uint32_t                 _missingHandleWarningCount = 0;
+    uint64_t         _nextAnonymousHandle = 1ull << 63;
+    mutable Mutex    _mutex {};
+    mutable uint32_t _missingHandleWarningCount = 0;
 };
 
-}
+} // namespace ZHLN

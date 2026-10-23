@@ -30,8 +30,9 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
     const std::array variants  = {BakeSpec {.bakeType = 0}, BakeSpec {.bakeType = 1}, BakeSpec {.bakeType = 2}};
     const auto       specInfos = bakeSpec.Infos(std::span {variants});
 
+    Vk::HeapMappingArena mappingArena {heapManager};
     auto build_res = compute.proceduralBake.BuildHeapVariants(
-        ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, &pipelineBinaries
+        ctx.Device(), shaderDesc, specInfos, mappingArena.Map(bakeHeapBindings.mappings), bakeHeapBindings.indexPushOffset, &pipelineBinaries
     );
     if (!build_res) {
         return std::unexpected(build_res.error());
@@ -56,13 +57,13 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
     )
         .and_then([&, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<TextureHandle, ErrorCode> {
             defer                       _([&] { allocator.DestroyImage(gpuImage); });
-            const VkImageViewCreateInfo writeInfo = gpuImage.ViewInfo();
+            const Vk::ImageView writeView = gpuImage.View();
 
-            heapManager.BeginImmediate();
-            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(bakeHeapBindings, Vk::Slot<"outTexture">(writeInfo));
+            auto                  heapScope = heapManager.CreateImmediateScope();
+            const Vk::HeapBlockBase block     = heapScope.WriteParameters<Shaders::Bake>(bakeHeapBindings, Vk::Slot<"outTexture">(writeView));
 
             if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
-                heapManager.BindHeaps(cmd);
+                heapScope.Bind(cmd);
 
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, gpuImage.Handle());
 
@@ -78,7 +79,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                 return std::unexpected(immediate.error());
             }
 
-            return textureManager.AdoptTexture(std::forward<decltype(gpuImage)>(gpuImage), writeInfo, width, height);
+            return textureManager.AdoptTexture(std::forward<decltype(gpuImage)>(gpuImage), writeView, width, height);
         });
 }
 

@@ -4,6 +4,7 @@
 module gpu_abi;
 
 import cluster_math;
+import common;
 import descriptor_heap_layout;
 import instance_data;
 import particles;
@@ -37,6 +38,29 @@ public struct GpuAbiTypes {
     public ThresholdPushConstants thresholdPush;
     public HdrAtrousPushConstants hdrAtrousPush;
     public BlitPushConstants blitPush;
+
+    public ShadowAtrousPushConstants shadowAtrousPush;
+    public FXAAPushConstants fxaaPush;
+    public MLAAPushConstants mlaaPush;
+    public TAAPushConstants taaPush;
+    public RtrHalfPushConstants rtrHalfPush;
+    public RtgiHalfPushConstants rtgiHalfPush;
+    public DdgiTracePushConstants ddgiTracePush;
+    public DdgiUpdatePushConstants ddgiUpdatePush;
+    public VolumetricFogPushConstants volumetricFogPush;
+    public VolumetricLightInjectPushConstants volumetricLightInjectPush;
+    public VolumetricTemporalPushConstants volumetricTemporalPush;
+    public BRDFLUTPush brdfLutPush;
+    public IBLBakePush iblBakePush;
+    public SMAALUTPush smaaLutPush;
+    public SmaaPushConstants smaaPush;
+    public HiZPushConstants hizPush;
+    public ParticleRenderPushConstants particleRenderPush;
+    public LinePushConstants linePush;
+    public DecalPushConstants decalPush;
+    public ShadowTilePush shadowTilePush;
+    public MeshParticleComputePush meshParticleComputePush;
+    public ComputePushConstants computePush;
 };
 
 ConstantBuffer<GpuAbiTypes> abi;
@@ -92,5 +116,27 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += asuint(abi.thresholdPush.exposure);
     acc += abi.hdrAtrousPush.stepSize;
     acc += asuint(abi.blitPush.colorFilter.x);
+    acc += abi.shadowAtrousPush.stepSize;
+    acc += asuint(abi.fxaaPush.rcpFrameX);
+    acc += asuint(abi.mlaaPush.threshold);
+    acc += asuint(abi.taaPush.feedback);
+    acc += abi.rtrHalfPush.halfRes.x;
+    acc += abi.rtgiHalfPush.halfRes.x;
+    acc += abi.ddgiTracePush.totalProbes;
+    acc += asuint(abi.ddgiUpdatePush.hysteresis);
+    acc += asuint(abi.volumetricFogPush.density);
+    acc += asuint(abi.volumetricLightInjectPush.scatteringIntensity);
+    acc += asuint(abi.volumetricTemporalPush.clampStrength);
+    acc += abi.brdfLutPush.width;
+    acc += abi.iblBakePush.sampleCount;
+    acc += abi.smaaLutPush.mode;
+    acc += asuint(abi.smaaPush.rtMetrics.x);
+    acc += asuint(abi.hizPush.rcpSrcWidth);
+    acc += abi.particleRenderPush.textureIndex;
+    acc += uint(abi.linePush.vertexBufferAddress);
+    acc += abi.decalPush.albedoIndex;
+    acc += uint(abi.shadowTilePush.viewProj[0][0]);
+    acc += abi.meshParticleComputePush.particleCount;
+    acc += abi.computePush.particleCount;
     sink[0] = acc;
 }

@@ -1,4 +1,5 @@
 
+import gpu_push_constants;
 import hash;
 import cluster_grid;
 import cluster_math;
@@ -12,13 +13,6 @@ namespace Dispatch {
     [[vk::constant_id(1001)]] const uint SizeY = Volumetric.Height;
     [[vk::constant_id(1002)]] const uint SizeZ = Volumetric.Depth;
 }
-
-struct VolumetricLightInjectPushConstants {
-    float scatteringIntensity;
-    float ambientIntensity;
-    float phaseAnisotropy;
-    uint enableShadows;
-};
 
 [vk::push_constant]
 VolumetricLightInjectPushConstants lightPC;

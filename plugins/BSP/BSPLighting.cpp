@@ -686,9 +686,17 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
     const float cellMetres      = std::max(kEmissiveClusterCellInches * unitScale, 0.1f);
     const float fixtureMetres   = std::max(kEmissiveFixtureRadiusInches * unitScale, 0.1f);
     const float fixtureMetresSq = fixtureMetres * fixtureMetres;
+    const float mergeMetres     = std::max(kEmissiveFixtureMergeInches * unitScale, 0.1f);
+    const float mergeMetresSq   = mergeMetres * mergeMetres;
 
-    // 1. Cluster: same material, same grid cell. A fixture built from many
-    //    coplanar sheets becomes one area-light proxy.
+    // 1. Cluster: same material, same grid cell, coplanar, and close enough to
+    //    be the same fixture. A lamp housing built from many coplanar sheets
+    //    becomes one area-light proxy; the next panel down the runway does not,
+    //    because a proxy is only allowed to speak for the fixture it sits on.
+    //    Merging further inflates the proxy's area -- and with it both its
+    //    intensity and its range -- and drags it to the group's centroid, which
+    //    is the difference between "a lamp lights the floor under it" and "a
+    //    pool of light floats between two lamps".
     struct Bucket {
         std::string material;
         float       areaSquareInches = 0.0f;
@@ -701,15 +709,48 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
         bool        noLightFlag      = false;
         uint32_t    faces            = 0;
     };
-    std::unordered_map<std::string, Bucket> buckets;
+    std::vector<Bucket>                                 buckets;
+    std::unordered_map<std::string, std::vector<size_t>> cells;
     buckets.reserve(surfaces.size());
+    cells.reserve(surfaces.size());
     for (const EmissiveSurface& surface: surfaces) {
-        const int64_t     cx     = static_cast<int64_t>(std::floor(surface.position.GetX() / cellMetres));
-        const int64_t     cy     = static_cast<int64_t>(std::floor(surface.position.GetY() / cellMetres));
-        const int64_t     cz     = static_cast<int64_t>(std::floor(surface.position.GetZ() / cellMetres));
-        const std::string key    = surface.materialName + "@" + std::to_string(cx) + "_" + std::to_string(cy) + "_" + std::to_string(cz);
-        Bucket&           bucket = buckets[key];
-        bucket.material          = surface.materialName;
+        const int64_t        cx         = static_cast<int64_t>(std::floor(surface.position.GetX() / cellMetres));
+        const int64_t        cy         = static_cast<int64_t>(std::floor(surface.position.GetY() / cellMetres));
+        const int64_t        cz         = static_cast<int64_t>(std::floor(surface.position.GetZ() / cellMetres));
+        const std::string    key        = surface.materialName + "@" + std::to_string(cx) + "_" + std::to_string(cy) + "_" + std::to_string(cz);
+        std::vector<size_t>& candidates = cells[key];
+
+        size_t target     = buckets.size();
+        float  bestDistSq = mergeMetresSq;
+        for (const size_t index: candidates) {
+            const Bucket& existing = buckets[index];
+            if (existing.areaSquareMetres <= 0.0f) {
+                continue;
+            }
+            // Compare against the group's running centroid, not its first face:
+            // a housing's sheets are consecutive and overlap each other, so the
+            // centroid tracks the fixture as it grows.
+            const JPH::Vec3 centroid = existing.weighted * (1.0f / existing.areaSquareMetres);
+            const float     distSq   = (centroid - surface.position).LengthSq();
+            if (distSq >= bestDistSq) {
+                continue;
+            }
+            const JPH::Vec3 normal =
+                (existing.weightedNormal.LengthSq() > 1e-8f) ? existing.weightedNormal.Normalized() : JPH::Vec3::sAxisY();
+            if (normal.Dot(surface.normal) < kEmissiveFixtureCoplanarCos) {
+                continue;
+            }
+            bestDistSq = distSq;
+            target     = index;
+        }
+        if (target == buckets.size()) {
+            buckets.emplace_back();
+            buckets.back().material = surface.materialName;
+            candidates.push_back(buckets.size() - 1u);
+            target = buckets.size() - 1u;
+        }
+
+        Bucket& bucket = buckets[target];
         bucket.areaSquareInches += surface.areaSquareInches;
         bucket.areaSquareMetres += surface.areaSquareMetres;
         bucket.weighted         = bucket.weighted + surface.position * surface.areaSquareMetres;
@@ -718,13 +759,12 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
         bucket.strength         = std::max(bucket.strength, surface.strength);
         bucket.reflectivityLuma = surface.reflectivityLuma;
         bucket.noLightFlag      = bucket.noLightFlag || surface.noLightFlag;
-        bucket.faces += surface.faceCount;
+        bucket.faces            += surface.faceCount;
     }
 
     std::vector<EmissiveSurface> out;
     out.reserve(buckets.size());
-    for (auto& kv: buckets) {
-        const Bucket& bucket = kv.second;
+    for (const Bucket& bucket: buckets) {
         if (bucket.areaSquareMetres <= 0.0f || bucket.faces == 0) {
             continue;
         }

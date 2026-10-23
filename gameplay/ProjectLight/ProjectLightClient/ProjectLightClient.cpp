@@ -1405,10 +1405,10 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
     MsgPackValue owned = MsgPackValue::Map();
     MsgPackValue ownedTransforms = MsgPackValue::Map();
     if (m_localController != Entity::Null() && m_localControllerBody != Physics::BodyHandle::Null()) {
-        Physics::BodyStateSnapshot state {};
         auto& physics = engine.GetPhysicsContext();
         const auto movement = registry.Get<Character::MovementComponent>(m_localController);
-        if (physics.TryGetBodyState(m_localControllerBody, state) && state.valid) {
+        if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState && bodyState->valid) {
+            const auto& state = *bodyState;
             const JPH::Quat rotation = movement ? movement->orientation.Normalized() : state.currentRotation.Normalized();
             const JPH::Vec3 velocity = physics.GetCharacterVelocity(m_localControllerBody);
             owned.Set("controllerState", FloatArray({
@@ -1436,8 +1436,8 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         } else if (const Entity entity = m_index.Find(uid); entity != Entity::Null() && registry.IsAlive(entity)) {
             const auto body = registry.Get<Components::PhysicsComponent>(entity);
             if (body) {
-                Physics::BodyStateSnapshot snapshot {};
-                if (physics.TryGetBodyState(body->physicsHandle, snapshot) && snapshot.valid) {
+                if (const auto bodyState = physics.BodyState(body->physicsHandle); bodyState && bodyState->valid) {
+                    const auto& snapshot = *bodyState;
                     transform.position = snapshot.currentPosition;
                     transform.rotation = snapshot.currentRotation;
                     const JPH::BodyID bodyId = Physics::GetBodyID(physics.GetInternalWorld(), body->physicsHandle);

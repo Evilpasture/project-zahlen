@@ -208,11 +208,9 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
                         .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
                         .Build()
                         .transform([&](auto&& context) -> auto {
-                            impl->ctx         = std::forward<decltype(context)>(context);
-                            const auto vendor = static_cast<Vk::GPUVendor>(physicalInfo.properties.properties.vendorID);
+                            impl->ctx = std::forward<decltype(context)>(context);
                             impl->diagnostics.gpuDiagnostics.Create(
-                                vendor, impl->ctx.Device(), impl->ctx.Physical(), impl->ctx.Instance().AddressTracker(),
-                                Vk::DiagnosticConfig {.crashDumpPath = cfg.crashDumpPath}
+                                impl->ctx.Device(), impl->ctx.Instance().AddressTracker(), {.crashDumpPath = cfg.crashDumpPath}
                             );
                         });
                 });

@@ -148,61 +148,6 @@ constexpr auto EnumMessageOf(E value) -> std::string_view {
     return matched ? last : std::string_view {};
 }
 
-#else
-
-template <typename E>
-    requires std::is_enum_v<E>
-constexpr std::string_view EnumToString(E ) {
-    return "Unknown";
-}
-
-template <typename E>
-    requires std::is_enum_v<E>
-consteval auto EnumHasValue(std::underlying_type_t<E> ) noexcept -> bool {
-    return false;
-}
-
-template <typename E>
-    requires std::is_enum_v<E>
-constexpr std::optional<E> StringToEnum(std::string_view ) {
-    return std::nullopt;
-}
-
-template <typename E>
-    requires std::is_enum_v<E>
-consteval std::size_t EnumCount() {
-    return 0;
-}
-
-template <typename E>
-    requires std::is_enum_v<E>
-consteval auto EnumNames() {
-    return std::array<std::string_view, 0> {};
-}
-
-template <typename E>
-    requires std::is_enum_v<E>
-consteval std::string_view EnumUnderlyingTypeName() {
-    return "";
-}
-
-template <typename E, typename F>
-    requires std::is_enum_v<E>
-constexpr void ForEachEnumerator(F&& ) {
-}
-
-template <typename Tag, typename E>
-    requires std::is_enum_v<E>
-constexpr std::optional<Tag> GetEnumeratorAnnotation(E ) {
-    return std::nullopt;
-}
-
-template <typename E>
-    requires std::is_enum_v<E>
-constexpr std::string_view EnumMessageOf(E ) {
-    return {};
-}
-
 #endif
 
 template <typename E, typename F>

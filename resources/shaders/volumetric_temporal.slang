@@ -1,4 +1,5 @@
 
+import gpu_push_constants;
 import uniforms;
 import volumetric_grid;
 
@@ -7,13 +8,6 @@ namespace Dispatch {
     [[vk::constant_id(1001)]] const uint SizeY = Volumetric.Height;
     [[vk::constant_id(1002)]] const uint SizeZ = Volumetric.Depth;
 }
-
-struct VolumetricTemporalPushConstants {
-    float temporalWeight;
-    float clampStrength;
-    uint resetHistory;
-    uint _pad;
-};
 
 [vk::push_constant]
 VolumetricTemporalPushConstants tempPC;

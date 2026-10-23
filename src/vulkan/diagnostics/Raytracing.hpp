@@ -8,6 +8,7 @@
 #endif
 
 #include "../VkError.hpp"
+#include "../memory/GeometryView.hpp"
 #include <cstdint>
 
 namespace ZHLN::Vk {
@@ -23,21 +24,11 @@ struct AccelerationStructureSizes {
     VkDeviceSize update_scratch_size = 0;
 };
 
-struct BlasGeometryDesc {
-    VkDeviceAddress vertex_data = 0;
-    uint32_t        vertex_stride = 0;
-    uint32_t        max_vertex = 0;
-    VkFormat        vertex_format = VK_FORMAT_R32G32B32_SFLOAT;
-    VkDeviceAddress index_data = 0;
-    VkIndexType     index_type = VK_INDEX_TYPE_NONE_KHR;
-};
-
 struct TlasGeometryDesc {
     VkDeviceAddress instance_data = 0;
 };
 
-[[nodiscard]] auto GetBLASSizes(VkDevice device, const BlasGeometryDesc& desc, uint32_t primitiveCount) noexcept
-    -> AccelerationStructureSizes;
+[[nodiscard]] auto GetBLASSizes(VkDevice device, const GeometryView& geometry) noexcept -> AccelerationStructureSizes;
 [[nodiscard]] auto GetTLASSizes(VkDevice device, uint32_t instanceCount) noexcept -> AccelerationStructureSizes;
 
 [[nodiscard]] auto CreateAccelerationStructure(
@@ -51,10 +42,9 @@ struct TlasGeometryDesc {
 
 void BuildBLAS(
     VkCommandBuffer cmd,
-    const BlasGeometryDesc& desc,
+    const GeometryView& geometry,
     VkAccelerationStructureKHR destination,
-    BufferSlice scratch,
-    uint32_t primitiveCount
+    BufferSlice scratch
 ) noexcept;
 void BuildTLAS(
     VkCommandBuffer cmd,

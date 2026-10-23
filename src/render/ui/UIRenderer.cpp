@@ -7,6 +7,7 @@
 #include "../TextureManager.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -62,7 +63,7 @@ struct UIRenderer::Impl {
     UIVariants<SupportedUITargetFormats> pipelines;
     VkFormat                             fallbackFormat = VK_FORMAT_UNDEFINED;
     Vk::Pipeline                         fallbackPipeline;
-    Vk::HeapMappingBundle                mappings;
+    Vk::HeapMappingTable                 mappings;
 
     std::array<Vk::Buffer, Vk::kFramesInFlight>      vbos {};
     std::array<VkDeviceAddress, Vk::kFramesInFlight> vboAddresses {};
@@ -106,12 +107,20 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     }
 
     impl.mappings =
-        Vk::HeapMappingBuilder(ctx.heapManager).Sampler(0, 0, ctx.globalSamplerSlot).BindlessTextureArray(0, 1, ctx.textureManager.BindlessBaseSlot()).Build();
+        Vk::HeapMappingBuilder(ctx.heapManager)
+            .Sampler(0, 0, ctx.globalSamplerSlot)
+            .BindlessTextureArray(0, 1, ctx.textureManager.BindlessBaseHandle())
+            .Build();
 
     auto uiShaders = Vk::ShaderStagesView::Create<Shaders::Modules::UiVS, Shaders::Modules::UiPS>();
     if (!uiShaders) {
         return std::unexpected(uiShaders.error());
     }
+
+    // Every UI variant draws with the same two bindings: materialize them once,
+    // for the length of this init.
+    Vk::HeapMappingArena mappingArena {ctx.heapManager};
+    const auto*          mappings = mappingArena.Map(impl.mappings);
 
     impl.pipelines               = {};
     impl.fallbackPipeline        = {};
@@ -121,7 +130,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         Vk::PipelineBuilder builder;
         builder.Shaders(*uiShaders)
             .Binaries(&ctx.pipelineBinaries)
-            .HeapMappings(&impl.mappings.info, &impl.mappings.info)
+            .HeapMappings(mappings, mappings)
             .AlphaBlend()
             .CullNone();
         return builder;
@@ -135,28 +144,49 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         return {};
     };
 
-    size_t                         pipelineCount = 0;
-    std::expected<void, ErrorCode> built;
-    std::apply(
-        [&](auto&... pipelines) {
-            (
-                [&] {
-                    using Pipeline            = std::remove_cvref_t<decltype(pipelines)>;
-                    constexpr VkFormat Format = Pipeline::FormatSet::color_formats[0];
-                    if (built && (Format == presentFormat || Format == VK_FORMAT_R8G8B8A8_UNORM || Format == VK_FORMAT_R16G16B16A16_SFLOAT)) {
-                        built = BuildVariant.template operator()<Format>(pipelines);
-                        if (built) {
-                            ++pipelineCount;
+    // Each variant is a separate pipeline and a separate question. The batch is
+    // what lets them be asked that way: every one is attempted, the ones that
+    // built are counted, and the failures are reported per format instead of the
+    // first one standing in for them. (The accumulator this replaces was
+    // `std::expected<void, ErrorCode> built`, gated on `if (built && ...)`: it
+    // stopped trying after the first failure and then failed the init outright,
+    // so a driver that could not make the HDR pipeline -- a format this renderer
+    // only asks for when the swapchain presents it -- cost the app its whole UI.)
+    std::size_t pipelineCount = 0;
+    {
+        struct VariantFailure {
+            VkFormat  format = VK_FORMAT_UNDEFINED;
+            ErrorCode error {};
+        };
+        BatchResult<VkFormat, VariantFailure> built;
+
+        std::apply(
+            [&](auto&... pipelines) {
+                (
+                    [&] {
+                        using Pipeline            = std::remove_cvref_t<decltype(pipelines)>;
+                        constexpr VkFormat Format = Pipeline::FormatSet::color_formats[0];
+                        if (Format != presentFormat && Format != VK_FORMAT_R8G8B8A8_UNORM && Format != VK_FORMAT_R16G16B16A16_SFLOAT) {
+                            return;
                         }
-                    }
-                }(),
-                ...
+                        if (auto variant = BuildVariant.template operator()<Format>(pipelines); variant) {
+                            built.AddSuccess(Format);
+                        } else {
+                            built.EmplaceError(VariantFailure {.format = Format, .error = variant.error()});
+                        }
+                    }(),
+                    ...);
+            },
+            impl.pipelines.pipelines
+        );
+
+        built.ForEachError([](const VariantFailure& failure) {
+            ZHLN::LogWarning(
+                "UIRenderer: no UI pipeline for VkFormat {} ({}); UI targets in that format will be refused rather than drawn.",
+                static_cast<uint32_t>(failure.format), failure.error
             );
-        },
-        impl.pipelines.pipelines
-    );
-    if (!built) {
-        return std::unexpected(built.error());
+        });
+        pipelineCount = built.SuccessCount();
     }
 
     if (!impl.pipelines.Supports(presentFormat)) {

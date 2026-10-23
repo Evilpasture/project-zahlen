@@ -148,16 +148,6 @@ struct Define {
     }
 };
 
-#else
-
-template <StringLiteral Name, typename... Fields>
-struct Define {
-    struct type {};
-    friend constexpr std::string_view GetSchemaName(type* ) {
-        return Name;
-    }
-};
-
 #endif
 
 }

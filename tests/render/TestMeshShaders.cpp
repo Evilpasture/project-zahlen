@@ -35,8 +35,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
-#include <filesystem>
-#include <fstream>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -64,36 +62,7 @@ enum class MeshShaderTestError : uint8_t {
 
 namespace {
 
-struct Image {
-    int                  width  = 0;
-    int                  height = 0;
-    std::vector<uint8_t> rgb;
-
-    [[nodiscard]] bool Valid() const noexcept {
-        return width > 0 && height > 0 && rgb.size() == static_cast<size_t>(width) * static_cast<size_t>(height) * 3u;
-    }
-};
-
-[[nodiscard]] Image LoadPPM(std::string_view path) {
-    Image         img;
-    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
-    if (!ppm.is_open()) {
-        return img;
-    }
-
-    std::string header;
-    int         maxColor = 0;
-    ppm >> header >> img.width >> img.height >> maxColor;
-    ppm.get();
-
-    if (img.width <= 0 || img.height <= 0) {
-        return {};
-    }
-
-    img.rgb.resize(static_cast<size_t>(img.width) * static_cast<size_t>(img.height) * 3u);
-    ppm.read(reinterpret_cast<char*>(img.rgb.data()), static_cast<std::streamsize>(img.rgb.size()));
-    return img;
-}
+using Image = ZHLN::Test::Image::RgbImage;
 
 // Pixels that differ from the top-left pixel: a cheap "is anything actually
 // drawn here" probe, so two identically-blank frames cannot pass as a match.
@@ -194,18 +163,12 @@ void WriteDiffImage(std::string_view path, const Image& a, const Image& b) {
     if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
         return;
     }
-    std::ofstream out(std::filesystem::path(path), std::ios::binary);
-    if (!out.is_open()) {
-        return;
-    }
-    out << "P6\n" << a.width << " " << a.height << "\n255\n";
-
-    std::vector<uint8_t> amplified(a.rgb.size());
+    Image amplified = a;
     for (size_t i = 0; i < a.rgb.size(); ++i) {
-        const int d  = std::abs(static_cast<int>(a.rgb[i]) - static_cast<int>(b.rgb[i]));
-        amplified[i] = static_cast<uint8_t>(std::min(255, d * 4));
+        const int d      = std::abs(static_cast<int>(a.rgb[i]) - static_cast<int>(b.rgb[i]));
+        amplified.rgb[i] = static_cast<uint8_t>(std::min(255, d * 4));
     }
-    out.write(reinterpret_cast<const char*>(amplified.data()), static_cast<std::streamsize>(amplified.size()));
+    (void) ZHLN::Test::Image::WritePPM(path, amplified);
 }
 
 } // namespace
@@ -545,15 +508,11 @@ struct MeshShaderTestSuite {
 
             constexpr float dt = 1.0f / 60.0f;
             auto            capture = [&](ZHLN::Engine& engine, std::string_view path) -> Image {
-                auto& rc = engine.GetRenderContext();
                 for (uint32_t frame = 0; frame < 6; ++frame) {
                     engine.ProcessEvents();
                     engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
                 }
-                if (!rc.CaptureScreenshotPPM(path)) {
-                    return {};
-                }
-                return LoadPPM(path);
+                return ZHLN::Test::Headless::Capture(engine, path);
             };
 
             // Mesh shading is create-time, so the two paths cannot share one
@@ -773,13 +732,11 @@ struct MeshShaderTestSuite {
 
             constexpr float dt = 1.0f / 60.0f;
             auto capture = [&](ZHLN::Engine& engine, std::string_view path) -> Image {
-                auto& rc = engine.GetRenderContext();
                 for (uint32_t f = 0; f < 6; ++f) {
                     engine.ProcessEvents();
                     engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
                 }
-                if (!rc.CaptureScreenshotPPM(path)) return {};
-                return LoadPPM(path);
+                return ZHLN::Test::Headless::Capture(engine, path);
             };
 
             // Both captures for one path are taken before the other path is
@@ -948,12 +905,7 @@ struct MeshShaderTestSuite {
                 return ZHLN::Test::ExpectTrue(mesh.has_value() && mesh->meshletCount > 0);
             };
 
-            auto capture = [](ZHLN::Engine& engine, const char* path) -> Image {
-                if (!engine.GetRenderContext().CaptureScreenshotPPM(path)) {
-                    return {};
-                }
-                return LoadPPM(path);
-            };
+            auto capture = [](ZHLN::Engine& engine, const char* path) -> Image { return ZHLN::Test::Headless::Capture(engine, path); };
 
             if (!setupBackplane(*vertexEngine)) {
                 return std::unexpected(MeshShaderTestError::DoubleSidedSetupFailed);

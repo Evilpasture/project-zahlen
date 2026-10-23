@@ -4,82 +4,6 @@
 
 namespace ZHLN::Vk {
 
-template <VkFormat F>
-inline RenderTarget<F>::RenderTarget(RenderTarget&& other) noexcept:
-    image(std::move(other.image)), attachmentView(std::move(other.attachmentView)), extent(other.extent) {
-}
-
-template <VkFormat F>
-inline auto RenderTarget<F>::operator=(RenderTarget&& other) noexcept -> RenderTarget& {
-    if (this != &other) {
-        attachmentView = std::move(other.attachmentView);
-        image          = std::move(other.image);
-        extent = other.extent;
-    }
-    return *this;
-}
-
-template <VkFormat F>
-inline auto RenderTarget<F>::State() const noexcept -> TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> {
-    return AsSlice().template Assume<VK_IMAGE_LAYOUT_UNDEFINED>();
-}
-
-template <VkFormat F>
-inline auto
-    RenderTarget<F>::Create(Allocator& allocator, VkDevice device, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode> {
-    RenderTarget rt;
-    rt.extent = extent;
-
-    const uint32_t mips = desc.mipLevels ? desc.mipLevels : 1;
-    ImageConfig imageConfig = ImageConfig::Texture2D(extent, F, desc.usage, mips, desc.arrayLayers);
-    imageConfig.cubeCompatible = desc.cubeCompatible;
-
-    auto img_res = Image::Create(allocator, imageConfig);
-    if (!img_res.has_value()) {
-        return std::unexpected(img_res.error());
-    }
-    rt.image = std::move(img_res.value());
-    ZHLN::defer _([&] { rt.Destroy(allocator); });
-
-    auto view_res = rt.image.CreateAttachmentView(device);
-    if (!view_res.has_value()) {
-        return std::unexpected(view_res.error());
-    }
-    rt.attachmentView = std::move(*view_res);
-    return std::move(rt);
-}
-
-template <VkFormat F>
-inline auto RenderTarget<F>::Valid() const noexcept -> bool {
-    return image.Valid() && attachmentView.Valid();
-}
-
-template <VkFormat F>
-inline RenderTarget<F>::operator bool() const noexcept {
-    return Valid();
-}
-
-template <VkFormat F>
-inline auto
-    RenderTarget3D<F>::Create(Allocator& allocator, VkDevice device, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode> {
-    RenderTarget3D rt;
-    rt.extent                    = extent;
-    const ImageConfig imageConfig = ImageConfig::Texture3D(extent, F, usage);
-    auto img_res = Image::Create(allocator, imageConfig);
-    if (!img_res.has_value()) {
-        return std::unexpected(img_res.error());
-    }
-    rt.image = std::move(img_res.value());
-    ZHLN::defer _([&] { rt.Destroy(allocator); });
-
-    auto view_res = rt.image.CreateAttachmentView(device);
-    if (!view_res.has_value()) {
-        return std::unexpected(view_res.error());
-    }
-    rt.attachmentView = std::move(*view_res);
-    return std::move(rt);
-}
-
 namespace TemplatedDetail {
 
 template <typename T>
@@ -93,18 +17,18 @@ struct ResourceTraits<TypedImage<Layout, Format>> {
     }
 };
 
-template <VkFormat F>
-struct ResourceTraits<RenderTarget<F>> {
+template <typename GraphTag>
+struct ResourceTraits<RenderTarget<GraphTag>> {
     static constexpr VkImageLayout old_layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    static auto GetSlice(const RenderTarget<F>& res) noexcept -> ImageSlice {
+    static auto GetSlice(const RenderTarget<GraphTag>& res) noexcept -> ImageSlice {
         return res.AsSlice();
     }
 };
 
 }
 
-template <VkImageLayout TargetLayout, VkFormat F>
-[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt, Tag<TargetLayout> ) noexcept {
+template <VkImageLayout TargetLayout, typename GraphTag>
+[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<GraphTag>& rt, Tag<TargetLayout> ) noexcept {
     return TransitionSingle<TargetLayout>(cmd, rt);
 }
 
