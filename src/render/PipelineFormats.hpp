@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "TargetManager.hpp"
 #include "passes/gbuffer/GBufferBasePass.hpp"
 
 namespace ZHLN {

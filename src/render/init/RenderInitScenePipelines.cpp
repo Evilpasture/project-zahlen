@@ -3,22 +3,24 @@
 
 #include "../RenderInternal.hpp"
 #include "../passes/lighting/EmissivePass.hpp"
+#include <PipelineFormats.hpp>
 #include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstring>
 #include <format>
 #include <span>
-#include <vector>
 
 namespace ZHLN {
 
 auto RenderContext::Impl::BuildEmissivePipeline() -> std::expected<void, ErrorCode> {
-    static_assert(Vk::ColorAttachmentWriteMask<Passes::EmissivePass, Res_LightingGI>() ==
-                  (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT),
-                  "Deferred emission must not write LightingGI alpha");
+    static_assert(
+        Vk::ColorAttachmentWriteMask<Passes::EmissivePass, Res_LightingGI>() ==
+            (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT),
+        "Deferred emission must not write LightingGI alpha"
+    );
     Vk::HeapMappingArena mappingArena {heapManager};
-    const auto*           sceneMappings = mappingArena.Map(sceneHeapMappings);
+    const auto*          sceneMappings = mappingArena.Map(sceneHeapMappings);
     return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::BasicVSEmissive>(), Vk::MakeStageSource<Shaders::Modules::EmissivePS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
@@ -42,7 +44,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
     auto csShader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>();
 
     Vk::HeapMappingArena mappingArena {heapManager};
-    const auto*           sceneMappings = mappingArena.Map(sceneHeapMappings);
+    const auto*          sceneMappings = mappingArena.Map(sceneHeapMappings);
 
     if (auto built = particleUpdate.particles.BuildHeap(ctx.Device(), csShader, sceneMappings, 0, &pipelineBinaries); !built) {
         return std::unexpected(built.error());
@@ -70,7 +72,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
     auto csMeshShader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>();
 
     Vk::HeapMappingArena mappingArena {heapManager};
-    const auto*           sceneMappings = mappingArena.Map(sceneHeapMappings);
+    const auto*          sceneMappings = mappingArena.Map(sceneHeapMappings);
 
     if (!particleUpdate.mesh.BuildHeap(ctx.Device(), csMeshShader, sceneMappings, 0, &pipelineBinaries)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -218,7 +220,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
     // Set 0 (the decal's own depth + point sampler) followed by the shared Set-1
     // scene block, materialized into one pMappings list.
     Vk::HeapMappingArena mappingArena {heapManager};
-    const auto*           decalMappings = mappingArena.Map(decalHeapMappings, sceneSet1HeapMappings);
+    const auto*          decalMappings = mappingArena.Map(decalHeapMappings, sceneSet1HeapMappings);
 
     return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::DecalVS>(), Vk::MakeStageSource<Shaders::Modules::DecalPS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
@@ -247,7 +249,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
 
     // Three stencil variants, one mapping table: materialize once.
     Vk::HeapMappingArena mappingArena {heapManager};
-    const auto*           sceneMappings = mappingArena.Map(sceneHeapMappings);
+    const auto*          sceneMappings = mappingArena.Map(sceneHeapMappings);
 
     return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
         .Shaders(stages)

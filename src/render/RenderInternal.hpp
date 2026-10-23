@@ -210,7 +210,7 @@ struct RenderContext::Impl: RenderFrameContext {
     void                                         BuildSceneHeapMappings() noexcept;
     void                                         BuildDecalHeapMappings() noexcept;
     void                                         WriteSceneStaticImageDescriptors() noexcept;
-    void                                         WritePointSamplerToHeap(const Vk::Sampler& config) noexcept;
+    void                                         WritePointSamplerToHeap(const Vk::Sampler& pointSamplerValue) noexcept;
     void                                         WriteTransLightingToHeap() noexcept;
     void                                         InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;

@@ -116,8 +116,8 @@ auto RenderContext::Impl::InitSceneHeaps(const Vk::Sampler& globalSamplerValue, 
     // Registration is one step: a handle that comes back is already written.
     auto globalSlot = heapManager.RegisterSampler(globalSampler);
     auto clampSlot  = heapManager.RegisterSampler(clampSampler);
-    // The point sampler's configuration is chosen by the post-process feature after
-    // this point, so its handle is reserved and bound there.
+    // The point sampler is chosen by the post-process feature after this point, so
+    // its handle is reserved and bound there.
     auto pointSlot = heapManager.ReserveSampler();
     if (!globalSlot || !clampSlot || !pointSlot) {
         return std::unexpected(Vk::DescriptorHeapError::SamplerSlotsExhausted);
@@ -214,8 +214,8 @@ void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
     }
 }
 
-void RenderContext::Impl::WritePointSamplerToHeap(const Vk::Sampler& config) noexcept {
-    heapManager.BindSampler(pointSamplerSlot, config);
+void RenderContext::Impl::WritePointSamplerToHeap(const Vk::Sampler& pointSamplerValue) noexcept {
+    heapManager.BindSampler(pointSamplerSlot, pointSamplerValue);
 }
 
 void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
@@ -227,49 +227,45 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
 }
 
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
-    const Vk::Sampler defaultConfig   = defaultSampler;
-    const Vk::Sampler pointConfig     = pointSampler;
-    const Vk::Sampler shadowConfig    = shadowSampler;
-    const Vk::Sampler clampConfig     = clampSampler;
-    const Vk::Sampler skyConfig       = Vk::Sampler::LinearRepeat().WithAddressModes(
+    // An equirectangular lookup wraps around the horizon and clamps at the poles.
+    const Vk::Sampler skySampler = Vk::Sampler::LinearRepeat().WithAddressModes(
         Vk::SamplerAddressMode::Repeat, Vk::SamplerAddressMode::ClampToEdge, Vk::SamplerAddressMode::ClampToEdge
     );
-    const Vk::Sampler blueNoiseConfig = blueNoiseSampler;
 
-    Vk::InitHeapPassSamplers<Shaders::Hiz>(heapManager, culling.hizHeapBindings, Vk::UnreadSampler<"pointSampler">(pointConfig));
-    Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, culling.cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointConfig));
+    Vk::InitHeapPassSamplers<Shaders::Hiz>(heapManager, culling.hizHeapBindings, Vk::UnreadSampler<"pointSampler">(pointSampler));
+    Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, culling.cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointSampler));
     Vk::InitHeapPassSamplers<Shaders::Lighting>(
-        heapManager, post.lighting.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"shadowSampler">(shadowConfig),
-        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"pointSampler">(pointConfig)
+        heapManager, post.lighting.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler), Vk::SamplerSlot<"shadowSampler">(shadowSampler),
+        Vk::SamplerSlot<"clampSampler">(clampSampler), Vk::SamplerSlot<"pointSampler">(pointSampler)
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
-        heapManager, reflectionPipeline.pass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
-        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+        heapManager, reflectionPipeline.pass.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler), Vk::SamplerSlot<"pointSampler">(pointSampler),
+        Vk::SamplerSlot<"clampSampler">(clampSampler), Vk::SamplerSlot<"skySampler">(skySampler), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseSampler)
     );
-    Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, antiAliasing.taa.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, antiAliasing.fxaa.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::Mlaa>(heapManager, antiAliasing.mlaa.heapBindings, Vk::SamplerSlot<"sPoint">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::SmaaEdge>(heapManager, antiAliasing.smaaEdge.heapBindings, Vk::SamplerSlot<"pointSampler">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(heapManager, antiAliasing.smaaWeight.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, antiAliasing.smaaBlend.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, post.blit.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, antiAliasing.taa.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, antiAliasing.fxaa.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::Mlaa>(heapManager, antiAliasing.mlaa.heapBindings, Vk::SamplerSlot<"sPoint">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::SmaaEdge>(heapManager, antiAliasing.smaaEdge.heapBindings, Vk::SamplerSlot<"pointSampler">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(heapManager, antiAliasing.smaaWeight.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, antiAliasing.smaaBlend.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, post.blit.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler));
 
     // Lighting and post-process samplers are registered here with every other
     // pass's, reading each bundle's bindings directly.
-    Vk::InitHeapPassSamplers<Shaders::Gtao>(heapManager, lighting.gtao.Bindings(), Vk::SamplerSlot<"pointSampler">(pointConfig));
-    Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(heapManager, post.bloomThreshold.Bindings(), Vk::SamplerSlot<"smp">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::BloomDown>(heapManager, post.bloomDown.Bindings(), Vk::SamplerSlot<"smp">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::BloomUp>(heapManager, post.bloomUp.Bindings(), Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::Gtao>(heapManager, lighting.gtao.Bindings(), Vk::SamplerSlot<"pointSampler">(pointSampler));
+    Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(heapManager, post.bloomThreshold.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::BloomDown>(heapManager, post.bloomDown.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::BloomUp>(heapManager, post.bloomUp.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler));
     if (ctx.RayTracingSupported()) {
-        Vk::InitHeapPassSamplers<Shaders::RtShadow>(heapManager, lighting.rtShadow.Bindings(), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig));
+        Vk::InitHeapPassSamplers<Shaders::RtShadow>(heapManager, lighting.rtShadow.Bindings(), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseSampler));
         Vk::InitHeapPassSamplers<Shaders::RtrHalf>(
-            heapManager, lighting.rtrHalf.Bindings(), Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
-            Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+            heapManager, lighting.rtrHalf.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler), Vk::SamplerSlot<"pointSampler">(pointSampler),
+            Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseSampler)
         );
         Vk::InitHeapPassSamplers<Shaders::RtgiHalf>(
-            heapManager, lighting.rtgiHalf.Bindings(), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig), Vk::SamplerSlot<"clampSampler">(clampConfig)
+            heapManager, lighting.rtgiHalf.Bindings(), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseSampler), Vk::SamplerSlot<"clampSampler">(clampSampler)
         );
-        Vk::InitHeapPassSamplers<Shaders::DdgiTrace>(heapManager, lighting.ddgiTrace.Bindings(), Vk::SamplerSlot<"clampSampler">(clampConfig));
+        Vk::InitHeapPassSamplers<Shaders::DdgiTrace>(heapManager, lighting.ddgiTrace.Bindings(), Vk::SamplerSlot<"clampSampler">(clampSampler));
     }
     fog.InitSamplers(*this);
 }

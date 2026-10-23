@@ -8,11 +8,11 @@
 #include "Zahlen/Geometry2D.hpp"
 #include "Zahlen/GraphicsSettings.hpp"
 #include "Zahlen/Render/Handles.hpp"
-#include "Zahlen/Render/PresentTiming.hpp"
 #include "Zahlen/Render/Types.hpp"
 #include "Zahlen/Vertex.hpp"
 #include "passes/forward/ForwardPass.hpp"
 #include "passes/gbuffer/GBufferBasePass.hpp"
+#include <PipelineFormats.hpp>
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
@@ -96,12 +96,8 @@ void RenderContext::UnregisterGPUMaterial(MaterialID id) noexcept {
     }
 }
 
-auto RenderContext::Impl::EnsureEmitterStorage(
-    EmitterStorageMap& emitters,
-    const uint64_t     emitterId,
-    const uint32_t     maxParticles,
-    const size_t       particleStride
-) -> BufferHandle {
+auto RenderContext::Impl::EnsureEmitterStorage(EmitterStorageMap& emitters, const uint64_t emitterId, const uint32_t maxParticles, const size_t particleStride)
+    -> BufferHandle {
     if (maxParticles == 0) {
         if (auto storage = emitters.Find(emitterId)) {
             if (storage->buffer != BufferHandle::Invalid) {
@@ -131,15 +127,15 @@ auto RenderContext::Impl::EnsureEmitterStorage(
     }
 
     const size_t allocationSize = static_cast<size_t>(maxParticles) * particleStride;
-    auto         created        = geometry.CreateBuffer(
-        {.allocationSize = allocationSize}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
-    );
+    auto         created        = geometry.CreateBuffer({.allocationSize = allocationSize}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
     if (!created || *created == BufferHandle::Invalid) {
         if (!storage->allocationWarningLogged) {
             if (!created) {
                 ZHLN::LogWarning("[Render] Could not allocate particle storage for emitter {} ({} particles): {}", emitterId, maxParticles, created.error());
             } else {
-                ZHLN::LogWarning("[Render] Could not allocate particle storage for emitter {} ({} particles): geometry buffer pool is full.", emitterId, maxParticles);
+                ZHLN::LogWarning(
+                    "[Render] Could not allocate particle storage for emitter {} ({} particles): geometry buffer pool is full.", emitterId, maxParticles
+                );
             }
             storage->allocationWarningLogged = true;
         }
@@ -149,8 +145,8 @@ auto RenderContext::Impl::EnsureEmitterStorage(
     if (storage->buffer != BufferHandle::Invalid) {
         geometry.Destroy(storage->buffer);
     }
-    storage->buffer = *created;
-    storage->capacity = maxParticles;
+    storage->buffer                  = *created;
+    storage->capacity                = maxParticles;
     storage->allocationWarningLogged = false;
     return storage->buffer;
 }
@@ -192,7 +188,7 @@ void RenderContext::Impl::ClearEmitterBuffers() noexcept {
         if (slot.buffer != BufferHandle::Invalid) {
             geometry.Destroy(slot.buffer);
         }
-        slot.buffer = BufferHandle::Invalid;
+        slot.buffer   = BufferHandle::Invalid;
         slot.capacity = 0;
     }
 }
@@ -205,20 +201,20 @@ auto RenderContext::CreateBuffer(const BufferDesc& desc) -> BufferHandle {
 
     Vk::BufferUsage vkUsage = Vk::BufferUsage::None;
     switch (desc.usage) {
-    case BufferUsage::Vertex:
-        vkUsage = Vk::BufferUsage::Vertex;
-        break;
-    case BufferUsage::Index:
-        vkUsage = Vk::BufferUsage::Index;
-        break;
-    case BufferUsage::Storage:
-        vkUsage = desc.data.empty() ? (Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex) : Vk::BufferUsage::Storage;
-        break;
-    case BufferUsage::Uniform:
-        vkUsage = Vk::BufferUsage::Uniform;
-        break;
-    case BufferUsage::SkinScratch:
-        break;
+        case BufferUsage::Vertex:
+            vkUsage = Vk::BufferUsage::Vertex;
+            break;
+        case BufferUsage::Index:
+            vkUsage = Vk::BufferUsage::Index;
+            break;
+        case BufferUsage::Storage:
+            vkUsage = desc.data.empty() ? (Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex) : Vk::BufferUsage::Storage;
+            break;
+        case BufferUsage::Uniform:
+            vkUsage = Vk::BufferUsage::Uniform;
+            break;
+        case BufferUsage::SkinScratch:
+            break;
     }
 
     GeometryManager::BufferSource source {
@@ -230,11 +226,11 @@ auto RenderContext::CreateBuffer(const BufferDesc& desc) -> BufferHandle {
 }
 
 void RenderContext::SubmitParticleEmitter(
-    const uint64_t                emitterId,
-    const uint32_t                maxParticles,
-    const ParticleEmitterDesc&    desc,
-    const TextureHandle           texture,
-    const bool                    additive
+    const uint64_t             emitterId,
+    const uint32_t             maxParticles,
+    const ParticleEmitterDesc& desc,
+    const TextureHandle        texture,
+    const bool                 additive
 ) {
     const BufferHandle gpuBuffer = _impl->EnsureEmitterStorage(_impl->particleEmitters, emitterId, maxParticles, sizeof(Particle));
     if (gpuBuffer == BufferHandle::Invalid) {
@@ -248,11 +244,11 @@ void RenderContext::SubmitParticleEmitter(
 }
 
 void RenderContext::SubmitMeshParticleEmitter(
-    const uint64_t                emitterId,
-    const uint32_t                maxParticles,
+    const uint64_t                 emitterId,
+    const uint32_t                 maxParticles,
     const MeshParticleEmitterDesc& desc,
-    const AssetID                 mesh,
-    const MaterialID              mat
+    const AssetID                  mesh,
+    const MaterialID               mat
 ) {
     const BufferHandle gpuBuffer = _impl->EnsureEmitterStorage(_impl->meshParticleEmitters, emitterId, maxParticles, sizeof(Particle3D));
     if (gpuBuffer == BufferHandle::Invalid) {
@@ -490,10 +486,7 @@ auto RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte>
     return _impl->geometry.Update(handle, bytes.data(), bytes.size());
 }
 
-static_assert(
-    ActiveGBuffer::count == 4,
-    "The compact deferred path owns SceneColor, Velocity, NormRough and the BakedMask ownership field only."
-);
+static_assert(ActiveGBuffer::count == 4, "The compact deferred path owns SceneColor, Velocity, NormRough and the BakedMask ownership field only.");
 static_assert(ActiveGBuffer::array[3] == VK_FORMAT_R8_UINT, "The baked-light ownership field is one R8 lane of bits, not a weight.");
 static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_count == 1);
@@ -501,25 +494,22 @@ static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_formats[0] =
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
-    const bool transmission = !desc.unlit && desc.transmissionFactor > 0.0f;
-    const bool hasClearcoat = !desc.unlit &&
-                              (desc.clearcoatFactor > 1.0f / 255.0f || desc.clearcoatMap != TextureHandle::Invalid ||
-                               desc.clearcoatRoughnessMap != TextureHandle::Invalid || desc.clearcoatNormalMap != TextureHandle::Invalid);
-    const bool hasAnisotropy = !desc.unlit &&
-                               (desc.anisotropyStrength > 1.0f / 255.0f || desc.anisotropyMap != TextureHandle::Invalid);
-    const bool hasSheen = !desc.unlit &&
-                          (desc.sheenColorFactor.x > 1.0f / 255.0f || desc.sheenColorFactor.y > 1.0f / 255.0f ||
-                           desc.sheenColorFactor.z > 1.0f / 255.0f || desc.sheenColorMap != TextureHandle::Invalid ||
-                           desc.sheenRoughnessMap != TextureHandle::Invalid);
+    const bool transmission  = !desc.unlit && desc.transmissionFactor > 0.0f;
+    const bool hasClearcoat  = !desc.unlit && (desc.clearcoatFactor > 1.0f / 255.0f || desc.clearcoatMap != TextureHandle::Invalid ||
+                                               desc.clearcoatRoughnessMap != TextureHandle::Invalid || desc.clearcoatNormalMap != TextureHandle::Invalid);
+    const bool hasAnisotropy = !desc.unlit && (desc.anisotropyStrength > 1.0f / 255.0f || desc.anisotropyMap != TextureHandle::Invalid);
+    const bool hasSheen      = !desc.unlit &&
+                               (desc.sheenColorFactor.x > 1.0f / 255.0f || desc.sheenColorFactor.y > 1.0f / 255.0f || desc.sheenColorFactor.z > 1.0f / 255.0f ||
+                                desc.sheenColorMap != TextureHandle::Invalid || desc.sheenRoughnessMap != TextureHandle::Invalid);
     // These paths previously serialized their data through the discarded
     // attachments. Keep their full material evaluation in ForwardPass instead.
     // Emission is deliberately not a forward-only feature: lit emitters retain
     // the deferred normal/AO/velocity path and get their radiance composited
     // additively into LightingGI before the reflection pass.
     const bool forwardOnly = desc.unlit || hasClearcoat || hasAnisotropy || hasSheen || desc.specularEnabled;
-    const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission || forwardOnly;
-    const bool alphaBlend   = !desc.additiveBlend && (desc.alphaBlend || desc.alphaMode == 2 || transmission);
-    const bool depthWrite   = transmission || (forwardOnly && !alphaBlend && !desc.additiveBlend);
+    const bool forward     = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission || forwardOnly;
+    const bool alphaBlend  = !desc.additiveBlend && (desc.alphaBlend || desc.alphaMode == 2 || transmission);
+    const bool depthWrite  = transmission || (forwardOnly && !alphaBlend && !desc.additiveBlend);
 
     Vk::MaterialFlags flags = Vk::MaterialFlags::None;
     if (desc.doubleSided) {
@@ -550,58 +540,58 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     auto basicMat = *mat_res;
 
     return Material {
-        .pipeline                 = basicMat.pipeline,
-        .prePassPipeline          = basicMat.prePassPipeline,
-        .albedoMap                = desc.albedoMap,
-        .normalMap                = desc.normalMap,
-        .pbrMap                   = desc.pbrMap,
-        .emissiveMap              = desc.emissiveMap,
-        .bakedIrradianceMap       = desc.bakedIrradianceMap,
-        .bakedIrradianceScale     = std::max(desc.bakedIrradianceScale, 0.0f),
-        .baseColorFactor          = desc.baseColor,
-        .emissiveFactor           = desc.emissive,
-        .metallicFactor           = desc.metallic,
-        .roughnessFactor          = desc.roughness,
-        .alphaCutoff              = desc.alphaCutoff,
-        .alphaMode                = transmission ? desc.alphaMode : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat.alphaMode),
-        .doubleSided              = desc.doubleSided,
-        .unlit                    = desc.unlit,
-        .transmissionFactor       = desc.transmissionFactor,
-        .transmissionMap          = desc.transmissionMap,
-        .iridescenceFactor        = desc.iridescenceFactor,
-        .filmThicknessNm          = desc.filmThicknessNm,
-        .filmThicknessMinNm       = desc.filmThicknessMinNm,
-        .volumeThicknessM         = desc.volumeThicknessM,
-        .ior                      = desc.ior,
-        .normalScale              = desc.normalScale,
-        .filmThicknessMap         = desc.filmThicknessMap,
-        .iridescenceMap           = desc.iridescenceMap,
-        .volumeThicknessMap       = desc.volumeThicknessMap,
-        .clearcoatFactor          = desc.clearcoatFactor,
-        .clearcoatRoughnessFactor = desc.clearcoatRoughnessFactor,
-        .clearcoatNormalScale     = desc.clearcoatNormalScale,
-        .clearcoatMap             = desc.clearcoatMap,
-        .clearcoatRoughnessMap    = desc.clearcoatRoughnessMap,
-        .clearcoatNormalMap       = desc.clearcoatNormalMap,
-        .anisotropyStrength       = desc.anisotropyStrength,
-        .anisotropyRotation       = desc.anisotropyRotation,
-        .anisotropyMap            = desc.anisotropyMap,
-        .sheenColorFactor         = desc.sheenColorFactor,
-        .sheenRoughnessFactor     = desc.sheenRoughnessFactor,
-        .sheenColorMap            = desc.sheenColorMap,
-        .sheenRoughnessMap        = desc.sheenRoughnessMap,
-        .occlusionMap             = desc.occlusionMap,
-        .occlusionStrength        = desc.occlusionStrength,
-        .specularEnabled          = desc.specularEnabled,
-        .environmentReflectionEnabled = desc.environmentReflectionEnabled,
+        .pipeline                       = basicMat.pipeline,
+        .prePassPipeline                = basicMat.prePassPipeline,
+        .albedoMap                      = desc.albedoMap,
+        .normalMap                      = desc.normalMap,
+        .pbrMap                         = desc.pbrMap,
+        .emissiveMap                    = desc.emissiveMap,
+        .bakedIrradianceMap             = desc.bakedIrradianceMap,
+        .bakedIrradianceScale           = std::max(desc.bakedIrradianceScale, 0.0f),
+        .baseColorFactor                = desc.baseColor,
+        .emissiveFactor                 = desc.emissive,
+        .metallicFactor                 = desc.metallic,
+        .roughnessFactor                = desc.roughness,
+        .alphaCutoff                    = desc.alphaCutoff,
+        .alphaMode                      = transmission ? desc.alphaMode : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat.alphaMode),
+        .doubleSided                    = desc.doubleSided,
+        .unlit                          = desc.unlit,
+        .transmissionFactor             = desc.transmissionFactor,
+        .transmissionMap                = desc.transmissionMap,
+        .iridescenceFactor              = desc.iridescenceFactor,
+        .filmThicknessNm                = desc.filmThicknessNm,
+        .filmThicknessMinNm             = desc.filmThicknessMinNm,
+        .volumeThicknessM               = desc.volumeThicknessM,
+        .ior                            = desc.ior,
+        .normalScale                    = desc.normalScale,
+        .filmThicknessMap               = desc.filmThicknessMap,
+        .iridescenceMap                 = desc.iridescenceMap,
+        .volumeThicknessMap             = desc.volumeThicknessMap,
+        .clearcoatFactor                = desc.clearcoatFactor,
+        .clearcoatRoughnessFactor       = desc.clearcoatRoughnessFactor,
+        .clearcoatNormalScale           = desc.clearcoatNormalScale,
+        .clearcoatMap                   = desc.clearcoatMap,
+        .clearcoatRoughnessMap          = desc.clearcoatRoughnessMap,
+        .clearcoatNormalMap             = desc.clearcoatNormalMap,
+        .anisotropyStrength             = desc.anisotropyStrength,
+        .anisotropyRotation             = desc.anisotropyRotation,
+        .anisotropyMap                  = desc.anisotropyMap,
+        .sheenColorFactor               = desc.sheenColorFactor,
+        .sheenRoughnessFactor           = desc.sheenRoughnessFactor,
+        .sheenColorMap                  = desc.sheenColorMap,
+        .sheenRoughnessMap              = desc.sheenRoughnessMap,
+        .occlusionMap                   = desc.occlusionMap,
+        .occlusionStrength              = desc.occlusionStrength,
+        .specularEnabled                = desc.specularEnabled,
+        .environmentReflectionEnabled   = desc.environmentReflectionEnabled,
         .environmentReflectionAlphaMask = desc.environmentReflectionAlphaMask,
-        .environmentReflectionFactor = desc.environmentReflectionFactor,
-        .specularFactor           = desc.specularFactor,
-        .specularColorFactor      = desc.specularColorFactor,
-        .specularMap              = desc.specularMap,
-        .specularTexMode          = desc.specularTexMode,
-        .textureSamplers          = desc.textureSamplers,
-        .textureTransforms        = desc.textureTransforms,
+        .environmentReflectionFactor    = desc.environmentReflectionFactor,
+        .specularFactor                 = desc.specularFactor,
+        .specularColorFactor            = desc.specularColorFactor,
+        .specularMap                    = desc.specularMap,
+        .specularTexMode                = desc.specularTexMode,
+        .textureSamplers                = desc.textureSamplers,
+        .textureTransforms              = desc.textureTransforms,
     };
 }
 
@@ -706,22 +696,26 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     }
     std::memcpy(staging.mappedData, Resource::blue_noise_rgba.data(), bytes);
 
-    if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image.Handle());
+    if (auto immediate = Vk::ExecuteImmediate(
+            ctx, graphicsCmdRing, stagingRingBuffer,
+            [&](VkCommandBuffer cmd) {
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image.Handle());
 
-        const VkBufferImageCopy2 region = {
-            .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-            .pNext             = nullptr,
-            .bufferOffset      = staging.slice.offset,
-            .bufferRowLength   = 0,
-            .bufferImageHeight = 0,
-            .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
-            .imageOffset       = {},
-            .imageExtent       = {w, h, 1},
-        };
-        Vk::CopyBufferToImage(cmd, staging.slice.buffer, image.Handle(), region);
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
-    }); !immediate) [[unlikely]] {
+                const VkBufferImageCopy2 region = {
+                    .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+                    .pNext             = nullptr,
+                    .bufferOffset      = staging.slice.offset,
+                    .bufferRowLength   = 0,
+                    .bufferImageHeight = 0,
+                    .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+                    .imageOffset       = {},
+                    .imageExtent       = {w, h, 1},
+                };
+                Vk::CopyBufferToImage(cmd, staging.slice.buffer, image.Handle(), region);
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
+            }
+        );
+        !immediate) [[unlikely]] {
         return std::unexpected(immediate.error());
     }
 
@@ -741,8 +735,12 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 }
 
 auto RebuildSkinnedBLAS(
-    VkCommandBuffer cmd, Vk::Context& ctx, Vk::Allocator& allocator, Vk::DeletionQueue& deletionQueue, const DrawCommand& drawCmd,
-    NativeMesh& scratchMesh
+    VkCommandBuffer    cmd,
+    Vk::Context&       ctx,
+    Vk::Allocator&     allocator,
+    Vk::DeletionQueue& deletionQueue,
+    const DrawCommand& drawCmd,
+    NativeMesh&        scratchMesh
 ) -> std::expected<Vk::DeviceAddress<>, ErrorCode> {
     if (!ctx.RayTracingSupported()) {
         return std::unexpected(RenderFeatureError::FeatureNotSupported);
@@ -766,7 +764,7 @@ auto RebuildSkinnedBLAS(
             return std::unexpected(blasBufOpt.error());
         }
         scratchMesh.blasBuffer = std::move(*blasBufOpt);
-        auto blas               = Vk::CreateAccelerationStructure(
+        auto blas              = Vk::CreateAccelerationStructure(
             ctx.Device(), scratchMesh.blasBuffer.Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel
         );
         if (!blas) {
@@ -797,9 +795,7 @@ auto RebuildSkinnedBLAS(
     return scratchMesh.blasAddress;
 }
 
-void RenderContext::DrawDebugTriangles(
-    std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material
-) noexcept {
+void RenderContext::DrawDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material) noexcept {
     if (positions.size() != surfaces.size()) {
         ZHLN::Assert(false, "debug vertex positions and surfaces must have the same count");
         return;
@@ -938,7 +934,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     auto* indexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
 
     const auto geometry = Vk::GeometryView::Triangles<VertexPosition>(posMesh->vboAddress, mesh.vertexCount)
-                              .MaybeIndexed(indexMesh ? indexMesh->vboAddress : nullptr, mesh.indexCount);
+                              .MaybeIndexed((indexMesh != nullptr) ? indexMesh->vboAddress : nullptr, mesh.indexCount);
 
     const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(impl.ctx.Device(), geometry);
 
@@ -1006,7 +1002,8 @@ auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint3
     return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
 }
 
-auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB, bool generateMips) -> TextureHandle {
+auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB, bool generateMips)
+    -> TextureHandle {
     const uint64_t expectedPixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (expectedPixels == 0 || expectedPixels != pixels.size()) {
         ZHLN::Log("[RenderContext] Procedural texture '{}' has an invalid extent or texel count.", name);
@@ -1048,37 +1045,41 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         auto  stagingBuffer = std::move(*stagingRes);
         defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
-        if (auto immediate = Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-            const VkImageMemoryBarrier2 toTransfer = Vk::MakeImageBarrier({
-                .image      = source,
-                .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT,
-                .src_layout = sourceLayout,
-                .dst_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-                .base_mip   = 0,
-                .mip_count  = VK_REMAINING_MIP_LEVELS,
-            });
-            Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toTransfer, 1});
+        if (auto immediate = Vk::ExecuteImmediate(
+                impl->ctx, impl->graphicsCmdRing,
+                [&](VkCommandBuffer cmd) -> void {
+                    const VkImageMemoryBarrier2 toTransfer = Vk::MakeImageBarrier({
+                        .image      = source,
+                        .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                        .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT,
+                        .src_layout = sourceLayout,
+                        .dst_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                        .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .base_mip   = 0,
+                        .mip_count  = VK_REMAINING_MIP_LEVELS,
+                    });
+                    Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toTransfer, 1});
 
-            Vk::CopyImageToBuffer(cmd, source, stagingBuffer.Handle(), extent);
+                    Vk::CopyImageToBuffer(cmd, source, stagingBuffer.Handle(), extent);
 
-            const VkImageMemoryBarrier2 toFrame = Vk::MakeImageBarrier({
-                .image      = source,
-                .src_access = VK_ACCESS_2_TRANSFER_READ_BIT,
-                .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                .src_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                .dst_stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-                .base_mip   = 0,
-                .mip_count  = VK_REMAINING_MIP_LEVELS,
-            });
-            Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toFrame, 1});
-        }); !immediate) [[unlikely]] {
+                    const VkImageMemoryBarrier2 toFrame = Vk::MakeImageBarrier({
+                        .image      = source,
+                        .src_access = VK_ACCESS_2_TRANSFER_READ_BIT,
+                        .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                        .src_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                        .dst_stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .base_mip   = 0,
+                        .mip_count  = VK_REMAINING_MIP_LEVELS,
+                    });
+                    Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toFrame, 1});
+                }
+            );
+            !immediate) [[unlikely]] {
             return std::unexpected(immediate.error());
         }
 
@@ -1161,13 +1162,17 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     auto  stagingBuffer = std::move(*stagingRes);
     defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
-    if (auto immediate = Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-        auto* const targetImg = impl->graphResources.hdrSceneColor.image.Handle();
+    if (auto immediate = Vk::ExecuteImmediate(
+            impl->ctx, impl->graphicsCmdRing,
+            [&](VkCommandBuffer cmd) -> void {
+                auto* const targetImg = impl->graphResources.hdrSceneColor.image.Handle();
 
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, targetImg);
-        Vk::CopyImageToBuffer(cmd, targetImg, stagingBuffer.Handle(), extent);
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, targetImg);
-    }); !immediate) [[unlikely]] {
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, targetImg);
+                Vk::CopyImageToBuffer(cmd, targetImg, stagingBuffer.Handle(), extent);
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, targetImg);
+            }
+        );
+        !immediate) [[unlikely]] {
         return std::unexpected(immediate.error());
     }
 
