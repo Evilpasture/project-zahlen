@@ -31,16 +31,24 @@ static_assert(
                                   .AddDepth(depthStencil)
                                   .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
                                   .ViewMask(3);
-        static constexpr auto inherit   = pass.GetSecondaryInheritance();
-        constexpr auto        colors    = inherit.ColorFormats();
-        constexpr auto        noStencil = Vk::DynamicPass(VkExtent2D {.width = 64, .height = 32})
-                                       .AddDepth(depthOnly)
-                                       .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
-                                       .GetSecondaryInheritance();
+        // Asserted where the driver reads it: the inheritance chain's own struct,
+        // not the fields that happen to produce it.
+        static constexpr auto inherit = pass.GetInheritance();
+        VkCommandBufferInheritanceRenderingInfo info {};
+        [[maybe_unused]] const void* head = inherit.Link(nullptr, info);
 
-        return colors.size() == 2 && colors[0] == colorA.GetFormat() && colors[1] == colorB.GetFormat() && inherit.depthFormat == depthStencil.GetFormat() &&
-               inherit.stencilFormat == depthStencil.GetFormat() && inherit.viewMask == 3 && inherit.viewport.x == 2.0F && inherit.viewport.width == 30.0F &&
-               noStencil.ColorFormats().empty() && noStencil.depthFormat == depthOnly.GetFormat() && noStencil.stencilFormat == VK_FORMAT_UNDEFINED;
+        constexpr auto noStencilPass = Vk::DynamicPass(VkExtent2D {.width = 64, .height = 32})
+                                           .AddDepth(depthOnly)
+                                           .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT);
+        static constexpr auto noStencil = noStencilPass.GetInheritance();
+        VkCommandBufferInheritanceRenderingInfo noStencilInfo {};
+        [[maybe_unused]] const void* noStencilHead = noStencil.Link(nullptr, noStencilInfo);
+
+        return info.colorAttachmentCount == 2 && info.pColorAttachmentFormats != nullptr && info.pColorAttachmentFormats[0] == colorA.GetFormat() &&
+               info.pColorAttachmentFormats[1] == colorB.GetFormat() && info.depthAttachmentFormat == depthStencil.GetFormat() &&
+               info.stencilAttachmentFormat == depthStencil.GetFormat() && info.viewMask == 3 && info.rasterizationSamples == VK_SAMPLE_COUNT_1_BIT &&
+               noStencilInfo.colorAttachmentCount == 0 && noStencilInfo.pColorAttachmentFormats == nullptr &&
+               noStencilInfo.depthAttachmentFormat == depthOnly.GetFormat() && noStencilInfo.stencilAttachmentFormat == VK_FORMAT_UNDEFINED;
     }(),
     "Secondary inheritance must match the DynamicPass's bound runtime attachments."
 );
@@ -132,16 +140,11 @@ void RecordCpuCulled(RenderFrameContext& ctx, VkCommandBuffer cmd, uint32_t draw
                           .ClearDepth(in.depth, kClearDepthValue)
                           .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT);
     pass.Execute(cmd, [&]() {
-        const auto frameAddresses = ctx.FrameHeapAddresses();
-        const auto samplerBind    = ctx.heapManager.GetSamplerHeapBindInfo();
-        const auto resourceBind   = ctx.heapManager.GetResourceHeapBindInfo();
+        const auto secContext = ctx.CreateSecondaryContext(pass.GetInheritance());
 
         const auto chunks = Vk::ParallelDrawDispatch(
             cmd,
-            pass.GetSecondaryInheritance(
-                &samplerBind, &resourceBind, GpuAbi::kScenePushLayout.UsedFrameAddresses(),
-                std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()}
-            ),
+            secContext,
             drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
             [&](uint32_t) -> VkCommandBuffer {
                 auto wIdx = TaskSystem::GetWorkerIndex();

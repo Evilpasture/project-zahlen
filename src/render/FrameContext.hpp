@@ -199,6 +199,24 @@ struct RenderFrameContext {
 
     [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
 
+    // A secondary command buffer's whole starting state, assembled from the
+    // parts that own it: the rendering inheritance the caller's pass describes,
+    // the heap inheritance the manager hands out by reference, and this frame's
+    // push rows -- which are copied, because they are addresses of this frame's
+    // buffers and the array that holds them is a local.
+    //
+    // Passes get one line here instead of three subsystems' worth of fields, and
+    // no layer is asked for a struct it would then have to keep alive.
+    [[nodiscard]] auto CreateSecondaryContext(const Vk::RenderingInheritance& rendering = {}) const noexcept -> Vk::SecondaryPassContext {
+        const auto addresses = FrameHeapAddresses();
+        return Vk::SecondaryPassContext {
+            rendering, heapManager.GetInheritance(),
+            Vk::FramePushState {
+                GpuAbi::kScenePushLayout.UsedFrameAddresses(), std::span<const VkDeviceAddress> {addresses.data(), addresses.size()}
+            }
+        };
+    }
+
     // Begins a frame command stream, with its heap state established before the
     // first command is recorded into it. The stream comes back as a
     // Vk::StreamCommandRecorder, a type that cannot be obtained any other way and
@@ -224,9 +242,8 @@ struct RenderFrameContext {
     //
     // Secondary command buffers inherit neither the bindings nor the push range
     // from the primary they are executed in, so they are not begun this way: the
-    // parallel recorders take the state as inheritance info and push the rows
-    // into every slot they begin, from FrameHeapAddresses() (see
-    // Vk::ParallelCommandRecorder::SetHeapState and
+    // parallel recorders take a Vk::SecondaryPassContext and let it re-establish
+    // that state in every slot they begin (see CreateSecondaryContext, and
     // RenderContext::Impl::ForkReplayer::ExecuteFork).
     [[nodiscard]] auto BeginStream(VkCommandBuffer cmd) const noexcept -> std::expected<Vk::StreamCommandRecorder, ErrorCode>;
 

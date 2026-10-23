@@ -7,8 +7,8 @@
 
 namespace ZHLN::Vk {
 
-template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
-auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
+template <size_t ConcurrentSlots>
+auto ParallelCommandRecorder<ConcurrentSlots>::Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
     _device = device;
     for (size_t i = 0; i < ConcurrentSlots; ++i) {
         _pools[i] = CommandPool(_device, queueFamily);
@@ -23,17 +23,17 @@ auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Init(VkDevice 
     return {};
 }
 
-template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
-void ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Reset() noexcept {
+template <size_t ConcurrentSlots>
+void ParallelCommandRecorder<ConcurrentSlots>::Reset() noexcept {
     for (auto& pool: _pools) {
         pool.Reset();
     }
     _nextGroup = 0;
 }
 
-template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
+template <size_t ConcurrentSlots>
 template <typename SchedulerPolicy, typename... Callables>
-auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Record(SchedulerPolicy&& scheduler, Callables&&... callables) -> RecordingBatch {
+auto ParallelCommandRecorder<ConcurrentSlots>::Record(SchedulerPolicy&& scheduler, Callables&&... callables) -> RecordingBatch {
     static_assert(
         sizeof...(Callables) <= ConcurrentSlots, "The number of recording tasks exceeds the allocated "
                                                  "ParallelCommandRecorder slots."
@@ -42,9 +42,9 @@ auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Record(Schedul
     return RecordImpl(std::forward<SchedulerPolicy>(scheduler), std::make_index_sequence<sizeof...(Callables)> {}, std::forward<Callables>(callables)...);
 }
 
-template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
+template <size_t ConcurrentSlots>
 template <typename SchedulerPolicy, size_t... Is, typename... Callables>
-auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...>, Callables&&... callables)
+auto ParallelCommandRecorder<ConcurrentSlots>::RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...>, Callables&&... callables)
     -> RecordingBatch {
     const uint32_t groupIdx = (_pools[0].Size() > 0 && _nextGroup < _pools[0].Size()) ? _nextGroup++ : 0u;
     for (size_t i = 0; i < ConcurrentSlots; ++i) {
@@ -63,28 +63,10 @@ auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::RecordImpl(Sch
     std::forward<SchedulerPolicy>(scheduler).Dispatch([this, &task_tuple, &errors, &recorded]() {
         RecordingSlot slot {.cmd = _cmds[Is], .slotIndex = static_cast<uint32_t>(Is)};
 
-        VkCommandBufferInheritanceInfo                        inherit_info = NullInheritanceInfo;
-        const VkCommandBufferInheritanceDescriptorHeapInfoEXT heap_inherit = {
-            .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
-            .pNext                 = nullptr,
-            .pSamplerHeapBindInfo  = _samplerHeapBindInfo,
-            .pResourceHeapBindInfo = _resourceHeapBindInfo,
-        };
-        if (_samplerHeapBindInfo != nullptr || _resourceHeapBindInfo != nullptr) {
-            inherit_info.pNext = &heap_inherit;
-        }
-
-        auto recording = CommandRecorder::Begin(slot.cmd, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, &inherit_info);
+        auto recording = _context.Begin(slot.cmd, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
         if (!recording) {
             errors[Is] = recording.error();
             return;
-        }
-
-        if (_frameAddressCount > 0) {
-            PushHeapFrameAddresses(
-                slot.cmd, std::span<const uint32_t> {_frameAddressOffsets.data(), _frameAddressCount},
-                std::span<const VkDeviceAddress> {_frameAddresses.data(), _frameAddressCount}
-            );
         }
 
         std::get<Is>(task_tuple)(slot);

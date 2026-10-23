@@ -75,6 +75,7 @@
 #include "pipeline/PipelineBuilder.hpp"
 #include "pipeline/GraphicsPipeline.hpp"
 #include "pipeline/HeapBindings.hpp"
+#include "execution/SecondaryPassContext.hpp"
 #include "pipeline/HeapMappingBuilder.hpp"
 #include "memory/RenderTarget.hpp"
 #include "memory/StagingContext.hpp"

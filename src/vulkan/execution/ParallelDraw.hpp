@@ -31,7 +31,7 @@ concept ParallelScheduler = requires(S&& s, uint32_t count, uint32_t chunkSize) 
 template <ParallelScheduler SchedulerT, typename CmdProviderFn, typename RecordFn>
 inline auto ParallelDrawDispatch(
     VkCommandBuffer             primaryCmd,
-    const SecondaryInheritance& inheritDesc,
+    const SecondaryPassContext& passContext,
     uint32_t                    drawCount,
     uint32_t                    chunkSize,
     SchedulerT&&                scheduler,
@@ -48,65 +48,19 @@ inline auto ParallelDrawDispatch(
     std::vector<VkCommandBuffer> secondaries(num_chunks, VK_NULL_HANDLE);
     std::vector<ErrorCode>       errors(num_chunks);
 
-    const VkCommandBufferInheritanceDescriptorHeapInfoEXT heap_inherit = {
-        .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
-        .pNext                 = nullptr,
-        .pSamplerHeapBindInfo  = inheritDesc.samplerHeapBindInfo,
-        .pResourceHeapBindInfo = inheritDesc.resourceHeapBindInfo,
-    };
-
-    const auto colorFormats = inheritDesc.ColorFormats();
-    VkCommandBufferInheritanceRenderingInfo inherit = {
-        .sType                   = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-        .pNext                   = nullptr,
-        .flags                   = 0,
-        .viewMask                = inheritDesc.viewMask,
-        .colorAttachmentCount    = static_cast<uint32_t>(colorFormats.size()),
-        .pColorAttachmentFormats = colorFormats.empty() ? nullptr : colorFormats.data(),
-        .depthAttachmentFormat   = inheritDesc.depthFormat,
-        .stencilAttachmentFormat = inheritDesc.stencilFormat,
-        .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT
-    };
-    if (inheritDesc.samplerHeapBindInfo != nullptr || inheritDesc.resourceHeapBindInfo != nullptr) {
-        inherit.pNext = &heap_inherit;
-    }
-
-    const VkCommandBufferInheritanceInfo p_inherit = {
-        .sType                = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
-        .pNext                = &inherit,
-        .renderPass           = VK_NULL_HANDLE,
-        .subpass              = 0,
-        .framebuffer          = VK_NULL_HANDLE,
-        .occlusionQueryEnable = VK_FALSE,
-        .queryFlags           = 0,
-        .pipelineStatistics   = 0
-    };
-
     std::forward<SchedulerT>(scheduler).ParallelFor(drawCount, chunkSize, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) noexcept {
         VkCommandBuffer sec_cmd = std::forward<CmdProviderFn>(cmdProvider)(chunkIdx);
 
-        auto recording = CommandRecorder::Begin(
-            sec_cmd, VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, &p_inherit
-        );
+        // The context links the inheritance chain, pushes the frame rows and
+        // sets the viewport -- the same three steps a parallel fork needs, which
+        // is why they live there rather than here.
+        auto recording = passContext.Begin(sec_cmd, VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
         if (!recording) {
             errors[chunkIdx] = recording.error();
             return;
         }
 
-        if (!inheritDesc.pushDataFrameAddresses.empty()) {
-            PushHeapFrameAddresses(sec_cmd, inheritDesc.pushDataFrameOffsets, inheritDesc.pushDataFrameAddresses);
-        }
-
         CommandEncoder encoder(sec_cmd);
-
-        const VkViewport viewport = inheritDesc.viewport;
-        const VkRect2D scissor = {
-            .offset = {.x = static_cast<int32_t>(viewport.x), .y = static_cast<int32_t>(viewport.y)},
-            .extent = {.width = static_cast<uint32_t>(viewport.width), .height = static_cast<uint32_t>(viewport.height)}
-        };
-        vkCmdSetViewport(sec_cmd, 0, 1, &viewport);
-        vkCmdSetScissor(sec_cmd, 0, 1, &scissor);
-
         for (uint32_t i = start; i < end; ++i) {
             recordFn(encoder, i);
         }

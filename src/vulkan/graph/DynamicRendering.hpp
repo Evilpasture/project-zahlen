@@ -8,8 +8,12 @@
 #endif
 
 #include "../pipeline/PipelineTypes.hpp"
+#include <algorithm>
+#include <array>
 #include <concepts>
+#include <cstdint>
 #include <optional>
+#include <span>
 #include <type_traits>
 
 namespace ZHLN::Vk {
@@ -348,48 +352,89 @@ static constexpr size_t kMaxColorAttachments = 8;
 template <size_t ColorCount, bool HasDepth, typename Formats>
 class DynamicPass;
 
-class SecondaryInheritance {
+// The viewport/scissor pair a pass applies to whatever it begins, primary or
+// secondary. Both paths set it, from the same viewport, so it lives here once.
+inline void ApplyViewportAndScissor(VkCommandBuffer cmd, VkViewport viewport) noexcept {
+    const VkRect2D scissor = {
+        .offset = {.x = static_cast<int32_t>(viewport.x), .y = static_cast<int32_t>(viewport.y)},
+        .extent = {.width = static_cast<uint32_t>(viewport.width), .height = static_cast<uint32_t>(viewport.height)}
+    };
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+}
+
+/// What a secondary command buffer inherits about the dynamic rendering it will
+/// record into: the attachment formats, the view mask and the viewport.
+///
+/// A value, and a closed one: the formats are copied in at construction and the
+/// struct the driver reads is produced by Link() on demand, so nothing outside
+/// asks this object for a format and re-assembles the inheritance itself. A
+/// default-constructed inheritance is inactive -- it links nothing -- which is
+/// what a non-raster secondary (a compute fork) wants.
+class RenderingInheritance {
     template <size_t, bool, typename>
     friend class DynamicPass;
 
-    std::array<VkFormat, kMaxColorAttachments> _colorFormats {};
-    uint32_t                                   _colorFormatCount;
+  public:
+    constexpr RenderingInheritance() noexcept = default;
 
-    constexpr SecondaryInheritance(
-        std::span<const VkFormat>        colorFormats,
-        VkFormat                         depth,
-        VkFormat                         stencil,
-        uint32_t                         mask,
-        const VkBindHeapInfoEXT*         samplerHeap,
-        const VkBindHeapInfoEXT*         resourceHeap,
-        std::span<const uint32_t>        pushOffsets,
-        std::span<const VkDeviceAddress> pushAddresses,
-        VkViewport                       effectiveViewport
+    constexpr RenderingInheritance(
+        std::span<const VkFormat> colorFormats, VkFormat depth, VkFormat stencil, uint32_t viewMask, VkViewport viewport
     ) noexcept:
-        _colorFormatCount(static_cast<uint32_t>(colorFormats.size())), depthFormat(depth), stencilFormat(stencil), viewMask(mask),
-        samplerHeapBindInfo(samplerHeap), resourceHeapBindInfo(resourceHeap), pushDataFrameOffsets(pushOffsets), pushDataFrameAddresses(pushAddresses),
-        viewport(effectiveViewport) {
-        for (size_t i = 0; i < colorFormats.size(); ++i) {
+        _colorFormatCount(static_cast<uint32_t>(std::min(colorFormats.size(), _colorFormats.size()))), _depthFormat(depth),
+        _stencilFormat(stencil), _viewMask(viewMask), _viewport(viewport), _active(true) {
+        for (size_t i = 0; i < _colorFormatCount; ++i) {
             _colorFormats[i] = colorFormats[i];
         }
     }
 
-  public:
-    [[nodiscard]] constexpr auto ColorFormats() const noexcept -> std::span<const VkFormat> {
-        return {_colorFormats.data(), _colorFormatCount};
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return _active;
+    }
+    explicit constexpr operator bool() const noexcept {
+        return Valid();
     }
 
-    const VkFormat                         depthFormat;
-    const VkFormat                         stencilFormat;
-    const uint32_t                         viewMask;
-    const VkBindHeapInfoEXT* const         samplerHeapBindInfo;
-    const VkBindHeapInfoEXT* const         resourceHeapBindInfo;
-    const std::span<const uint32_t>        pushDataFrameOffsets;
-    const std::span<const VkDeviceAddress> pushDataFrameAddresses;
-    const VkViewport                       viewport;
+    /// Tells the inheritance chain to link this rendering state, and returns the
+    /// head of the chain. `storage` must outlive the vkBeginCommandBuffer this
+    /// feeds -- which SecondaryPassContext::Begin guarantees.
+    [[nodiscard]] constexpr auto Link(void* pNext, VkCommandBufferInheritanceRenderingInfo& storage) const noexcept -> void* {
+        if (!_active) {
+            return pNext;
+        }
+        storage = {
+            .sType                   = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+            .pNext                   = pNext,
+            .flags                   = 0,
+            .viewMask                = _viewMask,
+            .colorAttachmentCount    = _colorFormatCount,
+            .pColorAttachmentFormats = _colorFormatCount > 0 ? _colorFormats.data() : nullptr,
+            .depthAttachmentFormat   = _depthFormat,
+            .stencilAttachmentFormat = _stencilFormat,
+            .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT,
+        };
+        return &storage;
+    }
+
+    /// Tells the secondary command buffer to adopt the viewport this pass
+    /// renders at; a non-raster inheritance has none to give.
+    void ApplyViewportAndScissor(VkCommandBuffer cmd) const noexcept {
+        if (_active) {
+            ::ZHLN::Vk::ApplyViewportAndScissor(cmd, _viewport);
+        }
+    }
+
+  private:
+    std::array<VkFormat, kMaxColorAttachments> _colorFormats {};
+    uint32_t                                   _colorFormatCount = 0;
+    VkFormat                                   _depthFormat      = VK_FORMAT_UNDEFINED;
+    VkFormat                                   _stencilFormat    = VK_FORMAT_UNDEFINED;
+    uint32_t                                   _viewMask         = 0;
+    VkViewport                                 _viewport {};
+    bool                                       _active = false;
 };
 
-static_assert(!std::is_aggregate_v<SecondaryInheritance> && !std::is_default_constructible_v<SecondaryInheritance>);
+static_assert(!std::is_aggregate_v<RenderingInheritance>, "RenderingInheritance is a value with an invariant, not a field bag.");
 
 template <VkImageLayout Layout>
 struct Tag {};
@@ -586,12 +631,10 @@ class DynamicPass {
 
     constexpr auto Flags(VkRenderingFlags flags) && noexcept -> DynamicPass<ColorCount, HasDepth, Formats>&&;
 
-    [[nodiscard]] constexpr auto GetSecondaryInheritance(
-        const VkBindHeapInfoEXT*         samplerHeap   = nullptr,
-        const VkBindHeapInfoEXT*         resourceHeap  = nullptr,
-        std::span<const uint32_t>        pushOffsets   = {},
-        std::span<const VkDeviceAddress> pushAddresses = {}
-    ) const noexcept -> SecondaryInheritance;
+    /// What a secondary command buffer must inherit to record this pass: the
+    /// attachment formats, the view mask and the effective viewport. Nothing
+    /// else -- descriptor heaps and frame rows are not this pass's to know.
+    [[nodiscard]] constexpr auto GetInheritance() const noexcept -> RenderingInheritance;
 
     template <typename Func>
     void Execute(VkCommandBuffer cmd, Func&& func) const;

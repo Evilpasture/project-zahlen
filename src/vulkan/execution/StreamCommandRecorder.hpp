@@ -42,8 +42,9 @@ concept StreamStateEstablisher = requires(const Fn& establish, VkCommandBuffer c
 ///
 /// Secondary command buffers are not begun this way: they inherit neither the
 /// bindings nor the push range from the primary they are executed in, so
-/// ParallelCommandRecorder and ParallelDrawDispatch are handed the same state as
-/// inheritance info and push the rows into every slot they record themselves.
+/// ParallelCommandRecorder and ParallelDrawDispatch are handed a
+/// SecondaryPassContext and let it re-establish that state -- as inheritance info
+/// plus a push into every slot it begins.
 class StreamCommandRecorder {
   public:
     /// Begin `cmd` and establish its heap state before anything is recorded into

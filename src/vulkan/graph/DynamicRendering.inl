@@ -417,12 +417,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::Flags(VkRenderingFlag
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
-constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetSecondaryInheritance(
-    const VkBindHeapInfoEXT*         samplerHeap,
-    const VkBindHeapInfoEXT*         resourceHeap,
-    std::span<const uint32_t>        pushOffsets,
-    std::span<const VkDeviceAddress> pushAddresses
-) const noexcept -> SecondaryInheritance {
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetInheritance() const noexcept -> RenderingInheritance {
     std::span<const VkFormat> colors;
     VkFormat                  depth = VK_FORMAT_UNDEFINED;
     if constexpr (std::same_as<Formats, RuntimeAttachmentFormats>) {
@@ -440,7 +435,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetSecondaryInheritan
     }
 
     const VkFormat stencil = (HasDepth && _hasStencil) ? StencilFormatForDepth(depth) : VK_FORMAT_UNDEFINED;
-    return SecondaryInheritance {colors, depth, stencil, _viewMask, samplerHeap, resourceHeap, pushOffsets, pushAddresses, EffectiveViewport()};
+    return RenderingInheritance {colors, depth, stencil, _viewMask, EffectiveViewport()};
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
@@ -474,14 +469,7 @@ void DynamicPass<ColorCount, HasDepth, Formats>::Execute(VkCommandBuffer cmd, Fu
 
     vkCmdBeginRendering(cmd, &rendering_info);
 
-    const VkViewport viewport = EffectiveViewport();
-    const VkRect2D   scissor  = {
-           .offset = {.x = static_cast<int32_t>(viewport.x), .y = static_cast<int32_t>(viewport.y)},
-           .extent = {.width = static_cast<uint32_t>(viewport.width), .height = static_cast<uint32_t>(viewport.height)}
-    };
-
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    ApplyViewportAndScissor(cmd, EffectiveViewport());
 
     std::forward<Func>(func)();
 

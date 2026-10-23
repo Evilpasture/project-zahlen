@@ -388,16 +388,12 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     }
 
     // The secondaries are new command buffers, so they do not inherit the
-    // primary's heap state: the recorder re-establishes both heap segments (as
-    // inheritance info) and the frame address block for every slot it records.
+    // primary's heap state: each slot is begun through a context that
+    // re-establishes both heap segments (as inheritance info) and pushes the
+    // frame address block. A fork records compute and raster bodies alike, so
+    // the context carries no rendering inheritance here.
     auto& rec = self.parallelRecorders[self.presenter.frameIndex];
-
-    const auto samplerBind  = self.heapManager.GetSamplerHeapBindInfo();
-    const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
-    const auto frameAddrs   = self.FrameHeapAddresses();
-    rec.SetHeapState(
-        &samplerBind, &resourceBind, GpuAbi::kScenePushLayout.UsedFrameAddresses(), std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
-    );
+    rec.SetContext(self.CreateSecondaryContext());
 
     const bool previousInheritance  = self.frameState.inForkSecondary;
     self.frameState.inForkSecondary = true;

@@ -15,6 +15,49 @@
 
 namespace ZHLN::Vk {
 
+/// Descriptor heap state as a secondary command buffer sees it: two pointers to
+/// binding state it must inherit, because a secondary does not inherit the
+/// bindings of the primary it is executed in.
+///
+/// Both pointers address a DescriptorHeap's own `_bindInfo`, so they stay valid
+/// for as long as the manager that produced them exists, and this type is cheap
+/// enough to pass around while that is true.
+class HeapInheritance {
+  public:
+    constexpr HeapInheritance() noexcept = default;
+
+    constexpr HeapInheritance(const VkBindHeapInfoEXT* samplerBind, const VkBindHeapInfoEXT* resourceBind) noexcept:
+        _samplerBind(samplerBind), _resourceBind(resourceBind) {
+    }
+
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return _samplerBind != nullptr || _resourceBind != nullptr;
+    }
+    explicit constexpr operator bool() const noexcept {
+        return Valid();
+    }
+
+    /// Tells the inheritance chain to link the descriptor heap state, and returns
+    /// the head of the chain. `storage` is only read by the vkBeginCommandBuffer
+    /// this feeds.
+    [[nodiscard]] auto Link(void* pNext, VkCommandBufferInheritanceDescriptorHeapInfoEXT& storage) const noexcept -> void* {
+        if (!Valid()) {
+            return pNext;
+        }
+        storage = {
+            .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
+            .pNext                 = pNext,
+            .pSamplerHeapBindInfo  = _samplerBind,
+            .pResourceHeapBindInfo = _resourceBind,
+        };
+        return &storage;
+    }
+
+  private:
+    const VkBindHeapInfoEXT* _samplerBind  = nullptr;
+    const VkBindHeapInfoEXT* _resourceBind = nullptr;
+};
+
 class ResourceWriteBatch;
 class SamplerWriteBatch;
 class HeapManager;
@@ -104,10 +147,6 @@ class DescriptorHeap {
     void               Cleanup() noexcept;
 
     void Bind(VkCommandBuffer cmd) const noexcept;
-
-    [[nodiscard]] auto GetBindInfo() const noexcept -> VkBindHeapInfoEXT {
-        return _bindInfo;
-    }
 
     void Flush(ResourceWriteBatch& batch) noexcept
         requires(Type == DescriptorHeapType::Resources);
@@ -377,11 +416,12 @@ class HeapManager {
 
     void BindHeaps(VkCommandBuffer cmd) const noexcept;
 
-    [[nodiscard]] auto GetResourceHeapBindInfo() const noexcept -> VkBindHeapInfoEXT {
-        return _resourceHeap.GetBindInfo();
-    }
-    [[nodiscard]] auto GetSamplerHeapBindInfo() const noexcept -> VkBindHeapInfoEXT {
-        return _samplerHeap.GetBindInfo();
+    /// A handle on where the heap binding state lives, so a secondary command
+    /// buffer can inherit it. The pointers address the two heaps' own
+    /// `_bindInfo` members, which move only when the manager does -- never a
+    /// copy on the caller's stack, which is what this used to hand out.
+    [[nodiscard]] auto GetInheritance() const noexcept -> HeapInheritance {
+        return HeapInheritance {&_samplerHeap._bindInfo, &_resourceHeap._bindInfo};
     }
 
   private:

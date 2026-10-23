@@ -67,7 +67,7 @@ recording, and never from pass code:
 | -------------------------------- | ---------------------------------------------------------------------------------- |
 | a window's graphics stream       | `RenderFrameContext::BeginStream`, in `RenderContext::Impl::AcquireTarget`           |
 | the async-compute stream         | `RenderFrameContext::BeginStream`, in `Pipelines::ComputeSimPipeline::Submit`        |
-| fork / parallel-draw secondaries | `Vk::ParallelCommandRecorder::SetHeapState` (heap inheritance info + address push per slot) |
+| fork / parallel-draw secondaries | `Vk::SecondaryPassContext::Begin` (`HeapInheritance` link + per-frame address push, per slot) |
 
 Nothing in the stream re-establishes it: `HeapManager` writes into one pair of
 device-addressable heap buffers that are created once and never grow or move, so
