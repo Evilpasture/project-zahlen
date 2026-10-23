@@ -17,8 +17,6 @@
 #include <cmath>
 #include <cstdint>
 #include <expected>
-#include <filesystem>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -32,35 +30,6 @@ enum class CameraLookAtError : uint8_t {
 };
 
 namespace {
-
-struct PpmImage {
-    int                  width  = 0;
-    int                  height = 0;
-    std::vector<uint8_t> pixels;
-};
-
-[[nodiscard]] auto LoadPPM(std::string_view path) -> std::expected<PpmImage, ZHLN::ErrorCode> {
-    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
-    if (!ppm.is_open()) {
-        return std::unexpected(CameraLookAtError::RenderOutputBlank);
-    }
-
-    PpmImage    image;
-    std::string header;
-    int         maxColor = 0;
-    ppm >> header >> image.width >> image.height >> maxColor;
-    ppm.get();
-    if (header != "P6" || image.width <= 0 || image.height <= 0) {
-        return std::unexpected(CameraLookAtError::RenderOutputBlank);
-    }
-
-    image.pixels.resize(static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 3u);
-    ppm.read(reinterpret_cast<char*>(image.pixels.data()), static_cast<std::streamsize>(image.pixels.size()));
-    if (ppm.gcount() != static_cast<std::streamsize>(image.pixels.size())) {
-        return std::unexpected(CameraLookAtError::RenderOutputBlank);
-    }
-    return image;
-}
 
 void DisableJitterAndVignette(ZHLN::ECS::Registry& reg) {
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
@@ -159,26 +128,22 @@ struct CameraLookAtTestSuite {
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
-            const std::string ppmPath    = "headless_camera_lookat.ppm";
-            const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
-            if (!captureRes) {
+            // In memory: the .ppm mirror is written for inspection only, so a
+            // failing run still leaves a picture behind.
+            const std::string ppmPath = "headless_camera_lookat.ppm";
+            const auto        image   = ZHLN::Test::Headless::Capture(*engine, ppmPath);
+            if (!image.Valid()) {
                 return std::unexpected(CameraLookAtError::RenderOutputBlank);
             }
-
-            auto imageRes = LoadPPM(ppmPath);
-            if (!imageRes) {
-                return std::unexpected(imageRes.error());
-            }
-            const PpmImage& image = *imageRes;
 
             uint64_t redCount = 0, greenCount = 0;
             double   redSumX = 0.0, redSumY = 0.0;
             for (int y = 0; y < image.height; ++y) {
                 for (int x = 0; x < image.width; ++x) {
                     const size_t  i = (static_cast<size_t>(y) * static_cast<size_t>(image.width) + static_cast<size_t>(x)) * 3u;
-                    const uint8_t r = image.pixels[i + 0];
-                    const uint8_t g = image.pixels[i + 1];
-                    const uint8_t b = image.pixels[i + 2];
+                    const uint8_t r = image.rgb[i + 0];
+                    const uint8_t g = image.rgb[i + 1];
+                    const uint8_t b = image.rgb[i + 2];
                     if (r > 160 && g < 50 && b < 50) {
                         redCount++;
                         redSumX += static_cast<double>(x);

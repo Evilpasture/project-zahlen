@@ -94,7 +94,6 @@ using ZHLN::Test::Image::LumaPlane;
 using ZHLN::Test::Image::TemporalMoments;
 using ZHLN::Test::Image::BBoxOfChangedPixels;
 using ZHLN::Test::Image::Crop;
-using ZHLN::Test::Image::LoadPPM;
 using ZHLN::Test::Image::LumaDifference;
 using ZHLN::Test::Image::RgbImage;
 using ZHLN::Test::Image::RmsInRegion;
@@ -292,11 +291,7 @@ struct RayTracedNoiseStabilityTestSuite {
     }
 
     static RgbImage Capture(ZHLN::Engine& engine, std::string_view name) {
-        const auto res = engine.GetRenderContext().CaptureScreenshotPPM(name);
-        if (!res) {
-            return {};
-        }
-        return LoadPPM(name);
+        return ZHLN::Test::Headless::Capture(engine, name);
     }
 
     // Settles the scene, then grabs one frame. Two ticks after a settings

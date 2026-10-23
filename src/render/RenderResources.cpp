@@ -14,6 +14,7 @@
 #include "passes/gbuffer/GBufferBasePass.hpp"
 #include <PipelineFormats.hpp>
 #include <ShaderBindings.hpp>
+#include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
@@ -1017,20 +1018,22 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D exte
     return *uploaded;
 }
 
-enum class ScreenshotError : uint8_t {
-    FileOpenFailed         ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing"> {}) = 1,
-    DestinationNotRecorded ZHLN_ANNOTATION(ZHLN::Description<"No completed frame was drawn into the headless presentation target"> {}),
+enum class FrameCaptureError : uint8_t {
+    DestinationNotRecorded ZHLN_ANNOTATION(ZHLN::Description<"No completed frame was drawn into the presentation target"> {}) = 1,
 };
 
-auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, ErrorCode> {
+auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, ErrorCode> {
     auto* const impl = _impl.get();
 
+    // -------------------------------------------------------------------------
+    // Path A: the presentation target, when there is one to read back
+    // -------------------------------------------------------------------------
     if (!impl->presenter.swapchain.Valid()) {
         const auto dest = impl->destinations.Find(impl->presentationTarget);
         if (impl->frameOpen || !dest || !dest->acquired || !dest->acquired->drawn) {
-            ZHLN::LogWarning("[Test Capture] No completed headless frame was drawn; capture refused.");
-            return std::unexpected(ScreenshotError::DestinationNotRecorded);
+            return std::unexpected(FrameCaptureError::DestinationNotRecorded);
         }
+
         const auto&   frameImage   = *dest->acquired;
         VkImage       source       = frameImage.image.Handle();
         VkExtent2D    extent       = frameImage.image.Extent2D();
@@ -1088,71 +1091,36 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             return std::unexpected(mapped.error());
         }
 
-        std::ofstream ofs(std::string(outputPath), std::ios::binary);
-        if (!ofs.is_open()) {
-            return std::unexpected(ScreenshotError::FileOpenFailed);
-        }
+        const auto* const rgba   = mapped->As<const uint8_t>();
+        const size_t      pixels = static_cast<size_t>(extent.width) * extent.height;
 
-        const bool writeAlpha = outputPath.ends_with(".pam") || outputPath.ends_with(".PAM");
-        if (writeAlpha) {
-            ofs << "P7\nWIDTH " << extent.width << "\nHEIGHT " << extent.height << "\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n";
-        } else {
-            ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
-        }
+        CapturedFrame result {
+            .extent = {extent.width, extent.height},
+            .format = PixelFormat::Rgba8,
+            .pixels = std::vector<uint8_t>(rgba, rgba + imageBytes),
+        };
 
-        const auto*             rgba        = mapped->As<const uint8_t>();
-        const size_t            pixels      = static_cast<size_t>(extent.width) * extent.height;
-        uint64_t                lumaSum     = 0;
-        uint64_t                lit         = 0;
-        uint64_t                transparent = 0;
-        std::array<uint64_t, 3> channelSum {};
-        std::array<uint64_t, 3> aboveFloor {};
-        std::array<uint8_t, 3>  channelMax {};
+        uint64_t lumaSum = 0;
         for (size_t i = 0; i < pixels; ++i) {
-            const uint8_t r = rgba[i * 4 + 0];
-            const uint8_t g = rgba[i * 4 + 1];
-            const uint8_t b = rgba[i * 4 + 2];
-            if (rgba[i * 4 + 3] == 0) {
-                ++transparent;
-            }
-            if (!writeAlpha) {
-                ofs.put(static_cast<char>(r));
-                ofs.put(static_cast<char>(g));
-                ofs.put(static_cast<char>(b));
-            }
-
-            const std::array<uint8_t, 3> channels {r, g, b};
-            for (size_t c = 0; c < channels.size(); ++c) {
-                channelSum[c] += channels[c];
-                channelMax[c] = std::max(channelMax[c], channels[c]);
-                aboveFloor[c] += channels[c] >= 45u ? 1u : 0u;
+            const uint8_t r = rgba[(i * 4) + 0];
+            const uint8_t g = rgba[(i * 4) + 1];
+            const uint8_t b = rgba[(i * 4) + 2];
+            if (rgba[(i * 4) + 3] == 0) {
+                ++result.metrics.transparentPixels;
             }
 
             const uint32_t luma = (2126u * static_cast<uint32_t>(r) + 7152u * static_cast<uint32_t>(g) + 722u * static_cast<uint32_t>(b)) / 10000u;
             lumaSum += luma;
-            lit += luma > 8u ? 1u : 0u;
+            result.metrics.litPixels += luma > 8u ? 1u : 0u;
         }
-        if (writeAlpha) {
-            ofs.write(reinterpret_cast<const char*>(rgba), static_cast<std::streamsize>(pixels * 4u));
-            ZHLN::LogDebug("[Test Capture] {} of {} pixels have alpha 0 (omit-background).", transparent, pixels);
-        }
-        ofs.close();
-
-        const double meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
-        const auto   meanOf   = [pixels](uint64_t sum) -> double { return pixels == 0 ? 0.0 : static_cast<double>(sum) / static_cast<double>(pixels); };
-
-        ZHLN::LogDebug(
-            "[Test Capture] Rendered frame written to: {} ({}x{} from image 0x{:016X}: mean luma {:.2f}, {} of {} pixels above black; mean RGB "
-            "({:.2f},{:.2f},{:.2f}); "
-            "max RGB ({},{},{}); channel pixels >=45: {}/{}/{})",
-            outputPath, extent.width, extent.height, reinterpret_cast<uint64_t>(source), meanLuma, lit, pixels, meanOf(channelSum[0]), meanOf(channelSum[1]),
-            meanOf(channelSum[2]), channelMax[0], channelMax[1], channelMax[2], aboveFloor[0], aboveFloor[1], aboveFloor[2]
-        );
-        return {};
+        result.metrics.meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
+        return result;
     }
 
-    const auto extent = impl->graphResources.hdrSceneColor.extent;
-
+    // -------------------------------------------------------------------------
+    // Path B: the HDR scene color, tone-mapped for display
+    // -------------------------------------------------------------------------
+    const auto   extent     = impl->graphResources.hdrSceneColor.extent;
     const size_t imageBytes = static_cast<size_t>(extent.width) * extent.height * sizeof(uint16_t) * 4;
 
     auto stagingRes = Vk::Buffer::Create(impl->allocator, imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
@@ -1180,65 +1148,57 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     if (!mapped) {
         return std::unexpected(mapped.error());
     }
-    const auto* const halfFloats = mapped->As<const uint16_t>();
 
-    std::ofstream ofs(std::string(outputPath), std::ios::binary);
-    if (!ofs.is_open()) {
-        return std::unexpected(ScreenshotError::FileOpenFailed);
-    }
+    const auto* const halfFloats   = mapped->As<const uint16_t>();
+    const bool        isFullBright = impl->currentUniforms.fullBright != 0;
+    const size_t      pixels       = static_cast<size_t>(extent.width) * extent.height;
 
-    ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
-
-    auto HalfToFloat = [](uint16_t h) noexcept -> float {
-        uint32_t sign     = (h >> 15) & 0x00000001;
-        uint32_t exponent = (h >> 10) & 0x0000001f;
-        uint32_t mantissa = h & 0x000003ff;
-
-        if (exponent == 0) {
-            if (mantissa == 0) {
-                return sign ? -0.0f : 0.0f;
-            }
-            return (sign ? -1.0f : 1.0f) * std::ldexp(static_cast<float>(mantissa), -24);
-        }
-        if (exponent == 31) {
-            return sign ? -INFINITY : INFINITY;
-        }
-        return (sign ? -1.0f : 1.0f) * std::ldexp(static_cast<float>(mantissa | 0x0400), static_cast<int>(exponent) - 15 - 10);
+    CapturedFrame result {
+        .extent = {extent.width, extent.height},
+        .format = PixelFormat::Rgb8,
+        .pixels = std::vector<uint8_t>(pixels * 3),
     };
 
-    auto ACESFilm = [](float x) noexcept -> float {
-        float a = 2.51f;
-        float b = 0.03f;
-        float c = 2.43f;
-        float d = 0.59f;
-        float e = 0.14f;
-        return std::clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f);
+    // The display transform belongs to the renderer, not to the encoder: whether
+    // the tone curve applies is a renderer uniform. What the caller receives is
+    // already display-referred, so every consumer sees the same image. The curve
+    // itself lives in CapturedFrame.hpp so a caller re-encoding a raw frame
+    // cannot land on a different one.
+    // NaN (a half-float readback can hold one) has no ordering, so it is
+    // answered before the clamp rather than cast through it.
+    const auto quantize = [](float v) noexcept -> uint8_t {
+        if (!(v > 0.0f)) {
+            return 0;
+        }
+        return static_cast<uint8_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f);
     };
 
-    bool isFullBright = (impl->currentUniforms.fullBright != 0);
-
-    ZHLN::Array<uint8_t> rgb(static_cast<size_t>(extent.width) * extent.height * 3);
-    for (size_t i = 0; i < static_cast<size_t>(extent.width) * extent.height; ++i) {
-        float r = HalfToFloat(halfFloats[i * 4 + 0]);
-        float g = HalfToFloat(halfFloats[i * 4 + 1]);
-        float b = HalfToFloat(halfFloats[i * 4 + 2]);
+    uint64_t lumaSum = 0;
+    for (size_t i = 0; i < pixels; ++i) {
+        float r = Math::HalfToFloat(halfFloats[(i * 4) + 0]);
+        float g = Math::HalfToFloat(halfFloats[(i * 4) + 1]);
+        float b = Math::HalfToFloat(halfFloats[(i * 4) + 2]);
 
         if (!isFullBright) {
-            r = ACESFilm(r * 0.015f);
-            g = ACESFilm(g * 0.015f);
-            b = ACESFilm(b * 0.015f);
+            r = Math::AcesFilm(r * kCaptureExposure);
+            g = Math::AcesFilm(g * kCaptureExposure);
+            b = Math::AcesFilm(b * kCaptureExposure);
         }
 
-        rgb[i * 3 + 0] = static_cast<uint8_t>(std::clamp(r, 0.0f, 1.0f) * 255.0f);
-        rgb[i * 3 + 1] = static_cast<uint8_t>(std::clamp(g, 0.0f, 1.0f) * 255.0f);
-        rgb[i * 3 + 2] = static_cast<uint8_t>(std::clamp(b, 0.0f, 1.0f) * 255.0f);
+        const uint8_t red   = quantize(r);
+        const uint8_t green = quantize(g);
+        const uint8_t blue  = quantize(b);
+
+        result.pixels[(i * 3) + 0] = red;
+        result.pixels[(i * 3) + 1] = green;
+        result.pixels[(i * 3) + 2] = blue;
+
+        const uint32_t luma = (2126u * static_cast<uint32_t>(red) + 7152u * static_cast<uint32_t>(green) + 722u * static_cast<uint32_t>(blue)) / 10000u;
+        lumaSum += luma;
+        result.metrics.litPixels += luma > 8u ? 1u : 0u;
     }
-
-    ofs.write(reinterpret_cast<const char*>(rgb.data()), rgb.size());
-    ofs.close();
-
-    ZHLN::LogDebug("[Test Capture] Rendered frame written to: {}", outputPath);
-    return {};
+    result.metrics.meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
+    return result;
 }
 
 void RenderContext::ProvokeDeviceLost() {

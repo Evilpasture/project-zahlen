@@ -26,7 +26,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -144,22 +143,12 @@ struct DescriptorHeapsParallelSuite {
             }
 
             const std::string ppmPath = "headless_dheap_parallel.ppm";
-            if (!rc.CaptureScreenshotPPM(ppmPath)) {
+            const auto        frame   = ZHLN::Test::Headless::Capture(*engine, ppmPath);
+            if (!frame.Valid()) {
                 return std::unexpected(DescriptorHeapsParallelTestError::RenderOutputBlank);
             }
-
-            std::ifstream ppm(ppmPath, std::ios::binary);
-            if (!ppm.is_open()) {
-                return std::unexpected(DescriptorHeapsParallelTestError::RenderOutputBlank);
-            }
-
-            std::string header;
-            int         width = 0, height = 0, maxColor = 0;
-            ppm >> header >> width >> height >> maxColor;
-            ppm.get();
-
-            std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
-            ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+            const std::vector<uint8_t>& pixels = frame.rgb;
+            const int                   width  = frame.width;
 
             // ====================================================================
             // Verification: fixed expected-RGB matching is too rigid for a lit

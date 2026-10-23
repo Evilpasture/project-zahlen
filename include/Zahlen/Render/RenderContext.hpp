@@ -11,6 +11,7 @@
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/ParticleEmitterDesc.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Render/FrameData.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Render/FrameScope.hpp>
@@ -222,7 +223,12 @@ class ZHLN_API RenderContext {
         BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] TextureHandle CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true, bool generateMips = true);
 
-    [[nodiscard]] std::expected<void, ErrorCode> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
+    // A captured frame: the pixels of the last completed frame, in memory, plus
+    // the statistics a caller would otherwise compute by parsing the file it
+    // asked to be written. The renderer writes nothing and names no format --
+    // encoding is the caller's (<netpbm/PpmEncoder.hpp> if it wants a PPM or a
+    // PAM) and so is the file itself.
+    [[nodiscard]] std::expected<CapturedFrame, ErrorCode> CaptureFrame() noexcept;
 
     [[nodiscard]] std::expected<void, ErrorCode> SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept;
 

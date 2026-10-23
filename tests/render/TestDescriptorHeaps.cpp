@@ -29,7 +29,6 @@
 #include <cstdint>
 #include <expected>
 #include <format>
-#include <fstream>
 #include <memory>
 #include <span>
 #include <string>
@@ -105,30 +104,25 @@ struct DescriptorHeapsSuite {
         return {static_cast<uint8_t>((r + m) * 255.0f), static_cast<uint8_t>((g + m) * 255.0f), static_cast<uint8_t>((b + m) * 255.0f)};
     }
 
-    // Captures a PPM screenshot and returns its RGB pixel buffer.
+    // Captures a frame and returns its tightly packed RGB pixels. The pixels never
+    // touch a file: `path` names the .ppm mirrored for inspection, not a source.
     [[nodiscard]] static auto CapturePixels(ZHLN::RenderContext& rc, std::string_view path, uint32_t& outWidth, uint32_t& outHeight)
         -> std::expected<std::vector<uint8_t>, ZHLN::ErrorCode> {
-        const std::string ppmPath(path);
-        if (!rc.CaptureScreenshotPPM(ppmPath)) {
+        const auto captured = rc.CaptureFrame();
+        if (!captured) {
             return std::unexpected(DescriptorHeapsTestError::RenderOutputBlank);
         }
-
-        std::ifstream ppm(ppmPath, std::ios::binary);
-        if (!ppm.is_open()) {
+        const auto image = ZHLN::Test::Headless::ToRgbImage(*captured);
+        if (!image.Valid()) {
             return std::unexpected(DescriptorHeapsTestError::RenderOutputBlank);
         }
+        if (!path.empty()) {
+            (void) ZHLN::Test::Image::WritePPM(path, image);
+        }
 
-        std::string header;
-        int         width = 0, height = 0, maxColor = 0;
-        ppm >> header >> width >> height >> maxColor;
-        ppm.get(); // consume newline
-
-        std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
-        ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
-
-        outWidth  = static_cast<uint32_t>(width);
-        outHeight = static_cast<uint32_t>(height);
-        return pixels;
+        outWidth  = static_cast<uint32_t>(image.width);
+        outHeight = static_cast<uint32_t>(image.height);
+        return image.rgb;
     }
 
     struct Tests {

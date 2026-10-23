@@ -17,9 +17,11 @@ Forbidden:
 `configure/check_tests_public_api.py` runs at CMake configure time and fails the
 build if a test includes engine internals.
 
-GPU suites (`ZHLN_BUILD_GPU_TESTS`) judge public behaviour from
-`CaptureScreenshotPPM` pixels — camera aim, PBR response, UI layout, and
-ray-traced reflection colour vs PBR F0/roughness — not private systems.
+GPU suites (`ZHLN_BUILD_GPU_TESTS`) judge public behaviour from the pixels
+`RenderContext::CaptureFrame` hands back — camera aim, PBR response, UI layout,
+and ray-traced reflection colour vs PBR F0/roughness — not private systems. The
+pixels arrive in memory; the `.ppm`/`.png` files a run leaves behind are
+diagnostic mirrors written by the test, never the thing the assertions read.
 See `tests/INVARIANT_TESTING.md` for the no-absolute-pixels rule, quiet logs
 (`ZHLN_TEST_LOG=verbose`), sample-asset coverage without committed GLBs,
 and quarantine (`[ QUARANTINE ]` = known open engine bug, still running).

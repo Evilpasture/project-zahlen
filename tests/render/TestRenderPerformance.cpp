@@ -3,6 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include "extras/profile/PerfBaseline.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -32,9 +33,7 @@
 #include <cmath>
 #include <cstdint>
 #include <expected>
-#include <filesystem>
 #include <format>
-#include <fstream>
 #include <memory>
 #include <numbers>
 #include <numeric>
@@ -67,46 +66,15 @@ enum class RenderPerfTestError : uint8_t {
 
 namespace {
 
-struct PpmImage {
-    int                  width  = 0;
-    int                  height = 0;
-    std::vector<uint8_t> pixels;
+using RgbImage = ZHLN::Test::Image::RgbImage;
 
-    [[nodiscard]] bool Valid() const noexcept {
-        return width > 0 && height > 0 && pixels.size() == static_cast<size_t>(width) * static_cast<size_t>(height) * 3u;
-    }
-};
-
-[[nodiscard]] PpmImage LoadPPM(std::string_view path) {
-    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
-    if (!ppm.is_open()) {
-        return {};
-    }
-
-    PpmImage    image;
-    std::string header;
-    int         maxColor = 0;
-    ppm >> header >> image.width >> image.height >> maxColor;
-    ppm.get();
-    if (header != "P6" || image.width <= 0 || image.height <= 0) {
-        return {};
-    }
-
-    image.pixels.resize(static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 3u);
-    ppm.read(reinterpret_cast<char*>(image.pixels.data()), static_cast<std::streamsize>(image.pixels.size()));
-    if (ppm.gcount() != static_cast<std::streamsize>(image.pixels.size())) {
-        return {};
-    }
-    return image;
-}
-
-[[nodiscard]] uint32_t CountLitPixels(const PpmImage& img, uint8_t threshold = 15) {
+[[nodiscard]] uint32_t CountLitPixels(const RgbImage& img, uint8_t threshold = 15) {
     if (!img.Valid()) {
         return 0;
     }
     uint32_t lit = 0;
-    for (size_t i = 0; i < img.pixels.size(); i += 3) {
-        if (img.pixels[i + 0] > threshold || img.pixels[i + 1] > threshold || img.pixels[i + 2] > threshold) {
+    for (size_t i = 0; i < img.rgb.size(); i += 3) {
+        if (img.rgb[i + 0] > threshold || img.rgb[i + 1] > threshold || img.rgb[i + 2] > threshold) {
             lit++;
         }
     }
@@ -740,13 +708,14 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     }
     double durationMs = timer.ElapsedMilliseconds();
 
-    const std::string ppmPath    = "headless_rt_isolated_output.ppm";
-    const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
-    if (!captureRes) {
+    const std::string ppmPath  = "headless_rt_isolated_output.ppm";
+    const auto        captured = rc.CaptureFrame();
+    if (!captured) {
         return std::unexpected(RenderPerfTestError::RayTracingThroughputFailed);
     }
 
-    PpmImage outputImg = LoadPPM(ppmPath);
+    const RgbImage outputImg = ZHLN::Test::Headless::ToRgbImage(*captured);
+    (void) ZHLN::Test::Image::WritePPM(ppmPath, outputImg); // diagnostic mirror
     uint32_t litPixels = CountLitPixels(outputImg, 15);
 
     ZHLN::Test::ExpectGt(litPixels, 30000u);
@@ -977,14 +946,15 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
                          engine.Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
                      });
 
-    // 10. Frame Screenshot Verification
-    const std::string ppmPath    = (mode == ZHLN::ValidationMode::On) ? "headless_master_rt_val_on.ppm" : "headless_master_rt_val_off.ppm";
-    const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
-    if (!captureRes) {
+    // 10. Frame Capture Verification
+    const std::string ppmPath  = (mode == ZHLN::ValidationMode::On) ? "headless_master_rt_val_on.ppm" : "headless_master_rt_val_off.ppm";
+    const auto        captured = rc.CaptureFrame();
+    if (!captured) {
         return std::unexpected(RenderPerfTestError::UnifiedMasterBenchmarkFailed);
     }
 
-    PpmImage outputImg = LoadPPM(ppmPath);
+    const RgbImage outputImg = ZHLN::Test::Headless::ToRgbImage(*captured);
+    (void) ZHLN::Test::Image::WritePPM(ppmPath, outputImg); // diagnostic mirror
     uint32_t litPixels = CountLitPixels(outputImg, 15);
 
     uint32_t valRaised = engine.GetRenderContext().GetValidationErrorCount() - valBefore;

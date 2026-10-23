@@ -386,13 +386,68 @@ inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt) {
     }
 }
 
-// Renders, reads the frame back, and mirrors it to .png for inspection.
-[[nodiscard]] inline auto Capture(ZHLN::Engine& engine, std::string_view ppmPath) -> Image::RgbImage {
-    if (!engine.GetRenderContext().CaptureScreenshotPPM(ppmPath)) {
+// A captured frame, converted into the test image type -- in memory, with no
+// file in between. This is what assertions should run on: the renderer hands
+// back pixels and statistics, and a test that reparsed a file it had just
+// written would be testing the encoder as much as the renderer.
+[[nodiscard]] inline auto ToRgbImage(const ZHLN::CapturedFrame& frame) -> Image::RgbImage {
+    Image::RgbImage img;
+    if (!frame.Valid()) {
+        return img;
+    }
+    img.width  = static_cast<int>(frame.extent.width);
+    img.height = static_cast<int>(frame.extent.height);
+
+    switch (frame.format) {
+        case ZHLN::PixelFormat::Rgb8:
+            img.rgb = frame.pixels;
+            break;
+
+        case ZHLN::PixelFormat::Rgba8:
+            // Drop alpha: an RGB test image is what the suites' statistics expect.
+            img.rgb.resize(frame.PixelCount() * 3);
+            for (size_t i = 0; i < frame.PixelCount(); ++i) {
+                img.rgb[(i * 3) + 0] = frame.pixels[(i * 4) + 0];
+                img.rgb[(i * 3) + 1] = frame.pixels[(i * 4) + 1];
+                img.rgb[(i * 3) + 2] = frame.pixels[(i * 4) + 2];
+            }
+            break;
+
+        case ZHLN::PixelFormat::Rgba16F: {
+            // Tone-mapped through the same curve the encoder uses, so a wide
+            // capture reads the same here as the file it would produce.
+            const auto* const texels = reinterpret_cast<const uint16_t*>(frame.pixels.data());
+            img.rgb.resize(frame.PixelCount() * 3);
+            for (size_t i = 0; i < frame.PixelCount(); ++i) {
+                for (size_t channel = 0; channel < 3; ++channel) {
+                    const float linear         = ZHLN::Math::HalfToFloat(texels[(i * 4) + channel]);
+                    const float toned          = ZHLN::Math::AcesFilm(linear * ZHLN::kCaptureExposure);
+                    img.rgb[(i * 3) + channel] = static_cast<uint8_t>(std::clamp(toned, 0.0F, 1.0F) * 255.0F);
+                }
+            }
+            break;
+        }
+    }
+    if (!img.Valid()) {
         return {};
     }
-    const Image::RgbImage img = Image::LoadPPM(ppmPath);
-    if (img.Valid()) {
+    return img;
+}
+
+// Renders, reads the frame back into memory, and mirrors it to .ppm/.png so a
+// failing run leaves something to look at. The mirror is diagnostic only: the
+// returned image never came from disk.
+[[nodiscard]] inline auto Capture(ZHLN::Engine& engine, std::string_view ppmPath) -> Image::RgbImage {
+    const auto captured = engine.GetRenderContext().CaptureFrame();
+    if (!captured) {
+        return {};
+    }
+    const Image::RgbImage img = ToRgbImage(*captured);
+    if (!img.Valid()) {
+        return {};
+    }
+    if (!ppmPath.empty()) {
+        (void) Image::WritePPM(ppmPath, img);
         (void) Image::SavePNG(Image::PngPathOf(ppmPath), img);
     }
     return img;

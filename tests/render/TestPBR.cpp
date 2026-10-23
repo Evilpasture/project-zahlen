@@ -21,7 +21,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -305,24 +304,14 @@ struct PBRTestSuite {
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
-            const std::string ppmPath    = "headless_pbr_roughness.ppm";
-            const auto        captureRes = engine->GetRenderContext().CaptureScreenshotPPM(ppmPath);
-            if (!captureRes) {
+            const std::string ppmPath = "headless_pbr_roughness.ppm";
+            const auto        frame   = ZHLN::Test::Headless::Capture(*engine, ppmPath);
+            if (!frame.Valid()) {
                 return std::unexpected(PBRTestError::RenderOutputBlank);
             }
-
-            std::ifstream ppm(ppmPath, std::ios::binary);
-            if (!ppm.is_open()) {
-                return std::unexpected(PBRTestError::RenderOutputBlank);
-            }
-
-            std::string header;
-            int         width = 0, height = 0, maxColor = 0;
-            ppm >> header >> width >> height >> maxColor;
-            ppm.get();
-
-            std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
-            ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+            const std::vector<uint8_t>& pixels = frame.rgb;
+            const int                   width  = frame.width;
+            const int                   height = frame.height;
 
             auto luminance = [](uint8_t r, uint8_t g, uint8_t b) -> float {
                 return 0.2126f * static_cast<float>(r) + 0.7152f * static_cast<float>(g) + 0.0722f * static_cast<float>(b);
@@ -794,24 +783,12 @@ struct PBRTestSuite {
                 engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
             }
 
-            const std::string ppmPath    = "headless_pbr_fullbright.ppm";
-            const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
-            if (!captureRes) {
+            const std::string ppmPath = "headless_pbr_fullbright.ppm";
+            const auto        frame   = ZHLN::Test::Headless::Capture(*engine, ppmPath);
+            if (!frame.Valid()) {
                 return std::unexpected(PBRTestError::RenderOutputBlank);
             }
-
-            std::ifstream ppm(ppmPath, std::ios::binary);
-            if (!ppm.is_open()) {
-                return std::unexpected(PBRTestError::RenderOutputBlank);
-            }
-
-            std::string header;
-            int         width = 0, height = 0, maxColor = 0;
-            ppm >> header >> width >> height >> maxColor;
-            ppm.get();
-
-            std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
-            ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+            const std::vector<uint8_t>& pixels = frame.rgb;
 
             uint32_t pureGreenPixels = 0;
             for (size_t i = 0; i < pixels.size(); i += 3) {

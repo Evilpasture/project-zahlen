@@ -38,6 +38,9 @@ target_link_libraries(zahlen_serialization PRIVATE zahlen_warnings)
 
 # The importer consumes the serializer; Fonts consumes both engine and
 # serialization; SVG remains independently optional when resvg is unavailable.
+# netpbm is header-only: it names no sources and links nothing, it only puts
+# <netpbm/PpmEncoder.hpp> on the include path of whoever asks for it.
+add_subdirectory(netpbm)
 add_subdirectory(glTF)
 add_subdirectory(BSP)
 add_subdirectory(Fonts)

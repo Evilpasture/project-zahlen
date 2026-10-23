@@ -108,9 +108,12 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
-            auto& rc = engine->GetRenderContext();
-            auto captureRes = rc.CaptureScreenshotPPM("test_render_output.ppm");
-            ZHLN::Test::ExpectTrue(captureRes.has_value());
+            auto& rc       = engine->GetRenderContext();
+            auto  captured = rc.CaptureFrame();
+            ZHLN::Test::ExpectTrue(captured.has_value());
+            if (captured) {
+                (void) ZHLN::Test::Image::WritePPM("test_render_output.ppm", ZHLN::Test::Headless::ToRgbImage(*captured));
+            }
             ZHLN::Test::ExpectGe(engine->GetCurrentFrame(), 60u);
             ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty());
 
@@ -179,10 +182,10 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectTrue(!engine->GetRegistry().GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
 
             // Before the first presented frame, the headless image is still
-            // UNDEFINED. A screenshot must fail without submitting an invalid
+            // UNDEFINED. A capture must fail without submitting an invalid
             // COLOR_ATTACHMENT -> TRANSFER_SRC readback barrier.
             const auto errorsBefore = engine->GetRenderContext().GetValidationErrorCount();
-            const auto emptyCapture = engine->GetRenderContext().CaptureScreenshotPPM("test_no_completed_frame.ppm");
+            const auto emptyCapture = engine->GetRenderContext().CaptureFrame();
             ZHLN::Test::ExpectFalse(emptyCapture.has_value());
             ZHLN::Test::ExpectEq(engine->GetRenderContext().GetValidationErrorCount(), errorsBefore);
             return {};
