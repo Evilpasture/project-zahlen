@@ -68,7 +68,7 @@ target_compile_options(
 
 target_link_libraries(
   zahlen_vulkan PUBLIC Vulkan-Headers GPUOpen::VulkanMemoryAllocator
-                       spirv_reflect)
+                       spirv-reflect-static)
 
 target_include_directories(
   zahlen_vulkan

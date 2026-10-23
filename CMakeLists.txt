@@ -272,7 +272,7 @@ target_link_libraries(
           zahlen_audio
           zahlen_gui
           glfw
-          spirv_reflect
+          spirv-reflect-static
           mimalloc-static
           ${ZSTD_LIBRARY}
           zahlen_warnings)
