@@ -62,8 +62,9 @@ using Res_ShadowDenoiseA  = Vk::GraphImage<"ShadowDenoiseA", VK_FORMAT_R16_SFLOA
 using Res_ShadowDenoiseB  = Vk::GraphImage<"ShadowDenoiseB", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, kShadowTraceDivisor>;
 using Res_RtrHalf         = Vk::GraphImage<"RtrHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, 2>;
 using Res_RtrHistory      = Vk::GraphImage<"RtrHistory", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, 2>;
-using Res_RtgiHalf        = Vk::GraphImage<"RtgiHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, 2>;
-using Res_RtgiHistory     = Vk::GraphImage<"RtgiHistory", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, 2>;
+using Res_RcgiProbes      = Vk::GraphImage<"RcgiProbes", VK_FORMAT_R32G32B32A32_SFLOAT>;
+using Res_RcgiCascadeA    = Vk::GraphImage<"RcgiCascadeA", VK_FORMAT_R16G16B16A16_SFLOAT>;
+using Res_RcgiCascadeB    = Vk::GraphImage<"RcgiCascadeB", VK_FORMAT_R16G16B16A16_SFLOAT>;
 using Res_RtgiDenoiseA    = Vk::GraphImage<"RtgiDenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_RtgiDenoiseB    = Vk::GraphImage<"RtgiDenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_DdgiIrradiance  = Vk::GraphImage<"DdgiIrradiance", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
@@ -121,8 +122,9 @@ class TargetManager {
         Vk::RenderTarget<Res_ShadowDenoiseB> shadowDenoiseB;
         Vk::RenderTarget<Res_RtrHalf> rtrHalf;
         Vk::RenderTarget<Res_RtrHistory> rtrHistory;
-        Vk::RenderTarget<Res_RtgiHalf> rtgiHalf;
-        Vk::RenderTarget<Res_RtgiHistory> rtgiHistory;
+        Vk::RenderTarget<Res_RcgiProbes> rcgiProbes;
+        Vk::RenderTarget<Res_RcgiCascadeA> rcgiCascadeA;
+        Vk::RenderTarget<Res_RcgiCascadeB> rcgiCascadeB;
         Vk::RenderTarget<Res_RtgiDenoiseA> rtgiDenoiseA;
         Vk::RenderTarget<Res_RtgiDenoiseB> rtgiDenoiseB;
         Vk::RenderTarget<Res_DdgiIrradiance> ddgiIrradiance;

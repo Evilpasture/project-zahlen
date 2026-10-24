@@ -122,13 +122,10 @@ template <AAMode Mode, typename GetSwapchainImageT>
             "ShadowDenoise", Shaders::ShadowDenoise, Res_RtShadowMask, Res_ShadowDenoiseA, Res_ShadowDenoiseB, Res_RtShadowHistory, ShadowAtrousPushConstants,
             Passes::ShadowDenoiseGate> {.frame = self},
         Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc}, Passes::ComputePass<Passes::RtrHalfTraceDesc> {.frame = self},
-        Passes::ComputePass<Passes::RtgiHalfTraceDesc> {.frame = self},
         Passes::AtrousDenoisePass<
             "RtrDenoise", Shaders::RtgiDenoise, Res_RtrHalf, Res_RtgiDenoiseA, Res_RtgiDenoiseB, Res_RtrHistory, RtgiAtrousPushConstants,
             Passes::RtrDenoiseGate> {.frame = self, .maxRoughness = 0.4f},
-        Passes::AtrousDenoisePass<
-            "RtgiDenoise", Shaders::RtgiDenoise, Res_RtgiHalf, Res_RtgiDenoiseA, Res_RtgiDenoiseB, Res_RtgiHistory, RtgiAtrousPushConstants,
-            Passes::RtgiDenoiseGate> {.frame = self, .maxRoughness = 1.0f},
+        Passes::RcgiCascadePass {.frame = self},
         Passes::RtgiCompositePass {.frame = self}, Passes::EmissivePass {.forward = self.forward, .frame = self},
         OpaqueReflectionPass {.frame = self, .pc = pc}, TranslucentReflectionPass {.frame = self, .pc = pc},
         Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self},

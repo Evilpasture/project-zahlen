@@ -96,6 +96,7 @@ enum class Stage : uint8_t {
     ShadowDenoise,
     RtrHalfTrace,
     RtgiHalfTrace,
+    RcgiCascade,
     RtrDenoise,
     RtgiDenoise,
     RtgiComposite,

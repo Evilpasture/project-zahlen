@@ -147,8 +147,7 @@ struct GraphicsSettings {
                 rayTracing.enableDiffuseGI   = false;
                 break;
             case QualityLevel::Medium:
-                antiAliasing.mode            = AAMode::TAA;
-                antiAliasing.taaFeedback     = 0.95f;
+                antiAliasing.mode            = AAMode::SMAA;
                 shadows.resolution           = 2048;
                 post.giSamples               = 8;
                 post.enableSSR               = 1;
@@ -161,8 +160,7 @@ struct GraphicsSettings {
                 rayTracing.enableDiffuseGI   = false;
                 break;
             case QualityLevel::High:
-                antiAliasing.mode            = AAMode::TAA;
-                antiAliasing.taaFeedback     = 0.95f;
+                antiAliasing.mode            = AAMode::SMAA;
                 shadows.resolution           = 2048;
                 post.giSamples               = 8;
                 post.enableSSR               = 1;
@@ -175,8 +173,7 @@ struct GraphicsSettings {
                 rayTracing.enableDiffuseGI   = true;
                 break;
             case QualityLevel::Ultra:
-                antiAliasing.mode            = AAMode::TAA;
-                antiAliasing.taaFeedback     = 0.95f;
+                antiAliasing.mode            = AAMode::SMAA;
                 shadows.resolution           = 4096;
                 post.giSamples               = 16;
                 post.enableSSR               = 1;

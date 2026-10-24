@@ -48,6 +48,7 @@ set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/instance_data.slang"
     "${SHADER_SRC_DIR}/volumetric_grid.slang"
     "${SHADER_SRC_DIR}/ddgi_common.slang"
+    "${SHADER_SRC_DIR}/rcgi_common.slang"
 )
 
 # The vendored Slang's shape, stated once: both fallbacks below -- the slangc
@@ -644,6 +645,21 @@ add_shader_target(rtgi_composite_shader
     STAGES "${SHADER_SRC_DIR}/rtgi_composite.slang|CSMain|cs_6_0|SHADER_RTGI_COMPOSITE_SLANG_CS_PATH"
 )
 
+# Deterministic Radiance Cascades Global Illumination (RCGI):
+# surface-pinned probe pyramid setup, wave-coherent RayQuery cascade trace +
+# parallax-corrected bilateral merge, and groupshared full-res resolve.
+add_shader_target(rcgi_probe_setup_shader
+    STAGES "${SHADER_SRC_DIR}/rcgi_probe_setup.slang|CSMain|cs_6_0|SHADER_RCGI_PROBE_SETUP_SLANG_CS_PATH"
+)
+
+add_shader_target(rcgi_cascade_trace_merge_shader
+    STAGES "${SHADER_SRC_DIR}/rcgi_cascade_trace_merge.slang|CSMain|cs_6_0|SHADER_RCGI_CASCADE_TRACE_MERGE_SLANG_CS_PATH"
+)
+
+add_shader_target(rcgi_resolve_shader
+    STAGES "${SHADER_SRC_DIR}/rcgi_resolve.slang|CSMain|cs_6_0|SHADER_RCGI_RESOLVE_SLANG_CS_PATH"
+)
+
 # World-space DDGI probe ray trace and octahedral irradiance/distance atlas update.
 add_shader_target(ddgi_trace_shader
     STAGES "${SHADER_SRC_DIR}/ddgi_trace.slang|CSMain|cs_6_0|SHADER_DDGI_TRACE_SLANG_CS_PATH"
@@ -917,6 +933,9 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "RtgiHalfCS=SHADER_RTGI_HALF_SLANG_CS_PATH"
     "RtgiDenoiseCS=SHADER_RTGI_DENOISE_ATROUS_SLANG_CS_PATH"
     "RtgiCompositeCS=SHADER_RTGI_COMPOSITE_SLANG_CS_PATH"
+    "RcgiProbeSetupCS=SHADER_RCGI_PROBE_SETUP_SLANG_CS_PATH"
+    "RcgiCascadeTraceMergeCS=SHADER_RCGI_CASCADE_TRACE_MERGE_SLANG_CS_PATH"
+    "RcgiResolveCS=SHADER_RCGI_RESOLVE_SLANG_CS_PATH"
     "GtaoCS=SHADER_AO_GTAO_SLANG_CS_PATH"
     "VolumetricFogInjectCS=SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH"
     "VolumetricLightInjectCS=SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH"
@@ -999,6 +1018,9 @@ set(ZHLN_SHADER_CATALOG_SETS
     "RtgiHalf=RtgiHalfCS"
     "RtgiDenoise=RtgiDenoiseCS"
     "RtgiComposite=RtgiCompositeCS"
+    "RcgiProbeSetup=RcgiProbeSetupCS"
+    "RcgiCascadeTraceMerge=RcgiCascadeTraceMergeCS"
+    "RcgiResolve=RcgiResolveCS"
     "DdgiTrace=DdgiTraceCS"
     "DdgiUpdateIrradiance=DdgiUpdateIrradianceCS"
     "Gtao=GtaoCS"

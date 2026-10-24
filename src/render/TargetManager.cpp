@@ -44,6 +44,17 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             } else if constexpr (std::is_same_v<Resource, Res_DdgiRays>) {
                 requested = {2048u, 64u};
                 extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
+            } else if constexpr (std::is_same_v<Resource, Res_RcgiProbes>) {
+                const uint32_t alignedW = std::max(32u, (requested.width + 31u) & ~31u);
+                const uint32_t alignedH = std::max(32u, (requested.height + 31u) & ~31u);
+                requested               = {alignedW / 2u, alignedH / 4u};
+                extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
+            } else if constexpr (std::is_same_v<Resource, Res_RcgiCascadeA> || std::is_same_v<Resource, Res_RcgiCascadeB>) {
+                requested = {
+                    std::max(32u, (requested.width + 31u) & ~31u),
+                    std::max(32u, (requested.height + 31u) & ~31u),
+                };
+                extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
             }
             // OpaqueSceneCopyPass transitions this image to TRANSFER_SRC and
             // copies it into TransLighting. Storage and TransferDst alone are
@@ -58,10 +69,7 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             ) {
                 extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
             }
-            if constexpr (
-                std::is_same_v<Resource, Res_RtrHalf> || std::is_same_v<Resource, Res_RtrHistory> || std::is_same_v<Resource, Res_RtgiHalf> ||
-                std::is_same_v<Resource, Res_RtgiHistory>
-            ) {
+            if constexpr (std::is_same_v<Resource, Res_RtrHalf> || std::is_same_v<Resource, Res_RtrHistory>) {
                 extra |= Vk::ImageUsage::TransferDst;
             }
             if constexpr (std::is_same_v<Resource, Res_LightingGI> || std::is_same_v<Resource, Res_HiZ>) {
@@ -252,9 +260,12 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
-    const std::array denoiseTargets = {_graph.denoiseA.image.Handle(),       _graph.denoiseB.image.Handle(),     _graph.shadowDenoiseA.image.Handle(),
-                                       _graph.shadowDenoiseB.image.Handle(), _graph.rtgiDenoiseA.image.Handle(), _graph.rtgiDenoiseB.image.Handle(),
-                                       _graph.ddgiRays.image.Handle()};
+    const std::array denoiseTargets = {
+        _graph.denoiseA.image.Handle(),     _graph.denoiseB.image.Handle(),     _graph.shadowDenoiseA.image.Handle(),
+        _graph.shadowDenoiseB.image.Handle(), _graph.rtgiDenoiseA.image.Handle(), _graph.rtgiDenoiseB.image.Handle(),
+        _graph.rcgiProbes.image.Handle(),   _graph.rcgiCascadeA.image.Handle(), _graph.rcgiCascadeB.image.Handle(),
+        _graph.ddgiRays.image.Handle()
+    };
     for (auto* const img: denoiseTargets) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
@@ -263,7 +274,7 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         cmd, Color4 {1.0f, 1.0f, 1.0f, 1.0f}, _graph.rtShadowMask, _graph.rtShadowHistory
     );
     Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, _graph.rtrHalf, _graph.rtrHistory, _graph.rtgiHalf, _graph.rtgiHistory, _graph.ddgiIrradiance
+        cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, _graph.rtrHalf, _graph.rtrHistory, _graph.ddgiIrradiance
     );
     Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
         cmd, _graph.ddgiDistance, Color4 {50.0f, 2500.0f, 0.0f, 0.0f}

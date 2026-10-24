@@ -8,6 +8,9 @@
 #include "graph/RenderGraph.hpp"
 #include "passes/ComputePass.hpp"
 #include <ShaderBindings.hpp>
+#include <algorithm>
+#include <array>
+#include <cstdint>
 
 namespace ZHLN::Passes {
 
@@ -151,48 +154,117 @@ struct RtrHalfTraceDesc {
     }
 };
 
-struct RtgiHalfTraceDesc {
-    static constexpr auto name = Vk::ResourceName("RtgiHalfTrace");
-    using Usages               = Vk::TypeList<
+// Deterministic 4-cascade Radiance Cascades Global Illumination (RCGI):
+// 1. Hierarchical surface-pinned probe setup (C0..C3) into Res_RcgiProbes.
+// 2. Top-down Direction-First wave-coherent RayQuery trace + parallax-corrected
+//    bilateral merge (C3 -> B, C2 -> A, C1 -> B, C0 -> A), converging in a
+//    single frame with zero temporal history buffers or A-Trous denoising.
+struct RcgiCascadePass:
+    Vk::RenderPass<
+        "RcgiCascade",
         Vk::ComputeRead<Res_Depth>,
         Vk::ComputeRead<Res_NormRough>,
-        Vk::ComputeRead<Res_Lighting>,
+        Vk::ComputeRead<Res_ShadowAtlas>,
         Vk::ComputeRead<Res_DdgiIrradiance>,
         Vk::ComputeRead<Res_DdgiDistance>,
-        Vk::ComputeWrite<Res_RtgiHalf>>;
-    using ShaderDecl    = Shaders::RtgiHalf;
-    using ShaderModule  = Shaders::Modules::RtgiHalfCS;
-    using PushConstants = RtgiHalfPushConstants;
+        Vk::ComputeWrite<Res_RcgiProbes>,
+        Vk::ComputeWrite<Res_RcgiCascadeA>,
+        Vk::ComputeWrite<Res_RcgiCascadeB>> {
+    RenderFrameContext& frame;
 
-    [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
+    void operator()(VkCommandBuffer cmd) const noexcept {
         const uint32_t fIdx = frame.presenter.frameIndex;
-        return frame.ctx.RayTracingSupported() && frame.settings.rayTracing.enableDiffuseGI && frame.settings.environment.fullBright == 0 &&
-               frame.frames.tlasAddresses[fIdx] != nullptr;
-    }
+        const bool     active =
+            frame.ctx.RayTracingSupported() && frame.settings.rayTracing.enableDiffuseGI && frame.settings.post.giIntensity > 0.0f &&
+            frame.settings.environment.fullBright == 0 && frame.frames.tlasAddresses[fIdx] != nullptr;
+        if (!active) {
+            return;
+        }
 
-    [[nodiscard]] static auto
-        GetPass(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::RtgiHalfCS, RtgiHalfPushConstants>>& {
-        return frame.lighting.rtgiHalf;
-    }
+        const VkExtent2D fullExt    = frame.graphResources.lightingGI.extent;
+        const VkExtent2D alignedExt = frame.graphResources.rcgiCascadeA.extent;
+        if (fullExt.width == 0u || fullExt.height == 0u || alignedExt.width == 0u || alignedExt.height == 0u) {
+            return;
+        }
 
-    [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
+        const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget());
+        const auto normal   = Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer);
+        const auto ddgiIrr  = Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(frame.graphResources.ddgiIrradiance);
+        const auto ddgiDist = Vk::Assume<Vk::ComputeRead<Res_DdgiDistance>>(frame.graphResources.ddgiDistance);
+        const auto probes   = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rcgiProbes);
+        const auto cascadeA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rcgiCascadeA);
+        const auto cascadeB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rcgiCascadeB);
 
         const Vk::AsAddressWrite tlas {.address = frame.frames.tlasAddresses[fIdx].Get()};
-        const auto              push  = RtgiHalfPushConstants {
-             .halfRes = {frame.graphResources.rtgiHalf.extent.width, frame.graphResources.rtgiHalf.extent.height},
-        };
 
-        return MakeComputePassArgs(
-            push, VkExtent3D {frame.graphResources.rtgiHalf.extent.width, frame.graphResources.rtgiHalf.extent.height, 1},
-            Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
-            Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
-            Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
-            Vk::Slot<"blueNoiseTex">(frame.textureManager.View(frame.blueNoiseTexIdx)),
-            Vk::Slot<"outImage">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rtgiHalf)), Vk::Slot<"tlas">(tlas),
-            Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(frame.graphResources.ddgiIrradiance)),
-            Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ComputeRead<Res_DdgiDistance>>(frame.graphResources.ddgiDistance))
-        );
+        Vk::ComputeChain chain(frame.heapManager, cmd);
+
+        // Step 1: Surface-pinned probe pyramid C0 -> C1 -> C2 -> C3
+        for (uint32_t c = 0u; c < 4u; ++c) {
+            const uint32_t probeW = std::max(1u, alignedExt.width >> (c + 2u));
+            const uint32_t probeH = std::max(1u, alignedExt.height >> (c + 2u));
+            const auto     push   = RcgiProbeSetupPushConstants {
+                .fullRes      = {fullExt.width, fullExt.height},
+                .alignedRes   = {alignedExt.width, alignedExt.height},
+                .cascadeIndex = c,
+            };
+
+            chain.Step<Shaders::RcgiProbeSetup>(
+                frame.lighting.rcgiProbeSetup, VkExtent3D {probeW, probeH, 1u}, push,
+                Vk::Slot<"texDepth">(depth),
+                Vk::Slot<"texNormalRoughness">(normal),
+                Vk::Slot<"inProbes">(probes),
+                Vk::Slot<"outProbes">(probes),
+                Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx])
+            );
+        }
+
+        // Step 2: Top-down wave-coherent RayQuery trace & parallax-corrected bilateral merge
+        struct CascadeInterval {
+            float tMin;
+            float tMax;
+            float tUpperMax;
+        };
+        static constexpr std::array<CascadeInterval, 4> kIntervals {{
+            {.tMin = 0.015f, .tMax = 0.65f, .tUpperMax = 2.60f},
+            {.tMin = 0.550f, .tMax = 2.60f, .tUpperMax = 10.4f},
+            {.tMin = 2.200f, .tMax = 10.4f, .tUpperMax = 40.0f},
+            {.tMin = 8.800f, .tMax = 40.0f, .tUpperMax = 40.0f},
+        }};
+
+        for (int c = 3; c >= 0; --c) {
+            const uint32_t cascIdx  = static_cast<uint32_t>(c);
+            const auto&    interval = kIntervals[cascIdx];
+            const auto&    inUpper  = ((cascIdx & 1u) != 0u) ? cascadeA : cascadeB;
+            const auto&    outCasc  = ((cascIdx & 1u) != 0u) ? cascadeB : cascadeA;
+
+            const auto push = RcgiCascadePushConstants {
+                .fullRes        = {fullExt.width, fullExt.height},
+                .alignedRes     = {alignedExt.width, alignedExt.height},
+                .cascadeIndex   = cascIdx,
+                .isTopCascade   = (cascIdx == 3u) ? 1u : 0u,
+                .tMin           = interval.tMin,
+                .tMax           = interval.tMax,
+                .tUpperMax      = interval.tUpperMax,
+                .normalBias     = 0.025f,
+                .enablePunctual = 1u,
+            };
+
+            chain.Step<Shaders::RcgiCascadeTraceMerge>(
+                frame.lighting.rcgiCascadeTraceMerge, VkExtent3D {alignedExt.width, alignedExt.height, 1u}, push,
+                Vk::Slot<"inProbes">(probes),
+                Vk::Slot<"inUpperCascade">(inUpper),
+                Vk::Slot<"outCascade">(outCasc),
+                Vk::Slot<"tlas">(tlas),
+                Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.View(VK_IMAGE_ASPECT_DEPTH_BIT)),
+                Vk::Slot<"shadowTiles">(frame.frames.shadowTileBuffers[fIdx]),
+                Vk::Slot<"texDdgiIrradiance">(ddgiIrr),
+                Vk::Slot<"texDdgiDistance">(ddgiDist),
+                Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]),
+                Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
+                Vk::Slot<"lights">(frame.frames.lightStorageBuffers[fIdx])
+            );
+        }
     }
 };
 

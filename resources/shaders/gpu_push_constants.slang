@@ -191,6 +191,37 @@ public struct RtgiHalfPushConstants {
     public uint2 _pad;
 };
 
+public struct RcgiProbeSetupPushConstants {
+    public uint2 fullRes;
+    public uint2 alignedRes;
+    public uint  cascadeIndex;
+    public uint  _pad0;
+    public uint  _pad1;
+    public uint  _pad2;
+};
+
+public struct RcgiCascadePushConstants {
+    public uint2 fullRes;
+    public uint2 alignedRes;
+    public uint  cascadeIndex;
+    public uint  isTopCascade;
+    public float tMin;
+    public float tMax;
+    public float tUpperMax;
+    public float normalBias;
+    public uint  enablePunctual;
+    public uint  _pad0;
+};
+
+public struct RcgiResolvePushConstants {
+    public uint2 fullRes;
+    public uint2 alignedRes;
+    public float giIntensity;
+    public float cMinus1Radius;
+    public float depthRejectScale;
+    public float skyOcclusionStrength;
+};
+
 public struct DdgiTracePushConstants {
     public uint  totalProbes;
     public uint  raysPerProbe;

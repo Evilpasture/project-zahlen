@@ -45,6 +45,15 @@ static_assert(GpuAbi::ScenePassPayload<RtrHalfPushConstants>, "a pass payload th
 using RtgiHalfPushConstants = Slang::RtgiHalfPushConstants;
 static_assert(GpuAbi::ScenePassPayload<RtgiHalfPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
+using RcgiProbeSetupPushConstants = Slang::RcgiProbeSetupPushConstants;
+static_assert(GpuAbi::ScenePassPayload<RcgiProbeSetupPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+using RcgiCascadePushConstants = Slang::RcgiCascadePushConstants;
+static_assert(GpuAbi::ScenePassPayload<RcgiCascadePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+using RcgiResolvePushConstants = Slang::RcgiResolvePushConstants;
+static_assert(GpuAbi::ScenePassPayload<RcgiResolvePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
 using DdgiTracePushConstants = Slang::DdgiTracePushConstants;
 static_assert(GpuAbi::ScenePassPayload<DdgiTracePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 

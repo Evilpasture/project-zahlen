@@ -24,7 +24,9 @@ struct LightingResources {
     Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::RtShadowCS, RTShadowPushConstants>>               rtShadow;
     Vk::BoundComputePass<Vk::DynamicComputePass>                                                                  shadowDenoise;
     Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::RtrHalfCS, RtrHalfPushConstants>>                 rtrHalf;
-    Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::RtgiHalfCS, RtgiHalfPushConstants>>               rtgiHalf;
+    Vk::BoundComputePass<Vk::DynamicComputePass>                                                                  rcgiProbeSetup;
+    Vk::BoundComputePass<Vk::DynamicComputePass>                                                                  rcgiCascadeTraceMerge;
+    Vk::BoundComputePass<Vk::DynamicComputePass>                                                                  rcgiResolve;
     Vk::BoundComputePass<Vk::DynamicComputePass>                                                                  rtgiDenoise;
     Vk::BoundComputePass<Vk::DynamicComputePass>                                                                  rtgiComposite;
     Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::DdgiTraceCS, DdgiTracePushConstants>>             ddgiTrace;

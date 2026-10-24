@@ -45,6 +45,9 @@ public struct GpuAbiTypes {
     public TAAPushConstants taaPush;
     public RtrHalfPushConstants rtrHalfPush;
     public RtgiHalfPushConstants rtgiHalfPush;
+    public RcgiProbeSetupPushConstants rcgiProbeSetupPush;
+    public RcgiCascadePushConstants rcgiCascadePush;
+    public RcgiResolvePushConstants rcgiResolvePush;
     public DdgiTracePushConstants ddgiTracePush;
     public DdgiUpdatePushConstants ddgiUpdatePush;
     public VolumetricFogPushConstants volumetricFogPush;
@@ -122,6 +125,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += asuint(abi.taaPush.feedback);
     acc += abi.rtrHalfPush.halfRes.x;
     acc += abi.rtgiHalfPush.halfRes.x;
+    acc += abi.rcgiProbeSetupPush.cascadeIndex;
+    acc += asuint(abi.rcgiCascadePush.tMax);
+    acc += asuint(abi.rcgiResolvePush.giIntensity);
     acc += abi.ddgiTracePush.totalProbes;
     acc += asuint(abi.ddgiUpdatePush.hysteresis);
     acc += asuint(abi.volumetricFogPush.density);

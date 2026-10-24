@@ -587,7 +587,6 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     if (_impl->ctx.RayTracingSupported()) {
         Vk::SwapBacking(_impl->graphResources.rtShadowMask, _impl->graphResources.rtShadowHistory);
         Vk::SwapBacking(_impl->graphResources.rtrHalf, _impl->graphResources.rtrHistory);
-        Vk::SwapBacking(_impl->graphResources.rtgiHalf, _impl->graphResources.rtgiHistory);
         _impl->rtHistoryValid = _impl->settings.rayTracing.denoiserPasses > 0;
     }
 

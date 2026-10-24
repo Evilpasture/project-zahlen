@@ -16,7 +16,8 @@ struct RtgiCompositePass:
         Vk::ComputeRead<Res_NormRough>,
         Vk::ComputeRead<Res_Lighting>,
         Vk::ComputeRead<Res_LightingAo>,
-        Vk::ComputeRead<Res_RtgiHalf>,
+        Vk::ComputeRead<Res_RcgiProbes>,
+        Vk::ComputeRead<Res_RcgiCascadeA>,
         Vk::ComputeWrite<Res_LightingGI>> {
     RenderFrameContext& frame;
 

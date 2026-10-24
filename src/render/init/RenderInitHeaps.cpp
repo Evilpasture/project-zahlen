@@ -262,8 +262,8 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
             heapManager, lighting.rtrHalf.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler), Vk::SamplerSlot<"pointSampler">(pointSampler),
             Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseSampler)
         );
-        Vk::InitHeapPassSamplers<Shaders::RtgiHalf>(
-            heapManager, lighting.rtgiHalf.Bindings(), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseSampler), Vk::SamplerSlot<"clampSampler">(clampSampler)
+        Vk::InitHeapPassSamplers<Shaders::RcgiCascadeTraceMerge>(
+            heapManager, lighting.rcgiCascadeTraceMerge.Bindings(), Vk::SamplerSlot<"clampSampler">(clampSampler)
         );
         Vk::InitHeapPassSamplers<Shaders::DdgiTrace>(heapManager, lighting.ddgiTrace.Bindings(), Vk::SamplerSlot<"clampSampler">(clampSampler));
     }

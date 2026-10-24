@@ -71,14 +71,6 @@ struct ShadowDenoiseGate {
     }
 };
 
-struct RtgiDenoiseGate {
-    [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
-        return frame.ctx.RayTracingSupported() && frame.settings.rayTracing.enableDiffuseGI && frame.settings.rayTracing.denoiserPasses != 0 &&
-               frame.settings.environment.fullBright == 0 && frame.frames.tlasAddresses[fIdx] != nullptr;
-    }
-};
-
 struct RtrDenoiseGate {
     [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
         const uint32_t fIdx = frame.presenter.frameIndex;
@@ -125,14 +117,6 @@ struct GraphMember<Res_RtrHalf> {
 template <>
 struct GraphMember<Res_RtrHistory> {
     static constexpr auto Ptr = &TargetManager::GraphResources::rtrHistory;
-};
-template <>
-struct GraphMember<Res_RtgiHalf> {
-    static constexpr auto Ptr = &TargetManager::GraphResources::rtgiHalf;
-};
-template <>
-struct GraphMember<Res_RtgiHistory> {
-    static constexpr auto Ptr = &TargetManager::GraphResources::rtgiHistory;
 };
 template <>
 struct GraphMember<Res_RtgiDenoiseA> {
