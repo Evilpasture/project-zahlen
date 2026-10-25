@@ -206,7 +206,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
 }
 
 auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode> {
-    static constexpr std::array<VkFormat, 2> decalFormats = {VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_FORMAT_R8G8B8A8_UNORM};
+    static constexpr std::array<VkFormat, 2> decalFormats = {Res_SceneColor::format, Res_NormRough::format};
 
     const std::array reflectInputs = {
         Vk::ReflectedStageInput {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},

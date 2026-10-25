@@ -53,7 +53,7 @@ class IBLProcessor {
             return std::unexpected(EnvironmentBakeError::RadianceTooLarge);
         }
 
-        const VkFormat cubeFormat      = hasRadiance ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
+        const VkFormat cubeFormat      = VK_FORMAT_R16G16B16A16_SFLOAT;
         const bool     useVisualSky    = hasRadiance && radiance.visualRgba != nullptr && radiance.renderSkybox != 0;
         const int      environmentMode = hasRadiance ? (radiance.renderSkybox == 0 ? 2 : (useVisualSky ? 3 : 1)) : 0;
 
@@ -185,7 +185,7 @@ class IBLProcessor {
 
                     for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                         const uint32_t mipSize     = kBaseSize >> mip;
-                        const uint32_t sampleCount = (mip == 0) ? 1u : (hasRadiance ? (mip >= 3 ? 1024u : 512u) : 32u);
+                        const uint32_t sampleCount = (mip == 0) ? 1u : (hasRadiance ? (mip >= 3 ? 1024u : 512u) : 256u);
 
                         IBLBakePush push = basePush;
                         push.width       = mipSize;

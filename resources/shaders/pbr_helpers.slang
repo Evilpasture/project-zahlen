@@ -75,18 +75,20 @@ public float SoftClamp(float x, float limit) {
 #define PCF_SAMPLES 16
 
 public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray<float> shadowMap, SamplerState linearSampler, uint cascadeIndex,
-                         bool halved = false) {
-    float blockerSum  = 0.0f;
-    int numBlockers   = 0;
-    float blockerBias = 0.0005f;
+                         float shadowResolution, float2 dzDuv, float blockerBias, bool halved = false) {
+    float blockerSum = 0.0f;
+    int   numBlockers = 0;
 
     const int stride = halved ? 2 : 1;
 
     for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; i += stride) {
         float2 offset        = PoissonDisk[i] * searchRadius;
-        float shadowMapDepth = shadowMap.SampleLevel(linearSampler, float3(uv + offset, cascadeIndex), 0);
+        float2 tapUV         = uv + offset;
+        float2 snappedTapUV  = (floor(tapUV * shadowResolution) + 0.5f) / shadowResolution;
+        float  zPlaneAtTap   = zReceiver + clamp(dot(dzDuv, snappedTapUV - uv), -0.02f, 0.02f);
+        float  shadowMapDepth = shadowMap.SampleLevel(linearSampler, float3(tapUV, cascadeIndex), 0);
 
-        if (shadowMapDepth < (zReceiver - blockerBias)) {
+        if (shadowMapDepth < (zPlaneAtTap - blockerBias)) {
             blockerSum += shadowMapDepth;
             numBlockers++;
         }
@@ -98,7 +100,8 @@ public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture
 }
 
 public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos, Texture2DArray<float> shadowMap, SamplerComparisonState shadowSampler,
-                                 SamplerState linearSampler, float shadowResolution, uint cascadeIndex, float worldDepthPerNdc, bool reduced = false) {
+                                 SamplerState linearSampler, float shadowResolution, uint cascadeIndex, float worldDepthPerNdc, float texelSizeWorld,
+                                 float2 dzDuv, float sunSize, bool reduced = false) {
     float3 projCoords = shadowPos.xyz / shadowPos.w;
 
     if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 || projCoords.z < 0.0 || projCoords.z > 1.0) {
@@ -108,19 +111,21 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
     float zReceiver = projCoords.z;
     float texelSize = 1.0 / shadowResolution;
 
-    float resolutionScale = 2048.0 / shadowResolution;
-    float bias            = max(0.0015f * (1.0 - dot(N, L)), 0.0005f) * resolutionScale;
-    zReceiver -= bias;
+    float texelDepthNdc = texelSizeWorld / max(worldDepthPerNdc, 1e-4f);
+    float constBias     = max(1.5f * texelDepthNdc, 0.00015f);
+    float blockerBias   = max(2.25f * texelDepthNdc, 0.00025f);
 
     float searchRadius    = 4.0 * texelSize;
-    float avgBlockerDepth = FindBlocker(projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler, cascadeIndex, reduced);
+    float avgBlockerDepth = FindBlocker(
+        projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler, cascadeIndex, shadowResolution, dzDuv, blockerBias, reduced);
 
     if (avgBlockerDepth == -1.0f)
         return 1.0f;
 
-    float worldDepthDiff = (zReceiver - avgBlockerDepth) * worldDepthPerNdc;
-    float penumbraWidth  = worldDepthDiff * 0.5f;
-    float filterRadius   = clamp(penumbraWidth, 2.5f, 16.0f) * texelSize;
+    float worldDepthDiff = max(0.0f, (zReceiver - avgBlockerDepth) * worldDepthPerNdc);
+    float penumbraWorld  = worldDepthDiff * max(sunSize, 0.004f);
+    float penumbraTexels = penumbraWorld / max(texelSizeWorld, 1e-4f);
+    float filterRadius   = clamp(penumbraTexels, 1.25f, 12.0f) * texelSize;
 
     float shadow = 0.0f;
     float angle  = GetShadowDither(screenPos) * 2.0 * 3.14159265;
@@ -131,8 +136,11 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
     const int pcfCount  = reduced ? (PCF_SAMPLES / 2) : PCF_SAMPLES;
 
     for (int i = 0; i < PCF_SAMPLES; i += pcfStride) {
-        float2 offset = float2(PoissonDisk[i].x * c - PoissonDisk[i].y * s, PoissonDisk[i].x * s + PoissonDisk[i].y * c) * filterRadius;
-        shadow += shadowMap.SampleCmpLevelZero(shadowSampler, float3(projCoords.xy + offset, cascadeIndex), zReceiver);
+        float2 offset      = float2(PoissonDisk[i].x * c - PoissonDisk[i].y * s, PoissonDisk[i].x * s + PoissonDisk[i].y * c) * filterRadius;
+        float2 tapUV       = projCoords.xy + offset;
+        float2 snappedTap  = (floor(tapUV * shadowResolution) + 0.5f) / shadowResolution;
+        float  zCompareTap = zReceiver + clamp(dot(dzDuv, snappedTap - projCoords.xy), -0.02f, 0.02f) - constBias;
+        shadow += shadowMap.SampleCmpLevelZero(shadowSampler, float3(tapUV, cascadeIndex), zCompareTap);
     }
 
     return shadow / (float) pcfCount;

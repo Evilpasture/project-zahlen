@@ -87,9 +87,10 @@ void CSMain(uint3 tid: SV_DispatchThreadID, uint3 gid: SV_GroupID, uint3 gtid: S
     // skips all LDS preloads, barriers, and reads of transient cascade targets.
     if (pc.giIntensity <= 0.0f || frame.fullBright != 0) {
         if (tid.x < pc.fullRes.x && tid.y < pc.fullRes.y) {
-            int2   px   = int2(tid.xy);
-            float4 base = texLighting.Load(int3(px, 0));
-            outLighting[px] = float4(IsFiniteFloat3(base.rgb) ? max(base.rgb, float3(0.0f)) : float3(0.0f), 1.0f);
+            int2   px        = int2(tid.xy);
+            float4 base      = texLighting.Load(int3(px, 0));
+            float  geomAlpha = (texDepth.Load(int3(px, 0)) < kSkyDepthSplit) ? 1.0f : 0.0f;
+            outLighting[px]  = float4(IsFiniteFloat3(base.rgb) ? max(base.rgb, float3(0.0f)) : float3(0.0f), geomAlpha);
         }
         return;
     }
@@ -136,7 +137,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID, uint3 gid: SV_GroupID, uint3 gtid: S
 
     float depth = texDepth.Load(int3(px, 0));
     if (depth >= kSkyDepthSplit || frame.fullBright != 0 || pc.giIntensity <= 0.0f) {
-        outLighting[px] = float4(baseLighting.rgb, 1.0f);
+        float geomAlpha = (depth < kSkyDepthSplit) ? 1.0f : 0.0f;
+        outLighting[px] = float4(baseLighting.rgb, geomAlpha);
         return;
     }
 

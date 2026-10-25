@@ -21,7 +21,7 @@ inline constexpr uint32_t kMaxGeneratedHiZMips = 7;
 
 using Res_SceneColor = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32>;
 using Res_Velocity   = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT>;
-using Res_NormRough  = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM>;
+using Res_NormRough  = Vk::GraphImage<"NormRough", VK_FORMAT_R16G16B16A16_SFLOAT>;
 // Which shading model owns the static lighting of a pixel, as a bitfield:
 //   bit 0 - a compile-time bake supplied this surface's diffuse ambient (a VRAD
 //           lightmap lump, or the leaf ambient cube that stands in for one on

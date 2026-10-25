@@ -172,6 +172,7 @@ public struct RcgiHitSurface {
     public float3 baseColor;
     public float3 emissive;
     public float  metallic;
+    public float  roughness;
     public bool   isUnlit;
     public bool   hasAmbientCube;
     public uint   instanceIndex;
@@ -229,6 +230,7 @@ public RcgiHitSurface FetchRcgiHitSurface(uint instanceIdx, uint primIdx, float2
     surf.baseColor      = saturate(inst.baseColorFactor.rgb * vertexColor);
     surf.emissive       = max(inst.emissiveFactor.rgb, float3(0.0f));
     surf.metallic       = saturate(inst.metallicFactor);
+    surf.roughness      = clamp(inst.roughnessFactor, 0.045f, 1.0f);
     surf.isUnlit        = inst.isUnlit;
     surf.hasAmbientCube = inst.hasAmbientCube;
     surf.instanceIndex  = instanceIdx;
@@ -548,23 +550,25 @@ public SsrHitResult RaymarchHiZDeterministic(float3 worldPos, float3 startPosWS,
             if (segMaxW >= (surfViewW - thickBias) && segMinW <= (surfViewW + maxThick)) {
                 float4 nrRaw    = texNormalRoughness.Load(int3(cell, 0));
                 float3 hitNorm  = UnpackNormalOctahedron(nrRaw.xy * 2.0f - 1.0f);
-                // Reject back-facing foreground silhouettes so rays passing behind pillars
-                // continue marching or cleanly hand off to TLAS.
-                if (nrRaw.z > 0.0f && dot(hitNorm, R) < 0.25f) {
-                    float  zSpan    = rayZ1 - rayZ0;
-                    float  fracHit  = (abs(zSpan) > 1e-6f) ? saturate((minCellZ - rayZ0) / zSpan) : 0.5f;
-                    float  tauExact = lerp(tau, tauClamp, fracHit);
-                    float2 hitUV    = clamp(P0.xy + D.xy * tauExact, float2(0.001f), float2(0.999f));
-                    float3 hitWS    = ReconstructWorldPos(hitUV, minCellZ, invViewProj);
+                // Require the reflection ray to enter the front hemisphere of the hit
+                // surface (`dot(hitNorm, R) < -0.01f`): rejects both back-facing foreground
+                // silhouettes and grazing rays receding away from their own mirror plane.
+                if (nrRaw.z > 0.0f && dot(hitNorm, R) < -0.01f) {
+                    float  zSpan        = rayZ1 - rayZ0;
+                    float  fracHit      = (abs(zSpan) > 1e-6f) ? saturate((minCellZ - rayZ0) / zSpan) : 0.5f;
+                    float  tauExact     = lerp(tau, tauClamp, fracHit);
+                    float2 hitUV        = clamp(P0.xy + D.xy * tauExact, float2(0.001f), float2(0.999f));
+                    float2 cellCenterUV = (float2(cell) + 0.5f) / float2(mipDim);
+                    float3 hitWS        = ReconstructWorldPos(cellCenterUV, minCellZ, invViewProj);
+                    float  distFromStart = length(hitWS - startPosWS);
 
-                    if (dot(hitWS - worldPos, N) > 0.02f) {
-                        float  distFromStart = length(hitWS - startPosWS);
-                        float  distFade      = saturate(1.0f - distFromStart / maxDist);
-                        float2 edgeFactor    = smoothstep(0.0f, 0.06f, hitUV) * smoothstep(1.0f, 0.94f, hitUV);
-                        res.uv               = hitUV;
-                        res.hitDist          = distFromStart;
-                        res.hitViewW         = surfViewW;
-                        res.confidence       = (distFade * distFade) * (edgeFactor.x * edgeFactor.y);
+                    if (dot(hitWS - worldPos, N) > max(0.03f, distFromStart * 0.015f)) {
+                        float  distFade   = saturate(1.0f - distFromStart / maxDist);
+                        float2 edgeFactor = smoothstep(0.0f, 0.06f, hitUV) * smoothstep(1.0f, 0.94f, hitUV);
+                        res.uv            = hitUV;
+                        res.hitDist       = distFromStart;
+                        res.hitViewW      = surfViewW;
+                        res.confidence    = (distFade * distFade) * (edgeFactor.x * edgeFactor.y);
                         return res;
                     }
                 }
@@ -636,19 +640,43 @@ public RtrWorldHitResult TraceDeterministicRtrFallback(
         float2 edgeFactor = smoothstep(0.0f, 0.04f, projUV) * smoothstep(1.0f, 0.96f, projUV);
         float  edgeMask   = edgeFactor.x * edgeFactor.y;
         if (edgeMask > 0.0f) {
-            float  sampledRawDepth = texDepth.SampleLevel(pointSampler, projUV, 0).r;
-            float4 hitNormRough    = texNormalRoughness.SampleLevel(pointSampler, projUV, 0);
+            int2   screenDim       = max(int2(frame.screenResolution), int2(1, 1));
+            int2   snappedPix      = clamp(int2(projUV * float2(screenDim)), int2(0, 0), screenDim - int2(1, 1));
+            float2 snappedUV       = (float2(snappedPix) + 0.5f) / float2(screenDim);
+            float  sampledRawDepth = texDepth.Load(int3(snappedPix, 0)).r;
+            float4 hitNormRough    = texNormalRoughness.Load(int3(snappedPix, 0));
             if (sampledRawDepth < 0.99999f && hitNormRough.z > 0.0f) {
-                float  sampledViewW    = abs(LinearizeDepth(sampledRawDepth, frame.invProj));
-                float  depthDiff       = abs(hitClip.w - sampledViewW);
-                float  maxDiff         = max(0.45f, hitClip.w * 0.045f);
                 float3 sampledNorm     = UnpackNormalOctahedron(hitNormRough.xy * 2.0f - 1.0f);
                 float  normalAlignment = saturate(dot(surf.shadingNormal, sampledNorm));
-                float  depthMask       = smoothstep(maxDiff * 1.5f, maxDiff * 0.2f, depthDiff) * smoothstep(0.30f, 0.75f, normalAlignment);
-                onScreenWeight         = saturate(edgeMask * depthMask);
-                if (onScreenWeight > 1e-3f) {
-                    float coneLod = ComputeReflectionConeLod(roughness, rayT, hitClip.w, frame.screenResolution, projScaleY, lightingMips);
-                    screenColor   = texLighting.SampleLevel(linearSmp, projUV, coneLod).rgb;
+                if (normalAlignment > 0.30f) {
+                    // Reconstruct the G-buffer surface at its exact integer texel center
+                    // `snappedUV` and measure perpendicular tangent-plane separation rather
+                    // than raw `|hitClip.w - sampledViewW|`, which sawtooths by meters per
+                    // pixel row on grazing planes near the horizon.
+                    float3 sampledWS     = ReconstructWorldPos(snappedUV, sampledRawDepth, frame.invViewProj);
+                    float3 camPos        = frame.camPos.xyz;
+                    float  planeDist     = max(abs(dot(surf.worldPos - sampledWS, sampledNorm)),
+                                               abs(dot(surf.worldPos - sampledWS, surf.shadingNormal)));
+                    float  sampledViewW  = abs(LinearizeDepth(sampledRawDepth, frame.invProj));
+                    float3 viewDirSample = SafeNormalize(camPos - sampledWS, sampledNorm);
+                    float  cosGrazing    = max(abs(dot(viewDirSample, sampledNorm)), 0.015f);
+                    float  pxWorldSpan   = (2.0f * max(sampledViewW, 0.25f)) / (max(projScaleY * float(screenDim.y), 64.0f) * cosGrazing);
+                    float  rawViewDiff   = max(0.0f, abs(hitClip.w - sampledViewW) - 1.75f * pxWorldSpan);
+                    float  effectiveDiff = max(planeDist, rawViewDiff);
+                    float  maxDiff       = max(0.20f, hitClip.w * 0.025f);
+                    float  depthMask     = smoothstep(maxDiff * 1.5f, maxDiff * 0.2f, effectiveDiff)
+                                         * smoothstep(0.30f, 0.75f, normalAlignment);
+                    onScreenWeight       = saturate(edgeMask * depthMask);
+                    if (onScreenWeight > 1e-3f) {
+                        float  coneLod      = ComputeReflectionConeLod(roughness, rayT, hitClip.w, frame.screenResolution, projScaleY, lightingMips);
+                        float4 screenSample = texLighting.SampleLevel(linearSmp, projUV, coneLod);
+                        if (screenSample.a > 1e-3f) {
+                            screenColor     = screenSample.rgb / max(screenSample.a, 0.05f);
+                            onScreenWeight *= saturate(screenSample.a * 2.0f);
+                        } else {
+                            onScreenWeight  = 0.0f;
+                        }
+                    }
                 }
             }
         }
@@ -661,15 +689,22 @@ public RtrWorldHitResult TraceDeterministicRtrFallback(
             offscreenColor = surf.baseColor + surf.emissive;
         } else {
             float  diffuseWeight = (1.0f - surf.metallic) * (1.0f - kDielectricF0);
-            float3 diffuseBrdf   = surf.baseColor * diffuseWeight * (1.0f / kRcgiPi);
             offscreenColor       = surf.emissive;
 
-            // Shadowed sun bounce on off-screen glossy hits
+            // Shadowed sun bounce (diffuse + GGX specular along -R) on off-screen glossy hits
             float3 sunDir  = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
             float  nDotSun = saturate(dot(surf.shadingNormal, sunDir));
             if (nDotSun > 0.0f && any(frame.sunRadiance.xyz > 0.0f)) {
                 if (TraceRcgiShadowVisibility(tlas, surf.worldPos + surf.geomNormal * 0.03f, sunDir, 250.0f)) {
-                    offscreenColor += diffuseBrdf * frame.sunRadiance.xyz * nDotSun;
+                    float3 V_hit  = -R;
+                    float3 H_hit  = SafeNormalize(V_hit + sunDir, surf.shadingNormal);
+                    float3 F0_hit = lerp(float3(kDielectricF0), surf.baseColor, surf.metallic);
+                    float3 F_hit  = SpecularFresnel(saturate(dot(H_hit, V_hit)), F0_hit, 1.0f);
+                    float3 specHit = SpecularGGX(
+                        surf.shadingNormal, V_hit, sunDir, H_hit, max(surf.roughness, 0.045f), F_hit,
+                        surf.shadingNormal, surf.shadingNormal, 0.0f);
+                    float3 kD_hit = (float3(1.0f) - F_hit) * (1.0f - surf.metallic);
+                    offscreenColor += (kD_hit * surf.baseColor * (1.0f / kRcgiPi) + specHit) * frame.sunRadiance.xyz * nDotSun;
                 }
             }
 

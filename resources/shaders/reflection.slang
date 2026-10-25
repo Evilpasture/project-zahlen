@@ -201,10 +201,13 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                     pc.viewProj, pc.invViewProj, frame.invProj);
 
                 if (ssrHit.confidence > 0.0f) {
-                    float coneLod = ComputeReflectionConeLod(
+                    float  coneLod   = ComputeReflectionConeLod(
                         roughness, ssrHit.hitDist, ssrHit.hitViewW, frame.screenResolution, projScaleY, lightingMips);
-                    ssrColor      = texLighting.SampleLevel(smp, ssrHit.uv, coneLod).rgb;
-                    ssrConfidence = ssrHit.confidence;
+                    float4 ssrSample = texLighting.SampleLevel(smp, ssrHit.uv, coneLod);
+                    if (ssrSample.a > 1e-3f) {
+                        ssrColor      = ssrSample.rgb / max(ssrSample.a, 0.05f);
+                        ssrConfidence = ssrHit.confidence * saturate(ssrSample.a * 2.0f);
+                    }
                 }
             }
 

@@ -269,20 +269,37 @@ LightingOutput PSMain(VSOutput input) {
         if (viewDepth > frame.cascadeSplits.z)
             cascadeIndex = 3;
 
-        float4 lightBasisX      = mul(frame.lightSpaceMatrices[cascadeIndex], float4(1.0f, 0.0f, 0.0f, 0.0f));
-        float4 lightBasisZ      = mul(frame.lightSpaceMatrices[cascadeIndex], float4(0.0f, 0.0f, 1.0f, 0.0f));
-        float  ndcPerWorldX     = max(length(lightBasisX.xyz), 1e-6f);
-        float  texelSizeWorld   = 2.0f / (ndcPerWorldX * float(frame.shadowResolution));
-        float  worldDepthPerNdc = 1.0f / max(abs(lightBasisZ.z), 1e-8f);
-        float  normalBias       = saturate(1.0 - dot(N, L_sun)) * 1.5 + 0.2;
-        float3 biasedWorldPos   = worldPos + N * (normalBias * texelSizeWorld);
+        float4x4 cascadeM       = frame.lightSpaceMatrices[cascadeIndex];
+        float3   rowX           = mul(float4(1.0f, 0.0f, 0.0f, 0.0f), cascadeM).xyz;
+        float3   rowY           = mul(float4(0.0f, 1.0f, 0.0f, 0.0f), cascadeM).xyz;
+        float3   rowZ           = mul(float4(0.0f, 0.0f, 1.0f, 0.0f), cascadeM).xyz;
+        float    rowXLenSq      = max(dot(rowX, rowX), 1e-12f);
+        float    rowYLenSq      = max(dot(rowY, rowY), 1e-12f);
+        float    rowZLen        = max(length(rowZ), 1e-8f);
+        float    ndcPerWorldX   = sqrt(rowXLenSq);
+        float    texelSizeWorld = 2.0f / (ndcPerWorldX * float(frame.shadowResolution));
+        float    worldDepthPerNdc = 1.0f / rowZLen;
 
-        float4 shadowPos = mul(frame.lightSpaceMatrices[cascadeIndex], float4(biasedWorldPos, 1.0f));
+        // Exact receiver tangent-plane slope in [0..1] shadow UV coordinates:
+        // e_u, e_v, e_z are the world-space vectors for +1 step in (u, v, z_ndc).
+        float3   eu             = (2.0f / rowXLenSq) * rowX;
+        float3   ev             = (2.0f / rowYLenSq) * rowY;
+        float3   wHat           = rowZ * worldDepthPerNdc;
+        float    nDotW          = dot(N, wHat);
+        float    safeNDotW      = (nDotW < 0.0f ? -1.0f : 1.0f) * max(abs(nDotW), 0.15f);
+        float    denomEz        = safeNDotW * worldDepthPerNdc;
+        float2   dzDuv          = -float2(dot(N, eu), dot(N, ev)) / denomEz;
+
+        float    normalBias     = saturate(1.0f - NdotL_sun) * 1.25f + 0.35f;
+        float3   biasedWorldPos = worldPos + N * (normalBias * texelSizeWorld);
+
+        float4 shadowPos = mul(cascadeM, float4(biasedWorldPos, 1.0f));
 
         shadowPos.xy = shadowPos.xy * 0.5f + 0.5f * shadowPos.w;
 
         cascadeShadow = CalculateShadowPCSS(
-            shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex, worldDepthPerNdc, false
+            shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex, worldDepthPerNdc, texelSizeWorld,
+            dzDuv, frame.sunSize, false
         );
     }
 
