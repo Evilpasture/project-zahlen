@@ -15,6 +15,7 @@
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <atomic>
 #include <cmath>
 #include <expected>
 #include <vector>
@@ -23,6 +24,7 @@ enum class PhysicsTestError : uint32_t {
     RaycastMissedExpectedBody ZHLN_ANNOTATION(ZHLN::Description<"Raycast did not hit expected collider.">{}) = 1,
     OverlapQueryFailed ZHLN_ANNOTATION(ZHLN::Description<"Broadphase overlap failed to detect sphere/AABB collision.">{}),
     RagdollCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Creating a single-part ragdoll fixture failed.">{}),
+    ParallelCharacterSyncFailed ZHLN_ANNOTATION(ZHLN::Description<"Parallel character step or concurrent shadow-state query failed.">{}),
 };
 
 struct PhysicsTestSuite {
@@ -245,6 +247,57 @@ struct PhysicsTestSuite {
             ZHLN::Test::ExpectTrue(reused != ZHLN::Physics::BodyHandle::Null());
             ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(reused));        // the live occupant is dynamic
             ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(dynamicBody));  // the stale handle is not
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> parallel_characters_and_concurrent_state_queries() {
+            ZHLN::PhysicsConfig  cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            ZHLN::PhysicsContext pc(cfg);
+
+            const auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 40.0f, 0.5f, 40.0f);
+            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            pc.OptimizeBroadphase();
+
+            constexpr size_t                        kCharCount = 8;
+            std::vector<ZHLN::Physics::BodyHandle>  characters(kCharCount);
+            for (size_t i = 0; i < kCharCount; ++i) {
+                characters[i] = pc.CreateCharacter(JPH::RVec3(static_cast<double>(i) * 2.5, 1.5, 0.0));
+                if (!ZHLN::Test::ExpectTrue(characters[i] != ZHLN::Physics::BodyHandle::Null())) {
+                    return std::unexpected(PhysicsTestError::ParallelCharacterSyncFailed);
+                }
+            }
+
+            for (int step = 0; step < 6; ++step) {
+                pc.Step(1.0f / 60.0f);
+            }
+
+            std::vector<ZHLN::Physics::BodyStateSnapshot> snapshots(kCharCount);
+            std::atomic<bool> shapesValid {true};
+            ZHLN::TaskSystem::ParallelFor(static_cast<uint32_t>(kCharCount), 1, [&](uint32_t start, uint32_t end, uint32_t) {
+                pc.FillBodyStates(
+                    std::span<const ZHLN::Physics::BodyHandle>(characters.data() + start, end - start),
+                    std::span<ZHLN::Physics::BodyStateSnapshot>(snapshots.data() + start, end - start)
+                );
+                const auto shape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.25f + static_cast<float>(start) * 0.1f);
+                if (shape == nullptr) {
+                    shapesValid.store(false, std::memory_order::relaxed);
+                }
+            });
+
+            if (!ZHLN::Test::ExpectTrue(shapesValid.load(std::memory_order::relaxed))) {
+                return std::unexpected(PhysicsTestError::ParallelCharacterSyncFailed);
+            }
+
+            for (size_t i = 0; i < kCharCount; ++i) {
+                if (!ZHLN::Test::ExpectTrue(snapshots[i].valid && snapshots[i].isCharacter)) {
+                    return std::unexpected(PhysicsTestError::ParallelCharacterSyncFailed);
+                }
+                const auto single = pc.BodyState(characters[i]);
+                if (!ZHLN::Test::ExpectTrue(single.has_value() && single->valid)) {
+                    return std::unexpected(PhysicsTestError::ParallelCharacterSyncFailed);
+                }
+            }
+
             return {};
         }
     };

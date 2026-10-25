@@ -4,6 +4,7 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/Threading/ConditionalVariable.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/SharedMutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp> // Required for InitMainThread
 #include <array>
@@ -182,6 +183,66 @@ struct SyncPrimTestSuite {
             ZHLN::TaskSystem::Wait(&sync);
 
             ZHLN::Test::ExpectEq(awakeCount, 4);
+            return {};
+        }
+
+        // 5. SharedMutex Concurrent Readers & Exclusive Writers
+        std::expected<void, ZHLN::ErrorCode> shared_mutex_readers_and_writers() {
+            alignas(ZHLN::SharedMutex) std::array<std::byte, sizeof(ZHLN::SharedMutex)> dirtyStorage;
+            dirtyStorage.fill(std::byte {0xff});
+            auto*      initialized = std::construct_at(reinterpret_cast<ZHLN::SharedMutex*>(dirtyStorage.data()));
+            const bool dirtyTry    = initialized->try_lock();
+            if (!ZHLN::Test::ExpectTrue(dirtyTry)) {
+                std::destroy_at(initialized);
+                return std::unexpected(SyncPrimError::ConcurrencyFailure);
+            }
+            initialized->unlock();
+            std::destroy_at(initialized);
+
+            ZHLN::SharedMutex     rwLock {};
+            std::atomic<uint32_t> activeReaders {0};
+            std::atomic<uint32_t> maxReaders {0};
+            std::atomic<bool>     writerActive {false};
+            std::atomic<bool>     violated {false};
+            uint32_t              sharedValue = 0;
+
+            ZHLN::TaskSystem::ParallelFor(4096, 32, [&](uint32_t start, uint32_t end, uint32_t) {
+                for (uint32_t i = start; i < end; ++i) {
+                    if ((i & 15u) == 0u) {
+                        ZHLN::WriteLock(rwLock, [&] {
+                            if (writerActive.exchange(true, std::memory_order::acq_rel) ||
+                                activeReaders.load(std::memory_order::acquire) != 0u) {
+                                violated.store(true, std::memory_order::relaxed);
+                            }
+                            ++sharedValue;
+                            writerActive.store(false, std::memory_order::release);
+                        });
+                    } else {
+                        ZHLN::SharedLock(rwLock, [&] {
+                            if (writerActive.load(std::memory_order::acquire)) {
+                                violated.store(true, std::memory_order::relaxed);
+                            }
+                            const uint32_t cur = activeReaders.fetch_add(1, std::memory_order::acq_rel) + 1;
+                            uint32_t        old = maxReaders.load(std::memory_order::relaxed);
+                            while (cur > old && !maxReaders.compare_exchange_weak(old, cur, std::memory_order::relaxed)) {
+                            }
+                            for (int spin = 0; spin < 8; ++spin) {
+                                ZHLN::CPURelax();
+                            }
+                            const uint32_t snapshot = sharedValue;
+                            if (snapshot > 4096u) {
+                                violated.store(true, std::memory_order::relaxed);
+                            }
+                            activeReaders.fetch_sub(1, std::memory_order::acq_rel);
+                        });
+                    }
+                }
+            });
+
+            if (violated.load(std::memory_order::relaxed) || !ZHLN::Test::ExpectEq(sharedValue, 256u) ||
+                !ZHLN::Test::ExpectGt(maxReaders.load(std::memory_order::relaxed), 1u)) {
+                return std::unexpected(SyncPrimError::ConcurrencyFailure);
+            }
             return {};
         }
     };

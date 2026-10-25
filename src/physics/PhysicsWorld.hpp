@@ -12,6 +12,7 @@
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/SharedMutex.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <cstdint>
 #include <span>
@@ -106,7 +107,8 @@ struct MaterialData {
 static_assert((std::is_trivially_default_constructible_v<MaterialData> && std::is_trivially_copyable_v<MaterialData>) );
 
 struct PhysicsWorld {
-    mutable BufferSync sync {};
+    mutable BufferSync        sync {};
+    mutable ZHLN::SharedMutex shadowRwLock {};
 
     alignas(64) JPH::PhysicsSystem*     system          = nullptr;
     JPH::BodyInterface*                 bodyInterface   = nullptr;
@@ -203,6 +205,13 @@ struct PhysicsWorld {
 };
 
 static_assert(std::is_standard_layout_v<PhysicsWorld>);
+
+template <typename Func>
+decltype(auto) WriteWorldLock(PhysicsWorld& world, Func&& func) {
+    ZHLN::MutexGuard     abiGuard(world.sync.shadowLock);
+    ZHLN::WriteLockGuard rwGuard(world.shadowRwLock);
+    return std::forward<Func>(func)();
+}
 
 
 struct SlotPredicate {

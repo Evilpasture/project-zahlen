@@ -275,21 +275,21 @@ void PhysicsWorld::RemoveConstraintSlot(uint32_t slot) {
 }
 
 auto PhysicsWorld::SaveState() const -> JPH::Array<std::byte> {
-    size_t currentCount = count.load(std::memory_order::acquire);
-    size_t slotCap      = slotCapacity;
+    JPH::Array<std::byte> buffer;
 
-    size_t posSize = currentCount * sizeof(JPH::Real) * 4;
-    size_t rotSize = currentCount * sizeof(float) * 4;
-    size_t velSize = currentCount * sizeof(float) * 4;
+    ZHLN::SharedLock(shadowRwLock, [&] -> void {
+        const size_t currentCount = count.load(std::memory_order::acquire);
+        const size_t slotCap      = slotCapacity;
 
-    size_t mappingSize = slotCap * (sizeof(uint32_t) * 3 + sizeof(uint8_t));
+        const size_t posSize     = currentCount * sizeof(JPH::Real) * 4;
+        const size_t rotSize     = currentCount * sizeof(float) * 4;
+        const size_t velSize     = currentCount * sizeof(float) * 4;
+        const size_t mappingSize = slotCap * (sizeof(uint32_t) * 3 + sizeof(uint8_t));
+        const size_t totalSize   = sizeof(WorldStateHeader) + posSize + rotSize + (velSize * 2) + mappingSize;
 
-    size_t totalSize = sizeof(WorldStateHeader) + posSize + rotSize + (velSize * 2) + mappingSize;
+        buffer.resize(totalSize);
+        auto* ptr = buffer.data();
 
-    JPH::Array<std::byte> buffer(totalSize);
-    auto*                 ptr = buffer.data();
-
-    ZHLN::Lock(sync.shadowLock, [&] -> void {
         WorldStateHeader header;
         header.bodyCount    = static_cast<uint32_t>(currentCount);
         header.slotCapacity = static_cast<uint32_t>(slotCap);
@@ -334,19 +334,18 @@ auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
     if (header->magic != WorldStateHeader::ZHLN || header->version != WorldStateHeader::Version) {
         return false;
     }
-    if (header->slotCapacity != slotCapacity) {
-        return false;
-    }
+    const size_t savedCount = header->bodyCount;
+    const bool   loaded     = WriteWorldLock(*this, [&] -> bool {
+        if (header->slotCapacity != slotCapacity) {
+            return false;
+        }
+        const size_t expectedSize = sizeof(WorldStateHeader) + savedCount * (sizeof(JPH::Real) + sizeof(float) * 3) * 4 +
+                                    slotCapacity * (sizeof(uint32_t) * 3 + sizeof(uint8_t));
+        if (savedCount > capacity || size < expectedSize) {
+            return false;
+        }
+        const uint8_t* ptr = data + sizeof(WorldStateHeader);
 
-    size_t savedCount = header->bodyCount;
-    const size_t expectedSize = sizeof(WorldStateHeader) + savedCount * (sizeof(JPH::Real) + sizeof(float) * 3) * 4 +
-                                slotCapacity * (sizeof(uint32_t) * 3 + sizeof(uint8_t));
-    if (savedCount > capacity || size < expectedSize) {
-        return false;
-    }
-    const uint8_t* ptr = data + sizeof(WorldStateHeader);
-
-    ZHLN::Lock(sync.shadowLock, [&] -> void {
         size_t posSize = savedCount * sizeof(JPH::Real) * 4;
         size_t rotSize = savedCount * sizeof(float) * 4;
         size_t velSize = savedCount * sizeof(float) * 4;
@@ -385,7 +384,11 @@ auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
         freeCount.store(newFreeCount, std::memory_order::release);
         count.store(savedCount, std::memory_order::release);
         time = header->worldTime;
+        return true;
     });
+    if (!loaded) {
+        return false;
+    }
 
     for (size_t i = 0; i < savedCount; i++) {
         JPH::BodyID bid = bodyIDs[i];

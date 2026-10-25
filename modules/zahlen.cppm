@@ -177,6 +177,7 @@ module;
 #include <Zahlen/Threading/Channel.hpp>
 #include <Zahlen/Threading/ConditionalVariable.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/SharedMutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Vertex.hpp>
@@ -297,6 +298,11 @@ using ZHLN::FiberFunc;
 using ZHLN::GetCurrentFiber;
 using ZHLN::Mutex;
 using ZHLN::MutexGuard;
+using ZHLN::SharedLock;
+using ZHLN::SharedLockGuard;
+using ZHLN::SharedMutex;
+using ZHLN::WriteLock;
+using ZHLN::WriteLockGuard;
 using ZHLN::YieldFiber;
 
 namespace TaskSystem {

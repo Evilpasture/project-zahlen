@@ -12,6 +12,7 @@
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Prefetch.hpp>
 #include <Zahlen/Core/Span.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
 #include <memory>
 
@@ -121,28 +122,19 @@ template <JPH::EBodyType TType>
 #if defined(__clang__)
   gnu::flatten,
 #endif
-  gnu::nonnull(2)]]
-inline void ExecuteSyncPass(
-    const uint32_t                                active_count,
-    const JPH::PhysicsSystem* const ZHLN_RESTRICT inSystem,
-    MappingDataCreateInfo                         map,
-    const WorldDataCreateInfo                     world
+  gnu::nonnull(3, 4)]]
+inline void ExecuteSyncRange(
+    const uint32_t                                        begin,
+    const uint32_t                                        end,
+    const JPH::BodyID* const ZHLN_RESTRICT                active_ids,
+    const JPH::BodyLockInterface* const ZHLN_RESTRICT     lock_iface,
+    MappingDataCreateInfo                                 map,
+    const WorldDataCreateInfo                             world
 ) noexcept {
-    if (active_count == 0) {
-        return;
-    }
-
-    const JPH::BodyID* const ZHLN_RESTRICT active_ids = inSystem->GetActiveBodiesUnsafe(TType);
-    if (active_ids == nullptr) [[unlikely]] {
-        return;
-    }
-
-    const auto* const ZHLN_RESTRICT lock_iface = &inSystem->GetBodyLockInterfaceNoLock();
-
     alignas(64) std::array<SyncWorkItem, BATCH_SIZE> worklist {};
     uint32_t                                         work_ptr = 0;
 
-    for (uint32_t i = 0; i < active_count; i++) {
+    for (uint32_t i = begin; i < end; i++) {
         const uint32_t raw_jolt_id = active_ids[i].GetIndexAndSequenceNumber();
         const uint32_t j_idx       = raw_jolt_id & JPH::BodyID::cMaxBodyIndex;
 
@@ -189,6 +181,35 @@ inline void ExecuteSyncPass(
     if (work_ptr > 0) {
         ProcessBatch<TType>(world, RestrictSpan(worklist).first(work_ptr));
     }
+}
+
+template <JPH::EBodyType TType>
+[[gnu::always_inline,
+#if defined(__clang__)
+  gnu::flatten,
+#endif
+  gnu::nonnull(2)]]
+inline void ExecuteSyncPass(
+    const uint32_t                                active_count,
+    const JPH::PhysicsSystem* const ZHLN_RESTRICT inSystem,
+    MappingDataCreateInfo                         map,
+    const WorldDataCreateInfo                     world
+) noexcept {
+    if (active_count == 0) {
+        return;
+    }
+
+    const JPH::BodyID* const ZHLN_RESTRICT active_ids = inSystem->GetActiveBodiesUnsafe(TType);
+    if (active_ids == nullptr) [[unlikely]] {
+        return;
+    }
+
+    const auto* const ZHLN_RESTRICT lock_iface = &inSystem->GetBodyLockInterfaceNoLock();
+
+    constexpr uint32_t kSyncChunkSize = 256;
+    TaskSystem::ParallelFor(active_count, kSyncChunkSize, [&](uint32_t start, uint32_t end, uint32_t) {
+        ExecuteSyncRange<TType>(start, end, active_ids, lock_iface, map, world);
+    });
 }
 
 [[gnu::always_inline]]

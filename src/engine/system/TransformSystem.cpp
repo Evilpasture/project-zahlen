@@ -4,6 +4,7 @@
 #include "TransformSystem.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <algorithm>
@@ -309,11 +310,14 @@ void TransformSystem::UpdateTransformHistory(ECS::Registry& registry) noexcept {
     // Compare against the last rendered matrix here rather than relying on every
     // writer to set a transient component flag. Static transforms incur reads
     // but no redundant previous-matrix writes.
-    for (size_t i = 0; i < entities.size(); ++i) {
-        if (!Math::SameMatrix(worldTransforms[i].world, worldTransforms[i].previous)) {
-            worldTransforms[i].previous = worldTransforms[i].world;
+    constexpr uint32_t kHistoryChunkSize = 512;
+    TaskSystem::ParallelFor(static_cast<uint32_t>(entities.size()), kHistoryChunkSize, [&](uint32_t start, uint32_t end, uint32_t) {
+        for (uint32_t i = start; i < end; ++i) {
+            if (!Math::SameMatrix(worldTransforms[i].world, worldTransforms[i].previous)) {
+                worldTransforms[i].previous = worldTransforms[i].world;
+            }
         }
-    }
+    });
 }
 
 } // namespace ZHLN

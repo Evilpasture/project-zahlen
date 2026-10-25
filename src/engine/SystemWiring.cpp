@@ -99,8 +99,10 @@ void Camera(Engine& engine, float dt, FrameContext&) {
     CameraSystem::Update(engine, dt, engine.GetCurrentAlpha());
 }
 
-void LOD(Engine& engine, float, FrameContext&) {
-    LODSystem::Update(engine);
+void LOD(Engine&, float, FrameContext&) {
+    // Preserved as a named Phase::Camera anchor for external modules; actual LOD
+    // selection runs inside RenderGraph (LODSystem::GraphUpdate) in parallel with
+    // DecalSystem and LightingSystem ahead of CullingSystem.
 }
 
 void RenderGraph(Engine& engine, float dt, FrameContext&) {
@@ -183,9 +185,10 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.AddSystem<&EnvironmentSunSystem::Update>();
 
     renderGraph.DeclareExternalWrites("ExternalPreRenderWrites", {ECS::Write<Components::CameraComponent>()});
-    renderGraph.AddSystem<&CullingSystem::GraphUpdate>();
+    renderGraph.AddSystem<&LODSystem::GraphUpdate>();
     renderGraph.AddSystem<&DecalSystem::Update>();
     renderGraph.AddSystem<&LightingSystem::Update>();
+    renderGraph.AddSystem<&CullingSystem::GraphUpdate>();
 
     // Every module the application installed contributes its nodes here, in
     // install order, and each one's signature-derived hazards are what order

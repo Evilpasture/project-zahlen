@@ -248,6 +248,26 @@ struct TaskSystemTestSuite {
             }
             return {};
         }
+
+        std::expected<void, ZHLN::ErrorCode> work_stealing_imbalanced_chunks() {
+            constexpr uint32_t    itemCount = 256;
+            std::atomic<uint32_t> processed {0};
+
+            // Chunk 0 does disproportionate work while sibling workers steal the remaining 63 chunks.
+            ZHLN::TaskSystem::ParallelFor(itemCount, 4, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) {
+                if (chunkIdx == 0) {
+                    for (int spin = 0; spin < 2000; ++spin) {
+                        ZHLN::CPURelax();
+                    }
+                }
+                processed.fetch_add(end - start, std::memory_order::relaxed);
+            });
+
+            if (!ZHLN::Test::ExpectEq(processed.load(std::memory_order::relaxed), itemCount)) {
+                return std::unexpected(TaskSystemError::ParallelForFailed);
+            }
+            return {};
+        }
     };
 };
 

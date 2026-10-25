@@ -102,9 +102,15 @@ Physics::ConstraintHandle
     PhysicsContext::CreateConstraint(Physics::ConstraintType type, Physics::BodyHandle b1, Physics::BodyHandle b2, const Physics::ConstraintParams& params) {
     auto& world = GetInternalWorld();
 
-    Physics::ConstraintHandle handle = world.AllocateConstraintHandle();
+    return Physics::WriteWorldLock(world, [&] -> Physics::ConstraintHandle {
+        const Physics::ConstraintHandle handle = world.AllocateConstraintHandle();
 
-    ZHLN::Lock(world.sync.shadowLock, [&] {
+        if (world.commandCount >= world.commandQueue.size()) {
+            const size_t newCap = world.commandQueue.size() == 0 ? 64 : world.commandQueue.size() * 2;
+            world.commandQueue.resize(newCap);
+            world.commandQueueSpare.resize(newCap);
+        }
+
         Physics::Command cmd {};
         cmd.type           = Physics::CommandType::CreateConstraint;
         cmd.cHandle        = handle;
@@ -114,14 +120,18 @@ Physics::ConstraintHandle
         cmd.createC.params = params;
 
         world.commandQueue[world.commandCount++] = cmd;
+        return handle;
     });
-
-    return handle;
 }
 
 void PhysicsContext::SetConstraintTarget(Physics::ConstraintHandle handle, float value) {
     auto& world = GetInternalWorld();
-    ZHLN::Lock(world.sync.shadowLock, [&] {
+    Physics::WriteWorldLock(world, [&] {
+        if (world.commandCount >= world.commandQueue.size()) {
+            const size_t newCap = world.commandQueue.size() == 0 ? 64 : world.commandQueue.size() * 2;
+            world.commandQueue.resize(newCap);
+            world.commandQueueSpare.resize(newCap);
+        }
         Physics::Command cmd {};
         cmd.type                                 = Physics::CommandType::SetConstraintTarget;
         cmd.setTarget.targetCHandle              = handle;

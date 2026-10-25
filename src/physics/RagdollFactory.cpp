@@ -22,7 +22,7 @@ auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, std
     settings->mSkeleton                     = skeleton;
     settings->mParts.resize(skeleton->GetJointCount());
 
-    auto ragdoll = ZHLN::Lock(world.sync.shadowLock, [&]() -> JPH::Ref<JPH::Ragdoll> {
+    auto ragdoll = Physics::WriteWorldLock(world, [&]() -> JPH::Ref<JPH::Ragdoll> {
         for (const auto& part: parts) {
             uint32_t jointIdx = part.jointIndex;
 
