@@ -11,7 +11,6 @@ struct ReflectionInputs {
     Vk::ImageWrite     prefiltered;
     Vk::ImageWrite     visualSky;
     Vk::ImageWrite     brdfLut;
-    Vk::ImageWrite     blueNoise;
     Vk::AsAddressWrite tlas {};
 };
 

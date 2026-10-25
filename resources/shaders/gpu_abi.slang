@@ -43,7 +43,6 @@ public struct GpuAbiTypes {
     public FXAAPushConstants fxaaPush;
     public MLAAPushConstants mlaaPush;
     public TAAPushConstants taaPush;
-    public RtrHalfPushConstants rtrHalfPush;
     public RtgiHalfPushConstants rtgiHalfPush;
     public RcgiProbeSetupPushConstants rcgiProbeSetupPush;
     public RcgiCascadePushConstants rcgiCascadePush;
@@ -123,7 +122,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += asuint(abi.fxaaPush.rcpFrameX);
     acc += asuint(abi.mlaaPush.threshold);
     acc += asuint(abi.taaPush.feedback);
-    acc += abi.rtrHalfPush.halfRes.x;
     acc += abi.rtgiHalfPush.halfRes.x;
     acc += abi.rcgiProbeSetupPush.cascadeIndex;
     acc += asuint(abi.rcgiCascadePush.tMax);
@@ -138,6 +136,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += abi.smaaLutPush.mode;
     acc += asuint(abi.smaaPush.rtMetrics.x);
     acc += asuint(abi.hizPush.rcpSrcWidth);
+    acc += abi.hizPush.reduceMin;
     acc += abi.particleRenderPush.textureIndex;
     acc += uint(abi.linePush.vertexBufferAddress);
     acc += abi.decalPush.albedoIndex;

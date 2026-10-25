@@ -74,8 +74,18 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     }
 
     float4 centerValue  = inColor.Load(int3(tid.xy, 0));
+    float4 normRoughRaw = texNormalRoughness.Load(int3(tid.xy, 0));
+    // Deterministic reflections (Tier 1 sharp `roughness < 0.20` and pure metals,
+    // which carry zero diffuse RT shadow dither) have zero stochastic noise;
+    // bypass the 2x median clamp and spatial wavelet so 1px specular glints and
+    // mirror edges stay razor-sharp.
+    if (normRoughRaw.z < 0.20f || normRoughRaw.w > 0.85f) {
+        outColor[tid.xy] = centerValue;
+        return;
+    }
+
     float  centerDepth  = LinearizeDepth(depth, frame.invProj);
-    float3 centerNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(tid.xy, 0)).xy * 2.0f - 1.0f);
+    float3 centerNormal = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
     float  centerLuma   = KarisLuma(centerValue.rgb);
     float  lumaTol      = max(pc.phiLuma, 1e-4f); // Karis space: [0, 1); phiLuma is a tolerance on that scale
 

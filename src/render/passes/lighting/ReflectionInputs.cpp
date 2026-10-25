@@ -13,12 +13,11 @@ auto GatherReflectionInputs(RenderFrameContext& frame) noexcept -> ReflectionInp
                 frame.iblPayload.visualSkyView.Handle() != VK_NULL_HANDLE ? frame.iblPayload.visualSkyView :
                                                                              frame.textureManager.View(kFallbackBlackTextureIndex)
             },
-        .brdfLut   = Vk::ImageWrite {frame.iblPayload.brdfLutView},
-        .blueNoise = Vk::ImageWrite {frame.textureManager.View(frame.blueNoiseTexIdx)},
-        .tlas      = Vk::AsAddressWrite {
-                 .address = (frame.ctx.RayTracingSupported() && frame.frames.tlasAddresses[frame.presenter.frameIndex] != nullptr) ?
-                                frame.frames.tlasAddresses[frame.presenter.frameIndex].Get() :
-                                0
+        .brdfLut = Vk::ImageWrite {frame.iblPayload.brdfLutView},
+        .tlas    = Vk::AsAddressWrite {
+            .address = (frame.ctx.RayTracingSupported() && frame.frames.tlasAddresses[frame.presenter.frameIndex] != nullptr) ?
+                           frame.frames.tlasAddresses[frame.presenter.frameIndex].Get() :
+                           0
         }
     };
 }

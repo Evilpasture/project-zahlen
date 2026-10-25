@@ -26,20 +26,9 @@ namespace ZHLN::Passes {
 // phiDepth stays relative to view depth (2% per plane), phiNormal is the
 // normal-dot exponent.
 template <typename PushT>
-[[nodiscard]] constexpr auto MakeAtrousPush(uint32_t stepSize, float temporalWeight, float maxRoughness = 1.0f) noexcept -> PushT {
+[[nodiscard]] constexpr auto MakeAtrousPush(uint32_t stepSize, float temporalWeight) noexcept -> PushT {
     if constexpr (std::same_as<PushT, ShadowAtrousPushConstants>) {
         return ShadowAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .temporalWeight = temporalWeight};
-    } else if constexpr (std::same_as<PushT, RtgiAtrousPushConstants>) {
-        // The RT buffers carry real 1spp noise, so their tolerance is looser
-        // than the HDR pass's: average the grain, stop at edges.
-        return RtgiAtrousPushConstants {
-            .stepSize       = stepSize,
-            .phiDepth       = 0.02f,
-            .phiNormal      = 16.0f,
-            .phiLuma        = 0.15f,
-            .temporalWeight = temporalWeight,
-            .maxRoughness   = maxRoughness,
-        };
     } else {
         static_assert(std::same_as<PushT, HdrAtrousPushConstants>, "an à-trous push payload MakeAtrousPush does not know how to fill");
         // The composed frame this chain filters is already denoised upstream;
@@ -48,34 +37,16 @@ template <typename PushT>
     }
 }
 
-// The early-out each denoiser ran before the consolidation. The four are not
-// one predicate: the shadow chain stays off unless something wants RT
-// shadows-or-RTR, the RTGI and RTR chains each track their own feature bit,
-// and the HDR wavelet deliberately ignores fullBright and the TLAS state (it
-// filters whatever landed in the scene color). Each gate preserves its
-// original chain's conditions verbatim.
-struct CommonAtrousGate {
-    [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
-        return frame.ctx.RayTracingSupported() && frame.settings.rayTracing.denoiserPasses != 0 && frame.settings.environment.fullBright == 0 &&
-               frame.frames.tlasAddresses[fIdx] != nullptr;
-    }
-};
-
+// Each denoiser chain preserves its feature predicate: the shadow chain runs
+// whenever RT shadows or reflections request the visibility mask, and the HDR
+// wavelet deliberately ignores fullBright and the TLAS state (it filters
+// whatever landed in the scene color while bypassing sharp/metallic Tier 1
+// specular pixels in shader).
 struct ShadowDenoiseGate {
     [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
         const uint32_t fIdx   = frame.presenter.frameIndex;
         const bool     wantRT = (frame.settings.rayTracing.enableReflections && frame.settings.post.enableRTR != 0) || frame.settings.rayTracing.enableShadows;
         return frame.ctx.RayTracingSupported() && wantRT && frame.settings.rayTracing.denoiserPasses != 0 && frame.settings.environment.fullBright == 0 &&
-               frame.frames.tlasAddresses[fIdx] != nullptr;
-    }
-};
-
-struct RtrDenoiseGate {
-    [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
-        return frame.ctx.RayTracingSupported() && frame.settings.rayTracing.enableReflections && frame.settings.post.enableRTR &&
-               frame.settings.rayTracing.denoiserPasses != 0 && frame.settings.environment.fullBright == 0 &&
                frame.frames.tlasAddresses[fIdx] != nullptr;
     }
 };
@@ -111,22 +82,6 @@ struct GraphMember<Res_RtShadowHistory> {
     static constexpr auto Ptr = &TargetManager::GraphResources::rtShadowHistory;
 };
 template <>
-struct GraphMember<Res_RtrHalf> {
-    static constexpr auto Ptr = &TargetManager::GraphResources::rtrHalf;
-};
-template <>
-struct GraphMember<Res_RtrHistory> {
-    static constexpr auto Ptr = &TargetManager::GraphResources::rtrHistory;
-};
-template <>
-struct GraphMember<Res_RtgiDenoiseA> {
-    static constexpr auto Ptr = &TargetManager::GraphResources::rtgiDenoiseA;
-};
-template <>
-struct GraphMember<Res_RtgiDenoiseB> {
-    static constexpr auto Ptr = &TargetManager::GraphResources::rtgiDenoiseB;
-};
-template <>
 struct GraphMember<Res_HdrSceneColor> {
     static constexpr auto Ptr = &TargetManager::GraphResources::hdrSceneColor;
 };
@@ -139,11 +94,8 @@ struct GraphMember<Res_DenoiseB> {
     static constexpr auto Ptr = &TargetManager::GraphResources::denoiseB;
 };
 
-// Maps a descriptor set to the resource that owns it. The RTR chain reuses the
-// RTGI set (same shader), which is why the mapping keys on the declared set and
-// not on the graph pass name. Each resource is a bundle, so the chain gets the
-// pipeline and its heap bindings from one lookup -- the lighting denoisers live
-// in LightingResources and the HDR wavelet in PostProcessResources.
+// Maps a descriptor set to the resource bundle that owns it -- the shadow
+// denoiser lives in LightingResources and the HDR wavelet in PostProcessResources.
 template <typename Declared>
 struct DenoiseAccess;
 
@@ -151,13 +103,6 @@ template <>
 struct DenoiseAccess<Shaders::ShadowDenoise> {
     [[nodiscard]] static auto Resource(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::DynamicComputePass>& {
         return frame.lighting.shadowDenoise;
-    }
-};
-
-template <>
-struct DenoiseAccess<Shaders::RtgiDenoise> {
-    [[nodiscard]] static auto Resource(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::DynamicComputePass>& {
-        return frame.lighting.rtgiDenoise;
     }
 };
 
@@ -189,8 +134,8 @@ template <
     typename PingRes,
     typename PongRes,
     typename HistoryRes = void,
-    typename PushT      = RtgiAtrousPushConstants,
-    typename Gate       = CommonAtrousGate>
+    typename PushT      = HdrAtrousPushConstants,
+    typename Gate       = HdrDenoiseGate>
 struct AtrousDenoisePass:
     TemplatedDetail::RenderPassOf<
         PassName,
@@ -201,7 +146,6 @@ struct AtrousDenoisePass:
     static_assert(TemplatedDetail::kNameProfilesAsStage<PassName>, "the pass name has no Stage enumerator, so the GPU profiler would never time it");
 
     RenderFrameContext& frame;
-    float               maxRoughness = 1.0f;
 
     void operator()(VkCommandBuffer cmd) const noexcept {
         if (!Gate::ShouldRun(frame)) {
@@ -221,7 +165,7 @@ struct AtrousDenoisePass:
 
         Vk::ComputeChain atrousChain(frame.heapManager, cmd);
         const auto       Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize, float tempWeight) noexcept {
-            const auto push = MakeAtrousPush<PushT>(stepSize, tempWeight, maxRoughness);
+            const auto push = MakeAtrousPush<PushT>(stepSize, tempWeight);
             const auto Step = [&](auto&&... slots) noexcept {
                 atrousChain.template Step<ShaderDecl>(GetResource<ShaderDecl>(frame), dst.Extent(), push, slots...);
             };

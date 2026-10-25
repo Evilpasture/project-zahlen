@@ -617,15 +617,9 @@ add_shader_target(shadow_denoise_atrous_shader
 )
 
 # Color A-Trous wavelet over the composited HDR scene color for ray-traced
-# shadows/reflections. RTGI is denoised separately before albedo modulation.
+# shadows. Reflections and RCGI are deterministic and do not use A-Trous.
 add_shader_target(hdr_denoise_atrous_shader
     STAGES "${SHADER_SRC_DIR}/hdr_denoise_atrous.slang|CSMain|cs_6_0|SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
-)
-
-# Half-resolution RT reflection tracing for the VNDF roughness band; the
-# reflection pass upsamples the composed result.
-add_shader_target(rtr_half_shader
-    STAGES "${SHADER_SRC_DIR}/rtr_half.slang|CSMain|cs_6_0|SHADER_RTR_HALF_SLANG_CS_PATH"
 )
 
 # Half-resolution RTGI trace, pre-albedo denoise and bilateral composite.
@@ -929,9 +923,7 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "LightingNortPS=SHADER_LIGHTING_NORT_SLANG_PS_PATH"
     "VolumetricClearCS=SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH"
     "HdrDenoiseAtrousCS=SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
-    "RtrHalfCS=SHADER_RTR_HALF_SLANG_CS_PATH"
     "RtgiHalfCS=SHADER_RTGI_HALF_SLANG_CS_PATH"
-    "RtgiDenoiseCS=SHADER_RTGI_DENOISE_ATROUS_SLANG_CS_PATH"
     "RtgiCompositeCS=SHADER_RTGI_COMPOSITE_SLANG_CS_PATH"
     "RcgiProbeSetupCS=SHADER_RCGI_PROBE_SETUP_SLANG_CS_PATH"
     "RcgiCascadeTraceMergeCS=SHADER_RCGI_CASCADE_TRACE_MERGE_SLANG_CS_PATH"
@@ -1014,9 +1006,7 @@ set(ZHLN_SHADER_CATALOG_SETS
     "HdrDenoise=HdrDenoiseAtrousCS"
     "RtShadow=RtShadowCS"
     "ShadowDenoise=ShadowDenoiseAtrousCS"
-    "RtrHalf=RtrHalfCS"
     "RtgiHalf=RtgiHalfCS"
-    "RtgiDenoise=RtgiDenoiseCS"
     "RtgiComposite=RtgiCompositeCS"
     "RcgiProbeSetup=RcgiProbeSetupCS"
     "RcgiCascadeTraceMerge=RcgiCascadeTraceMergeCS"

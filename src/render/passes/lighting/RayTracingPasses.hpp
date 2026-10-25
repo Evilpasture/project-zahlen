@@ -110,50 +110,6 @@ struct RtShadowDesc {
     }
 };
 
-struct RtrHalfTraceDesc {
-    static constexpr auto name = Vk::ResourceName("RtrHalfTrace");
-    using Usages               = Vk::TypeList<
-        Vk::ComputeRead<Res_Depth>,
-        Vk::ComputeRead<Res_NormRough>,
-        Vk::ComputeRead<Res_Lighting>,
-        Vk::ComputeRead<Res_DdgiIrradiance>,
-        Vk::ComputeRead<Res_DdgiDistance>,
-        Vk::ComputeWrite<Res_RtrHalf>>;
-    using ShaderDecl    = Shaders::RtrHalf;
-    using ShaderModule  = Shaders::Modules::RtrHalfCS;
-    using PushConstants = RtrHalfPushConstants;
-
-    [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
-        return frame.ctx.RayTracingSupported() && frame.settings.rayTracing.enableReflections && frame.settings.post.enableRTR;
-    }
-
-    [[nodiscard]] static auto
-        GetPass(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::RtrHalfCS, RtrHalfPushConstants>>& {
-        return frame.lighting.rtrHalf;
-    }
-
-    [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
-
-        const Vk::AsAddressWrite tlas {.address = frame.frames.tlasAddresses[fIdx].Get()};
-        const auto              push  = RtrHalfPushConstants {
-             .halfRes = {frame.graphResources.rtrHalf.extent.width, frame.graphResources.rtrHalf.extent.height},
-        };
-
-        return MakeComputePassArgs(
-            push, VkExtent3D {frame.graphResources.rtrHalf.extent.width, frame.graphResources.rtrHalf.extent.height, 1},
-            Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
-            Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
-            Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(frame.graphResources.lightingTarget)),
-            Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
-            Vk::Slot<"blueNoiseTex">(frame.textureManager.View(frame.blueNoiseTexIdx)),
-            Vk::Slot<"outImage">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rtrHalf)), Vk::Slot<"tlas">(tlas),
-            Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(frame.graphResources.ddgiIrradiance)),
-            Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ComputeRead<Res_DdgiDistance>>(frame.graphResources.ddgiDistance))
-        );
-    }
-};
-
 // Deterministic 4-cascade Radiance Cascades Global Illumination (RCGI):
 // 1. Hierarchical surface-pinned probe setup (C0..C3) into Res_RcgiProbes.
 // 2. Top-down Direction-First wave-coherent RayQuery trace + parallax-corrected

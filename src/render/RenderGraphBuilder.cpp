@@ -35,6 +35,15 @@ struct ResourceResolver<Res_TransLighting> {
 };
 
 template <>
+struct ResourceResolver<Res_LightingGI> {
+    [[nodiscard]] static auto Resolve(RenderContext::Impl& impl) noexcept -> ImageSlice {
+        const auto& target = impl.graphResources.lightingGI;
+
+        return ImageSlice {target.image.Handle(), target.mipAttachmentViews[0], target.extent, Res_LightingGI::format};
+    }
+};
+
+template <>
 struct ResourceResolver<Res_AccumPrevious> {
     [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
         return MakeRef<Res_AccumPrevious>(impl.accumulationHistory.Previous());

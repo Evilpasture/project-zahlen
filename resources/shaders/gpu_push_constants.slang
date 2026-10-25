@@ -181,11 +181,6 @@ public struct TAAPushConstants {
     public float feedback;
 };
 
-public struct RtrHalfPushConstants {
-    public uint2 halfRes;
-    public uint2 _pad;
-};
-
 public struct RtgiHalfPushConstants {
     public uint2 halfRes;
     public uint2 _pad;
@@ -307,6 +302,7 @@ public struct HiZPushConstants {
     public uint  srcWidth;
     public uint  srcHeight;
     public uint  isFirstPass;
+    public uint  reduceMin;
 };
 
 public struct ParticleRenderPushConstants {

@@ -22,6 +22,7 @@
 #include "passes/lighting/AtrousDenoisePass.hpp"
 #include "passes/lighting/ClusteredLightingPass.hpp"
 #include "passes/lighting/EmissivePass.hpp"
+#include "passes/lighting/LightingMipPass.hpp"
 #include "passes/lighting/RayTracingPasses.hpp"
 #include "passes/lighting/ReflectionPass.hpp"
 #include "passes/lighting/RtgiCompositePass.hpp"
@@ -115,18 +116,17 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::BackgroundGBufferPass {.frame = self},
         Passes::HiZGeneratePass {.cull = self.culling, .frame = self},
         Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self},
-        Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.frame = self}, Passes::TranslucentPrePass {.frame = self},
+        Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.frame = self},
+        Passes::SsrHiZGeneratePass {.cull = self.culling, .frame = self}, Passes::TranslucentPrePass {.frame = self},
         Passes::ComputePass<Passes::GtaoDesc> {.frame = self, .pc = pc}, Passes::ComputePass<Passes::DdgiTraceDesc> {.frame = self},
         Passes::ComputePass<Passes::DdgiUpdateDesc> {.frame = self}, Passes::ComputePass<Passes::RtShadowDesc> {.frame = self},
         Passes::AtrousDenoisePass<
             "ShadowDenoise", Shaders::ShadowDenoise, Res_RtShadowMask, Res_ShadowDenoiseA, Res_ShadowDenoiseB, Res_RtShadowHistory, ShadowAtrousPushConstants,
             Passes::ShadowDenoiseGate> {.frame = self},
-        Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc}, Passes::ComputePass<Passes::RtrHalfTraceDesc> {.frame = self},
-        Passes::AtrousDenoisePass<
-            "RtrDenoise", Shaders::RtgiDenoise, Res_RtrHalf, Res_RtgiDenoiseA, Res_RtgiDenoiseB, Res_RtrHistory, RtgiAtrousPushConstants,
-            Passes::RtrDenoiseGate> {.frame = self, .maxRoughness = 0.4f},
+        Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc},
         Passes::RcgiCascadePass {.frame = self},
         Passes::RtgiCompositePass {.frame = self}, Passes::EmissivePass {.forward = self.forward, .frame = self},
+        Passes::LightingMipPass {.frame = self},
         OpaqueReflectionPass {.frame = self, .pc = pc}, TranslucentReflectionPass {.frame = self, .pc = pc},
         Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self},
         Passes::AtrousDenoisePass<

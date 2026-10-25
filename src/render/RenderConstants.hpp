@@ -89,16 +89,14 @@ enum class Stage : uint8_t {
     // the build instead of silently dropping its timing row. Hand-written
     // passes still rely on this list being kept current by hand.
     OpaqueSceneCopy,
+    SsrHiZGenerate,
+    LightingMip,
     GTAO,
     DdgiRayTrace,
     DdgiUpdateAtlas,
     RtShadow,
     ShadowDenoise,
-    RtrHalfTrace,
-    RtgiHalfTrace,
     RcgiCascade,
-    RtrDenoise,
-    RtgiDenoise,
     RtgiComposite,
     HdrDenoise,
 };

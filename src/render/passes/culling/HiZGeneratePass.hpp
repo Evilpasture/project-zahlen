@@ -15,4 +15,11 @@ struct HiZGeneratePass: Vk::RenderPass<"HiZGenerate", Vk::ShaderRead<Res_Depth>,
     void operator()(VkCommandBuffer cmd) const noexcept;
 };
 
+struct SsrHiZGeneratePass: Vk::RenderPass<"SsrHiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>> {
+    CullingResources&   cull;
+    RenderFrameContext& frame;
+
+    void operator()(VkCommandBuffer cmd) const noexcept;
+};
+
 } // namespace ZHLN::Passes
