@@ -53,6 +53,7 @@
 // The optional layer targets this harness consumes. They remain independent of
 // Core. samples/CMakeLists.txt skips the sample when a required target is absent,
 // so these includes do not need target guards.
+#include <Animation/AnimationSystem.hpp>
 #include <AssetCooking/RadianceDecoder.hpp>
 #include <glTF/GLTFImporter.hpp>
 #include <json/JSONSchema.hpp>
@@ -751,6 +752,7 @@ auto main(int argc, char* argv[]) -> int {
         engine->GetPlatformHost().Focus();
     }
 
+    ZHLN::Animation::Install(*engine);
     engine->InitializeDefaultScene();
 
     ZHLN::Log(

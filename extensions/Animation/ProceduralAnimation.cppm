@@ -10,6 +10,7 @@ module;
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -22,6 +23,7 @@ module;
 #include <memory>
 #include <span>
 #include <string_view>
+#include <type_traits>
 
 export module ZHLN.ProceduralAnimation;
 
@@ -182,17 +184,17 @@ struct alignas(64) RigBoneMap {
     int32_t                               springPoseTrack         = -1;
     bool                                  springPoseInitialized   = false;
 
-    const ModelPrefab* sourcePrefab                 = nullptr;
-    size_t             nodeCount                    = 0;
-    size_t             sourceHairStrandCount        = 0;
-    uint32_t           jointOffset                  = 0;
-    uint32_t           jointCount                   = 0;
-    int32_t            skeletonIndex                = -1;
-    uint64_t           poseVersion                  = 0;
-    size_t             synchronizedAttachmentCount  = 0;
-    size_t             synchronizedSkinPaletteCount = 0;
-    bool               initialized                  = false;
-    bool               poseValid                    = false;
+    AssetID sourcePrefabAsset            = InvalidAssetID;
+    size_t  nodeCount                    = 0;
+    size_t  sourceHairStrandCount        = 0;
+    uint32_t jointOffset                 = 0;
+    uint32_t jointCount                  = 0;
+    int32_t  skeletonIndex               = -1;
+    uint64_t poseVersion                 = 0;
+    size_t   synchronizedAttachmentCount = 0;
+    size_t   synchronizedSkinPaletteCount = 0;
+    bool     initialized                 = false;
+    bool     poseValid                   = false;
     // Baked control rigs animate CTR/FK/IK/MCH/ORG and DEF nodes together.
     // Filtering only the semantic DEF nodes through independent springs breaks
     // those authored relationships, so their complete hierarchy is sampled as
@@ -204,6 +206,7 @@ struct alignas(64) RigBoneMap {
         std::construct_at(this);
     }
 };
+static_assert(std::is_trivially_copyable_v<RigBoneMap>, "RigBoneMap must remain trivially copyable.");
 
 /**
  * Named parametric snapshot for one locomotion mode. The gait blender
@@ -497,6 +500,11 @@ struct ProceduralLocomotionTracksComponent {
     int32_t walkTrack = -1;
     int32_t runTrack  = -1;
 
+    int32_t prevTrack         = -1;
+    float   prevTrackTime     = 0.0f;
+    float   prevPlaybackSpeed = 1.0f;
+    float   blendFactor       = 1.0f;
+
     float movementThreshold        = 0.08f;
     float runSpeedThreshold        = 3.20f;
     // Hysteresis state for the walk/run switch (see SynchronizeLocomotionTrack):
@@ -510,6 +518,7 @@ struct ProceduralLocomotionTracksComponent {
     float reachWeight              = 1.0f;
     bool  synchronizeToStrideWheel = true;
 };
+static_assert(std::is_trivially_copyable_v<ProceduralLocomotionTracksComponent>, "ProceduralLocomotionTracksComponent must remain trivially copyable.");
 
 /** Core procedural algorithms. Optional layers may consume these APIs; Core never consumes them. */
 namespace Animation {

@@ -9,6 +9,7 @@
 //
 // WASD + mouse: the default-scene free-cam. Escape / window close to quit.
 
+#include <Animation/AnimationSystem.hpp>
 #include <CDN/CDN.hpp>
 #include <FreeCam/FreeCam.hpp>
 #include <RemoteAsset/DiskCache.hpp>
@@ -126,6 +127,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     ZHLN::FreeCam::Install(*engine);
+    ZHLN::Animation::Install(*engine);
 
 #if defined(ZHLN_HAS_FONTS)
     if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {

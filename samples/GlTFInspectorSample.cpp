@@ -9,6 +9,7 @@
 //
 // Drop a .glb / .gltf file onto the window to load and orbit it.
 
+#include <Animation/AnimationSystem.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Engine.hpp>
@@ -58,6 +59,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     engine->GetPlatformHost().Focus();
+    ZHLN::Animation::Install(*engine);
 
 #if defined(ZHLN_HAS_FONTS)
     // The composition root's default bake (see app/main.cpp): the vendored

@@ -69,6 +69,47 @@ class PoseUploadQueue {
         return _uploads.size();
     }
 
+    // Model-space joint transforms published ahead of ArticulationSystem for
+    // skeletons that also drive a ragdoll. Stored in the same frame arena as
+    // skinning palettes so ECS components never carry matrix arrays.
+    void PushKinematic(uint32_t jointOffset, std::span<const JPH::Mat44> modelJoints) {
+        std::span<const JPH::Mat44> stored;
+        if (!modelJoints.empty()) {
+            auto* destination = static_cast<JPH::Mat44*>(Allocate(modelJoints.size_bytes(), alignof(JPH::Mat44)));
+            std::uninitialized_copy(modelJoints.begin(), modelJoints.end(), destination);
+            stored = {destination, modelJoints.size()};
+        }
+        for (PoseUpload& existing: _kinematicPoses) {
+            if (existing.jointOffset == jointOffset) {
+                if (!existing.matrices.empty()) {
+                    std::destroy_n(const_cast<JPH::Mat44*>(existing.matrices.data()), existing.matrices.size());
+                }
+                existing.matrices = stored;
+                return;
+            }
+        }
+        _kinematicPoses.push_back(PoseUpload {.jointOffset = jointOffset, .matrices = stored});
+    }
+
+    [[nodiscard]] auto KinematicPose(uint32_t jointOffset) const noexcept -> std::span<const JPH::Mat44> {
+        for (const PoseUpload& entry: _kinematicPoses) {
+            if (entry.jointOffset == jointOffset) {
+                return entry.matrices;
+            }
+        }
+        return {};
+    }
+
+    void Clear() noexcept {
+        DestroyQueuedMatrices();
+        _uploads.clear();
+        _kinematicPoses.clear();
+        for (LinearArena& arena: _arenas) {
+            arena.Reset();
+        }
+        _currentArena = 0;
+    }
+
     // Renderer side. Producers have finished before this is called, so no lock
     // is needed. Every matrix remains alive for the complete consumer call; all
     // queued matrix objects are destroyed and the arenas reset afterwards.
@@ -77,12 +118,7 @@ class PoseUploadQueue {
         for (const PoseUpload& upload: _uploads) {
             std::invoke(consume, upload);
         }
-        DestroyQueuedMatrices();
-        _uploads.clear();
-        for (LinearArena& arena: _arenas) {
-            arena.Reset();
-        }
-        _currentArena = 0;
+        Clear();
     }
 
   private:
@@ -129,6 +165,11 @@ class PoseUploadQueue {
                 std::destroy_n(const_cast<JPH::Mat44*>(upload.matrices.data()), upload.matrices.size());
             }
         }
+        for (const PoseUpload& entry: _kinematicPoses) {
+            if (!entry.matrices.empty()) {
+                std::destroy_n(const_cast<JPH::Mat44*>(entry.matrices.data()), entry.matrices.size());
+            }
+        }
     }
 
     // The queue owns the matrix objects until Drain; upload spans never point
@@ -136,6 +177,7 @@ class PoseUploadQueue {
     // arena segments can grow without moving any already-published matrix data.
     std::vector<LinearArena> _arenas;
     std::vector<PoseUpload>  _uploads;
+    std::vector<PoseUpload>  _kinematicPoses;
     size_t                   _currentArena = 0;
 };
 

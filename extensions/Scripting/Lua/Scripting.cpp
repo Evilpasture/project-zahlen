@@ -5,7 +5,6 @@
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"
-#include "engine/system/AnimationSystem.hpp"
 #include "engine/system/ArticulationSystem.hpp"
 #include "engine/system/PhysicsSystem.hpp"
 // NOTE: no gameplay/ header belongs here. This file is the engine's script
@@ -15,10 +14,13 @@
 // comes back. The includes above are extensions/, which this layer is allowed
 // to compose; the ones that were gameplay/ (RagdollAuthoring) moved to the
 // module that owns the verb.
+#include <Animation/AnimationContext.hpp>
+#include <Animation/AnimationSystem.hpp>
 #include <Animation/IK.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <Terrain/TerrainFactory.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/PrefabFactory.hpp>
@@ -1136,8 +1138,8 @@ void RegisterSystemCommands() {
     RegisterCmd("GetAnimationTrackCount", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
                     if (auto anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
-                        if (anim->prefab != nullptr) {
-                            return static_cast<uint64_t>(anim->prefab->animations.size());
+                        if (auto prefab = engine->GetAssetManager().GetCachedPrefab(anim->prefabAsset)) {
+                            return static_cast<uint64_t>(prefab->animations.size());
                         }
                     }
                     return 0;
@@ -1146,9 +1148,9 @@ void RegisterSystemCommands() {
     RegisterCmd("GetAnimationTrackName", MakeCmd<GetTrackNameArgs>([](ZHLN::Engine* engine, const GetTrackNameArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
                     if (auto anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
-                        if (anim->prefab != nullptr) {
-                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(anim->prefab->animations.size())) {
-                                const auto& name    = anim->prefab->animations[a.trackIndex].name;
+                        if (auto prefab = engine->GetAssetManager().GetCachedPrefab(anim->prefabAsset)) {
+                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(prefab->animations.size())) {
+                                const auto& name    = prefab->animations[a.trackIndex].name;
                                 auto*       outName = const_cast<char*>(a.outName);
                                 size_t      copyLen = std::min(name.size(), sizeof(a.outName) - 1);
                                 std::memcpy(outName, name.data(), copyLen);
@@ -1163,21 +1165,15 @@ void RegisterSystemCommands() {
     RegisterCmd("PlayAnimationTrack", MakeCmd<PlayTrackArgs>([](ZHLN::Engine* engine, const PlayTrackArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
                     if (auto anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
-                        if (anim->prefab != nullptr) {
-                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(anim->prefab->animations.size())) {
+                        if (auto prefab = engine->GetAssetManager().GetCachedPrefab(anim->prefabAsset)) {
+                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(prefab->animations.size())) {
                                 if (anim->currentTrackIdx != a.trackIndex) {
-                                    anim->prevTrackIdx      = anim->currentTrackIdx;
-                                    anim->prevTrackTime     = anim->currentTrackTime;
-                                    anim->prevPlaybackSpeed = anim->currentPlaybackSpeed;
-
                                     anim->currentTrackIdx      = a.trackIndex;
                                     anim->currentTrackTime     = 0.0f;
                                     anim->currentPlaybackSpeed = a.playbackSpeed;
                                     anim->currentLoop          = (a.loop != 0);
-
-                                    anim->blendFactor   = 0.0f;
-                                    anim->blendDuration = a.blendDuration;
-                                    anim->isFinished    = false;
+                                    anim->blendDuration        = a.blendDuration;
+                                    anim->isFinished           = false;
                                 } else {
                                     anim->currentLoop          = (a.loop != 0);
                                     anim->currentPlaybackSpeed = a.playbackSpeed;
@@ -1210,14 +1206,16 @@ void RegisterSystemCommands() {
                     chain.poleVector     = JPH::Vec3(a.poleX, a.poleY, a.poleZ);
                     chain.weight         = a.weight;
 
-                    ikComp->chains.push_back(chain);
-                    return static_cast<uint64_t>(ikComp->chains.size() - 1);
+                    if (!ikComp->AddChain(chain)) {
+                        return static_cast<uint64_t>(~0ull);
+                    }
+                    return static_cast<uint64_t>(ikComp->chainCount - 1);
                 }));
 
     RegisterCmd("SetIKTarget", MakeCmd<SetIKTargetArgs>([](ZHLN::Engine* engine, const SetIKTargetArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
                     if (auto ikComp = engine->GetRegistry().Get<IK::TwoBoneIKComponent>(entity)) {
-                        if (a.chainIndex < ikComp->chains.size()) {
+                        if (a.chainIndex < ikComp->chainCount && a.chainIndex < ikComp->chains.size()) {
                             auto& chain          = ikComp->chains[a.chainIndex];
                             chain.targetPosition = JPH::Vec3(a.tx, a.ty, a.tz);
                             chain.targetRotation = JPH::Quat(a.rx, a.ry, a.rz, a.rw);
@@ -1231,7 +1229,7 @@ void RegisterSystemCommands() {
     RegisterCmd("SetIKTargetEntity", MakeCmd<SetIKTargetEntityArgs>([](ZHLN::Engine* engine, const SetIKTargetEntityArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
                     if (auto ikComp = engine->GetRegistry().Get<IK::TwoBoneIKComponent>(entity)) {
-                        if (a.chainIndex < ikComp->chains.size()) {
+                        if (a.chainIndex < ikComp->chainCount && a.chainIndex < ikComp->chains.size()) {
                             auto& chain        = ikComp->chains[a.chainIndex];
                             chain.targetEntity = ZHLN::Entity::Unpack(a.targetEntityRaw);
                             chain.targetOffset = JPH::Vec3(a.offsetX, a.offsetY, a.offsetZ);

@@ -170,7 +170,7 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # frame step live in that domain, so it links alongside zahlen_gltf.
 #
 # ZHLN_TEST_SOURCE_DIR locates resources/assets/ at runtime.
-target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization zahlen_camera)
+target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization zahlen_camera zahlen_skeletal_animation)
 target_include_directories(GPU_Pipeline PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

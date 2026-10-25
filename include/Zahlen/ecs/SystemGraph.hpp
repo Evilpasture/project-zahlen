@@ -14,6 +14,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/Carrier.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ecs/ExtensionServices.hpp>
 #include <Zahlen/ecs/SystemAccess.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
 #include <Zahlen/ecs/SystemSignature.hpp>
@@ -127,18 +128,36 @@ struct ParameterResolver<FrameIndex> {
 template <typename T>
 struct ParameterResolver<Res<T>> {
     template <typename CarrierType>
-        requires(Reflect::BundleProvides<T, typename CarrierType::Services>())
+        requires(Reflect::BundleProvides<T, typename CarrierType::Services>() ||
+                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
     static auto Resolve(CarrierType& carrier) noexcept -> Res<T> {
-        return {Reflect::FindService<T>(carrier.services)};
+        if constexpr (Reflect::BundleProvides<T, typename CarrierType::Services>()) {
+            return {Reflect::FindService<T>(carrier.services)};
+        } else {
+            const auto* extensions = Reflect::FindService<ExtensionServices>(carrier.services);
+            ZHLN::Assert(extensions != nullptr, "ExtensionServices missing from service bundle");
+            auto found = extensions->template Get<T>();
+            ZHLN::Assert(found.has_value(), "System requested Res<T> for an extension service that was not installed");
+            return {std::addressof(*found)};
+        }
     }
 };
 
 template <typename T>
 struct ParameterResolver<ResMut<T>> {
     template <typename CarrierType>
-        requires(Reflect::BundleProvides<T, typename CarrierType::Services>())
+        requires(Reflect::BundleProvides<T, typename CarrierType::Services>() ||
+                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
     static auto Resolve(CarrierType& carrier) noexcept -> ResMut<T> {
-        return {Reflect::FindService<T>(carrier.services)};
+        if constexpr (Reflect::BundleProvides<T, typename CarrierType::Services>()) {
+            return {Reflect::FindService<T>(carrier.services)};
+        } else {
+            auto* extensions = Reflect::FindService<ExtensionServices>(carrier.services);
+            ZHLN::Assert(extensions != nullptr, "ExtensionServices missing from service bundle");
+            auto found = extensions->template Get<T>();
+            ZHLN::Assert(found.has_value(), "System requested ResMut<T> for an extension service that was not installed");
+            return {std::addressof(*found)};
+        }
     }
 };
 
@@ -172,11 +191,19 @@ struct ParameterResolver<Local<T>> {
 template <TemplatedDetail::OptionalResourceParam Param>
 struct ParameterResolver<Param> {
     using Value = typename Param::value_type;
+    using Clean = std::remove_const_t<Value>;
 
     template <typename CarrierType>
     static auto Resolve(CarrierType& carrier) noexcept -> Param {
-        if constexpr (Reflect::BundleProvides<std::remove_const_t<Value>, typename CarrierType::Services>()) {
-            return *Reflect::FindService<std::remove_const_t<Value>>(carrier.services);
+        if constexpr (Reflect::BundleProvides<Clean, typename CarrierType::Services>()) {
+            return *Reflect::FindService<Clean>(carrier.services);
+        } else if constexpr (Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>()) {
+            auto* extensions = Reflect::FindService<ExtensionServices>(carrier.services);
+            if constexpr (std::is_const_v<Value>) {
+                return std::as_const(*extensions).template Get<Clean>();
+            } else {
+                return extensions->template Get<Clean>();
+            }
         } else {
             return std::nullopt;
         }

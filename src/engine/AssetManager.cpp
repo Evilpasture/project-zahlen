@@ -40,6 +40,13 @@ auto AssetManager::GetCachedPrefab(uint64_t hash) -> ZHLN::Optional<ModelPrefab&
     return _prefabCache.Find(hash);
 }
 
+auto AssetManager::GetCachedPrefab(uint64_t hash) const noexcept -> ZHLN::Optional<const ModelPrefab&> {
+    if (auto found = _prefabCache.Find(hash)) {
+        return std::cref(*found);
+    }
+    return std::nullopt;
+}
+
 void AssetManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
     _prefabCache.Insert(hash, prefab);
 }

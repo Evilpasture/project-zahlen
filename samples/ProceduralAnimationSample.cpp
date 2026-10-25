@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
@@ -621,16 +622,16 @@ auto AttachCharacterRig(
         reg.Add(
             player,
             ZHLN::Components::AnimatorComponent {
+                .prefabAsset     = ZHLN::HashAssetPath(std::string_view(prefab->virtualPath)),
                 .currentTrackIdx = idleTrack,
                 .currentLoop     = true,
-                .prefab          = &*prefab,
             },
             ZHLN::ProceduralLocomotionTracksComponent {
                 .idleTrack = idleTrack,
                 .walkTrack = walkTrack,
                 .runTrack  = runTrack,
             },
-            ZHLN::Components::KinematicPoseOverrideComponent {}, ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by the optional subsystem
+            ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by the optional subsystem
             std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig, ZHLN::FirstPersonVisibilityComponent {}, std::move(itemHandling)
         );
     } else {
@@ -640,7 +641,7 @@ auto AttachCharacterRig(
         ZHLN::BuildStandardProceduralRig(proceduralRig);
 
         reg.Add(
-            player, ZHLN::Components::KinematicPoseOverrideComponent {}, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
+            player, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
             animationConfig, ZHLN::FirstPersonVisibilityComponent {}, std::move(itemHandling)
         );
     }

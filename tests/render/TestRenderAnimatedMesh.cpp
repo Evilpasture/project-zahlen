@@ -3,6 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
+#include <Animation/AnimationSystem.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
@@ -73,6 +74,7 @@ struct RenderAnimatedMeshTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(AnimatedMeshTestError::EngineInitFailed);
             }
+            ZHLN::Animation::Install(*engine);
 
             auto& reg = engine->GetRegistry();
 

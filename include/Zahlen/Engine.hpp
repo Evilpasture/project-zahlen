@@ -201,12 +201,23 @@ class ZHLN_API Engine {
     void               SetPhysicsSubstepHooks(PhysicsSubstepHooks hooks);
     [[nodiscard]] auto GetPhysicsSubstepHooks() const noexcept -> const PhysicsSubstepHooks&;
 
-    // The pose pipeline's inbound edge, and the counterpart of GetPoseUploads
-    // below: the engine owns the queue poses leave through, so it owns the list
-    // modifiers contribute to as well. A module appends its processor at install
-    // time; the animation system walks the list through the services bundle, by
-    // reference, so an install after the graphs exist still takes effect.
-    [[nodiscard]] auto GetPosePostProcessors() -> PosePostProcessorPipeline&;
+    [[nodiscard]] auto Services() noexcept -> ECS::ExtensionServices&;
+    [[nodiscard]] auto Services() const noexcept -> const ECS::ExtensionServices&;
+
+    template <typename T, typename... Args>
+    auto EmplaceService(Args&&... args) -> T& {
+        return Services().Emplace<T>(std::forward<Args>(args)...);
+    }
+
+    template <typename T>
+    [[nodiscard]] auto Service() noexcept -> ZHLN::Optional<T&> {
+        return Services().Get<T>();
+    }
+
+    template <typename T>
+    [[nodiscard]] auto Service() const noexcept -> ZHLN::Optional<const T&> {
+        return Services().Get<T>();
+    }
 
     void AddTeardownHook(TeardownHook hook);
 

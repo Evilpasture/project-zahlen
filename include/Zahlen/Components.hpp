@@ -21,6 +21,7 @@
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Scene.hpp>
+#include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/physics/PhysicsHandles.hpp>
 #include <algorithm>
 #include <array>
@@ -96,14 +97,6 @@ struct Components {
         int32_t      skeletonIndex      = -1;
         BufferHandle skinnedScratch     = BufferHandle::Invalid;
         uint32_t     scratchVertexCount = 0;
-    };
-
-    struct alignas(64) KinematicPoseOverrideComponent {
-        static constexpr size_t           MaxJoints = 512;
-        std::array<JPH::Mat44, MaxJoints> modelTransforms {};
-        uint32_t                          jointCount  = 0;
-        uint64_t                          poseVersion = 0;
-        bool                              valid       = false;
     };
 
     struct MorphTargetComponent {
@@ -262,21 +255,16 @@ struct Components {
         int physicsDrawMode = 0;
     };
     struct AnimatorComponent {
-        int32_t currentTrackIdx      = -1;
-        float   currentTrackTime     = 0.0f;
-        float   currentPlaybackSpeed = 1.0f;
-        bool    currentLoop          = true;
-
-        int32_t prevTrackIdx      = -1;
-        float   prevTrackTime     = 0.0f;
-        float   prevPlaybackSpeed = 1.0f;
-
-        float blendFactor   = 1.0f;
-        float blendDuration = 0.15f;
-        bool  isFinished    = false;
-
-        const ModelPrefab* prefab = nullptr;
+        AnimationHandle animationHandle      = AnimationHandle::Null();
+        AssetID         prefabAsset          = InvalidAssetID;
+        int32_t         currentTrackIdx      = -1;
+        float           currentTrackTime     = 0.0f;
+        float           currentPlaybackSpeed = 1.0f;
+        float           blendDuration        = 0.15f;
+        bool            currentLoop          = true;
+        bool            isFinished           = false;
     };
+    static_assert(std::is_trivially_copyable_v<AnimatorComponent>);
 
     struct AudioListenerComponent {
         bool isPrimary = true;

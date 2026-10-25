@@ -945,16 +945,16 @@ auto AttachCharacterRig(
         reg.Add(
             player,
             ZHLN::Components::AnimatorComponent {
+                .prefabAsset     = ZHLN::HashAssetPath(std::string_view(prefab->virtualPath)),
                 .currentTrackIdx = idleTrack,
                 .currentLoop     = true,
-                .prefab          = &*prefab,
             },
             ZHLN::ProceduralLocomotionTracksComponent {
                 .idleTrack = idleTrack,
                 .walkTrack = walkTrack,
                 .runTrack  = runTrack,
             },
-            ZHLN::Components::KinematicPoseOverrideComponent {}, ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by the optional subsystem
+            ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by the optional subsystem
             std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig, std::move(firstPerson)
         );
     } else {
@@ -964,7 +964,7 @@ auto AttachCharacterRig(
         ZHLN::BuildStandardProceduralRig(proceduralRig);
 
         reg.Add(
-            player, ZHLN::Components::KinematicPoseOverrideComponent {}, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
+            player, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
             animationConfig, std::move(firstPerson)
         );
     }

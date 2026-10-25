@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "SystemWiring.hpp"
-#include "AnimationSystem.hpp"
 #include "ArticulationSystem.hpp"
 #include "AudioSystem.hpp"
 #include "CameraSystem.hpp"
@@ -178,7 +177,6 @@ void BuildSystemGraphs(Engine& engine) {
     // Every graph node derives its name, thunk and component hazards from its
     // callable's signature. The camera is modified in the earlier frame phase.
     updateGraph.AddSystem<&VisualInterpolationSystem::Update>();
-    updateGraph.AddSystem<&AnimationSystem::Update>();
     updateGraph.AddSystem<&ArticulationSystem::Update>();
     updateGraph.AddSystem<&TransformSystem::Update>();
     updateGraph.AddSystem<&AudioSystem>();

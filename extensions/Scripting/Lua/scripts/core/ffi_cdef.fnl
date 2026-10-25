@@ -324,17 +324,14 @@
       } TerrainComponent;
 
       typedef struct AnimatorComponent {
+          uint32_t animationHandle;
+          uint64_t prefabAsset;
           int32_t currentTrackIdx;
           float currentTrackTime;
           float currentPlaybackSpeed;
-          bool currentLoop;
-          int32_t prevTrackIdx;
-          float prevTrackTime;
-          float prevPlaybackSpeed;
-          float blendFactor;
           float blendDuration;
+          bool currentLoop;
           bool isFinished;
-          void* prefab;
       } AnimatorComponent;
 
       typedef struct ParticleEmitterParams {

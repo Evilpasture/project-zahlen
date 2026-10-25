@@ -105,9 +105,8 @@ bool ArticulationSystem::AttachRagdoll(
 }
 
 void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const Components::PhysicsComponent,
-                                            const Components::KinematicPoseOverrideComponent, const Components::SkeletalMeshComponent,
-                                            Components::TransformComponent&, const Components::RagdollHitReactionCommand,
-                                            const Components::RagdollImpulseCommand> query,
+                                            const Components::SkeletalMeshComponent, Components::TransformComponent&,
+                                            const Components::RagdollHitReactionCommand, const Components::RagdollImpulseCommand> query,
                                  ECS::EntityCommandBuffer& ecb, ECS::ResMut<ArticulationSystem> articulation,
                                  ECS::ResMut<PhysicsContext> physics, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt) {
     auto& sys = *articulation;
@@ -207,9 +206,9 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
             }
         }
 
-        if (const auto poseOverride = query.Get<Components::KinematicPoseOverrideComponent>(e); poseOverride && poseOverride->valid) {
-            const uint32_t overrideCount = std::min<uint32_t>(count, poseOverride->jointCount);
-            std::copy_n(poseOverride->modelTransforms.begin(), overrideCount, modelJoints.begin());
+        if (const auto kinematic = poseUploads->KinematicPose(offset); !kinematic.empty()) {
+            const size_t overrideCount = std::min<size_t>(count, kinematic.size());
+            std::copy_n(kinematic.data(), overrideCount, modelJoints.data());
         }
 
         std::memcpy(animPose.GetJointMatrices().data(), modelJoints.data(), count * sizeof(JPH::Mat44));

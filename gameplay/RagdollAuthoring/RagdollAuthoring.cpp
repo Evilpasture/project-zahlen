@@ -5,6 +5,7 @@
 #include "RagdollAuthoring.hpp"
 
 #include "engine/system/ArticulationSystem.hpp"
+#include "Zahlen/AssetManager.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Log.hpp"
@@ -71,12 +72,20 @@ auto AuthorHumanoidParts(const Skeleton& skeleton, PhysicsContext& pc) -> std::v
     return parts;
 }
 
-auto BuildHumanoidBipedRagdoll(Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc, ArticulationSystem& articulation) -> bool {
+auto BuildHumanoidBipedRagdoll(
+    Entity rootEntity, ECS::Registry& reg, const AssetManager& assets, PhysicsContext& pc, ArticulationSystem& articulation
+) -> bool {
     // The root owns the rig description: its AnimatorComponent holds the
-    // prefab the skeletons live in.
+    // prefabAsset whose cached ModelPrefab owns the skeletons.
     const auto animComp = reg.Get<Components::AnimatorComponent>(rootEntity);
-    if (!animComp || animComp->prefab == nullptr) {
-        ZHLN::LogWarning("[RagdollAuthoring] BuildHumanoidBipedRagdoll found no AnimatorComponent with a prefab on entity {}.", rootEntity.index);
+    if (!animComp || animComp->prefabAsset == InvalidAssetID) {
+        ZHLN::LogWarning("[RagdollAuthoring] BuildHumanoidBipedRagdoll found no AnimatorComponent with a prefabAsset on entity {}.", rootEntity.index);
+        return false;
+    }
+
+    const auto prefab = assets.GetCachedPrefab(animComp->prefabAsset);
+    if (!prefab) {
+        ZHLN::LogWarning("[RagdollAuthoring] BuildHumanoidBipedRagdoll could not resolve cached prefab for entity {}.", rootEntity.index);
         return false;
     }
 
@@ -90,10 +99,10 @@ auto BuildHumanoidBipedRagdoll(Entity rootEntity, ECS::Registry& reg, PhysicsCon
         if (!skelMesh || !hier || hier->parent != rootEntity) {
             continue;
         }
-        if (skelMesh->skeletonIndex < 0 || static_cast<size_t>(skelMesh->skeletonIndex) >= animComp->prefab->skeletons.size()) {
+        if (skelMesh->skeletonIndex < 0 || static_cast<size_t>(skelMesh->skeletonIndex) >= prefab->skeletons.size()) {
             continue;
         }
-        targetSkeleton = &animComp->prefab->skeletons[static_cast<size_t>(skelMesh->skeletonIndex)];
+        targetSkeleton = &prefab->skeletons[static_cast<size_t>(skelMesh->skeletonIndex)];
         jointOffset    = skelMesh->jointOffset;
         break;
     }
@@ -128,7 +137,7 @@ auto SetupRagdollCommand(Engine& engine, const void* args) -> uint64_t {
     // generator resolves the rig and authors the parts, and the core
     // articulation system only executes the result.
     const bool built = BuildHumanoidBipedRagdoll(
-        Entity::Unpack(a.playerEntity), engine.GetRegistry(), engine.GetPhysicsContext(), engine.GetArticulationSystem()
+        Entity::Unpack(a.playerEntity), engine.GetRegistry(), engine.GetAssetManager(), engine.GetPhysicsContext(), engine.GetArticulationSystem()
     );
     return built ? 1u : 0u;
 }

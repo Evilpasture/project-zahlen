@@ -699,10 +699,10 @@ auto InstantiatePrefab(
         if (params.isAnimated && (!prefab.animations.empty() || !prefab.skeletons.empty())) {
             reg.Add(
                 rootEntity, Components::AnimatorComponent {
+                                .prefabAsset      = HashAssetPath(std::string_view(prefab.virtualPath)),
                                 .currentTrackIdx  = prefab.animations.empty() ? -1 : 0,
                                 .currentTrackTime = 0.0f,
                                 .currentLoop      = true,
-                                .prefab           = &prefab,
                             }
             );
         }

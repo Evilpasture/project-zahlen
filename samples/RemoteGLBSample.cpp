@@ -85,6 +85,7 @@
 // G hide/show the floor, H hide/show the subject, S toggle screen-space
 // reflections, R re-download, C re-crawl the model list.
 
+#include <Animation/AnimationSystem.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
@@ -1515,6 +1516,7 @@ auto main(int argc, char* argv[]) -> int {
     // subscribes its own device-lost rebuild. Once, next to the first import (see
     // GLTF::InstallDeviceLostHandler).
     ZHLN::GLTF::InstallDeviceLostHandler(*engine);
+    ZHLN::Animation::Install(*engine);
 
     engine->InitializeDefaultScene();
 

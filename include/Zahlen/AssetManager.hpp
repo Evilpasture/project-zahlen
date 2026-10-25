@@ -142,6 +142,7 @@ class AssetManager {
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool { return _vfs.Exists(assetID); }
 
     [[nodiscard]] auto GetCachedPrefab(uint64_t hash) -> ZHLN::Optional<ModelPrefab&>;
+    [[nodiscard]] auto GetCachedPrefab(uint64_t hash) const noexcept -> ZHLN::Optional<const ModelPrefab&>;
     // Bind the uploading renderer via UseRenderContext before caching a prefab
     // whose parts contain GPU meshes (Kernel already does this for Engine users).
     void CachePrefab(uint64_t hash, ModelPrefab* prefab);

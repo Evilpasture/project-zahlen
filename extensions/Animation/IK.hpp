@@ -3,13 +3,9 @@
 
 // extensions/Animation/IK.hpp
 //
-// Analytic two-bone IK: an animation *modifier* on top of core's skeletal
-// hierarchy transforms. Core keeps the pose pipeline and GPUJoint; this extra
-// owns the solver, the chain component and the pose post-processor that the
-// skinning pipeline calls between pose evaluation and joint upload. It is
-// contributed to Engine::GetPosePostProcessors() rather than installed into a
-// slot -- see Install below, and PosePostProcessorPipeline for why the pipeline
-// is a list Core owns instead of a graph node.
+// Analytic two-bone IK: a declarative animation modifier backed by
+// AnimationContext. TwoBoneIKComponent is pure trivially-copyable state;
+// TwoBoneIKSystem forwards chains into AnimationContext prior to Step().
 #pragma once
 
 // clang-format off
@@ -18,27 +14,32 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
-#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Components.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/GameModule.hpp>
+#include <Zahlen/ecs/SystemAccess.hpp>
+#include <Zahlen/ecs/SystemParameters.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <span>
-#include <vector>
+#include <type_traits>
 
 namespace ZHLN {
 class Engine;
-struct ModelPrefab;
-namespace ECS {
-class Registry;
-} // namespace ECS
+
+namespace Animation {
+class AnimationContext;
+}
 
 namespace IK {
 
+constexpr size_t kMaxTwoBoneIKChains = 4;
+
 // One solvable chain: upper -> lower -> end bone indices into the prefab's
 // node list, plus the target (fixed position or a tracked entity) and the
-// pole hint. Moved out of ZHLN::Components with the solver it belongs to;
-// the bare reflection name ("TwoBoneIKComponent") is unchanged, so registry
-// and script names survive the move.
+// pole hint.
 struct TwoBoneIKChain {
     int32_t upperNodeIndex = -1;
     int32_t lowerNodeIndex = -1;
@@ -54,25 +55,40 @@ struct TwoBoneIKChain {
     float weight            = 1.0f;
     bool  orientEndEffector = true;
 };
+static_assert(std::is_trivially_copyable_v<TwoBoneIKChain>, "TwoBoneIKChain must remain trivially copyable.");
 
 struct TwoBoneIKComponent {
-    ZHLN::Array<TwoBoneIKChain> chains;
+    std::array<TwoBoneIKChain, kMaxTwoBoneIKChains> chains {};
+    uint32_t                                        chainCount = 0;
+
+    constexpr void ClearChains() noexcept {
+        chainCount = 0;
+    }
+
+    constexpr auto AddChain(const TwoBoneIKChain& chain) noexcept -> bool {
+        if (chainCount >= chains.size()) {
+            return false;
+        }
+        chains[chainCount++] = chain;
+        return true;
+    }
+
+    [[nodiscard]] constexpr auto ActiveChains() const noexcept -> std::span<const TwoBoneIKChain> {
+        const uint32_t bounded = std::min<uint32_t>(chainCount, static_cast<uint32_t>(chains.size()));
+        return std::span<const TwoBoneIKChain> {chains.data(), bounded};
+    }
+};
+static_assert(std::is_trivially_copyable_v<TwoBoneIKComponent>, "TwoBoneIKComponent must never own heap memory or views.");
+
+struct TwoBoneIKSystem {
+    static void Update(
+        ECS::Query<const Components::AnimatorComponent, const TwoBoneIKComponent, const Components::TransformComponent> query,
+        ECS::ResMut<Animation::AnimationContext>                                                                        anim
+    );
 };
 
-// The bone-pose post-processor the skinning pipeline invokes between pose
-// evaluation and joint upload (BonePosePostProcessor shape). Solves every
-// chain on `rootEntity` in place over `worldTransforms`. Thread-safe: it
-// only reads the registry and writes the caller-owned transform vectors,
-// matching the parallel context it runs in.
-void ApplyTwoBoneIK(
-    const ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::span<JPH::Mat44> worldTransforms
-);
-
-// Composition-root entry point: registers TwoBoneIKComponent and contributes
-// ApplyTwoBoneIK to the pose pipeline, alongside whatever other modifiers the
-// host installed. Without this,
-// TwoBoneIKComponent entities animate as authored -- IK is opt-in by design.
-void Install(Engine& engine);
+[[nodiscard]] auto Describe() noexcept -> Module;
+void               Install(Engine& engine);
 
 struct TwoBoneIKSolverInput {
     JPH::Vec3 upperPosition;

@@ -10,9 +10,12 @@ module;
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
+#include <Animation/AnimationContext.hpp>
+#include <Animation/AnimationSystem.hpp>
+#include <CharacterController/CharacterComponents.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -420,7 +423,14 @@ void SamplePoseChannel(
     }
 }
 
-void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const ProceduralAnimationConfigComponent* config, RigBoneMap& map, float dt) noexcept {
+void ApplyAuthoredPose(
+    const Components::AnimatorComponent*       animator,
+    const ModelPrefab*                         prefab,
+    const ProceduralLocomotionTracksComponent* tracks,
+    const ProceduralAnimationConfigComponent*  config,
+    RigBoneMap&                                map,
+    float                                      dt
+) noexcept {
     std::array<JPH::Vec3, kMaxRigNodes> targetTranslations {};
     std::array<JPH::Quat, kMaxRigNodes> targetRotations {};
     std::array<JPH::Vec3, kMaxRigNodes> targetScales {};
@@ -444,10 +454,10 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
     }
 
     int32_t activeTrack = -1;
-    if (animator != nullptr && animator->prefab != nullptr && animator->currentTrackIdx >= 0 &&
-        animator->currentTrackIdx < static_cast<int32_t>(animator->prefab->animations.size())) {
+    if (animator != nullptr && prefab != nullptr && animator->currentTrackIdx >= 0 &&
+        animator->currentTrackIdx < static_cast<int32_t>(prefab->animations.size())) {
         activeTrack               = animator->currentTrackIdx;
-        const AnimationClip& clip = animator->prefab->animations[static_cast<size_t>(activeTrack)];
+        const AnimationClip& clip = prefab->animations[static_cast<size_t>(activeTrack)];
         for (const AnimationChannel& channel: clip.channels) {
             if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(map.nodeCount) || channel.path == AnimationPathType::Weights) {
                 continue;
@@ -456,13 +466,10 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
             SamplePoseChannel(channel, animator->currentTrackTime, mode, bicubicTension, targetTranslations[node], targetRotations[node], targetScales[node]);
         }
 
-        // Cross-fade between the previous and current tracks when a blend is
-        // active. Without this, locomotion track switches snap instantly even
-        // though SynchronizeLocomotionTrack sets blendFactor/blendDuration.
-        // The core AnimationSystem also cross-fades, but ProceduralAnimation
-        // overwrites its output, so we must blend here too.
-        if (animator->prevTrackIdx >= 0 && animator->blendFactor < 1.0f &&
-            animator->prevTrackIdx < static_cast<int32_t>(animator->prefab->animations.size())) {
+        // Cross-fade between the previous and current tracks when a stride-wheel
+        // blend is active on ProceduralLocomotionTracksComponent.
+        if (tracks != nullptr && tracks->prevTrack >= 0 && tracks->blendFactor < 1.0f &&
+            tracks->prevTrack < static_cast<int32_t>(prefab->animations.size())) {
             std::array<JPH::Vec3, kMaxRigNodes> prevTranslations {};
             std::array<JPH::Quat, kMaxRigNodes> prevRotations {};
             std::array<JPH::Vec3, kMaxRigNodes> prevScales {};
@@ -471,7 +478,7 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
                 prevRotations[node]    = ExtractRotation(map.bindLocalTransforms[node]);
                 prevScales[node]       = ExtractScale(map.bindLocalTransforms[node]);
             }
-            const AnimationClip& prevClip = animator->prefab->animations[static_cast<size_t>(animator->prevTrackIdx)];
+            const AnimationClip& prevClip = prefab->animations[static_cast<size_t>(tracks->prevTrack)];
             for (const AnimationChannel& channel: prevClip.channels) {
                 if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(map.nodeCount) ||
                     channel.path == AnimationPathType::Weights) {
@@ -479,11 +486,11 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
                 }
                 const size_t node = static_cast<size_t>(channel.targetNodeIndex);
                 SamplePoseChannel(
-                    channel, animator->prevTrackTime, mode, bicubicTension,
+                    channel, tracks->prevTrackTime, mode, bicubicTension,
                     prevTranslations[node], prevRotations[node], prevScales[node]
                 );
             }
-            const float t = SmootherStep(animator->blendFactor);
+            const float t = SmootherStep(tracks->blendFactor);
             for (size_t node = 0; node < map.nodeCount; ++node) {
                 targetTranslations[node] = prevTranslations[node] + t * (targetTranslations[node] - prevTranslations[node]);
                 targetRotations[node]    = prevRotations[node].SLERP(targetRotations[node], t).Normalized();
@@ -542,10 +549,14 @@ struct AuthoredUpperBodyCoverage {
     bool torsoHead = false;
 };
 
-[[nodiscard]] AuthoredUpperBodyCoverage FindAuthoredUpperBodyCoverage(const Components::AnimatorComponent* animator, const RigBoneMap& map) noexcept {
+[[nodiscard]] AuthoredUpperBodyCoverage FindAuthoredUpperBodyCoverage(
+    const Components::AnimatorComponent* animator,
+    const ModelPrefab*                   prefab,
+    const RigBoneMap&                    map
+) noexcept {
     AuthoredUpperBodyCoverage coverage;
-    if (animator == nullptr || animator->prefab == nullptr || animator->currentTrackIdx < 0 ||
-        animator->currentTrackIdx >= static_cast<int32_t>(animator->prefab->animations.size())) {
+    if (animator == nullptr || prefab == nullptr || animator->currentTrackIdx < 0 ||
+        animator->currentTrackIdx >= static_cast<int32_t>(prefab->animations.size())) {
         return coverage;
     }
 
@@ -556,7 +567,7 @@ struct AuthoredUpperBodyCoverage {
         CharacterBone::Spine, CharacterBone::SupSpine, CharacterBone::Chest, CharacterBone::Neck, CharacterBone::Head,
     };
 
-    const AnimationClip& clip = animator->prefab->animations[static_cast<size_t>(animator->currentTrackIdx)];
+    const AnimationClip& clip = prefab->animations[static_cast<size_t>(animator->currentTrackIdx)];
     for (const AnimationChannel& channel: clip.channels) {
         if (channel.path == AnimationPathType::Weights || channel.targetNodeIndex < 0) {
             continue;
@@ -572,12 +583,13 @@ struct AuthoredUpperBodyCoverage {
     return coverage;
 }
 
-[[nodiscard]] bool IsValidTrack(const Components::AnimatorComponent& animator, int32_t track) noexcept {
-    return animator.prefab != nullptr && track >= 0 && track < static_cast<int32_t>(animator.prefab->animations.size());
+[[nodiscard]] bool IsValidTrack(const ModelPrefab* prefab, int32_t track) noexcept {
+    return prefab != nullptr && track >= 0 && track < static_cast<int32_t>(prefab->animations.size());
 }
 
 void SynchronizeLocomotionTrack(
     Components::AnimatorComponent&       animator,
+    const ModelPrefab*                   prefab,
     ProceduralLocomotionTracksComponent& tracks,
     const Character::MovementComponent* movement,
     ProceduralLocomotionComponent&       gait,
@@ -604,12 +616,12 @@ void SynchronizeLocomotionTrack(
 
     int32_t desiredTrack = tracks.idleTrack;
     if (moving) {
-        desiredTrack = running && IsValidTrack(animator, tracks.runTrack) ? tracks.runTrack : tracks.walkTrack;
-        if (!IsValidTrack(animator, desiredTrack)) {
-            desiredTrack = IsValidTrack(animator, tracks.runTrack) ? tracks.runTrack : tracks.idleTrack;
+        desiredTrack = running && IsValidTrack(prefab, tracks.runTrack) ? tracks.runTrack : tracks.walkTrack;
+        if (!IsValidTrack(prefab, desiredTrack)) {
+            desiredTrack = IsValidTrack(prefab, tracks.runTrack) ? tracks.runTrack : tracks.idleTrack;
         }
     }
-    if (!IsValidTrack(animator, desiredTrack)) {
+    if (!IsValidTrack(prefab, desiredTrack)) {
         return;
     }
 
@@ -669,53 +681,42 @@ void SynchronizeLocomotionTrack(
     }
 
     if (animator.currentTrackIdx != desiredTrack) {
-        if (animator.prevTrackIdx == desiredTrack && animator.blendFactor < 1.0f) {
-            // Reversing a blend in progress (e.g. rapid walk→run→walk toggle).
-            // Swap prev/current and invert the blend factor so the cross-fade
-            // smoothly reverses instead of snapping to a fresh blend from a
-            // barely-started track.
-            std::swap(animator.prevTrackIdx, animator.currentTrackIdx);
-            std::swap(animator.prevTrackTime, animator.currentTrackTime);
-            std::swap(animator.prevPlaybackSpeed, animator.currentPlaybackSpeed);
-            animator.blendFactor = 1.0f - animator.blendFactor;
+        if (tracks.prevTrack == desiredTrack && tracks.blendFactor < 1.0f) {
+            std::swap(tracks.prevTrack, animator.currentTrackIdx);
+            std::swap(tracks.prevTrackTime, animator.currentTrackTime);
+            std::swap(tracks.prevPlaybackSpeed, animator.currentPlaybackSpeed);
+            tracks.blendFactor = 1.0f - tracks.blendFactor;
         } else {
-            animator.prevTrackIdx      = animator.currentTrackIdx;
-            animator.prevTrackTime     = animator.currentTrackTime;
-            animator.prevPlaybackSpeed = animator.currentPlaybackSpeed;
-            animator.currentTrackIdx   = desiredTrack;
-            animator.currentTrackTime  = 0.0f;
+            tracks.prevTrack              = animator.currentTrackIdx;
+            tracks.prevTrackTime          = animator.currentTrackTime;
+            tracks.prevPlaybackSpeed      = animator.currentPlaybackSpeed;
+            animator.currentTrackIdx      = desiredTrack;
+            animator.currentTrackTime     = 0.0f;
             animator.currentPlaybackSpeed = 1.0f;
-            animator.blendFactor       = 0.0f;
-            animator.blendDuration     = 0.35f;
-            animator.isFinished        = false;
+            tracks.blendFactor            = 0.0f;
+            animator.blendDuration        = 0.35f;
+            animator.isFinished           = false;
         }
     }
 
-    // Advance the track cross-fade. ProceduralAnimation owns the final pose
-    // for locomotion entities, so it must drive the blend factor itself rather
-    // than relying on the core AnimationSystem (which may run at a different
-    // point in the frame or not at all for these entities).
-    if (animator.prevTrackIdx >= 0 && animator.blendDuration > 0.0f) {
-        animator.blendFactor = std::min(1.0f, animator.blendFactor + (dt / animator.blendDuration));
-        if (animator.blendFactor >= 1.0f) {
-            animator.prevTrackIdx = -1;
+    if (tracks.prevTrack >= 0 && animator.blendDuration > 0.0f) {
+        tracks.blendFactor = std::min(1.0f, tracks.blendFactor + (dt / animator.blendDuration));
+        if (tracks.blendFactor >= 1.0f) {
+            tracks.prevTrack = -1;
         }
     } else {
-        animator.blendFactor = 1.0f;
+        tracks.blendFactor = 1.0f;
     }
-    if (animator.prevTrackIdx >= 0 && animator.blendFactor < 1.0f) {
-        // Keep the previous track stride-synced too, so both tracks show the
-        // same pose phase during the cross-fade. Without this, the prev track
-        // drifts relative to the current track and the blend looks wrong.
+    if (tracks.prevTrack >= 0 && tracks.blendFactor < 1.0f && IsValidTrack(prefab, tracks.prevTrack)) {
         if (moving && tracks.synchronizeToStrideWheel) {
             const float          prevPosePhase = Animation::EvaluateTwoKeyPosePhase(gait.phase);
-            const AnimationClip& prevClip      = animator.prefab->animations[static_cast<size_t>(animator.prevTrackIdx)];
-            animator.prevTrackTime             = prevPosePhase * std::max(prevClip.duration, 0.0f);
+            const AnimationClip& prevClip      = prefab->animations[static_cast<size_t>(tracks.prevTrack)];
+            tracks.prevTrackTime               = prevPosePhase * std::max(prevClip.duration, 0.0f);
         } else {
-            animator.prevTrackTime += dt * animator.prevPlaybackSpeed;
-            const AnimationClip& prevClip = animator.prefab->animations[static_cast<size_t>(animator.prevTrackIdx)];
+            tracks.prevTrackTime += dt * tracks.prevPlaybackSpeed;
+            const AnimationClip& prevClip = prefab->animations[static_cast<size_t>(tracks.prevTrack)];
             if (prevClip.duration > 0.0f) {
-                animator.prevTrackTime = std::fmod(animator.prevTrackTime, prevClip.duration);
+                tracks.prevTrackTime = std::fmod(tracks.prevTrackTime, prevClip.duration);
             }
         }
     }
@@ -730,7 +731,7 @@ void SynchronizeLocomotionTrack(
         // the stride wheel makes pass occur halfway between them and returns to
         // key zero without a loop discontinuity.
         const float          posePhase = Animation::EvaluateTwoKeyPosePhase(wheelPhase);
-        const AnimationClip& clip      = animator.prefab->animations[static_cast<size_t>(desiredTrack)];
+        const AnimationClip& clip      = prefab->animations[static_cast<size_t>(desiredTrack)];
         tracks.synchronizedPhase       = posePhase;
         tracks.synchronizedTime        = posePhase * std::max(clip.duration, 0.0f);
         animator.currentTrackTime      = tracks.synchronizedTime;
@@ -1398,8 +1399,9 @@ int32_t FindAnimationTrack(const ModelPrefab& prefab, std::string_view name) noe
 bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMap& outMap) noexcept {
     outMap.Reset();
 
-    outMap.sourcePrefab = &prefab;
-    outMap.nodeCount    = std::min(prefab.nodes.size(), kMaxRigNodes);
+    const std::string_view vPath = std::string_view(prefab.virtualPath);
+    outMap.sourcePrefabAsset     = vPath.empty() ? InvalidAssetID : HashAssetPath(vPath);
+    outMap.nodeCount             = std::min(prefab.nodes.size(), kMaxRigNodes);
     outMap.jointCount   = static_cast<uint32_t>(std::min(skeleton.joints.size(), kMaxRigNodes));
     if (prefab.nodes.size() > kMaxRigNodes) {
         ZHLN::Log(
@@ -1660,14 +1662,30 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
     outMap.poseValid   = true;
 }
 
-// Structural additions (pose overrides and attachment world transforms) need
-// Registry&: the inspector marks this evaluator as a wildcard component writer.
-// Keep the existing SystemContext entry point below for custom schedules.
-void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Res<PhysicsContext> physicsRes,
-                               ECS::ResMut<PoseUploadQueue> poseUploads) noexcept;
+void ProceduralAnimationSystem(
+    ECS::Registry&                             registry,
+    FrameDt                                    frameDt,
+    ECS::Res<PhysicsContext>                   physicsRes,
+    ECS::Res<AssetManager>                     assetsRes,
+    ECS::ResMut<PoseUploadQueue>               poseUploads
+) noexcept;
 
-void ProceduralAnimation::Register(Engine& engine) {
-    auto& registry = engine.GetRegistry();
+namespace {
+
+struct ProceduralSuppressUploadSystem {
+    static void Update(
+        ECS::Query<const ProceduralLocomotionComponent, const Components::AnimatorComponent> query,
+        ECS::ResMut<Animation::AnimationContext>                                             anim
+    ) {
+        for (const Entity entity: query.Entities<ProceduralLocomotionComponent>()) {
+            if (const auto animator = query.Get<Components::AnimatorComponent>(entity); animator && animator->animationHandle.IsValid()) {
+                anim->SuppressPaletteUpload(animator->animationHandle);
+            }
+        }
+    }
+};
+
+void RegisterProceduralComponents(ECS::Registry& registry) {
     registry.RegisterComponent<ProceduralLocomotionComponent>("ProceduralLocomotionComponent");
     registry.RegisterComponent<HairStrandsComponent>("HairStrandsComponent");
     registry.RegisterComponent<ProceduralLookAtComponent>("ProceduralLookAtComponent");
@@ -1676,12 +1694,31 @@ void ProceduralAnimation::Register(Engine& engine) {
     registry.RegisterComponent<ProceduralLocomotionTracksComponent>("ProceduralLocomotionTracksComponent");
     registry.RegisterComponent<Animation::ItemHandlingComponent>("ItemHandlingComponent");
     registry.RegisterComponent<RigBoneMap>("RigBoneMap");
+}
 
-    auto&      graph    = engine.GetUpdateGraph();
-    const bool inserted = graph.AddSystemBefore<&ProceduralAnimationSystem>("ArticulationSystem");
-    if (inserted) {
-        graph.Compile();
+void AddProceduralSystems(ECS::SimGraph& updateGraph, ECS::RenderGraph&) {
+    if (!updateGraph.AddSystemBefore<&ProceduralSuppressUploadSystem::Update>("AnimationStepSystem")) {
+        updateGraph.AddSystem<&ProceduralSuppressUploadSystem::Update>();
+    }
+    if (!updateGraph.AddSystemBefore<&ProceduralAnimationSystem>("ArticulationSystem")) {
+        updateGraph.AddSystem<&ProceduralAnimationSystem>();
+    }
+}
+
+} // namespace
+
+void ProceduralAnimation::Register(Engine& engine) {
+    Animation::Install(engine);
+
+    const Module module {
+        .name               = "ProceduralAnimation",
+        .registerComponents = &RegisterProceduralComponents,
+        .addGraphSystems    = &AddProceduralSystems,
+    };
+    if (auto installed = engine.InstallModule(module); installed) {
         ZHLN::Log("[ProceduralAnimation] Registered optional subsystem before ArticulationSystem.");
+    } else {
+        ZHLN::LogError("[ProceduralAnimation] Failed to install module: {}", ToString(installed.error()));
     }
 }
 
@@ -1895,16 +1932,26 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
 // produces goes to the palette queue rather than to a renderer reference.
 void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
     ProceduralAnimationSystem(
-        ctx.registry, FrameDt {dt}, ECS::Res<PhysicsContext> {&ctx.services.physics}, ECS::ResMut<PoseUploadQueue> {&ctx.services.poseUploads}
+        ctx.registry,
+        FrameDt {dt},
+        ECS::Res<PhysicsContext> {&ctx.services.physics},
+        ECS::Res<AssetManager> {&ctx.services.assets},
+        ECS::ResMut<PoseUploadQueue> {&ctx.services.poseUploads}
     );
 }
 
-void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Res<PhysicsContext> physicsRes,
-                               ECS::ResMut<PoseUploadQueue> poseUploads) noexcept {
+void ProceduralAnimationSystem(
+    ECS::Registry&                             registry,
+    FrameDt                                    frameDt,
+    ECS::Res<PhysicsContext>                   physicsRes,
+    ECS::Res<AssetManager>                     assetsRes,
+    ECS::ResMut<PoseUploadQueue>               poseUploads
+) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
 
-    const float dt = frameDt.value;
-    auto& physics  = *physicsRes;
+    const float dt      = frameDt.value;
+    auto&       physics = *physicsRes;
+    const auto& assets  = *assetsRes;
 
     for (Entity entity: registry.GetEntitiesWith<ProceduralLocomotionComponent>()) {
         // Everything between the loop entry and the first stage below: the
@@ -1914,39 +1961,32 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         // cannot be hoisted out of the loop body to close a scope around them.
         std::optional<ZHLN::ScopedTimer> preambleTimer(std::in_place, "PA Stage: Entity preamble");
 
-        auto gait             = registry.Get<ProceduralLocomotionComponent>(entity);
-        auto hair             = registry.Get<HairStrandsComponent>(entity);
-        auto config           = registry.Get<ProceduralAnimationConfigComponent>(entity);
-        auto firstPerson      = registry.Get<FirstPersonVisibilityComponent>(entity);
-        auto tracks           = registry.Get<ProceduralLocomotionTracksComponent>(entity);
-        auto itemHandling     = registry.Get<Animation::ItemHandlingComponent>(entity);
-        auto movement         = registry.Get<Character::MovementComponent>(entity);
-        auto transform        = registry.Get<Components::TransformComponent>(entity);
-        auto physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
-        auto poseOverride     = registry.Get<Components::KinematicPoseOverrideComponent>(entity);
-        auto boneMap          = registry.Get<RigBoneMap>(entity);
+        auto       gait             = registry.Get<ProceduralLocomotionComponent>(entity);
+        auto       hair             = registry.Get<HairStrandsComponent>(entity);
+        auto       config           = registry.Get<ProceduralAnimationConfigComponent>(entity);
+        auto       firstPerson      = registry.Get<FirstPersonVisibilityComponent>(entity);
+        auto       tracks           = registry.Get<ProceduralLocomotionTracksComponent>(entity);
+        auto       itemHandling     = registry.Get<Animation::ItemHandlingComponent>(entity);
+        auto       movement         = registry.Get<Character::MovementComponent>(entity);
+        auto       transform        = registry.Get<Components::TransformComponent>(entity);
+        auto       physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
+        auto       boneMap          = registry.Get<RigBoneMap>(entity);
+        const bool hasRagdoll       = registry.Get<Components::RagdollComponent>(entity).has_value();
 
-        // Articulation consumes only the generic core pose hook. Guarantee that
-        // a procedural ragdoll publishes through that hook even when spawn code
-        // forgot to attach it explicitly.
-        if (!poseOverride && registry.Get<Components::RagdollComponent>(entity)) {
-            poseOverride = registry.Add(entity, Components::KinematicPoseOverrideComponent {});
-            ZHLN::Log("[ProceduralAnimation] Added missing KinematicPoseOverrideComponent to ragdoll entity {}.", entity.index);
-        }
-        if (poseOverride) {
-            poseOverride->valid = false;
-        }
         if (!gait || !transform || !boneMap) {
             continue;
         }
 
-        auto               animator = registry.Get<Components::AnimatorComponent>(entity);
-        const ModelPrefab* prefab   = animator ? animator->prefab : boneMap->sourcePrefab;
-        SkinBinding        skin     = FindSkinBinding(registry, entity, prefab);
+        auto               animator    = registry.Get<Components::AnimatorComponent>(entity);
+        const AssetID      prefabAsset = (animator && animator->prefabAsset != InvalidAssetID) ? animator->prefabAsset : boneMap->sourcePrefabAsset;
+        const auto         prefabOpt   = prefabAsset != InvalidAssetID ? assets.GetCachedPrefab(prefabAsset) : ZHLN::Optional<const ModelPrefab&> {};
+        const ModelPrefab* prefab      = prefabOpt ? &*prefabOpt : nullptr;
+        SkinBinding        skin        = FindSkinBinding(registry, entity, prefab);
 
-        if ((!boneMap->initialized || boneMap->sourcePrefab != prefab) && prefab != nullptr && skin.skeleton != nullptr) {
-            const bool complete    = BuildBoneMap(*prefab, *skin.skeleton, *boneMap);
-            boneMap->jointOffset   = skin.skeletalMesh->jointOffset;
+        if ((!boneMap->initialized || boneMap->sourcePrefabAsset != prefabAsset) && prefab != nullptr && skin.skeleton != nullptr) {
+            const bool complete        = BuildBoneMap(*prefab, *skin.skeleton, *boneMap);
+            boneMap->sourcePrefabAsset = prefabAsset;
+            boneMap->jointOffset       = skin.skeletalMesh->jointOffset;
             boneMap->skeletonIndex = skin.skeletalMesh->skeletonIndex;
             if (hair) {
                 hair->bindPoseInitialized = false;
@@ -2112,13 +2152,13 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
                 Animation::EvaluateGait(*gait, velocityLocal, angularVelocity, dt);
             }
             if (animator && tracks) {
-                SynchronizeLocomotionTrack(*animator, *tracks, movement ? &*movement : nullptr, *gait, horizontalSpeed, dt);
+                SynchronizeLocomotionTrack(*animator, prefab, *tracks, movement ? &*movement : nullptr, *gait, horizontalSpeed, dt);
             }
         }
 
         {
             ZHLN::ScopedTimer stageTimer("PA Stage: Authored pose");
-            ApplyAuthoredPose(animator ? &*animator : nullptr, config ? &*config : nullptr, *boneMap, dt);
+            ApplyAuthoredPose(animator ? &*animator : nullptr, prefab, tracks ? &*tracks : nullptr, config ? &*config : nullptr, *boneMap, dt);
         }
         {
             ZHLN::ScopedTimer stageTimer("PA Stage: Capture deltas and FK");
@@ -2179,7 +2219,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         // swing/look-at only fill groups not keyed by the active GLB track.
         if (upperBodyEnabled) {
             ZHLN::ScopedTimer stageTimer("PA Stage: Upper body");
-            const AuthoredUpperBodyCoverage coverage      = FindAuthoredUpperBodyCoverage(animator ? &*animator : nullptr, *boneMap);
+            const AuthoredUpperBodyCoverage coverage      = FindAuthoredUpperBodyCoverage(animator ? &*animator : nullptr, prefab, *boneMap);
             const bool                      forceLayering = config && config->layerUpperBodyOverAuthoredChannels;
             const bool                      applyArmSwing = forceLayering || !coverage.arms;
             const bool                      applyLookAt   = forceLayering || !coverage.torsoHead;
@@ -2405,9 +2445,6 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         }
         boneMap->poseValid = true;
         ++boneMap->poseVersion;
-        if (poseOverride) {
-            poseOverride->valid = false;
-        }
 
         // Stage 7.5: drive the first-person camera from the current evaluated
         // head pose. Smooth only the head-local eye offset/orientation; root
@@ -2492,17 +2529,16 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
             uploadedOffsets[uploadedPaletteCount++] = skeletalMesh->jointOffset;
 
             if (skeletalMesh == skin.skeletalMesh) {
-                if (poseOverride) {
-                    const size_t overrideCount = std::min(paletteCount, Components::KinematicPoseOverrideComponent::MaxJoints);
-                    for (size_t jointIndex = 0; jointIndex < overrideCount; ++jointIndex) {
-                        const int32_t      importedNode           = skeleton.joints[jointIndex].nodeIndex;
-                        const RigNodeIndex node                   = importedNode >= 0 ? static_cast<RigNodeIndex>(importedNode) : InvalidRigNode;
-                        poseOverride->modelTransforms[jointIndex] = IsValidRigNode(node, boneMap->nodeCount) ? boneMap->modelTransforms[node] :
-                                                                                                               JPH::Mat44::sIdentity();
+                if (hasRagdoll) {
+                    std::array<JPH::Mat44, kMaxRigNodes> kinematicJoints {};
+                    const size_t                         kinematicCount = std::min(paletteCount, kinematicJoints.size());
+                    for (size_t jointIndex = 0; jointIndex < kinematicCount; ++jointIndex) {
+                        const int32_t      importedNode  = skeleton.joints[jointIndex].nodeIndex;
+                        const RigNodeIndex node          = importedNode >= 0 ? static_cast<RigNodeIndex>(importedNode) : InvalidRigNode;
+                        kinematicJoints[jointIndex]      = IsValidRigNode(node, boneMap->nodeCount) ? boneMap->modelTransforms[node] :
+                                                                                                      JPH::Mat44::sIdentity();
                     }
-                    poseOverride->jointCount  = static_cast<uint32_t>(overrideCount);
-                    poseOverride->poseVersion = boneMap->poseVersion;
-                    poseOverride->valid       = true;
+                    poseUploads->PushKinematic(skeletalMesh->jointOffset, std::span<const JPH::Mat44> {kinematicJoints.data(), kinematicCount});
                 }
                 boneMap->jointOffset   = skeletalMesh->jointOffset;
                 boneMap->jointCount    = static_cast<uint32_t>(paletteCount);

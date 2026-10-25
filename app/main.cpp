@@ -157,8 +157,7 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
     ZHLN::Terrain::Install(engine);
 #endif
 #if defined(ZHLN_HAS_ANIMATION)
-    // Registers TwoBoneIKComponent and installs the pose post-processor the
-    // skinning pass calls; without it IK chains animate as authored.
+    // Installs AnimationContext + AnimationSystem and TwoBoneIKSystem.
     ZHLN::IK::Install(engine);
 #endif
 #if defined(ZHLN_HAS_FALLBACK_SCENE)

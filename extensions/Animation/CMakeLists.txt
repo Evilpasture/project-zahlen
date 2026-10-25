@@ -1,24 +1,54 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# extensions/Animation -- the procedural animation rig (zahlen_animation).
+# extensions/Animation -- skeletal animation domain + procedural animation rig.
 #
-# Its own target rather than a corner of the compatibility aggregate because nothing in
-# it needs anything the other domains carry. The four module interfaces
-# (ZHLN.Rig, ZHLN.Animator, ZHLN.Locomotion, ZHLN.ProceduralAnimation) and the
-# implementation units behind them are rig maths over Jolt vectors, the
-# analytic two-bone IK toolkit (IK.hpp / TwoBoneIK.cpp), and the ECS. A
-# consumer that wants the gait solver gets no simdjson, no sockets, no cgltf
-# and no Lua runtime along with it.
-#
-# Discovery is local and non-recursive: ../CMakeLists.txt no longer globs this
-# tree, so what compiles into this target is decided here and nowhere else.
+# Split into two targets so header-only / non-module consumers (samples, render
+# tests, scripting) get AnimationContext, AnimationSystem, and TwoBoneIK without
+# pulling in C++20 module BMIs or character-controller/camera dependencies:
+#   - zahlen_skeletal_animation: AnimationContext, AnimationSystem, TwoBoneIK
+#   - zahlen_animation:          ZHLN.Rig, ZHLN.Animator, ZHLN.Locomotion,
+#                                ZHLN.ProceduralAnimation + procedural solvers
 #
 # Public headers and module interfaces are reached as <Animation/...>.
 
+# ---------------------------------------------------------------------------
+# 1. Skeletal animation domain + ECS bridge + TwoBoneIK (no C++20 modules)
+# ---------------------------------------------------------------------------
+set(SKELETAL_TARGET zahlen_skeletal_animation)
+
+add_library(${SKELETAL_TARGET} STATIC
+    AnimationContext.cpp
+    AnimationSystem.cpp
+    TwoBoneIK.cpp
+)
+
+set_target_properties(${SKELETAL_TARGET} PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON
+)
+
+target_include_directories(${SKELETAL_TARGET} PUBLIC
+    ${PROJECT_SOURCE_DIR}/extensions
+)
+
+target_link_libraries(${SKELETAL_TARGET} PUBLIC
+    zahlen_engine
+)
+
+if(COMMAND zahlen_enable_reflection)
+    zahlen_enable_reflection(${SKELETAL_TARGET})
+endif()
+
+target_link_libraries(${SKELETAL_TARGET} PRIVATE zahlen_warnings)
+
+# ---------------------------------------------------------------------------
+# 2. Procedural animation rig + C++20 modules (re-exports skeletal animation)
+# ---------------------------------------------------------------------------
 set(TARGET_NAME zahlen_animation)
 
-# Module interface units, named.
 set(ZHLN_ANIMATION_MODULES
     Animator.cppm
     Locomotion.cppm
@@ -26,13 +56,11 @@ set(ZHLN_ANIMATION_MODULES
     Rig.cppm
 )
 
-# The ordinary translation units of this target, named.
 set(ZHLN_ANIMATION_SOURCES
     ProceduralAnimation.cpp
     ProceduralGait.cpp
     ProceduralItemHandling.cpp
     ProceduralSecondaryPhysics.cpp
-    TwoBoneIK.cpp
 )
 
 add_library(${TARGET_NAME} STATIC)
@@ -41,20 +69,11 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
-    # Every static library in this tree that ends up inside a shared library or
-    # a PIE executable sets this explicitly -- there is no global
-    # CMAKE_POSITION_INDEPENDENT_CODE.
     POSITION_INDEPENDENT_CODE ON
 )
 
-# 'module;' has to be the first thing the compiler sees, so no precompiled
-# header may ever be injected ahead of it. This target has no PCH of its
-# own; the property is what keeps that true if one is ever added here.
 set_source_files_properties(${ZHLN_ANIMATION_MODULES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
-# BASE_DIRS is the extensions root rather than this directory, which keeps the
-# BMI paths ("Animation/Animator.cppm" and friends) identical to the ones
-# the former cross-domain archive produced.
 target_sources(${TARGET_NAME}
     PUBLIC
         FILE_SET CXX_MODULES
@@ -65,21 +84,8 @@ target_sources(${TARGET_NAME}
 
 target_sources(${TARGET_NAME} PRIVATE ${ZHLN_ANIMATION_SOURCES})
 
-# Core is a public dependency: Animator.cppm's global module fragment includes
-# <Animation/IK.hpp> (this directory), Locomotion.cppm includes
-# <Zahlen/Components.hpp>, and the exported signatures name ZHLN::Engine and
-# ECS handles. A consumer needs core's include path and its symbols, not just
-# this archive.
-#
-# The character controller is a public dependency too: Locomotion.cppm and
-# ProceduralAnimation.cpp reach Character::MovementComponent /
-# Character::InputComponent, so a consumer of this target needs those
-# component definitions as well.
-#
-# The camera rig is one as well: Locomotion.cppm's SpawnCharacter authors the
-# third-person follow camera as a CameraRig::TargetCameraComponent, so its
-# definition has to travel with this target.
 target_link_libraries(${TARGET_NAME} PUBLIC
+    zahlen_skeletal_animation
     zahlen_engine
     zahlen_character_controller
     zahlen_camera
@@ -90,11 +96,6 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions
 )
 
-# Locomotion.cppm, ProceduralAnimation.cpp and ProceduralItemHandling.cpp all
-# include <Zahlen/Components.hpp>, whose InputStateComponent sizes its key
-# bitset with Reflect::EnumCount<KeyCode>(). Reflection is not a per-target
-# feature -- without the flags that count is 0 instead of 72 and mouseX moves
-# four bytes, which is a silent wrong-offset read rather than a compile error.
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()

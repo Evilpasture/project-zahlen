@@ -75,9 +75,7 @@ struct EngineImpl {
     ScriptCommandRegistry scriptCommands;
 
     Engine::PhysicsSubstepHooks                  physicsSubstepHooks;
-    // Engine-owned, handed out by reference: the list outlives every graph
-    // rebuild, which is what makes a late install work.
-    PosePostProcessorPipeline                    posePostProcessors;
+    ECS::ExtensionServices                       extensions;
     std::vector<Engine::TeardownHook>            teardownHooks;
     std::vector<Engine::SceneCleanupPass>        sceneCleanupPasses;
 
@@ -253,7 +251,6 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         return std::unexpected(world_res.error());
     }
     _impl->world = std::move(world_res.value());
-    _impl->posePostProcessors.BindRegistry(_impl->world->GetRegistry());
 
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
         auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
@@ -352,6 +349,9 @@ Engine::~Engine() {
         ClearScene();
     }
 
+    _impl->updateGraph.reset();
+    _impl->renderGraph.reset();
+    _impl->extensions.Clear();
     _impl->world.reset();
     _impl->bootScriptWatches.clear();
     _impl->nativeScriptModule.reset();
@@ -450,26 +450,26 @@ void Engine::EnsureSystemGraphs() {
 
     _impl->simServices = std::make_unique<SimServices>(
         SimServices {
-            .physics               = _impl->world->GetPhysics(),
-            .audio                 = _impl->kernel->GetAudioContext(),
-            .assets                = _impl->kernel->GetAssetManager(),
-            .articulation          = _impl->world->GetArticulationSystem(),
-            .posePostProcessors    = _impl->posePostProcessors,
-            .poseUploads           = _impl->poseUploads,
+            .physics      = _impl->world->GetPhysics(),
+            .audio        = _impl->kernel->GetAudioContext(),
+            .assets       = _impl->kernel->GetAssetManager(),
+            .articulation = _impl->world->GetArticulationSystem(),
+            .extensions   = _impl->extensions,
+            .poseUploads  = _impl->poseUploads,
         }
     );
 
     _impl->renderServices = std::make_unique<RenderServices>(
         RenderServices {
-            .render  = render,
-            .scene   = _impl->sceneData,
-            .assets  = _impl->kernel->GetAssetManager(),
-            .visible = VisibleEntities {_impl->world->GetVisibleEntities()},
-            .shadow  = VisibleShadowEntities {_impl->world->GetVisibleShadowEntities()},
+            .render     = render,
+            .scene      = _impl->sceneData,
+            .assets     = _impl->kernel->GetAssetManager(),
+            .extensions = _impl->extensions,
+            .visible    = VisibleEntities {_impl->world->GetVisibleEntities()},
+            .shadow     = VisibleShadowEntities {_impl->world->GetVisibleShadowEntities()},
         }
     );
 
-    _impl->posePostProcessors.BindRegistry(_impl->world->GetRegistry());
     _impl->updateGraph = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices, &MarkPendingDestroy);
     _impl->renderGraph = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices, &MarkPendingDestroy);
 }
@@ -607,6 +607,11 @@ auto Engine::DeviceLostCallbackCount() const noexcept -> size_t {
 }
 
 auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePlanError> {
+    if (!module.name.empty() &&
+        std::ranges::any_of(_impl->modules, [&](const Module& existing) { return existing.name == module.name; })) {
+        return {};
+    }
+
     // The plan first, and on a plan that core has already seeded: a module's
     // steps are placed against names core owns, and placing them can fail. Doing
     // it before anything else is applied is what makes the failure clean -- a
@@ -630,6 +635,9 @@ auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePla
     }
 
     _impl->modules.push_back(module);
+    if (module.addGraphSystems != nullptr && _impl->updateGraph != nullptr) {
+        BuildSystemGraphs(*this);
+    }
     return {};
 }
 
@@ -670,8 +678,12 @@ auto Engine::GetPhysicsSubstepHooks() const noexcept -> const PhysicsSubstepHook
     return _impl->physicsSubstepHooks;
 }
 
-auto Engine::GetPosePostProcessors() -> PosePostProcessorPipeline& {
-    return _impl->posePostProcessors;
+auto Engine::Services() noexcept -> ECS::ExtensionServices& {
+    return _impl->extensions;
+}
+
+auto Engine::Services() const noexcept -> const ECS::ExtensionServices& {
+    return _impl->extensions;
 }
 
 void Engine::AddTeardownHook(TeardownHook hook) {

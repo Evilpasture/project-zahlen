@@ -22,12 +22,13 @@ namespace ECS {
 class Registry;
 } // namespace ECS
 
+class AssetManager;
 class PhysicsContext;
 class ArticulationSystem;
 
 namespace RagdollAuthoring {
 
-// Resolves the rig `rootEntity` owns -- the prefab from its
+// Resolves the rig `rootEntity` owns -- the prefabAsset from its
 // AnimatorComponent, the skeleton and joint offset from one of its skinned
 // children -- and authors a procedural humanoid biped for it: joint-name
 // heuristics pick the shape, mass and joint limits per bone, and the result
@@ -36,7 +37,7 @@ namespace RagdollAuthoring {
 // Returns false when no skeleton could be resolved, leaving the entity
 // untouched.
 [[nodiscard]] auto BuildHumanoidBipedRagdoll(
-    Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc, ArticulationSystem& articulation
+    Entity rootEntity, ECS::Registry& reg, const AssetManager& assets, PhysicsContext& pc, ArticulationSystem& articulation
 ) -> bool;
 
 // The script-facing argument blob for the "SetupRagdoll" command.

@@ -208,15 +208,10 @@ void ToggleClipPlayback(InspectorState& state, int32_t clipIndex) {
 
     const bool stopping = (state.playingClip == clipIndex);
     reg.Patch<ZHLN::Components::AnimatorComponent>(root, [&](auto& anim) -> auto {
-        anim.prevTrackIdx      = anim.currentTrackIdx;
-        anim.prevTrackTime     = anim.currentTrackTime;
-        anim.prevPlaybackSpeed = anim.currentPlaybackSpeed;
-
         anim.currentTrackIdx      = stopping ? -1 : clipIndex;
         anim.currentTrackTime     = 0.0f;
         anim.currentPlaybackSpeed = 1.0f;
         anim.currentLoop          = !stopping;
-        anim.blendFactor          = 0.0f;
         anim.blendDuration        = 0.15f;
         anim.isFinished           = false;
     });
