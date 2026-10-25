@@ -740,13 +740,15 @@ auto BodyForEntity(ECS::Registry& registry, Entity entity) noexcept -> Physics::
 void RegisterPhysicsCommands() {
     RegisterCmd("GetPhysicsPositions", MakeCmd<GetBufferArgs>([](ZHLN::Engine* engine, const GetBufferArgs& a) -> uint64_t {
                     const auto& world = engine->GetPhysicsContext().GetWorld();
-                    *a.outView        = ZHLN::ViewComposer::Build(&world, world.positions, (sizeof(JPH::Real) == 8) ? "d" : "f", world.count.load(), 4);
+                    const auto& snap  = world.transforms.GetReadSnapshot();
+                    *a.outView        = ZHLN::ViewComposer::Build(&world, snap.positions, (sizeof(JPH::Real) == 8) ? "d" : "f", snap.count, 4);
                     return 0;
                 }));
 
     RegisterCmd("GetPhysicsLinearVelocities", MakeCmd<GetBufferArgs>([](ZHLN::Engine* engine, const GetBufferArgs& a) -> uint64_t {
                     const auto& world = engine->GetPhysicsContext().GetWorld();
-                    *a.outView        = ZHLN::ViewComposer::Build(&world, world.linearVelocities, "f", world.count.load(), 4);
+                    const auto& snap  = world.transforms.GetReadSnapshot();
+                    *a.outView        = ZHLN::ViewComposer::Build(&world, snap.linearVelocities, "f", snap.count, 4);
                     return 0;
                 }));
 

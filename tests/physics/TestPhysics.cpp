@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cmath>
 #include <expected>
+#include <thread>
 #include <vector>
 
 enum class PhysicsTestError : uint32_t {
@@ -25,6 +26,7 @@ enum class PhysicsTestError : uint32_t {
     OverlapQueryFailed ZHLN_ANNOTATION(ZHLN::Description<"Broadphase overlap failed to detect sphere/AABB collision.">{}),
     RagdollCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Creating a single-part ragdoll fixture failed.">{}),
     ParallelCharacterSyncFailed ZHLN_ANNOTATION(ZHLN::Description<"Parallel character step or concurrent shadow-state query failed.">{}),
+    LockFreeConcurrencyFailed ZHLN_ANNOTATION(ZHLN::Description<"Concurrent ping-pong transform reads or mailbox commands failed during Step.">{}),
 };
 
 struct PhysicsTestSuite {
@@ -295,6 +297,122 @@ struct PhysicsTestSuite {
                 const auto single = pc.BodyState(characters[i]);
                 if (!ZHLN::Test::ExpectTrue(single.has_value() && single->valid)) {
                     return std::unexpected(PhysicsTestError::ParallelCharacterSyncFailed);
+                }
+            }
+
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> lock_free_ping_pong_reads_and_concurrent_command_mailbox() {
+            ZHLN::PhysicsConfig  cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
+            ZHLN::PhysicsContext pc(cfg);
+
+            const auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 50.0f, 0.5f, 50.0f);
+            const auto sphereShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.35f);
+            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+
+            constexpr size_t                       kPersistentBodies = 12;
+            std::vector<ZHLN::Physics::BodyHandle> persistent(kPersistentBodies);
+            for (size_t i = 0; i < kPersistentBodies; ++i) {
+                persistent[i] = pc.CreateRigidBody(
+                    sphereShape,
+                    JPH::RVec3(static_cast<double>(i) * 1.25 - 6.0, 4.0 + static_cast<double>(i) * 0.25, 0.0),
+                    JPH::Quat::sIdentity(),
+                    JPH::EMotionType::Dynamic,
+                    ZHLN::Layers::ID::MOVING
+                );
+            }
+
+            const ZHLN::Physics::BodyHandle character = pc.CreateCharacter(JPH::RVec3(0.0, 0.8, 3.0));
+            const float                     cachedGroundOffset = pc.GetCharacterGroundOffset(character);
+            if (!ZHLN::Test::ExpectGt(cachedGroundOffset, 0.5f)) {
+                return std::unexpected(PhysicsTestError::LockFreeConcurrencyFailed);
+            }
+
+            pc.OptimizeBroadphase();
+            pc.Step(1.0f / 60.0f);
+
+            std::atomic<bool>     keepRunning {true};
+            std::atomic<bool>     workerFailed {false};
+            std::atomic<bool>     observedGrounded {false};
+            std::atomic<uint32_t> stepEpoch {1u};
+
+            std::thread readerAndProducer([&] {
+                std::vector<ZHLN::Physics::BodyStateSnapshot> snaps(kPersistentBodies);
+                uint32_t                                      lastSpawnedEpoch = 0;
+                while (keepRunning.load(std::memory_order::acquire)) {
+                    pc.FillBodyStates(persistent, snaps);
+                    for (const auto& s: snaps) {
+                        if (!s.valid || !std::isfinite(s.currentPosition.GetX()) || !std::isfinite(s.currentPosition.GetY()) ||
+                            !std::isfinite(s.previousPosition.GetY())) {
+                            workerFailed.store(true, std::memory_order::release);
+                            return;
+                        }
+                    }
+
+                    const auto charPos = pc.BodyPosition(character);
+                    if (!charPos.has_value() || !std::isfinite(static_cast<double>(charPos->GetY()))) {
+                        workerFailed.store(true, std::memory_order::release);
+                        return;
+                    }
+
+                    if (std::abs(pc.GetCharacterGroundOffset(character) - cachedGroundOffset) > 1e-6f) {
+                        workerFailed.store(true, std::memory_order::release);
+                        return;
+                    }
+
+                    if (pc.IsCharacterOnGround(character)) {
+                        observedGrounded.store(true, std::memory_order::relaxed);
+                    }
+
+                    const uint32_t currentEpoch = stepEpoch.load(std::memory_order::acquire);
+                    if (currentEpoch != lastSpawnedEpoch) {
+                        lastSpawnedEpoch = currentEpoch;
+                        for (uint32_t b = 0; b < 4u; ++b) {
+                            const auto shape =
+                                pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.2f + static_cast<float>((currentEpoch + b) & 15u) * 0.05f, 0.2f, 0.2f);
+                            if (shape == nullptr) {
+                                workerFailed.store(true, std::memory_order::release);
+                                return;
+                            }
+                            const auto transient = pc.CreateRigidBody(
+                                shape, JPH::RVec3(0.0, 8.0 + static_cast<double>(b), -4.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic,
+                                ZHLN::Layers::ID::MOVING
+                            );
+                            if (transient == ZHLN::Physics::BodyHandle::Null() || !pc.IsBodyDynamic(transient)) {
+                                workerFailed.store(true, std::memory_order::release);
+                                return;
+                            }
+                            pc.AddImpulse(persistent[(currentEpoch + b) % kPersistentBodies], JPH::Vec3(0.0f, 0.25f, 0.0f));
+                            pc.DestroyBody(transient);
+                        }
+                    }
+                }
+            });
+
+            for (int step = 0; step < 30; ++step) {
+                pc.SetCharacterVelocity(character, JPH::Vec3(0.5f, -2.0f, 0.0f));
+                pc.Step(1.0f / 60.0f);
+                stepEpoch.fetch_add(1u, std::memory_order::release);
+            }
+
+            keepRunning.store(false, std::memory_order::release);
+            readerAndProducer.join();
+
+            if (!ZHLN::Test::ExpectFalse(workerFailed.load(std::memory_order::acquire))) {
+                return std::unexpected(PhysicsTestError::LockFreeConcurrencyFailed);
+            }
+            if (!ZHLN::Test::ExpectTrue(observedGrounded.load(std::memory_order::relaxed) || pc.IsCharacterOnGround(character))) {
+                return std::unexpected(PhysicsTestError::LockFreeConcurrencyFailed);
+            }
+
+            // Drain any final transient DestroyBody queued right before join.
+            pc.Step(1.0f / 60.0f);
+
+            for (const auto h: persistent) {
+                const auto state = pc.BodyState(h);
+                if (!ZHLN::Test::ExpectTrue(state.has_value() && state->valid)) {
+                    return std::unexpected(PhysicsTestError::LockFreeConcurrencyFailed);
                 }
             }
 

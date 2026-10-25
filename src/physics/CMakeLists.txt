@@ -4,6 +4,10 @@
 
 add_library(zahlen_physics STATIC
     Physics.cpp
+    BodyTable.hpp
+    CharacterManager.hpp
+    CharacterManager.cpp
+    CommandMailbox.hpp
     PhysicsWorld.hpp
     PhysicsWorld.cpp
     PhysicsContactEvents.hpp
@@ -13,7 +17,11 @@ add_library(zahlen_physics STATIC
     ConstraintFactory.cpp
     PhysicsDebug.cpp
     PhysicsDebug.hpp
+    RagdollManager.hpp
     RagdollFactory.cpp
+    ShapeCache.hpp
+    ShapeCache.cpp
+    TransformBuffer.hpp
 )
 set_target_properties(zahlen_physics PROPERTIES
     POSITION_INDEPENDENT_CODE ON

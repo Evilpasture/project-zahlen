@@ -1,85 +1,42 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "CharacterManager.hpp"
 #include "PhysicsContactEvents.hpp"
 #include "PhysicsDebug.hpp"
 #include "PhysicsWorld.hpp"
+#include "RagdollManager.hpp"
+#include "ShapeCache.hpp"
 #include "Zahlen/Profiler.hpp"
-#include <Jolt/Core/Color.h>
-#include <Jolt/Core/FixedSizeFreeList.h>
-#include <Jolt/Core/JobSystemThreadPool.h>
-#include <Jolt/Core/JobSystemWithBarrier.h>
-#include <Jolt/Core/TempAllocator.h>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include <Jolt/Core/Color.h>
+#include <Jolt/Core/FixedSizeFreeList.h>
+#include <Jolt/Core/JobSystemWithBarrier.h>
+#include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
-#include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
-#include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
-#include <Jolt/Physics/Collision/Shape/PlaneShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
-#include <Jolt/Physics/Constraints/HingeConstraint.h>
-#include <Jolt/Physics/Constraints/MotorSettings.h>
-#include <Jolt/Physics/Constraints/SliderConstraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <array>
-#include <cstdlib>
-#include <cstring>
 #include <memory>
-#include <new>
+#include <span>
 #include <utility>
-#include <vector>
 
 namespace ZHLN {
+
 using JPH::uint;
-struct ShapeKey {
-    uint32_t type;
-    float    p1, p2, p3, p4;
-};
-
-struct ShapeEntry {
-    ShapeKey       key;
-    JPH::ShapeRefC shape;
-};
-
-namespace {
-template <typename T>
-[[nodiscard]] auto AllocateAligned(size_t count, size_t alignment) -> T* {
-    return static_cast<T*>(::operator new[](count * sizeof(T), std::align_val_t {alignment}));
-}
-
-template <typename T>
-void DeallocateAligned(T* ptr, size_t alignment) {
-    if (ptr) {
-        ::operator delete[](ptr, std::align_val_t {alignment});
-    }
-}
-
-template <typename T>
-void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t alignment) {
-    static_assert(std::is_trivially_copyable_v<T>);
-    T* new_ptr = AllocateAligned<T>(new_count, alignment);
-    if (ptr && old_count > 0) {
-        std::memcpy(new_ptr, ptr, old_count * sizeof(T));
-        DeallocateAligned(ptr, alignment);
-    } else if (ptr) {
-        DeallocateAligned(ptr, alignment);
-    }
-    ptr = new_ptr;
-}
-} // namespace
 
 class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
     static constexpr size_t                             kObjectLayerCount = ZHLN::Reflect::EnumCount<Layers::ID>();
@@ -108,7 +65,7 @@ class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
 #endif
 };
 
-class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilter {
+class ObjectVsBroadPhaseLayerFilterImpl final: public JPH::ObjectVsBroadPhaseLayerFilter {
   public:
     ~ObjectVsBroadPhaseLayerFilterImpl() override;
     [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inLayer1, JPH::BroadPhaseLayer inLayer2) const -> bool override {
@@ -123,7 +80,7 @@ class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilt
     }
 };
 
-class ObjectLayerPairFilterImpl: public JPH::ObjectLayerPairFilter {
+class ObjectLayerPairFilterImpl final: public JPH::ObjectLayerPairFilter {
   public:
     ~ObjectLayerPairFilterImpl() override;
     [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const -> bool override {
@@ -142,7 +99,6 @@ BPLayerInterfaceImpl::~BPLayerInterfaceImpl()                           = defaul
 ObjectVsBroadPhaseLayerFilterImpl::~ObjectVsBroadPhaseLayerFilterImpl() = default;
 ObjectLayerPairFilterImpl::~ObjectLayerPairFilterImpl()                 = default;
 ZHLN::Physics::ContactListener::~ContactListener()                      = default;
-ZHLN::Physics::CharacterListener::~CharacterListener()                  = default;
 
 namespace {
 
@@ -172,7 +128,7 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
 
     auto CreateJob(const char* inName, JPH::ColorArg inColor, const JPH::JobSystem::JobFunction& inJobFunction, JPH::uint32 inNumDependencies = 0)
         -> JPH::JobSystem::JobHandle override {
-        JPH::uint32 index = mJobs.ConstructObject(inName, inColor, this, inJobFunction, inNumDependencies);
+        const JPH::uint32 index = mJobs.ConstructObject(inName, inColor, this, inJobFunction, inNumDependencies);
         if (index == JPH::FixedSizeFreeList<JPH::JobSystem::Job>::cInvalidObjectIndex) {
             ZHLN::Panic("Jolt: JobSystemFiber exceeded the maximum number of jobs!");
         }
@@ -183,7 +139,7 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
     void QueueJob(JPH::JobSystem::Job* inJob) override {
         inJob->AddRef();
 
-        ZHLN::TaskSystem::Task task = {.func = JoltJobThunk, .arg = inJob};
+        const ZHLN::TaskSystem::Task task = {.func = JoltJobThunk, .arg = inJob};
         ZHLN::TaskSystem::Dispatch(std::span<const ZHLN::TaskSystem::Task>(&task, 1), &mInFlight);
     }
 
@@ -211,6 +167,64 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
     ZHLN::TaskSystem::Counter mInFlight;
     AvailableJobs             mJobs;
 };
+
+[[nodiscard]] auto ReadBodySnapshot(
+    const Physics::BodyTable&      bt,
+    const Physics::TransformFrame& snap,
+    Physics::BodyHandle            handle
+) noexcept -> Physics::BodyStateSnapshot {
+    Physics::BodyStateSnapshot outState {};
+    const uint32_t             slot = handle.index;
+    if (slot >= bt.slotCapacity || bt.generations[slot].load(std::memory_order::acquire) != handle.generation) {
+        return outState;
+    }
+
+    const Physics::SlotState liveState = bt.LoadSlotState(slot);
+    if (liveState == Physics::SlotState::Empty || liveState == Physics::SlotState::PendingDestroy) {
+        return outState;
+    }
+
+    if (snap.slotGenerations[slot] == handle.generation) {
+        const auto snapState = static_cast<Physics::SlotState>(snap.slotStates[slot]);
+        if (Physics::GetSlotPredicate(snapState).isActive) {
+            const uint32_t dense = snap.slotToDense[slot];
+            if (dense < snap.count) {
+                const size_t base         = static_cast<size_t>(dense) * 4;
+                outState.previousPosition = JPH::Vec3(
+                    static_cast<float>(snap.prevPositions[base]),
+                    static_cast<float>(snap.prevPositions[base + 1]),
+                    static_cast<float>(snap.prevPositions[base + 2])
+                );
+                outState.currentPosition = JPH::Vec3(
+                    static_cast<float>(snap.positions[base]),
+                    static_cast<float>(snap.positions[base + 1]),
+                    static_cast<float>(snap.positions[base + 2])
+                );
+                outState.previousRotation =
+                    JPH::Quat(snap.prevRotations[base], snap.prevRotations[base + 1], snap.prevRotations[base + 2], snap.prevRotations[base + 3]);
+                outState.currentRotation =
+                    JPH::Quat(snap.rotations[base], snap.rotations[base + 1], snap.rotations[base + 2], snap.rotations[base + 3]);
+                outState.isCharacter = (snapState == Physics::SlotState::Character);
+                outState.valid       = true;
+                return outState;
+            }
+        }
+    }
+
+    if (liveState == Physics::SlotState::PendingCreateRigid || liveState == Physics::SlotState::PendingCreateChar) {
+        const JPH::Vec3 spawnPos(bt.spawnPositions[slot]);
+        const JPH::Quat spawnRot  = bt.spawnRotations[slot];
+        outState.previousPosition = spawnPos;
+        outState.currentPosition  = spawnPos;
+        outState.previousRotation = spawnRot;
+        outState.currentRotation  = spawnRot;
+        outState.isCharacter      = (liveState == Physics::SlotState::PendingCreateChar);
+        outState.valid            = true;
+    }
+
+    return outState;
+}
+
 } // namespace
 
 struct PhysicsContext::Impl {
@@ -222,39 +236,30 @@ struct PhysicsContext::Impl {
     ObjectVsBroadPhaseLayerFilterImpl objVsBpFilter;
     ObjectLayerPairFilterImpl         objVsObjFilter;
 
-    Physics::PhysicsWorld world {};
-
-    struct RagdollSlot {
-        JPH::Ref<JPH::Ragdoll> instance   = nullptr;
-        uint32_t               generation = 1;
-        bool                   active     = false;
-    };
-    std::vector<RagdollSlot> ragdolls;
-    std::vector<uint32_t>    freeRagdollSlots;
-
-    [[nodiscard]] auto FindRagdollSlot(Physics::RagdollHandle handle) noexcept -> RagdollSlot* {
-        if (handle == Physics::RagdollHandle::Invalid) {
-            return nullptr;
-        }
-        const uint64_t raw   = static_cast<uint64_t>(handle);
-        const uint32_t index = static_cast<uint32_t>(raw);
-        if (index >= ragdolls.size()) {
-            return nullptr;
-        }
-        auto& slot = ragdolls[index];
-        return slot.generation == static_cast<uint32_t>(raw >> 32) && slot.instance != nullptr ? &slot : nullptr;
-    }
-
+    Physics::PhysicsWorld    world {};
     Physics::ContactListener contactListener {&world};
+
+    Physics::ShapeCache       shapeCache {};
+    Physics::CharacterManager characters {};
+    Physics::RagdollManager   ragdolls {};
 
     std::unique_ptr<Physics::PhysicsDebugRenderer> debugRenderer;
 
-    JPH::Array<JPH::Ref<JPH::CharacterVirtual>> characterMap;
-    JPH::Array<JPH::CharacterVirtual*>          activeCharacters;
-    std::array<std::unique_ptr<JPH::TempAllocatorImplWithMallocFallback>, TaskSystem::MaxParallelForChunks> characterTempAllocators {};
-
-    Physics::CharacterListener characterListener {&world};
-    JPH::Array<ShapeEntry>     shapeCache;
+    void FlushPendingSetup() {
+        if (world.isStepping.load(std::memory_order::acquire)) {
+            return;
+        }
+        const auto commands = world.mailbox.Drain();
+        if (commands.empty()) {
+            return;
+        }
+        world.transforms.BeginWriteFromFront();
+        auto& backFrame = world.transforms.GetWriteBuffer();
+        world.ProcessCommands(commands, characters, backFrame);
+        world.mailbox.ResetDrained();
+        world.transforms.PublishTableMetadataToBack(world.bodyTable);
+        world.transforms.Swap();
+    }
 };
 
 PhysicsContext::PhysicsContext(const PhysicsConfig& cfg): _impl(std::make_unique<Impl>()) {
@@ -265,42 +270,17 @@ PhysicsContext::PhysicsContext(const PhysicsConfig& cfg): _impl(std::make_unique
         cfg.maxBodies, 0, cfg.maxBodyPairs, cfg.maxContactConstraints, _impl->bpLayerInterface, _impl->objVsBpFilter, _impl->objVsObjFilter
     );
 
-    _impl->debugRenderer     = std::make_unique<Physics::PhysicsDebugRenderer>();
-    _impl->characterListener = Physics::CharacterListener(&_impl->world);
-
+    _impl->debugRenderer = std::make_unique<Physics::PhysicsDebugRenderer>();
     _impl->world.Init(cfg.maxBodies, &_impl->physicsSystem, &_impl->jobSystem, _impl->tempAllocator.get());
+    _impl->characters.Init(cfg.maxBodies, &_impl->world);
 }
 
 PhysicsContext::~PhysicsContext() {
     _impl->jobSystem.WaitIdle();
-    // Release ragdolls while the Jolt system (and its bodies) still exists.
-    for (auto& slot: _impl->ragdolls) {
-        if (slot.instance != nullptr) {
-            if (slot.active) {
-                slot.instance->RemoveFromPhysicsSystem();
-            }
-            slot.instance = nullptr;
-        }
-    }
-    // Engine::ClearScene may queue the final body's release after the last
-    // simulation step. Drain that batch while Jolt and the character maps are
-    // still alive, instead of dropping the pending commands on Shutdown.
-    auto& world = _impl->world;
-    Physics::WriteWorldLock(world, [&] {
-        const size_t queued = world.commandCount;
-        if (queued != 0) {
-            world.commandQueue.swap(world.commandQueueSpare);
-            world.commandCount = 0;
-            world.FlushCommands(world.commandQueueSpare.data(), queued, _impl->characterMap, _impl->activeCharacters);
-        }
-    });
-    for (auto& character: _impl->characterMap) {
-        if (character != nullptr) {
-            character->SetListener(nullptr);
-        }
-    }
-    _impl->activeCharacters.clear();
-    _impl->characterMap.clear();
+    _impl->ragdolls.Shutdown();
+    _impl->FlushPendingSetup();
+    _impl->characters.Shutdown();
+    _impl->shapeCache.Clear();
     _impl->physicsSystem.SetContactListener(nullptr);
     _impl->world.Shutdown();
 }
@@ -309,56 +289,30 @@ void PhysicsContext::Step(float deltaTime) {
     ZHLN::ScopedTimer profTimer("Physics (JPH)");
     auto&             world = _impl->world;
 
-    Physics::WriteWorldLock(world, [&] -> void {
-        const size_t capturedCount = world.commandCount;
-        if (capturedCount > 0) {
-            world.commandQueue.swap(world.commandQueueSpare);
-            world.commandCount = 0;
-            world.FlushCommands(world.commandQueueSpare.data(), capturedCount, _impl->characterMap, _impl->activeCharacters);
-        }
-    });
-
-    world.contactCount.store(0, std::memory_order::relaxed);
-    world.isStepping.store(true, std::memory_order::release);
-
-    _impl->physicsSystem.Update(deltaTime, 2, _impl->tempAllocator.get(), &_impl->jobSystem);
-
-    const auto stepCharacter = [&](JPH::CharacterVirtual* character, JPH::TempAllocator& allocator) {
-        JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings {
-            .mStickToFloorStepDown = (character->GetLinearVelocity().GetY() <= 0.01f) ? JPH::Vec3(0.0f, -0.25f, 0.0f) : JPH::Vec3::sZero(),
-            .mWalkStairsStepUp     = JPH::Vec3(0.0f, 0.40f, 0.0f),
-        };
-
-        character->ExtendedUpdate(
-            deltaTime, _impl->physicsSystem.GetGravity(), updateSettings,
-            _impl->physicsSystem.GetDefaultBroadPhaseLayerFilter(static_cast<JPH::ObjectLayer>(Layers::ID::MOVING)),
-            _impl->physicsSystem.GetDefaultLayerFilter(static_cast<JPH::ObjectLayer>(Layers::ID::MOVING)), {}, {}, allocator
-        );
-    };
-
-    const auto characterCount = static_cast<uint32_t>(_impl->activeCharacters.size());
-    if (characterCount == 1) {
-        stepCharacter(_impl->activeCharacters[0], *_impl->tempAllocator);
-    } else if (characterCount > 1) {
-        constexpr uint32_t kCharacterScratchBytes = 64u * 1024u;
-        const uint32_t     neededChunks           = std::min(characterCount, TaskSystem::MaxParallelForChunks);
-        for (uint32_t c = 0; c < neededChunks; ++c) {
-            if (_impl->characterTempAllocators[c] == nullptr) {
-                _impl->characterTempAllocators[c] = std::make_unique<JPH::TempAllocatorImplWithMallocFallback>(kCharacterScratchBytes);
-            }
-        }
-        TaskSystem::ParallelFor(characterCount, 1, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) {
-            JPH::TempAllocator& scratch = *_impl->characterTempAllocators[chunkIdx];
-            for (uint32_t i = start; i < end; ++i) {
-                stepCharacter(_impl->activeCharacters[i], scratch);
-            }
-        });
+    // Phase 1: Command Ingestion (O(1) mailbox swap, lock-free command application onto back frame)
+    world.transforms.BeginWriteFromFront();
+    auto& backFrame = world.transforms.GetWriteBuffer();
+    if (const auto commands = world.mailbox.Drain(); !commands.empty()) {
+        world.ProcessCommands(commands, _impl->characters, backFrame);
+        world.mailbox.ResetDrained();
     }
 
+    // Phase 2: Simulation (Jolt rigid-body solver + parallel CharacterVirtual integration)
+    world.contactCount.store(0u, std::memory_order::relaxed);
+    world.BeginSteppingGate();
+
+    _impl->physicsSystem.Update(deltaTime, 2, _impl->tempAllocator.get(), &_impl->jobSystem);
+    _impl->characters.UpdateCharacters(deltaTime, _impl->physicsSystem, *_impl->tempAllocator);
     _impl->jobSystem.WaitIdle();
 
-    Physics::WriteWorldLock(world, [&] -> void { world.Synchronize(&_impl->physicsSystem, _impl->activeCharacters); });
-    world.isStepping.store(false, std::memory_order::release);
+    world.EndSteppingGate();
+    world.time += static_cast<double>(deltaTime);
+
+    // Phase 3: Synchronization (SIMD scatter into inactive back TransformBuffer)
+    world.Synchronize(&_impl->physicsSystem, _impl->characters.ActiveSpan(), backFrame);
+
+    // Phase 4: Publish Snapshot (atomic release flip of frontIndex)
+    world.transforms.Swap();
 }
 
 auto PhysicsContext::GetWorld() const -> const Physics::PhysicsWorld& {
@@ -378,91 +332,12 @@ void PhysicsContext::TraceDiagnostics() const {
 }
 
 void PhysicsContext::OptimizeBroadphase() {
+    _impl->FlushPendingSetup();
     _impl->physicsSystem.OptimizeBroadPhase();
 }
 
 auto PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p1, float p2, float p3, float p4) -> JPH::ShapeRefC {
-    auto* impl = _impl.get();
-
-    const float np1 = (p1 < 1e-3f && type != Physics::ShapeType::Plane) ? 1e-3f : p1;
-    const float np2 = (p2 < 1e-3f && type != Physics::ShapeType::Plane) ? 1e-3f : p2;
-    const float np3 = (p3 < 1e-3f && type != Physics::ShapeType::Plane) ? 1e-3f : p3;
-    const float np4 = (type == Physics::ShapeType::Plane) ? p4 : 0.0f;
-
-    const auto keyMatch = [&](const ShapeEntry& entry) noexcept {
-        return entry.key.type == static_cast<uint32_t>(type) && entry.key.p1 == np1 && entry.key.p2 == np2 && entry.key.p3 == np3 && entry.key.p4 == np4;
-    };
-
-    if (JPH::ShapeRefC cached = ZHLN::SharedLock(impl->world.shadowRwLock, [&]() -> JPH::ShapeRefC {
-            for (const auto& entry: impl->shapeCache) {
-                if (keyMatch(entry)) {
-                    return entry.shape;
-                }
-            }
-            return nullptr;
-        });
-        cached != nullptr) {
-        return cached;
-    }
-
-    JPH::ShapeRefC newShape;
-    switch (type) {
-        case Physics::ShapeType::Box: {
-            JPH::BoxShapeSettings s(JPH::Vec3(np1, np2, np3), 0.05f);
-            newShape = s.Create().Get();
-            break;
-        }
-        case Physics::ShapeType::Sphere: {
-            JPH::SphereShapeSettings s(np1);
-            newShape = s.Create().Get();
-            break;
-        }
-        case Physics::ShapeType::Capsule: {
-            JPH::CapsuleShapeSettings s(np1, np2);
-            newShape = s.Create().Get();
-            break;
-        }
-        case Physics::ShapeType::Cylinder: {
-            JPH::CylinderShapeSettings s(np1, np2, 0.05f);
-            newShape = s.Create().Get();
-            break;
-        }
-        case Physics::ShapeType::Plane: {
-            JPH::Plane              plane(JPH::Vec3(np1, np2, np3), np4);
-            JPH::PlaneShapeSettings s(plane, nullptr, 1000.0f);
-            newShape = s.Create().Get();
-            break;
-        }
-    }
-
-    if (newShape == nullptr) {
-        ZHLN::Log("Failed to create Jolt Shape! Degenerate parameters?");
-        return nullptr;
-    }
-
-    return Physics::WriteWorldLock(impl->world, [&]() -> JPH::ShapeRefC {
-        for (const auto& entry: impl->shapeCache) {
-            if (keyMatch(entry)) {
-                return entry.shape;
-            }
-        }
-        impl->shapeCache.push_back({.key = ShapeKey {.type = static_cast<uint32_t>(type), .p1 = np1, .p2 = np2, .p3 = np3, .p4 = np4}, .shape = newShape});
-        return newShape;
-    });
-}
-
-static auto ResolveMaterial(const Physics::PhysicsWorld& world, uint32_t id) -> Physics::MaterialData {
-    constexpr auto materialDefault = Physics::MaterialData {.id = 0, .friction = 0.2f, .restitution = 0.0f};
-    if (id == 0) {
-        return materialDefault;
-    }
-
-    for (size_t i = 0; i < world.materialCount; ++i) {
-        if (world.materials[i].id == id) {
-            return world.materials[i];
-        }
-    }
-    return materialDefault;
+    return _impl->shapeCache.GetOrCreate(type, p1, p2, p3, p4);
 }
 
 auto PhysicsContext::CreateRigidBody(
@@ -476,78 +351,80 @@ auto PhysicsContext::CreateRigidBody(
     uint32_t              mask,
     JPH::EActivation      activation
 ) -> Physics::BodyHandle {
-    auto&                 world = _impl->world;
-    Physics::MaterialData mat {};
+    if (shape == nullptr) {
+        return Physics::BodyHandle::Null();
+    }
 
-    Physics::BodyHandle handle = Physics::BodyHandle::Null();
-    Physics::WriteWorldLock(world, [&] -> void {
-        handle = world.AllocateHandle();
-        mat    = ResolveMaterial(world, materialID);
-        JPH::BodyCreationSettings settings(shape, pos, rot, motion, static_cast<JPH::ObjectLayer>(layer));
+    auto&                     world  = _impl->world;
+    auto&                     bt     = world.bodyTable;
+    const Physics::BodyHandle handle = bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, motion, pos, rot);
+
+    uint32_t precreatedBodyID = JPH::BodyID::cInvalidBodyID;
+    if (world.TryEnterIdleJoltMutation()) {
+        const Physics::MaterialData mat = world.ResolveMaterial(materialID);
+        JPH::BodyCreationSettings   settings(shape, pos, rot, motion, static_cast<JPH::ObjectLayer>(layer));
         settings.mUserData    = handle.Pack();
         settings.mFriction    = mat.friction;
         settings.mRestitution = mat.restitution;
 
         if (motion == JPH::EMotionType::Dynamic) {
             settings.mAllowSleeping = true;
-            // Continuous collision detection. Brush-world floors are thin
-            // one-sided triangle meshes; with discrete stepping a small prop
-            // moving fast enough tunnels straight through them.
             settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
         }
 
-        JPH::BodyID id =
+        const JPH::BodyID id =
             world.bodyInterface->CreateAndAddBody(settings, (motion == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate : activation);
+        precreatedBodyID = id.GetIndexAndSequenceNumber();
 
-        auto dense                      = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order::relaxed));
-        world.bodyIDs[dense]            = id;
-        world.slotToDense[handle.index] = dense;
-        world.denseToSlot[dense]        = handle.index;
-        world.StoreSlotState(handle.index, Physics::SlotState::Alive);
+        bt.slotBodyIDs[handle.index].store(precreatedBodyID, std::memory_order::release);
+        bt.slotMaterialIDs[handle.index].store(materialID, std::memory_order::relaxed);
 
-        const uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-        world.idToHandleMap[j_idx].store(handle.Pack(), std::memory_order::release);
+        const uint32_t jIdx = precreatedBodyID & JPH::BodyID::cMaxBodyIndex;
+        ZHLN::Assert(jIdx < bt.idToHandleMap.size(), "PhysicsContext::CreateRigidBody: jIdx ({}) exceeds idToHandleMap!", jIdx);
+        bt.idToHandleMap[jIdx].store(handle.Pack(), std::memory_order::release);
 
-        world.positions[dense * 4 + 0] = pos.GetX();
-        world.positions[dense * 4 + 1] = pos.GetY();
-        world.positions[dense * 4 + 2] = pos.GetZ();
-        world.positions[dense * 4 + 3] = 0.0;
+        world.LeaveIdleJoltMutation();
+    }
 
-        world.prevPositions[dense * 4 + 0] = pos.GetX();
-        world.prevPositions[dense * 4 + 1] = pos.GetY();
-        world.prevPositions[dense * 4 + 2] = pos.GetZ();
-        world.prevPositions[dense * 4 + 3] = 0.0;
-
-        world.rotations[dense * 4 + 0] = rot.GetX();
-        world.rotations[dense * 4 + 1] = rot.GetY();
-        world.rotations[dense * 4 + 2] = rot.GetZ();
-        world.rotations[dense * 4 + 3] = rot.GetW();
-
-        world.prevRotations[dense * 4 + 0] = rot.GetX();
-        world.prevRotations[dense * 4 + 1] = rot.GetY();
-        world.prevRotations[dense * 4 + 2] = rot.GetZ();
-        world.prevRotations[dense * 4 + 3] = rot.GetW();
-
-        world.materialIDs[dense] = materialID;
-        world.categories[dense]  = category;
-        world.masks[dense]       = mask;
-    });
+    Physics::Command cmd {};
+    cmd.type                = Physics::CommandType::CreateRigidBody;
+    cmd.shape               = shape;
+    cmd.payload.createRigid = Physics::CreateRigidPayload {
+        .handle           = handle,
+        .px               = pos.GetX(),
+        .py               = pos.GetY(),
+        .pz               = pos.GetZ(),
+        .rx               = rot.GetX(),
+        .ry               = rot.GetY(),
+        .rz               = rot.GetZ(),
+        .rw               = rot.GetW(),
+        .precreatedBodyID = precreatedBodyID,
+        .materialID       = materialID,
+        .category         = category,
+        .mask             = mask,
+        .motion           = motion,
+        .layer            = layer,
+        .activation       = activation,
+    };
+    world.mailbox.Enqueue(std::move(cmd));
     return handle;
 }
 
 namespace Physics {
 
-auto GetBodyID(const PhysicsWorld& world, Physics::BodyHandle handle) -> JPH::BodyID {
-    if (handle.index >= world.slotCapacity) {
+auto GetBodyID(const PhysicsWorld& world, BodyHandle handle) -> JPH::BodyID {
+    const auto& bt = world.bodyTable;
+    if (handle.index >= bt.slotCapacity) {
         return {};
     }
-
-    if (world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+    if (bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return {};
     }
-
-    uint32_t dense = world.slotToDense[handle.index];
-    return world.bodyIDs[dense];
+    const SlotState state = bt.LoadSlotState(handle.index);
+    if (state != SlotState::Alive && state != SlotState::PendingCreateRigid) {
+        return {};
+    }
+    return JPH::BodyID(bt.slotBodyIDs[handle.index].load(std::memory_order::acquire));
 }
 
 auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC {
@@ -564,9 +441,9 @@ auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const
     JPH::IndexedTriangleList joltTriangles;
     joltTriangles.reserve(indexCount / 3);
     for (uint32_t i = 0; i < indexCount; i += 3) {
-        uint32_t i1 = indices[i + 0];
-        uint32_t i2 = indices[i + 1];
-        uint32_t i3 = indices[i + 2];
+        const uint32_t i1 = indices[i + 0];
+        const uint32_t i2 = indices[i + 1];
+        const uint32_t i3 = indices[i + 2];
 
         if (i1 == i2 || i2 == i3 || i1 == i3) {
             continue;
@@ -579,41 +456,42 @@ auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const
         return nullptr;
     }
 
-    JPH::MeshShapeSettings  settings(std::move(joltVertices), std::move(joltTriangles));
-    JPH::Shape::ShapeResult result = settings.Create();
+    JPH::MeshShapeSettings        settings(std::move(joltVertices), std::move(joltTriangles));
+    const JPH::Shape::ShapeResult result = settings.Create();
     return result.HasError() ? nullptr : result.Get();
 }
 
 auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) -> JPH::ShapeRefC {
     JPH::HeightFieldShapeSettings settings;
-    settings.mSampleCount = sampleCount;
-    settings.mHeightSamples.resize(static_cast<size_t>(sampleCount) * sampleCount);
+    settings.mSampleCount = static_cast<uint32_t>(sampleCount);
+    settings.mHeightSamples.resize(static_cast<size_t>(sampleCount) * static_cast<size_t>(sampleCount));
 
     for (int i = 0; i < sampleCount * sampleCount; ++i) {
-        settings.mHeightSamples[i] = heights[i];
+        settings.mHeightSamples[static_cast<size_t>(i)] = heights[i];
     }
 
-    settings.mOffset = JPH::Vec3(-worldSize / 2.0f, 0.0f, -worldSize / 2.0f);
-    settings.mScale  = JPH::Vec3(worldSize / (sampleCount - 1), 1.0f, worldSize / (sampleCount - 1));
+    const float step = worldSize / static_cast<float>(sampleCount - 1);
+    settings.mOffset = JPH::Vec3(-worldSize * 0.5f, 0.0f, -worldSize * 0.5f);
+    settings.mScale  = JPH::Vec3(step, 1.0f, step);
 
-    JPH::Shape::ShapeResult result = settings.Create();
+    const JPH::Shape::ShapeResult result = settings.Create();
     return result.HasError() ? nullptr : result.Get();
 }
 
 auto CreateDualShape(const DualShapeConfig& config) -> JPH::ShapeRefC {
     JPH::StaticCompoundShapeSettings compound;
 
-    JPH::ShapeRefC lifterShape = new JPH::SphereShape(config.lifterRadius);
+    const JPH::ShapeRefC lifterShape = new JPH::SphereShape(config.lifterRadius);
     compound.AddShape(JPH::Vec3(0.0f, config.GetLifterOffsetY(), 0.0f), JPH::Quat::sIdentity(), lifterShape);
 
-    const float    cylinderHalfHeight = std::max(0.001f, config.bumperRadiusY - config.bumperRadiusXZ);
-    JPH::ShapeRefC bumperShape        = (config.bumperRadiusY > config.bumperRadiusXZ) ?
-                                            static_cast<JPH::ShapeRefC>(new JPH::CapsuleShape(cylinderHalfHeight, config.bumperRadiusXZ)) :
-                                            static_cast<JPH::ShapeRefC>(new JPH::SphereShape(config.bumperRadiusXZ));
+    const float          cylinderHalfHeight = std::max(0.001f, config.bumperRadiusY - config.bumperRadiusXZ);
+    const JPH::ShapeRefC bumperShape        = (config.bumperRadiusY > config.bumperRadiusXZ) ?
+                                                  static_cast<JPH::ShapeRefC>(new JPH::CapsuleShape(cylinderHalfHeight, config.bumperRadiusXZ)) :
+                                                  static_cast<JPH::ShapeRefC>(new JPH::SphereShape(config.bumperRadiusXZ));
 
     compound.AddShape(JPH::Vec3(0.0f, config.GetBumperOffsetY(), 0.0f), JPH::Quat::sIdentity(), bumperShape);
 
-    auto res = compound.Create();
+    const auto res = compound.Create();
     return res.HasError() ? nullptr : res.Get();
 }
 
@@ -629,7 +507,7 @@ auto PhysicsContext::CreateMeshBody(
     uint32_t              category,
     uint32_t              mask
 ) -> Physics::BodyHandle {
-    JPH::ShapeRefC shape = Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
+    const JPH::ShapeRefC shape = Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
     if (shape == nullptr) {
         return Physics::BodyHandle::Null();
     }
@@ -644,82 +522,61 @@ auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::Char
     if (charShape == nullptr) {
         charShape = GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.3f);
     }
+    if (charShape == nullptr) {
+        return Physics::BodyHandle::Null();
+    }
 
-    Physics::BodyHandle handle = Physics::BodyHandle::Null();
-    Physics::WriteWorldLock(world, [&] -> void {
-        handle = world.AllocateHandle();
-        JPH::CharacterVirtualSettings settings;
-        settings.mShape                       = charShape;
-        settings.mMaxSlopeAngle               = params.maxSlopeAngle;
-        settings.mMaxStrength                 = params.maxStrength;
-        settings.mBackFaceMode                = JPH::EBackFaceMode::CollideWithBackFaces;
-        settings.mCharacterPadding            = params.characterPadding;
-        settings.mPenetrationRecoverySpeed    = params.penetrationRecoverySpeed;
-        settings.mEnhancedInternalEdgeRemoval = true;
-        settings.mSupportingVolume            = params.supportingVolume;
+    // Cache centre-to-feet ground offset once at creation so gameplay never
+    // queries Jolt shape bounds on hot steering ticks.
+    const float groundOffset = charShape->GetLocalBounds().mMax.GetY();
 
-        auto* character = new JPH::CharacterVirtual(&settings, position, JPH::Quat::sIdentity(), &impl->physicsSystem);
-        character->SetListener(&impl->characterListener);
-        character->SetUserData(handle.Pack());
+    const Physics::BodyHandle handle =
+        world.bodyTable.ReserveSlot(Physics::SlotState::PendingCreateChar, JPH::EMotionType::Kinematic, position, JPH::Quat::sIdentity());
+    impl->characters.InitReservedSlot(handle, groundOffset);
 
-        if (handle.index >= impl->characterMap.size()) {
-            impl->characterMap.resize(handle.index + 1);
-        }
-        impl->characterMap[handle.index] = character;
-        impl->activeCharacters.push_back(character);
-
-        auto dense                      = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order::relaxed));
-        world.bodyIDs[dense]            = JPH::BodyID();
-        world.slotToDense[handle.index] = dense;
-        world.denseToSlot[dense]        = handle.index;
-        world.StoreSlotState(handle.index, Physics::SlotState::Character);
-        world.categories[dense]        = params.category;
-        world.masks[dense]             = params.mask;
-
-        world.positions[dense * 4 + 0] = position.GetX();
-        world.positions[dense * 4 + 1] = position.GetY();
-        world.positions[dense * 4 + 2] = position.GetZ();
-        world.positions[dense * 4 + 3] = 0.0;
-
-        world.prevPositions[dense * 4 + 0] = position.GetX();
-        world.prevPositions[dense * 4 + 1] = position.GetY();
-        world.prevPositions[dense * 4 + 2] = position.GetZ();
-        world.prevPositions[dense * 4 + 3] = 0.0;
-
-        world.rotations[dense * 4 + 0] = 0.0f;
-        world.rotations[dense * 4 + 1] = 0.0f;
-        world.rotations[dense * 4 + 2] = 0.0f;
-        world.rotations[dense * 4 + 3] = 1.0f;
-
-        world.prevRotations[dense * 4 + 0] = 0.0f;
-        world.prevRotations[dense * 4 + 1] = 0.0f;
-        world.prevRotations[dense * 4 + 2] = 0.0f;
-        world.prevRotations[dense * 4 + 3] = 1.0f;
-    });
+    const JPH::Vec3  planeNormal   = params.supportingVolume.GetNormal();
+    const float      planeConstant = params.supportingVolume.GetConstant();
+    Physics::Command cmd {};
+    cmd.type               = Physics::CommandType::CreateCharacter;
+    cmd.shape              = std::move(charShape);
+    cmd.payload.createChar = Physics::CreateCharacterPayload {
+        .handle                   = handle,
+        .px                       = position.GetX(),
+        .py                       = position.GetY(),
+        .pz                       = position.GetZ(),
+        .maxSlopeAngle            = params.maxSlopeAngle,
+        .maxStrength              = params.maxStrength,
+        .characterPadding         = params.characterPadding,
+        .penetrationRecoverySpeed = params.penetrationRecoverySpeed,
+        .planeNx                  = planeNormal.GetX(),
+        .planeNy                  = planeNormal.GetY(),
+        .planeNz                  = planeNormal.GetZ(),
+        .planeC                   = planeConstant,
+        .category                 = params.category,
+        .mask                     = params.mask,
+    };
+    world.mailbox.Enqueue(std::move(cmd));
     return handle;
 }
 
 void PhysicsContext::SetCollisionFilter(Physics::BodyHandle handle, uint32_t category, uint32_t mask) {
-    auto& world = _impl->world;
-    Physics::WriteWorldLock(world, [&] -> void {
-        if (world.commandCount >= world.commandQueue.size()) {
-            const size_t newCap = world.commandQueue.size() == 0 ? 64 : world.commandQueue.size() * 2;
-            world.commandQueue.resize(newCap);
-            world.commandQueueSpare.resize(newCap);
-        }
-        Physics::Command cmd {};
-        cmd.type                                 = Physics::CommandType::SetCollisionFilter;
-        cmd.setFilter.handle                     = handle;
-        cmd.setFilter.category                   = category;
-        cmd.setFilter.mask                       = mask;
-        world.commandQueue[world.commandCount++] = cmd;
-    });
+    Physics::Command cmd {};
+    cmd.type              = Physics::CommandType::SetCollisionFilter;
+    cmd.payload.setFilter = Physics::SetFilterPayload {
+        .handle   = handle,
+        .category = category,
+        .mask     = mask,
+    };
+    _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
 auto PhysicsContext::GetDebugDrawData(bool drawShapes, bool drawConstraints, bool wireframe) const -> Physics::DebugDrawData {
     auto* impl = _impl.get();
-
     impl->debugRenderer->Clear();
+
+    if (impl->world.isStepping.load(std::memory_order::acquire)) {
+        return {};
+    }
 
     JPH::BodyManager::DrawSettings settings;
     settings.mDrawShape                 = drawShapes;
@@ -735,121 +592,129 @@ auto PhysicsContext::GetDebugDrawData(bool drawShapes, bool drawConstraints, boo
     }
 
     return {
-        .lines         = reinterpret_cast<const Physics::DebugVertex*>(impl->debugRenderer->lines.data()),
+        .lines         = impl->debugRenderer->lines.data(),
         .lineCount     = impl->debugRenderer->lines.size(),
-        .triangles     = reinterpret_cast<const Physics::DebugVertex*>(impl->debugRenderer->triangles.data()),
-        .triangleCount = impl->debugRenderer->triangles.size()
+        .triangles     = impl->debugRenderer->triangles.data(),
+        .triangleCount = impl->debugRenderer->triangles.size(),
     };
 }
 
 void PhysicsContext::SetCharacterVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity) {
-    if (handle.index < _impl->characterMap.size()) {
-        auto& character = _impl->characterMap[handle.index];
-        if ((character != nullptr) && Physics::BodyHandle::Unpack(character->GetUserData()).generation == handle.generation) {
-            character->SetLinearVelocity(velocity);
-        }
+    if (!_impl->characters.RecordDesiredVelocity(handle, velocity)) {
+        return;
     }
+    Physics::Command cmd {};
+    cmd.type                = Physics::CommandType::SetCharacterVelocity;
+    cmd.payload.setVelocity = Physics::SetVelocityPayload {
+        .handle = handle,
+        .vx     = velocity.GetX(),
+        .vy     = velocity.GetY(),
+        .vz     = velocity.GetZ(),
+    };
+    _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
 void PhysicsContext::SetCharacterPosition(Physics::BodyHandle handle, JPH::RVec3Arg position) {
-    if (handle.index < _impl->characterMap.size()) {
-        auto& character = _impl->characterMap[handle.index];
-        if ((character != nullptr) && Physics::BodyHandle::Unpack(character->GetUserData()).generation == handle.generation) {
-            character->SetPosition(position);
-        }
+    auto& bt = _impl->world.bodyTable;
+    if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+        return;
     }
+    Physics::Command cmd {};
+    cmd.type                = Physics::CommandType::SetCharacterPosition;
+    cmd.payload.setPosition = Physics::SetPositionPayload {
+        .handle = handle,
+        .px     = position.GetX(),
+        .py     = position.GetY(),
+        .pz     = position.GetZ(),
+    };
+    _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
 void PhysicsContext::SetKinematicPose(Physics::BodyHandle handle, JPH::RVec3Arg position, JPH::QuatArg rotation) {
-    JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
-    // Static bodies live in the static broadphase tree and must never be
-    // teleported; kinematic/dynamic bodies can. The WhenChanged variant only
-    // touches the pose/broadphase when it actually differs, so idle scripted
-    // bodies don't churn every frame, and EActivation::Activate wakes the body
-    // so Jolt keeps updating contacts while it moves.
-    if (!id.IsInvalid() && _impl->world.bodyInterface->GetMotionType(id) != JPH::EMotionType::Static) {
-        _impl->world.bodyInterface->SetPositionAndRotationWhenChanged(id, position, rotation, JPH::EActivation::Activate);
+    auto& bt = _impl->world.bodyTable;
+    if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+        return;
     }
+    Physics::Command cmd {};
+    cmd.type                     = Physics::CommandType::SetKinematicPose;
+    cmd.payload.setKinematicPose = Physics::SetKinematicPosePayload {
+        .handle = handle,
+        .px     = position.GetX(),
+        .py     = position.GetY(),
+        .pz     = position.GetZ(),
+        .rx     = rotation.GetX(),
+        .ry     = rotation.GetY(),
+        .rz     = rotation.GetZ(),
+        .rw     = rotation.GetW(),
+    };
+    _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
 void PhysicsContext::SetLinearVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity) {
-    JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
-    if (!id.IsInvalid()) {
-        // Jolt's SetLinearVelocity does not wake the body; a sleeping prop
-        // that gets an explicit velocity (thrown, pushed by script) must
-        // actually start simulating.
-        _impl->world.bodyInterface->ActivateBody(id);
-        _impl->world.bodyInterface->SetLinearVelocity(id, velocity);
+    auto& bt = _impl->world.bodyTable;
+    if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+        return;
     }
+    Physics::Command cmd {};
+    cmd.type                = Physics::CommandType::SetLinearVelocity;
+    cmd.payload.setVelocity = Physics::SetVelocityPayload {
+        .handle = handle,
+        .vx     = velocity.GetX(),
+        .vy     = velocity.GetY(),
+        .vz     = velocity.GetZ(),
+    };
+    _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
 auto PhysicsContext::GetCharacterVelocity(Physics::BodyHandle handle) const -> JPH::Vec3 {
-    return ZHLN::SharedLock(_impl->world.shadowRwLock, [&] -> JPH::Vec3 {
-        if (handle.index < _impl->characterMap.size()) {
-            auto& character = _impl->characterMap[handle.index];
-            if (character != nullptr && Physics::BodyHandle::Unpack(character->GetUserData()).generation == handle.generation) {
-                return character->GetLinearVelocity();
-            }
-        }
-        return JPH::Vec3::sZero();
-    });
+    return _impl->characters.GetVelocity(handle);
 }
 
 auto PhysicsContext::GetCharacterGroundOffset(Physics::BodyHandle handle) const -> float {
-    return ZHLN::SharedLock(_impl->world.shadowRwLock, [&] -> float {
-        if (handle.index < _impl->characterMap.size()) {
-            auto& character = _impl->characterMap[handle.index];
-            if (character != nullptr && Physics::BodyHandle::Unpack(character->GetUserData()).generation == handle.generation) {
-                // Shapes are authored centred on the body origin, so the local
-                // bounds' +Y half-extent is the centre-to-feet distance: for the
-                // player capsule that is the cylinder half-height plus the cap
-                // radius. The shape offset is included because a shifted shape
-                // moves the feet without moving the body origin.
-                const JPH::AABox bounds = character->GetShape()->GetLocalBounds();
-                return bounds.mMax.GetY() - character->GetShapeOffset().GetY();
-            }
-        }
-        return 0.0f;
-    });
+    return _impl->characters.GetGroundOffset(handle);
 }
 
 auto PhysicsContext::IsCharacterOnGround(Physics::BodyHandle handle) const -> bool {
-    return ZHLN::SharedLock(_impl->world.shadowRwLock, [&] -> bool {
-        if (handle.index < _impl->characterMap.size()) {
-            auto& character = _impl->characterMap[handle.index];
-            if (character != nullptr && Physics::BodyHandle::Unpack(character->GetUserData()).generation == handle.generation) {
-                return character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
-            }
-        }
+    const auto&    world = _impl->world;
+    const auto&    bt    = world.bodyTable;
+    const uint32_t slot  = handle.index;
+    if (slot >= bt.slotCapacity || bt.generations[slot].load(std::memory_order::acquire) != handle.generation) {
         return false;
-    });
+    }
+    if (bt.LoadSlotState(slot) != Physics::SlotState::Character) {
+        return false;
+    }
+
+    const Physics::TransformFrame& snap = world.transforms.GetReadSnapshot();
+    if (snap.slotGenerations[slot] != handle.generation || static_cast<Physics::SlotState>(snap.slotStates[slot]) != Physics::SlotState::Character) {
+        return false;
+    }
+    const uint32_t dense = snap.slotToDense[slot];
+    return dense < snap.count && (snap.characterFlags[dense] & Physics::kCharacterFlagOnGround) != 0u;
 }
 
 auto PhysicsContext::IsBodyDynamic(Physics::BodyHandle handle) const -> bool {
-    const auto& world = _impl->world;
-    if (handle.index >= world.slotCapacity) {
+    const auto&    bt   = _impl->world.bodyTable;
+    const uint32_t slot = handle.index;
+    if (slot >= bt.slotCapacity || bt.generations[slot].load(std::memory_order::acquire) != handle.generation) {
         return false;
     }
 
-    if (world.LoadSlotState(handle.index) != Physics::SlotState::Alive) {
+    const Physics::SlotState state = bt.LoadSlotState(slot);
+    if (state != Physics::SlotState::Alive && state != Physics::SlotState::PendingCreateRigid) {
         return false;
     }
 
-    const JPH::BodyID bodyID = Physics::GetBodyID(world, handle);
-    if (bodyID.IsInvalid()) {
-        return false;
-    }
-
-    return world.bodyInterface->GetMotionType(bodyID) == JPH::EMotionType::Dynamic;
+    return static_cast<JPH::EMotionType>(bt.slotMotionTypes[slot].load(std::memory_order::acquire)) == JPH::EMotionType::Dynamic;
 }
 
 auto PhysicsContext::GetPositionBuffer() const -> BufferView {
-    const auto& world = GetWorld();
-    BufferView  view {};
-    view.buf        = world.positions;
+    const Physics::TransformFrame& snap = _impl->world.transforms.GetReadSnapshot();
+    BufferView                     view {};
+    view.buf        = snap.positions;
     view.itemsize   = sizeof(JPH::Real);
     view.strides[0] = sizeof(JPH::Real) * 4;
-    view.shape[0]   = world.count.load();
+    view.shape[0]   = snap.count;
     view.ndim       = 1;
     view.format[0]  = (sizeof(JPH::Real) == 8) ? 'd' : 'f';
     return view;
@@ -863,171 +728,95 @@ auto PhysicsContext::GetBodyHandle(JPH::BodyID bodyID) const -> Physics::BodyHan
     if (bodyID.IsInvalid()) {
         return Physics::BodyHandle::Null();
     }
-    const uint64_t rawData = _impl->world.bodyInterface->GetUserData(bodyID);
-    return rawData != 0 ? Physics::BodyHandle::Unpack(rawData) : Physics::BodyHandle::Null();
+    const auto&    bt   = _impl->world.bodyTable;
+    const uint32_t jIdx = bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
+    if (jIdx >= bt.idToHandleMap.size()) {
+        return Physics::BodyHandle::Null();
+    }
+    const uint64_t rawData = bt.idToHandleMap[jIdx].load(std::memory_order::acquire);
+    return rawData != 0u ? Physics::BodyHandle::Unpack(rawData) : Physics::BodyHandle::Null();
 }
 
-auto PhysicsContext::RegisterRagdoll(JPH::Ref<JPH::Ragdoll> ragdoll) -> Physics::RagdollHandle {
-    auto& world = _impl->world;
-    return Physics::WriteWorldLock(world, [&] -> Physics::RagdollHandle {
-        uint32_t index;
-        if (_impl->freeRagdollSlots.empty()) {
-            // Reserve free-list capacity on growth so DestroyRagdoll stays noexcept.
-            _impl->freeRagdollSlots.reserve(_impl->ragdolls.size() + 1);
-            index = static_cast<uint32_t>(_impl->ragdolls.size());
-            _impl->ragdolls.emplace_back();
-        } else {
-            index = _impl->freeRagdollSlots.back();
-            _impl->freeRagdollSlots.pop_back();
-        }
-        auto& slot = _impl->ragdolls[index];
-        slot.instance = std::move(ragdoll);
-        slot.active = false;
-        return static_cast<Physics::RagdollHandle>((static_cast<uint64_t>(slot.generation) << 32) | index);
-    });
+auto PhysicsContext::RegisterRagdoll(JPH::Ref<JPH::Ragdoll>) -> Physics::RagdollHandle {
+    return Physics::RagdollHandle::Invalid;
+}
+
+auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, std::span<const Physics::RagdollPartParams> parts) -> Physics::RagdollHandle {
+    return _impl->ragdolls.CreateSkeletalRagdoll(_impl->physicsSystem, std::move(skeleton), parts);
 }
 
 void PhysicsContext::DestroyRagdoll(Physics::RagdollHandle handle) noexcept {
-    DestroyRagdolls(std::span {&handle, 1});
+    _impl->ragdolls.DestroyRagdolls(std::span {&handle, 1});
 }
 
 void PhysicsContext::DestroyRagdolls(std::span<const Physics::RagdollHandle> handles) noexcept {
-    if (handles.empty()) {
-        return;
-    }
-    auto& world = _impl->world;
-    Physics::WriteWorldLock(world, [&] {
-        for (const auto handle: handles) {
-            auto* slot = _impl->FindRagdollSlot(handle);
-            if (slot == nullptr) {
-                continue;
-            }
-            if (slot->active) {
-                slot->instance->RemoveFromPhysicsSystem();
-                slot->active = false;
-            }
-            slot->instance = nullptr;
-            ++slot->generation;
-            _impl->freeRagdollSlots.push_back(static_cast<uint32_t>(static_cast<uint64_t>(handle)));
-        }
-    });
+    _impl->ragdolls.DestroyRagdolls(handles);
 }
 
 auto PhysicsContext::GetRagdoll(Physics::RagdollHandle handle) const noexcept -> ZHLN::Optional<JPH::Ragdoll&> {
-    auto& world = _impl->world;
-    return ZHLN::SharedLock(world.shadowRwLock, [&] -> ZHLN::Optional<JPH::Ragdoll&> {
-        auto* slot = _impl->FindRagdollSlot(handle);
-        if (slot != nullptr && slot->instance != nullptr) {
-            return *slot->instance.GetPtr();
-        }
-        return std::nullopt;
-    });
+    return _impl->ragdolls.GetRagdoll(handle);
 }
 
 void PhysicsContext::ActivateRagdoll(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept {
-    auto& world = _impl->world;
-    Physics::WriteWorldLock(world, [&] {
-        auto* slot = _impl->FindRagdollSlot(handle);
-        if (slot == nullptr) {
-            return;
-        }
-        if (!slot->active) {
-            slot->instance->AddToPhysicsSystem(JPH::EActivation::Activate);
-            slot->active = true;
-        }
-        slot->instance->SetPose(pose);
-        slot->instance->SetLinearAndAngularVelocity(initialVelocity, JPH::Vec3::sZero());
-    });
+    _impl->ragdolls.ActivateRagdoll(handle, pose, initialVelocity);
 }
 
 void PhysicsContext::RemoveRagdoll(Physics::RagdollHandle handle) noexcept {
-    auto& world = _impl->world;
-    Physics::WriteWorldLock(world, [&] {
-        auto* slot = _impl->FindRagdollSlot(handle);
-        if (slot != nullptr && slot->active) {
-            slot->instance->RemoveFromPhysicsSystem();
-            slot->active = false;
-        }
-    });
+    _impl->ragdolls.RemoveRagdoll(handle);
 }
 
 void PhysicsContext::DriveRagdollPose(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose) noexcept {
-    auto& world = _impl->world;
-    Physics::WriteWorldLock(world, [&] {
-        auto* slot = _impl->FindRagdollSlot(handle);
-        if (slot == nullptr || !slot->active) {
-            return;
-        }
-        slot->instance->Activate();
-        slot->instance->DriveToPoseUsingMotors(pose);
-    });
+    _impl->ragdolls.DriveRagdollPose(handle, pose);
 }
 
 void PhysicsContext::AddRagdollImpulse(Physics::RagdollHandle handle, uint32_t jointIndex, JPH::Vec3Arg impulse) noexcept {
-    auto& world = _impl->world;
-    Physics::WriteWorldLock(world, [&] {
-        auto* slot = _impl->FindRagdollSlot(handle);
-        if (slot == nullptr || !slot->active || jointIndex >= slot->instance->GetBodyCount()) {
-            return;
-        }
-        const JPH::BodyID bodyID = slot->instance->GetBodyID(jointIndex);
-        if (!bodyID.IsInvalid()) {
-            world.bodyInterface->AddImpulse(bodyID, impulse);
-            world.bodyInterface->ActivateBody(bodyID);
-        }
-    });
+    _impl->ragdolls.AddRagdollImpulse(handle, jointIndex, impulse, *_impl->world.bodyInterface);
+}
+
+auto PhysicsContext::GetRagdollPose(Physics::RagdollHandle handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept -> bool {
+    return _impl->ragdolls.GetRagdollPose(handle, outRootOffset, outWorldJoints);
 }
 
 auto PhysicsContext::BodyPosition(Physics::BodyHandle handle) const noexcept -> std::optional<JPH::RVec3> {
-    const auto& world = _impl->world;
-    return ZHLN::SharedLock(world.shadowRwLock, [&] -> std::optional<JPH::RVec3> {
-        if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
-            return std::nullopt;
+    const auto&    world = _impl->world;
+    const auto&    bt    = world.bodyTable;
+    const uint32_t slot  = handle.index;
+    if (slot >= bt.slotCapacity || bt.generations[slot].load(std::memory_order::acquire) != handle.generation) {
+        return std::nullopt;
+    }
+
+    const Physics::SlotState liveState = bt.LoadSlotState(slot);
+    if (liveState == Physics::SlotState::Empty || liveState == Physics::SlotState::PendingDestroy) {
+        return std::nullopt;
+    }
+
+    const Physics::TransformFrame& snap = world.transforms.GetReadSnapshot();
+    if (snap.slotGenerations[slot] == handle.generation) {
+        const auto snapState = static_cast<Physics::SlotState>(snap.slotStates[slot]);
+        if (Physics::GetSlotPredicate(snapState).isActive) {
+            const uint32_t dense = snap.slotToDense[slot];
+            if (dense < snap.count) {
+                const size_t base = static_cast<size_t>(dense) * 4;
+                return JPH::RVec3(snap.positions[base], snap.positions[base + 1], snap.positions[base + 2]);
+            }
         }
-        if (!Physics::GetSlotPredicate(world.LoadSlotState(handle.index)).isActive) {
-            return std::nullopt;
-        }
-        const uint32_t dense = world.slotToDense[handle.index];
-        if (dense >= world.count.load(std::memory_order::acquire)) {
-            return std::nullopt;
-        }
-        const size_t base = static_cast<size_t>(dense) * 4;
-        return JPH::RVec3(world.positions[base], world.positions[base + 1], world.positions[base + 2]);
-    });
+    }
+
+    if (liveState == Physics::SlotState::PendingCreateRigid || liveState == Physics::SlotState::PendingCreateChar) {
+        return bt.spawnPositions[slot];
+    }
+
+    return std::nullopt;
 }
 
 auto PhysicsContext::BodyState(Physics::BodyHandle handle) const noexcept -> std::optional<Physics::BodyStateSnapshot> {
-    const auto& world = _impl->world;
-    return ZHLN::SharedLock(world.shadowRwLock, [&] -> std::optional<Physics::BodyStateSnapshot> {
-        if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
-            return std::nullopt;
-        }
-
-        const Physics::SlotState slotState = world.LoadSlotState(handle.index);
-        if (!Physics::GetSlotPredicate(slotState).isActive) {
-            return std::nullopt;
-        }
-
-        const uint32_t dense = world.slotToDense[handle.index];
-        if (dense >= world.count.load(std::memory_order::acquire)) {
-            return std::nullopt;
-        }
-
-        Physics::BodyStateSnapshot outState {};
-
-        const size_t base         = static_cast<size_t>(dense) * 4;
-        outState.previousPosition = JPH::Vec3(
-            static_cast<float>(world.prevPositions[base]), static_cast<float>(world.prevPositions[base + 1]), static_cast<float>(world.prevPositions[base + 2])
-        );
-        outState.currentPosition =
-            JPH::Vec3(static_cast<float>(world.positions[base]), static_cast<float>(world.positions[base + 1]), static_cast<float>(world.positions[base + 2]));
-        outState.previousRotation =
-            JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
-        outState.currentRotation = JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
-        outState.isCharacter     = slotState == Physics::SlotState::Character;
-        outState.valid           = true;
+    const auto&                      world    = _impl->world;
+    const Physics::TransformFrame&   snap     = world.transforms.GetReadSnapshot();
+    const Physics::BodyStateSnapshot outState = ReadBodySnapshot(world.bodyTable, snap, handle);
+    if (outState.valid) {
         return outState;
-    });
+    }
+    return std::nullopt;
 }
 
 void PhysicsContext::FillBodyStates(std::span<const Physics::BodyHandle> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept {
@@ -1038,81 +827,14 @@ void PhysicsContext::FillBodyStates(std::span<const Physics::BodyHandle> handles
         return;
     }
 
-    const auto& world = _impl->world;
-    ZHLN::SharedLock(world.shadowRwLock, [&] {
-        for (size_t i = 0; i < handles.size(); ++i) {
-            Physics::BodyStateSnapshot& outState = outStates[i];
-            outState                             = {};
-            const Physics::BodyHandle handle     = handles[i];
-            if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
-                continue;
-            }
+    const auto&                    world = _impl->world;
+    const Physics::BodyTable&      bt    = world.bodyTable;
+    const Physics::TransformFrame& snap  = world.transforms.GetReadSnapshot();
 
-            const Physics::SlotState slotState = world.LoadSlotState(handle.index);
-            if (!Physics::GetSlotPredicate(slotState).isActive) {
-                continue;
-            }
-
-            const uint32_t dense = world.slotToDense[handle.index];
-            if (dense >= world.count.load(std::memory_order::acquire)) {
-                continue;
-            }
-
-            const size_t base         = static_cast<size_t>(dense) * 4;
-            outState.previousPosition = JPH::Vec3(
-                static_cast<float>(world.prevPositions[base]), static_cast<float>(world.prevPositions[base + 1]),
-                static_cast<float>(world.prevPositions[base + 2])
-            );
-            outState.currentPosition = JPH::Vec3(
-                static_cast<float>(world.positions[base]), static_cast<float>(world.positions[base + 1]), static_cast<float>(world.positions[base + 2])
-            );
-            outState.previousRotation =
-                JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
-            outState.currentRotation = JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
-            outState.isCharacter     = slotState == Physics::SlotState::Character;
-            outState.valid           = true;
-        }
-    });
+    for (size_t i = 0; i < handles.size(); ++i) {
+        outStates[i] = ReadBodySnapshot(bt, snap, handles[i]);
+    }
 }
-
-auto PhysicsContext::GetRagdollPose(Physics::RagdollHandle handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept -> bool {
-    if (outWorldJoints == nullptr) {
-        return false;
-    }
-    auto& world = _impl->world;
-    return ZHLN::SharedLock(world.shadowRwLock, [&] -> bool {
-        auto* slot = _impl->FindRagdollSlot(handle);
-        if (slot == nullptr || !slot->active) {
-            return false;
-        }
-        slot->instance->GetPose(outRootOffset, outWorldJoints);
-        return true;
-    });
-}
-
-namespace {
-
-void QueueDestroyBodyLocked(Physics::PhysicsWorld& world, Physics::BodyHandle handle) {
-    const uint32_t slot = handle.index;
-    if (slot >= world.slotCapacity || world.generations[slot].load(std::memory_order::acquire) != handle.generation) {
-        return;
-    }
-
-    const auto predicate = Physics::GetSlotPredicate(world.LoadSlotState(slot));
-    if (!predicate.isDestructible) {
-        return;
-    }
-
-    world.StoreSlotState(slot, Physics::SlotState::PendingDestroy);
-    if (world.commandCount >= world.commandQueue.size()) {
-        const size_t newCapacity = world.commandQueue.empty() ? 64 : world.commandQueue.size() * 2;
-        world.commandQueue.resize(newCapacity);
-        world.commandQueueSpare.resize(newCapacity);
-    }
-    world.commandQueue[world.commandCount++] = {.type = Physics::CommandType::DestroyBody, .handle = handle};
-}
-
-} // namespace
 
 void PhysicsContext::DestroyBody(Physics::BodyHandle handle) {
     DestroyBodies(std::span {&handle, 1});
@@ -1123,88 +845,87 @@ void PhysicsContext::DestroyBodies(std::span<const Physics::BodyHandle> handles)
         return;
     }
     auto& world = _impl->world;
-    Physics::WriteWorldLock(world, [&] {
-        const size_t required = world.commandCount + handles.size();
-        if (required > world.commandQueue.size()) {
-            const size_t capacity = std::max({required, size_t {64}, world.commandQueue.size() * 2});
-            world.commandQueue.resize(capacity);
-            world.commandQueueSpare.resize(capacity);
+    auto& bt    = world.bodyTable;
+
+    JPH::Array<Physics::Command> batch;
+    batch.reserve(handles.size());
+    for (const auto handle: handles) {
+        if (bt.TryMarkPendingDestroy(handle)) {
+            Physics::Command cmd {};
+            cmd.type           = Physics::CommandType::DestroyBody;
+            cmd.payload.handle = handle;
+            batch.push_back(std::move(cmd));
         }
-        for (const auto handle: handles) {
-            QueueDestroyBodyLocked(world, handle);
-        }
-    });
+    }
+    if (!batch.empty()) {
+        world.mailbox.EnqueueBatch(std::span<Physics::Command>(batch.data(), batch.size()));
+    }
 }
 
 void PhysicsContext::RegisterMaterial(uint32_t id, float friction, float restitution) {
-    auto& world = _impl->world;
-    Physics::WriteWorldLock(world, [&] -> void {
-        for (size_t i = 0; i < world.materialCount; ++i) {
-            if (world.materials[i].id == id) {
-                world.materials[i].friction    = friction;
-                world.materials[i].restitution = restitution;
-                return;
-            }
-        }
-        if (world.materialCount >= world.materials.size()) {
-            size_t newCap = world.materials.size() == 0 ? 16 : world.materials.size() * 2;
-            world.materials.resize(newCap);
-        }
-        world.materials[world.materialCount++] = {.id = id, .friction = friction, .restitution = restitution};
-    });
+    _impl->world.RegisterMaterial(id, friction, restitution);
 }
 
 void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Vec3Arg impulse) {
-    JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
-    if (!id.IsInvalid()) {
-        _impl->world.bodyInterface->AddImpulse(id, impulse);
-        _impl->world.bodyInterface->ActivateBody(id);
+    auto& bt = _impl->world.bodyTable;
+    if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+        return;
     }
+    Physics::Command cmd {};
+    cmd.type                = Physics::CommandType::AddImpulse;
+    cmd.payload.setVelocity = Physics::SetVelocityPayload {
+        .handle = handle,
+        .vx     = impulse.GetX(),
+        .vy     = impulse.GetY(),
+        .vz     = impulse.GetZ(),
+    };
+    _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
 void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Vec3Arg impulse, JPH::RVec3Arg position) {
-    JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
-    if (!id.IsInvalid()) {
-        _impl->world.bodyInterface->AddImpulse(id, impulse, position);
-        _impl->world.bodyInterface->ActivateBody(id);
+    auto& bt = _impl->world.bodyTable;
+    if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+        return;
     }
+    Physics::Command cmd {};
+    cmd.type                    = Physics::CommandType::AddImpulseAtPosition;
+    cmd.payload.addImpulseAtPos = Physics::AddImpulseAtPosPayload {
+        .handle = handle,
+        .px     = position.GetX(),
+        .py     = position.GetY(),
+        .pz     = position.GetZ(),
+        .ix     = impulse.GetX(),
+        .iy     = impulse.GetY(),
+        .iz     = impulse.GetZ(),
+    };
+    _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
 void PhysicsContext::AddRadialImpulse(JPH::RVec3Arg center, float radius, float maxImpulse) {
-    const auto&              world = GetWorld();
     JPH::Array<Physics::BodyHandle> overlapped;
     OverlapSphere(center, radius, overlapped);
 
-    for (Physics::BodyHandle physHandle: overlapped) {
-        if (physHandle.index >= world.slotCapacity) {
-            continue;
-        }
-        if (world.generations[physHandle.index].load(std::memory_order::acquire) != physHandle.generation) {
+    for (const Physics::BodyHandle physHandle: overlapped) {
+        const auto bodyPos = BodyPosition(physHandle);
+        if (!bodyPos) {
             continue;
         }
 
-        uint32_t   dense = world.slotToDense[physHandle.index];
-        size_t     base  = static_cast<size_t>(dense) * 4;
-        JPH::RVec3 bodyPos(world.positions[base], world.positions[base + 1], world.positions[base + 2]);
-
-        JPH::RVec3 diff    = bodyPos - center;
-        auto       dist    = static_cast<float>(diff.Length());
-        float      falloff = 1.0f - std::clamp(dist / radius, 0.0f, 1.0f);
+        const JPH::RVec3 diff    = *bodyPos - center;
+        const auto       dist    = static_cast<float>(diff.Length());
+        const float      falloff = 1.0f - std::clamp(dist / radius, 0.0f, 1.0f);
 
         if (dist > 1e-4f && falloff > 0.01f) {
-            JPH::Vec3 impulseDir = JPH::Vec3(diff / static_cast<double>(dist)) + JPH::Vec3(0.0f, 0.35f, 0.0f);
-            JPH::Vec3 impulse    = impulseDir.Normalized() * (maxImpulse * falloff * falloff);
+            const JPH::Vec3 impulseDir = JPH::Vec3(diff / static_cast<double>(dist)) + JPH::Vec3(0.0f, 0.35f, 0.0f);
+            const JPH::Vec3 impulse    = impulseDir.Normalized() * (maxImpulse * falloff * falloff);
             AddImpulse(physHandle, impulse);
         }
     }
 }
 
 auto PhysicsContext::GetContactEvents() const -> std::pair<const Physics::ContactEvent*, size_t> {
-    const auto& world = _impl->world;
-
-    size_t count = world.contactCount.load(std::memory_order::acquire);
-    count        = std::min(count, world.contactCapacity);
-
+    const auto&  world = _impl->world;
+    const size_t count = std::min(world.contactCount.load(std::memory_order::acquire), world.contactCapacity);
     return {world.contactBuffer.data(), count};
 }
 

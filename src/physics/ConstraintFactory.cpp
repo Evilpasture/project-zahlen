@@ -8,14 +8,14 @@
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/Constraints/PointConstraint.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
-#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <utility>
 
 namespace ZHLN {
 
 namespace Physics {
 
-JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body* b2, const ConstraintParams& p) {
+auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body* b2, const ConstraintParams& p) -> JPH::Constraint* {
     switch (type) {
         case ConstraintType::Fixed: {
             JPH::FixedConstraintSettings settings;
@@ -30,12 +30,12 @@ JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1
         }
         case ConstraintType::Hinge: {
             JPH::HingeConstraintSettings settings;
-            settings.mSpace  = JPH::EConstraintSpace::WorldSpace;
-            settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot);
+            settings.mSpace      = JPH::EConstraintSpace::WorldSpace;
+            settings.mPoint1     = settings.mPoint2 = JPH::RVec3(p.pivot);
             settings.mHingeAxis1 = settings.mHingeAxis2 = p.axis;
 
-            JPH::Vec3 normal      = p.axis.GetNormalizedPerpendicular();
-            settings.mNormalAxis1 = settings.mNormalAxis2 = normal;
+            const JPH::Vec3 normal = p.axis.GetNormalizedPerpendicular();
+            settings.mNormalAxis1  = settings.mNormalAxis2 = normal;
 
             settings.mLimitsMin = p.limitMin;
             settings.mLimitsMax = p.limitMax;
@@ -50,11 +50,11 @@ JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1
         }
         case ConstraintType::Slider: {
             JPH::SliderConstraintSettings settings;
-            settings.mSpace  = JPH::EConstraintSpace::WorldSpace;
-            settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot);
+            settings.mSpace       = JPH::EConstraintSpace::WorldSpace;
+            settings.mPoint1      = settings.mPoint2 = JPH::RVec3(p.pivot);
             settings.mSliderAxis1 = settings.mSliderAxis2 = p.axis;
-            settings.mLimitsMin                           = p.limitMin;
-            settings.mLimitsMax                           = p.limitMax;
+            settings.mLimitsMin                          = p.limitMin;
+            settings.mLimitsMax                          = p.limitMax;
             return settings.Create(*b1, *b2);
         }
         case ConstraintType::Cone: {
@@ -62,16 +62,16 @@ JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1
             settings.mSpace  = JPH::EConstraintSpace::WorldSpace;
             settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot);
 
-            JPH::Vec3 axis  = p.axis;
-            float     lenSq = axis.LengthSq();
+            JPH::Vec3   axis  = p.axis;
+            const float lenSq = axis.LengthSq();
             if (lenSq < 1e-6f) {
                 axis = JPH::Vec3::sAxisY();
             } else {
                 axis /= JPH::Sqrt(lenSq);
             }
 
-            settings.mTwistAxis1 = settings.mTwistAxis2 = axis;
-            settings.mHalfConeAngle                     = p.limitMax;
+            settings.mTwistAxis1    = settings.mTwistAxis2 = axis;
+            settings.mHalfConeAngle = p.limitMax;
             return settings.Create(*b1, *b2);
         }
         case ConstraintType::Distance: {
@@ -90,54 +90,43 @@ JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1
 
             return settings.Create(*b1, *b2);
         }
-        default:
-            break;
     }
     return nullptr;
 }
 
-}
+} // namespace Physics
 
-Physics::ConstraintHandle
-    PhysicsContext::CreateConstraint(Physics::ConstraintType type, Physics::BodyHandle b1, Physics::BodyHandle b2, const Physics::ConstraintParams& params) {
-    auto& world = GetInternalWorld();
+auto PhysicsContext::CreateConstraint(
+    Physics::ConstraintType          type,
+    Physics::BodyHandle              b1,
+    Physics::BodyHandle              b2,
+    const Physics::ConstraintParams& params
+) -> Physics::ConstraintHandle {
+    auto&                           world  = GetInternalWorld();
+    const Physics::ConstraintHandle handle = world.AllocateConstraintHandle();
 
-    return Physics::WriteWorldLock(world, [&] -> Physics::ConstraintHandle {
-        const Physics::ConstraintHandle handle = world.AllocateConstraintHandle();
-
-        if (world.commandCount >= world.commandQueue.size()) {
-            const size_t newCap = world.commandQueue.size() == 0 ? 64 : world.commandQueue.size() * 2;
-            world.commandQueue.resize(newCap);
-            world.commandQueueSpare.resize(newCap);
-        }
-
-        Physics::Command cmd {};
-        cmd.type           = Physics::CommandType::CreateConstraint;
-        cmd.cHandle        = handle;
-        cmd.createC.cType  = type;
-        cmd.createC.b1     = b1;
-        cmd.createC.b2     = b2;
-        cmd.createC.params = params;
-
-        world.commandQueue[world.commandCount++] = cmd;
-        return handle;
-    });
+    Physics::Command cmd {};
+    cmd.type                     = Physics::CommandType::CreateConstraint;
+    cmd.payload.createConstraint = Physics::CreateConstraintPayload {
+        .cHandle = handle,
+        .b1      = b1,
+        .b2      = b2,
+        .cType   = type,
+        .params  = params,
+    };
+    world.mailbox.Enqueue(std::move(cmd));
+    return handle;
 }
 
 void PhysicsContext::SetConstraintTarget(Physics::ConstraintHandle handle, float value) {
-    auto& world = GetInternalWorld();
-    Physics::WriteWorldLock(world, [&] {
-        if (world.commandCount >= world.commandQueue.size()) {
-            const size_t newCap = world.commandQueue.size() == 0 ? 64 : world.commandQueue.size() * 2;
-            world.commandQueue.resize(newCap);
-            world.commandQueueSpare.resize(newCap);
-        }
-        Physics::Command cmd {};
-        cmd.type                                 = Physics::CommandType::SetConstraintTarget;
-        cmd.setTarget.targetCHandle              = handle;
-        cmd.setTarget.targetValue                = value;
-        world.commandQueue[world.commandCount++] = cmd;
-    });
+    auto&            world = GetInternalWorld();
+    Physics::Command cmd {};
+    cmd.type                        = Physics::CommandType::SetConstraintTarget;
+    cmd.payload.setConstraintTarget = Physics::SetConstraintTargetPayload {
+        .targetCHandle = handle,
+        .targetValue   = value,
+    };
+    world.mailbox.Enqueue(std::move(cmd));
 }
 
-}
+} // namespace ZHLN
