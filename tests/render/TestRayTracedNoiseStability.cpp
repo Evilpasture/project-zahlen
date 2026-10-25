@@ -110,20 +110,6 @@ struct RayTracedNoiseStabilityTestSuite {
         });
     }
 
-    static bool SetDenoiser(ZHLN::Engine& engine, uint32_t passes) {
-        auto&      reg  = engine.GetRegistry();
-        const auto ents = reg.GetEntitiesWith<ZHLN::Components::RayTracingSettingsComponent>();
-        if (ents.empty()) {
-            const ZHLN::Entity e = reg.Create();
-            if (e == ZHLN::Entity::Null()) {
-                return false;
-            }
-            reg.Add(e, ZHLN::Components::RayTracingSettingsComponent {.config = ZHLN::RayTracingConfig {.denoiserPasses = passes}});
-            return true;
-        }
-        return reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(ents[0], [passes](auto& c) { c.config.denoiserPasses = passes; });
-    }
-
     // Rough floor + raking sun from +Z so contact seams project directly toward
     // the camera on the floor. Every material stays rough (>= 0.70 > 0.40) and
     // SSR is off, isolating pc.enableRTR to TraceSunContactShadow in lighting.slang.
@@ -216,7 +202,6 @@ struct RayTracedNoiseStabilityTestSuite {
             );
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
-            RayTracedNoiseStabilityTestSuite::SetDenoiser(*engine, 0);
 
             RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 0);
             RgbImage off = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_contact_live_off.ppm");
@@ -277,7 +262,6 @@ struct RayTracedNoiseStabilityTestSuite {
             );
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
-            RayTracedNoiseStabilityTestSuite::SetDenoiser(*engine, 0);
 
             RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 0);
             RgbImage off = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_contact_far_off.ppm");
@@ -333,7 +317,6 @@ struct RayTracedNoiseStabilityTestSuite {
             );
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
-            RayTracedNoiseStabilityTestSuite::SetDenoiser(*engine, 0);
 
             RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 0);
             RgbImage off = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_contact_debris_off.ppm");

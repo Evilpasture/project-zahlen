@@ -45,16 +45,10 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
                 };
                 extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
             }
-            // OpaqueSceneCopyPass transitions this image to TRANSFER_SRC and
-            // copies it into TransLighting. Storage and TransferDst alone are
-            // insufficient even though both allow other GPU write paths.
+            // OpaqueSceneCopyPass and CaptureFrame transition this image to
+            // TRANSFER_SRC to copy out the composited HDR scene color.
             if constexpr (std::is_same_v<Resource, Res_HdrSceneColor>) {
                 extra |= Vk::ImageUsage::TransferSrc;
-            }
-            if constexpr (
-                std::is_same_v<Resource, Res_HdrSceneColor> || std::is_same_v<Resource, Res_DenoiseA> || std::is_same_v<Resource, Res_DenoiseB>
-            ) {
-                extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
             }
             if constexpr (std::is_same_v<Resource, Res_LightingGI> || std::is_same_v<Resource, Res_HiZ>) {
                 extra |= Vk::ImageUsage::Storage;
@@ -236,11 +230,10 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
-    const std::array denoiseTargets = {
-        _graph.denoiseA.image.Handle(), _graph.denoiseB.image.Handle(), _graph.rcgiProbes.image.Handle(),
-        _graph.rcgiCascadeA.image.Handle(), _graph.rcgiCascadeB.image.Handle()
+    const std::array rcgiTargets = {
+        _graph.rcgiProbes.image.Handle(), _graph.rcgiCascadeA.image.Handle(), _graph.rcgiCascadeB.image.Handle()
     };
-    for (auto* const img: denoiseTargets) {
+    for (auto* const img: rcgiTargets) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 

@@ -121,8 +121,7 @@ auto RenderContext::Impl::BuildLightingResources() -> std::expected<void, ErrorC
 auto RenderContext::Impl::BuildPostProcessResources() -> std::expected<void, ErrorCode> {
     return BuildBoundDynamic(*this, post.bloomThreshold, Shaders::Modules::BloomThresholdCS::Bytes())
         .and_then([&]() -> std::expected<void, ErrorCode> { return BuildBoundDynamic(*this, post.bloomDown, Shaders::Modules::BloomDownCS::Bytes()); })
-        .and_then([&]() -> std::expected<void, ErrorCode> { return BuildBoundDynamic(*this, post.bloomUp, Shaders::Modules::BloomUpCS::Bytes()); })
-        .and_then([&]() -> std::expected<void, ErrorCode> { return BuildBoundDynamic(*this, post.hdrDenoise, Shaders::Modules::HdrDenoiseAtrousCS::Bytes()); });
+        .and_then([&]() -> std::expected<void, ErrorCode> { return BuildBoundDynamic(*this, post.bloomUp, Shaders::Modules::BloomUpCS::Bytes()); });
 }
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -308,8 +307,7 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
                 this, "Bloom", [this]() -> std::expected<void, ErrorCode> { return BuildPostProcessResources(); },
-                {Shaders::Modules::BloomThresholdCS::Path, Shaders::Modules::BloomDownCS::Path, Shaders::Modules::BloomUpCS::Path,
-                 Shaders::Modules::HdrDenoiseAtrousCS::Path}
+                {Shaders::Modules::BloomThresholdCS::Path, Shaders::Modules::BloomDownCS::Path, Shaders::Modules::BloomUpCS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

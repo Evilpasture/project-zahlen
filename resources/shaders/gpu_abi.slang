@@ -33,7 +33,6 @@ public struct GpuAbiTypes {
     public GtaoPushConstants gtaoPush;
     public KawasePushConstants kawasePush;
     public ThresholdPushConstants thresholdPush;
-    public HdrAtrousPushConstants hdrAtrousPush;
     public BlitPushConstants blitPush;
 
     public FXAAPushConstants fxaaPush;
@@ -102,7 +101,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += asuint(abi.gtaoPush.rcpFullRes.x);
     acc += uint(abi.kawasePush.mode);
     acc += asuint(abi.thresholdPush.exposure);
-    acc += abi.hdrAtrousPush.stepSize;
     acc += asuint(abi.blitPush.colorFilter.x);
     acc += asuint(abi.fxaaPush.rcpFrameX);
     acc += asuint(abi.mlaaPush.threshold);

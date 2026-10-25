@@ -19,7 +19,6 @@
 #include "passes/gbuffer/GBufferBasePass.hpp"
 #include "passes/gbuffer/GBufferResolvePass.hpp"
 #include "passes/gbuffer/ViewmodelPass.hpp"
-#include "passes/lighting/AtrousDenoisePass.hpp"
 #include "passes/lighting/ClusteredLightingPass.hpp"
 #include "passes/lighting/EmissivePass.hpp"
 #include "passes/lighting/LightingMipPass.hpp"
@@ -125,10 +124,6 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::LightingMipPass {.frame = self},
         OpaqueReflectionPass {.frame = self, .pc = pc}, TranslucentReflectionPass {.frame = self, .pc = pc},
         Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self},
-        Passes::AtrousDenoisePass<
-            "HdrDenoise", Shaders::HdrDenoise, Res_HdrSceneColor, Res_DenoiseA, Res_DenoiseB, void, HdrAtrousPushConstants, Passes::HdrDenoiseGate> {
-            .frame = self
-        },
         Passes::BloomPass {.frame = self}
     );
 

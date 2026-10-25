@@ -17,7 +17,6 @@ using BakePush = Slang::BakePush;
 using GtaoPushConstants = Slang::GtaoPushConstants;
 using KawasePushConstants = Slang::KawasePushConstants;
 using ThresholdPushConstants = Slang::ThresholdPushConstants;
-using HdrAtrousPushConstants = Slang::HdrAtrousPushConstants;
 using BlitPushConstants = Slang::BlitPushConstants;
 
 using ScenePassPushConstants = Slang::ScenePassPushConstants;
@@ -59,7 +58,7 @@ static_assert(
      GpuAbi::ScenePassPayload<SkinningConstants> && GpuAbi::ScenePassPayload<BakePush> &&
      GpuAbi::ScenePassPayload<GtaoPushConstants> &&
      GpuAbi::ScenePassPayload<KawasePushConstants> && GpuAbi::ScenePassPayload<ThresholdPushConstants> &&
-     GpuAbi::ScenePassPayload<HdrAtrousPushConstants> && GpuAbi::ScenePassPayload<BlitPushConstants> &&
+     GpuAbi::ScenePassPayload<BlitPushConstants> &&
      GpuAbi::ScenePassPayload<ScenePassPushConstants>),
     "a generated pass payload no longer fits the push blob's prefix in front of the frame addresses"
 );

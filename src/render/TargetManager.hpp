@@ -46,8 +46,6 @@ using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT>;
 using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT>;
 using Res_Lighting      = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT>;
 using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16_SFLOAT>;
-using Res_DenoiseA      = Vk::GraphImage<"DenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT>;
-using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT>;
 using Res_RcgiProbes    = Vk::GraphImage<"RcgiProbes", VK_FORMAT_R32G32B32A32_SFLOAT>;
 using Res_RcgiCascadeA  = Vk::GraphImage<"RcgiCascadeA", VK_FORMAT_R16G16B16A16_SFLOAT>;
 using Res_RcgiCascadeB  = Vk::GraphImage<"RcgiCascadeB", VK_FORMAT_R16G16B16A16_SFLOAT>;
@@ -95,8 +93,6 @@ class TargetManager {
         Vk::RenderTarget<Res_BakedMask> bakedMask;
         Vk::RenderTarget<Res_Lighting> lightingTarget;
         Vk::RenderTarget<Res_HdrSceneColor> hdrSceneColor;
-        Vk::RenderTarget<Res_DenoiseA> denoiseA;
-        Vk::RenderTarget<Res_DenoiseB> denoiseB;
         Vk::RenderTarget<Res_RcgiProbes> rcgiProbes;
         Vk::RenderTarget<Res_RcgiCascadeA> rcgiCascadeA;
         Vk::RenderTarget<Res_RcgiCascadeB> rcgiCascadeB;

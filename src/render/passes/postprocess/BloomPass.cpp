@@ -13,7 +13,7 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
     using enum Vk::BarrierAccess;
     using namespace Shaders;
 
-    const auto srcHdr     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.hdrSceneColor);
+    const auto srcHdr     = Vk::Assume<Vk::ComputeRead<Res_HdrSceneColor>>(frame.graphResources.hdrSceneColor);
     const auto thresh     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomThresholdTarget);
     const auto down1      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomDown1);
     const auto down2      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomDown2);

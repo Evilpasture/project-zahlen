@@ -7,9 +7,8 @@
 
 namespace ZHLN::Passes::TemplatedDetail {
 
-// Concatenates Vk::TypeList usage lists. The pass templates below build their
-// usage list conditionally (a history/velocity pair that exists only for the
-// temporal denoisers), and Vk::RenderPass wants the usages as one flat pack.
+// Concatenates Vk::TypeList usage lists so templated pass wrappers can assemble
+// conditional resource packs into one flat Vk::RenderPass base.
 template <typename... Lists>
 struct Concat;
 template <>

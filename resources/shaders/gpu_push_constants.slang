@@ -106,13 +106,6 @@ public struct ThresholdPushConstants {
     public float exposure;
 };
 
-public struct HdrAtrousPushConstants {
-    public uint stepSize;
-    public float phiDepth;
-    public float phiNormal;
-    public float phiLuma;
-};
-
 public struct BlitPushConstants {
     public float vignetteIntensity;
     public float vignettePower;

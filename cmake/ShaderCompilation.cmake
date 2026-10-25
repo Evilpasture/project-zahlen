@@ -603,13 +603,6 @@ add_shader_target(hiz_generate_shader
     STAGES "${SHADER_SRC_DIR}/hiz_generate.slang|CSMain|cs_6_0|SHADER_HIZ_GENERATE_SLANG_CS_PATH"
 )
 
-# Color A-Trous wavelet over the composited HDR scene color.
-# Sun contact shadows, reflections, and RCGI are deterministic and do not use
-# separate shadow/reflection A-Trous passes.
-add_shader_target(hdr_denoise_atrous_shader
-    STAGES "${SHADER_SRC_DIR}/hdr_denoise_atrous.slang|CSMain|cs_6_0|SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
-)
-
 # Deterministic Radiance Cascades Global Illumination (RCGI):
 # surface-pinned probe pyramid setup, wave-coherent RayQuery cascade trace +
 # parallax-corrected bilateral merge, and groupshared full-res resolve.
@@ -884,7 +877,6 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "LightingNortVS=SHADER_LIGHTING_NORT_SLANG_VS_PATH"
     "LightingNortPS=SHADER_LIGHTING_NORT_SLANG_PS_PATH"
     "VolumetricClearCS=SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH"
-    "HdrDenoiseAtrousCS=SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
     "RcgiProbeSetupCS=SHADER_RCGI_PROBE_SETUP_SLANG_CS_PATH"
     "RcgiCascadeTraceMergeCS=SHADER_RCGI_CASCADE_TRACE_MERGE_SLANG_CS_PATH"
     "RcgiResolveCS=SHADER_RCGI_RESOLVE_SLANG_CS_PATH"
@@ -959,7 +951,6 @@ set(ZHLN_SHADER_CATALOG_SETS
     "BloomThreshold=BloomThresholdCS"
     "BloomDown=BloomDownCS"
     "BloomUp=BloomUpCS"
-    "HdrDenoise=HdrDenoiseAtrousCS"
     "RcgiProbeSetup=RcgiProbeSetupCS"
     "RcgiCascadeTraceMerge=RcgiCascadeTraceMergeCS"
     "RcgiResolve=RcgiResolveCS"

@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 
-# The renderer's translation units. The templated pass families -- the à-trous
-# denoisers, the fullscreen AA nodes and the single-dispatch compute passes --
-# are header-only by design (AtrousDenoisePass.hpp, FullscreenPass.hpp,
-# ComputePass.hpp and their domain descriptor headers) and deliberately do not
-# appear here; every instantiation is compiled through RenderGraphBuild.hpp and
-# pipelines/ComputeSimPipeline.cpp. Shader hot-reload registration lives in
-# init/RenderInitPostProcess.cpp and is unaffected by pass file layout.
+# The renderer's translation units. The templated pass families -- the
+# fullscreen AA nodes and the single-dispatch compute passes -- are header-only
+# by design (FullscreenPass.hpp, ComputePass.hpp and their domain descriptor
+# headers) and deliberately do not appear here; every instantiation is compiled
+# through RenderGraphBuild.hpp and pipelines/ComputeSimPipeline.cpp. Shader
+# hot-reload registration lives in init/RenderInitPostProcess.cpp and is
+# unaffected by pass file layout.
 set(RAW_RENDER_SOURCES
     GpuAbi.cpp
     GpuPack.cpp

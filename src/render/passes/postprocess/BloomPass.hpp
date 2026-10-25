@@ -11,7 +11,7 @@ namespace ZHLN::Passes {
 struct BloomPass:
     Vk::RenderPass<
         "BloomKawase",
-        Vk::ComputeReadGeneral<Res_HdrSceneColor>,
+        Vk::ComputeRead<Res_HdrSceneColor>,
         Vk::ComputeWrite<Res_BloomThresh>,
         Vk::ComputeWrite<Res_BloomDown1>,
         Vk::ComputeWrite<Res_BloomDown2>,

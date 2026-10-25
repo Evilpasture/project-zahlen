@@ -22,8 +22,6 @@
 //                    residual ~ 0 without needing multi-frame accumulation).
 //   4. HYBRID & NO DEBRIS - Hi-Z SSR, TLAS inline fallback, and hybrid SSR+RTR
 //                    all light up the glossy band without isolated ray debris.
-//   5. HDR DENOISE - enabling HdrDenoise preserves metallic reflection luminance
-//                    and keeps consecutive frames bit-stable.
 
 #include "helpers/ImageTesting.hpp"
 #include "RayTracedNoiseMetrics.hpp"
@@ -47,7 +45,6 @@
 #include <cstdio>
 #include <expected>
 #include <memory>
-#include <numeric>
 #include <string>
 #include <vector>
 
@@ -65,7 +62,6 @@ enum class ReflectionNoiseError : uint8_t {
     ReflectionIsFragmented ZHLN_ANNOTATION(ZHLN::Description<"The on/off reflection delta is fragmented rather than forming a contiguous glossy band.">{}),
     ResidualDidNotConverge ZHLN_ANNOTATION(ZHLN::Description<"Consecutive static frames exhibited non-zero temporal residual instead of immediate single-frame convergence.">{}),
     RayDebrisDetected ZHLN_ANNOTATION(ZHLN::Description<"The reflection band contains isolated single-pixel outliers (ray debris / fireflies).">{}),
-    DenoiserCorruptedReflection ZHLN_ANNOTATION(ZHLN::Description<"The A-Trous HDR wavelet darkened, clamped, or destabilized the deterministic metallic reflection band.">{}),
 };
 
 namespace {
@@ -162,25 +158,6 @@ struct RayTracedReflectionNoiseTestSuite {
             pp.skyHorizon        = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
             pp.skyGround         = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
         });
-    }
-
-    // The A-Trous HDR denoiser (RenderGraphBuilder MakeHdrDenoisePass) runs
-    // whenever rayTracing.denoiserPasses > 0 and any RT path is on. These
-    // suites measure RAW 1 SPP statistics -- the wavelet output is spatially
-    // correlated, so every raw scenario pins the denoiser off through the
-    // RayTracingSettingsComponent the settings sync reads.
-    static bool SetDenoiser(ZHLN::Engine& engine, uint32_t passes) {
-        auto&      reg  = engine.GetRegistry();
-        const auto ents = reg.GetEntitiesWith<ZHLN::Components::RayTracingSettingsComponent>();
-        if (ents.empty()) {
-            const ZHLN::Entity e = reg.Create();
-            if (e == ZHLN::Entity::Null()) {
-                return false;
-            }
-            reg.Add(e, ZHLN::Components::RayTracingSettingsComponent {.config = ZHLN::RayTracingConfig {.denoiserPasses = passes}});
-            return true;
-        }
-        return reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(ents[0], [passes](auto& c) { c.config.denoiserPasses = passes; });
     }
 
     // A dark room of metal. The plate is the only surface at or under the 0.4
@@ -328,7 +305,6 @@ struct RayTracedReflectionNoiseTestSuite {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
-            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 0);
 
             // Off first: it doubles as the ground-truth frame. Three zero
             // deltas in a row proved that a blanket "path inactive" verdict
@@ -450,7 +426,6 @@ struct RayTracedReflectionNoiseTestSuite {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
-            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 0);
 
             RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 0);
             RgbImage off = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_structure_off.ppm");
@@ -505,7 +480,6 @@ struct RayTracedReflectionNoiseTestSuite {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
-            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 0);
 
             RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 0);
             RgbImage off = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_conv_off.ppm");
@@ -553,7 +527,6 @@ struct RayTracedReflectionNoiseTestSuite {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
-            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 0);
 
             RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 0);
             RgbImage off = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_debris_off.ppm");
@@ -583,69 +556,6 @@ struct RayTracedReflectionNoiseTestSuite {
             }
 
             ZHLN::Println("    [PASS] Hybrid Hi-Z SSR + TLAS reflection band is clean, stable, and free of ray debris.");
-            return {};
-        }
-
-        // Enabling the HDR A-Trous wavelet must preserve the metallic reflection
-        // band's luminance (never median-clamping or blackening reflections) and
-        // preserve deterministic frame-to-frame stability.
-        std::expected<void, ZHLN::ErrorCode> hdr_denoiser_preserves_reflection_luma_and_stability() {
-            auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
-                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
-            }
-            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
-                ZHLN::Println("    [SKIP] Device has no ray tracing support; denoiser check is not applicable.");
-                return {};
-            }
-            if (!RayTracedReflectionNoiseTestSuite::BuildReflectionScene(*engine)) {
-                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
-            }
-            RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
-
-            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 0);
-            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 0);
-            RgbImage off = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_denoise_off.ppm");
-
-            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1, 1);
-            RgbImage rawA = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_denoise_raw_a.ppm");
-            if (!(ZHLN::Test::ExpectTrue(off.Valid()) && ZHLN::Test::ExpectTrue(rawA.Valid()))) {
-                return std::unexpected(ReflectionNoiseError::CaptureFailed);
-            }
-            const std::vector<double> onOffDiff = LumaDifference(rawA, off);
-            const BBox                band      = BBoxOfChangedPixels(onOffDiff.data(), kWidth, kHeight, kChangeThreshold, 4);
-            if (!(ZHLN::Test::ExpectTrue(!band.Empty()) && ZHLN::Test::ExpectGe(band.Width(), kMinRegionWidth) &&
-                  ZHLN::Test::ExpectGe(band.Height(), kMinRegionHeight))) {
-                return std::unexpected(ReflectionNoiseError::ReflectionRegionTooSmall);
-            }
-
-            // Denoised pair: three wavelet iterations.
-            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 3);
-            RgbImage denA = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_denoise_on_a.ppm");
-            RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
-            RgbImage denB = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_denoise_on_b.ppm");
-            if (!(ZHLN::Test::ExpectTrue(denA.Valid()) && ZHLN::Test::ExpectTrue(denB.Valid()))) {
-                return std::unexpected(ReflectionNoiseError::CaptureFailed);
-            }
-            const std::vector<double> denDiff = LumaDifference(denA, denB);
-            const double              denRms  = RmsInRegion(denDiff.data(), kWidth, band);
-            const auto                meanLumaOf = [](const RgbImage& img) {
-                const std::vector<double> pl = LumaPlane(img);
-                return std::accumulate(pl.begin(), pl.end(), 0.0) / static_cast<double>(pl.size());
-            };
-            const double rawMeanLuma = meanLumaOf(rawA);
-            const double denMeanLuma = meanLumaOf(denA);
-            ZHLN::Println("    [INFO] denoiser ON (3 passes): on/on residual rms over the band = {:.6f}", denRms);
-            ZHLN::Println("    [INFO] frame mean luma: raw={:.3f} denoised={:.3f}", rawMeanLuma, denMeanLuma);
-
-            if (!ZHLN::Test::ExpectGt(denMeanLuma, 0.85 * rawMeanLuma)) {
-                return std::unexpected(ReflectionNoiseError::DenoiserCorruptedReflection);
-            }
-            if (!ZHLN::Test::ExpectLt(denRms, 0.05)) {
-                return std::unexpected(ReflectionNoiseError::DenoiserCorruptedReflection);
-            }
-
-            ZHLN::Println("    [PASS] HDR A-Trous bypasses metallic reflections cleanly with preserved luma and zero temporal boil.");
             return {};
         }
     };
