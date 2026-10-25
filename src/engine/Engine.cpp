@@ -4,6 +4,7 @@
 #include "ArticulationSystem.hpp"
 #include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
+#include "Hierarchy.hpp"
 #include "NativeScriptModule.hpp"
 #include "Platform.hpp"
 #include "SystemWiring.hpp"
@@ -252,6 +253,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         return std::unexpected(world_res.error());
     }
     _impl->world = std::move(world_res.value());
+    _impl->posePostProcessors.BindRegistry(_impl->world->GetRegistry());
 
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
         auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
@@ -467,8 +469,9 @@ void Engine::EnsureSystemGraphs() {
         }
     );
 
-    _impl->updateGraph = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices);
-    _impl->renderGraph = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices);
+    _impl->posePostProcessors.BindRegistry(_impl->world->GetRegistry());
+    _impl->updateGraph = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices, &MarkPendingDestroy);
+    _impl->renderGraph = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices, &MarkPendingDestroy);
 }
 
 auto Engine::GetPoseUploads() -> PoseUploadQueue& {

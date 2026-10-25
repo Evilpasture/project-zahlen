@@ -225,12 +225,12 @@ struct RenderContext::Impl: RenderFrameContext {
     Vk::Image ltcAmpImage;
 
     struct BillboardSlot {
-        uint32_t     textureIndex = 0;
-        uint32_t     blendMode    = 0;
-        uint32_t     alignment    = 0;
-        uint32_t     serial       = 0;
-        BufferHandle buffer       = BufferHandle::Invalid;
-        uint32_t     capacity     = 0;
+        uint32_t               textureIndex = 0;
+        uint32_t               blendMode    = 0;
+        uint32_t               alignment    = 0;
+        uint32_t               serial       = 0;
+        PerFrame<BufferHandle> buffers {};
+        PerFrame<uint32_t>     capacities {};
     };
     ZHLN::Array<BillboardSlot> billboardSlots;
     ZHLN::Array<Particle>      billboardStaging;

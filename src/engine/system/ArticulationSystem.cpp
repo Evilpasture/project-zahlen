@@ -15,6 +15,7 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cstring>
@@ -25,15 +26,15 @@
 namespace ZHLN {
 
 namespace Tests {
-static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcept {
+static void VerifyArticulationStateConsistency(
+    std::span<const Entity>                       entities,
+    std::span<const Components::RagdollComponent> ragdolls
+) noexcept {
     static bool testsRun = false;
     if (testsRun) {
         return;
     }
     testsRun = true;
-
-    auto entities = reg.GetEntitiesWith<Components::RagdollComponent>();
-    auto ragdolls = reg.GetRawArray<Components::RagdollComponent>();
 
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity      e       = entities[i];
@@ -107,7 +108,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
                                             const Components::KinematicPoseOverrideComponent, const Components::SkeletalMeshComponent,
                                             Components::TransformComponent&, const Components::RagdollHitReactionCommand,
                                             const Components::RagdollImpulseCommand> query,
-                                 ECS::Registry& registry, ECS::ResMut<ArticulationSystem> articulation,
+                                 ECS::EntityCommandBuffer& ecb, ECS::ResMut<ArticulationSystem> articulation,
                                  ECS::ResMut<PhysicsContext> physics, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt) {
     auto& sys = *articulation;
     auto& pc  = *physics;
@@ -141,12 +142,12 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
 
                 ragComp.state = RagdollState::PartialBlend;
             }
-            registry.Remove<Components::RagdollHitReactionCommand>(e);
+            ecb.RemoveComponent<Components::RagdollHitReactionCommand>(e);
         }
 
         if (auto impulseCmd = query.Get<Components::RagdollImpulseCommand>(e)) {
             pc.AddRagdollImpulse(ragComp.ragdollHandle, impulseCmd->jointIndex, impulseCmd->impulse);
-            registry.Remove<Components::RagdollImpulseCommand>(e);
+            ecb.RemoveComponent<Components::RagdollImpulseCommand>(e);
         }
 
         bool hasActiveBlend = false;
@@ -289,7 +290,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
     }
 
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyArticulationStateConsistency(registry);
+        ZHLN::Tests::VerifyArticulationStateConsistency(entities, ragdolls);
     }
 }
 

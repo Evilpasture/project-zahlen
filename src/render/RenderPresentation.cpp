@@ -61,6 +61,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
             presented.EmplaceSuccess(PresentOutcome {.windowId = windowId, .disposition = PresentDisposition::NotRecorded});
             continue;
         }
+        geometry.RecordPendingUpdates(recording->recorder.Handle());
         const auto reconciled = ReconcileDestination(dest, recording->recorder);
         if (!reconciled) {
             ZHLN::Log("[Render] Window target cannot be presented: {}.", reconciled.error());
@@ -72,11 +73,20 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
 
         const bool presents = destPresenter.HasSwapchain();
 
-        std::array<Vk::SemaphoreSubmit, 3> waits {};
+        std::array<Vk::SemaphoreSubmit, 4> waits {};
         uint32_t waitCount = 0;
         const uint64_t stagingValue = transferRingBuffer.GetCurrentValue();
         if (transferRingBuffer.GetSemaphore() != VK_NULL_HANDLE && stagingValue > 0) {
             waits[waitCount++] = Vk::SemaphoreSubmit::Timeline(transferRingBuffer.GetSemaphore(), stagingValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+        }
+
+        // Overlap CPU frame N with GPU frame N-1 without GPU render-target hazards:
+        // order this window's graphics submission behind the previous frame slot's
+        // graphics timeline on the GPU rather than stalling the CPU in BeginFrame.
+        if (auto prevGfxDep = destPresenter.sync.GetGraphicsWaitDependency(
+                Vk::PreviousFrameSlot(destPresenter.frameIndex), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+            )) {
+            waits[waitCount++] = *prevGfxDep;
         }
 
         // Tell-Don't-Ask: ask FrameSync for a ready-made compute dependency

@@ -85,8 +85,18 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
         return std::unexpected(executable.error());
     }
 
+    std::array<Vk::SemaphoreSubmit, 2> waits {};
+    uint32_t                           waitCount = 0;
+    const uint32_t                     prevSlot  = Vk::PreviousFrameSlot(slot);
+    if (auto prevGfxDep = impl.presenter.sync.GetGraphicsWaitDependency(prevSlot, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)) {
+        waits[waitCount++] = *prevGfxDep;
+    }
+    if (auto prevCompDep = impl.presenter.sync.GetComputeWaitDependency(prevSlot, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)) {
+        waits[waitCount++] = *prevCompDep;
+    }
+
     auto compSync  = impl.presenter.sync.PrepareComputeSubmit(slot);
-    auto submitted = Vk::QueueSubmit(impl.ctx.ComputeQueue(), std::move(*executable), {}, compSync.Signal());
+    auto submitted = Vk::QueueSubmit(impl.ctx.ComputeQueue(), std::move(*executable), std::span<const Vk::SemaphoreSubmit> {waits.data(), waitCount}, compSync.Signal());
 
     if (!submitted) [[unlikely]] {
         if (Vk::IsDeviceLost(submitted.error())) {

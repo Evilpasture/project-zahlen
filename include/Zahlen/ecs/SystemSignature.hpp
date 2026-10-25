@@ -98,10 +98,14 @@ struct SystemSignature {
                     constexpr Access mode = std::is_same_v<Clean, ResMut<Target>> ? Access::Write : Access::Read;
                     appendAccess(ComponentFamily::GetTypeID<TemplatedDetail::ServiceToken<Target>>(), mode);
                 }
-            } else if constexpr (std::is_same_v<Param, Registry&> || std::is_same_v<Param, const Registry&>) {
-                // Direct registry access can touch any component, including
-                // families not listed in this system's Query parameters.
+            } else if constexpr (std::is_same_v<Param, Registry&>) {
+                // Direct mutable registry access can touch any component,
+                // including families not listed in this system's Query parameters.
                 accesses.push_back({AllComponents, Access::Write});
+            } else if constexpr (std::is_same_v<Param, const Registry&>) {
+                // Read-only registry access conflicts with writers of any
+                // component, while still allowing concurrent read-only passes.
+                accesses.push_back({AllComponents, Access::Read});
             }
         });
         return accesses;

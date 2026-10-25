@@ -71,8 +71,6 @@ class ZHLN_API AnimationSystem {
     using NodeWorldTransformMap = JPH::UnorderedMap<const cgltf_node*, JPH::Mat44, PointerHash, std::equal_to<>>;
     using SampledTransformMap   = JPH::UnorderedMap<const cgltf_node*, SampledTransform, PointerHash, std::equal_to<>>;
 
-    // The optional pose callback uses a raw Registry&, so the graph treats
-    // this pass as a structural/wildcard writer even if no callback is set.
     static void Update(
         ECS::Query<
             Components::AnimatorComponent&,
@@ -81,7 +79,6 @@ class ZHLN_API AnimationSystem {
             const Components::MeshComponent,
             Components::MorphTargetComponent&,
             Components::TransformComponent&> query,
-        ECS::Registry&                       registry,
         ECS::ResMut<PoseUploadQueue>         poseUploads,
         FrameDt                              frameDt,
         ECS::Res<PosePostProcessorPipeline>  posePostProcessors,

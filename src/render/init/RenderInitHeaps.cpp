@@ -269,7 +269,7 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
         allocator.DestroyBuffer(morphDeltasBuffer);
     });
     JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
-    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
+    for (uint32_t i = 0; i < FrameResources::kJointBufferRingSize; ++i) {
         auto jb_res = Vk::Buffer::Create(
             allocator, sizeof(JPH::Mat44) * 8192, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
         );

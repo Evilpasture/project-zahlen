@@ -79,6 +79,21 @@ void DeclarativeReader(ReadQuery query) {
 }
 
 void WildcardRegistrySystem(ZHLN::ECS::Registry&) {}
+void ReadOnlyRegistrySystem(const ZHLN::ECS::Registry&) {}
+void CommandBufferSystemA(ZHLN::ECS::Query<TestCompA&> query, ZHLN::ECS::EntityCommandBuffer& ecb) {
+    query.ForEach([&](ZHLN::Entity e, TestCompA& comp) {
+        comp.value += 10;
+        ecb.AddComponent(e, TestCompB {.value = 77});
+    });
+    ecb.CreateEntity(TestCompA {.value = 99});
+}
+void CommandBufferSystemB(ZHLN::ECS::Query<const TestCompB> query, ZHLN::ECS::EntityCommandBuffer& ecb) {
+    for (const ZHLN::Entity e: query.Entities<TestCompB>()) {
+        if (const auto b = query.Get<TestCompB>(e); b && b->value == 42) {
+            ecb.RemoveComponent<TestCompB>(e);
+        }
+    }
+}
 void PlainCallable(int, const double&) {} // callable inspection does not require ECS types
 void NullarySystem() { nullaryCalls.fetch_add(1); }
 void MultipleQueries(ZHLN::ECS::Query<const TestCompA>, ZHLN::ECS::Query<TestCompA&>,
@@ -452,6 +467,51 @@ struct SystemGraphTestSuite {
             before.Compile();
             before.Execute(frame); // all four callable kinds use the same thunk path
             if (nullaryCalls.load() != 1) {
+                return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> command_buffer_and_const_registry_hazards_and_playback() {
+            using ZHLN::ECS::Access;
+            using ZHLN::ECS::SystemSignature;
+
+            const auto constWildcard = SystemSignature<&ReadOnlyRegistrySystem>::PopulateAccessPattern();
+            const auto ecbAccessA    = SystemSignature<&CommandBufferSystemA>::PopulateAccessPattern();
+            const auto ecbAccessB    = SystemSignature<&CommandBufferSystemB>::PopulateAccessPattern();
+            const uint32_t idA       = ZHLN::ECS::ComponentFamily::GetTypeID<TestCompA>();
+            const uint32_t idB       = ZHLN::ECS::ComponentFamily::GetTypeID<TestCompB>();
+
+            if (constWildcard.size() != 1 || constWildcard[0].familyId != ZHLN::ECS::AllComponents || constWildcard[0].mode != Access::Read ||
+                ecbAccessA.size() != 1 || ecbAccessA[0].familyId != idA || ecbAccessA[0].mode != Access::Write ||
+                ecbAccessB.size() != 1 || ecbAccessB[0].familyId != idB || ecbAccessB[0].mode != Access::Read) {
+                return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
+            }
+
+            ZHLN::ECS::SystemInfo constWildInfo {.access_pattern = constWildcard};
+            ZHLN::ECS::SystemInfo ecbInfoA {.access_pattern = ecbAccessA};
+            ZHLN::ECS::SystemInfo ecbInfoB {.access_pattern = ecbAccessB};
+            if (ZHLN::ECS::SystemGraphCore::HasConflict(constWildInfo, constWildInfo) ||
+                !ZHLN::ECS::SystemGraphCore::HasConflict(constWildInfo, ecbInfoA) ||
+                ZHLN::ECS::SystemGraphCore::HasConflict(constWildInfo, ecbInfoB) ||
+                ZHLN::ECS::SystemGraphCore::HasConflict(ecbInfoA, ecbInfoB)) {
+                return std::unexpected(SystemGraphTestError::HazardMismatch);
+            }
+
+            ZHLN::ECS::Registry reg;
+            const auto          e1 = reg.Create(TestCompA {.value = 5});
+            const auto          e2 = reg.Create(TestCompB {.value = 42});
+
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> graph {reg};
+            graph.AddSystem<&CommandBufferSystemA>();
+            graph.AddSystem<&CommandBufferSystemB>();
+            graph.Compile();
+            graph.Execute(ZHLN::Frame {.frame = 1, .alpha = 0.0f, .dt = TestDeltaTime});
+
+            if (!reg.Get<TestCompA>(e1) || reg.Get<TestCompA>(e1)->value != 15 ||
+                !reg.Get<TestCompB>(e1) || reg.Get<TestCompB>(e1)->value != 77 ||
+                reg.Get<TestCompB>(e2).has_value() ||
+                reg.GetEntitiesWith<TestCompA>().size() != 2) {
                 return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
             }
             return {};

@@ -27,6 +27,7 @@ class RenderContext;
 struct Skeleton;
 
 namespace ECS {
+class EntityCommandBuffer;
 class Registry;
 }
 
@@ -55,7 +56,7 @@ class ZHLN_API ArticulationSystem {
                                   const Components::KinematicPoseOverrideComponent, const Components::SkeletalMeshComponent,
                                   Components::TransformComponent&, const Components::RagdollHitReactionCommand,
                                   const Components::RagdollImpulseCommand> query,
-                       ECS::Registry& registry, ECS::ResMut<ArticulationSystem> articulation,
+                       ECS::EntityCommandBuffer& ecb, ECS::ResMut<ArticulationSystem> articulation,
                        ECS::ResMut<PhysicsContext> physics, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt);
 
     [[nodiscard]] bool AttachRagdoll(

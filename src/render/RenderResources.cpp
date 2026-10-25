@@ -186,11 +186,13 @@ void RenderContext::Impl::ClearEmitterBuffers() noexcept {
     destroy(particleEmitters);
     destroy(meshParticleEmitters);
     for (auto& slot: billboardSlots) {
-        if (slot.buffer != BufferHandle::Invalid) {
-            geometry.Destroy(slot.buffer);
+        for (uint32_t f = 0; f < Vk::kFramesInFlight; ++f) {
+            if (slot.buffers[f] != BufferHandle::Invalid) {
+                geometry.Destroy(slot.buffers[f]);
+            }
+            slot.buffers[f]    = BufferHandle::Invalid;
+            slot.capacities[f] = 0;
         }
-        slot.buffer   = BufferHandle::Invalid;
-        slot.capacity = 0;
     }
 }
 
@@ -303,26 +305,30 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
             group = &_impl->billboardSlots.back();
         }
 
-        if (group->capacity < count) {
-            if (group->buffer != BufferHandle::Invalid) {
-                DestroyBuffer(group->buffer);
+        const uint32_t frameSlot = Vk::FrameSlot(_impl->presenter.frameIndex);
+        BufferHandle&  slotBuf   = group->buffers[frameSlot];
+        uint32_t&      slotCap   = group->capacities[frameSlot];
+
+        if (slotCap < count) {
+            if (slotBuf != BufferHandle::Invalid) {
+                DestroyBuffer(slotBuf);
             }
-            const auto created = _impl->geometry.CreateBuffer(
-                {.allocationSize = static_cast<size_t>(count) * sizeof(Particle)}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
+            const auto created = _impl->geometry.CreateUninitializedBuffer(
+                static_cast<size_t>(count) * sizeof(Particle), Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex, count
             );
-            group->buffer   = created.value_or(BufferHandle::Invalid);
-            group->capacity = group->buffer != BufferHandle::Invalid ? count : 0;
+            slotBuf = created.value_or(BufferHandle::Invalid);
+            slotCap = slotBuf != BufferHandle::Invalid ? count : 0;
         }
-        if (group->buffer == BufferHandle::Invalid) {
+        if (slotBuf == BufferHandle::Invalid) {
             continue;
         }
 
-        if (auto updated = UpdateBuffer(group->buffer, std::as_bytes(std::span {_impl->billboardStaging})); !updated) [[unlikely]] {
+        if (auto updated = UpdateBuffer(slotBuf, std::as_bytes(std::span {_impl->billboardStaging})); !updated) [[unlikely]] {
             ZHLN::Log("Particle buffer update failed.");
             continue;
         }
         _impl->queues.ParticleEmitters().push_back(
-            {.gpuBuffer    = group->buffer,
+            {.gpuBuffer    = slotBuf,
              .maxParticles = count,
              .params       = {.textureIndex = textureIndex, .alignment = static_cast<Slang::ParticleAlignment>(alignment), .blendMode = blendMode},
              .simulate     = false}
@@ -339,6 +345,7 @@ void RenderContext::ClearGPUCaches() noexcept {
         }
     }
 
+    _impl->geometry.DiscardPendingUpdates();
     _impl->geometry.ClearMeshes();
 
     _impl->pipelines.RetireAll();
@@ -840,7 +847,7 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const JPH::Ma
     if (matrices.empty()) {
         return;
     }
-    auto& buffer = _impl->frames.jointBuffers[_impl->presenter.frameIndex];
+    auto& buffer = _impl->frames.CurrentJointBuffer();
     if (offset > buffer.Size() / sizeof(JPH::Mat44) || matrices.size() > buffer.Size() / sizeof(JPH::Mat44) - offset) {
         ZHLN::Assert(false, "joint palette exceeds the current frame's buffer");
         return;
@@ -971,6 +978,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         return std::unexpected(recording.error());
     }
     auto* const cmd = recording->Handle();
+    impl.geometry.RecordPendingUpdates(cmd);
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,
         Vk::BarrierAccess::AccelerationStructureRead

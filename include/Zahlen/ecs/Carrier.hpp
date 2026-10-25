@@ -28,6 +28,7 @@ struct Frame;
 namespace ZHLN::ECS {
 
 class Registry;
+class EntityCommandBuffer;
 
 template <typename Services>
 class SystemGraph;
@@ -77,6 +78,7 @@ struct Carrier {
     ServicesT&                      services;
     const ZHLN::Frame&              frame;
     TemplatedDetail::LocalStateView local {};
+    EntityCommandBuffer*            ecb = nullptr;
 };
 
 } // namespace ZHLN::ECS

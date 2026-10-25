@@ -193,7 +193,7 @@ auto AnimationSystem::ScratchStorage::GetJointOutputArena(size_t minimumCapacity
 void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Components::SkeletalMeshComponent,
                                         const Components::HierarchyComponent, const Components::MeshComponent,
                                         Components::MorphTargetComponent&, Components::TransformComponent&> query,
-                             ECS::Registry& registry, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt,
+                             ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt,
                              ECS::Res<PosePostProcessorPipeline> posePostProcessors, ECS::Local<ScratchStorage> scratchStorage) {
     scratchStorage->ResetForUpdate();
 
@@ -379,7 +379,7 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
             // empty list rather than a null check: an absent modifier is the
             // same statement as a modifier that does nothing.
             if (!posePostProcessors->IsEmpty()) {
-                posePostProcessors->Apply(registry, rootEntity, prefab, localTransforms, worldTransforms);
+                posePostProcessors->Apply(rootEntity, prefab, localTransforms, worldTransforms);
             }
 
             for (Entity childEnt: allMeshEntities) {

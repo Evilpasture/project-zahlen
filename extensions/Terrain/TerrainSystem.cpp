@@ -12,6 +12,7 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <algorithm>
 #include <array>
@@ -146,8 +147,11 @@ void TerrainSystem::Cleanup(Engine& engine, bool all) {
     }
 }
 
-void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshComponent&, Components::OwnedMeshComponent&> query,
-                           ECS::ResMut<RenderContext> render, ECS::Registry& registry) {
+void TerrainSystem::Update(
+    ECS::Query<const TerrainComponent, const Components::PendingDestroy, Components::MeshComponent&, Components::OwnedMeshComponent&> query,
+    ECS::ResMut<RenderContext> render,
+    ECS::EntityCommandBuffer&  ecb
+) {
     // Reclaim retired terrain buffers from previous frames
     Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
 
@@ -159,7 +163,7 @@ void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshCo
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity e        = entities[i];
         auto&  terrain  = terrains[i];
-        if (registry.Get<Components::PendingDestroy>(e)) {
+        if (query.Get<Components::PendingDestroy>(e)) {
             continue;
         }
         auto meshComp = query.Get<Components::MeshComponent>(e);
@@ -199,7 +203,7 @@ void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshCo
                     rc.DestroyMesh(owned->mesh);
                     owned->mesh = tMesh;
                 } else {
-                    registry.Add(e, Components::OwnedMeshComponent {.meshAsset = meshComp->meshAsset, .mesh = tMesh});
+                    ecb.AddComponent(e, Components::OwnedMeshComponent {.meshAsset = meshComp->meshAsset, .mesh = tMesh});
                 }
                 rc.RegisterGPUMesh(meshComp->meshAsset, tMesh);
             }

@@ -194,6 +194,16 @@ class FrameSync {
         return std::nullopt;
     }
 
+    /// Builds a dependency for a stage waiting on a prior graphics submission.
+    [[nodiscard]] auto GetGraphicsWaitDependency(uint32_t slot, VkPipelineStageFlags2 stage) const noexcept -> std::optional<SemaphoreSubmit> {
+        const uint32_t s   = slot % N;
+        const uint64_t val = _graphicsValuesSubmitted[s];
+        if (val > 0 && _frames[s].graphicsTimeline != VK_NULL_HANDLE) {
+            return SemaphoreSubmit::Timeline(_frames[s].graphicsTimeline, val, stage);
+        }
+        return std::nullopt;
+    }
+
   private:
     void Reset() noexcept;
 

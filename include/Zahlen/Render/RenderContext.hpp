@@ -152,7 +152,7 @@ class ZHLN_API RenderContext {
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
     [[nodiscard]] auto UpdateBuffer(BufferHandle handle, std::span<T, SpanExtent> elements) noexcept -> std::expected<void, ErrorCode> {
-        return UpdateBuffer(handle, std::as_bytes(elements));
+        return UpdateBuffer(handle, std::span<const std::byte> {std::as_bytes(elements)});
     }
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
 

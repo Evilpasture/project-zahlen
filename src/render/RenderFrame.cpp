@@ -65,12 +65,13 @@ auto RenderFrameContext::FrameHeapAddresses() const noexcept -> std::array<VkDev
                 case Slang::FrameAddressField::instancesAddress:
                     return ctx.BufferAddress(frames.instanceDataBuffers[presenter.frameIndex].Handle());
                 case Slang::FrameAddressField::jointsAddress:
-                    return ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle());
+                    return ctx.BufferAddress(frames.CurrentJointBuffer().Handle());
                 case Slang::FrameAddressField::previousJointsAddress:
-                    return ctx.BufferAddress(frames.jointBuffers[Vk::PreviousFrameSlot(presenter.frameIndex)].Handle());
+                    return ctx.BufferAddress(frames.PreviousJointBuffer().Handle());
                 case Slang::FrameAddressField::morphDeltasAddress:
                     return ctx.BufferAddress(morphDeltasBuffer.Handle());
             }
+            std::unreachable();
         }();
     }
     return addresses;
@@ -129,7 +130,7 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> BatchRe
                 .inSkinAddr       = drawCmd.skinDataAddress.Get(),
                 .outPosAddr       = positions.Address().Get(),
                 .outFrameAddr     = framesOut.Address().Get(),
-                .jointsAddr       = ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
+                .jointsAddr       = ctx.BufferAddress(frames.CurrentJointBuffer().Handle()),
                 .morphDeltasAddr  = ctx.BufferAddress(morphDeltasBuffer.Handle()),
                 .vertexCount      = vertexCount,
                 .jointOffset      = drawCmd.jointOffset,
@@ -286,6 +287,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
 }
 
 void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept {
+    geometry.RecordPendingUpdates(cmd);
     ApplySceneView(view);
 
     const auto skinnedBlas = DispatchSkinningPasses(cmd);
@@ -428,20 +430,16 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     auto&          primarySync = _impl->presenter.sync;
     const uint32_t slot        = _impl->presenter.frameIndex;
 
-    for (const uint32_t frameSlot: {Vk::PreviousFrameSlot(slot), slot}) {
-        if (auto res = primarySync.WaitSlotIdle(frameSlot); !res) {
-            return std::unexpected(res.error());
-        }
+    if (auto res = primarySync.WaitSlotIdle(slot); !res) {
+        return std::unexpected(res.error());
     }
     for (auto& dest: _impl->destinations.Windows()) {
         if (dest.IsPrimary()) {
             continue;
         }
         auto& sess = dest.Presenter();
-        for (const uint32_t frameSlot: {Vk::PreviousFrameSlot(sess.frameIndex), sess.frameIndex}) {
-            if (auto res = sess.sync.WaitSlotIdle(frameSlot); !res) {
-                return std::unexpected(res.error());
-            }
+        if (auto res = sess.sync.WaitSlotIdle(sess.frameIndex); !res) {
+            return std::unexpected(res.error());
         }
     }
 
@@ -573,6 +571,9 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     if (_impl->presenter.frameIndex == primarySlotBefore) {
         _impl->presenter.AdvanceFrame();
     }
+
+    _impl->frames.AdvanceJointRing();
+    _impl->geometry.AdvanceUploadFrame();
 
     if (_impl->submittedStaging) {
         _impl->submittedStaging->Wait();

@@ -12,12 +12,12 @@
 namespace ZHLN::IK {
 
 void ApplyTwoBoneIK(
-    ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::span<JPH::Mat44> worldTransforms
+    const ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::span<JPH::Mat44> worldTransforms
 ) {
-    auto& reg = registry;
+    const auto& reg = registry;
 
-    if (auto ikComp = reg.Get<TwoBoneIKComponent>(rootEntity)) {
-        for (auto& chain: ikComp->chains) {
+    if (const auto ikComp = reg.Get<TwoBoneIKComponent>(rootEntity)) {
+        for (const auto& chain: ikComp->chains) {
             if (chain.weight <= 0.001f || chain.upperNodeIndex < 0 || chain.lowerNodeIndex < 0 || chain.endNodeIndex < 0) {
                 continue;
             }

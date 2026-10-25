@@ -3,17 +3,27 @@
 
 #pragma once
 
+#include <Zahlen/Components.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
 
 namespace ZHLN {
 class AssetManager;
+namespace ECS {
+class EntityCommandBuffer;
+}
 
-// Reconciles a cooked emitter as a scene-owned directional light *before*
-// culling and lighting run. Registry& explicitly declares structural ECS
-// writes to the graph; the renderer never owns or liveness-polls entities.
+// Reconciles a cooked emitter as a scene-owned directional light in UpdateGraph
+// before scene cleanup, culling, and lighting run.
 class EnvironmentSunSystem {
   public:
-    static void Update(ECS::Registry& registry, ECS::Res<AssetManager> assets);
+    using SunEnvQuery = ECS::Query<
+        const Components::EnvironmentSunTagComponent,
+        const Components::EnvironmentMapComponent,
+        Components::LightComponent&,
+        const Components::SunTagComponent,
+        const Components::PendingDestroy>;
+
+    static void Update(SunEnvQuery query, ECS::EntityCommandBuffer& ecb, ECS::Res<AssetManager> assets);
 };
 
 } // namespace ZHLN

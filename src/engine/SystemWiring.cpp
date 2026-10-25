@@ -182,9 +182,9 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.AddSystem<&ArticulationSystem::Update>();
     updateGraph.AddSystem<&TransformSystem::Update>();
     updateGraph.AddSystem<&AudioSystem>();
+    updateGraph.AddSystem<&EnvironmentSunSystem::Update>();
 
     renderGraph.DeclareExternalWrites("ExternalPreRenderWrites", {ECS::Write<Components::CameraComponent>()});
-    renderGraph.AddSystem<&EnvironmentSunSystem::Update>();
     renderGraph.AddSystem<&CullingSystem::GraphUpdate>();
     renderGraph.AddSystem<&DecalSystem::Update>();
     renderGraph.AddSystem<&LightingSystem::Update>();

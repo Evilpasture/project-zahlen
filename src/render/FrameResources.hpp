@@ -11,6 +11,8 @@
 namespace ZHLN {
 
 struct FrameResources {
+    static constexpr uint32_t kJointBufferRingSize = Vk::kFramesInFlight + 1;
+
     PerFrame<Vk::Buffer>      lineVbos;
     PerFrame<VkDeviceAddress> lineVboAddresses;
     PerFrame<Vk::Buffer>      clusterGridBuffers;
@@ -25,8 +27,26 @@ struct FrameResources {
     PerFrame<Vk::Buffer>      secondPassCandidatesBuffers;
     PerFrame<Vk::Buffer>      secondPassCountBuffers;
 
-    PerFrame<Vk::Buffer>                jointBuffers;
-    PerFrame<Vk::AccelerationStructure> tlas;
+    // Three-slot ring: while GPU frame N-1 reads slots {prev(N-1), curr(N-1)},
+    // CPU frame N writes the third slot without clobbering either.
+    std::array<Vk::Buffer, kJointBufferRingSize> jointBuffers;
+    uint32_t                                     currentJointSlot  = 0;
+    uint32_t                                     previousJointSlot = kJointBufferRingSize - 1;
+    PerFrame<Vk::AccelerationStructure>          tlas;
+
+    [[nodiscard]] auto CurrentJointBuffer() noexcept -> Vk::Buffer& {
+        return jointBuffers[currentJointSlot];
+    }
+    [[nodiscard]] auto CurrentJointBuffer() const noexcept -> const Vk::Buffer& {
+        return jointBuffers[currentJointSlot];
+    }
+    [[nodiscard]] auto PreviousJointBuffer() const noexcept -> const Vk::Buffer& {
+        return jointBuffers[previousJointSlot];
+    }
+    void AdvanceJointRing() noexcept {
+        previousJointSlot = currentJointSlot;
+        currentJointSlot  = (currentJointSlot + 1) % kJointBufferRingSize;
+    }
 
     PerFrame<Vk::DeviceAddress<>>       tlasAddresses;
     PerFrame<Vk::Buffer>                tlasBuffer;

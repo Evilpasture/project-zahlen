@@ -43,7 +43,7 @@ class Registry;
 // animator. The callback may mutate worldTransforms, but must not retain either
 // the span or references/pointers into the vector after it returns.
 using BonePosePostProcessor = void (*)(
-    ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::span<JPH::Mat44> worldTransforms
+    const ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::span<JPH::Mat44> worldTransforms
 );
 
 // The pose pipeline's extension point: every post-processor the animation system
@@ -68,6 +68,10 @@ using BonePosePostProcessor = void (*)(
 // away.
 class PosePostProcessorPipeline {
   public:
+    void BindRegistry(const ECS::Registry& registry) noexcept {
+        _registry = &registry;
+    }
+
     void Add(BonePosePostProcessor processor) {
         if (processor != nullptr) {
             _processors.push_back(processor);
@@ -78,11 +82,19 @@ class PosePostProcessorPipeline {
     // another task on the same worker cannot add to the list, because
     // installation is composition-time and this is the simulation phase.
     void Apply(
-        ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms,
+        const ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms,
         std::span<JPH::Mat44> worldTransforms
     ) const {
         for (const BonePosePostProcessor processor: _processors) {
             processor(registry, rootEntity, prefab, localTransforms, worldTransforms);
+        }
+    }
+
+    void Apply(
+        Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::span<JPH::Mat44> worldTransforms
+    ) const {
+        if (_registry != nullptr) {
+            Apply(*_registry, rootEntity, prefab, localTransforms, worldTransforms);
         }
     }
 
@@ -91,6 +103,7 @@ class PosePostProcessorPipeline {
     void               Clear() noexcept { _processors.clear(); }
 
   private:
+    const ECS::Registry*               _registry = nullptr;
     std::vector<BonePosePostProcessor> _processors;
 };
 

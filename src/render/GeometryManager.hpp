@@ -5,16 +5,19 @@
 #include "DrawCommands.hpp"
 #include "GenerationalPool.hpp"
 #include "Rendering.hpp"
+#include "core/FrameStorage.hpp"
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/Render/Types.hpp>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace ZHLN {
 
@@ -53,9 +56,19 @@ class GeometryManager {
 
     [[nodiscard]] auto CreateBuffer(const BufferSource& source, Vk::BufferUsage usage) -> std::expected<BufferHandle, ErrorCode>;
 
+    [[nodiscard]] auto CreateUninitializedBuffer(size_t allocationSize, Vk::BufferUsage usage, uint32_t elementCount = 0)
+        -> std::expected<BufferHandle, ErrorCode>;
+
     [[nodiscard]] auto Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceAddress<> address) -> BufferHandle;
 
     [[nodiscard]] auto Update(BufferHandle handle, const void* data, size_t size) noexcept -> std::expected<void, ErrorCode>;
+
+    void RecordPendingUpdates(VkCommandBuffer cmd) noexcept;
+    void AdvanceUploadFrame() noexcept;
+    void DiscardPendingUpdates() noexcept;
+    [[nodiscard]] auto HasPendingUpdates() const noexcept -> bool {
+        return !_pendingCopies.empty();
+    }
 
     void Destroy(BufferHandle handle);
 
@@ -96,7 +109,22 @@ class GeometryManager {
     void RetireAll() noexcept;
 
   private:
-    void Retire(NativeMesh& mesh) noexcept;
+    static constexpr uint32_t kUploadRingSize = Vk::kFramesInFlight + 1;
+
+    struct UploadSlot {
+        Vk::Buffer buffer;
+        size_t     offset = 0;
+    };
+
+    struct PendingBufferCopy {
+        VkBuffer     srcBuffer = VK_NULL_HANDLE;
+        BufferHandle dstHandle = BufferHandle::Invalid;
+        VkDeviceSize srcOffset = 0;
+        VkDeviceSize size      = 0;
+    };
+
+    [[nodiscard]] auto AllocateGpuBuffer(size_t size, Vk::BufferUsage usage) -> std::expected<Vk::Buffer, ErrorCode>;
+    void               Retire(NativeMesh& mesh) noexcept;
 
     Vk::Context&                                 _ctx;
     Vk::Allocator&                               _allocator;
@@ -108,6 +136,10 @@ class GeometryManager {
 
     ZHLN::HashMap<AssetID, Mesh>        _meshes;
     ZHLN::HashMap<MaterialID, Material> _materials;
+
+    std::array<UploadSlot, kUploadRingSize> _uploadSlots {};
+    uint32_t                                _currentUploadSlot = 0;
+    std::vector<PendingBufferCopy>          _pendingCopies;
 };
 
 } // namespace ZHLN

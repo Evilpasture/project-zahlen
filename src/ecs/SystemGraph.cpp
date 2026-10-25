@@ -24,6 +24,11 @@ struct SystemGraphCore::ExecutionContext {
     std::span<NodePayload>            payloads;
 };
 
+void SystemGraphCore::BindCommandRegistry(Registry& registry, EntityCommandBuffer::DestroyFn destroy) noexcept {
+    _commandRegistry = &registry;
+    _commandDestroy  = destroy;
+}
+
 void SystemGraphCore::AddSystem(SystemInfo info) {
     _nodes.push_back({.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
     AdoptLocal(_nodes.back());
@@ -34,6 +39,9 @@ void SystemGraphCore::AddSystem(SystemInfo info) {
 // destroy. A node whose system names no Local<T> allocates nothing.
 void SystemGraphCore::AdoptLocal(Node& node) {
     node.local.Adopt(node.info.local);
+    if (node.info.usesCommandBuffer && _commandRegistry != nullptr) {
+        node.ecb = std::make_unique<EntityCommandBuffer>(*_commandRegistry, _commandDestroy);
+    }
 }
 
 bool SystemGraphCore::AddSystemBefore(SystemInfo info, std::string_view beforeSystem) {
@@ -159,6 +167,12 @@ void SystemGraphCore::Execute(void* carrier) {
     }
 
     TaskSystem::Wait(&ctx.completionCounter);
+
+    for (auto& node: _nodes) {
+        if (node.info.enabled && node.ecb != nullptr && !node.ecb->Empty()) {
+            node.ecb->Playback();
+        }
+    }
 }
 
 void SystemGraphCore::TaskThunk(void* arg) {
@@ -177,6 +191,7 @@ void SystemGraphCore::DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx) {
             .local     = node.local.Pointer(),
             .slots     = node.local.Slots(),
             .slotCount = node.local.SlotCount(),
+            .ecb       = node.ecb.get(),
         };
         node.info.update_func(&call);
     }
