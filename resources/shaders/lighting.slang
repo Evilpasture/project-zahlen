@@ -1,7 +1,6 @@
 
 import cluster_grid;
 import cluster_math;
-import ddgi_common;
 import descriptor_heap_layout;
 import pbr_helpers;
 import uniforms;
@@ -46,8 +45,6 @@ Texture2D<uint> texBakedMask;
 
 #ifndef DISABLE_RTR
 RaytracingAccelerationStructure tlas;
-Texture2D<float4> texDdgiIrradiance;
-Texture2D<float2> texDdgiDistance;
 #endif
 
 [[vk::constant_id(0)]]
@@ -165,23 +162,10 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
     // ownership-dependent: a baked pixel already carries the map's static
     // ambient -- sky term and bounced light alike -- in its lightmap or leaf
     // ambient cube, which PSEmissive adds back verbatim, so the analytic SH
-    // floor is withheld there. What survives on a baked pixel is the DDGI
-    // term's live half, added below.
+    // floor is withheld there. Live multi-light diffuse bounce is added
+    // downstream by Radiance Cascades (RtgiCompositePass).
     const float3 shAmbient = EvaluateSH(N, frame.sh) * frame.ambientExposure;
-    float3       baselineAmbient = shAmbient * (1.0f - bakedAmbient);
-#ifndef DISABLE_RTR
-    if (ENABLE_RTR != 0 && frame.ddgiParams.w > 0.0f) {
-        float3 V_amb = SafeNormalize(pc.camPos.xyz - worldPos, N);
-        // SampleDDGIOrSH resolves to max(probe field, SH floor). Only the part
-        // above that floor is live GI -- the flashlight's bounce, a door opening
-        // onto a baked wall -- and it belongs to baked and unbaked surfaces
-        // alike, because no bake ever saw it. Unbaked pixels therefore still
-        // resolve to exactly max(probes, shAmbient), i.e. the previous result.
-        const float3 probes = SampleDDGIOrSH(worldPos, N, V_amb, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
-        baselineAmbient += max(probes - shAmbient, float3(0.0f));
-    }
-#endif
-    indirectLight += baselineAmbient;
+    indirectLight += shAmbient * (1.0f - bakedAmbient);
 
     return float4(indirectLight, ao);
 }

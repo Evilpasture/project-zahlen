@@ -31,8 +31,6 @@ public struct GpuAbiTypes {
     public SkinningConstants skinningConstants;
     public BakePush bakePush;
     public GtaoPushConstants gtaoPush;
-    public RtgiCompositePushConstants rtgiCompositePush;
-    public RtgiAtrousPushConstants rtgiAtrousPush;
     public KawasePushConstants kawasePush;
     public ThresholdPushConstants thresholdPush;
     public HdrAtrousPushConstants hdrAtrousPush;
@@ -41,12 +39,9 @@ public struct GpuAbiTypes {
     public FXAAPushConstants fxaaPush;
     public MLAAPushConstants mlaaPush;
     public TAAPushConstants taaPush;
-    public RtgiHalfPushConstants rtgiHalfPush;
     public RcgiProbeSetupPushConstants rcgiProbeSetupPush;
     public RcgiCascadePushConstants rcgiCascadePush;
     public RcgiResolvePushConstants rcgiResolvePush;
-    public DdgiTracePushConstants ddgiTracePush;
-    public DdgiUpdatePushConstants ddgiUpdatePush;
     public VolumetricFogPushConstants volumetricFogPush;
     public VolumetricLightInjectPushConstants volumetricLightInjectPush;
     public VolumetricTemporalPushConstants volumetricTemporalPush;
@@ -73,9 +68,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += asuint(abi.frame.camPos.x);
     acc += asuint(abi.frame.invProj[0][0]);
     acc += abi.frame.frameIndex;
-    acc += asuint(abi.frame.ddgiOriginSpacing.x);
-    acc += asuint(abi.frame.ddgiGridCounts.x);
-    acc += asuint(abi.frame.ddgiParams.x);
     acc += uint(abi.light.type);
     acc += abi.light.shadowTileBase;
     acc += asuint(abi.shadowTile.uvOrigin.x);
@@ -108,9 +100,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += abi.bakePush.width;
     acc += abi.gtaoPush.halfRes.x;
     acc += asuint(abi.gtaoPush.rcpFullRes.x);
-    acc += abi.rtgiCompositePush.fullRes.x;
-    acc += abi.rtgiAtrousPush.stepSize;
-    acc += asuint(abi.rtgiAtrousPush._pad.x);
     acc += uint(abi.kawasePush.mode);
     acc += asuint(abi.thresholdPush.exposure);
     acc += abi.hdrAtrousPush.stepSize;
@@ -118,12 +107,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += asuint(abi.fxaaPush.rcpFrameX);
     acc += asuint(abi.mlaaPush.threshold);
     acc += asuint(abi.taaPush.feedback);
-    acc += abi.rtgiHalfPush.halfRes.x;
     acc += abi.rcgiProbeSetupPush.cascadeIndex;
     acc += asuint(abi.rcgiCascadePush.tMax);
     acc += asuint(abi.rcgiResolvePush.giIntensity);
-    acc += abi.ddgiTracePush.totalProbes;
-    acc += asuint(abi.ddgiUpdatePush.hysteresis);
     acc += asuint(abi.volumetricFogPush.density);
     acc += asuint(abi.volumetricLightInjectPush.scatteringIntensity);
     acc += asuint(abi.volumetricTemporalPush.clampStrength);

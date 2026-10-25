@@ -69,7 +69,6 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
     if (auto targets_res = targets.Recreate(ext, voxelExt); !targets_res) {
         return targets_res;
     }
-    rtHistoryValid = false;
 
     if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
         targets.RecordInitialLayouts(cmd);

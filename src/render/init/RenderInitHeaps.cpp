@@ -256,12 +256,6 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(heapManager, post.bloomThreshold.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler));
     Vk::InitHeapPassSamplers<Shaders::BloomDown>(heapManager, post.bloomDown.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler));
     Vk::InitHeapPassSamplers<Shaders::BloomUp>(heapManager, post.bloomUp.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler));
-    if (ctx.RayTracingSupported()) {
-        Vk::InitHeapPassSamplers<Shaders::RcgiCascadeTraceMerge>(
-            heapManager, lighting.rcgiCascadeTraceMerge.Bindings(), Vk::SamplerSlot<"clampSampler">(clampSampler)
-        );
-        Vk::InitHeapPassSamplers<Shaders::DdgiTrace>(heapManager, lighting.ddgiTrace.Bindings(), Vk::SamplerSlot<"clampSampler">(clampSampler));
-    }
     fog.InitSamplers(*this);
 }
 

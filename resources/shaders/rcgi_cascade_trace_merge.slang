@@ -15,9 +15,6 @@ RWTexture2D<float4>             outCascade;
 RaytracingAccelerationStructure tlas;
 Texture2D<float>                shadowAtlas;
 StructuredBuffer<ShadowTile>    shadowTiles;
-Texture2D<float4>               texDdgiIrradiance;
-Texture2D<float2>               texDdgiDistance;
-SamplerState                    clampSampler;
 
 ConstantBuffer<FrameUniforms>  frame;
 StructuredBuffer<InstanceData> g_instances;
@@ -62,7 +59,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     ray.TMax      = pc.tMax;
 
     // Fixed-function hardware RT traversal (`RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES`
-    // matches `rtgi_half`, `ddgi_trace`, and `lighting`, keeping BVH intersection 100% on RT cores).
+    // matches `lighting`, keeping BVH intersection 100% on RT cores).
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> query;
     query.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
     while (query.Proceed()) {
@@ -92,10 +89,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             g_instances,
             lights,
             shadowAtlas,
-            shadowTiles,
-            texDdgiIrradiance,
-            texDdgiDistance,
-            clampSampler);
+            shadowTiles);
 
         // Compress extreme close-range grazing singularity spikes in C0 (< 0.35m)
         // so discrete 16-cone C0 sampling never rings next to intense thin emitters.

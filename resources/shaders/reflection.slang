@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import common;
-import ddgi_common;
 import gpu_buffer;
 import instance_data;
 import material_model;
@@ -56,8 +55,6 @@ StructuredBuffer<InstanceData> g_instances;
 
 #ifndef DISABLE_RTR
 RaytracingAccelerationStructure tlas;
-Texture2D<float4>               texDdgiIrradiance;
-Texture2D<float2>               texDdgiDistance;
 Texture2D<float4>               texRcgiProbes;
 Texture2D<float4>               texRcgiCascade0;
 #endif
@@ -220,7 +217,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             if (wantRTR && ssrConfidence < 0.98f) {
                 RtrWorldHitResult tlasHit = TraceDeterministicRtrFallback(
                     worldPos, N, R, roughness, prefilteredColor, projScaleY, lightingMips, tlas, frame, g_instances,
-                    texDepth, texNormalRoughness, texLighting, texDdgiIrradiance, texDdgiDistance, smp, pointSampler, clampSampler);
+                    texDepth, texNormalRoughness, texLighting, smp, pointSampler);
 
                 if (tlasHit.confidence > 0.0f) {
                     reflectionColor = lerp(tlasHit.radiance, ssrColor, ssrConfidence);

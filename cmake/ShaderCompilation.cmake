@@ -47,7 +47,6 @@ set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/math/transform.slang"
     "${SHADER_SRC_DIR}/instance_data.slang"
     "${SHADER_SRC_DIR}/volumetric_grid.slang"
-    "${SHADER_SRC_DIR}/ddgi_common.slang"
     "${SHADER_SRC_DIR}/rcgi_common.slang"
 )
 
@@ -611,23 +610,6 @@ add_shader_target(hdr_denoise_atrous_shader
     STAGES "${SHADER_SRC_DIR}/hdr_denoise_atrous.slang|CSMain|cs_6_0|SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
 )
 
-# Half-resolution RTGI trace, pre-albedo denoise and bilateral composite.
-# Trace/denoise need ray tracing; composite is always available and passes
-# through direct lighting when the independent diffuse-GI toggle is off.
-add_shader_target(rtgi_half_shader
-    STAGES "${SHADER_SRC_DIR}/rtgi_half.slang|CSMain|cs_6_0|SHADER_RTGI_HALF_SLANG_CS_PATH"
-)
-
-# A-Trous filtering of the half-resolution incoming-radiance signal before
-# RtgiComposite applies surface albedo, avoiding texture-detail blur.
-add_shader_target(rtgi_denoise_atrous_shader
-    STAGES "${SHADER_SRC_DIR}/rtgi_denoise_atrous.slang|CSMain|cs_6_0|SHADER_RTGI_DENOISE_ATROUS_SLANG_CS_PATH"
-)
-
-add_shader_target(rtgi_composite_shader
-    STAGES "${SHADER_SRC_DIR}/rtgi_composite.slang|CSMain|cs_6_0|SHADER_RTGI_COMPOSITE_SLANG_CS_PATH"
-)
-
 # Deterministic Radiance Cascades Global Illumination (RCGI):
 # surface-pinned probe pyramid setup, wave-coherent RayQuery cascade trace +
 # parallax-corrected bilateral merge, and groupshared full-res resolve.
@@ -641,15 +623,6 @@ add_shader_target(rcgi_cascade_trace_merge_shader
 
 add_shader_target(rcgi_resolve_shader
     STAGES "${SHADER_SRC_DIR}/rcgi_resolve.slang|CSMain|cs_6_0|SHADER_RCGI_RESOLVE_SLANG_CS_PATH"
-)
-
-# World-space DDGI probe ray trace and octahedral irradiance/distance atlas update.
-add_shader_target(ddgi_trace_shader
-    STAGES "${SHADER_SRC_DIR}/ddgi_trace.slang|CSMain|cs_6_0|SHADER_DDGI_TRACE_SLANG_CS_PATH"
-)
-
-add_shader_target(ddgi_update_irradiance_shader
-    STAGES "${SHADER_SRC_DIR}/ddgi_update_irradiance.slang|CSMain|cs_6_0|SHADER_DDGI_UPDATE_IRRADIANCE_SLANG_CS_PATH"
 )
 
 # Half-resolution GTAO horizon search for the AO-only GI modes; the lighting
@@ -912,8 +885,6 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "LightingNortPS=SHADER_LIGHTING_NORT_SLANG_PS_PATH"
     "VolumetricClearCS=SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH"
     "HdrDenoiseAtrousCS=SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
-    "RtgiHalfCS=SHADER_RTGI_HALF_SLANG_CS_PATH"
-    "RtgiCompositeCS=SHADER_RTGI_COMPOSITE_SLANG_CS_PATH"
     "RcgiProbeSetupCS=SHADER_RCGI_PROBE_SETUP_SLANG_CS_PATH"
     "RcgiCascadeTraceMergeCS=SHADER_RCGI_CASCADE_TRACE_MERGE_SLANG_CS_PATH"
     "RcgiResolveCS=SHADER_RCGI_RESOLVE_SLANG_CS_PATH"
@@ -949,8 +920,6 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "IblShCS=SHADER_IBL_SH_CS_PATH"
     "SmaaLutCS=SHADER_SMAA_LUT_CS_PATH"
     "GpuSceneCS=SHADER_GPU_SCENE_CS_PATH"
-    "DdgiTraceCS=SHADER_DDGI_TRACE_SLANG_CS_PATH"
-    "DdgiUpdateIrradianceCS=SHADER_DDGI_UPDATE_IRRADIANCE_SLANG_CS_PATH"
 )
 
 # A type whose macro no cook produced would reach the generator as `Type=` and
@@ -991,13 +960,9 @@ set(ZHLN_SHADER_CATALOG_SETS
     "BloomDown=BloomDownCS"
     "BloomUp=BloomUpCS"
     "HdrDenoise=HdrDenoiseAtrousCS"
-    "RtgiHalf=RtgiHalfCS"
-    "RtgiComposite=RtgiCompositeCS"
     "RcgiProbeSetup=RcgiProbeSetupCS"
     "RcgiCascadeTraceMerge=RcgiCascadeTraceMergeCS"
     "RcgiResolve=RcgiResolveCS"
-    "DdgiTrace=DdgiTraceCS"
-    "DdgiUpdateIrradiance=DdgiUpdateIrradianceCS"
     "Gtao=GtaoCS"
     "Taa=TaaPS"
     "Fxaa=FxaaPS"

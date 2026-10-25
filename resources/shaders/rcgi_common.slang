@@ -3,7 +3,6 @@
 
 module rcgi_common;
 
-import ddgi_common;
 import gpu_buffer;
 import instance_data;
 import pbr_helpers;
@@ -307,8 +306,7 @@ public float SampleRcgiPunctualShadowAtlas(Light light, float3 worldPos, float3 
 public float3 EvaluateRcgiHitRadiance(RcgiHitSurface surf, float3 incomingRayDir, uint cascadeIndex, bool enablePunctual,
                                       RaytracingAccelerationStructure tlas, ConstantBuffer<FrameUniforms> frame,
                                       StructuredBuffer<InstanceData> instances, StructuredBuffer<Light> lights,
-                                      Texture2D<float> shadowAtlas, StructuredBuffer<ShadowTile> shadowTiles,
-                                      Texture2D<float4> texDdgiIrradiance, Texture2D<float2> texDdgiDistance, SamplerState clampSampler) {
+                                      Texture2D<float> shadowAtlas, StructuredBuffer<ShadowTile> shadowTiles) {
     if (surf.isUnlit) {
         return min(surf.baseColor + surf.emissive, float3(16.0f));
     }
@@ -371,12 +369,10 @@ public float3 EvaluateRcgiHitRadiance(RcgiHitSurface surf, float3 incomingRayDir
         }
     }
 
-    // 3. Multi-bounce diffuse floor (BSP ambient cube, live DDGI field, or analytic SH)
+    // 3. Multi-bounce diffuse floor (BSP ambient cube or analytic SH)
     float3 multiBounceIrrOverPi = float3(0.0f);
     if (surf.hasAmbientCube) {
         multiBounceIrrOverPi = SampleAmbientCube(instances[surf.instanceIndex], surf.shadingNormal);
-    } else if (frame.ddgiParams.w > 0.0f) {
-        multiBounceIrrOverPi = SampleDDGIOrSH(surf.worldPos, surf.shadingNormal, -incomingRayDir, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
     } else {
         multiBounceIrrOverPi = EvaluateSH(surf.shadingNormal, frame.sh) * frame.ambientExposure;
     }
@@ -590,8 +586,7 @@ public RtrWorldHitResult TraceDeterministicRtrFallback(
     float3 worldPos, float3 N, float3 R, float roughness, float3 prefilteredEnvAlongR, float projScaleY, uint lightingMips,
     RaytracingAccelerationStructure tlas, ConstantBuffer<FrameUniforms> frame, StructuredBuffer<InstanceData> instances,
     Texture2D<float> texDepth, Texture2D<float4> texNormalRoughness, Texture2D<float4> texLighting,
-    Texture2D<float4> texDdgiIrradiance, Texture2D<float2> texDdgiDistance,
-    SamplerState linearSmp, SamplerState pointSampler, SamplerState clampSampler) {
+    SamplerState linearSmp, SamplerState pointSampler) {
     RtrWorldHitResult outRes;
     outRes.radiance   = float3(0.0f);
     outRes.confidence = 0.0f;
@@ -682,7 +677,7 @@ public RtrWorldHitResult TraceDeterministicRtrFallback(
             if (surf.hasAmbientCube) {
                 ambientIrrOverPi = SampleAmbientCube(instances[surf.instanceIndex], surf.shadingNormal);
             } else {
-                ambientIrrOverPi = SampleDDGIOrSH(surf.worldPos, surf.shadingNormal, -R, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
+                ambientIrrOverPi = EvaluateSH(surf.shadingNormal, frame.sh) * frame.ambientExposure;
             }
             offscreenColor += surf.baseColor * diffuseWeight * ambientIrrOverPi;
 

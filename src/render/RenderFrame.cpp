@@ -584,9 +584,6 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     std::swap(_impl->graphResources.shadowMap, _impl->targets.ShadowMapPrev());
     _impl->targets.SwapCascadeViews();
     Vk::SwapBacking(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
-    if (_impl->ctx.RayTracingSupported()) {
-        _impl->rtHistoryValid = _impl->settings.rayTracing.denoiserPasses > 0;
-    }
 
     return SummarizePresentations(windows);
 }
@@ -619,13 +616,7 @@ auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     const VkCommandBuffer cmd = resolved->recorder.Handle();
     _impl->destinations.SetActive(resolved->window.id);
     _impl->sceneTarget = resolved->image;
-    if (_impl->settings.post.enableRTR != settings.post.enableRTR || _impl->settings.rayTracing.enableReflections != settings.rayTracing.enableReflections ||
-        _impl->settings.rayTracing.enableShadows != settings.rayTracing.enableShadows ||
-        _impl->settings.rayTracing.enableDiffuseGI != settings.rayTracing.enableDiffuseGI ||
-        _impl->settings.rayTracing.denoiserPasses != settings.rayTracing.denoiserPasses || settings.rayTracing.denoiserPasses == 0) {
-        _impl->rtHistoryValid = false;
-    }
-    _impl->settings = settings;
+    _impl->settings    = settings;
 
     Pipelines::DeferredPbrPipeline::Execute(*_impl, cmd, view, settings);
 

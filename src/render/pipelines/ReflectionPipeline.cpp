@@ -30,8 +30,6 @@ void ReflectionPipeline::Dispatch(
         Vk::Slot<"texLightingAo">(Vk::Assume<Vk::ShaderRead<Res_LightingAo>>(impl.graphResources.lightingAo)),
         Vk::Slot<"texVoxelIntegrated">(Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(impl.graphResources.voxelResolved)),
         Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]), Vk::Slot<"tlas">(inputs.tlas),
-        Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ShaderRead<Res_DdgiIrradiance>>(impl.graphResources.ddgiIrradiance)),
-        Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ShaderRead<Res_DdgiDistance>>(impl.graphResources.ddgiDistance)),
         Vk::Slot<"texRcgiProbes">(Vk::Assume<Vk::ShaderRead<Res_RcgiProbes>>(impl.graphResources.rcgiProbes)),
         Vk::Slot<"texRcgiCascade0">(Vk::Assume<Vk::ShaderRead<Res_RcgiCascadeA>>(impl.graphResources.rcgiCascadeA))
     );

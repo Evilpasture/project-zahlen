@@ -49,12 +49,9 @@ using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16
 using Res_DenoiseA      = Vk::GraphImage<"DenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT>;
 using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT>;
 using Res_RcgiProbes    = Vk::GraphImage<"RcgiProbes", VK_FORMAT_R32G32B32A32_SFLOAT>;
-using Res_RcgiCascadeA    = Vk::GraphImage<"RcgiCascadeA", VK_FORMAT_R16G16B16A16_SFLOAT>;
-using Res_RcgiCascadeB    = Vk::GraphImage<"RcgiCascadeB", VK_FORMAT_R16G16B16A16_SFLOAT>;
-using Res_DdgiIrradiance  = Vk::GraphImage<"DdgiIrradiance", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-using Res_DdgiDistance    = Vk::GraphImage<"DdgiDistance", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-using Res_DdgiRays        = Vk::GraphImage<"DdgiRays", VK_FORMAT_R16G16B16A16_SFLOAT>;
-using Res_LightingGI      = Vk::GraphImage<"LightingGI", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, false, true>;
+using Res_RcgiCascadeA  = Vk::GraphImage<"RcgiCascadeA", VK_FORMAT_R16G16B16A16_SFLOAT>;
+using Res_RcgiCascadeB  = Vk::GraphImage<"RcgiCascadeB", VK_FORMAT_R16G16B16A16_SFLOAT>;
+using Res_LightingGI    = Vk::GraphImage<"LightingGI", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, false, true>;
 using Res_LightingAo      = Vk::GraphImage<"LightingAo", VK_FORMAT_R8_UNORM>;
 using Res_Ao              = Vk::GraphImage<"Ao", VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomThresh     = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
@@ -103,9 +100,6 @@ class TargetManager {
         Vk::RenderTarget<Res_RcgiProbes> rcgiProbes;
         Vk::RenderTarget<Res_RcgiCascadeA> rcgiCascadeA;
         Vk::RenderTarget<Res_RcgiCascadeB> rcgiCascadeB;
-        Vk::RenderTarget<Res_DdgiIrradiance> ddgiIrradiance;
-        Vk::RenderTarget<Res_DdgiDistance> ddgiDistance;
-        Vk::RenderTarget<Res_DdgiRays> ddgiRays;
         Vk::RenderTarget<Res_LightingGI> lightingGI;
         Vk::RenderTarget<Res_LightingAo> lightingAo;
         Vk::RenderTarget<Res_Ao> ao;

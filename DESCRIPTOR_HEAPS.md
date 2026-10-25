@@ -185,10 +185,9 @@ Set-0 bindings map as follows (baked by `BuildSceneHeapMappings`):
 | 7       | prefilteredMap  | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
 | 8       | brdfLUT         | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
 | 9       | clampSampler    | `HEAP_WITH_CONSTANT_OFFSET` → static sampler slot |
-| 10      | texTransLighting| `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
-| 11      | globalTextures[]| `HEAP_WITH_CONSTANT_OFFSET`, `heapArrayStride = resource stride` |
-| 12      | texDdgiIrradiance | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
-| 13      | texDdgiDistance   | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
+| 10      | texTransLighting   | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
+| 11      | materialSamplers[] | `HEAP_WITH_CONSTANT_OFFSET` → static 9-sampler wrap table |
+| 12      | globalTextures[]   | `HEAP_WITH_CONSTANT_OFFSET`, `heapArrayStride = resource stride` |
 
 ### Push-data layout
 

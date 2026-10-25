@@ -77,8 +77,6 @@ struct RcgiCascadePass:
         Vk::ComputeRead<Res_Depth>,
         Vk::ComputeRead<Res_NormRough>,
         Vk::ComputeRead<Res_ShadowAtlas>,
-        Vk::ComputeRead<Res_DdgiIrradiance>,
-        Vk::ComputeRead<Res_DdgiDistance>,
         Vk::ComputeWrite<Res_RcgiProbes>,
         Vk::ComputeWrite<Res_RcgiCascadeA>,
         Vk::ComputeWrite<Res_RcgiCascadeB>> {
@@ -101,8 +99,6 @@ struct RcgiCascadePass:
 
         const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget());
         const auto normal   = Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer);
-        const auto ddgiIrr  = Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(frame.graphResources.ddgiIrradiance);
-        const auto ddgiDist = Vk::Assume<Vk::ComputeRead<Res_DdgiDistance>>(frame.graphResources.ddgiDistance);
         const auto probes   = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rcgiProbes);
         const auto cascadeA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rcgiCascadeA);
         const auto cascadeB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rcgiCascadeB);
@@ -170,107 +166,11 @@ struct RcgiCascadePass:
                 Vk::Slot<"tlas">(tlas),
                 Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.View(VK_IMAGE_ASPECT_DEPTH_BIT)),
                 Vk::Slot<"shadowTiles">(frame.frames.shadowTileBuffers[fIdx]),
-                Vk::Slot<"texDdgiIrradiance">(ddgiIrr),
-                Vk::Slot<"texDdgiDistance">(ddgiDist),
                 Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]),
                 Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
                 Vk::Slot<"lights">(frame.frames.lightStorageBuffers[fIdx])
             );
         }
-    }
-};
-
-struct DdgiTraceDesc {
-    static constexpr auto name = Vk::ResourceName("DdgiRayTrace");
-    using Usages               = Vk::TypeList<
-        Vk::ComputeRead<Res_DdgiIrradiance>,
-        Vk::ComputeRead<Res_DdgiDistance>,
-        Vk::ComputeWrite<Res_DdgiRays>>;
-    using ShaderDecl    = Shaders::DdgiTrace;
-    using ShaderModule  = Shaders::Modules::DdgiTraceCS;
-    using PushConstants = DdgiTracePushConstants;
-
-    [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
-        const bool     wantRT =
-            frame.settings.rayTracing.enableDiffuseGI || (frame.settings.rayTracing.enableReflections && frame.settings.post.enableRTR != 0) ||
-            frame.settings.rayTracing.enableShadows;
-        return frame.ctx.RayTracingSupported() && wantRT && frame.settings.environment.fullBright == 0 &&
-               frame.frames.tlasAddresses[fIdx] != nullptr;
-    }
-
-    [[nodiscard]] static auto
-        GetPass(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::DdgiTraceCS, DdgiTracePushConstants>>& {
-        return frame.lighting.ddgiTrace;
-    }
-
-    [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
-
-        const Vk::AsAddressWrite tlas {.address = frame.frames.tlasAddresses[fIdx].Get()};
-        const auto              totalProbes  = frame.graphResources.ddgiRays.extent.width;
-        const auto              raysPerProbe = frame.graphResources.ddgiRays.extent.height;
-
-        const DdgiTracePushConstants push {
-            .totalProbes    = totalProbes,
-            .raysPerProbe   = raysPerProbe,
-            .maxRayDistance = 24.0f,
-            ._pad           = 0u,
-        };
-
-        return MakeComputePassArgs(
-            push, VkExtent3D {totalProbes, raysPerProbe, 1}, Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]),
-            Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
-            Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(frame.graphResources.ddgiIrradiance)),
-            Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ComputeRead<Res_DdgiDistance>>(frame.graphResources.ddgiDistance)),
-            Vk::Slot<"outRays">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.ddgiRays)), Vk::Slot<"tlas">(tlas)
-        );
-    }
-};
-
-struct DdgiUpdateDesc {
-    static constexpr auto name = Vk::ResourceName("DdgiUpdateAtlas");
-    using Usages               = Vk::TypeList<
-        Vk::ComputeRead<Res_DdgiRays>,
-        Vk::ComputeWrite<Res_DdgiIrradiance>,
-        Vk::ComputeWrite<Res_DdgiDistance>>;
-    using ShaderDecl    = Shaders::DdgiUpdateIrradiance;
-    using ShaderModule  = Shaders::Modules::DdgiUpdateIrradianceCS;
-    using PushConstants = DdgiUpdatePushConstants;
-
-    [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
-        const bool     wantRT =
-            frame.settings.rayTracing.enableDiffuseGI || (frame.settings.rayTracing.enableReflections && frame.settings.post.enableRTR != 0) ||
-            frame.settings.rayTracing.enableShadows;
-        return frame.ctx.RayTracingSupported() && wantRT && frame.settings.environment.fullBright == 0 &&
-               frame.frames.tlasAddresses[fIdx] != nullptr;
-    }
-
-    [[nodiscard]] static auto GetPass(RenderFrameContext& frame) noexcept
-        -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::DdgiUpdateIrradianceCS, DdgiUpdatePushConstants>>& {
-        return frame.lighting.ddgiUpdate;
-    }
-
-    [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
-
-        const auto totalProbes  = frame.graphResources.ddgiRays.extent.width;
-        const auto raysPerProbe = frame.graphResources.ddgiRays.extent.height;
-
-        const DdgiUpdatePushConstants push {
-            .totalProbes    = totalProbes,
-            .raysPerProbe   = raysPerProbe,
-            .hysteresis     = frame.currentUniforms.ddgiParams.x,
-            .depthSharpness = 16.0f,
-        };
-
-        return MakeComputePassArgs(
-            push, VkExtent3D {totalProbes * 16u, 16u, 1u}, Vk::Slot<"inRays">(Vk::Assume<Vk::ComputeRead<Res_DdgiRays>>(frame.graphResources.ddgiRays)),
-            Vk::Slot<"outIrradiance">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.ddgiIrradiance)),
-            Vk::Slot<"outDistance">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.ddgiDistance)),
-            Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx])
-        );
     }
 };
 

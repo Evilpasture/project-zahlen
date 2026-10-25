@@ -81,15 +81,13 @@ that setting. Specifically:
   because `giMode` only covers the SSAO/SSGI gather:
   `rayTracing.enableDiffuseGI` and `post.enableRTR`/`post.enableSSR` are
   separate switches, and `ApplyPreset(QualityLevel::High)` turns the first
-  one **on**. With it on, `RenderSetup` sets `frame.ddgiParams.w = 1` and the
-  lighting pass replaces the environment SH with the DDGI probe
-  (`SampleDDGIOrSH`), while `RtgiCompositePass` adds screen-space bounce on
-  top of the deferred lighting. A conformance capture then depends on the
-  engine's live GI rather than on the scenario's environment, and every
-  golden comparison inherits whatever the DDGI/RTGI shaders currently do —
-  an unrelated change to the probe path moves every scenario. The harness
-  therefore clears `enableDiffuseGI` explicitly, next to
-  `enableReflections`/`enableShadows`.
+  one **on**. With it on, `RcgiCascadePass` and `RtgiCompositePass` add
+  multi-cascade indirect diffuse bounce on top of the deferred lighting. A
+  conformance capture then depends on the engine's live GI rather than on the
+  scenario's environment, and every golden comparison inherits whatever the
+  RCGI shaders currently do — an unrelated change to the cascade path moves
+  every scenario. The harness therefore clears `enableDiffuseGI` explicitly,
+  next to `enableReflections`/`enableShadows`.
 * **Camera from the scenario**: Khronos `{theta, phi, radius}` around
   `target` (phi measured from **+Y**; theta azimuth about **+Y**), `verticalFoV`,
   near 0.01 / far 100. Radius **0 is valid**: upstream uses it for

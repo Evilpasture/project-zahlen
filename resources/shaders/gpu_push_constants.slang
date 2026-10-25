@@ -90,22 +90,6 @@ public struct GtaoPushConstants {
     public float4x4 viewProj;
 };
 
-public struct RtgiCompositePushConstants {
-    public uint2 fullRes;
-    public uint enabled;
-    public float giIntensity;
-};
-
-public struct RtgiAtrousPushConstants {
-    public uint stepSize;
-    public float phiDepth;
-    public float phiNormal;
-    public float phiLuma;
-    public float temporalWeight;
-    public float maxRoughness;
-    public uint2 _pad;
-};
-
 public struct KawasePushConstants {
     public int mode;
     public float rcpWidth;
@@ -167,11 +151,6 @@ public struct TAAPushConstants {
     public float feedback;
 };
 
-public struct RtgiHalfPushConstants {
-    public uint2 halfRes;
-    public uint2 _pad;
-};
-
 public struct RcgiProbeSetupPushConstants {
     public uint2 fullRes;
     public uint2 alignedRes;
@@ -201,20 +180,6 @@ public struct RcgiResolvePushConstants {
     public float cMinus1Radius;
     public float depthRejectScale;
     public float skyOcclusionStrength;
-};
-
-public struct DdgiTracePushConstants {
-    public uint  totalProbes;
-    public uint  raysPerProbe;
-    public float maxRayDistance;
-    public uint  _pad;
-};
-
-public struct DdgiUpdatePushConstants {
-    public uint  totalProbes;
-    public uint  raysPerProbe;
-    public float hysteresis;
-    public float depthSharpness;
 };
 
 public struct VolumetricFogPushConstants {

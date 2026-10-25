@@ -78,42 +78,6 @@ void RenderContext::SetFrameData(
         _impl->currentUniforms.frameIndex = gpuUniforms.frameIndex;
     }
 
-    constexpr float kProbeSpacing = 3.2f;
-    const JPH::Vec3 halfSpan      = JPH::Vec3(15.0f * 0.5f, 7.0f * 0.5f, 15.0f * 0.5f) * kProbeSpacing;
-    JPH::Vec3       gridCenter    = JPH::Vec3(0.0f, 6.0f, 0.0f);
-    if ((frame.probeMax - frame.probeMin).LengthSq() > 1.0f) {
-        gridCenter = (frame.probeMin + frame.probeMax) * 0.5f;
-    }
-    const JPH::Vec3 camOffset = cam.position - gridCenter;
-    if (std::abs(camOffset.GetX()) > halfSpan.GetX() * 0.75f || std::abs(camOffset.GetY()) > halfSpan.GetY() * 0.75f ||
-        std::abs(camOffset.GetZ()) > halfSpan.GetZ() * 0.75f) {
-        constexpr float kSnap = kProbeSpacing * 4.0f;
-        gridCenter            = JPH::Vec3(
-            std::floor(cam.position.GetX() / kSnap + 0.5f) * kSnap,
-            std::floor(cam.position.GetY() / kSnap + 0.5f) * kSnap,
-            std::floor(cam.position.GetZ() / kSnap + 0.5f) * kSnap
-        );
-    }
-    const JPH::Vec3 gridOrigin    = gridCenter - halfSpan;
-    const uint32_t  fIdx          = _impl->presenter.frameIndex;
-    const bool      ddgiEnabled   = _impl->ctx.RayTracingSupported() && _impl->settings.environment.fullBright == 0 &&
-                                    _impl->frames.tlasAddresses[fIdx] != nullptr &&
-                                    (_impl->settings.rayTracing.enableDiffuseGI || _impl->settings.rayTracing.enableReflections ||
-                                     _impl->settings.rayTracing.enableShadows);
-    // Probe atlas indices have no world-space identity of their own. If the
-    // camera-following grid snaps, all existing texels describe the old probe
-    // positions and must not be blended into the new ones.
-    const bool ddgiGridMoved = !_impl->ddgiGridOriginValid || (gridOrigin - _impl->ddgiGridOrigin).LengthSq() > 1.0e-6f;
-    const float ddgiHysteresis = (_impl->rtHistoryValid && !ddgiGridMoved) ? 0.96f : 0.0f;
-    _impl->ddgiGridOrigin      = gridOrigin;
-    _impl->ddgiGridOriginValid = true;
-    gpuUniforms.ddgiOriginSpacing = JPH::Float4 {gridOrigin.GetX(), gridOrigin.GetY(), gridOrigin.GetZ(), kProbeSpacing};
-    gpuUniforms.ddgiGridCounts    = JPH::Float4 {16.0f, 8.0f, 16.0f, 64.0f};
-    gpuUniforms.ddgiParams        = JPH::Float4 {ddgiHysteresis, 0.1f, 0.2f, ddgiEnabled ? 1.0f : 0.0f};
-    _impl->currentUniforms.ddgiOriginSpacing = gpuUniforms.ddgiOriginSpacing;
-    _impl->currentUniforms.ddgiGridCounts    = gpuUniforms.ddgiGridCounts;
-    _impl->currentUniforms.ddgiParams        = gpuUniforms.ddgiParams;
-
     auto mappedUniforms = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
     if (!mappedUniforms) return;
     std::memcpy(mappedUniforms->Data(), &gpuUniforms, sizeof(FrameUniforms));

@@ -92,8 +92,6 @@ enum class Stage : uint8_t {
     SsrHiZGenerate,
     LightingMip,
     GTAO,
-    DdgiRayTrace,
-    DdgiUpdateAtlas,
     RcgiCascade,
     RtgiComposite,
     HdrDenoise,

@@ -98,8 +98,8 @@ struct RenderFrameContext {
     ShadowRenderer      shadows;
     ShadowAtlas         shadowAtlas;
     VolumetricFogSystem fog;
-    // Ray-traced and screen-space lighting: shadows, reflections, GI, DDGI, GTAO
-    // and their denoisers, each a pipeline bundled with its heap bindings.
+    // Ray-traced and screen-space lighting compute passes (GTAO and RCGI),
+    // each a pipeline bundled with its heap bindings.
     LightingResources lighting;
     // What runs after the scene is lit: the two fullscreen passes, the LTC
     // lookup-table views, and the bloom/HDR chain. Both groups are addressed the
@@ -120,15 +120,8 @@ struct RenderFrameContext {
     FrameUniforms currentUniforms {};
     float         currentDt = 0.0166f;
 
-    bool enableMeshShading = true;
-    bool rtHistoryValid    = false;
-    // DDGI atlas texels are indexed by probe coordinate, so moving the grid
-    // changes the world position represented by every texel. Track that
-    // separately from FrameUniforms (which is rebuilt from FrameData each
-    // frame) so relocation can invalidate temporal probe accumulation.
-    bool      ddgiGridOriginValid = false;
-    JPH::Vec3 ddgiGridOrigin      = JPH::Vec3::sZero();
-    uint32_t  blueNoiseTexIdx     = 0;
+    bool     enableMeshShading = true;
+    uint32_t blueNoiseTexIdx   = 0;
 
     uint32_t activeLineVertexCount = 0;
 

@@ -33,18 +33,7 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
         } else {
             VkExtent2D     requested = ext;
             Vk::ImageUsage extra     = Vk::ImageUsage::None;
-            // DDGI atlases have fixed shader-addressed resolutions, not a
-            // fraction of the viewport; preserve their old allocation policy.
-            if constexpr (std::is_same_v<Resource, Res_DdgiIrradiance>) {
-                requested = {640u, 320u};
-                extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
-            } else if constexpr (std::is_same_v<Resource, Res_DdgiDistance>) {
-                requested = {1024u, 512u};
-                extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
-            } else if constexpr (std::is_same_v<Resource, Res_DdgiRays>) {
-                requested = {2048u, 64u};
-                extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
-            } else if constexpr (std::is_same_v<Resource, Res_RcgiProbes>) {
+            if constexpr (std::is_same_v<Resource, Res_RcgiProbes>) {
                 const uint32_t alignedW = std::max(32u, (requested.width + 31u) & ~31u);
                 const uint32_t alignedH = std::max(32u, (requested.height + 31u) & ~31u);
                 requested               = {alignedW / 2u, alignedH / 4u};
@@ -247,18 +236,13 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
-    const std::array denoiseTargets = {_graph.denoiseA.image.Handle(),     _graph.denoiseB.image.Handle(),     _graph.rcgiProbes.image.Handle(),
-                                       _graph.rcgiCascadeA.image.Handle(), _graph.rcgiCascadeB.image.Handle(), _graph.ddgiRays.image.Handle()};
+    const std::array denoiseTargets = {
+        _graph.denoiseA.image.Handle(), _graph.denoiseB.image.Handle(), _graph.rcgiProbes.image.Handle(),
+        _graph.rcgiCascadeA.image.Handle(), _graph.rcgiCascadeB.image.Handle()
+    };
     for (auto* const img: denoiseTargets) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
-
-    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        cmd, _graph.ddgiIrradiance, Color4 {0.0f, 0.0f, 0.0f, 0.0f}
-    );
-    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        cmd, _graph.ddgiDistance, Color4 {50.0f, 2500.0f, 0.0f, 0.0f}
-    );
 
     Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
         cmd, _graph.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT

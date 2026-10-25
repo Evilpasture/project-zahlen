@@ -20,8 +20,6 @@ struct ReflectionPass:
         Vk::ShaderRead<Res_ShadowMap>,
         Vk::ShaderRead<Res_ShadowAtlas>,
         Vk::ShaderReadGeneral<Res_VoxelResolved>,
-        Vk::ShaderRead<Res_DdgiIrradiance>,
-        Vk::ShaderRead<Res_DdgiDistance>,
         Vk::ShaderRead<Res_RcgiProbes>,
         Vk::ShaderRead<Res_RcgiCascadeA>,
         Vk::ColorWrite<OutputTag>> {

@@ -26,7 +26,7 @@ namespace ZHLN::Passes {
 // phiDepth stays relative to view depth (2% per plane), phiNormal is the
 // normal-dot exponent.
 template <typename PushT>
-[[nodiscard]] constexpr auto MakeAtrousPush(uint32_t stepSize, [[maybe_unused]] float temporalWeight) noexcept -> PushT {
+[[nodiscard]] constexpr auto MakeAtrousPush(uint32_t stepSize) noexcept -> PushT {
     static_assert(std::same_as<PushT, HdrAtrousPushConstants>, "an à-trous push payload MakeAtrousPush does not know how to fill");
     // The composed frame this chain filters is already deterministic upstream;
     // its luma structure is detail, not noise, so the tolerance is tight.
@@ -122,11 +122,9 @@ struct AtrousDenoisePass:
         const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget());
         const auto normal   = Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer);
 
-        const float temporalW = frame.rtHistoryValid ? 0.85f : 0.0f;
-
         Vk::ComputeChain atrousChain(frame.heapManager, cmd);
-        const auto       Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize, float tempWeight) noexcept {
-            const auto push = MakeAtrousPush<PushT>(stepSize, tempWeight);
+        const auto       Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
+            const auto push = MakeAtrousPush<PushT>(stepSize);
             const auto Step = [&](auto&&... slots) noexcept {
                 atrousChain.template Step<ShaderDecl>(GetResource<ShaderDecl>(frame), dst.Extent(), push, slots...);
             };
@@ -148,25 +146,23 @@ struct AtrousDenoisePass:
 
         // `denoiserPasses` is a quality tier, not a literal iteration count: the
         // cheapest valid configuration still needs two dispatches, because a single
-        // pass would have to read and write the same image, and the frame swaps the
-        // written image into the history. Tier 2 and tier 3 previously ran the same
-        // three dispatches, so the top of the ladder was dead. Tier 3 now adds the
-        // step-8 pass; tier 2 is unchanged and stays the default.
+        // pass would have to read and write the same image. Tier 3 adds the step-8
+        // pass; tier 2 stays the default.
         switch (passes) {
             case 1:
-                Dispatch(target, denoiseA, 1, temporalW);
-                Dispatch(denoiseA, target, 2, 0.0f);
+                Dispatch(target, denoiseA, 1);
+                Dispatch(denoiseA, target, 2);
                 break;
             case 2:
-                Dispatch(target, denoiseA, 1, temporalW);
-                Dispatch(denoiseA, denoiseB, 2, 0.0f);
-                Dispatch(denoiseB, target, 4, 0.0f);
+                Dispatch(target, denoiseA, 1);
+                Dispatch(denoiseA, denoiseB, 2);
+                Dispatch(denoiseB, target, 4);
                 break;
             default:
-                Dispatch(target, denoiseA, 1, temporalW);
-                Dispatch(denoiseA, denoiseB, 2, 0.0f);
-                Dispatch(denoiseB, denoiseA, 4, 0.0f);
-                Dispatch(denoiseA, target, 8, 0.0f);
+                Dispatch(target, denoiseA, 1);
+                Dispatch(denoiseA, denoiseB, 2);
+                Dispatch(denoiseB, denoiseA, 4);
+                Dispatch(denoiseA, target, 8);
                 break;
         }
     }
