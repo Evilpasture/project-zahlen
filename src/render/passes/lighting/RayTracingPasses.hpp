@@ -66,50 +66,6 @@ struct GtaoDesc {
     }
 };
 
-struct RtShadowDesc {
-    static constexpr auto name = Vk::ResourceName("RtShadow");
-    using Usages               = Vk::TypeList<
-        Vk::FragmentAndComputeRead<Res_Depth>,
-        Vk::FragmentAndComputeRead<Res_NormRough>,
-        Vk::ComputeWrite<Res_RtShadowMask>>;
-    using ShaderDecl    = Shaders::RtShadow;
-    using ShaderModule  = Shaders::Modules::RtShadowCS;
-    using PushConstants = RTShadowPushConstants;
-
-    [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
-        const uint32_t fIdx   = frame.presenter.frameIndex;
-        const bool     wantRT = (frame.settings.rayTracing.enableReflections && frame.settings.post.enableRTR != 0) || frame.settings.rayTracing.enableShadows;
-        return frame.ctx.RayTracingSupported() && wantRT && frame.settings.environment.fullBright == 0 && frame.frames.tlasAddresses[fIdx] != nullptr;
-    }
-
-    [[nodiscard]] static auto
-        GetPass(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::RtShadowCS, RTShadowPushConstants>>& {
-        return frame.lighting.rtShadow;
-    }
-
-    [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants&) noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
-
-        const Vk::AsAddressWrite tlas {.address = frame.frames.tlasAddresses[fIdx].Get()};
-        const auto              push  = RTShadowPushConstants {
-             .samples     = 1u,
-             .normalBias  = 0.04f,
-             .maxDistance = 300.0f,
-        };
-
-        return MakeComputePassArgs(
-            push, VkExtent3D {frame.graphResources.rtShadowMask.extent.width, frame.graphResources.rtShadowMask.extent.height, 1},
-            Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
-            Vk::Slot<"texNormalRoughness">(
-                Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)
-            ),
-            Vk::Slot<"outShadow">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rtShadowMask)),
-            Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"tlas">(tlas),
-            Vk::Slot<"blueNoiseTex">(frame.textureManager.View(frame.blueNoiseTexIdx))
-        );
-    }
-};
-
 // Deterministic 4-cascade Radiance Cascades Global Illumination (RCGI):
 // 1. Hierarchical surface-pinned probe setup (C0..C3) into Res_RcgiProbes.
 // 2. Top-down Direction-First wave-coherent RayQuery trace + parallax-corrected

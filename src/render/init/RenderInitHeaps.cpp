@@ -257,7 +257,6 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     Vk::InitHeapPassSamplers<Shaders::BloomDown>(heapManager, post.bloomDown.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler));
     Vk::InitHeapPassSamplers<Shaders::BloomUp>(heapManager, post.bloomUp.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler));
     if (ctx.RayTracingSupported()) {
-        Vk::InitHeapPassSamplers<Shaders::RtShadow>(heapManager, lighting.rtShadow.Bindings(), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseSampler));
         Vk::InitHeapPassSamplers<Shaders::RcgiCascadeTraceMerge>(
             heapManager, lighting.rcgiCascadeTraceMerge.Bindings(), Vk::SamplerSlot<"clampSampler">(clampSampler)
         );

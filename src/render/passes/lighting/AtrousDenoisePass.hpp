@@ -26,31 +26,16 @@ namespace ZHLN::Passes {
 // phiDepth stays relative to view depth (2% per plane), phiNormal is the
 // normal-dot exponent.
 template <typename PushT>
-[[nodiscard]] constexpr auto MakeAtrousPush(uint32_t stepSize, float temporalWeight) noexcept -> PushT {
-    if constexpr (std::same_as<PushT, ShadowAtrousPushConstants>) {
-        return ShadowAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .temporalWeight = temporalWeight};
-    } else {
-        static_assert(std::same_as<PushT, HdrAtrousPushConstants>, "an à-trous push payload MakeAtrousPush does not know how to fill");
-        // The composed frame this chain filters is already denoised upstream;
-        // its luma structure is detail, not noise, so the tolerance is tight.
-        return HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .phiLuma = 0.05f};
-    }
+[[nodiscard]] constexpr auto MakeAtrousPush(uint32_t stepSize, [[maybe_unused]] float temporalWeight) noexcept -> PushT {
+    static_assert(std::same_as<PushT, HdrAtrousPushConstants>, "an à-trous push payload MakeAtrousPush does not know how to fill");
+    // The composed frame this chain filters is already deterministic upstream;
+    // its luma structure is detail, not noise, so the tolerance is tight.
+    return HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .phiLuma = 0.05f};
 }
 
-// Each denoiser chain preserves its feature predicate: the shadow chain runs
-// whenever RT shadows or reflections request the visibility mask, and the HDR
-// wavelet deliberately ignores fullBright and the TLAS state (it filters
-// whatever landed in the scene color while bypassing sharp/metallic Tier 1
-// specular pixels in shader).
-struct ShadowDenoiseGate {
-    [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
-        const uint32_t fIdx   = frame.presenter.frameIndex;
-        const bool     wantRT = (frame.settings.rayTracing.enableReflections && frame.settings.post.enableRTR != 0) || frame.settings.rayTracing.enableShadows;
-        return frame.ctx.RayTracingSupported() && wantRT && frame.settings.rayTracing.denoiserPasses != 0 && frame.settings.environment.fullBright == 0 &&
-               frame.frames.tlasAddresses[fIdx] != nullptr;
-    }
-};
-
+// The HDR wavelet deliberately ignores fullBright and the TLAS state (it
+// filters whatever landed in the scene color while bypassing sharp/metallic
+// Tier 1 specular pixels in shader).
 struct HdrDenoiseGate {
     [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
         return frame.ctx.RayTracingSupported() && frame.settings.rayTracing.denoiserPasses > 0 &&
@@ -66,22 +51,6 @@ template <typename Res>
 struct GraphMember;
 
 template <>
-struct GraphMember<Res_RtShadowMask> {
-    static constexpr auto Ptr = &TargetManager::GraphResources::rtShadowMask;
-};
-template <>
-struct GraphMember<Res_ShadowDenoiseA> {
-    static constexpr auto Ptr = &TargetManager::GraphResources::shadowDenoiseA;
-};
-template <>
-struct GraphMember<Res_ShadowDenoiseB> {
-    static constexpr auto Ptr = &TargetManager::GraphResources::shadowDenoiseB;
-};
-template <>
-struct GraphMember<Res_RtShadowHistory> {
-    static constexpr auto Ptr = &TargetManager::GraphResources::rtShadowHistory;
-};
-template <>
 struct GraphMember<Res_HdrSceneColor> {
     static constexpr auto Ptr = &TargetManager::GraphResources::hdrSceneColor;
 };
@@ -94,17 +63,9 @@ struct GraphMember<Res_DenoiseB> {
     static constexpr auto Ptr = &TargetManager::GraphResources::denoiseB;
 };
 
-// Maps a descriptor set to the resource bundle that owns it -- the shadow
-// denoiser lives in LightingResources and the HDR wavelet in PostProcessResources.
+// Maps a descriptor set to the resource bundle that owns it.
 template <typename Declared>
 struct DenoiseAccess;
-
-template <>
-struct DenoiseAccess<Shaders::ShadowDenoise> {
-    [[nodiscard]] static auto Resource(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::DynamicComputePass>& {
-        return frame.lighting.shadowDenoise;
-    }
-};
 
 template <>
 struct DenoiseAccess<Shaders::HdrDenoise> {
@@ -173,17 +134,10 @@ struct AtrousDenoisePass:
             if constexpr (!std::is_void_v<HistoryRes>) {
                 const auto history  = Vk::Assume<Vk::ComputeRead<HistoryRes>>(frame.graphResources.*(TemplatedDetail::GraphMember<HistoryRes>::Ptr));
                 const auto velocity = Vk::Assume<Vk::ComputeRead<Res_Velocity>>(frame.graphResources.velocityBuffer);
-                if constexpr (std::same_as<PushT, ShadowAtrousPushConstants>) {
-                    Step(
-                        Vk::Slot<"inShadow">(src), Vk::Slot<"texDepth">(depth), Vk::Slot<"texNormalRoughness">(normal), Vk::Slot<"texHistory">(history),
-                        Vk::Slot<"texVelocity">(velocity), Vk::Slot<"outShadow">(dst), Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx])
-                    );
-                } else {
-                    Step(
-                        Vk::Slot<"inColor">(src), Vk::Slot<"texDepth">(depth), Vk::Slot<"texNormalRoughness">(normal), Vk::Slot<"texHistory">(history),
-                        Vk::Slot<"texVelocity">(velocity), Vk::Slot<"outColor">(dst), Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx])
-                    );
-                }
+                Step(
+                    Vk::Slot<"inColor">(src), Vk::Slot<"texDepth">(depth), Vk::Slot<"texNormalRoughness">(normal), Vk::Slot<"texHistory">(history),
+                    Vk::Slot<"texVelocity">(velocity), Vk::Slot<"outColor">(dst), Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx])
+                );
             } else {
                 Step(
                     Vk::Slot<"inColor">(src), Vk::Slot<"texDepth">(depth), Vk::Slot<"texNormalRoughness">(normal), Vk::Slot<"outColor">(dst),

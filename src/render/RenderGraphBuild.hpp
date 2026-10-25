@@ -119,10 +119,7 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.frame = self},
         Passes::SsrHiZGeneratePass {.cull = self.culling, .frame = self}, Passes::TranslucentPrePass {.frame = self},
         Passes::ComputePass<Passes::GtaoDesc> {.frame = self, .pc = pc}, Passes::ComputePass<Passes::DdgiTraceDesc> {.frame = self},
-        Passes::ComputePass<Passes::DdgiUpdateDesc> {.frame = self}, Passes::ComputePass<Passes::RtShadowDesc> {.frame = self},
-        Passes::AtrousDenoisePass<
-            "ShadowDenoise", Shaders::ShadowDenoise, Res_RtShadowMask, Res_ShadowDenoiseA, Res_ShadowDenoiseB, Res_RtShadowHistory, ShadowAtrousPushConstants,
-            Passes::ShadowDenoiseGate> {.frame = self},
+        Passes::ComputePass<Passes::DdgiUpdateDesc> {.frame = self},
         Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc},
         Passes::RcgiCascadePass {.frame = self},
         Passes::RtgiCompositePass {.frame = self}, Passes::EmissivePass {.forward = self.forward, .frame = self},

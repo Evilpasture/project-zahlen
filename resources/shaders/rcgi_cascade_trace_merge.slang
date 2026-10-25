@@ -62,7 +62,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     ray.TMax      = pc.tMax;
 
     // Fixed-function hardware RT traversal (`RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES`
-    // matches `rtgi_half`, `ddgi_trace`, and `rt_shadow`, keeping BVH intersection 100% on RT cores).
+    // matches `rtgi_half`, `ddgi_trace`, and `lighting`, keeping BVH intersection 100% on RT cores).
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> query;
     query.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
     while (query.Proceed()) {

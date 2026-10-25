@@ -94,8 +94,6 @@ enum class Stage : uint8_t {
     GTAO,
     DdgiRayTrace,
     DdgiUpdateAtlas,
-    RtShadow,
-    ShadowDenoise,
     RcgiCascade,
     RtgiComposite,
     HdrDenoise,

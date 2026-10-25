@@ -45,7 +45,7 @@ Texture2D<uint> texBakedMask;
 
 
 #ifndef DISABLE_RTR
-Texture2D<float> texRtShadowMask;
+RaytracingAccelerationStructure tlas;
 Texture2D<float4> texDdgiIrradiance;
 Texture2D<float2> texDdgiDistance;
 #endif
@@ -186,6 +186,38 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
     return float4(indirectLight, ao);
 }
 
+#ifndef DISABLE_RTR
+// Deterministic short-range (0 -> 3.0m) sun contact shadow ray along exact L_sun.
+// Cascade PCSS owns broad scene shadows and distant soft penumbras with zero
+// temporal lag; this unjittered ray closes the Peter-Panning / sub-texel contact
+// gap right at caster bases with zero stochastic noise and zero history buffers.
+float TraceSunContactShadow(float3 worldPos, float3 N, float3 L_sun, float NdotL_sun, float viewDepth) {
+    float contactBias = 0.005f + 0.00025f * max(viewDepth, 0.0f) + 0.004f * (1.0f - NdotL_sun);
+
+    RayDesc ray;
+    ray.Origin    = worldPos + N * contactBias;
+    ray.Direction = L_sun;
+    ray.TMin      = 0.005f;
+    ray.TMax      = 3.0f;
+
+    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> q;
+    // Main world only (kRayMaskWorld): Source's scaled skybox world never shadows the map.
+    q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
+    while (q.Proceed()) {
+    }
+
+    if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
+        return 1.0f;
+    }
+
+    // Full contact occlusion over [0 .. 1.2m] seals all CSM Peter-Panning and
+    // grounds thin sub-texel geometry; smooth handoff over [1.2m .. 3.0m] lets
+    // Cascade PCSS's distance-hardening penumbra take over seamlessly.
+    float rtContact = smoothstep(1.2f, 3.0f, q.CommittedRayT());
+    return lerp(rtContact, 1.0f, smoothstep(80.0f, 100.0f, viewDepth));
+}
+#endif
+
 struct LightingOutput {
     float4 color : SV_Target0;
     float ao : SV_Target1;
@@ -243,16 +275,8 @@ LightingOutput PSMain(VSOutput input) {
     float3 H_sun    = SafeNormalize(V + L_sun, N);
     float NdotL_sun = saturate(dot(N, L_sun));
 
-    float shadow = 1.0f;
-
     float cascadeShadow = 1.0f;
-    bool  needCascade   = true;
-    bool  rtrBlendBand  = false;
-#ifndef DISABLE_RTR
-    needCascade  = !(ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth < 80.0f);
-    rtrBlendBand = (ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth >= 80.0f && viewDepth < 160.0f);
-#endif
-    if (needCascade) {
+    if (NdotL_sun > 0.0f) {
         uint cascadeIndex = 0;
         if (viewDepth > frame.cascadeSplits.x)
             cascadeIndex = 1;
@@ -261,59 +285,33 @@ LightingOutput PSMain(VSOutput input) {
         if (viewDepth > frame.cascadeSplits.z)
             cascadeIndex = 3;
 
-        float4 lightBasisX     = mul(frame.lightSpaceMatrices[cascadeIndex], float4(1.0f, 0.0f, 0.0f, 0.0f));
-        float4 lightBasisZ     = mul(frame.lightSpaceMatrices[cascadeIndex], float4(0.0f, 0.0f, 1.0f, 0.0f));
-        float  ndcPerWorldX    = max(length(lightBasisX.xyz), 1e-6f);
-        float  texelSizeWorld  = 2.0f / (ndcPerWorldX * float(frame.shadowResolution));
+        float4 lightBasisX      = mul(frame.lightSpaceMatrices[cascadeIndex], float4(1.0f, 0.0f, 0.0f, 0.0f));
+        float4 lightBasisZ      = mul(frame.lightSpaceMatrices[cascadeIndex], float4(0.0f, 0.0f, 1.0f, 0.0f));
+        float  ndcPerWorldX     = max(length(lightBasisX.xyz), 1e-6f);
+        float  texelSizeWorld   = 2.0f / (ndcPerWorldX * float(frame.shadowResolution));
         float  worldDepthPerNdc = 1.0f / max(abs(lightBasisZ.z), 1e-8f);
-        float normalBias      = saturate(1.0 - dot(N, L_sun)) * 1.5 + 0.2;
-        float3 biasedWorldPos = worldPos + N * (normalBias * texelSizeWorld);
+        float  normalBias       = saturate(1.0 - dot(N, L_sun)) * 1.5 + 0.2;
+        float3 biasedWorldPos   = worldPos + N * (normalBias * texelSizeWorld);
 
         float4 shadowPos = mul(frame.lightSpaceMatrices[cascadeIndex], float4(biasedWorldPos, 1.0f));
 
         shadowPos.xy = shadowPos.xy * 0.5f + 0.5f * shadowPos.w;
 
         cascadeShadow = CalculateShadowPCSS(
-            shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex, worldDepthPerNdc, rtrBlendBand
+            shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex, worldDepthPerNdc, false
         );
     }
-    shadow = cascadeShadow;
 
+    float rtContactShadow = 1.0f;
 #ifndef DISABLE_RTR
-    if (ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth < 160.0f) {
-        // texRtShadowMask is traced and denoised below native resolution, so it
-        // has to be filtered up. Filtering by hand keeps this off the heap
-        // sampler table -- and the previous point sample was the direct cause of
-        // shadow crawl, since one texel of a temporally accumulated mask was
-        // being handed to a full-resolution pixel.
-        float2 maskDims;
-        texRtShadowMask.GetDimensions(maskDims.x, maskDims.y);
-        float2 maskCoord = input.uv * maskDims - 0.5f;
-        int2   maskBase  = int2(floor(maskCoord));
-        float2 maskFrac  = frac(maskCoord);
-        float  maskSum    = 0.0f;
-        float  maskWeight = 0.0f;
-        [unroll]
-        for (int maskY = 0; maskY <= 1; ++maskY) {
-            [unroll]
-            for (int maskX = 0; maskX <= 1; ++maskX) {
-                int2  tap  = clamp(maskBase + int2(maskX, maskY), int2(0, 0), int2(maskDims) - 1);
-                float wBil = lerp(1.0f - maskFrac.x, maskFrac.x, float(maskX)) *
-                             lerp(1.0f - maskFrac.y, maskFrac.y, float(maskY));
-                maskSum    += texRtShadowMask.Load(int3(tap, 0)).r * wBil;
-                maskWeight += wBil;
-            }
-        }
-        float rtrShadow = (maskWeight > 1e-5f) ? (maskSum / maskWeight) : 1.0f;
-        if (viewDepth < 80.0f) {
-            shadow = rtrShadow;
-        } else {
-            float t         = saturate((viewDepth - 80.0f) / 80.0f);
-            t               = t * t * (3.0f - 2.0f * t);
-            shadow          = lerp(rtrShadow, cascadeShadow, t);
-        }
+    // Pixels already in Cascade PCSS umbra (`cascadeShadow <= 0.001f`) or facing
+    // away from the sun skip the hardware ray completely (`0 * rtContact = 0`).
+    if (ENABLE_RTR != 0 && pc.enableRTR != 0 && NdotL_sun > 0.0f && cascadeShadow > 0.001f && viewDepth < 100.0f) {
+        rtContactShadow = TraceSunContactShadow(worldPos, N, L_sun, NdotL_sun, viewDepth);
     }
 #endif
+
+    float shadow = cascadeShadow * rtContactShadow;
 
     float3 F     = SpecularFresnel(saturate(dot(H_sun, V)), F0, f90);
     float3 spec  = SpecularGGX(N, V, L_sun, H_sun, roughness, F, T, B, anisoStrength);

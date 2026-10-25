@@ -604,20 +604,9 @@ add_shader_target(hiz_generate_shader
     STAGES "${SHADER_SRC_DIR}/hiz_generate.slang|CSMain|cs_6_0|SHADER_HIZ_GENERATE_SLANG_CS_PATH"
 )
 
-# Ray-traced sun shadow mask and its edge-avoiding A-Trous wavelet denoiser.
-# The mask is traced at 1-2 SPP with blue-noise/Vogel-disk jitter and then
-# smoothed by `denoiserPasses` iterations of the wavelet before the lighting
-# pass reads a single load instead of a ray.
-add_shader_target(rt_shadow_shader
-    STAGES "${SHADER_SRC_DIR}/rt_shadow.slang|CSMain|cs_6_0|SHADER_RT_SHADOW_SLANG_CS_PATH"
-)
-
-add_shader_target(shadow_denoise_atrous_shader
-    STAGES "${SHADER_SRC_DIR}/shadow_denoise_atrous.slang|CSMain|cs_6_0|SHADER_SHADOW_DENOISE_ATROUS_SLANG_CS_PATH"
-)
-
-# Color A-Trous wavelet over the composited HDR scene color for ray-traced
-# shadows. Reflections and RCGI are deterministic and do not use A-Trous.
+# Color A-Trous wavelet over the composited HDR scene color.
+# Sun contact shadows, reflections, and RCGI are deterministic and do not use
+# separate shadow/reflection A-Trous passes.
 add_shader_target(hdr_denoise_atrous_shader
     STAGES "${SHADER_SRC_DIR}/hdr_denoise_atrous.slang|CSMain|cs_6_0|SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
 )
@@ -960,8 +949,6 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "IblShCS=SHADER_IBL_SH_CS_PATH"
     "SmaaLutCS=SHADER_SMAA_LUT_CS_PATH"
     "GpuSceneCS=SHADER_GPU_SCENE_CS_PATH"
-    "RtShadowCS=SHADER_RT_SHADOW_SLANG_CS_PATH"
-    "ShadowDenoiseAtrousCS=SHADER_SHADOW_DENOISE_ATROUS_SLANG_CS_PATH"
     "DdgiTraceCS=SHADER_DDGI_TRACE_SLANG_CS_PATH"
     "DdgiUpdateIrradianceCS=SHADER_DDGI_UPDATE_IRRADIANCE_SLANG_CS_PATH"
 )
@@ -1004,8 +991,6 @@ set(ZHLN_SHADER_CATALOG_SETS
     "BloomDown=BloomDownCS"
     "BloomUp=BloomUpCS"
     "HdrDenoise=HdrDenoiseAtrousCS"
-    "RtShadow=RtShadowCS"
-    "ShadowDenoise=ShadowDenoiseAtrousCS"
     "RtgiHalf=RtgiHalfCS"
     "RtgiComposite=RtgiCompositeCS"
     "RcgiProbeSetup=RcgiProbeSetupCS"

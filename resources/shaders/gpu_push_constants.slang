@@ -78,13 +78,6 @@ public struct BakePush {
     public float distortion;
 };
 
-public struct RTShadowPushConstants {
-    public uint samples;
-    public float normalBias;
-    public float maxDistance;
-    public uint _pad;
-};
-
 public struct GtaoPushConstants {
     public uint2 halfRes;
     public float2 rcpFullRes;
@@ -153,13 +146,6 @@ public struct BlitPushConstants {
 // mirrors in src/render/PassPayloads.hpp and the individual pass files).
 // Names are the host-visible C++ names; each replaces a per-shader local
 // struct that duplicated this layout in C++.
-
-public struct ShadowAtrousPushConstants {
-    public uint  stepSize;
-    public float phiDepth;
-    public float phiNormal;
-    public float temporalWeight;
-};
 
 public struct FXAAPushConstants {
     public float rcpFrameX;

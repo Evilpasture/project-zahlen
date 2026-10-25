@@ -30,7 +30,6 @@ public struct GpuAbiTypes {
     public MeshParticleRenderPushConstants meshParticleRenderPush;
     public SkinningConstants skinningConstants;
     public BakePush bakePush;
-    public RTShadowPushConstants rtShadowPush;
     public GtaoPushConstants gtaoPush;
     public RtgiCompositePushConstants rtgiCompositePush;
     public RtgiAtrousPushConstants rtgiAtrousPush;
@@ -39,7 +38,6 @@ public struct GpuAbiTypes {
     public HdrAtrousPushConstants hdrAtrousPush;
     public BlitPushConstants blitPush;
 
-    public ShadowAtrousPushConstants shadowAtrousPush;
     public FXAAPushConstants fxaaPush;
     public MLAAPushConstants mlaaPush;
     public TAAPushConstants taaPush;
@@ -108,7 +106,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += uint(abi.skinningConstants.inPosAddr);
     acc += asuint(abi.skinningConstants.morphWeights.x);
     acc += abi.bakePush.width;
-    acc += abi.rtShadowPush.samples;
     acc += abi.gtaoPush.halfRes.x;
     acc += asuint(abi.gtaoPush.rcpFullRes.x);
     acc += abi.rtgiCompositePush.fullRes.x;
@@ -118,7 +115,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += asuint(abi.thresholdPush.exposure);
     acc += abi.hdrAtrousPush.stepSize;
     acc += asuint(abi.blitPush.colorFilter.x);
-    acc += abi.shadowAtrousPush.stepSize;
     acc += asuint(abi.fxaaPush.rcpFrameX);
     acc += asuint(abi.mlaaPush.threshold);
     acc += asuint(abi.taaPush.feedback);

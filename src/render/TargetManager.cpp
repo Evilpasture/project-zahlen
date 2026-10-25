@@ -63,9 +63,7 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
                 extra |= Vk::ImageUsage::TransferSrc;
             }
             if constexpr (
-                std::is_same_v<Resource, Res_HdrSceneColor> || std::is_same_v<Resource, Res_DenoiseA> || std::is_same_v<Resource, Res_DenoiseB> ||
-                std::is_same_v<Resource, Res_RtShadowMask> || std::is_same_v<Resource, Res_RtShadowHistory> || std::is_same_v<Resource, Res_ShadowDenoiseA> ||
-                std::is_same_v<Resource, Res_ShadowDenoiseB>
+                std::is_same_v<Resource, Res_HdrSceneColor> || std::is_same_v<Resource, Res_DenoiseA> || std::is_same_v<Resource, Res_DenoiseB>
             ) {
                 extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
             }
@@ -249,16 +247,12 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
-    const std::array denoiseTargets = {_graph.denoiseA.image.Handle(),       _graph.denoiseB.image.Handle(),   _graph.shadowDenoiseA.image.Handle(),
-                                       _graph.shadowDenoiseB.image.Handle(), _graph.rcgiProbes.image.Handle(), _graph.rcgiCascadeA.image.Handle(),
-                                       _graph.rcgiCascadeB.image.Handle(),   _graph.ddgiRays.image.Handle()};
+    const std::array denoiseTargets = {_graph.denoiseA.image.Handle(),     _graph.denoiseB.image.Handle(),     _graph.rcgiProbes.image.Handle(),
+                                       _graph.rcgiCascadeA.image.Handle(), _graph.rcgiCascadeB.image.Handle(), _graph.ddgiRays.image.Handle()};
     for (auto* const img: denoiseTargets) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
-    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        cmd, Color4 {1.0f, 1.0f, 1.0f, 1.0f}, _graph.rtShadowMask, _graph.rtShadowHistory
-    );
     Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
         cmd, _graph.ddgiIrradiance, Color4 {0.0f, 0.0f, 0.0f, 0.0f}
     );

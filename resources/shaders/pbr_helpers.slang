@@ -138,45 +138,6 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
     return shadow / (float) pcfCount;
 }
 
-#ifndef DISABLE_RTR
-public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float2 screenPos, uint frameIndex, RaytracingAccelerationStructure tlas,
-                                      Texture2D<float4> blueNoiseTex, SamplerState blueNoiseSampler, float sunSize = 0.001f, uint samples = 1u) {
-    float3 up        = abs(L.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
-    float3 right     = normalize(cross(up, L));
-    float3 bitangent = cross(L, right);
-
-    uint2 pixelPos  = uint2(screenPos);
-    uint  frameIdx  = WrapFrameIndex(frameIndex);
-    float spread    = max(sunSize, 0.00001f);
-    uint  spp       = max(samples, 1u);
-
-    float visibility = 0.0f;
-    for (uint i = 0u; i < spp; ++i) {
-        float4 u    = SampleBlueNoiseAt(blueNoiseTex, blueNoiseSampler, pixelPos, frameIdx, i);
-
-        float2 disk = VogelDisk(i, spp, u.x * 6.2831853f) * spread;
-
-        RayDesc ray;
-        ray.Origin    = worldPos + N * 0.04f;
-        ray.Direction = normalize(L + right * disk.x + bitangent * disk.y);
-        ray.TMin      = 0.01f;
-        ray.TMax      = 300.0f;
-
-        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-        // Main world only (kRayMaskWorld): background-layer scenery never
-        // shadows the map -- Source's two worlds do not share shadows.
-        q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
-        while (q.Proceed()) {
-        }
-
-        visibility += (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) ? 1.0f : 0.0f;
-    }
-
-    return visibility / float(spp);
-}
-
-#endif
-
 // KHR_materials_sheen: Charlie's cylindrical-fiber distribution with the
 // cheaper Ashikhmin/Premoze visibility. The prefiltered environment is GGX,
 // so its sheen term below is an approximation, not a Charlie convolution.

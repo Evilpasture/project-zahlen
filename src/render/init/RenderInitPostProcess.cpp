@@ -106,20 +106,8 @@ auto RenderContext::Impl::BuildLightingResources() -> std::expected<void, ErrorC
             return BuildBoundDynamic(*this, lighting.rcgiResolve, Shaders::Modules::RcgiResolveCS::Bytes());
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            // The ray-traced half is only reachable on a device that supports it;
+            // The ray-traced passes are only reachable on a device that supports RT;
             // the bundles stay empty (and the passes stay gated) when it is absent.
-            if (!ctx.RayTracingSupported()) {
-                return {};
-            }
-            return BuildBoundTyped(*this, lighting.rtShadow);
-        })
-        .and_then([&]() -> std::expected<void, ErrorCode> {
-            if (!ctx.RayTracingSupported()) {
-                return {};
-            }
-            return BuildBoundDynamic(*this, lighting.shadowDenoise, Shaders::Modules::ShadowDenoiseAtrousCS::Bytes());
-        })
-        .and_then([&]() -> std::expected<void, ErrorCode> {
             if (!ctx.RayTracingSupported()) {
                 return {};
             }
@@ -328,10 +316,10 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
                 this, "Ray Traced Lighting", [this]() -> std::expected<void, ErrorCode> { return BuildLightingResources(); },
-                {Shaders::Modules::GtaoCS::Path, Shaders::Modules::RtShadowCS::Path, Shaders::Modules::ShadowDenoiseAtrousCS::Path,
-                 Shaders::Modules::RcgiProbeSetupCS::Path, Shaders::Modules::RcgiCascadeTraceMergeCS::Path,
-                 Shaders::Modules::RcgiResolveCS::Path, Shaders::Modules::RtgiCompositeCS::Path,
-                 Shaders::Modules::DdgiTraceCS::Path, Shaders::Modules::DdgiUpdateIrradianceCS::Path}
+                {Shaders::Modules::GtaoCS::Path, Shaders::Modules::RcgiProbeSetupCS::Path,
+                 Shaders::Modules::RcgiCascadeTraceMergeCS::Path, Shaders::Modules::RcgiResolveCS::Path,
+                 Shaders::Modules::RtgiCompositeCS::Path, Shaders::Modules::DdgiTraceCS::Path,
+                 Shaders::Modules::DdgiUpdateIrradianceCS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

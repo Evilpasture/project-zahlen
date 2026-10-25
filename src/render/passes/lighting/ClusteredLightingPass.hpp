@@ -19,7 +19,6 @@ struct ClusteredLightingPass:
         Vk::ShaderRead<Res_ShadowMap>,
         Vk::ShaderRead<Res_ShadowAtlas>,
         Vk::ShaderRead<Res_Ao>,
-        Vk::ShaderRead<Res_RtShadowMask>,
         Vk::FragmentAndComputeRead<Res_DdgiIrradiance>,
         Vk::FragmentAndComputeRead<Res_DdgiDistance>,
         Vk::ColorWrite<Res_Lighting>,

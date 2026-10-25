@@ -7,12 +7,14 @@
 namespace ZHLN::Passes {
 
 void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    const auto fIdx = frame.presenter.frameIndex;
+    const auto fIdx    = frame.presenter.frameIndex;
+    const bool hasTlas = frame.ctx.RayTracingSupported() && frame.frames.tlasAddresses[fIdx] != nullptr;
     const auto lightVariant =
         (frame.settings.rayTracing.enableReflections || frame.settings.rayTracing.enableShadows || frame.settings.rayTracing.enableDiffuseGI) &&
-                frame.ctx.RayTracingSupported() ?
+                hasTlas ?
             1 :
             0;
+    const Vk::AsAddressWrite tlas {.address = hasTlas ? frame.frames.tlasAddresses[fIdx].Get() : 0};
 
     const auto block = post.lighting.WriteHeapParameters<Shaders::Lighting>(
         frame.heapManager, Vk::Slot<"texInput">(Vk::Assume<Vk::FragmentAndComputeRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
@@ -25,7 +27,7 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
         Vk::Slot<"clusterIndexList">(frame.frames.lightIndexListBuffers[fIdx]),
         Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.View(VK_IMAGE_ASPECT_DEPTH_BIT)),
         Vk::Slot<"shadowTiles">(frame.frames.shadowTileBuffers[fIdx]), Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(frame.graphResources.ao)),
-        Vk::Slot<"texRtShadowMask">(Vk::Assume<Vk::ShaderRead<Res_RtShadowMask>>(frame.graphResources.rtShadowMask)),
+        Vk::Slot<"tlas">(tlas),
         Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::FragmentAndComputeRead<Res_DdgiIrradiance>>(frame.graphResources.ddgiIrradiance)),
         Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::FragmentAndComputeRead<Res_DdgiDistance>>(frame.graphResources.ddgiDistance))
     );

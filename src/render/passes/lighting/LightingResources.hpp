@@ -21,8 +21,6 @@ namespace ZHLN {
 // Each field here bundles both halves, so one question gets both answers.
 struct LightingResources {
     Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::GtaoCS, GtaoPushConstants>>                       gtao;
-    Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::RtShadowCS, RTShadowPushConstants>>               rtShadow;
-    Vk::BoundComputePass<Vk::DynamicComputePass>                                                                  shadowDenoise;
     Vk::BoundComputePass<Vk::DynamicComputePass>                                                                  rcgiProbeSetup;
     Vk::BoundComputePass<Vk::DynamicComputePass>                                                                  rcgiCascadeTraceMerge;
     Vk::BoundComputePass<Vk::DynamicComputePass>                                                                  rcgiResolve;

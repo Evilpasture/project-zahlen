@@ -48,19 +48,7 @@ using Res_Lighting      = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLO
 using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16_SFLOAT>;
 using Res_DenoiseA      = Vk::GraphImage<"DenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT>;
 using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT>;
-// The RT GI, RT reflection and RT shadow chains all trace and filter below
-// native resolution; the shadow chain was the last one still running at full
-// resolution, which is why ShadowDenoise cost more than the shadow trace it
-// filters. Kept as one constant because the shaders hard-code the inverse as
-// kShadowTraceScale, and a mismatch between the two silently misaligns the
-// depth and normal taps against the filtered signal.
-inline constexpr uint32_t kShadowTraceDivisor = 2;
-
-using Res_RtShadowMask    = Vk::GraphImage<"RtShadowMask", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, kShadowTraceDivisor>;
-using Res_RtShadowHistory = Vk::GraphImage<"RtShadowHistory", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, kShadowTraceDivisor>;
-using Res_ShadowDenoiseA  = Vk::GraphImage<"ShadowDenoiseA", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, kShadowTraceDivisor>;
-using Res_ShadowDenoiseB  = Vk::GraphImage<"ShadowDenoiseB", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, kShadowTraceDivisor>;
-using Res_RcgiProbes      = Vk::GraphImage<"RcgiProbes", VK_FORMAT_R32G32B32A32_SFLOAT>;
+using Res_RcgiProbes    = Vk::GraphImage<"RcgiProbes", VK_FORMAT_R32G32B32A32_SFLOAT>;
 using Res_RcgiCascadeA    = Vk::GraphImage<"RcgiCascadeA", VK_FORMAT_R16G16B16A16_SFLOAT>;
 using Res_RcgiCascadeB    = Vk::GraphImage<"RcgiCascadeB", VK_FORMAT_R16G16B16A16_SFLOAT>;
 using Res_DdgiIrradiance  = Vk::GraphImage<"DdgiIrradiance", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
@@ -112,10 +100,6 @@ class TargetManager {
         Vk::RenderTarget<Res_HdrSceneColor> hdrSceneColor;
         Vk::RenderTarget<Res_DenoiseA> denoiseA;
         Vk::RenderTarget<Res_DenoiseB> denoiseB;
-        Vk::RenderTarget<Res_RtShadowMask> rtShadowMask;
-        Vk::RenderTarget<Res_RtShadowHistory> rtShadowHistory;
-        Vk::RenderTarget<Res_ShadowDenoiseA> shadowDenoiseA;
-        Vk::RenderTarget<Res_ShadowDenoiseB> shadowDenoiseB;
         Vk::RenderTarget<Res_RcgiProbes> rcgiProbes;
         Vk::RenderTarget<Res_RcgiCascadeA> rcgiCascadeA;
         Vk::RenderTarget<Res_RcgiCascadeB> rcgiCascadeB;

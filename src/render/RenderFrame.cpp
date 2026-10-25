@@ -585,7 +585,6 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     _impl->targets.SwapCascadeViews();
     Vk::SwapBacking(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
     if (_impl->ctx.RayTracingSupported()) {
-        Vk::SwapBacking(_impl->graphResources.rtShadowMask, _impl->graphResources.rtShadowHistory);
         _impl->rtHistoryValid = _impl->settings.rayTracing.denoiserPasses > 0;
     }
 

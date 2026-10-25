@@ -14,7 +14,6 @@ using MeshParticleRenderPush = Slang::MeshParticleRenderPushConstants;
 using SkinningConstants = Slang::SkinningConstants;
 using BakePush = Slang::BakePush;
 
-using RTShadowPushConstants = Slang::RTShadowPushConstants;
 using GtaoPushConstants = Slang::GtaoPushConstants;
 using RtgiCompositePushConstants = Slang::RtgiCompositePushConstants;
 using RtgiAtrousPushConstants = Slang::RtgiAtrousPushConstants;
@@ -27,9 +26,6 @@ using ScenePassPushConstants = Slang::ScenePassPushConstants;
 
 // Slang owns these payloads (resources/shaders/gpu_push_constants.slang); the
 // generated definitions are the ABI. The aliases keep the pass-side names.
-using ShadowAtrousPushConstants = Slang::ShadowAtrousPushConstants;
-static_assert(GpuAbi::ScenePassPayload<ShadowAtrousPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
-
 using FXAAPushConstants = Slang::FXAAPushConstants;
 static_assert(GpuAbi::ScenePassPayload<FXAAPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
@@ -72,7 +68,7 @@ static_assert(
     (GpuAbi::ScenePassPayload<ObjectConstants> && GpuAbi::ScenePassPayload<UIObjectConstants> &&
      GpuAbi::ScenePassPayload<CullingConstants> && GpuAbi::ScenePassPayload<MeshParticleRenderPush> &&
      GpuAbi::ScenePassPayload<SkinningConstants> && GpuAbi::ScenePassPayload<BakePush> &&
-     GpuAbi::ScenePassPayload<RTShadowPushConstants> && GpuAbi::ScenePassPayload<GtaoPushConstants> &&
+     GpuAbi::ScenePassPayload<GtaoPushConstants> &&
      GpuAbi::ScenePassPayload<RtgiCompositePushConstants> && GpuAbi::ScenePassPayload<RtgiAtrousPushConstants> &&
      GpuAbi::ScenePassPayload<KawasePushConstants> && GpuAbi::ScenePassPayload<ThresholdPushConstants> &&
      GpuAbi::ScenePassPayload<HdrAtrousPushConstants> && GpuAbi::ScenePassPayload<BlitPushConstants> &&
