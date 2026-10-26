@@ -39,6 +39,9 @@ target_link_libraries(${TARGET_NAME} PUBLIC
 target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/gameplay
 )
+target_compile_definitions(${TARGET_NAME} PRIVATE
+    ZHLN_TARGET_TRIPLE="${ZHLN_TARGET_TRIPLE}"
+)
 
 # FallbackScene.cpp reaches Components.hpp, whose key bitset is sized by
 # Reflect::EnumCount<KeyCode>(). Reflection is not a per-target feature --

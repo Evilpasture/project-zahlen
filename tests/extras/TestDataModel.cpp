@@ -310,6 +310,6 @@ struct TestDataModelSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<TestDataModelSuite>();
+auto RunDataModelSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<TestDataModelSuite>();
 }

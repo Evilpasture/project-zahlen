@@ -3,6 +3,26 @@
 
 #include "Zahlen/CommandLine.hpp"
 #include "Zahlen/Config.hpp"
+
+#ifndef ZHLN_GIT_COMMIT_HASH
+#define ZHLN_GIT_COMMIT_HASH "unknown"
+#endif
+
+#ifndef ZHLN_COMPILER_FLAGS
+#define ZHLN_COMPILER_FLAGS "unknown"
+#endif
+
+#ifndef ZHLN_META_BUILDER
+#define ZHLN_META_BUILDER "unknown"
+#endif
+
+#ifndef ZHLN_BUILD_TOOL
+#define ZHLN_BUILD_TOOL "unknown"
+#endif
+
+#ifndef ZHLN_LINKER_NAME
+#define ZHLN_LINKER_NAME "unknown"
+#endif
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Render/RenderGraphDump.hpp>

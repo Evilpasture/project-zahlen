@@ -233,7 +233,12 @@ def main() -> int:
         # Field offsets need the member to exist in C++. Discover the ones that
         # do not by letting the compiler name them, then report those as drift
         # rather than failing the whole audit on the first stale field.
-        stale: set[tuple[str, str]] = set()
+        # Pre-seed known alignment padding fields so the C++ probe compiles on
+        # the first pass instead of paying an extra failed compile to discover
+        # them; real stale fields are still caught by both Clang and GCC diagnostics.
+        stale: set[tuple[str, str]] = {
+            (n, f) for n, fs in structs.items() for f in fs if PADDING_RE.match(f)
+        }
         cxx_out: dict[str, int] = {}
         for _attempt in range(8):
             probe = {
@@ -251,7 +256,13 @@ def main() -> int:
             newly = {
                 (m.group(2), m.group(1))
                 for m in re.finditer(
-                    r"no member named '(\w+)' in '(\w+)'", proc.stderr
+                    r"no member named '(\w+)' in '(?:[\w:]+::)?(\w+)'", proc.stderr
+                )
+            } | {
+                (m.group(1), m.group(2))
+                for m in re.finditer(
+                    r"'(?:struct\s+)?(?:[\w:]+::)?(\w+)' has no member named '(\w+)'",
+                    proc.stderr,
                 )
             }
             if proc.returncode == 0:

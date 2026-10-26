@@ -5,7 +5,7 @@
 #include "FrameContext.hpp"
 #include "PassPayloads.hpp"
 #include "TargetManager.hpp"
-#include "graph/RenderGraph.hpp"
+#include "graph/RenderPassDecl.hpp"
 #include "passes/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 #include <algorithm>

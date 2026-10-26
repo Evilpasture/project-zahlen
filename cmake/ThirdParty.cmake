@@ -194,6 +194,8 @@ if(TARGET LuaJIT AND EXISTS "${CMAKE_SOURCE_DIR}/extern/LuaJIT/src/luajit.c" AND
 endif()
 
 # --- Jolt Physics ---
+option(ZHLN_ENABLE_THIRDPARTY_LTO "Enable interprocedural optimization (LTO) on vendored third-party libraries" OFF)
+set(INTERPROCEDURAL_OPTIMIZATION ${ZHLN_ENABLE_THIRDPARTY_LTO} CACHE BOOL "Enable interprocedural optimizations" FORCE)
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
 set(USE_RTTI OFF CACHE BOOL "" FORCE)

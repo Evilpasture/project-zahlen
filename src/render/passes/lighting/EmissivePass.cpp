@@ -3,6 +3,7 @@
 
 #include "passes/lighting/EmissivePass.hpp"
 #include "passes/SceneDraw.hpp"
+#include "passes/forward/ForwardResources.hpp"
 #include <ShaderBindings.hpp>
 #include <cstddef>
 #include <cstdint>

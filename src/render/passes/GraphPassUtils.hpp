@@ -3,7 +3,8 @@
 
 #pragma once
 #include "RenderConstants.hpp"
-#include "graph/RenderGraph.hpp"
+#include "graph/RenderPassDecl.hpp"
+#include <Zahlen/Core/Reflection/Enums.hpp>
 
 namespace ZHLN::Passes::TemplatedDetail {
 

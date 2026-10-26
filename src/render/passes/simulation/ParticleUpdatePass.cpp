@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/simulation/ParticleUpdatePass.hpp"
+#include "FrameContext.hpp"
+#include "passes/simulation/ParticleUpdateResources.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {

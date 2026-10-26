@@ -7,7 +7,7 @@
 #endif
 
 #include "ActivePipeline.hpp"
-#include "graph/RenderGraph.hpp"
+#include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN::Vk {
 

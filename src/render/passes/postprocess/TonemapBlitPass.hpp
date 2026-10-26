@@ -4,10 +4,11 @@
 #pragma once
 #include "PassPayloads.hpp"
 #include "TargetManager.hpp"
-#include "graph/RenderGraph.hpp"
+#include "graph/RenderPassDecl.hpp"
 #include "passes/FullscreenPassRecorder.hpp"
 #include "passes/postprocess/PostProcessResources.hpp"
 #include <ShaderBindings.hpp>
+#include <Zahlen/Core/FunctionRef.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 
 namespace ZHLN::Passes {
@@ -15,12 +16,14 @@ namespace ZHLN::Passes {
 template <AAMode Mode>
 using BlitInputRes = std::conditional_t<Mode != AAMode::None, Res_AccumCurrent, Res_HdrSceneColor>;
 
-template <AAMode Mode, typename GetSwapchainImageT>
+template <AAMode Mode>
 struct TonemapBlitPass:
     Vk::RenderPass<"Blit", Vk::ShaderRead<BlitInputRes<Mode>>, Vk::ShaderRead<Res_BloomFinal>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_Swapchain>> {
+    using SwapchainImageFn = FunctionRef<Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>() const>;
+
     PostProcessResources& post;
     RenderFrameContext&   frame;
-    GetSwapchainImageT    getSwapchainImage;
+    SwapchainImageFn      getSwapchainImage;
 
     // Manual-scope pass (operator()(VkCommandBuffer)): the draw closure below
     // owns its Vk::DynamicPass scope -- the swapchain target is not a graph

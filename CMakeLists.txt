@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -137,6 +137,8 @@ option(ZHLN_BUILD_TESTS "Build engine test suite" ON)
 option(ZHLN_BUILD_SAMPLES "Build engine sample applications" ON)
 option(ZHLN_BUILD_EXTRAS
        "Build optional asset plugins, engine extensions, and gameplay systems" ON)
+option(ZHLN_ENABLE_PCH
+       "Enable precompiled headers on high-TU non-module GCC targets" ON)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(ZHLN_DEBUG=1)
@@ -222,14 +224,23 @@ target_compile_definitions(
   zahlen_engine
   PRIVATE ZHLN_ENGINE_BUILD
           JPH_DOUBLE_PRECISION
-          JPH_SHARED_LIBRARY
-          ZHLN_GIT_COMMIT_HASH="${ZHLN_GIT_HASH}"
-          ZHLN_COMPILER_FLAGS="${COMPILER_FLAGS_LIST}"
-          ZHLN_META_BUILDER="CMake ${CMAKE_VERSION}"
-          ZHLN_BUILD_TOOL="${CMAKE_GENERATOR}"
-          ZHLN_TARGET_TRIPLE="${ZHLN_TARGET_TRIPLE}"
-          ZHLN_LINKER_NAME="${ZHLN_LINKER}"
-          ZHLN_COMPILED_SCRIPTS_DIR="${CMAKE_BINARY_DIR}")
+          JPH_SHARED_LIBRARY)
+
+set_source_files_properties(
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/CommandLine.cpp
+  PROPERTIES SKIP_PRECOMPILE_HEADERS ON
+             COMPILE_DEFINITIONS
+             "ZHLN_GIT_COMMIT_HASH=\"${ZHLN_GIT_HASH}\";ZHLN_COMPILER_FLAGS=\"${COMPILER_FLAGS_LIST}\";ZHLN_META_BUILDER=\"CMake ${CMAKE_VERSION}\";ZHLN_BUILD_TOOL=\"${CMAKE_GENERATOR}\";ZHLN_TARGET_TRIPLE=\"${ZHLN_TARGET_TRIPLE}\";ZHLN_LINKER_NAME=\"${ZHLN_LINKER}\"")
+
+# Bloomberg clang-p2996's PCH ASTReader crashes when deserializing P2996
+# reflection expressions inside variable-template initializers; keep PCH on GCC.
+if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_precompile_headers(
+      zahlen_engine PRIVATE
+      "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Math3D.hpp>"
+      "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Log.hpp>"
+      "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Error.hpp>")
+endif()
 
 target_sources(zahlen_engine
                PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/stbi_impl.c)
@@ -249,8 +260,16 @@ set(ZHLN_MODULE_FILES
 set_source_files_properties(${ZHLN_MODULE_FILES}
                             PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
+add_library(zahlen_module STATIC)
+set_target_properties(
+  zahlen_module
+  PROPERTIES CXX_STANDARD 26
+             CXX_STANDARD_REQUIRED ON
+             CXX_EXTENSIONS OFF
+             CXX_SCAN_FOR_MODULES ON
+             POSITION_INDEPENDENT_CODE ON)
 target_sources(
-  zahlen_engine
+  zahlen_module
   PUBLIC FILE_SET
          CXX_MODULES
          TYPE
@@ -259,6 +278,7 @@ target_sources(
          ${CMAKE_CURRENT_SOURCE_DIR}/modules
          FILES
          ${ZHLN_MODULE_FILES})
+target_link_libraries(zahlen_module PUBLIC zahlen_engine PRIVATE zahlen_warnings)
 
 target_link_libraries(
   zahlen_engine
@@ -288,7 +308,7 @@ target_link_libraries(
 # macro is ignored outside Windows (Common.h uses gnu::visibility), so this
 # changes nothing on the other platforms.
 foreach(ZHLN_ENGINE_LIB_TARGET
-        zahlen_render  zahlen_vulkan  zahlen_window   zahlen_physics
+        zahlen_render  zahlen_shader_bytecode  zahlen_vulkan  zahlen_window   zahlen_physics
         zahlen_threading  zahlen_filesystem  zahlen_ecs  zahlen_audio
         zahlen_gui)
     target_compile_definitions(${ZHLN_ENGINE_LIB_TARGET} PRIVATE ZHLN_ENGINE_BUILD)
@@ -412,7 +432,9 @@ endif()
 zahlen_enable_reflection(zahlen_window)
 zahlen_enable_reflection(zahlen_vulkan)
 zahlen_enable_reflection(zahlen_render)
+zahlen_enable_reflection(zahlen_shader_bytecode)
 zahlen_enable_reflection(zahlen_engine)
+zahlen_enable_reflection(zahlen_module)
 zahlen_enable_reflection(zahlen_audio)
 zahlen_enable_reflection(zahlen_physics)
 zahlen_enable_reflection(zahlen_ecs)
@@ -461,6 +483,7 @@ if(ZHLN_BUILD_EXTRAS)
     endif()
     add_library(zahlen_extras INTERFACE)
     target_link_libraries(zahlen_extras INTERFACE
+    zahlen_module
     zahlen_animation
     zahlen_network
     zahlen_datamodel

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/forward/OpaqueSceneCopyPass.hpp"
+#include "FrameContext.hpp"
 
 namespace ZHLN::Passes {
 

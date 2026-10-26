@@ -516,6 +516,6 @@ struct TwoBoneIKTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<TwoBoneIKTestSuite>();
+auto RunTwoBoneIKSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<TwoBoneIKTestSuite>();
 }

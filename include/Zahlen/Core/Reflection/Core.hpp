@@ -94,6 +94,11 @@ consteval auto TypeName(NameOverride rename) -> std::string_view {
     return spelling;
 }
 
+consteval auto DefineStaticString(std::string_view sv) -> std::string_view {
+    const auto span = std::define_static_array(sv);
+    return std::string_view(span.data(), span.size());
+}
+
 #else
 
 // The stub era is over: no ZHLN_ALLOW_REFLECTION_STUBS exemption, no

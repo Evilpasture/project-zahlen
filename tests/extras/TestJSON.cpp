@@ -294,8 +294,6 @@ struct JSONTestSuite {
     };
 };
 
-// The extras test binaries are one suite per process (see
-// tests/extras/CMakeLists.txt), so this owns its own entry point.
-int main() {
-    return ZHLN::Test::Runner::Run<JSONTestSuite>();
+auto RunJSONSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<JSONTestSuite>();
 }

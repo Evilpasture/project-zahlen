@@ -4,6 +4,7 @@
 #pragma once
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Core/LogLevel.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <cstdlib>
@@ -13,8 +14,6 @@
 #include <string>
 
 namespace ZHLN {
-
-enum class LogLevel : uint8_t { Quiet, Moderate, Verbose };
 
 enum class CommandLineError : uint8_t { InvalidValue = 1, MissingValue, UnknownArgument };
 

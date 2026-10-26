@@ -202,38 +202,22 @@ auto NamesEnumerators() -> bool {
     return !name.empty() && name != kUnnamedEnumerator;
 }
 
-void ReflectModule(Module& module, const SlangSource& source, std::span<const std::string> searchPaths) {
-    const std::vector<uint8_t> bytes = ReadFile(module.path);
-    module.byteSize                  = static_cast<uint32_t>(bytes.size());
+namespace {
 
-    const SlangCompileArgs args{
-        .file        = source.path,
-        .entry       = source.entry,
-        .stage       = ParseSlangStage(source.path, source.entry, source.stage),
-        .searchPaths = searchPaths,
-        .defines     = source.defines,
-    };
-    SlangEntryInfo info = ReflectCatalogModule(args);
-    module.entryPoint   = std::move(info.entryPoint);
-    module.stage        = StageName(module.path, StageFor(module.path, module.entryPoint, info.stage));
-    module.localSize    = info.localSize;
-    // No unnamed check: the walk fails on an unnamed binding before one can
-    // arrive here, as the old reader did on the spot.
+void PopulateModuleFromInfo(Module& module, SlangEntryInfo info) {
+    module.entryPoint = std::move(info.entryPoint);
+    module.stage      = StageName(module.path, StageFor(module.path, module.entryPoint, info.stage));
+    module.localSize  = info.localSize;
     for (SlangBinding& binding : info.bindings) {
         const VkDescriptorType type = DescriptorTypeFor(module.path, module.entryPoint, binding);
-        Descriptor             descriptor{
-                        .name    = std::move(binding.name),
-                        .type    = DescriptorTypeName(module.path, type),
-                        .set     = binding.set,
-                        .binding = binding.binding,
+        Descriptor             descriptor {
+            .name    = std::move(binding.name),
+            .type    = DescriptorTypeName(module.path, type),
+            .set     = binding.set,
+            .binding = binding.binding,
         };
-        // A sampler is a sampler because the module says so, not because of
-        // where it sits: the two halves are written by different heaps.
         (type == VK_DESCRIPTOR_TYPE_SAMPLER ? module.samplers : module.resources).push_back(std::move(descriptor));
     }
-    // The iterator spelling rather than std::ranges: this is the one file in the
-    // tool that includes the reflection headers, and their <meta> is what makes
-    // the ranges header a hazard next to them. A plain sort says the same thing.
     const auto byBinding = [](const Descriptor& a, const Descriptor& b) {
         return a.set != b.set ? a.set < b.set : a.binding < b.binding;
     };
@@ -245,12 +229,53 @@ void ReflectModule(Module& module, const SlangSource& source, std::span<const st
         block.paddedSize = push.extent;
         for (SlangPushMember& member : push.members) {
             block.members.push_back(
-                PushMember{.name = std::move(member.name), .offset = member.offset, .size = member.size});
+                PushMember {.name = std::move(member.name), .offset = member.offset, .size = member.size}
+            );
         }
         module.pushes.push_back(std::move(block));
     }
 
     module.reflected = true;
+}
+
+} // namespace
+
+void ReflectModule(Module& module, const SlangSource& source, std::span<const std::string> searchPaths) {
+    const SlangCompileArgs args {
+        .file        = source.path,
+        .entry       = source.entry,
+        .stage       = ParseSlangStage(source.path, source.entry, source.stage),
+        .searchPaths = searchPaths,
+        .defines     = source.defines,
+    };
+    PopulateModuleFromInfo(module, ReflectCatalogModule(args));
+}
+
+void ReflectAllModules(
+    std::span<Module>                         modules,
+    const std::map<std::string, SlangSource>& slangSources,
+    std::span<const std::string>              searchPaths
+) {
+    std::vector<SlangBatchRequest> requests;
+    requests.reserve(modules.size());
+    for (const Module& module : modules) {
+        const auto found = slangSources.find(module.macro);
+        if (found == slangSources.end()) {
+            Fail("--bytes {} has no --slang-source; the catalog compiles every module from source", module.macro);
+        }
+        const SlangSource& source = found->second;
+        requests.push_back(SlangBatchRequest {
+            .file    = source.path,
+            .entry   = source.entry,
+            .stage   = ParseSlangStage(source.path, source.entry, source.stage),
+            .defines = source.defines,
+        });
+    }
+
+    std::vector<SlangEntryInfo> infos = ReflectCatalogBatch(requests, searchPaths);
+    for (size_t i = 0; i < modules.size(); ++i) {
+        PopulateModuleFromInfo(modules[i], std::move(infos[i]));
+    }
 }
 
 } // namespace ZHLN::ZShader

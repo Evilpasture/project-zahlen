@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/lighting/ClusteredLightingPass.hpp"
+#include "FrameContext.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {

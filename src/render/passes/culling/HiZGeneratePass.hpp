@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "FrameContext.hpp"
-#include "graph/RenderGraph.hpp"
-#include "passes/culling/CullingResources.hpp"
+#include "RenderTargetTags.hpp"
+#include "graph/RenderPassDecl.hpp"
+
+namespace ZHLN {
+struct CullingResources;
+struct RenderFrameContext;
+} // namespace ZHLN
 
 namespace ZHLN::Passes {
 

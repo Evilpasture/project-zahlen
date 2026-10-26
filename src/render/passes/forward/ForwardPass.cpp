@@ -3,6 +3,7 @@
 
 #include "passes/forward/ForwardPass.hpp"
 #include "passes/SceneDraw.hpp"
+#include "passes/forward/ForwardResources.hpp"
 #include <GeneratedGpuTypes.hpp>
 #include <ShaderBindings.hpp>
 #include <cstddef>

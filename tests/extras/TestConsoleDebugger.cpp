@@ -198,6 +198,6 @@ struct ConsoleDebuggerTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<ConsoleDebuggerTestSuite>();
+auto RunConsoleDebuggerSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<ConsoleDebuggerTestSuite>();
 }

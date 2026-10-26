@@ -98,4 +98,9 @@ enum class Stage : uint8_t {
 
 using FrameProfiler = Profiler::GpuProfiler<Stage>;
 
+namespace Diag {
+[[nodiscard]] bool DisableGpuCulling() noexcept;
+[[nodiscard]] bool ForkSequentialForced() noexcept;
+} // namespace Diag
+
 } // namespace ZHLN

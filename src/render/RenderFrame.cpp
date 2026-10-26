@@ -5,7 +5,6 @@
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "diagnostics/GpuProfiler.hpp"
-#include "graph/RenderGraph.hpp"
 #include "pipelines/ComputeSimPipeline.hpp"
 #include "pipelines/DeferredPbrPipeline.hpp"
 #include "pipelines/UIPipeline.hpp"

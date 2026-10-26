@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/gbuffer/DecalPass.hpp"
-#include "RenderInternal.hpp"
+#include "FrameContext.hpp"
+#include "passes/gbuffer/DecalResources.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {

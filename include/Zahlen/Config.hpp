@@ -26,28 +26,8 @@
 
 #define ZHLN_VERSION_STR ZHLN_STR(ZHLN_VERSION_MAJOR) "." ZHLN_STR(ZHLN_VERSION_MINOR) "." ZHLN_STR(ZHLN_VERSION_PATCH)
 
-#ifndef ZHLN_GIT_COMMIT_HASH
-#define ZHLN_GIT_COMMIT_HASH "unknown"
-#endif
-
-#ifndef ZHLN_COMPILER_FLAGS
-#define ZHLN_COMPILER_FLAGS "unknown"
-#endif
-
-#ifndef ZHLN_META_BUILDER
-#define ZHLN_META_BUILDER "unknown"
-#endif
-
-#ifndef ZHLN_BUILD_TOOL
-#define ZHLN_BUILD_TOOL "unknown"
-#endif
-
 #ifndef ZHLN_TARGET_TRIPLE
 #define ZHLN_TARGET_TRIPLE "unknown"
-#endif
-
-#ifndef ZHLN_LINKER_NAME
-#define ZHLN_LINKER_NAME "unknown"
 #endif
 
 namespace ZHLN {

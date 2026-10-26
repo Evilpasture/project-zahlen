@@ -5,6 +5,7 @@
 #include "diagnostics/DiagnosticsInternal.hpp"
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Print.hpp>
+#include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/Log.hpp>
 #include <bit>
 #include <cctype>
@@ -19,8 +20,10 @@
 
 #if defined(__linux__)
 #include <sys/uio.h>
+#include <unistd.h>
 #elif defined(__APPLE__)
 #include <fcntl.h>
+#include <unistd.h>
 #endif
 
 namespace ZHLN::Diagnostics {

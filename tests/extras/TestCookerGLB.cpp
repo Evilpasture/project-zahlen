@@ -147,8 +147,6 @@ struct CookerGlbTestSuite {
     };
 };
 
-// The extras test binaries are one suite per process (see
-// tests/extras/CMakeLists.txt), so this owns its own entry point.
-int main() {
-    return ZHLN::Test::Runner::Run<CookerGlbTestSuite>();
+auto RunCookerGlbSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<CookerGlbTestSuite>();
 }

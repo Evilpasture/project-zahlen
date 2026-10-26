@@ -508,8 +508,7 @@ function(add_shader_target TARGET_SUFFIX)
     endforeach()
 
     set(TGT zahlen_engine_${TARGET_SUFFIX})
-    add_custom_target(${TGT} ALL DEPENDS ${OUTPUTS})
-    add_dependencies(zahlen_engine ${TGT})
+    add_custom_target(${TGT} DEPENDS ${OUTPUTS})
 
     list(APPEND ALL_GENERATED_SPVS ${OUTPUTS})
     set(ALL_SHADER_MACRO_PATHS ${ALL_SHADER_MACRO_PATHS} PARENT_SCOPE)
@@ -554,8 +553,7 @@ function(compile_shaders TARGET_NAME)
         endforeach()
     endforeach()
 
-    add_custom_target(${TARGET_NAME}_shader_gen ALL DEPENDS ${ALL_SPV_OUTPUTS})
-    add_dependencies(${TARGET_NAME} ${TARGET_NAME}_shader_gen)
+    add_custom_target(${TARGET_NAME}_shader_gen DEPENDS ${ALL_SPV_OUTPUTS})
 
     set(ALL_SHADER_MACRO_PATHS ${ALL_SHADER_MACRO_PATHS} PARENT_SCOPE)
     set(ALL_GENERATED_SPVS ${ALL_GENERATED_SPVS} ${ALL_SPV_OUTPUTS} PARENT_SCOPE)
@@ -1058,7 +1056,6 @@ add_custom_command(
         ${ZHLN_SLANG_GLSLANG_ORDER}
         $<TARGET_FILE:zshader> ${ZSHADER_ARGS}
     DEPENDS
-        ${ALL_GENERATED_SPVS}
         ${ALL_SHADER_ENTRY_SOURCES}
         ${ZHLN_SHADER_COMMON_SOURCES}
         "${CMAKE_SOURCE_DIR}/src/render/ltc_mat.dds"
@@ -1072,11 +1069,14 @@ add_custom_command(
         "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.hpp"
         "${CMAKE_SOURCE_DIR}/tools/zshader/Emit.cpp"
         "${CMAKE_SOURCE_DIR}/tools/zshader/GpuTypes.cpp"
-    COMMENT "zshader: reflecting the cooked shaders into the catalog"
+    COMMENT "zshader: reflecting Slang shaders into the catalog"
     VERBATIM
 )
 add_custom_target(zahlen_shader_catalog
     DEPENDS "${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}"
+)
+add_custom_target(zahlen_shaders_spv
+    DEPENDS ${ALL_GENERATED_SPVS}
 )
 
 # --- THE GPU HOST TYPES ---

@@ -26,9 +26,13 @@ struct Field {
 
 namespace TemplatedDetail {
 
+template <typename U>
+inline constexpr auto kDataMembers =
+    std::define_static_array(std::meta::nonstatic_data_members_of(^^U, std::meta::access_context::current()));
+
 template <typename T>
 consteval auto NonStaticDataMembers() {
-    return std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+    return kDataMembers<std::remove_cvref_t<T>>;
 }
 
 template <typename Meta>
@@ -193,7 +197,7 @@ constexpr auto ZipFieldsWithNames(T&& t) {
 
 template <typename T>
 consteval auto FieldCount() -> std::size_t {
-    return std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()).size();
+    return TemplatedDetail::kDataMembers<std::remove_cvref_t<T>>.size();
 }
 
 template <std::size_t N, typename T>

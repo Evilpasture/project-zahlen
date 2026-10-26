@@ -373,6 +373,6 @@ struct WidgetTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<WidgetTestSuite>();
+auto RunWidgetsSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<WidgetTestSuite>();
 }

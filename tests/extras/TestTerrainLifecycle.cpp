@@ -44,6 +44,6 @@ struct TerrainLifecycleTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<TerrainLifecycleTestSuite>();
+auto RunTerrainLifecycleSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<TerrainLifecycleTestSuite>();
 }

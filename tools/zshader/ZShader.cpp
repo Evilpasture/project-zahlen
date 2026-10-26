@@ -114,7 +114,7 @@ auto BytesInputsOf(const Options& options) -> std::vector<BytesInput> {
     std::vector<BytesInput> inputs;
     inputs.reserve(options.modules.size() + options.blobs.size());
     for (const Module& module: options.modules) {
-        inputs.push_back(BytesInput {.symbol = module.symbol, .path = module.path, .size = module.byteSize});
+        inputs.push_back(BytesInput {.symbol = module.symbol, .path = module.path, .size = 0, .hasExpectedSize = false});
     }
     inputs.append_range(options.blobs);
     return inputs;

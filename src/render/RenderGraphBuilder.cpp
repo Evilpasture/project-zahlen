@@ -5,6 +5,8 @@
 #include "Zahlen/Math3D.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
+#include <Zahlen/Render/RenderGraphDump.hpp>
+#include <string_view>
 #include <utility>
 
 namespace ZHLN {
@@ -68,16 +70,16 @@ struct ResourceResolver<Res_Swapchain> {
 
 namespace {
 
-template <AAMode Mode, typename GetSwapchainImageT>
+template <AAMode Mode>
 void ExecuteSceneGraph(
-    RenderContext::Impl&    self,
-    VkCommandBuffer         cmd,
-    const SceneView&        view,
-    const GraphicsSettings& settings,
-    GetSwapchainImageT&&    getSwapchain
+    RenderContext::Impl&                self,
+    VkCommandBuffer                     cmd,
+    const SceneView&                    view,
+    const GraphicsSettings&             settings,
+    RenderGraphDetail::SwapchainImageFn getSwapchain
 ) {
     auto graph = RenderGraphDetail::BuildFrameGraph<Mode>(
-        self, RenderGraphDetail::AssembleScenePushConstants(self, view, settings), std::forward<GetSwapchainImageT>(getSwapchain)
+        self, RenderGraphDetail::AssembleScenePushConstants(self, view, settings), getSwapchain
     );
 
     typename decltype(graph)::Binder binder;
@@ -87,9 +89,15 @@ void ExecuteSceneGraph(
     graph.Execute(cmd, binder, self.presenter.frameIndex, &self.diagnostics.gpuProfiler, diagnostics, self.ForkExecutor());
 }
 
-template <typename Self, typename GetSwapchainImageT>
-void DispatchAAMode(Self& self, VkCommandBuffer cmd, AAMode mode, const SceneView& view, const GraphicsSettings& settings, GetSwapchainImageT&& getSwapchain) {
-    Reflect::DispatchEnum(mode, [&]<AAMode Val>() { ExecuteSceneGraph<Val>(self, cmd, view, settings, std::forward<GetSwapchainImageT>(getSwapchain)); });
+void DispatchAAMode(
+    RenderContext::Impl&                self,
+    VkCommandBuffer                     cmd,
+    AAMode                              mode,
+    const SceneView&                    view,
+    const GraphicsSettings&             settings,
+    RenderGraphDetail::SwapchainImageFn getSwapchain
+) {
+    Reflect::DispatchEnum(mode, [&]<AAMode Val>() { ExecuteSceneGraph<Val>(self, cmd, view, settings, getSwapchain); });
 }
 
 } // namespace
@@ -98,6 +106,32 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
     auto getSwapchainImage = [&]() -> RenderGraphDetail::SwapchainImage { return sceneTarget->Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(); };
 
     DispatchAAMode(*this, cmd, sceneSettings.antiAliasing.mode, view, sceneSettings, getSwapchainImage);
+}
+
+auto GetRenderGraphDump(AAMode currentMode) noexcept -> std::string_view {
+    using enum AAMode;
+    using RenderGraphDetail::SceneGraphFor;
+    using Vk::Debug::GraphVisualizer;
+
+    static constexpr auto vis_taa  = GraphVisualizer<SceneGraphFor<TAA>>::Visualize();
+    static constexpr auto vis_smaa = GraphVisualizer<SceneGraphFor<SMAA>>::Visualize();
+    static constexpr auto vis_fxaa = GraphVisualizer<SceneGraphFor<FXAA>>::Visualize();
+    static constexpr auto vis_mlaa = GraphVisualizer<SceneGraphFor<MLAA>>::Visualize();
+    static constexpr auto vis_none = GraphVisualizer<SceneGraphFor<None>>::Visualize();
+
+    switch (currentMode) {
+        case TAA:
+            return vis_taa.string_view();
+        case SMAA:
+            return vis_smaa.string_view();
+        case FXAA:
+            return vis_fxaa.string_view();
+        case MLAA:
+            return vis_mlaa.string_view();
+        case None:
+            return vis_none.string_view();
+    }
+    return "Not implemented.";
 }
 
 } // namespace ZHLN

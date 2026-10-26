@@ -3,7 +3,7 @@
 
 #pragma once
 #include "FrameContext.hpp"
-#include "graph/RenderGraph.hpp"
+#include "graph/RenderPassDecl.hpp"
 #include "passes/GraphPassUtils.hpp"
 #include <ShaderBindings.hpp>
 #include <concepts>

@@ -20,7 +20,7 @@
 #include "diagnostics/GpuProfiler.hpp"
 #include "features/ShadowRenderer.hpp"
 #include "features/VolumetricFogSystem.hpp"
-#include "graph/RenderGraph.hpp"
+#include "graph/RenderPassDecl.hpp"
 #include "passes/SceneDrawResources.hpp"
 #include "passes/aa/AntiAliasingResources.hpp"
 #include "passes/culling/CullingResources.hpp"
@@ -38,7 +38,6 @@
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/RadixSort.hpp>
-#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
@@ -81,26 +80,12 @@ namespace ZHLN {
 
 void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 
-namespace Diag {
-[[nodiscard]] bool DisableGpuCulling() noexcept;
-[[nodiscard]] bool ForkSequentialForced() noexcept;
-} // namespace Diag
-
 using GlobalSceneLayout    = Vk::ReflectedLayout;
 using CullingLayout        = Vk::ReflectedLayout;
 using HiZGenerateLayout    = Vk::ReflectedLayout;
 using ClusterCullingLayout = Vk::ReflectedLayout;
 using BakeLayout           = Vk::ReflectedLayout;
 using DecalLayout          = Vk::ReflectedLayout;
-
-template <VkImageLayout ColorL, VkImageLayout DepthL>
-struct SceneResources {
-    Vk::TypedImage<ColorL> sceneColor;
-    Vk::TypedImage<ColorL> velocity;
-    Vk::TypedImage<ColorL> normRough;
-    Vk::TypedImage<ColorL> bakedMask;
-    Vk::TypedImage<DepthL> depth;
-};
 
 namespace Resource {
 }
@@ -462,13 +447,6 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
         return textureManager.Adopt(std::move(image), view);
     });
 }
-
-struct GroupRange {
-    const NativeMaterial* material;
-    uint32_t              start;
-    uint32_t              count;
-    VkCullModeFlags       cullMode;
-};
 
 inline std::vector<uint32_t> LoadShaderSpv(std::string_view path) noexcept {
     std::ifstream file(std::filesystem::path(path), std::ios::ate | std::ios::binary);

@@ -3,6 +3,7 @@
 
 #include "passes/aa/SMAAPasses.hpp"
 #include "passes/FullscreenPassRecorder.hpp"
+#include "passes/aa/AntiAliasingResources.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {

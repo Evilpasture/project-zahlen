@@ -5,6 +5,7 @@
 
 #include "Atomic.hpp"
 #include "Optional.hpp"
+#include "Platform.hpp"
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 #include <array>
@@ -12,10 +13,6 @@
 #include <new>
 #include <utility>
 #include <vector>
-
-#if defined(__x86_64__) || defined(_M_X64)
-#include <emmintrin.h>
-#endif
 
 namespace ZHLN {
 
@@ -31,13 +28,7 @@ class SkipList {
             bool expected = false;
             while (!locked.compare_exchange_weak(expected, true, std::memory_order::acquire, std::memory_order::relaxed)) {
                 expected = false;
-#if defined(__x86_64__) || defined(_M_X64)
-                _mm_pause();
-#elif defined(__aarch64__)
-                __asm__ __volatile__("yield" ::: "memory");
-#else
-                std::this_thread::yield();
-#endif
+                ZHLN::CPURelax();
             }
         }
 

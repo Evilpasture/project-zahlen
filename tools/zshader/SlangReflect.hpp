@@ -151,8 +151,19 @@ auto ReflectSlangEntry(slang::IComponentType* linked, std::string_view file, std
 
 // Compile + reflect for one catalog module: the linked program's records,
 // exactly as Slang's layout and usage table describe them. No bytes -- the
-// cooked file is never the tool's input (the catalog mode only sizes the
-// module from it).
+// cooked file is never the tool's input.
 auto ReflectCatalogModule(const SlangCompileArgs& args) -> SlangEntryInfo;
+
+struct SlangBatchRequest {
+    std::string_view                                     file {};
+    std::string_view                                     entry {};
+    SlangStage                                           stage = SLANG_STAGE_NONE;
+    std::span<const std::pair<std::string, std::string>> defines {};
+};
+
+// Compiles and reflects a batch of catalog modules, sharing one Slang session
+// and one parsed module per unique (file, defines) group across worker threads.
+auto ReflectCatalogBatch(std::span<const SlangBatchRequest> requests, std::span<const std::string> searchPaths)
+    -> std::vector<SlangEntryInfo>;
 
 } // namespace ZHLN::ZShader

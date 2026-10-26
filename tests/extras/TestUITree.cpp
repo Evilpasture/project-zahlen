@@ -224,6 +224,6 @@ struct UITreeTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<UITreeTestSuite>();
+auto RunUITreeSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<UITreeTestSuite>();
 }

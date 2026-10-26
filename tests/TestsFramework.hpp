@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <Zahlen/Error.hpp>
@@ -554,7 +555,8 @@ TestStats RunSuite() {
     ZHLN::Println("{}=================================================={}", Color::Cyan, Color::Reset);
 
     auto run_test_method = [&](auto target, auto pmf, std::string_view name) {
-        if (!filter.empty() && filter != suiteName && filter != name && filter != std::format("{}::{}", suiteName, name)) {
+        if (!filter.empty() && filter != suiteName && filter != name && filter != std::format("{}::*", suiteName) &&
+            filter != std::format("{}::{}", suiteName, name)) {
             return;
         }
         using MethodType = decltype(pmf);

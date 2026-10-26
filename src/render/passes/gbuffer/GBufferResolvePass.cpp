@@ -3,6 +3,7 @@
 
 #include "passes/gbuffer/GBufferResolvePass.hpp"
 #include "passes/SceneDraw.hpp"
+#include "passes/culling/CullingResources.hpp"
 #include <ShaderBindings.hpp>
 #include <algorithm>
 

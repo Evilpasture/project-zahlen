@@ -109,7 +109,7 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${ZHLN_SHARED_ASSET_DIR}/build_assets"
     )
     if(ZHLN_TOOL_ENV_COMMAND)
-        add_custom_target(cook_assets ALL
+        add_custom_target(cook_assets
             ${COOK_ASSETS_PREFIX}
             # Run ninja inside the shared directory with persistent .ninja_log
             COMMAND ${ZHLN_TOOL_ENV_COMMAND} "${ZHLN_TOOL_ENV_ARGUMENT}"
@@ -118,10 +118,9 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
             DEPENDS "${ZHLN_SHARED_ASSET_DIR}/assets.ninja" zcook
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             COMMENT "Cooking assets in parallel using Ninja..."
-            USES_TERMINAL
         )
     else()
-        add_custom_target(cook_assets ALL
+        add_custom_target(cook_assets
             ${COOK_ASSETS_PREFIX}
             # Run ninja inside the shared directory with persistent .ninja_log
             COMMAND ninja -C "${ZHLN_SHARED_ASSET_DIR}" -f "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
@@ -129,7 +128,6 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
             DEPENDS "${ZHLN_SHARED_ASSET_DIR}/assets.ninja" zcook
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             COMMENT "Cooking assets in parallel using Ninja..."
-            USES_TERMINAL
         )
     endif()
     add_dependencies(zahlen cook_assets)

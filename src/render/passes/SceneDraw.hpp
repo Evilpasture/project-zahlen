@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderInternal.hpp"
+#include "FrameContext.hpp"
+#include "RenderConstants.hpp"
+#include "passes/SceneDrawResources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Meshlet.hpp>

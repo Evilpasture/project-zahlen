@@ -44,6 +44,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
+    CXX_SCAN_FOR_MODULES ON
     # Matters more here than in the plugins layer: cgltf_impl.c is a C
     # translation unit compiled into this archive, and samples and tests link it
     # straight into a PIE executable.

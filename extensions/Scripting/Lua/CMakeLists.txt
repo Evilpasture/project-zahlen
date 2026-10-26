@@ -75,6 +75,9 @@ zahlen_enable_reflection(${TARGET_NAME})
 # needs real static reflection: without it ForEachNestedType expands to nothing,
 # and the generator exits non-zero rather than writing a plausible file with no
 # components in it.
+# GenFFICdef.cpp only reflects compile-time layouts and never calls engine
+# runtime functions, so build it header-only without waiting on zahlen_engine,
+# zahlen_render, or Jolt.
 add_executable(zahlen_gen_ffi_cdef
     tools/GenFFICdef.cpp
 )
@@ -83,13 +86,25 @@ set_target_properties(zahlen_gen_ffi_cdef PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
-# The character and camera components moved out of ZHLN::Components into
-# extensions/CharacterController and extensions/Camera; the generator reflects them
-# explicitly, so it links those domains.
-target_link_libraries(zahlen_gen_ffi_cdef PRIVATE zahlen_engine zahlen_character_controller zahlen_camera)
-# <Scripting/Lua/tools/FFICTypeMap.hpp> resolves from the extensions root.
+target_compile_options(zahlen_gen_ffi_cdef PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+)
+target_compile_definitions(zahlen_gen_ffi_cdef PRIVATE
+    JPH_DOUBLE_PRECISION
+    JPH_SHARED_LIBRARY
+)
+target_include_directories(zahlen_gen_ffi_cdef PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+)
+# <Scripting/Lua/tools/FFICTypeMap.hpp>, CharacterController, Camera, and Jolt
+# headers resolve directly without linking runtime archives.
 target_include_directories(zahlen_gen_ffi_cdef SYSTEM PRIVATE
     ${PROJECT_SOURCE_DIR}/extensions
+    ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
+)
+target_link_libraries(zahlen_gen_ffi_cdef PRIVATE
+    zahlen_warnings
+    $<$<AND:$<BOOL:${MINGW}>,$<CXX_COMPILER_ID:GNU>>:stdc++exp>
 )
 zahlen_enable_reflection(zahlen_gen_ffi_cdef)
 

@@ -21,12 +21,6 @@
 #include <utility>
 #include <vector>
 
-namespace ZHLN {
-std::string GetPoorMansStacktrace() {
-    return "test_stacktrace";
-}
-} // namespace ZHLN
-
 namespace {
 
 using ZHLN::Test::BinaryWriter;
@@ -531,12 +525,23 @@ struct BSPStaticPropsTestSuite {
 
 } // namespace
 
-int main() {
+auto RunBSPStaticPropsSuite() -> ZHLN::Test::TestStats {
+    constexpr std::string_view suiteName = "BSPStaticPropsTestSuite";
+    const char* const          filterEnv = std::getenv("ZHLN_TEST_FILTER");
+    const std::string_view     filter    = filterEnv != nullptr ? std::string_view {filterEnv} : std::string_view {};
+    if (const auto sep = filter.find("::"); sep != std::string_view::npos && filter.substr(0, sep) != suiteName) {
+        return {};
+    }
+
     BSPStaticPropsTestSuite::Tests suite;
-    int                            passed = 0;
-    int                            failed = 0;
+    uint32_t                       passed = 0;
+    uint32_t                       failed = 0;
 
     auto runTest = [&](std::string_view testName, auto testFunc) {
+        if (!filter.empty() && filter != suiteName && filter != testName && filter != "BSPStaticPropsTestSuite::*" &&
+            filter != std::format("{}::{}", suiteName, testName)) {
+            return;
+        }
         ZHLN::Println("\033[32m[ RUN      ]\033[0m {}", testName);
         auto res = testFunc();
         if (res.has_value()) {
@@ -564,5 +569,5 @@ int main() {
     ZHLN::Println("Summary for BSPStaticPropsTestSuite: {} Passed, {} Failed", passed, failed);
     ZHLN::Println("==================================================");
 
-    return failed == 0 ? 0 : 1;
+    return {.passed = passed, .failed = failed};
 }

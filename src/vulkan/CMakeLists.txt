@@ -80,9 +80,18 @@ target_include_directories(zahlen_vulkan SYSTEM
 target_compile_definitions(zahlen_vulkan PRIVATE VMA_STATIC_VULKAN_FUNCTIONS=0
                                                  VMA_DYNAMIC_VULKAN_FUNCTIONS=1)
 
-target_precompile_headers(
-  zahlen_vulkan PRIVATE
-  "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>")
+# Every src/vulkan/*.cpp TU relies on Rendering.hpp being force-included first
+# (defining ZHLN_RENDERING_HPP_INCLUDED and VK_NO_PROTOTYPES); keep PCH on both
+# GCC and Clang when enabled, and fall back to -include when ZHLN_ENABLE_PCH=OFF.
+if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_precompile_headers(
+      zahlen_vulkan PRIVATE
+      "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>")
+else()
+    target_compile_options(
+      zahlen_vulkan PRIVATE
+      "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include \"${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp\">")
+endif()
 
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 

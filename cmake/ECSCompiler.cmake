@@ -88,6 +88,7 @@ function(zahlen_compile_ecs_modules TARGET_NAME)
     endforeach()
 
     # Register generated C++ module interface files (.cppm)
+    set_target_properties(${TARGET_NAME} PROPERTIES CXX_SCAN_FOR_MODULES ON)
     target_sources(${TARGET_NAME}
         PUBLIC
             FILE_SET CXX_MODULES

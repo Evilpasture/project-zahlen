@@ -25,6 +25,7 @@
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Core/Reflection/Enums.hpp>
+#include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/physics/Physics.hpp>

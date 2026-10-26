@@ -19,7 +19,6 @@ set(RAW_RENDER_SOURCES
     RenderPresentation.cpp
     FrameDestinations.cpp
     RenderGraphBuilder.cpp
-    RenderGraphDump.cpp
     RenderDrawCommands.cpp
     DrawQueueManager.cpp
     TargetManager.cpp
@@ -73,9 +72,40 @@ set(RAW_RENDER_SOURCES
 
 zahlen_transpile_sources(RENDER_SOURCES ${RAW_RENDER_SOURCES})
 
-list(APPEND RENDER_SOURCES "${ZHLN_SHADER_CATALOG_SOURCE}")
+set_source_files_properties(
+    "${ZHLN_SHADER_CATALOG_HEADER}"
+    "${ZHLN_SHADER_CATALOG_SOURCE}"
+    PROPERTIES GENERATED TRUE
+)
+set_source_files_properties(
+    "${ZHLN_SHADER_CATALOG_SOURCE}"
+    PROPERTIES OBJECT_DEPENDS "${ALL_GENERATED_SPVS};${ZHLN_BLUE_NOISE_COOKED}"
+)
 
-add_library(zahlen_render STATIC ${RENDER_SOURCES})
+# ShaderBytecode.cpp #embeds every cooked .spv module, whereas the 59 renderer
+# translation units only consume the reflected ShaderBindings.hpp text catalog.
+# Isolating ShaderBytecode.cpp in its own OBJECT library lets all renderer C++
+# TUs compile in parallel with slangc .spv cooking and limits .slang body edits
+# to recompiling this single object file.
+add_library(zahlen_shader_bytecode OBJECT "${ZHLN_SHADER_CATALOG_SOURCE}")
+set_target_properties(zahlen_shader_bytecode PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+target_compile_options(zahlen_shader_bytecode PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
+target_link_libraries(zahlen_shader_bytecode PRIVATE zahlen_vulkan Jolt zahlen_warnings)
+target_include_directories(zahlen_shader_bytecode PRIVATE
+    "${CMAKE_BINARY_DIR}/generated_shaders"
+    "${PROJECT_SOURCE_DIR}/src/vulkan"
+)
+target_include_directories(zahlen_shader_bytecode SYSTEM PRIVATE
+    "${PROJECT_SOURCE_DIR}/extern/JoltPhysics"
+)
+add_dependencies(zahlen_shader_bytecode zahlen_shader_catalog)
+
+add_library(zahlen_render STATIC ${RENDER_SOURCES} $<TARGET_OBJECTS:zahlen_shader_bytecode>)
 set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_compile_features(zahlen_render PUBLIC cxx_std_26)
@@ -105,13 +135,12 @@ target_include_directories(zahlen_render SYSTEM PRIVATE
     ${PROJECT_SOURCE_DIR}/third_party/renderdoc
 )
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_precompile_headers(zahlen_render PRIVATE
-        "${PROJECT_SOURCE_DIR}/src/vulkan/Rendering.hpp"
+        "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/RenderPCH.hpp>"
     )
 endif()
 
-set_source_files_properties("${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}" PROPERTIES GENERATED TRUE)
 add_dependencies(zahlen_render zahlen_shader_catalog)
 target_include_directories(zahlen_render PRIVATE "${CMAKE_BINARY_DIR}/generated_shaders")
 add_dependencies(zahlen_render zahlen_gpu_types)

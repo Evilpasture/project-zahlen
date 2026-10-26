@@ -116,9 +116,6 @@ module;
 #include <Jolt/Skeleton/SkeletonPose.h>
 // clang-format on
 
-// Preserve the existing umbrella-module export without exposing this engine
-// graph entry through the audio library's public headers.
-#include <AudioSystem.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
@@ -152,6 +149,7 @@ module;
 #include <Zahlen/Core/SkipList.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
@@ -466,7 +464,6 @@ using ZHLN::AudioConfig;
 using ZHLN::AudioContext;
 using ZHLN::AudioFilterType;
 using ZHLN::AudioNoiseType;
-using ZHLN::AudioSystem;
 using ZHLN::AudioWaveformType;
 
 using ZHLN::ScriptRunner;

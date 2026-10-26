@@ -138,6 +138,13 @@ my %FIRST_PARTY = (
     Hash64           => ['include/Zahlen/Core/Hash.hpp'],
     Hash32           => ['include/Zahlen/Core/Hash.hpp'],
     HashCombine      => ['include/Zahlen/Core/Hash.hpp'],
+    LogLevel         => ['include/Zahlen/Core/LogLevel.hpp'],
+    CommandLineOptions => ['include/Zahlen/CommandLine.hpp'],
+    HandleCommandLine  => ['include/Zahlen/CommandLine.hpp'],
+    DumpOptions        => ['include/Zahlen/Core/Trace.hpp'],
+    MemoryDump         => ['include/Zahlen/Core/Trace.hpp'],
+    'ZHLN::Trace'      => ['include/Zahlen/Core/Trace.hpp'],
+    'ZHLN::Dump'       => ['include/Zahlen/Core/Trace.hpp'],
     # Reached by accident when PostProcessFeature -- the only header including
     # pipeline/ComputePass.hpp -- stopped being the renderer's compute-pass bag.
     DynamicComputePass => ['src/vulkan/pipeline/ComputePass.hpp'],

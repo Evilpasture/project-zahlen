@@ -3,6 +3,7 @@
 
 #include "passes/gbuffer/GBufferBasePass.hpp"
 #include "passes/SceneDraw.hpp"
+#include "passes/culling/CullingResources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>

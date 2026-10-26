@@ -8,6 +8,7 @@
 #endif
 
 #include "../memory/ImageView.hpp"
+#include "DynamicRendering.hpp"
 #include <array>
 #include <string_view>
 
@@ -47,6 +48,11 @@ struct GraphImage {
     static constexpr uint32_t           scale_divisor = ScaleDivisor;
     static constexpr bool               is_3d         = Is3D;
     static constexpr bool               is_mipmapped  = IsMipmapped;
+};
+
+template <typename Tag>
+struct ClearColorOf {
+    static constexpr Color4 value = {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 1.0F};
 };
 
 } // namespace ZHLN::Vk

@@ -157,6 +157,6 @@ struct BakedFontLoaderTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<BakedFontLoaderTestSuite>();
+auto RunBakedFontLoaderSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<BakedFontLoaderTestSuite>();
 }

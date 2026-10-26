@@ -156,7 +156,8 @@ auto ParseBlob(std::string_view argument) -> BytesInput {
     if (!IsIdentifier(blob.symbol)) {
         Fail("--blob {} is not a C++ identifier: it names the span the bytes are read through", blob.symbol);
     }
-    blob.size = static_cast<uint32_t>(ReadFile(blob.path).size());
+    blob.size            = static_cast<uint32_t>(ReadFile(blob.path).size());
+    blob.hasExpectedSize = true;
     return blob;
 }
 
@@ -295,13 +296,7 @@ auto RunCommandLine(int argc, char** argv) -> int {
             Fail("--slang-source {} names no --bytes module", macro);
         }
     }
-    for (Module& module: options.modules) {
-        const auto found = options.slangSources.find(module.macro);
-        if (found == options.slangSources.end()) {
-            Fail("--bytes {} has no --slang-source; the catalog compiles every module from source", module.macro);
-        }
-        ReflectModule(module, found->second, slangSearch);
-    }
+    ReflectAllModules(options.modules, options.slangSources, slangSearch);
     for (const auto& [name, members]: options.sets) {
         for (const auto& member: members) {
             if (options.catalog.find(member) == options.catalog.end()) {

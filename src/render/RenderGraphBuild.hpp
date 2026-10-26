@@ -36,6 +36,7 @@
 namespace ZHLN::RenderGraphDetail {
 
 using SwapchainImage     = Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>;
+using SwapchainImageFn   = FunctionRef<SwapchainImage() const>;
 using ScenePushConstants = Slang::ScenePassPushConstants;
 
 [[nodiscard]] inline auto
@@ -105,8 +106,8 @@ inline constexpr auto kMlaaPrepare = +[](RenderFrameContext& frame) noexcept {
     );
 };
 
-template <AAMode Mode, typename GetSwapchainImageT>
-[[nodiscard]] auto BuildFrameGraph(RenderContext::Impl& self, const ScenePushConstants& pc, GetSwapchainImageT&& getSwapchain) {
+template <AAMode Mode>
+[[nodiscard]] auto BuildFrameGraph(RenderContext::Impl& self, const ScenePushConstants& pc, SwapchainImageFn getSwapchain) {
     using OpaqueReflectionPass      = Passes::ReflectionPass<Passes::OpaqueSurface, Res_HdrSceneColor, "Reflection">;
     using TranslucentReflectionPass = Passes::ReflectionPass<Passes::TranslucentSurface, Res_TransLighting, "TransReflection">;
 
@@ -159,8 +160,8 @@ template <AAMode Mode, typename GetSwapchainImageT>
     }();
 
     auto blit = Vk::MakePassPack(
-        Passes::TonemapBlitPass<Mode, std::decay_t<GetSwapchainImageT>> {
-            .post = self.post, .frame = self, .getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchain)
+        Passes::TonemapBlitPass<Mode> {
+            .post = self.post, .frame = self, .getSwapchainImage = getSwapchain
         }
     );
 
@@ -169,6 +170,6 @@ template <AAMode Mode, typename GetSwapchainImageT>
 
 template <AAMode Mode>
 using SceneGraphFor =
-    decltype(BuildFrameGraph<Mode>(std::declval<RenderContext::Impl&>(), std::declval<const ScenePushConstants&>(), std::declval<SwapchainImage (*)()>()));
+    decltype(BuildFrameGraph<Mode>(std::declval<RenderContext::Impl&>(), std::declval<const ScenePushConstants&>(), std::declval<SwapchainImageFn>()));
 
 } // namespace ZHLN::RenderGraphDetail

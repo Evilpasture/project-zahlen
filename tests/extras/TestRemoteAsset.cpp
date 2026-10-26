@@ -935,19 +935,6 @@ struct RemoteAssetTestSuite {
     };
 };
 
-// The extras test binaries are one suite per process (see
-// tests/extras/CMakeLists.txt), so this owns its own entry point.
-int main() {
-    ZHLN::TaskSystem::Scope taskScope;
-    // The fetcher's workers go out to 127.0.0.1: a proxy in the environment
-    // would send them somewhere else, and the suite would report failures
-    // that are about the machine it ran on rather than about the fetcher.
-    for (const char* name: {"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"}) {
-#if defined(_WIN32)
-        _putenv_s(name, "");
-#else
-        unsetenv(name);
-#endif
-    }
-    return ZHLN::Test::Runner::Run<RemoteAssetTestSuite>();
+auto RunRemoteAssetSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<RemoteAssetTestSuite>();
 }

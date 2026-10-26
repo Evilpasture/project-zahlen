@@ -191,6 +191,6 @@ struct ALifeTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<ALifeTestSuite>();
+auto RunALifeSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<ALifeTestSuite>();
 }

@@ -272,8 +272,7 @@ auto EmitHeader(const Options& options) -> std::string {
         out.Line("    static constexpr const char*           EntryPoint = \"{}\";", module.entryPoint);
         out.Line("    static constexpr VkShaderStageFlagBits Stage      = {};", module.stage);
         out.Raw(kHeaderSource);
-        out.Line("    static constexpr const char* Path     = \"{}\";", AsLiteral(module.path));
-        out.Line("    static constexpr uint32_t    ByteSize = {};", module.byteSize);
+        out.Line("    static constexpr const char* Path = \"{}\";", AsLiteral(module.path));
         if (module.stage == "VK_SHADER_STAGE_COMPUTE_BIT") {
             // The threadgroup size the entry point declares: Slang's own
             // reflection of [numthreads] (SlangReflect.cpp), which is the only
@@ -334,7 +333,11 @@ auto EmitSource(const Options& options) -> std::string {
         out.Line("alignas(uint32_t) constexpr uint8_t {}_bytes[] = {{", input.symbol);
         out.Line("#embed \"{}\"", AsLiteral(input.path));
         out.Verbatim("};");
-        out.Line("static_assert(sizeof({}_bytes) == {});", input.symbol, input.size);
+        if (input.hasExpectedSize) {
+            out.Line("static_assert(sizeof({}_bytes) == {});", input.symbol, input.size);
+        } else {
+            out.Line("static_assert(sizeof({0}_bytes) > 0 && (sizeof({0}_bytes) % sizeof(uint32_t)) == 0);", input.symbol);
+        }
         out.Blank();
     }
 

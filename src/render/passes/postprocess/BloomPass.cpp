@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/postprocess/BloomPass.hpp"
+#include "FrameContext.hpp"
 #include "PassPayloads.hpp"
 #include <ShaderBindings.hpp>
 #include <algorithm>
