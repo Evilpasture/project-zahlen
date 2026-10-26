@@ -7,11 +7,6 @@
 // means naming the optional layers it runs with, and the core library may not
 // know optional layers exist. See include/ARCHITECTURE.md 1.2.
 #include "engine/Platform.hpp"
-#if defined(ZHLN_HAS_SCRIPTING)
-// Core has no scripting of its own; the composition root is what names the
-// optional layers the engine runs with.
-#include <Scripting/Lua/LuaScriptRuntime.hpp>
-#endif
 #include "engine/system/GraphicsSettingsSync.hpp"
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
@@ -25,6 +20,11 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
+#include <Zahlen/FramePlan.hpp>
+#include <Zahlen/GameModule.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/gui/GUI.hpp>
@@ -35,9 +35,9 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
+#include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scene.hpp>
-#include <Zahlen/Scripting.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -49,6 +49,10 @@
 // ZHLN::Scene::Scene into a document, via its Jolt vector bindings.
 #include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>
+#endif
+#if defined(ZHLN_HAS_LUA)
+#include <lua/ReflectLua.hpp>
+#include <lua/SceneLua.hpp>
 #endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
 #include <CharacterController/CharacterController.hpp>
@@ -91,9 +95,11 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <print>
 #include <string>
@@ -169,12 +175,161 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
     ZHLN::FreeCam::Install(engine);
 #endif
 #if defined(ZHLN_HAS_RAGDOLL_AUTHORING)
-    // Contributes the "SetupRagdoll" script verb by name and nothing else: no
-    // frame steps, no components, no graph systems. A host that installs no
-    // script runtime gets the same no-op module. This is what used to be a
-    // link-time dependency of the scripting runtime on a gameplay module.
     ZHLN::RagdollAuthoring::Install(engine);
 #endif
+}
+
+struct HostLaunchConfig {
+    std::filesystem::path scenePath;
+    std::filesystem::path graphicsConfigPath = "config/graphics.lua";
+};
+
+HostLaunchConfig s_HostLaunchConfig;
+
+struct HostStateService {
+    ZHLN::FS::FileWatchHandle graphicsWatch = 0;
+    bool                      bootApplied   = false;
+};
+
+[[nodiscard]] auto LoadSceneDocument(ZHLN::Engine& engine, const std::filesystem::path& path) -> bool {
+    const std::string ext = path.extension().string();
+#if defined(ZHLN_HAS_LUA)
+    if (ext == ".lua") {
+        auto parsed = ZHLN::ReflectLua::EvaluateFile<ZHLN::Scene::Scene>(path);
+        if (!parsed) {
+            ZHLN::LogError("[Scene] failed to evaluate Lua scene '{}': {}", path.string(), parsed.error());
+            return false;
+        }
+        engine.ClearScene();
+        auto inst = ZHLN::Scene::Instantiate(engine, *parsed);
+        if (!inst) {
+            ZHLN::LogError("[Scene] failed to instantiate Lua scene '{}': {}", path.string(), inst.error());
+            return false;
+        }
+        ZHLN::Log("[Scene] instantiated '{}' ({} entities, {} lights)", path.string(), inst->entities.size(), inst->lights.size());
+        return true;
+    }
+#endif
+#if defined(ZHLN_HAS_SCENE_TOML)
+    if (ext == ".toml") {
+        std::ifstream in(path, std::ios::binary);
+        if (!in) {
+            ZHLN::LogError("[Scene] could not open TOML scene '{}'", path.string());
+            return false;
+        }
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        auto        parsed = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>(text);
+        if (!parsed) {
+            ZHLN::LogError("[Scene] failed to parse TOML scene '{}': {}", path.string(), parsed.error());
+            return false;
+        }
+        engine.ClearScene();
+        auto inst = ZHLN::Scene::Instantiate(engine, *parsed);
+        if (!inst) {
+            ZHLN::LogError("[Scene] failed to instantiate TOML scene '{}': {}", path.string(), inst.error());
+            return false;
+        }
+        ZHLN::Log("[Scene] instantiated '{}' ({} entities, {} lights)", path.string(), inst->entities.size(), inst->lights.size());
+        return true;
+    }
+#endif
+    ZHLN::LogError("[Scene] unsupported or disabled scene format for '{}'", path.string());
+    return false;
+}
+
+#if defined(ZHLN_HAS_LUA)
+void ApplyGraphicsProfileFromLua(ZHLN::Engine& engine, const std::filesystem::path& path) {
+    auto source = ZHLN::ReflectLua::ReadLuaFileText(path);
+    if (!source) {
+        return;
+    }
+    const std::string      chunkName = "@" + path.generic_string();
+    const ZHLN::RenderInfo hw        = engine.GetRenderContext().GetInfo();
+
+    const auto applyOverlay = [&](ZHLN::GraphicsSettings& dst) -> std::expected<void, ZHLN::ErrorCode> {
+        auto callRes = ZHLN::ReflectLua::ApplyCallPatchString(dst, *source, chunkName, ZHLN::LuaBudget {}, hw);
+        if (!callRes && callRes.error().Is(ZHLN::LuaError::NotAFunction)) {
+            return ZHLN::ReflectLua::ApplyPatchString(dst, *source, chunkName);
+        }
+        return callRes;
+    };
+
+    const ZHLN::GraphicsSettings base    = ZHLN::CollectGraphicsSettings(engine);
+    ZHLN::GraphicsSettings       staging = base;
+    if (auto res = applyOverlay(staging); !res) {
+        ZHLN::LogWarning("[Graphics] '{}' rejected ({}); keeping live settings.", path.string(), res.error());
+        return;
+    }
+
+    if (staging.qualityPreset != ZHLN::QualityLevel::Custom && staging.qualityPreset != base.qualityPreset) {
+        ZHLN::GraphicsSettings presetLayered = base;
+        presetLayered.ApplyPreset(staging.qualityPreset);
+        if (applyOverlay(presetLayered)) {
+            staging = presetLayered;
+        }
+    }
+
+    ZHLN::ApplyGraphicsSettings(engine, staging);
+    ZHLN::Log("[Graphics] applied declarative profile '{}' (preset={}).", path.string(), staging.qualityPreset);
+}
+#endif
+
+void BootHostStateStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContext& /*ctx*/) {
+    auto svc = engine.Service<HostStateService>();
+    if (!svc || svc->bootApplied) {
+        return;
+    }
+    svc->bootApplied = true;
+
+    if (!s_HostLaunchConfig.scenePath.empty()) {
+        if (!LoadSceneDocument(engine, s_HostLaunchConfig.scenePath)) {
+            ZHLN::LogWarning("[Scene] falling back to default scene after '{}' failed.", s_HostLaunchConfig.scenePath.string());
+        }
+    }
+
+#if defined(ZHLN_HAS_LUA)
+    if (!s_HostLaunchConfig.graphicsConfigPath.empty() && std::filesystem::exists(s_HostLaunchConfig.graphicsConfigPath)) {
+        const std::filesystem::path cfgPath = s_HostLaunchConfig.graphicsConfigPath;
+        ApplyGraphicsProfileFromLua(engine, cfgPath);
+        svc->graphicsWatch = engine.GetFileSystemWatcher().WatchFile(cfgPath, [&engine, cfgPath](const ZHLN::FS::FileWatchEvent& ev) {
+            if (ev.action != ZHLN::FS::FileWatchAction::Deleted) {
+                ApplyGraphicsProfileFromLua(engine, cfgPath);
+            }
+        });
+    }
+#endif
+}
+
+void TeardownHostState(ZHLN::Engine& engine) {
+    if (auto svc = engine.Service<HostStateService>(); svc && svc->graphicsWatch != 0) {
+        if (!engine.GetFileSystemWatcher().Unwatch(svc->graphicsWatch)) {
+            ZHLN::LogWarning("[Graphics] could not release file watch handle {}.", svc->graphicsWatch);
+        }
+        svc->graphicsWatch = 0;
+    }
+}
+
+void InstallHostWithState(ZHLN::Engine& engine) {
+    InstallGameplayExtras(engine);
+    engine.EmplaceService<HostStateService>();
+
+    static constexpr ZHLN::ModuleStep kSteps[] = {
+        {
+            .phase     = ZHLN::FramePhase::HotReload,
+            .name      = "HostStateBoot",
+            .run       = &BootHostStateStep,
+            .placement = ZHLN::StepPlacement::After,
+            .anchor    = "StateAndShaderReload",
+        },
+    };
+    const ZHLN::Module mod {
+        .name       = "HostState",
+        .frameSteps = kSteps,
+        .teardown   = &TeardownHostState,
+    };
+    if (auto res = engine.InstallModule(mod); !res) {
+        ZHLN::LogError("[HostState] module install failed: {}", ZHLN::ToString(res.error()));
+    }
 }
 
 #if defined(ZHLN_HAS_BENCHMARK)
@@ -748,7 +903,38 @@ auto main(int argc, char* argv[]) -> int {
     // storage duration is required because its address is copied into the
     // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
     static ZHLN::CrashState crashState;
-    return ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
+    s_HostLaunchConfig = {};
+
+    const std::array appHandlers = {
+        ZHLN::CommandHandler {
+            .key         = "--scene",
+            .placeholder = "<file.toml|file.lua>",
+            .description = "Instantiate a TOML or Lua scene recipe on boot",
+            .action =
+                [](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                    if (v.empty()) {
+                        return std::unexpected(ZHLN::CommandLineError::MissingValue);
+                    }
+                    s_HostLaunchConfig.scenePath = std::filesystem::path(v);
+                    return {};
+                },
+        },
+        ZHLN::CommandHandler {
+            .key         = "--graphics-config",
+            .placeholder = "<file.lua>",
+            .description = "Path to declarative Lua graphics profile (default: config/graphics.lua)",
+            .action =
+                [](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                    if (v.empty()) {
+                        return std::unexpected(ZHLN::CommandLineError::MissingValue);
+                    }
+                    s_HostLaunchConfig.graphicsConfigPath = std::filesystem::path(v);
+                    return {};
+                },
+        },
+    };
+
+    return ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)), appHandlers)
         .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<void, ZHLN::ErrorCode> {
             // Early exits (e.g. --help, --version, --print-graph) are successful runs
             if (options.helpRequested || options.versionRequested || options.printGraphRequested) {
@@ -803,14 +989,7 @@ auto main(int argc, char* argv[]) -> int {
 
             auto engine = std::move(engine_res.value());
 
-#if defined(ZHLN_HAS_SCRIPTING)
-            // Nothing in core installs a runtime, so a build without the
-            // scripting extra simply has none: ScriptRunner forwards to
-            // nothing and the engine runs C++-only.
-            engine->GetScriptRunner().SetRuntime(std::make_unique<ZHLN::LuaScriptRuntime>());
-#endif
-
-            InstallGameplayExtras(*engine);
+            InstallHostWithState(*engine);
 
             engine->GetPlatformHost().Focus();
             engine->InitializeDefaultScene();
@@ -825,9 +1004,9 @@ auto main(int argc, char* argv[]) -> int {
             // that never presses F3 draws exactly what it drew before (the
             // callback returns without touching the UI frame while hidden).
 #if defined(ZHLN_HAS_BENCHMARK)
-            return ZHLN::Engine::Run(options, crashState, MakeBenchmarkOverlay(), &InstallGameplayExtras);
+            return ZHLN::Engine::Run(options, crashState, MakeBenchmarkOverlay(), &InstallHostWithState);
 #else
-            return ZHLN::Engine::Run(options, crashState, nullptr, &InstallGameplayExtras);
+            return ZHLN::Engine::Run(options, crashState, nullptr, &InstallHostWithState);
 #endif
         })
         .transform([]() -> int {

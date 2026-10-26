@@ -345,16 +345,12 @@ const std::array Handlers = {
         .key         = "--driver",
         .shortKey    = "-d",
         .placeholder = "<driver>",
-        .description = "Select the gameplay loop driver (scripted, cpp, hybrid)",
+        .description = "Select the gameplay loop driver (cpp)",
         .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
             if (v == "cpp" || v == "c++" || v == "native") {
                 opt.driver = ZHLN::GameplayDriver::Cpp;
-            } else if (v == "scripted" || v == "fennel" || v == "lua") {
-                opt.driver = ZHLN::GameplayDriver::Scripted;
-            } else if (v == "hybrid") {
-                opt.driver = ZHLN::GameplayDriver::Hybrid;
             } else {
-                std::println(stderr, "Error: Invalid driver '{}'. Valid options: scripted, cpp, hybrid.", v);
+                std::println(stderr, "Error: Invalid driver '{}'. Valid options: cpp.", v);
                 return std::unexpected(ZHLN::CommandLineError::InvalidValue);
             }
             return {};

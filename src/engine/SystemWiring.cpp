@@ -25,7 +25,6 @@
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Scripting.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
@@ -51,30 +50,8 @@ void Physics(Engine& engine, float dt, FrameContext&) {
 }
 
 void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
-    switch (ctx.driver) {
-        using enum GameplayDriver;
-        case Cpp: {
-            ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-            ctx.status = engine.UpdateNativeGameplay(dt);
-            break;
-        }
-        case Scripted: {
-            ZHLN::ScopedTimer profTimer("ECS System: Scripted Update");
-            engine.GetScriptRunner().CallUpdate(&engine, dt);
-            break;
-        }
-        case Hybrid: {
-            {
-                ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-                ctx.status = engine.UpdateNativeGameplay(dt);
-            }
-            {
-                ZHLN::ScopedTimer profTimer("ECS System: Scripted Update");
-                engine.GetScriptRunner().CallUpdate(&engine, dt);
-            }
-            break;
-        }
-    }
+    ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
+    ctx.status = engine.UpdateNativeGameplay(dt);
 }
 
 void UpdateGraph(Engine& engine, float dt, FrameContext&) {
@@ -156,7 +133,7 @@ void BuildCoreFramePlan(Engine& engine) {
     };
 
     require(plan.Append(Phase::UI, "HostUICallback", Steps::HostUICallback));
-    require(plan.Append(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload));
+    require(plan.Append(Phase::HotReload, "StateAndShaderReload", Steps::HotReload));
     require(plan.Append(Phase::Physics, "PhysicsSystem", Steps::Physics));
     require(plan.Append(Phase::Gameplay, "GameplayModule", Steps::Gameplay));
     require(plan.Append(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph));

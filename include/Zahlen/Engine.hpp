@@ -15,7 +15,6 @@
 #include <Zahlen/FramePlan.hpp>
 #include <Zahlen/GameModule.hpp>
 #include <Zahlen/PoseUploads.hpp>
-#include <Zahlen/ScriptCommandRegistry.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/SystemContext.hpp>
 #include <Zahlen/WindowInput.hpp>
@@ -37,7 +36,6 @@ struct SceneData;
 class PhysicsContext;
 class AudioContext;
 class AssetManager;
-class ScriptRunner;
 class Window;
 namespace FS {
 class FileSystemWatcher;
@@ -128,7 +126,6 @@ class ZHLN_API Engine {
     auto               GetSceneData() -> SceneData&;
     auto               GetAssetManager() -> AssetManager&;
     auto               GetAudioContext() -> AudioContext&;
-    auto               GetScriptRunner() -> ScriptRunner&;
     auto               GetFileSystemWatcher() -> FileSystemWatcher&;
     [[nodiscard]] auto GetRegistry() -> ECS::Registry&;
     [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
@@ -192,12 +189,6 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetFramePlan() -> FramePlan&;
     [[nodiscard]] auto GetFramePlan() const noexcept -> const FramePlan&;
 
-    // Module-contributed script verbs. The registry is engine state because the
-    // engine is what a dispatch has in hand; it is empty in a host that installs
-    // no modules, and a C++-only host still reaches the verbs it does hold.
-    [[nodiscard]] auto GetScriptCommands() noexcept -> ScriptCommandRegistry&;
-    [[nodiscard]] auto GetScriptCommands() const noexcept -> const ScriptCommandRegistry&;
-
     void               SetPhysicsSubstepHooks(PhysicsSubstepHooks hooks);
     [[nodiscard]] auto GetPhysicsSubstepHooks() const noexcept -> const PhysicsSubstepHooks&;
 
@@ -256,8 +247,6 @@ class ZHLN_API Engine {
     void EnsureFramePlan();
 
     auto InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode>;
-
-    void RegisterBootScriptWatches();
 
     std::unique_ptr<EngineImpl> _impl;
 };

@@ -105,11 +105,6 @@ auto ReadNumbers(const ScriptVal& sval, std::string_view scriptName, Unbox unbox
             return std::unexpected(ScriptError::TypeMismatch);
         }
         raw = obj->rawPtr;
-    } else if (const auto* obj = std::get_if<OwnedObject>(&sval)) {
-        if (obj->typeName != scriptName) {
-            return std::unexpected(ScriptError::TypeMismatch);
-        }
-        raw = obj->ptr.get();
     }
     if (raw != nullptr) {
         return unbox(*static_cast<const T*>(raw));

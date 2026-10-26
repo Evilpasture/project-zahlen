@@ -29,6 +29,11 @@ target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_scripting
 )
 
+if(TARGET zahlen_lua)
+    target_link_libraries(${TARGET_NAME} PRIVATE zahlen_lua)
+    target_compile_definitions(${TARGET_NAME} PRIVATE ZHLN_CONSOLE_HAS_LUA=1)
+endif()
+
 target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions
 )

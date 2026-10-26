@@ -16,4 +16,6 @@ ZHLN_API GraphicsSettings SyncGraphicsSettings(Engine& engine);
 
 ZHLN_API bool ApplyQualityPreset(Engine& engine, QualityLevel preset);
 
-}
+ZHLN_API void ApplyGraphicsSettings(Engine& engine, const GraphicsSettings& settings);
+
+} // namespace ZHLN

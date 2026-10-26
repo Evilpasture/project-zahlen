@@ -39,6 +39,14 @@ using ShadowSettingsComponent      = Components::ShadowSettingsComponent;
     return {v.GetX(), v.GetY(), v.GetZ(), v.GetW()};
 }
 
+[[nodiscard]] JPH::Vec3 FromArray3(const std::array<float, 3>& a) noexcept {
+    return JPH::Vec3(a[0], a[1], a[2]);
+}
+
+[[nodiscard]] JPH::Vec4 FromArray4(const std::array<float, 4>& a) noexcept {
+    return JPH::Vec4(a[0], a[1], a[2], a[3]);
+}
+
 constexpr uint64_t kGovernorMarginThresholdNs = 2000000;
 constexpr uint32_t kGovernorPatienceFrames    = 90;
 
@@ -232,4 +240,83 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
     return changed;
 }
 
+void ApplyGraphicsSettings(Engine& engine, const GraphicsSettings& settings) {
+    auto&            reg = engine.GetRegistry();
+    GraphicsSettings gfx = settings;
+    gfx.rayTracing.enableReflections = (gfx.post.enableRTR != 0) || gfx.rayTracing.enableReflections;
+    if (gfx.rayTracing.enableReflections) {
+        gfx.post.enableRTR = 1;
+    }
+
+    Entity ppEnt = SettingsEntity(reg);
+    if (!reg.Get<PostProcessSettingsComponent>(ppEnt)) {
+        ppEnt = reg.SingletonEntity<PostProcessSettingsComponent>();
+    }
+    if (ppEnt == Entity::Null()) {
+        ppEnt = reg.Create(Components::GlobalSettingsTagComponent {});
+        reg.Add(ppEnt, PostProcessSettingsComponent {});
+    }
+    reg.Patch<PostProcessSettingsComponent>(ppEnt, [&gfx](PostProcessSettingsComponent& pp) {
+        pp.giMode            = gfx.post.mode;
+        pp.aoRadius          = gfx.post.aoRadius;
+        pp.aoBias            = gfx.post.aoBias;
+        pp.aoPower           = gfx.post.aoPower;
+        pp.giIntensity       = gfx.post.giIntensity;
+        pp.giSamples         = gfx.post.giSamples;
+        pp.vignetteIntensity = gfx.post.vignetteIntensity;
+        pp.vignettePower     = gfx.post.vignettePower;
+        pp.glowIntensity     = gfx.post.glowIntensity;
+        pp.enableSSR         = gfx.post.enableSSR != 0;
+        pp.enableRTR         = gfx.post.enableRTR != 0;
+        pp.exposure          = gfx.post.exposure;
+        pp.bloomStrength     = gfx.post.bloomStrength;
+        pp.contrast          = gfx.post.contrast;
+        pp.saturation        = gfx.post.saturation;
+        pp.tonemapper        = gfx.post.tonemapper;
+        pp.colorFilter       = FromArray3(gfx.post.colorFilter);
+
+        pp.ambientExposure = gfx.environment.ambientExposure;
+        pp.fullBright      = gfx.environment.fullBright;
+        pp.useLocalProbe   = gfx.environment.useLocalProbe;
+        pp.probeMin        = FromArray3(gfx.environment.probeMin);
+        pp.probeMax        = FromArray3(gfx.environment.probeMax);
+        pp.probePos        = FromArray3(gfx.environment.probePos);
+        pp.skyZenith       = FromArray4(gfx.environment.skyZenith);
+        pp.skyHorizon      = FromArray4(gfx.environment.skyHorizon);
+        pp.skyGround       = FromArray4(gfx.environment.skyGround);
+    });
+
+    Entity shadowEnt = reg.SingletonEntity<ShadowSettingsComponent>();
+    if (shadowEnt == Entity::Null()) {
+        shadowEnt = ppEnt;
+        reg.Add(shadowEnt, ShadowSettingsComponent {});
+    }
+    reg.Patch<ShadowSettingsComponent>(shadowEnt, [&gfx](ShadowSettingsComponent& shadow) {
+        shadow.shadowWidth      = gfx.shadows.width;
+        shadow.shadowResolution = static_cast<int>(gfx.shadows.resolution);
+        shadow.sunSize          = gfx.shadows.sunSize;
+    });
+
+    Entity aaEnt = CameraEntity(reg);
+    if (!reg.Get<AASettingsComponent>(aaEnt)) {
+        aaEnt = reg.SingletonEntity<AASettingsComponent>();
+    }
+    if (aaEnt == Entity::Null() && CameraEntity(reg) != Entity::Null()) {
+        aaEnt = CameraEntity(reg);
+        reg.Add(aaEnt, AASettingsComponent {});
+    }
+    if (aaEnt != Entity::Null()) {
+        reg.Patch<AASettingsComponent>(aaEnt, [&gfx](AASettingsComponent& aa) { aa.state = gfx.antiAliasing; });
+    }
+
+    Entity rtEnt = reg.SingletonEntity<RayTracingSettingsComponent>();
+    if (rtEnt == Entity::Null()) {
+        rtEnt = reg.Create();
+        reg.Add(rtEnt, RayTracingSettingsComponent {});
+    }
+    reg.Patch<RayTracingSettingsComponent>(rtEnt, [&gfx](RayTracingSettingsComponent& rt) { rt.config = gfx.rayTracing; });
+
+    engine.GetRenderContext().ApplySettings(gfx);
 }
+
+} // namespace ZHLN

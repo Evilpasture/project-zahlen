@@ -66,7 +66,7 @@ git submodule update --init --recursive
 ```
 
 ### 2. Recommended Directory Structure
-To utilize the automated Fennel compiler and Ninja asset cooking pipelines, structure your game repository as follows:
+To utilize the Ninja asset cooking pipeline and declarative state files, structure your game repository as follows:
 
 ```text
 MyGame/
@@ -74,7 +74,7 @@ MyGame/
 ├── extern/
 │   └── zahlen/                # Engine submodule
 ├── gameplay/                  # Game C++ source files (.cpp, .cppm)
-├── scripts/                   # Game Fennel / Lua scripts (.fnl, .lua, boot.lua)
+├── config/                    # Declarative Lua / TOML configuration (graphics.lua)
 ├── resources/
 │   └── assets/                # Raw game assets (.blend, .png, .wav, etc.)
 └── src/
@@ -82,7 +82,7 @@ MyGame/
 ```
 
 ### 3. Game CMakeLists.txt Boilerplate
-Create a `CMakeLists.txt` in your game's root directory. Include the engine submodule and invoke its exported helper functions (`zahlen_compile_fennel` and `zahlen_configure_game_assets`):
+Create a `CMakeLists.txt` in your game's root directory. Include the engine submodule and invoke its exported asset pipeline helper (`zahlen_configure_game_assets`):
 
 ```cmake
 cmake_minimum_required(VERSION 3.28)
@@ -146,36 +146,6 @@ if(GAMEPLAY_CPP_SOURCES)
     )
 endif()
 
-# Dynamically discover and compile ANY .fnl files in scripts/ (handles 0, 1, or many files automatically)
-file(GLOB_RECURSE FENNEL_GAME_SCRIPTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.fnl")
-
-if(FENNEL_GAME_SCRIPTS)
-    zahlen_compile_fennel(${PROJECT_NAME} COMPILED_GAME_LUA ${FENNEL_GAME_SCRIPTS})
-    add_custom_target(compile_game_fennel ALL DEPENDS ${COMPILED_GAME_LUA})
-else()
-    add_custom_target(compile_game_fennel ALL)
-endif()
-
-file(GLOB_RECURSE STATIC_GAME_SCRIPTS LIST_DIRECTORIES false "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.lua" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.sh" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.txt")
-list(FILTER STATIC_GAME_SCRIPTS EXCLUDE REGEX ".*/scripts/core/.*")
-
-set(GAME_SCRIPT_SYMLINKS "")
-foreach(STATIC_SRC IN LISTS STATIC_GAME_SCRIPTS)
-    file(RELATIVE_PATH REL_FILE "${CMAKE_CURRENT_SOURCE_DIR}/scripts" "${STATIC_SRC}")
-    get_filename_component(REL_DIR "${REL_FILE}" DIRECTORY)
-    set(OUT_FILE "${CMAKE_BINARY_DIR}/scripts/${REL_FILE}")
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/scripts/${REL_DIR}")
-    if(WIN32)
-        add_custom_command(OUTPUT "${OUT_FILE}" COMMAND ${CMAKE_COMMAND} -E copy "${STATIC_SRC}" "${OUT_FILE}" DEPENDS "${STATIC_SRC}" VERBATIM)
-    else()
-        add_custom_command(OUTPUT "${OUT_FILE}" COMMAND ${CMAKE_COMMAND} -E create_symlink "${STATIC_SRC}" "${OUT_FILE}" DEPENDS "${STATIC_SRC}" VERBATIM)
-    endif()
-    list(APPEND GAME_SCRIPT_SYMLINKS "${OUT_FILE}")
-endforeach()
-
-add_custom_target(sync_game_static_scripts DEPENDS ${GAME_SCRIPT_SYMLINKS})
-add_dependencies(compile_game_fennel sync_game_static_scripts)
-
 # Configure Game Ninja Asset Cooking Pipeline (zcook)
 zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -193,7 +163,6 @@ if(TARGET gameplay_modules)
 endif()
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE JPH_DOUBLE_PRECISION)
-add_dependencies(${PROJECT_NAME} compile_game_fennel)
 
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive-)

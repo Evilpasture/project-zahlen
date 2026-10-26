@@ -16,17 +16,13 @@
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scene.hpp>
-#include <Zahlen/Scripting.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <filesystem>
 #include <format>
-#include <ranges>
 #include <utility>
 
 namespace ZHLN::FallbackScene {
@@ -281,11 +277,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
                 { 0.35f, 0.88f, 1.0f, 1.0f });
 
         // Alert toast box
-        // No filename in the boot-script title: which script is missing is the
-        // runtime's business, and the detail line below already carries the path
-        // that was actually looked for.
         std::string reasonTitle =
-            (s_Reason == FallbackReason::MissingBootScript)   ? "[WARNING] MISSING BOOT SCRIPT" :
             (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] MISSING NATIVE MODULE ('libgameplay.so')" :
                                                                 "[WARNING] NO GAMEPLAY MODULE DETECTED";
 
@@ -321,14 +313,8 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         // Button row
         ui.BeginRow(12.0f);
 
-        if (ui.Button("Reload Boot", GUI::Sizing { .grow = 1.0f })) {
-            const auto bootPaths = engine.GetScriptRunner().BootScriptPaths();
-            if (bootPaths.empty()) {
-                Log("[DefaultPreset] No scripting runtime installed; nothing to reload.");
-            } else {
-                Log("[DefaultPreset] Reloading '{}' via Native UI...", bootPaths.front());
-                engine.GetScriptRunner().ReloadFile(bootPaths.front());
-            }
+        if (ui.Button("Dismiss Notice", GUI::Sizing { .grow = 1.0f })) {
+            s_PopupVisible = false;
         }
 
         if (ui.Button(s_AnimateScene ? "Pause Motion" : "Resume Motion", GUI::Sizing { .grow = 1.0f })) {
@@ -359,42 +345,16 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
 namespace {
 
-// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
-// Lifted from core's SystemWiring frame steps; the module declares it at its
-// original position -- after GameplayModule, before the simulation graph --
-// through the step list Describe() returns.
+// Auto-detect missing native gameplay modules and engage the Fallback Preset.
 void FallbackStep(Engine& engine, float dt, FrameContext& ctx) {
     if (!engine.FallbackSceneEnabled()) {
         return;
     }
 
-    if (!DefaultPreset::IsActive()) {
-        // The runtime declares its own boot entry points; core only asks whether
-        // any of them exist, so no scripting language is named here.
-        //
-        // An empty list means no runtime is installed, which is not a reason to
-        // stand down: the scripted driver still has nothing to run, and the
-        // fallback scene is the only thing that puts anything on screen. Without
-        // it a plain `zahlen` with no flags renders an empty world -- the camera
-        // and system graphs from InitializeDefaultScene have no geometry.
-        const auto bootPaths       = engine.GetScriptRunner().BootScriptPaths();
-        const bool scriptingDriver = ctx.driver == GameplayDriver::Scripted || ctx.driver == GameplayDriver::Hybrid;
-        const bool hasBootScript   = std::ranges::any_of(bootPaths, [](const std::string_view p) { return std::filesystem::exists(std::filesystem::path(p)); });
-        if (scriptingDriver && !hasBootScript) {
-            if (bootPaths.empty()) {
-                DefaultPreset::BuildFallbackScene(
-                    engine, FallbackReason::MissingBootScript, "No scripting runtime is installed, so no boot script could run."
-                );
-            } else {
-                DefaultPreset::BuildFallbackScene(
-                    engine, FallbackReason::MissingBootScript, std::format("Script '{}' was not found in working directory.", bootPaths.front())
-                );
-            }
-        } else if (ctx.driver == GameplayDriver::Cpp && !engine.IsNativeGameplayLoaded()) {
-            DefaultPreset::BuildFallbackScene(
-                engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
-            );
-        }
+    if (!DefaultPreset::IsActive() && ctx.driver == GameplayDriver::Cpp && !engine.IsNativeGameplayLoaded()) {
+        DefaultPreset::BuildFallbackScene(
+            engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
+        );
     }
 
     if (DefaultPreset::IsActive()) {

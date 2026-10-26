@@ -5,92 +5,173 @@
 #include "RagdollAuthoring.hpp"
 
 #include "engine/system/ArticulationSystem.hpp"
-#include "Zahlen/AssetManager.hpp"
-#include "Zahlen/Components.hpp"
-#include "Zahlen/Engine.hpp"
-#include "Zahlen/Log.hpp"
-#include "Zahlen/ModelPrefab.hpp"
-#include "Zahlen/SkeletalAnimation.hpp"
+
+#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Components.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/Reflection/Annotations.hpp>
+#include <Zahlen/Engine.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/Physics/Jolt.hpp>
+#include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
+
+#if defined(ZHLN_RAGDOLL_HAS_LUA)
+#include <lua/ReflectLua.hpp>
+#endif
+
 #include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <string>
 #include <vector>
 
 namespace ZHLN::RagdollAuthoring {
 
-// Authoring policy: which joints of a humanoid biped deserve a collider, and
-// what kind. Wrong by construction for anything whose joints are not named
-// like a human -- that is the point of keeping it out of the engine core.
-auto AuthorHumanoidParts(const Skeleton& skeleton, PhysicsContext& pc) -> std::vector<Physics::RagdollPartParams> {
-    auto IsImportantJoint = [](std::string name) -> bool {
-        std::ranges::transform(name, name.begin(), ::tolower);
-        return name.contains("hip") || name.contains("pelvis") || name.contains("root") || name.contains("spine") || name.contains("chest") ||
-               name.contains("torso") || name.contains("head") || name.contains("neck") || name.contains("arm") || name.contains("forearm") ||
-               name.contains("thigh") || name.contains("calf") || name.contains("shin");
+namespace {
+
+    enum class RagdollRecipeError : uint8_t {
+        LuaUnavailable ZHLN_ANNOTATION(ZHLN::Description<"RagdollAuthoring was built without plugins/lua support"> {}) = 1,
     };
 
+    auto LowerAscii(std::string s) -> std::string {
+        std::ranges::transform(s, s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return s;
+    }
+
+    auto MatchesAnyPattern(std::string_view loweredJointName, const std::vector<std::string>& patterns) -> bool {
+        for (const std::string& rawPat: patterns) {
+            const std::string loweredPat = LowerAscii(rawPat);
+            if (!loweredPat.empty() && loweredJointName.find(loweredPat) != std::string_view::npos) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    auto ResolveSpec(std::string_view loweredJointName, const RagdollRecipe& recipe) -> const RagdollPartSpec& {
+        for (const RagdollJointRule& rule: recipe.rules) {
+            if (MatchesAnyPattern(loweredJointName, rule.patterns)) {
+                return rule.spec;
+            }
+        }
+        return recipe.fallback;
+    }
+
+} // namespace
+
+auto DefaultHumanoidRecipe() -> RagdollRecipe {
+    return RagdollRecipe {
+        .rules =
+            {
+                RagdollJointRule {
+                    .patterns = {"hip", "pelvis", "root"},
+                    .spec     = {.shape = RagdollShapeKind::Capsule, .halfHeight = 0.4f, .radius = 0.2f, .mass = 15.0f},
+                },
+                RagdollJointRule {
+                    .patterns = {"spine", "chest", "torso"},
+                    .spec     = {
+                        .shape         = RagdollShapeKind::Capsule,
+                        .halfHeight    = 0.5f,
+                        .radius        = 0.25f,
+                        .mass          = 20.0f,
+                        .enableMotors  = true,
+                        .maxMotorForce = 250.0f,
+                    },
+                },
+                RagdollJointRule {
+                    .patterns = {"head", "neck"},
+                    .spec     = {
+                        .shape         = RagdollShapeKind::Sphere,
+                        .radius        = 0.3f,
+                        .mass          = 8.0f,
+                        .enableMotors  = true,
+                        .maxMotorForce = 250.0f,
+                    },
+                },
+                RagdollJointRule {
+                    .patterns = {"arm", "forearm", "thigh", "calf", "shin"},
+                    .spec     = {.shape = RagdollShapeKind::Capsule, .halfHeight = 0.2f, .radius = 0.1f, .mass = 3.0f},
+                },
+            },
+        .fallback = {.shape = RagdollShapeKind::Sphere, .radius = 0.08f, .mass = 0.5f},
+    };
+}
+
+auto LoadRecipeFromLuaString([[maybe_unused]] std::string_view chunk, [[maybe_unused]] std::string_view chunkName)
+    -> std::expected<RagdollRecipe, ErrorCode> {
+#if defined(ZHLN_RAGDOLL_HAS_LUA)
+    return ReflectLua::EvaluateString<RagdollRecipe>(chunk, chunkName);
+#else
+    return std::unexpected(RagdollRecipeError::LuaUnavailable);
+#endif
+}
+
+auto LoadRecipeFromLuaFile([[maybe_unused]] const std::filesystem::path& path) -> std::expected<RagdollRecipe, ErrorCode> {
+#if defined(ZHLN_RAGDOLL_HAS_LUA)
+    return ReflectLua::EvaluateFile<RagdollRecipe>(path);
+#else
+    return std::unexpected(RagdollRecipeError::LuaUnavailable);
+#endif
+}
+
+auto AuthorPartsFromRecipe(const Skeleton& skeleton, const RagdollRecipe& recipe, PhysicsContext& pc)
+    -> std::vector<Physics::RagdollPartParams> {
     std::vector<Physics::RagdollPartParams> parts;
     parts.reserve(skeleton.joints.size());
 
     for (size_t i = 0; i < skeleton.joints.size(); ++i) {
-        std::string name = skeleton.joints[i].name.c_str();
+        const std::string      lowered = LowerAscii(skeleton.joints[i].name.c_str());
+        const RagdollPartSpec& spec    = ResolveSpec(lowered, recipe);
 
-        Physics::RagdollPartParams part;
+        Physics::RagdollPartParams part {};
         part.jointIndex       = static_cast<uint32_t>(i);
         part.parentJointIndex = skeleton.joints[i].parentIndex;
-        part.mass             = 1.0f;
-        part.enableMotors     = false;
+        part.mass             = spec.mass;
+        part.enableMotors     = spec.enableMotors;
+        part.maxMotorForce    = spec.maxMotorForce;
 
-        JPH::Mat44 bindPose = skeleton.joints[i].inverseBindMatrix.Inversed();
-        part.position       = JPH::RVec3(bindPose.GetTranslation());
-        part.rotation       = bindPose.GetQuaternion().Normalized();
+        const JPH::Mat44 bindPose = skeleton.joints[i].inverseBindMatrix.Inversed();
+        part.position             = JPH::RVec3(bindPose.GetTranslation());
+        part.rotation             = bindPose.GetQuaternion().Normalized();
 
-        std::ranges::transform(name, name.begin(), ::tolower);
-        if (name.contains("hip") || name.contains("pelvis") || name.contains("root")) {
-            part.shape = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.4f, 0.2f);
-            part.mass  = 15.0f;
-        } else if (name.contains("spine") || name.contains("chest") || name.contains("torso")) {
-            part.shape         = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.25f);
-            part.mass          = 20.0f;
-            part.enableMotors  = true;
-            part.maxMotorForce = 250.0f;
-        } else if (name.contains("head") || name.contains("neck")) {
-            part.shape         = pc.GetOrCreateShape(Physics::ShapeType::Sphere, 0.3f);
-            part.mass          = 8.0f;
-            part.enableMotors  = true;
-            part.maxMotorForce = 250.0f;
-        } else if (IsImportantJoint(name)) {
-            part.shape = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.2f, 0.1f);
-            part.mass  = 3.0f;
-        } else {
-            part.shape = pc.GetOrCreateShape(Physics::ShapeType::Sphere, 0.08f);
-            part.mass  = 0.5f;
+        switch (spec.shape) {
+            case RagdollShapeKind::Capsule:
+                part.shape = pc.GetOrCreateShape(Physics::ShapeType::Capsule, spec.halfHeight, spec.radius);
+                break;
+            case RagdollShapeKind::Sphere:
+                part.shape = pc.GetOrCreateShape(Physics::ShapeType::Sphere, spec.radius);
+                break;
         }
         parts.push_back(part);
     }
+
     return parts;
 }
 
-auto BuildHumanoidBipedRagdoll(
-    Entity rootEntity, ECS::Registry& reg, const AssetManager& assets, PhysicsContext& pc, ArticulationSystem& articulation
+auto BuildRagdollFromRecipe(
+    Entity               rootEntity,
+    const RagdollRecipe& recipe,
+    ECS::Registry&       reg,
+    const AssetManager&  assets,
+    PhysicsContext&      pc,
+    ArticulationSystem&  articulation
 ) -> bool {
-    // The root owns the rig description: its AnimatorComponent holds the
-    // prefabAsset whose cached ModelPrefab owns the skeletons.
     const auto animComp = reg.Get<Components::AnimatorComponent>(rootEntity);
     if (!animComp || animComp->prefabAsset == InvalidAssetID) {
-        ZHLN::LogWarning("[RagdollAuthoring] BuildHumanoidBipedRagdoll found no AnimatorComponent with a prefabAsset on entity {}.", rootEntity.index);
+        ZHLN::LogWarning("[RagdollAuthoring] BuildRagdollFromRecipe found no AnimatorComponent with a prefabAsset on entity {}.", rootEntity.index);
         return false;
     }
 
     const auto prefab = assets.GetCachedPrefab(animComp->prefabAsset);
     if (!prefab) {
-        ZHLN::LogWarning("[RagdollAuthoring] BuildHumanoidBipedRagdoll could not resolve cached prefab for entity {}.", rootEntity.index);
+        ZHLN::LogWarning("[RagdollAuthoring] BuildRagdollFromRecipe could not resolve cached prefab for entity {}.", rootEntity.index);
         return false;
     }
 
-    // One of the root's skinned children carries the rest: which skeleton of
-    // that prefab, and the joint offset its matrices were allocated at.
     const Skeleton* targetSkeleton = nullptr;
     uint32_t        jointOffset    = 0;
     for (const Entity child: reg.GetEntitiesWith<Components::SkeletalMeshComponent>()) {
@@ -108,55 +189,29 @@ auto BuildHumanoidBipedRagdoll(
     }
 
     if (targetSkeleton == nullptr) {
-        ZHLN::LogWarning("[RagdollAuthoring] BuildHumanoidBipedRagdoll found no skinned child of entity {}.", rootEntity.index);
+        ZHLN::LogWarning("[RagdollAuthoring] BuildRagdollFromRecipe found no skinned child of entity {}.", rootEntity.index);
         return false;
     }
 
-    auto parts = AuthorHumanoidParts(*targetSkeleton, pc);
+    auto parts = AuthorPartsFromRecipe(*targetSkeleton, recipe, pc);
     return articulation.AttachRagdoll(rootEntity, reg, pc, *targetSkeleton, parts, jointOffset);
 }
 
-// The verb, contributed by name.
-//
-// This body used to be a command in extensions/Scripting/Lua/Scripting.cpp,
-// which meant the generic scripting layer included
-// <RagdollAuthoring/RagdollAuthoring.hpp> and linked a gameplay module: the
-// script host had to compile against a domain it does not own, and the domain
-// could not exist without the script host. Both halves of that are gone now.
-// The scripting layer resolves a *name*; this module is what knows the name
-// means a biped ragdoll.
-namespace {
-
-auto SetupRagdollCommand(Engine& engine, const void* args) -> uint64_t {
-    if (args == nullptr) {
-        return 0;
+auto BuildHumanoidBipedRagdoll(
+    Entity rootEntity, ECS::Registry& reg, const AssetManager& assets, PhysicsContext& pc, ArticulationSystem& articulation
+) -> bool {
+    constexpr std::string_view kDefaultRecipePath = "config/ragdoll_humanoid.lua";
+    if (std::filesystem::exists(kDefaultRecipePath)) {
+        if (auto loaded = LoadRecipeFromLuaFile(kDefaultRecipePath)) {
+            return BuildRagdollFromRecipe(rootEntity, *loaded, reg, assets, pc, articulation);
+        }
     }
-    const auto& a = *static_cast<const SetupRagdollArgs*>(args);
-
-    // Ragdoll authoring is a gameplay-layer concern: the procedural biped
-    // generator resolves the rig and authors the parts, and the core
-    // articulation system only executes the result.
-    const bool built = BuildHumanoidBipedRagdoll(
-        Entity::Unpack(a.playerEntity), engine.GetRegistry(), engine.GetAssetManager(), engine.GetPhysicsContext(), engine.GetArticulationSystem()
-    );
-    return built ? 1u : 0u;
-}
-
-} // namespace
-
-void RegisterScriptCommands(ScriptCommandRegistry& commands) {
-    if (!commands.Add(ScriptCommand {.name = "SetupRagdoll", .invoke = &SetupRagdollCommand})) {
-        // Either the name is empty, the function is null, or another module
-        // already claimed "SetupRagdoll" -- the last of which is the one worth
-        // knowing about.
-        LogError("[RagdollAuthoring] could not contribute the 'SetupRagdoll' script command.");
-    }
+    return BuildRagdollFromRecipe(rootEntity, DefaultHumanoidRecipe(), reg, assets, pc, articulation);
 }
 
 auto Describe() -> Module {
-    return Module{
-        .name                   = "RagdollAuthoring",
-        .registerScriptCommands = &RegisterScriptCommands,
+    return Module {
+        .name = "RagdollAuthoring",
     };
 }
 

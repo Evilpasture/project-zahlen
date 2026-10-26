@@ -188,24 +188,13 @@ if(APPLE)
 endif()
 
 # --- LuaJIT ---
+# Lua is strictly a sandboxed, reflection-driven state and configuration layer
+# (plugins/lua/ReflectLua); FFI isolation is enforced at VM creation by never
+# opening luaopen_ffi or luaopen_package. Keep LUAJIT_DISABLE_FFI OFF because
+# extern/LuaJIT/CMakeLists.txt hardcodes `-D FFI` in DASM_FLAGS and omits
+# LUAJIT_FEATURES_DEFINITIONS on luaJIT_buildvm on POSIX.
+set(LUAJIT_DISABLE_FFI OFF CACHE BOOL "Keep LuaJIT buildvm and lib_buffer consistent on POSIX" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LuaJIT SYSTEM)
-
-# LuaJIT's CMake produces the static library only. The CLI is what drives the
-# vendored Fennel compiler (tools/fennelc.lua); host `fennel` is not required.
-if(TARGET LuaJIT AND EXISTS "${CMAKE_SOURCE_DIR}/extern/LuaJIT/src/luajit.c" AND NOT TARGET luajit)
-    add_executable(luajit "${CMAKE_SOURCE_DIR}/extern/LuaJIT/src/luajit.c")
-    target_link_libraries(luajit PRIVATE LuaJIT)
-    set_target_properties(luajit PROPERTIES
-        C_STANDARD 99
-        C_STANDARD_REQUIRED ON
-        C_EXTENSIONS ON
-    )
-    if(UNIX AND NOT APPLE)
-        target_link_libraries(luajit PRIVATE dl m)
-    elseif(UNIX)
-        target_link_libraries(luajit PRIVATE m)
-    endif()
-endif()
 
 # --- Jolt Physics ---
 option(ZHLN_ENABLE_THIRDPARTY_LTO "Enable interprocedural optimization (LTO) on vendored third-party libraries" OFF)

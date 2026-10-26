@@ -17,7 +17,7 @@ namespace ZHLN {
 
 enum class CommandLineError : uint8_t { InvalidValue = 1, MissingValue, UnknownArgument };
 
-enum class GameplayDriver : uint8_t { Scripted, Cpp, Hybrid };
+enum class GameplayDriver : uint8_t { Cpp };
 
 enum class GameplayStatus : int8_t { OK = 0, RequestQuit = 1, RequestReload = 2, Error = -1 };
 
@@ -48,7 +48,7 @@ struct CommandLineOptions {
     bool                   enableRenderDoc = false;
     bool                   benchmark       = false;
 
-    GameplayDriver driver = GameplayDriver::Scripted;
+    GameplayDriver driver = GameplayDriver::Cpp;
 
     bool helpRequested       = false;
     bool versionRequested    = false;

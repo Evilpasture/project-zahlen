@@ -27,7 +27,7 @@ struct Scene;
 
 namespace FallbackScene {
 
-enum class FallbackReason : uint8_t { None = 0, MissingBootScript, MissingNativeModule, ScriptExecutionError };
+enum class FallbackReason : uint8_t { None = 0, MissingNativeModule };
 
 // Compiled-in fail-safe scene. Hosts that do not want it set
 // `EngineConfig::enableFallbackScene` false at Create rather than talking to

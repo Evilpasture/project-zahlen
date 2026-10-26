@@ -45,3 +45,7 @@ add_subdirectory(glTF)
 add_subdirectory(BSP)
 add_subdirectory(Fonts)
 add_subdirectory(SVG)
+if(TARGET LuaJIT)
+    add_subdirectory(lua)
+endif()
+

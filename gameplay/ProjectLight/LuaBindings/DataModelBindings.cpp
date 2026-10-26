@@ -7,13 +7,9 @@
 // It is deliberately an adapter: Instance userdata retain the canonical C++
 // objects, while value userdata and event connections are Lua-boundary details.
 //
-// This file used to live in extensions/Scripting/Lua/. It is ProjectLight's
-// binding to the Lua runtime, not the runtime's knowledge of ProjectLight --
-// the runtime is generic and Core owns the IScriptRuntime seam it implements,
-// while the object graph being exposed belongs to this gameplay module. Moving
-// it here is what lets zahlen_scripting_lua stop linking zahlen_datamodel, and
-// it is the same boundary configure/check_layer_dag.py enforces: a layer below
-// never names a layer above.
+// It is ProjectLight's adapter onto the sandboxed LuaJIT VM (`zahlen_lua`),
+// keeping `plugins/lua/` completely ignorant of gameplay types so the layer DAG
+// (`configure/check_layer_dag.py`) never points upward.
 
 #include <LuaBindings/DataModelBindings.hpp>
 

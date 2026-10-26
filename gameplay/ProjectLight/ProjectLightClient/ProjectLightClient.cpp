@@ -451,7 +451,7 @@ constexpr ModuleStep kFrameSteps[] = {
         .name      = "ProjectLightNetworkPoll",
         .run       = &LightClientPrePhysicsStep,
         .placement = StepPlacement::After,
-        .anchor    = "ScriptAndShaderReload",
+        .anchor    = "StateAndShaderReload",
     },
     {
         .phase     = FramePhase::Physics,

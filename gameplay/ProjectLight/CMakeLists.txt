@@ -7,6 +7,6 @@
 add_subdirectory(DataModel)
 add_subdirectory(ProjectLightClient)
 
-# LuaBindings/ is deliberately not added here: it depends on the Lua runtime in
-# extensions/Scripting/Lua, and the root composition configures both after this
-# directory. See its CMakeLists for what it owns.
+if(TARGET zahlen_lua)
+    add_subdirectory(LuaBindings)
+endif()

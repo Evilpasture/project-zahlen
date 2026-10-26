@@ -25,7 +25,6 @@ RUN pacman -Sy --noconfirm && \
     seatd \
     zstd \
     gtest \
-    fennel \
     pkgconf \
     wget \
     tar \
@@ -111,15 +110,7 @@ RUN pacman -S --needed --noconfirm \
 
 WORKDIR /app
 
-# The payload the builder collected: ./zahlen, its libraries, ./data/base.pak and
-# ./scripts. All four are read relative to the working directory.
-#
-# ./scripts is the tree the build assembles -- Fennel compiled to Lua, the
-# generated ffi_cdef_generated.lua and the static script files -- and not a
-# source directory: the sources moved to extensions/Scripting/Lua/scripts in the
-# layout refactor, so the top-level scripts directory this used to copy is gone.
-# ZHLN_COMPILED_SCRIPTS_DIR is the build tree, which makes build/scripts the tree
-# that `require 'scripts.core.*'` resolves against.
+# The payload the builder collected: ./zahlen, its libraries, and ./data/base.pak.
 COPY --from=builder /workspace/dist/ /app/
 # Shader sources and loose assets are read, and watched for hot reload, from this
 # layout rather than from the pak.

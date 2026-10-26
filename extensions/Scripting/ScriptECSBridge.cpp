@@ -6,7 +6,6 @@
 namespace ZHLN {
 
 auto ScriptECSBridge::ResolveBoxedPointer(const BoxedObject& obj) const -> std::expected<void*, ErrorCode> {
-    // Path A: Stable ECS Handle Re-resolution
     if (obj.ownerEntity != Entity::Null()) {
         if (!m_registry.IsAlive(obj.ownerEntity)) {
             return std::unexpected(ScriptError::EntityNotFound);
@@ -107,11 +106,10 @@ auto ScriptECSBridge::GetProperty(Entity entity, std::string_view compName, std:
 }
 
 auto ScriptECSBridge::GetPropertyOf(const ScriptVal& parentVal, std::string_view propName) const -> std::expected<ScriptVal, ErrorCode> {
-    void*                 parentPtr = nullptr;
-    std::string_view      typeName;
-    Entity                ownerEnt = Entity::Null();
-    std::string_view      rootComp;
-    std::shared_ptr<void> parentOwnedKeepAlive = nullptr;
+    void*            parentPtr = nullptr;
+    std::string_view typeName;
+    Entity           ownerEnt = Entity::Null();
+    std::string_view rootComp;
 
     if (const auto* boxed = std::get_if<BoxedObject>(&parentVal)) {
         auto resolved = ResolveBoxedPointer(*boxed);
@@ -122,10 +120,6 @@ auto ScriptECSBridge::GetPropertyOf(const ScriptVal& parentVal, std::string_view
         typeName  = boxed->typeName;
         ownerEnt  = boxed->ownerEntity;
         rootComp  = boxed->compName;
-    } else if (const auto* owned = std::get_if<OwnedObject>(&parentVal)) {
-        parentPtr            = owned->ptr.get();
-        typeName             = owned->typeName;
-        parentOwnedKeepAlive = owned->ptr;
     } else {
         return std::unexpected(ScriptError::TypeMismatch);
     }
@@ -148,11 +142,6 @@ auto ScriptECSBridge::GetPropertyOf(const ScriptVal& parentVal, std::string_view
 
     ScriptVal outVal = res.value();
     if (auto* childBoxed = std::get_if<BoxedObject>(&outVal)) {
-        if (parentOwnedKeepAlive) {
-            std::shared_ptr<void> aliasedPtr(parentOwnedKeepAlive, childBoxed->rawPtr);
-            return OwnedObject {.typeName = childBoxed->typeName, .ptr = aliasedPtr};
-        }
-
         childBoxed->ownerEntity = ownerEnt;
         childBoxed->compName    = rootComp;
         childBoxed->propName    = propName;
@@ -160,7 +149,8 @@ auto ScriptECSBridge::GetPropertyOf(const ScriptVal& parentVal, std::string_view
     return outVal;
 }
 
-auto ScriptECSBridge::SetProperty(Entity entity, std::string_view compName, std::string_view propName, const ScriptVal& val) -> std::expected<void, ErrorCode> {
+auto ScriptECSBridge::SetProperty(Entity entity, std::string_view compName, std::string_view propName, const ScriptVal& val)
+    -> std::expected<void, ErrorCode> {
     if (!m_registry.IsAlive(entity)) {
         return std::unexpected(ScriptError::EntityNotFound);
     }
@@ -209,9 +199,6 @@ auto ScriptECSBridge::SetPropertyOf(ScriptVal& parentVal, std::string_view propN
         }
         parentPtr = resolved.value();
         typeName  = boxed->typeName;
-    } else if (auto* owned = std::get_if<OwnedObject>(&parentVal)) {
-        parentPtr = owned->ptr.get();
-        typeName  = owned->typeName;
     } else {
         return std::unexpected(ScriptError::TypeMismatch);
     }
@@ -237,42 +224,6 @@ auto ScriptECSBridge::SetPropertyOf(ScriptVal& parentVal, std::string_view propN
     }
 
     return propIt->second.set(parentPtr, valueToAssign);
-}
-
-auto ScriptECSBridge::CallMethod(Entity entity, std::string_view compName, std::string_view methodName, std::span<const ScriptVal> args)
-    -> std::expected<ScriptVal, ErrorCode> {
-    if (!m_registry.IsAlive(entity)) {
-        return std::unexpected(ScriptError::EntityNotFound);
-    }
-
-    const auto& registry = ScriptBinder::Get().classes;
-    auto        it       = registry.find(compName);
-    if (it == registry.end()) {
-        return std::unexpected(ScriptError::TypeNotFound);
-    }
-
-    uint32_t familyID = ECS::Registry::GetFamilyIDFromName(compName);
-    if (familyID == 0xFFFFFFFF) {
-        return std::unexpected(ScriptError::ComponentNotFound);
-    }
-
-    void* compPtr = m_registry.GetRawByFamily(entity, familyID);
-    if (compPtr == nullptr) {
-        return std::unexpected(ScriptError::ComponentNotFound);
-    }
-
-    std::vector<ScriptVal> resolvedArgs(args.begin(), args.end());
-    for (auto& arg: resolvedArgs) {
-        if (auto* boxed = std::get_if<BoxedObject>(&arg)) {
-            auto resolvedPtr = ResolveBoxedPointer(*boxed);
-            if (!resolvedPtr) {
-                return std::unexpected(resolvedPtr.error());
-            }
-            boxed->rawPtr = resolvedPtr.value();
-        }
-    }
-
-    return it->second.InvokeMethod(compPtr, methodName, resolvedArgs);
 }
 
 auto ScriptECSBridge::GetArrayElement(const ScriptVal& arrayVal, size_t index) -> std::expected<ScriptVal, ErrorCode> {

@@ -27,21 +27,18 @@ struct CommandLineTestSuite {
                 ZHLN::Test::ExpectEq(opts.driver, ZHLN::GameplayDriver::Cpp);
             }
 
-            // The canonical scripted value and the scripting extra's aliases
-            // (fennel, lua) all map to the same driver.
-            std::array<char*, 2> scriptedArgv = {(char*) "zahlen", (char*) "--driver=scripted"};
-            auto                 scriptedRes  = ZHLN::HandleCommandLine(scriptedArgv);
-            ZHLN::Test::ExpectTrue(scriptedRes.has_value());
-            if (scriptedRes) {
-                ZHLN::Test::ExpectEq(scriptedRes->driver, ZHLN::GameplayDriver::Scripted);
+            // Native aliases map to GameplayDriver::Cpp; retired scripted/fennel
+            // drivers are rejected cleanly as InvalidValue.
+            std::array<char*, 2> nativeArgv = {(char*) "zahlen", (char*) "--driver=native"};
+            auto                 nativeRes  = ZHLN::HandleCommandLine(nativeArgv);
+            ZHLN::Test::ExpectTrue(nativeRes.has_value());
+            if (nativeRes) {
+                ZHLN::Test::ExpectEq(nativeRes->driver, ZHLN::GameplayDriver::Cpp);
             }
 
-            std::array<char*, 2> fennelArgv = {(char*) "zahlen", (char*) "--driver=fennel"};
-            auto                 fennelRes  = ZHLN::HandleCommandLine(fennelArgv);
-            ZHLN::Test::ExpectTrue(fennelRes.has_value());
-            if (fennelRes) {
-                ZHLN::Test::ExpectEq(fennelRes->driver, ZHLN::GameplayDriver::Scripted);
-            }
+            std::array<char*, 2> retiredArgv = {(char*) "zahlen", (char*) "--driver=scripted"};
+            auto                 retiredRes  = ZHLN::HandleCommandLine(retiredArgv);
+            ZHLN::Test::ExpectFalse(retiredRes.has_value());
 
             return {};
         }

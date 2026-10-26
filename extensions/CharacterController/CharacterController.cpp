@@ -72,7 +72,7 @@ constexpr ModuleStep kFrameSteps[] = {
         .name      = "PlayerInputTranslate",
         .run       = &PlayerIntentStep,
         .placement = StepPlacement::After,
-        .anchor    = "ScriptAndShaderReload",
+        .anchor    = "StateAndShaderReload",
     },
 };
 

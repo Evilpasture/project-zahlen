@@ -38,14 +38,12 @@ set(RAW_ENGINE_SOURCES
     system/SceneCleanupSystem.cpp
     CommandLine.cpp
     FramePlan.cpp
-    ScriptCommandRegistry.cpp
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp
     system/LightingSystem.cpp
     system/EnvironmentSunSystem.cpp
     system/CameraSystem.cpp
     Scene.cpp
-    ScriptRunner.cpp
 )
 
 zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})

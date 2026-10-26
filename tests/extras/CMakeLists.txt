@@ -203,20 +203,24 @@ zahlen_register_extras_group_member(Extras_Simulation TestTerrainLifecycle "Terr
 zahlen_register_extras_group_member(Extras_Simulation TestALife "ALifeTestSuite::*")
 zahlen_register_extras_group_member(Extras_Simulation TestDataModel "TestDataModelSuite::*")
 
-# 3. Extras_Serialization: JSON, TOML, and zcook GLB container inspection.
+# 3. Extras_Serialization: JSON, TOML, ReflectLua, and zcook GLB container inspection.
 zahlen_add_extras_group(Extras_Serialization
     RunExtrasSerializationTests.cpp
     TestJSON.cpp
     TestTOML.cpp
+    TestReflectLua.cpp
     TestCookerGLB.cpp
 )
 target_link_libraries(Extras_Serialization PRIVATE
     zahlen_engine
     zahlen_serialization
+    zahlen_lua
+    zahlen_ragdoll_authoring
 )
 add_dependencies(Extras_Serialization zcook)
 zahlen_register_extras_group_member(Extras_Serialization TestJSON "JSONTestSuite::*")
 zahlen_register_extras_group_member(Extras_Serialization TestTOML "TOMLTestSuite::*")
+zahlen_register_extras_group_member(Extras_Serialization TestReflectLua "ReflectLuaSuite::*")
 zahlen_register_extras_group_member(Extras_Serialization TestCookerGLB "CookerGlbTestSuite::*"
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/.."
 )
@@ -372,7 +376,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_engine
-    zahlen_scripting_lua
+    zahlen_scripting
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE

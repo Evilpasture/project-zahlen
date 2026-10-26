@@ -11,7 +11,7 @@
 
 #include <DataModel/DataModel.hpp>
 #include <LuaBindings/DataModelBindings.hpp>
-#include <Scripting/Lua/LuaScriptRuntime.hpp>
+#include <lua/ReflectLua.hpp>
 
 #include <Jolt/Math/Vec3.h>
 #include <cmath>
@@ -42,12 +42,13 @@ struct TestLuaDataModelSuite {
             ZHLN::Test::ExpectTrue(player->SetParent(players).has_value());
             ZHLN::Test::ExpectTrue(players->SetLocalPlayer(player).has_value());
 
-            ZHLN::LuaScriptRuntime runtime;
-            runtime.AddBindingInitializer([&dataModel](lua_State* state) {
-                RegisterDataModelLuaBindings(state, dataModel);
-            });
-            runtime.Initialize(nullptr);
-            runtime.ExecuteString(R"lua(
+            auto vm = ZHLN::ReflectLua::LuaVm::Create();
+            ZHLN::Test::ExpectTrue(vm.has_value());
+            if (!vm) {
+                return {};
+            }
+            RegisterDataModelLuaBindings(vm->RawState(), dataModel);
+            const auto execRes = vm->ExecuteString(R"lua(
                 local Workspace = game:GetService("Workspace")
                 local Players = game:GetService("Players")
                 local localPlayer = Players.LocalPlayer
@@ -124,7 +125,7 @@ struct TestLuaDataModelSuite {
                 torso.CanCollide = transitions == 1
                 assert(found == torso and character:FindFirstChildWhichIsA("BasePart", true) == torso)
             )lua");
-            runtime.Shutdown();
+            ZHLN::Test::ExpectTrue(execRes.has_value());
 
             const InstancePtr characterInstance = workspace->FindFirstChild("Builder");
             ZHLN::Test::ExpectTrue(characterInstance != nullptr);

@@ -5,12 +5,14 @@
 
 auto RunJSONSuite() -> ZHLN::Test::TestStats;
 auto RunTOMLSuite() -> ZHLN::Test::TestStats;
+auto RunReflectLuaSuite() -> ZHLN::Test::TestStats;
 auto RunCookerGlbSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
         RunJSONSuite,
         RunTOMLSuite,
+        RunReflectLuaSuite,
         RunCookerGlbSuite
     );
 }

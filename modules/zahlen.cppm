@@ -168,7 +168,6 @@ module;
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
-#include <Zahlen/Scripting.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/SystemContext.hpp>
@@ -199,7 +198,6 @@ export import :ecs;
 export import :physics;
 export import :render;
 export import :audio;
-export import :scripting;
 export import :engine;
 
 export namespace JPH {
@@ -465,8 +463,6 @@ using ZHLN::AudioContext;
 using ZHLN::AudioFilterType;
 using ZHLN::AudioNoiseType;
 using ZHLN::AudioWaveformType;
-
-using ZHLN::ScriptRunner;
 
 using ZHLN::AssetLoadRequest;
 using ZHLN::AssetManager;

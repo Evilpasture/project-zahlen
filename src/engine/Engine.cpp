@@ -26,7 +26,6 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Scripting.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Window.hpp>
@@ -57,10 +56,8 @@ struct EngineImpl {
     std::unique_ptr<Kernel> kernel;
     std::unique_ptr<World>  world;
 
-    std::unique_ptr<ScriptRunner>       scriptRunner;
     std::unique_ptr<NativeScriptModule> nativeScriptModule;
-    std::vector<FS::FileWatchHandle> bootScriptWatches;
-    GameplayDriver               activeGameplayDriver = GameplayDriver::Cpp;
+    GameplayDriver                      activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback uiCallback = nullptr;
     UIDrawData                              pendingUIData {};
@@ -73,7 +70,6 @@ struct EngineImpl {
     std::vector<Module> modules;
     FramePlan           framePlan;
     bool                framePlanBuilt = false;
-    ScriptCommandRegistry scriptCommands;
 
     Engine::PhysicsSubstepHooks                  physicsSubstepHooks;
     ECS::ExtensionServices                       extensions;
@@ -242,10 +238,8 @@ auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<En
 auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode> {
     ZHLN::Fiber::InitMainThread();
 
-    _impl               = std::make_unique<EngineImpl>();
-    _impl->config       = cfg;
-    _impl->scriptRunner = std::make_unique<ScriptRunner>();
-    _impl->scriptRunner->SetRuntimeChanged([this] { RegisterBootScriptWatches(); });
+    _impl         = std::make_unique<EngineImpl>();
+    _impl->config = cfg;
 
     auto world_res = World::Create(cfg.physics, true);
     if (!world_res) {
@@ -306,31 +300,6 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     return {};
 }
 
-void Engine::RegisterBootScriptWatches() {
-    if (_impl == nullptr || _impl->kernel == nullptr) {
-        return;
-    }
-
-    for (const FS::FileWatchHandle handle: _impl->bootScriptWatches) {
-        static_cast<void>(_impl->kernel->GetFileSystemWatcher().Unwatch(handle));
-    }
-    _impl->bootScriptWatches.clear();
-
-    if (_impl->scriptRunner == nullptr) {
-        return;
-    }
-
-    const auto reloadBootScript = [this](const FS::FileWatchEvent& event) {
-        if (_impl->activeGameplayDriver == GameplayDriver::Cpp || event.action == FS::FileWatchAction::Deleted) {
-            return;
-        }
-        _impl->scriptRunner->ReloadFile(event.path.string());
-    };
-    for (const std::string_view path: _impl->scriptRunner->BootScriptPaths()) {
-        _impl->bootScriptWatches.push_back(_impl->kernel->GetFileSystemWatcher().WatchFile(std::filesystem::path(path), reloadBootScript));
-    }
-}
-
 Engine::~Engine() {
     if (_impl == nullptr) {
         return;
@@ -354,7 +323,6 @@ Engine::~Engine() {
     _impl->renderGraph.reset();
     _impl->extensions.Clear();
     _impl->world.reset();
-    _impl->bootScriptWatches.clear();
     _impl->nativeScriptModule.reset();
     _impl->kernel.reset();
 }
@@ -513,9 +481,6 @@ auto Engine::GetAssetManager() -> AssetManager& {
 auto Engine::GetAudioContext() -> AudioContext& {
     return _impl->kernel->GetAudioContext();
 }
-auto Engine::GetScriptRunner() -> ScriptRunner& {
-    return *_impl->scriptRunner;
-}
 auto Engine::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
     return _impl->kernel->GetFileSystemWatcher();
 }
@@ -631,9 +596,6 @@ auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePla
     if (module.teardown != nullptr) {
         AddTeardownHook(module.teardown);
     }
-    if (module.registerScriptCommands != nullptr) {
-        module.registerScriptCommands(_impl->scriptCommands);
-    }
 
     _impl->modules.push_back(module);
     if (module.addGraphSystems != nullptr && _impl->updateGraph != nullptr) {
@@ -653,14 +615,6 @@ auto Engine::GetFramePlan() -> FramePlan& {
 
 auto Engine::GetFramePlan() const noexcept -> const FramePlan& {
     return _impl->framePlan;
-}
-
-auto Engine::GetScriptCommands() noexcept -> ScriptCommandRegistry& {
-    return _impl->scriptCommands;
-}
-
-auto Engine::GetScriptCommands() const noexcept -> const ScriptCommandRegistry& {
-    return _impl->scriptCommands;
 }
 
 void Engine::EnsureFramePlan() {
