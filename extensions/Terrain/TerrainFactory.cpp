@@ -19,60 +19,6 @@
 
 namespace ZHLN::Terrain {
 
-namespace {
-
-// Meshlet partitioning for terrain meshes. Lifted from the renderer's
-// MeshBuilder helper (which stays core-private): the terrain generator needs
-// its meshes on the mesh pipeline exactly like before the move, and the only
-// ingredients are the public BuildMeshlets + RenderContext buffer API.
-void AttachTerrainMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPosition> positions, std::span<const uint32_t> indices) {
-    if (positions.empty()) {
-        return;
-    }
-
-    std::vector<uint32_t> sequential;
-    if (indices.empty()) {
-        sequential.resize(positions.size());
-        for (uint32_t i = 0; i < sequential.size(); ++i) {
-            sequential[i] = i;
-        }
-        indices = sequential;
-    }
-
-    // Triangle lists only: anything else has no meshlet representation.
-    if (indices.size() < 3 || (indices.size() % 3) != 0) {
-        return;
-    }
-
-    const auto built = BuildMeshlets(indices, positions);
-    if (built.Empty()) {
-        return;
-    }
-
-    const auto packedMeshlets = PackMeshlets(built.meshlets);
-
-    // Storage, not vertex data: the task/mesh shaders reach these only through
-    // their device address, they are never bound to the input assembler.
-    mesh.meshletBuffer       = ctx.CreateBuffer(BufferDesc {.usage = BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = kMeshletPackedBytes});
-    mesh.meshletVertexBuffer = ctx.CreateBuffer<BufferUsage::Storage>(std::span {built.vertices});
-    mesh.meshletTriBuffer    = ctx.CreateBuffer<BufferUsage::Storage>(std::span {built.triangles});
-
-    if (mesh.meshletBuffer == BufferHandle::Invalid || mesh.meshletVertexBuffer == BufferHandle::Invalid || mesh.meshletTriBuffer == BufferHandle::Invalid) {
-        ctx.DestroyBuffer(mesh.meshletBuffer);
-        ctx.DestroyBuffer(mesh.meshletVertexBuffer);
-        ctx.DestroyBuffer(mesh.meshletTriBuffer);
-        mesh.meshletBuffer       = BufferHandle::Invalid;
-        mesh.meshletVertexBuffer = BufferHandle::Invalid;
-        mesh.meshletTriBuffer    = BufferHandle::Invalid;
-        mesh.meshletCount        = 0;
-        return;
-    }
-
-    mesh.meshletCount = static_cast<uint32_t>(built.meshlets.size());
-}
-
-} // namespace
-
 auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh {
     float halfSize = worldSize / 2.0f;
     float dx       = worldSize / (sampleCount - 1);
@@ -172,12 +118,21 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
         }
     }
 
-    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
-    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
+    BufferHandle         posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle         frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
+    BufferHandle         surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
+    const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(positions));
 
-    Mesh finalMesh {.posBuffer = posVbo, .tangentFrameBuffer = frameVbo, .surfaceBuffer = surfaceVbo, .vertexCount = static_cast<uint32_t>(positions.size())};
-    AttachTerrainMeshlets(ctx, finalMesh, positions, {});
+    Mesh finalMesh {
+        .posBuffer           = posVbo,
+        .tangentFrameBuffer  = frameVbo,
+        .surfaceBuffer       = surfaceVbo,
+        .vertexCount         = static_cast<uint32_t>(positions.size()),
+        .meshletBuffer       = ml.meshlets,
+        .meshletVertexBuffer = ml.vertices,
+        .meshletTriBuffer    = ml.triangles,
+        .meshletCount        = ml.count,
+    };
     if (auto res = ctx.BuildMeshBLAS(finalMesh); !res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::LogWarning("CreateTerrainMeshFromData: Failed to build mesh BLAS: {}", res.error());
@@ -383,16 +338,20 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
     BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
     BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
 
+    const MeshletStreams ml = ctx.UploadMeshlets(BuildMeshlets(positions));
     auto finalMesh = Mesh {
-        .posBuffer          = posVbo,
-        .tangentFrameBuffer = frameVbo,
-        .surfaceBuffer      = surfaceVbo,
-        .skinBuffer         = BufferHandle::Invalid,
-        .indexBuffer        = BufferHandle::Invalid,
-        .vertexCount        = static_cast<uint32_t>(positions.size()),
-        .indexCount         = 0
+        .posBuffer           = posVbo,
+        .tangentFrameBuffer  = frameVbo,
+        .surfaceBuffer       = surfaceVbo,
+        .skinBuffer          = BufferHandle::Invalid,
+        .indexBuffer         = BufferHandle::Invalid,
+        .vertexCount         = static_cast<uint32_t>(positions.size()),
+        .indexCount          = 0,
+        .meshletBuffer       = ml.meshlets,
+        .meshletVertexBuffer = ml.vertices,
+        .meshletTriBuffer    = ml.triangles,
+        .meshletCount        = ml.count,
     };
-    AttachTerrainMeshlets(ctx, finalMesh, positions, {});
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {

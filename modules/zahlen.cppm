@@ -433,6 +433,7 @@ using ZHLN::DrawParams;
 using ZHLN::Material;
 using ZHLN::MaterialDesc;
 using ZHLN::Mesh;
+using ZHLN::MeshletStreams;
 using ZHLN::PipelineHandle;
 using ZHLN::RenderContext;
 

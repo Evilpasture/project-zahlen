@@ -420,28 +420,11 @@ void AssemblePrefabParts(
             continue;
         }
 
-        const auto meshletResult = BuildMeshlets(std::span {part.indices}, std::span {part.positions});
-
-        const BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.positions});
-        const BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.tangentFrames});
-        const BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.surfaces});
-        const BufferHandle ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {part.indices});
-
-        const bool hasMeshlets    = !meshletResult.Empty();
-        const auto packedMeshlets = PackMeshlets(meshletResult.meshlets);
-
-        BufferHandle meshletVbo       = hasMeshlets ? ctx.CreateBuffer(
-                                                          BufferDesc {
-                                                              .usage  = BufferUsage::Storage,
-                                                              .data   = std::as_bytes(std::span {packedMeshlets}),
-                                                              .stride = kMeshletPackedBytes,
-                                                          }
-                                                      ) :
-                                                      BufferHandle::Invalid;
-        BufferHandle meshletVertexVbo = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {meshletResult.vertices}) : BufferHandle::Invalid;
-        BufferHandle meshletTriVbo    = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {meshletResult.triangles}) : BufferHandle::Invalid;
-        const bool   completeMeshlets = hasMeshlets && meshletVbo != BufferHandle::Invalid && meshletVertexVbo != BufferHandle::Invalid &&
-                                        meshletTriVbo != BufferHandle::Invalid;
+        const BufferHandle   posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.positions});
+        const BufferHandle   frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.tangentFrames});
+        const BufferHandle   surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.surfaces});
+        const BufferHandle   ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {part.indices});
+        const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(std::span {part.indices}, std::span {part.positions}));
 
         Mesh subMesh = {
             .posBuffer           = posVbo,
@@ -451,10 +434,10 @@ void AssemblePrefabParts(
             .indexBuffer         = ibo,
             .vertexCount         = part.VertexCount(),
             .indexCount          = part.IndexCount(),
-            .meshletBuffer       = meshletVbo,
-            .meshletVertexBuffer = meshletVertexVbo,
-            .meshletTriBuffer    = meshletTriVbo,
-            .meshletCount        = completeMeshlets ? static_cast<uint32_t>(meshletResult.meshlets.size()) : 0u,
+            .meshletBuffer       = ml.meshlets,
+            .meshletVertexBuffer = ml.vertices,
+            .meshletTriBuffer    = ml.triangles,
+            .meshletCount        = ml.count,
         };
 
         if (auto res = ctx.BuildMeshBLAS(subMesh); !res) [[unlikely]] {

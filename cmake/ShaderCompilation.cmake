@@ -1090,8 +1090,7 @@ add_custom_target(zahlen_shaders_spv
 # --- THE GPU HOST TYPES ---
 # zshader's second mode compiles the gpu_abi module in-process and walks its
 # reflected layout into the generated host structs (GeneratedGpuTypes.hpp):
-# every struct gpu_abi.slang wraps -- minus GPUMeshlet, whose ABI is the raw
-# word protocol rather than the declared layout (see GpuTypes.cpp) -- plus the
+# every struct gpu_abi.slang wraps -- GPUMeshlet included -- plus the
 # scene push layout (Slang::kScenePushLayout) the heap writer pushes with.
 # src/render/GpuLayout.hpp includes the header and re-exports the
 # renderer-only structs under the names the renderer uses; it is

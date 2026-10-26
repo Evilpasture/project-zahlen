@@ -107,6 +107,7 @@ my %FIRST_PARTY = (
     RenderTextureHandle => ['include/Zahlen/Render/Handles.hpp'],
     FrameTarget      => ['include/Zahlen/Render/Handles.hpp'],
     Mesh             => ['include/Zahlen/Render/Types.hpp'],
+    MeshletStreams   => ['include/Zahlen/Render/Types.hpp'],
     Material         => ['include/Zahlen/Render/Types.hpp'],
     DrawFlags        => ['include/Zahlen/Render/Types.hpp'],
     CSGOperation     => ['include/Zahlen/Render/Types.hpp'],
@@ -119,7 +120,6 @@ my %FIRST_PARTY = (
     kMeshletConeWeight => ['include/Zahlen/Meshlet.hpp'],
     kMeshletsPerTaskGroup => ['include/Zahlen/Meshlet.hpp'],
     kMeshShaderGroupSize => ['include/Zahlen/Meshlet.hpp'],
-    kMeshletPackedBytes => ['include/Zahlen/Meshlet.hpp'],
     # Reached by accident before the sweep: the ECS spells LightType, the
     # renderer spells GraphicsSettings, and neither included its own header.
     LightType        => ['include/Zahlen/Render/GpuEnums.hpp'],

@@ -93,6 +93,18 @@ struct MaterialTextureTransform {
 };
 using MaterialTextureTransforms = std::array<MaterialTextureTransform, kMaterialTextureSlotCount>;
 
+struct MeshletStreams {
+    using enum BufferHandle;
+    BufferHandle meshlets  = Invalid;
+    BufferHandle vertices  = Invalid;
+    BufferHandle triangles = Invalid;
+    uint32_t     count     = 0;
+
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return count != 0 && meshlets != Invalid && vertices != Invalid && triangles != Invalid;
+    }
+};
+
 struct Mesh {
     using enum BufferHandle;
     BufferHandle posBuffer          = Invalid;

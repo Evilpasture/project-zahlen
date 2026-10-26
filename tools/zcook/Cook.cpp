@@ -72,7 +72,7 @@ int CookMesh(int argc, char** argv) {
 
     CookedMeshHeader meshHeader {};
     meshHeader.magic   = 0x3048534D;
-    meshHeader.version = 7; // Version 7: meshlet records reorder coneCutoff before coneAxis (16-alignment, no implicit pad)
+    meshHeader.version = 8; // Version 8: serialize logical MeshletDesc records (60B) instead of GPU wire structs
 
     if (compiled.positions.empty()) {
         meshHeader.boundingBoxMin[0] = meshHeader.boundingBoxMin[1] = meshHeader.boundingBoxMax[0] = meshHeader.boundingBoxMax[1] =
@@ -91,9 +91,9 @@ int CookMesh(int argc, char** argv) {
         meshHeader.hasSkin           = compiled.isSkinned ? 1 : 0;
     }
 
-    meshHeader.meshletCount        = static_cast<uint32_t>(compiled.meshlets.size());
-    meshHeader.meshletVertexCount  = static_cast<uint32_t>(compiled.meshletVertices.size());
-    meshHeader.meshletTriByteCount = static_cast<uint32_t>(compiled.meshletTriangles.size());
+    meshHeader.meshletCount        = static_cast<uint32_t>(compiled.meshlets.meshlets.size());
+    meshHeader.meshletVertexCount  = static_cast<uint32_t>(compiled.meshlets.vertices.size());
+    meshHeader.meshletTriByteCount = static_cast<uint32_t>(compiled.meshlets.triangles.size());
 
     fs::create_directories(fs::path(outPath).parent_path());
     FILE* out = std::fopen(outPath.c_str(), "wb");
@@ -117,13 +117,13 @@ int CookMesh(int argc, char** argv) {
             std::fwrite(compiled.indices.data(), 1, compiled.indices.size() * sizeof(uint32_t), out);
         }
 
-        // VK_EXT_mesh_shader streams (version 4). Written last so that a v3
-        // reader that stops after the index stream still sees a valid mesh.
-        if (!compiled.meshlets.empty()) {
-            const auto packedMeshlets = PackMeshlets(compiled.meshlets);
-            std::fwrite(packedMeshlets.data(), 1, packedMeshlets.size(), out);
-            std::fwrite(compiled.meshletVertices.data(), 1, compiled.meshletVertices.size() * sizeof(uint32_t), out);
-            std::fwrite(compiled.meshletTriangles.data(), 1, compiled.meshletTriangles.size(), out);
+        // Logical meshlet streams (version 8): MeshletDesc[meshletCount] +
+        // meshletVertices[meshletVertexCount] + meshletTriangles[meshletTriByteCount].
+        // RenderContext::UploadMeshlets packs MeshletDesc into Slang::GPUMeshlet at upload time.
+        if (!compiled.meshlets.Empty()) {
+            std::fwrite(compiled.meshlets.meshlets.data(), 1, compiled.meshlets.meshlets.size() * sizeof(MeshletDesc), out);
+            std::fwrite(compiled.meshlets.vertices.data(), 1, compiled.meshlets.vertices.size() * sizeof(uint32_t), out);
+            std::fwrite(compiled.meshlets.triangles.data(), 1, compiled.meshlets.triangles.size(), out);
         }
         std::fclose(out);
     }

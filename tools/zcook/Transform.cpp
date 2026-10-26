@@ -238,11 +238,8 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
     // streams above are still written to the .zmesh verbatim: the BLAS builder
     // and the legacy vertex pipeline consume them unchanged, meshlets are only
     // an additional index view over the same vertex pool.
-    if (auto meshlets = BuildMeshlets(result.indices, result.positions); !meshlets.Empty()) {
-        result.meshlets         = std::move(meshlets.meshlets);
-        result.meshletVertices  = std::move(meshlets.vertices);
-        result.meshletTriangles = std::move(meshlets.triangles);
-    } else if (!result.indices.empty()) {
+    result.meshlets = BuildMeshlets(result.indices, result.positions);
+    if (result.meshlets.Empty() && !result.indices.empty()) {
         std::println(stderr, "[zcook] WARNING: meshlet generation produced no clusters for mesh '{}'.", mesh.id);
     }
 

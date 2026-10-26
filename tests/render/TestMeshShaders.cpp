@@ -219,7 +219,7 @@ struct MeshShaderTestSuite {
         // This is the exact code path both zcook and the runtime glTF importer
         // use, so a regression here corrupts every cooked asset.
         std::expected<void, ZHLN::ErrorCode> meshlet_partitioning_invariants() {
-            static_assert(ZHLN::kMeshletPackedBytes == 64u, "meshlet wire stride: fetchMeshlet and the cooked format agree on 64");
+            static_assert(sizeof(ZHLN::MeshletDesc) == 60u, "cooked .zmesh MeshletDesc record stride");
             static_assert(ZHLN::kMeshletMaxTriangles % 4 == 0, "meshoptimizer requires max_triangles to be a multiple of 4");
             static_assert(ZHLN::kMeshletMaxVertices <= 255, "micro indices are 8 bit");
 
@@ -246,9 +246,7 @@ struct MeshShaderTestSuite {
                 // 3 micro indices padded up to the 4-byte word the mesh shader loads.
                 ZHLN::Test::ExpectEq(built.triangles.size(), static_cast<size_t>(4));
                 ZHLN::Test::ExpectGt(built.meshlets[0].sphereRadius, 0.0f);
-                // The GPU ABI is frozen: the shaders index these streams by hand.
-                // The packed wire stride carries the pin the struct's assert used to.
-                ZHLN::Test::ExpectEq(ZHLN::PackMeshlets(built.meshlets).size(), built.meshlets.size() * ZHLN::kMeshletPackedBytes);
+                ZHLN::Test::ExpectEq(ZHLN::BuildMeshlets(pos), built);
             }
 
             // --- c) A real surface: nothing lost, nothing out of bounds ---

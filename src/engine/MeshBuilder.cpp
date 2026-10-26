@@ -32,49 +32,6 @@ struct VertexStreams {
     }
 };
 
-void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPosition> positions, std::span<const uint32_t> indices) {
-    if (positions.empty()) {
-        return;
-    }
-
-    std::vector<uint32_t> sequential;
-    if (indices.empty()) {
-        sequential.resize(positions.size());
-        for (uint32_t i = 0; i < sequential.size(); ++i) {
-            sequential[i] = i;
-        }
-        indices = sequential;
-    }
-
-    if (indices.size() < 3 || (indices.size() % 3) != 0) {
-        return;
-    }
-
-    const auto built = BuildMeshlets(indices, positions);
-    if (built.Empty()) {
-        return;
-    }
-
-    const auto packedMeshlets = PackMeshlets(built.meshlets);
-
-    mesh.meshletBuffer       = ctx.CreateBuffer(BufferDesc {.usage = BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = kMeshletPackedBytes});
-    mesh.meshletVertexBuffer = ctx.CreateBuffer<BufferUsage::Storage>(std::span {built.vertices});
-    mesh.meshletTriBuffer    = ctx.CreateBuffer<BufferUsage::Storage>(std::span {built.triangles});
-
-    if (mesh.meshletBuffer == BufferHandle::Invalid || mesh.meshletVertexBuffer == BufferHandle::Invalid || mesh.meshletTriBuffer == BufferHandle::Invalid) {
-        ctx.DestroyBuffer(mesh.meshletBuffer);
-        ctx.DestroyBuffer(mesh.meshletVertexBuffer);
-        ctx.DestroyBuffer(mesh.meshletTriBuffer);
-        mesh.meshletBuffer       = BufferHandle::Invalid;
-        mesh.meshletVertexBuffer = BufferHandle::Invalid;
-        mesh.meshletTriBuffer    = BufferHandle::Invalid;
-        mesh.meshletCount        = 0;
-        return;
-    }
-
-    mesh.meshletCount = static_cast<uint32_t>(built.meshlets.size());
-}
-
 } // namespace
 
 auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
@@ -89,21 +46,25 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
         streams.Push(n, t, Math::PackUV(0.0f, 0.0f), c);
     }
 
-    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
-    BufferHandle ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
+    BufferHandle         posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle         frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle         surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    BufferHandle         ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
+    const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(indices, positions));
 
     Mesh finalMesh = {
-        .posBuffer          = posVbo,
-        .tangentFrameBuffer = frameVbo,
-        .surfaceBuffer      = surfaceVbo,
-        .skinBuffer         = BufferHandle::Invalid,
-        .indexBuffer        = ibo,
-        .vertexCount        = static_cast<uint32_t>(positions.size()),
-        .indexCount         = static_cast<uint32_t>(indices.size())
+        .posBuffer           = posVbo,
+        .tangentFrameBuffer  = frameVbo,
+        .surfaceBuffer       = surfaceVbo,
+        .skinBuffer          = BufferHandle::Invalid,
+        .indexBuffer         = ibo,
+        .vertexCount         = static_cast<uint32_t>(positions.size()),
+        .indexCount          = static_cast<uint32_t>(indices.size()),
+        .meshletBuffer       = ml.meshlets,
+        .meshletVertexBuffer = ml.vertices,
+        .meshletTriBuffer    = ml.triangles,
+        .meshletCount        = ml.count,
     };
-    AttachMeshlets(ctx, finalMesh, positions, indices);
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
@@ -130,20 +91,24 @@ auto CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) -
     streams.Push(n, t, Math::PackUV(0.0f, 0.0f), c);
     streams.Push(n, t, Math::PackUV(0.0f, 1.0f), c);
 
-    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    BufferHandle         posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle         frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle         surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(positions));
 
     auto finalMesh = Mesh {
-        .posBuffer          = posVbo,
-        .tangentFrameBuffer = frameVbo,
-        .surfaceBuffer      = surfaceVbo,
-        .skinBuffer         = BufferHandle::Invalid,
-        .indexBuffer        = BufferHandle::Invalid,
-        .vertexCount        = static_cast<uint32_t>(positions.size()),
-        .indexCount         = 0
+        .posBuffer           = posVbo,
+        .tangentFrameBuffer  = frameVbo,
+        .surfaceBuffer       = surfaceVbo,
+        .skinBuffer          = BufferHandle::Invalid,
+        .indexBuffer         = BufferHandle::Invalid,
+        .vertexCount         = static_cast<uint32_t>(positions.size()),
+        .indexCount          = 0,
+        .meshletBuffer       = ml.meshlets,
+        .meshletVertexBuffer = ml.vertices,
+        .meshletTriBuffer    = ml.triangles,
+        .meshletCount        = ml.count,
     };
-    AttachMeshlets(ctx, finalMesh, positions, {});
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
@@ -223,20 +188,24 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
     streams.Push(nNX, tNX, uv00, c);
     streams.Push(nNX, tNX, uv01, c);
 
-    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    BufferHandle         posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle         frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle         surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(positions));
 
     auto finalMesh = Mesh {
-        .posBuffer          = posVbo,
-        .tangentFrameBuffer = frameVbo,
-        .surfaceBuffer      = surfaceVbo,
-        .skinBuffer         = BufferHandle::Invalid,
-        .indexBuffer        = BufferHandle::Invalid,
-        .vertexCount        = static_cast<uint32_t>(positions.size()),
-        .indexCount         = 0
+        .posBuffer           = posVbo,
+        .tangentFrameBuffer  = frameVbo,
+        .surfaceBuffer       = surfaceVbo,
+        .skinBuffer          = BufferHandle::Invalid,
+        .indexBuffer         = BufferHandle::Invalid,
+        .vertexCount         = static_cast<uint32_t>(positions.size()),
+        .indexCount          = 0,
+        .meshletBuffer       = ml.meshlets,
+        .meshletVertexBuffer = ml.vertices,
+        .meshletTriBuffer    = ml.triangles,
+        .meshletCount        = ml.count,
     };
-    AttachMeshlets(ctx, finalMesh, positions, {});
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
@@ -286,21 +255,25 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
         }
     }
 
-    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
-    BufferHandle ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
+    BufferHandle         posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle         frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle         surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    BufferHandle         ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
+    const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(indices, positions));
 
     Mesh finalMesh = {
-        .posBuffer          = posVbo,
-        .tangentFrameBuffer = frameVbo,
-        .surfaceBuffer      = surfaceVbo,
-        .skinBuffer         = BufferHandle::Invalid,
-        .indexBuffer        = ibo,
-        .vertexCount        = static_cast<uint32_t>(positions.size()),
-        .indexCount         = static_cast<uint32_t>(indices.size())
+        .posBuffer           = posVbo,
+        .tangentFrameBuffer  = frameVbo,
+        .surfaceBuffer       = surfaceVbo,
+        .skinBuffer          = BufferHandle::Invalid,
+        .indexBuffer         = ibo,
+        .vertexCount         = static_cast<uint32_t>(positions.size()),
+        .indexCount          = static_cast<uint32_t>(indices.size()),
+        .meshletBuffer       = ml.meshlets,
+        .meshletVertexBuffer = ml.vertices,
+        .meshletTriBuffer    = ml.triangles,
+        .meshletCount        = ml.count,
     };
-    AttachMeshlets(ctx, finalMesh, positions, indices);
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
@@ -358,21 +331,25 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
         }
     }
 
-    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
-    BufferHandle ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
+    BufferHandle         posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle         frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle         surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    BufferHandle         ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
+    const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(indices, positions));
 
     Mesh finalMesh = {
-        .posBuffer          = posVbo,
-        .tangentFrameBuffer = frameVbo,
-        .surfaceBuffer      = surfaceVbo,
-        .skinBuffer         = BufferHandle::Invalid,
-        .indexBuffer        = ibo,
-        .vertexCount        = static_cast<uint32_t>(positions.size()),
-        .indexCount         = static_cast<uint32_t>(indices.size())
+        .posBuffer           = posVbo,
+        .tangentFrameBuffer  = frameVbo,
+        .surfaceBuffer       = surfaceVbo,
+        .skinBuffer          = BufferHandle::Invalid,
+        .indexBuffer         = ibo,
+        .vertexCount         = static_cast<uint32_t>(positions.size()),
+        .indexCount          = static_cast<uint32_t>(indices.size()),
+        .meshletBuffer       = ml.meshlets,
+        .meshletVertexBuffer = ml.vertices,
+        .meshletTriBuffer    = ml.triangles,
+        .meshletCount        = ml.count,
     };
-    AttachMeshlets(ctx, finalMesh, positions, indices);
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
@@ -425,21 +402,25 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
         indices.insert(indices.end(), {ct, first + static_cast<uint32_t>(ix), first + static_cast<uint32_t>(ix) + 1});
     }
 
-    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
-    BufferHandle ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
+    BufferHandle         posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle         frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle         surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    BufferHandle         ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
+    const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(indices, positions));
 
     Mesh finalMesh = {
-        .posBuffer          = posVbo,
-        .tangentFrameBuffer = frameVbo,
-        .surfaceBuffer      = surfaceVbo,
-        .skinBuffer         = BufferHandle::Invalid,
-        .indexBuffer        = ibo,
-        .vertexCount        = static_cast<uint32_t>(positions.size()),
-        .indexCount         = static_cast<uint32_t>(indices.size())
+        .posBuffer           = posVbo,
+        .tangentFrameBuffer  = frameVbo,
+        .surfaceBuffer       = surfaceVbo,
+        .skinBuffer          = BufferHandle::Invalid,
+        .indexBuffer         = ibo,
+        .vertexCount         = static_cast<uint32_t>(positions.size()),
+        .indexCount          = static_cast<uint32_t>(indices.size()),
+        .meshletBuffer       = ml.meshlets,
+        .meshletVertexBuffer = ml.vertices,
+        .meshletTriBuffer    = ml.triangles,
+        .meshletCount        = ml.count,
     };
-    AttachMeshlets(ctx, finalMesh, positions, indices);
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {

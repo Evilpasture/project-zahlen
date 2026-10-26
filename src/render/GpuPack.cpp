@@ -25,6 +25,20 @@ namespace {
 
 } // namespace
 
+auto PackMeshlet(const MeshletDesc& desc) noexcept -> GPUMeshlet {
+    GPUMeshlet packed {};
+    packed.vertexOffset   = desc.vertexOffset;
+    packed.triangleOffset = desc.triangleOffset;
+    packed.vertexCount    = desc.vertexCount;
+    packed.triangleCount  = desc.triangleCount;
+    packed.sphereCenter   = JPH::Float3 {desc.sphereCenter[0], desc.sphereCenter[1], desc.sphereCenter[2]};
+    packed.sphereRadius   = desc.sphereRadius;
+    packed.coneApex       = JPH::Float3 {desc.coneApex[0], desc.coneApex[1], desc.coneApex[2]};
+    packed.coneCutoff     = desc.coneCutoff;
+    packed.coneAxis       = JPH::Float3 {desc.coneAxis[0], desc.coneAxis[1], desc.coneAxis[2]};
+    return packed;
+}
+
 auto PackParticleEmitter(const ParticleEmitterDesc& desc, uint32_t textureIndex, uint32_t blendMode) noexcept -> ParticleEmitterParams {
     ParticleEmitterParams packed {};
 

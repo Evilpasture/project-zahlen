@@ -228,6 +228,40 @@ auto RenderContext::CreateBuffer(const BufferDesc& desc) -> BufferHandle {
     return _impl->geometry.CreateBuffer(source, vkUsage).value_or(BufferHandle::Invalid);
 }
 
+auto RenderContext::CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferHandle {
+    if (meshlets.empty()) {
+        return BufferHandle::Invalid;
+    }
+    std::vector<GPUMeshlet> packed(meshlets.size());
+    for (size_t i = 0; i < meshlets.size(); ++i) {
+        packed[i] = GpuPack::PackMeshlet(meshlets[i]);
+    }
+    return CreateBuffer<BufferUsage::Storage>(std::span<const GPUMeshlet> {packed});
+}
+
+auto RenderContext::UploadMeshlets(const MeshletBuildResult& built) -> MeshletStreams {
+    if (built.Empty() || built.vertices.empty() || built.triangles.empty()) {
+        return {};
+    }
+
+    const BufferHandle meshlets  = CreateMeshletBuffer(built.meshlets);
+    const BufferHandle vertices  = CreateBuffer<BufferUsage::Storage>(std::span {built.vertices});
+    const BufferHandle triangles = CreateBuffer<BufferUsage::Storage>(std::span {built.triangles});
+    if (meshlets == BufferHandle::Invalid || vertices == BufferHandle::Invalid || triangles == BufferHandle::Invalid) {
+        DestroyBuffer(meshlets);
+        DestroyBuffer(vertices);
+        DestroyBuffer(triangles);
+        return {};
+    }
+
+    return MeshletStreams {
+        .meshlets  = meshlets,
+        .vertices  = vertices,
+        .triangles = triangles,
+        .count     = static_cast<uint32_t>(built.meshlets.size()),
+    };
+}
+
 void RenderContext::SubmitParticleEmitter(
     const uint64_t             emitterId,
     const uint32_t             maxParticles,

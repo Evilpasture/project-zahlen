@@ -69,8 +69,7 @@ struct CaptureResult {
                        .color = ZHLN::Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f)};
     }
     constexpr std::array<uint32_t, 6> indices {0, 1, 2, 0, 2, 3};
-    const auto meshlets = ZHLN::BuildMeshlets(std::span {indices}, std::span {positions});
-    const auto packedMeshlets = ZHLN::PackMeshlets(meshlets.meshlets);
+    const ZHLN::MeshletStreams        ml = rc.UploadMeshlets(ZHLN::BuildMeshlets(std::span {indices}, std::span {positions}));
 
     return {
         .posBuffer           = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {positions}),
@@ -79,10 +78,10 @@ struct CaptureResult {
         .indexBuffer         = rc.CreateBuffer<ZHLN::BufferUsage::Index>(std::span<const uint32_t> {indices}),
         .vertexCount         = static_cast<uint32_t>(positions.size()),
         .indexCount          = static_cast<uint32_t>(indices.size()),
-        .meshletBuffer       = rc.CreateBuffer(ZHLN::BufferDesc {.usage = ZHLN::BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = ZHLN::kMeshletPackedBytes}),
-        .meshletVertexBuffer = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(std::span {meshlets.vertices}),
-        .meshletTriBuffer    = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(std::span {meshlets.triangles}),
-        .meshletCount        = static_cast<uint32_t>(meshlets.meshlets.size()),
+        .meshletBuffer       = ml.meshlets,
+        .meshletVertexBuffer = ml.vertices,
+        .meshletTriBuffer    = ml.triangles,
+        .meshletCount        = ml.count,
     };
 }
 

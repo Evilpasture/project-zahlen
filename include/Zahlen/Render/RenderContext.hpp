@@ -10,6 +10,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Meshlet.hpp>
 #include <Zahlen/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Render/FrameData.hpp>
@@ -145,6 +146,9 @@ class ZHLN_API RenderContext {
             }
         );
     }
+
+    [[nodiscard]] auto CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferHandle;
+    [[nodiscard]] auto UploadMeshlets(const MeshletBuildResult& built) -> MeshletStreams;
 
     void DestroyBuffer(BufferHandle handle);
     [[nodiscard]] auto UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept -> std::expected<void, ErrorCode>;

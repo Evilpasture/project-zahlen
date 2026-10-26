@@ -60,10 +60,11 @@ struct CookedTextureHeader {
     uint32_t dataSize;
 };
 
-// Version 7 payload: positions[vertexCount], tangentFrames[vertexCount],
+// Version 8 payload: positions[vertexCount], tangentFrames[vertexCount],
 // surfaces[vertexCount], optional skins[vertexCount], indices[indexCount],
-// then the three meshlet streams (v7 reorders the meshlet record: coneCutoff
-// ahead of coneAxis). All vertices use independent SoA buffers.
+// then the three logical meshlet streams (MeshletDesc[meshletCount],
+// meshletVertices[meshletVertexCount], meshletTriangles[meshletTriByteCount]).
+// All vertices use independent SoA buffers.
 struct CookedMeshHeader {
     uint32_t magic;
     uint32_t version;

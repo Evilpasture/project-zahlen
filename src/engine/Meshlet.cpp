@@ -3,31 +3,10 @@
 
 #include <Zahlen/Meshlet.hpp>
 #include <cstddef>
-#include <cstring>
 #include <meshoptimizer.h>
+#include <numeric>
 
 namespace ZHLN {
-
-namespace {
-
-// Wire layout for cooked .zmesh records and mesh-shader word fetches (16 x uint32).
-// Verified against Slang::GPUMeshlet in src/render/GpuAbi.cpp when ZHLN_BUILD_RENDER=ON.
-struct PackedMeshletWire {
-    uint32_t vertexOffset;
-    uint32_t triangleOffset;
-    uint32_t vertexCount;
-    uint32_t triangleCount;
-    float    sphereCenter[3];
-    float    sphereRadius;
-    float    coneApex[3];
-    float    coneCutoff;
-    float    coneAxis[3];
-    uint32_t _padding;
-};
-
-static_assert(sizeof(PackedMeshletWire) == kMeshletPackedBytes, "meshlet wire stride drifted from kMeshletPackedBytes");
-
-} // namespace
 
 MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, const float* positions, size_t vertexCount, size_t posStride) noexcept {
     MeshletBuildResult out;
@@ -104,25 +83,13 @@ MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, std::span<co
     return BuildMeshlets(indices, &positions[0].position[0], positions.size(), sizeof(VertexPosition));
 }
 
-std::vector<uint8_t> PackMeshlets(std::span<const MeshletDesc> meshlets) noexcept {
-    std::vector<uint8_t> out(meshlets.size() * sizeof(PackedMeshletWire));
-    for (size_t i = 0; i < meshlets.size(); ++i) {
-        const MeshletDesc&      d = meshlets[i];
-        const PackedMeshletWire g {
-            .vertexOffset   = d.vertexOffset,
-            .triangleOffset = d.triangleOffset,
-            .vertexCount    = d.vertexCount,
-            .triangleCount  = d.triangleCount,
-            .sphereCenter   = {d.sphereCenter[0], d.sphereCenter[1], d.sphereCenter[2]},
-            .sphereRadius   = d.sphereRadius,
-            .coneApex       = {d.coneApex[0], d.coneApex[1], d.coneApex[2]},
-            .coneCutoff     = d.coneCutoff,
-            .coneAxis       = {d.coneAxis[0], d.coneAxis[1], d.coneAxis[2]},
-            ._padding       = 0,
-        };
-        std::memcpy(out.data() + i * sizeof(PackedMeshletWire), &g, sizeof(PackedMeshletWire));
+MeshletBuildResult BuildMeshlets(std::span<const VertexPosition> positions) noexcept {
+    if (positions.size() < 3) {
+        return {};
     }
-    return out;
+    std::vector<uint32_t> sequential(positions.size());
+    std::iota(sequential.begin(), sequential.end(), uint32_t {0});
+    return BuildMeshlets(std::span<const uint32_t> {sequential}, positions);
 }
 
 }

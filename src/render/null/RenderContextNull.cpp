@@ -283,6 +283,38 @@ auto RenderContext::CreateBuffer(const BufferDesc& desc) -> BufferHandle {
     return static_cast<BufferHandle>(id);
 }
 
+auto RenderContext::CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferHandle {
+    if (meshlets.empty()) {
+        return BufferHandle::Invalid;
+    }
+    const uint64_t id = _impl->nextBufferId++;
+    _impl->liveBuffers.insert(id);
+    return static_cast<BufferHandle>(id);
+}
+
+auto RenderContext::UploadMeshlets(const MeshletBuildResult& built) -> MeshletStreams {
+    if (built.Empty() || built.vertices.empty() || built.triangles.empty()) {
+        return {};
+    }
+
+    const BufferHandle meshlets  = CreateMeshletBuffer(built.meshlets);
+    const BufferHandle vertices  = CreateBuffer<BufferUsage::Storage>(std::span {built.vertices});
+    const BufferHandle triangles = CreateBuffer<BufferUsage::Storage>(std::span {built.triangles});
+    if (meshlets == BufferHandle::Invalid || vertices == BufferHandle::Invalid || triangles == BufferHandle::Invalid) {
+        DestroyBuffer(meshlets);
+        DestroyBuffer(vertices);
+        DestroyBuffer(triangles);
+        return {};
+    }
+
+    return MeshletStreams {
+        .meshlets  = meshlets,
+        .vertices  = vertices,
+        .triangles = triangles,
+        .count     = static_cast<uint32_t>(built.meshlets.size()),
+    };
+}
+
 void RenderContext::DestroyBuffer(BufferHandle handle) {
     if (handle != BufferHandle::Invalid) {
         _impl->liveBuffers.erase(static_cast<uint64_t>(handle));
