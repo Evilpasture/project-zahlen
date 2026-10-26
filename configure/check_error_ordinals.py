@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -43,6 +44,7 @@ ALLOWLIST = ROOT / "configure" / "error_ordinal_allowlist.json"
 # absent: the checkers talk about these shapes in their own docstrings.
 SCAN_ROOTS = ("src", "include", "plugins", "extensions", "gameplay", "modules", "app", "samples", "tools", "tests")
 SOURCE_SUFFIXES = {".h", ".hh", ".hpp", ".hxx", ".cpp", ".cc", ".cxx", ".cppm", ".ixx"}
+SKIP_DIR_NAMES = {".git", "build", "target", "__pycache__", ".cache", "node_modules"}
 
 CAST_KEYWORDS = ("static_cast", "bit_cast", "reinterpret_cast")
 
@@ -70,6 +72,23 @@ ERROR_WORD_READ = re.compile(r"(?<![\w.])(?:err|error|errCode|errorCode|code)\s*
 UNPACKED_WORD_READ = re.compile(r"\.(?:error\(\)|As\s*<[^>]*>\s*\(\s*\))\s*\.\s*(?:value|category)\b")
 
 
+_COMMENT_OR_LITERAL_RE = re.compile(
+    r"//[^\n]*"
+    r"|/\*[\s\S]*?\*/"
+    r'|R"([^()\\\s]{0,16})\([\s\S]*?\)\1"'
+    r'|"(?:\\[\s\S]|[^"\\\n])*"'
+    r"|'(?:\\[\s\S]|[^'\\\n])*'"
+)
+_PREFILTER_RE = re.compile(r"\b(?:static_cast|bit_cast|reinterpret_cast)\b|\.\s*(?:value|category)\b")
+
+
+def _blank_match(match: re.Match[str]) -> str:
+    span = match.group(0)
+    if "\n" not in span:
+        return " " * len(span)
+    return "\n".join(" " * len(part) for part in span.split("\n"))
+
+
 def blank_out_comments_and_strings(text: str) -> str:
     """Return @p text with comments and string/char literals replaced by spaces.
 
@@ -77,52 +96,7 @@ def blank_out_comments_and_strings(text: str) -> str:
     line a reader sees. A cast mentioned in prose -- or in one of this file's own
     docstrings -- is not a cast.
     """
-    out = list(text)
-    i, n = 0, len(text)
-
-    def blank(start: int, end: int) -> None:
-        for k in range(start, min(end, n)):
-            if out[k] != "\n":
-                out[k] = " "
-
-    while i < n:
-        two = text[i : i + 2]
-        if two == "//":
-            end = text.find("\n", i)
-            end = n if end == -1 else end
-            blank(i, end)
-            i = end
-        elif two == "/*":
-            end = text.find("*/", i + 2)
-            end = n if end == -1 else end + 2
-            blank(i, end)
-            i = end
-        elif text[i] == "R" and text[i + 1 : i + 2] == '"':
-            delim_end = text.find("(", i + 2)
-            if delim_end == -1:
-                i += 1
-                continue
-            delim = text[i + 2 : delim_end]
-            close = text.find(f'){delim}"', delim_end)
-            end = n if close == -1 else close + len(delim) + 2
-            blank(i, end)
-            i = end
-        elif text[i] in "\"'":
-            quote = text[i]
-            j = i + 1
-            while j < n:
-                if text[j] == "\\":
-                    j += 2
-                    continue
-                if text[j] == quote or text[j] == "\n":
-                    j += 1
-                    break
-                j += 1
-            blank(i, j)
-            i = j
-        else:
-            i += 1
-    return "".join(out)
+    return _COMMENT_OR_LITERAL_RE.sub(_blank_match, text)
 
 
 def cast_sites(code: str):
@@ -165,8 +139,11 @@ def cast_sites(code: str):
 
 def violations_in(path: Path):
     """Yield (line number, source line) for every ordinal escape in @p path."""
-    code = blank_out_comments_and_strings(path.read_text(errors="replace"))
-    lines = path.read_text(errors="replace").splitlines()
+    raw = path.read_text(errors="replace")
+    if not _PREFILTER_RE.search(raw):
+        return
+    code = blank_out_comments_and_strings(raw)
+    lines = raw.splitlines()
 
     def line_of(offset: int) -> str:
         number = code.count("\n", 0, offset)
@@ -188,6 +165,23 @@ def load_allowlist():
     return entries
 
 
+def _scan_files() -> list[Path]:
+    found: list[Path] = []
+    for root_name in SCAN_ROOTS:
+        root = ROOT / root_name
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIR_NAMES)
+            base = Path(dirpath)
+            for name in sorted(filenames):
+                candidate = base / name
+                if candidate.suffix in SOURCE_SUFFIXES and candidate.is_file():
+                    found.append(candidate)
+    found.sort()
+    return found
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--file", action="append", default=[], help="Check one file (relative to the caller's cwd). Repeatable.")
@@ -196,12 +190,7 @@ def main() -> int:
     if args.file:
         files = [Path(f).resolve() for f in args.file]
     else:
-        files = sorted(
-            path
-            for root in SCAN_ROOTS
-            for path in (ROOT / root).rglob("*")
-            if path.is_file() and path.suffix in SOURCE_SUFFIXES
-        )
+        files = _scan_files()
 
     allow = load_allowlist()
     used = set()

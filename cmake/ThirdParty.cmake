@@ -124,30 +124,44 @@ if(UNIX AND NOT APPLE)
     # GLFW 3.4+ always compiles the null platform. X11/Wayland are extra
     # backends that need their -dev packages; without them, glfwInit fails
     # over to TTY/KMS instead of failing configure.
-    find_package(X11 QUIET)
+    # Guard FindX11 (4 try_compiles + 30 find_library calls) and Wayland
+    # pkg-config spawns behind fast header probes; unsetting NOTFOUND entries
+    # keeps warm reconfigures sub-millisecond while still picking up newly
+    # installed -dev packages without wiping the build directory.
     set(_zhln_glfw_x11 FALSE)
-    if(X11_FOUND
-       AND X11_Xrandr_INCLUDE_PATH
-       AND X11_Xinerama_INCLUDE_PATH
-       AND X11_Xkb_INCLUDE_PATH
-       AND X11_Xcursor_INCLUDE_PATH
-       AND X11_Xi_INCLUDE_PATH
-       AND X11_Xshape_INCLUDE_PATH)
-        set(_zhln_glfw_x11 TRUE)
+    find_path(_ZHLN_PROBE_XLIB_H NAMES X11/Xlib.h QUIET)
+    if(_ZHLN_PROBE_XLIB_H)
+        find_package(X11 QUIET)
+        if(X11_FOUND
+           AND X11_Xrandr_INCLUDE_PATH
+           AND X11_Xinerama_INCLUDE_PATH
+           AND X11_Xkb_INCLUDE_PATH
+           AND X11_Xcursor_INCLUDE_PATH
+           AND X11_Xi_INCLUDE_PATH
+           AND X11_Xshape_INCLUDE_PATH)
+            set(_zhln_glfw_x11 TRUE)
+        endif()
+    else()
+        unset(_ZHLN_PROBE_XLIB_H CACHE)
     endif()
 
     set(_zhln_glfw_wayland FALSE)
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(ZHLN_WAYLAND QUIET
-            wayland-client>=0.2.7
-            wayland-cursor>=0.2.7
-            wayland-egl>=0.2.7
-            xkbcommon>=0.5.0)
-        find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
-        if(ZHLN_WAYLAND_FOUND AND WAYLAND_SCANNER_EXECUTABLE)
-            set(_zhln_glfw_wayland TRUE)
+    find_path(_ZHLN_PROBE_WAYLAND_H NAMES wayland-client.h QUIET)
+    if(_ZHLN_PROBE_WAYLAND_H)
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(ZHLN_WAYLAND QUIET
+                wayland-client>=0.2.7
+                wayland-cursor>=0.2.7
+                wayland-egl>=0.2.7
+                xkbcommon>=0.5.0)
+            find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
+            if(ZHLN_WAYLAND_FOUND AND WAYLAND_SCANNER_EXECUTABLE)
+                set(_zhln_glfw_wayland TRUE)
+            endif()
         endif()
+    else()
+        unset(_ZHLN_PROBE_WAYLAND_H CACHE)
     endif()
 
     set(GLFW_BUILD_X11 ${_zhln_glfw_x11} CACHE BOOL "Build GLFW with X11" FORCE)
@@ -312,7 +326,11 @@ set_target_properties(spirv-reflect-static PROPERTIES
 # SIMDJSON_STATIC_REFLECTION=0 PUBLIC, keeping the definition identical for
 # simdjson.cpp and for its consumers.
 set(SIMDJSON_STATIC_REFLECTION_MODE "OFF" CACHE STRING "" FORCE)
+# C++26 guarantees <bit>; pre-seeding skips simdjson's try_compile check, and
+# disabling PCH on this single-TU library avoids building a throwaway .pch.
+set(SIMDJSON_HAS_BIT_HEADER TRUE CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/simdjson EXCLUDE_FROM_ALL SYSTEM)
+set_target_properties(simdjson PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 # --- test-harness toggles for vendor projects ---
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)

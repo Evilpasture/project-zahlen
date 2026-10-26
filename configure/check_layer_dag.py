@@ -47,6 +47,7 @@ layer may assume about another, not about who may assemble them.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -56,6 +57,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # The layer nothing else may consume, and the layers that may not consume it.
 GAMEPLAY = "gameplay"
 BELOW_GAMEPLAY = ("plugins", "extensions")
+SKIP_DIR_NAMES = {".git", "build", "target", "__pycache__", ".cache", "node_modules"}
 
 # Where each layer publishes headers from: the whole tree, plus the nested roots
 # a target adds on top. Mirrors LAYER_INCLUDE_ROOTS in
@@ -69,11 +71,63 @@ LAYER_INCLUDE_ROOTS = {
 
 # Core's include roots: an include that resolves here is core's, whatever a
 # basename elsewhere happens to collide with.
-CORE_INCLUDE_ROOTS = (ROOT / "include", ROOT / "src", ROOT / "modules", ROOT / "extern", ROOT / "third_party")
+FIRST_PARTY_CORE_ROOTS = (ROOT / "include", ROOT / "src", ROOT / "modules")
+VENDOR_CORE_ROOTS = (ROOT / "extern", ROOT / "third_party")
+CORE_INCLUDE_ROOTS = (*FIRST_PARTY_CORE_ROOTS, *VENDOR_CORE_ROOTS)
 
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".cppm", ".ixx"}
 
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]', re.MULTILINE)
+
+_LAYER_BASENAME_INDEX: dict[str, Path] | None = None
+_FIRST_PARTY_CORE_BASENAMES: set[str] | None = None
+_VENDOR_CORE_BASENAMES: set[str] | None = None
+
+
+def _walk_files(root: Path):
+    if not root.is_dir():
+        return
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIR_NAMES)
+        base = Path(dirpath)
+        for name in sorted(filenames):
+            candidate = base / name
+            if candidate.is_file():
+                yield candidate
+
+
+def _layer_basename_index() -> dict[str, Path]:
+    global _LAYER_BASENAME_INDEX
+    if _LAYER_BASENAME_INDEX is None:
+        index: dict[str, Path] = {}
+        for _layer, roots in LAYER_INCLUDE_ROOTS.items():
+            for root in roots:
+                for candidate in _walk_files(root):
+                    index.setdefault(candidate.name, candidate)
+        _LAYER_BASENAME_INDEX = index
+    return _LAYER_BASENAME_INDEX
+
+
+def _first_party_core_basenames() -> set[str]:
+    global _FIRST_PARTY_CORE_BASENAMES
+    if _FIRST_PARTY_CORE_BASENAMES is None:
+        names: set[str] = set()
+        for root in FIRST_PARTY_CORE_ROOTS:
+            for candidate in _walk_files(root):
+                names.add(candidate.name)
+        _FIRST_PARTY_CORE_BASENAMES = names
+    return _FIRST_PARTY_CORE_BASENAMES
+
+
+def _vendor_core_basenames() -> set[str]:
+    global _VENDOR_CORE_BASENAMES
+    if _VENDOR_CORE_BASENAMES is None:
+        names: set[str] = set()
+        for root in VENDOR_CORE_ROOTS:
+            for candidate in _walk_files(root):
+                names.add(candidate.name)
+        _VENDOR_CORE_BASENAMES = names
+    return _VENDOR_CORE_BASENAMES
 
 
 def normalize(text: str) -> str:
@@ -105,17 +159,15 @@ def resolve_in_layer(include: str) -> Path | None:
     # a compiler would when the file sits at the top of an include directory.
     # Core wins that race in a real build (its roots come first on the include
     # path), so a name core also has is not treated as a layer include.
+    # Check the pre-built optional-layer basename index first so stdlib/system
+    # includes (<vector>, <string>, ...) never walk extern/ (Slang, Jolt, ...).
     if "/" not in relative:
-        for core_root in CORE_INCLUDE_ROOTS:
-            if core_root.is_dir() and any(hit.is_file() for hit in core_root.rglob(relative)):
-                return None
-        for _layer, roots in LAYER_INCLUDE_ROOTS.items():
-            for root in roots:
-                if not root.is_dir():
-                    continue
-                for candidate in root.rglob(relative):
-                    if candidate.is_file():
-                        return candidate
+        candidate = _layer_basename_index().get(relative)
+        if candidate is None:
+            return None
+        if relative in _first_party_core_basenames() or relative in _vendor_core_basenames():
+            return None
+        return candidate
     return None
 
 
@@ -148,7 +200,7 @@ def check_includes(violations: list[str]) -> None:
         root = ROOT / layer
         if not root.is_dir():
             continue
-        for source in sorted(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES):
+        for source in (path for path in _walk_files(root) if path.suffix.lower() in SOURCE_SUFFIXES):
             text = source.read_text(encoding="utf-8", errors="ignore")
             for match in INCLUDE_RE.finditer(text):
                 owner = gameplay_include(source, match.group(1), match.group(2))

@@ -44,65 +44,75 @@ set(ZHLN_SVG_TARGET "")
 set(ZHLN_SVG_ORIGIN "")
 set(ZHLN_SVG_VERSION "")
 
-find_package(resvg CONFIG QUIET)
+find_path(
+    _ZHLN_PROBE_RESVG_H
+    NAMES resvg/resvg.h resvg.h
+    HINTS "${RESVG_ROOT}" ENV RESVG_ROOT /opt/homebrew/opt/resvg /usr/local/opt/resvg
+    PATH_SUFFIXES include
+    QUIET)
+if(_ZHLN_PROBE_RESVG_H)
+    find_package(resvg CONFIG QUIET)
 
-# A hand-written config file gets to choose its own target name, so take the
-# first of the usual spellings that exists.
-foreach(ZHLN_SVG_PACKAGE_TARGET resvg::resvg resvg::capi unofficial-resvg::resvg)
-    if(TARGET ${ZHLN_SVG_PACKAGE_TARGET})
-        set(ZHLN_SVG_TARGET ${ZHLN_SVG_PACKAGE_TARGET})
-        set(ZHLN_SVG_ORIGIN "CMake package ${ZHLN_SVG_PACKAGE_TARGET}")
-        if(DEFINED resvg_VERSION)
-            set(ZHLN_SVG_VERSION "${resvg_VERSION}")
+    # A hand-written config file gets to choose its own target name, so take the
+    # first of the usual spellings that exists.
+    foreach(ZHLN_SVG_PACKAGE_TARGET resvg::resvg resvg::capi unofficial-resvg::resvg)
+        if(TARGET ${ZHLN_SVG_PACKAGE_TARGET})
+            set(ZHLN_SVG_TARGET ${ZHLN_SVG_PACKAGE_TARGET})
+            set(ZHLN_SVG_ORIGIN "CMake package ${ZHLN_SVG_PACKAGE_TARGET}")
+            if(DEFINED resvg_VERSION)
+                set(ZHLN_SVG_VERSION "${resvg_VERSION}")
+            endif()
+            break()
         endif()
-        break()
-    endif()
-endforeach()
+    endforeach()
 
-if(NOT ZHLN_SVG_TARGET)
-    find_package(PkgConfig QUIET)
-    if(PKG_CONFIG_FOUND)
-        # QUIET, not REQUIRED: pkg-config is only the first discovery step
-        # here; a missing entry falls through to the bare-library search
-        # below instead of failing.
-        pkg_check_modules(ZHLN_RESVG QUIET IMPORTED_TARGET resvg)
-        if(ZHLN_RESVG_FOUND AND TARGET PkgConfig::ZHLN_RESVG)
-            set(ZHLN_SVG_TARGET PkgConfig::ZHLN_RESVG)
-            set(ZHLN_SVG_ORIGIN "pkg-config resvg")
-            if(ZHLN_RESVG_VERSION)
-                set(ZHLN_SVG_VERSION "${ZHLN_RESVG_VERSION}")
+    if(NOT ZHLN_SVG_TARGET)
+        find_package(PkgConfig QUIET)
+        if(PKG_CONFIG_FOUND)
+            # QUIET, not REQUIRED: pkg-config is only the first discovery step
+            # here; a missing entry falls through to the bare-library search
+            # below instead of failing.
+            pkg_check_modules(ZHLN_RESVG QUIET IMPORTED_TARGET resvg)
+            if(ZHLN_RESVG_FOUND AND TARGET PkgConfig::ZHLN_RESVG)
+                set(ZHLN_SVG_TARGET PkgConfig::ZHLN_RESVG)
+                set(ZHLN_SVG_ORIGIN "pkg-config resvg")
+                if(ZHLN_RESVG_VERSION)
+                    set(ZHLN_SVG_VERSION "${ZHLN_RESVG_VERSION}")
+                endif()
             endif()
         endif()
     endif()
-endif()
 
-# Neither name is initialised here, and that is deliberate: find_path and
-# find_library write CACHE entries, and a normal variable of the same name set
-# beforehand would shadow the result -- the classic way a library that was found
-# reads back as empty. An undefined ZHLN_SVG_BARE_LIBRARY below expands to ""
-# and its MATCHES is simply false. The bare library is also what decides whether
-# a static libresvg.a needs the Rust runtime's own dependencies added by hand.
-if(NOT ZHLN_SVG_TARGET)
-    find_path(ZHLN_SVG_BARE_INCLUDE_DIR
-        NAMES resvg/resvg.h resvg.h
-        HINTS "${RESVG_ROOT}" ENV RESVG_ROOT
-        PATH_SUFFIXES include
-    )
-    find_library(ZHLN_SVG_BARE_LIBRARY
-        NAMES resvg
-        HINTS "${RESVG_ROOT}" ENV RESVG_ROOT
-        PATH_SUFFIXES lib lib64
-    )
-
-    if(ZHLN_SVG_BARE_INCLUDE_DIR AND ZHLN_SVG_BARE_LIBRARY)
-        add_library(ZHLN::resvg INTERFACE IMPORTED)
-        set_target_properties(ZHLN::resvg PROPERTIES
-            INTERFACE_LINK_LIBRARIES "${ZHLN_SVG_BARE_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ZHLN_SVG_BARE_INCLUDE_DIR}"
+    # Neither name is initialised here, and that is deliberate: find_path and
+    # find_library write CACHE entries, and a normal variable of the same name set
+    # beforehand would shadow the result -- the classic way a library that was found
+    # reads back as empty. An undefined ZHLN_SVG_BARE_LIBRARY below expands to ""
+    # and its MATCHES is simply false. The bare library is also what decides whether
+    # a static libresvg.a needs the Rust runtime's own dependencies added by hand.
+    if(NOT ZHLN_SVG_TARGET)
+        find_path(ZHLN_SVG_BARE_INCLUDE_DIR
+            NAMES resvg/resvg.h resvg.h
+            HINTS "${RESVG_ROOT}" ENV RESVG_ROOT
+            PATH_SUFFIXES include
         )
-        set(ZHLN_SVG_TARGET ZHLN::resvg)
-        set(ZHLN_SVG_ORIGIN "${ZHLN_SVG_BARE_LIBRARY}")
+        find_library(ZHLN_SVG_BARE_LIBRARY
+            NAMES resvg
+            HINTS "${RESVG_ROOT}" ENV RESVG_ROOT
+            PATH_SUFFIXES lib lib64
+        )
+
+        if(ZHLN_SVG_BARE_INCLUDE_DIR AND ZHLN_SVG_BARE_LIBRARY)
+            add_library(ZHLN::resvg INTERFACE IMPORTED)
+            set_target_properties(ZHLN::resvg PROPERTIES
+                INTERFACE_LINK_LIBRARIES "${ZHLN_SVG_BARE_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${ZHLN_SVG_BARE_INCLUDE_DIR}"
+            )
+            set(ZHLN_SVG_TARGET ZHLN::resvg)
+            set(ZHLN_SVG_ORIGIN "${ZHLN_SVG_BARE_LIBRARY}")
+        endif()
     endif()
+else()
+    unset(_ZHLN_PROBE_RESVG_H CACHE)
 endif()
 
 if(NOT ZHLN_SVG_TARGET)

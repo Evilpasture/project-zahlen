@@ -10,8 +10,8 @@
 # and applied from the root's REFLECTION FLAGS PROPAGATION section.
 
 # --- DETECT C++26 LANGUAGE FEATURE FLAGS ---
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
+include(CompilerFlagProbe)
+zhln_check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
 
 if(COMPILER_HAS_REFLECTION)
     message(STATUS "C++26 Static Reflection supported via -freflection")
@@ -19,10 +19,10 @@ if(COMPILER_HAS_REFLECTION)
     # flag; -freflection alone supplies only P2996. GCC exposes it with
     # -freflection, so the extra flag is Clang-specific.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        check_cxx_compiler_flag("-freflection -fparameter-reflection" COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
+        zhln_check_cxx_compiler_flag("-freflection -fparameter-reflection" COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
         if(NOT COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
             # Newer forks also provide a unified flag for companion proposals.
-            check_cxx_compiler_flag("-freflection -freflection-latest" COMPILER_HAS_REFLECTION_LATEST_FLAG)
+            zhln_check_cxx_compiler_flag("-freflection -freflection-latest" COMPILER_HAS_REFLECTION_LATEST_FLAG)
             if(NOT COMPILER_HAS_REFLECTION_LATEST_FLAG)
                 message(FATAL_ERROR "This Clang supports -freflection but not P3096 parameter reflection (-fparameter-reflection or -freflection-latest).")
             endif()

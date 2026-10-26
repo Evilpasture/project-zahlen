@@ -32,6 +32,7 @@ out/
 *.ii
 compile_commands.json
 .ninja_log
+.zhln_governance_cache.json*
 
 # --- C++ / MSVC / GCC Artifacts ---
 .vs/

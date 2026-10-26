@@ -316,17 +316,25 @@ if(ZHLN_SLANGC_PROBEABLE OR ZHLN_SLANG_IMPORTED)
     # either stream -- so capture both and only trust a dotted version.
     set(ZHLN_SLANGC_VERSION "unknown")
     if(ZHLN_SLANGC_PROBEABLE)
-        execute_process(COMMAND ${SLANG_EXECUTABLE} -version
-            RESULT_VARIABLE ZHLN_SLANGC_VERSION_RESULT
-            OUTPUT_VARIABLE ZHLN_SLANGC_VERSION_OUT
-            ERROR_VARIABLE ZHLN_SLANGC_VERSION_ERR
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_STRIP_TRAILING_WHITESPACE)
-        string(STRIP "${ZHLN_SLANGC_VERSION_OUT} ${ZHLN_SLANGC_VERSION_ERR}" ZHLN_SLANGC_VERSION_LINE)
-        # CMake's regex engine has no {n} intervals: spell the four digits out.
-        if(ZHLN_SLANGC_VERSION_RESULT EQUAL 0
-           AND ZHLN_SLANGC_VERSION_LINE MATCHES "([0-9][0-9][0-9][0-9]\\.[0-9]+)")
-            set(ZHLN_SLANGC_VERSION "${CMAKE_MATCH_1}")
+        file(TIMESTAMP "${SLANG_EXECUTABLE}" _zhln_slangc_mtime UTC)
+        set(_zhln_slangc_cache_key "${SLANG_EXECUTABLE};${_zhln_slangc_mtime}")
+        if(ZHLN_CACHED_SLANGC_KEY STREQUAL "${_zhln_slangc_cache_key}" AND DEFINED ZHLN_CACHED_SLANGC_VERSION)
+            set(ZHLN_SLANGC_VERSION "${ZHLN_CACHED_SLANGC_VERSION}")
+        else()
+            execute_process(COMMAND ${SLANG_EXECUTABLE} -version
+                RESULT_VARIABLE ZHLN_SLANGC_VERSION_RESULT
+                OUTPUT_VARIABLE ZHLN_SLANGC_VERSION_OUT
+                ERROR_VARIABLE ZHLN_SLANGC_VERSION_ERR
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_STRIP_TRAILING_WHITESPACE)
+            string(STRIP "${ZHLN_SLANGC_VERSION_OUT} ${ZHLN_SLANGC_VERSION_ERR}" ZHLN_SLANGC_VERSION_LINE)
+            # CMake's regex engine has no {n} intervals: spell the four digits out.
+            if(ZHLN_SLANGC_VERSION_RESULT EQUAL 0
+               AND ZHLN_SLANGC_VERSION_LINE MATCHES "([0-9][0-9][0-9][0-9]\\.[0-9]+)")
+                set(ZHLN_SLANGC_VERSION "${CMAKE_MATCH_1}")
+            endif()
+            set(ZHLN_CACHED_SLANGC_KEY "${_zhln_slangc_cache_key}" CACHE INTERNAL "slangc probe key")
+            set(ZHLN_CACHED_SLANGC_VERSION "${ZHLN_SLANGC_VERSION}" CACHE INTERNAL "slangc probed version")
         endif()
     endif()
     # libslang: the versioned filename is the only version the target carries

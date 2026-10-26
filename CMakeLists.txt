@@ -17,10 +17,14 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 # Must run BEFORE project() so platform modules don't bake -isystem into CXX module scanners
 if(APPLE)
-    execute_process(
-    COMMAND xcrun --show-sdk-path
-    OUTPUT_VARIABLE _ZHLN_MAC_SDK
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _ZHLN_CACHED_MAC_SDK OR NOT EXISTS "${_ZHLN_CACHED_MAC_SDK}")
+        execute_process(
+        COMMAND xcrun --show-sdk-path
+        OUTPUT_VARIABLE _ZHLN_MAC_SDK_OUT
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        set(_ZHLN_CACHED_MAC_SDK "${_ZHLN_MAC_SDK_OUT}" CACHE INTERNAL "macOS SDK path")
+    endif()
+    set(_ZHLN_MAC_SDK "${_ZHLN_CACHED_MAC_SDK}")
 
     # Tell CMake NEVER to pass the SDK's usr/include as -isystem
     list(APPEND CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES "${_ZHLN_MAC_SDK}/usr/include")
@@ -43,18 +47,27 @@ if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
       "-DCMAKE_CXX_COMPILER=clang++.")
 endif()
 
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag("-Qunused-arguments" ZHLN_HAS_QUNUSED_ARGUMENTS)
-check_cxx_compiler_flag("-fblocks" ZHLN_HAS_FBLOCKS)
-check_cxx_compiler_flag("-fannotation-attributes"
-                        ZHLN_HAS_ANNOTATION_ATTRIBUTES)
-check_cxx_compiler_flag("-stdlib=libc++" ZHLN_HAS_STDLIB_LIBCXX)
+option(ZHLN_USE_CUSTOM_LIBCXX "Link against Bloomberg custom libc++" OFF)
 
+include(CompilerFlagProbe)
+zhln_check_cxx_compiler_flag("-Qunused-arguments" ZHLN_HAS_QUNUSED_ARGUMENTS)
+zhln_check_cxx_compiler_flag("-fblocks" ZHLN_HAS_FBLOCKS)
+zhln_check_cxx_compiler_flag("-fannotation-attributes"
+                             ZHLN_HAS_ANNOTATION_ATTRIBUTES)
 
-include(CheckSymbolExists)
-set(CMAKE_REQUIRED_LIBRARIES ws2_32)
-check_symbol_exists(WSAStartup "winsock2.h" ZHLN_HAVE_WINSOCK)
-unset(CMAKE_REQUIRED_LIBRARIES)
+if(ZHLN_USE_CUSTOM_LIBCXX)
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-stdlib=libc++" ZHLN_HAS_STDLIB_LIBCXX)
+endif()
+
+if(WIN32)
+    include(CheckSymbolExists)
+    set(CMAKE_REQUIRED_LIBRARIES ws2_32)
+    check_symbol_exists(WSAStartup "winsock2.h" ZHLN_HAVE_WINSOCK)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+else()
+    set(ZHLN_HAVE_WINSOCK FALSE)
+endif()
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE
@@ -83,10 +96,7 @@ endif()
 if(APPLE)
     enable_language(OBJCXX)
     set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} -fno-rtti -fno-exceptions")
-    execute_process(
-    COMMAND xcrun --show-sdk-path
-    OUTPUT_VARIABLE MACOS_SDK_PATH
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(MACOS_SDK_PATH "${_ZHLN_MAC_SDK}")
     set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
 endif()
 
