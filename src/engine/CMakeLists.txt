@@ -15,6 +15,7 @@ set(RAW_ENGINE_SOURCES
     diagnostics/StackTrace.cpp
     diagnostics/MemoryInspector.cpp
     diagnostics/SanitizerBridges.cpp
+    diagnostics/RenderDocInit.cpp
     SignalManager.cpp
     Engine.cpp
     EngineGlobals.cpp
@@ -23,6 +24,8 @@ set(RAW_ENGINE_SOURCES
     SystemWiring.cpp
     Hierarchy.cpp
     PrefabFactory.cpp
+    MeshBuilder.cpp
+    Meshlet.cpp
     AssetManager.cpp
     Platform.cpp
     Profiler.cpp

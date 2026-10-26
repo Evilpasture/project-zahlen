@@ -33,15 +33,10 @@ target_include_directories(zahlen_gui SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/clay
     ${PROJECT_SOURCE_DIR}/extern/stb
     ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
-    ${PROJECT_SOURCE_DIR}/extern/volk
 )
-
-target_include_directories(zahlen_gui PRIVATE "${CMAKE_BINARY_DIR}/generated_shaders")
-add_dependencies(zahlen_gui zahlen_gpu_types)
 
 target_link_libraries(zahlen_gui PUBLIC
     zahlen_ecs
-    zahlen_vulkan
     Jolt
 )
 

@@ -1,12 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Resources.hpp"
-#include "Zahlen/Render/Render.hpp"
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
 #include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>

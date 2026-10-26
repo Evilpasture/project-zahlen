@@ -2,6 +2,31 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 
+if(NOT ZHLN_BUILD_RENDER)
+    add_library(zahlen_render STATIC null/RenderContextNull.cpp)
+    set_target_properties(zahlen_render PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 26
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    target_compile_features(zahlen_render PUBLIC cxx_std_26)
+    target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
+    target_include_directories(zahlen_render PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src/window
+    )
+    target_include_directories(zahlen_render SYSTEM PRIVATE
+        ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
+    )
+    target_link_libraries(zahlen_render
+        PUBLIC  Jolt
+        PRIVATE zahlen_window
+        PRIVATE zahlen_warnings
+    )
+    return()
+endif()
+
 # The renderer's translation units. The templated pass families -- the
 # fullscreen AA nodes and the single-dispatch compute passes -- are header-only
 # by design (FullscreenPass.hpp, ComputePass.hpp and their domain descriptor
@@ -34,11 +59,8 @@ set(RAW_RENDER_SOURCES
     init/RenderInitUI.cpp
     ui/UIRenderer.cpp
     RenderResources.cpp
-    MeshBuilder.cpp
-    Meshlet.cpp
     TextureManager.cpp
     Resources.cpp
-    RenderDocInit.cpp
     RenderProcedural.cpp
     RenderSetup.cpp
     pipelines/ComputeSimPipeline.cpp
@@ -119,7 +141,6 @@ target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exce
 target_link_libraries(zahlen_render
     PUBLIC  zahlen_vulkan
     PUBLIC  Jolt
-    PRIVATE meshoptimizer
     PRIVATE zahlen_window
 )
 

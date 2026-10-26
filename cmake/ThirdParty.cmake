@@ -10,7 +10,9 @@
 
 # Vulkan-Headers is a vendored submodule. Its CMake project provides the
 # Vulkan-Headers interface target; no installed SDK or loader is required.
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/Vulkan-Headers EXCLUDE_FROM_ALL SYSTEM)
+if(ZHLN_BUILD_RENDER)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/Vulkan-Headers EXCLUDE_FROM_ALL SYSTEM)
+endif()
 
 # --- mimalloc ---
 if(APPLE)
@@ -173,6 +175,7 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
+target_compile_definitions(glfw INTERFACE GLFW_INCLUDE_NONE)
 
 # The macOS SDK marks sprintf deprecated and the vendored cocoa joystick
 # still uses it; silence the deprecation noise on the vendored target only.
@@ -204,6 +207,9 @@ set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
 set(USE_RTTI OFF CACHE BOOL "" FORCE)
 set(TARGET_UNIT_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
 set(JPH_BUILD_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
+if(NOT ZHLN_BUILD_RENDER)
+    set(JPH_USE_VK OFF CACHE BOOL "Use Vulkan" FORCE)
+endif()
 
 if(APPLE)
     # Jolt enables its Metal backend by default, which adds Objective-C++ files
@@ -258,8 +264,10 @@ set_target_properties(Jolt PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
-# --- VulkanMemoryAllocator ---
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
+if(ZHLN_BUILD_RENDER)
+    # --- VulkanMemoryAllocator ---
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
+endif()
 
 # --- meshoptimizer (VK_EXT_mesh_shader meshlet generation) ---
 # Used by the offline cooker (zcook) and by the runtime glTF importer through
@@ -270,29 +278,31 @@ set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/meshoptimizer EXCLUDE_FROM_ALL SYSTEM)
 set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-# --- SPIRV-Reflect (vendored at extern/SPIRV-Reflect) ---
-# Reflection of compiled SPIR-V for zahlen_vulkan's pipeline layout builder.
-# Upstream's CMake builds its spirv-reflect command-line tools (and install
-# rules) by default; zahlen only embeds the static library, so everything
-# else is forced off before the upstream CMakeLists runs. The static target
-# upstream provides is spirv-reflect-static, not the spirv_reflect target
-# the old third_party/ wrapper defined, so consumers link that name.
-set(SPIRV_REFLECT_EXECUTABLE OFF CACHE BOOL "" FORCE)
-set(SPIRV_REFLECT_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(SPIRV_REFLECT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(SPIRV_REFLECT_STATIC_LIB ON CACHE BOOL "" FORCE)
-set(SPIRV_REFLECT_SHARED_LIB OFF CACHE BOOL "" FORCE)
-set(SPIRV_REFLECT_INSTALL OFF CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/SPIRV-Reflect EXCLUDE_FROM_ALL SYSTEM)
-# The old vendored wrapper built this as C11 + PIC; upstream's static target
-# sets neither. PIC is required: the archive is linked into the shared
-# zahlen_engine (through the static zahlen_vulkan).
-set_target_properties(spirv-reflect-static PROPERTIES
-    C_STANDARD 11
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-    POSITION_INDEPENDENT_CODE ON
-)
+if(ZHLN_BUILD_RENDER)
+    # --- SPIRV-Reflect (vendored at extern/SPIRV-Reflect) ---
+    # Reflection of compiled SPIR-V for zahlen_vulkan's pipeline layout builder.
+    # Upstream's CMake builds its spirv-reflect command-line tools (and install
+    # rules) by default; zahlen only embeds the static library, so everything
+    # else is forced off before the upstream CMakeLists runs. The static target
+    # upstream provides is spirv-reflect-static, not the spirv_reflect target
+    # the old third_party/ wrapper defined, so consumers link that name.
+    set(SPIRV_REFLECT_EXECUTABLE OFF CACHE BOOL "" FORCE)
+    set(SPIRV_REFLECT_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SPIRV_REFLECT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(SPIRV_REFLECT_STATIC_LIB ON CACHE BOOL "" FORCE)
+    set(SPIRV_REFLECT_SHARED_LIB OFF CACHE BOOL "" FORCE)
+    set(SPIRV_REFLECT_INSTALL OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/SPIRV-Reflect EXCLUDE_FROM_ALL SYSTEM)
+    # The old vendored wrapper built this as C11 + PIC; upstream's static target
+    # sets neither. PIC is required: the archive is linked into the shared
+    # zahlen_engine (through the static zahlen_vulkan).
+    set_target_properties(spirv-reflect-static PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED ON
+        C_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON
+    )
+endif()
 
 # --- simdjson (vendored at extern/simdjson) ---
 # plugins/json is its only consumer. Provisioned here like every other extern/

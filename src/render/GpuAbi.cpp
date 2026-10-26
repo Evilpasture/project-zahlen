@@ -13,8 +13,22 @@
 // would be confirming Slang against Slang.
 
 #include "GpuAbi.hpp"
+#include "GpuLayout.hpp"
+#include <Zahlen/Meshlet.hpp>
+#include <cstddef>
 
 namespace ZHLN::GpuAbi {
+
+static_assert(sizeof(GPUMeshlet) == kMeshletPackedBytes, "meshlet wire stride drifted from Slang::GPUMeshlet");
+static_assert(offsetof(GPUMeshlet, vertexOffset) == 0);
+static_assert(offsetof(GPUMeshlet, triangleOffset) == 4);
+static_assert(offsetof(GPUMeshlet, vertexCount) == 8);
+static_assert(offsetof(GPUMeshlet, triangleCount) == 12);
+static_assert(offsetof(GPUMeshlet, sphereCenter) == 16);
+static_assert(offsetof(GPUMeshlet, sphereRadius) == 28);
+static_assert(offsetof(GPUMeshlet, coneApex) == 32);
+static_assert(offsetof(GPUMeshlet, coneCutoff) == 44);
+static_assert(offsetof(GPUMeshlet, coneAxis) == 48);
 
 const Vk::HeapPushDataLayout kScenePushLayout = Slang::kScenePushLayout;
 

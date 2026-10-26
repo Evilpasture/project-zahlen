@@ -1,14 +1,33 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "GpuLayout.hpp"
 #include <Zahlen/Meshlet.hpp>
+#include <cstddef>
 #include <cstring>
 #include <meshoptimizer.h>
 
 namespace ZHLN {
 
-static_assert(sizeof(GPUMeshlet) == kMeshletPackedBytes, "meshlet wire stride drifted from the generated layout");
+namespace {
+
+// Wire layout for cooked .zmesh records and mesh-shader word fetches (16 x uint32).
+// Verified against Slang::GPUMeshlet in src/render/GpuAbi.cpp when ZHLN_BUILD_RENDER=ON.
+struct PackedMeshletWire {
+    uint32_t vertexOffset;
+    uint32_t triangleOffset;
+    uint32_t vertexCount;
+    uint32_t triangleCount;
+    float    sphereCenter[3];
+    float    sphereRadius;
+    float    coneApex[3];
+    float    coneCutoff;
+    float    coneAxis[3];
+    uint32_t _padding;
+};
+
+static_assert(sizeof(PackedMeshletWire) == kMeshletPackedBytes, "meshlet wire stride drifted from kMeshletPackedBytes");
+
+} // namespace
 
 MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, const float* positions, size_t vertexCount, size_t posStride) noexcept {
     MeshletBuildResult out;
@@ -86,10 +105,10 @@ MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, std::span<co
 }
 
 std::vector<uint8_t> PackMeshlets(std::span<const MeshletDesc> meshlets) noexcept {
-    std::vector<uint8_t> out(meshlets.size() * sizeof(GPUMeshlet));
+    std::vector<uint8_t> out(meshlets.size() * sizeof(PackedMeshletWire));
     for (size_t i = 0; i < meshlets.size(); ++i) {
-        const MeshletDesc& d = meshlets[i];
-        const GPUMeshlet   g {
+        const MeshletDesc&      d = meshlets[i];
+        const PackedMeshletWire g {
             .vertexOffset   = d.vertexOffset,
             .triangleOffset = d.triangleOffset,
             .vertexCount    = d.vertexCount,
@@ -101,7 +120,7 @@ std::vector<uint8_t> PackMeshlets(std::span<const MeshletDesc> meshlets) noexcep
             .coneAxis       = {d.coneAxis[0], d.coneAxis[1], d.coneAxis[2]},
             ._padding       = 0,
         };
-        std::memcpy(out.data() + i * sizeof(GPUMeshlet), &g, sizeof(GPUMeshlet));
+        std::memcpy(out.data() + i * sizeof(PackedMeshletWire), &g, sizeof(PackedMeshletWire));
     }
     return out;
 }

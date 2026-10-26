@@ -147,6 +147,9 @@ option(ZHLN_BUILD_TESTS "Build engine test suite" ON)
 option(ZHLN_BUILD_SAMPLES "Build engine sample applications" ON)
 option(ZHLN_BUILD_EXTRAS
        "Build optional asset plugins, engine extensions, and gameplay systems" ON)
+option(ZHLN_BUILD_RENDER
+       "Build the Vulkan descriptor-heap renderer (OFF links the zero-overhead world-only null RenderContext)"
+       ON)
 option(ZHLN_ENABLE_PCH
        "Enable precompiled headers on high-TU non-module GCC targets" ON)
 
@@ -157,7 +160,11 @@ endif()
 include(ThirdParty)
 
 add_subdirectory(src/window)
-add_subdirectory(src/vulkan)
+if(ZHLN_BUILD_RENDER)
+    add_subdirectory(src/vulkan)
+else()
+    message(STATUS "ZHLN_BUILD_RENDER=OFF: skipping Vulkan, Slang shader compilation, and zahlen_render GPU passes (linking world-only null RenderContext)")
+endif()
 add_subdirectory(src/threading)
 add_subdirectory(src/filesystem)
 add_subdirectory(src/physics)
@@ -194,7 +201,9 @@ add_library(zahlen_engine SHARED)
 
 add_subdirectory(src/engine)
 
-include(ShaderCompilation)
+if(ZHLN_BUILD_RENDER)
+    include(ShaderCompilation)
+endif()
 
 add_subdirectory(src/render)
 
@@ -292,7 +301,6 @@ target_link_libraries(zahlen_module PUBLIC zahlen_engine PRIVATE zahlen_warnings
 target_link_libraries(
   zahlen_engine
   PRIVATE zahlen_render
-          zahlen_vulkan
           zahlen_window
           zahlen_physics
           zahlen_threading
@@ -300,11 +308,14 @@ target_link_libraries(
           zahlen_ecs
           zahlen_audio
           zahlen_gui
+          meshoptimizer
           glfw
-          spirv-reflect-static
           mimalloc-static
           ${ZSTD_LIBRARY}
           zahlen_warnings)
+if(ZHLN_BUILD_RENDER)
+    target_link_libraries(zahlen_engine PRIVATE zahlen_vulkan spirv-reflect-static)
+endif()
 
 # Every target whose objects are linked into libzahlen_engine compiles the
 # engine's own public headers, so all of them must see ZHLN_API as dllexport.
@@ -316,10 +327,19 @@ target_link_libraries(
 # MinGW ld reports as an undefined reference while linking it. The visibility
 # macro is ignored outside Windows (Common.h uses gnu::visibility), so this
 # changes nothing on the other platforms.
-foreach(ZHLN_ENGINE_LIB_TARGET
-        zahlen_render  zahlen_shader_bytecode  zahlen_vulkan  zahlen_window   zahlen_physics
-        zahlen_threading  zahlen_filesystem  zahlen_ecs  zahlen_audio
-        zahlen_gui)
+set(ZHLN_ENGINE_LIB_TARGETS
+    zahlen_render
+    zahlen_window
+    zahlen_physics
+    zahlen_threading
+    zahlen_filesystem
+    zahlen_ecs
+    zahlen_audio
+    zahlen_gui)
+if(ZHLN_BUILD_RENDER)
+    list(APPEND ZHLN_ENGINE_LIB_TARGETS zahlen_shader_bytecode zahlen_vulkan)
+endif()
+foreach(ZHLN_ENGINE_LIB_TARGET IN LISTS ZHLN_ENGINE_LIB_TARGETS)
     target_compile_definitions(${ZHLN_ENGINE_LIB_TARGET} PRIVATE ZHLN_ENGINE_BUILD)
 endforeach()
 
@@ -348,7 +368,7 @@ if(MINGW)
     target_link_libraries(zahlen_engine PRIVATE dbghelp atomic)
 endif()
 
-if(APPLE)
+if(APPLE AND ZHLN_BUILD_RENDER)
     target_link_libraries(zahlen_engine PRIVATE HostBlitSwapchain)
 endif()
 
@@ -359,8 +379,7 @@ target_include_directories(
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/extern/JoltPhysics
           ${CMAKE_CURRENT_SOURCE_DIR}/third_party/renderdoc)
 target_include_directories(
-  zahlen_engine SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
-                              ${CMAKE_BINARY_DIR}/generated_shaders)
+  zahlen_engine SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(
   zahlen_engine SYSTEM
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/extern/clay
@@ -438,9 +457,7 @@ if(USE_SANITIZERS)
 endif()
 
 zahlen_enable_reflection(zahlen_window)
-zahlen_enable_reflection(zahlen_vulkan)
 zahlen_enable_reflection(zahlen_render)
-zahlen_enable_reflection(zahlen_shader_bytecode)
 zahlen_enable_reflection(zahlen_engine)
 zahlen_enable_reflection(zahlen_module)
 zahlen_enable_reflection(zahlen_audio)
@@ -453,9 +470,12 @@ zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zahlen_ui_editor)
 zahlen_enable_reflection(zcook)
 
-zahlen_enable_reflection(zshader)
-
-zahlen_enable_reflection(HostBlitSwapchain)
+if(ZHLN_BUILD_RENDER)
+    zahlen_enable_reflection(zahlen_vulkan)
+    zahlen_enable_reflection(zahlen_shader_bytecode)
+    zahlen_enable_reflection(zshader)
+    zahlen_enable_reflection(HostBlitSwapchain)
+endif()
 
 if(ZHLN_BUILD_EXTRAS)
     # Every target in this tree names its sources. Nothing is discovered by
