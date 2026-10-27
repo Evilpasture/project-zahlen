@@ -188,6 +188,10 @@ struct GpuTypesOptions {
 
 void RunGpuTypesMode(const GpuTypesOptions& options);
 
+// Decodes a source PNG (`inPath`) into tightly packed 8-bit RGBA (`outPath`)
+// so embedded lookup tiles (blue_noise.rgba) build without Python.
+void RunCookRgbaMode(std::string_view inPath, std::string_view outPath);
+
 // Writes `content` to `path`, unless the file already says exactly that: the
 // generated files are inputs to the build, so rewriting an identical one
 // would recompile every translation unit that includes it. True when the

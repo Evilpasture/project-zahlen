@@ -26,13 +26,18 @@ namespace ZHLN {
 //                   <root>/resources/intermediate for what Blender exported,
 //                   <root>/resources/assets for loose textures and models
 //   --engine-tools  the engine's tools/ directory: the Blender-side exporter
-//                   (export_metadata.py) and its launcher (run_blender.py) are
-//                   Python by necessity -- they run inside Blender -- and the
-//                   generated rules must name them at the path the build knows
+//                   (export_metadata.py) runs inside Blender's bundled Python,
+//                   launched directly via `zcook blender` with no host Python
+//                   dependency
 //   --self          how the generated file re-invokes this generator; defaults
 //                   to argv[0], which is what the build passes. Keep it the
 //                   stable path (the shared symlink) rather than a build-dir
 //                   path: the file it writes is shared between build trees.
 int GenerateAssetNinja(int argc, char** argv);
+
+// zcook blender -- locate Blender, scrub host Python environment variables so
+// virtual environments never leak into Blender's bundled interpreter, and invoke
+// Blender directly without requiring a system Python installation.
+int RunBlender(int argc, char** argv);
 
 } // namespace ZHLN

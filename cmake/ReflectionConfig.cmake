@@ -30,6 +30,13 @@ if(COMPILER_HAS_REFLECTION)
         endif()
     endif()
 else()
+    if(NOT ZHLN_HAS_PYTHON)
+        message(FATAL_ERROR
+            "C++26 static reflection (-freflection) is not supported by ${CMAKE_CXX_COMPILER_ID} (${CMAKE_CXX_COMPILER}), "
+            "and Python 3 was not found (ZHLN_HAS_PYTHON=OFF) to run the fallback reflection transpiler "
+            "(tools/transpile_reflection.py). Configure with a -freflection compiler (GCC 16+ or clang-p2996) "
+            "or install Python 3.")
+    endif()
     message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
 endif()
 

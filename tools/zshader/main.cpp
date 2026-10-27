@@ -196,6 +196,8 @@ auto RunCommandLine(int argc, char** argv) -> int {
 
     Options                  options;
     GpuTypesOptions          gpuTypes;
+    std::string              cookRgbaIn;
+    std::string              cookRgbaOut;
     std::vector<std::string> slangSearch; // the one flag the modes share: --slang-search fills it for both
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument = argv[index];
@@ -217,6 +219,10 @@ auto RunCommandLine(int argc, char** argv) -> int {
             slangSearch.emplace_back(next());
         } else if (argument == "--out-abi-spv") {
             gpuTypes.outSpv = next();
+        } else if (argument == "--cook-rgba") {
+            cookRgbaIn = next();
+        } else if (argument == "--out-rgba") {
+            cookRgbaOut = next();
         } else if (argument == "--bytes") {
             Module     module    = ParseBytes(next());
             const auto duplicate = ZHLN::Ranges::FindIf(options.modules, [&module](const Module& existing) { return existing.macro == module.macro; });
@@ -264,6 +270,20 @@ auto RunCommandLine(int argc, char** argv) -> int {
     }
 
     const bool wantsGpuTypes = !gpuTypes.outStructs.empty() || !gpuTypes.module.empty() || !gpuTypes.outSpv.empty();
+    const bool wantsCookRgba = !cookRgbaIn.empty() || !cookRgbaOut.empty();
+    if (wantsCookRgba) {
+        if (cookRgbaIn.empty() || cookRgbaOut.empty()) {
+            Fail("--cook-rgba and --out-rgba are both required together");
+        }
+        if (wantsGpuTypes || !options.outHeader.empty() || !options.outSource.empty() || !options.modules.empty() ||
+            !options.catalog.empty() || !options.blobs.empty() || !options.sets.empty() || !options.slangSources.empty() ||
+            !slangSearch.empty()) {
+            Fail("the cook-rgba mode takes no catalog or gpu-types arguments; run it separately");
+        }
+        RunCookRgbaMode(cookRgbaIn, cookRgbaOut);
+        return 0;
+    }
+
     if (wantsGpuTypes) {
         if (gpuTypes.outStructs.empty() || gpuTypes.module.empty() || slangSearch.empty() || gpuTypes.outSpv.empty()) {
             Fail("--slang-module, --slang-search, --out-gpu-types and --out-abi-spv are all required together");

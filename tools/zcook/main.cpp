@@ -22,13 +22,18 @@ int main(int argc, char** argv) {
                     "  glb   - Compiles internal scenes and layouts into standard glTF GLB containers.\n"
                     "  anim  - Compiles animations into binary format for runtime playback.\n"
                     "  font  - Bakes a TrueType font into a cooked SDF glyph atlas for the runtime.\n"
-                    "  pak   - Compact files listed in a manifest file into single custom pak indexes.\n"
-                    "  ninja - Scans an asset tree and writes the ninja graph that cooks it."
+                    "  pak     - Compact files listed in a manifest file into single custom pak indexes.\n"
+                    "  ninja   - Scans an asset tree and writes the ninja graph that cooks it.\n"
+                    "  blender - Launches Blender with a scrubbed Python environment."
         );
         return 1;
     }
 
     std::string_view cmd = argv[1];
+    if (cmd == "blender") {
+        return ZHLN::RunBlender(argc - 2, argv + 2);
+    }
+
     if (cmd != "mesh" && cmd != "tex" && cmd != "glb" && cmd != "anim" && cmd != "font" && cmd != "pak" && cmd != "ninja") {
         std::println(stderr, "[zcook] ERROR: Unsupported action subcommand '{}'.", cmd);
         return 1;

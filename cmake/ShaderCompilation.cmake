@@ -141,6 +141,11 @@ elseif(TARGET slangc)
 else()
     set(SLANG_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
     if(EXISTS "${SLANG_SOURCE_DIR}/CMakeLists.txt")
+        if(NOT ZHLN_HAS_PYTHON)
+            message(FATAL_ERROR
+                "Building vendored Slang from source (${SLANG_SOURCE_DIR}) requires Python 3 (upstream SPIRV-Tools codegen), "
+                "but ZHLN_HAS_PYTHON=OFF. Install a prebuilt Slang / Vulkan SDK on PATH or CMAKE_PREFIX_PATH, or install Python 3.")
+        endif()
         if(ZHLN_SLANG_VENDORED)
             message(STATUS "ZHLN_SLANG_VENDORED: building slangc from the pinned ${SLANG_SOURCE_DIR}")
         else()
@@ -194,6 +199,12 @@ else()
         set(ZHLN_SLANG_TARGET slang::slang)
         message(STATUS "Found libslang (config): ${slang_DIR}")
     elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang/CMakeLists.txt")
+        if(NOT ZHLN_HAS_PYTHON)
+            message(FATAL_ERROR
+                "Building vendored libslang from source (${CMAKE_CURRENT_SOURCE_DIR}/extern/slang) requires Python 3 "
+                "(upstream SPIRV-Tools codegen), but ZHLN_HAS_PYTHON=OFF. Install a prebuilt Slang / Vulkan SDK on "
+                "CMAKE_PREFIX_PATH, or install Python 3.")
+        endif()
         if(ZHLN_SLANG_VENDORED)
             message(STATUS "ZHLN_SLANG_VENDORED: building libslang from the pinned ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
         else()
@@ -989,18 +1000,27 @@ add_subdirectory("${CMAKE_SOURCE_DIR}/tools/zshader" "${CMAKE_BINARY_DIR}/tools/
 # tile that is cheaper at both ends -- 1024x1024 of noise compresses to within
 # 8KB of its own raw size, and the decode disappears.
 #
-# Stdlib-only on purpose: this needs the interpreter GovernanceChecks found and
-# no third-party package, because the build promises an interpreter and nothing
-# else. See configure/cook_blue_noise.py.
+# Decoded by zshader (--cook-rgba / --out-rgba, tools/zshader/ImageCook.cpp) so
+# the shader catalog build has zero host Python requirement.
 set(ZHLN_BLUE_NOISE_SOURCE "${CMAKE_SOURCE_DIR}/src/render/LDR_RGBA_0.png")
 set(ZHLN_BLUE_NOISE_COOKED "${GEN_INCLUDE_DIR}/blue_noise.rgba")
 add_custom_command(
     OUTPUT "${ZHLN_BLUE_NOISE_COOKED}"
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/configure/cook_blue_noise.py"
-        -i "${ZHLN_BLUE_NOISE_SOURCE}"
-        -o "${ZHLN_BLUE_NOISE_COOKED}"
-    DEPENDS "${CMAKE_SOURCE_DIR}/configure/cook_blue_noise.py" "${ZHLN_BLUE_NOISE_SOURCE}"
-    COMMENT "cook_blue_noise: decoding the blue-noise tile to raw RGBA"
+    # Same order-only rule as the catalog and gpu-types commands: $<TARGET_FILE:zshader>
+    # orders zshader's link before this command without making the binary a file-level
+    # DEPENDS input that would re-decode the PNG whenever zshader relinks.
+    COMMAND ${CMAKE_COMMAND} -E env
+        "PATH=${ZHLN_SLANG_LIB_DIR}\;${ZHLN_SLANG_GLSLANG_DIR}\;$ENV{PATH}"
+        "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}"
+        "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}"
+        ${ZHLN_SLANG_GLSLANG_ORDER}
+        $<TARGET_FILE:zshader>
+        --cook-rgba "${ZHLN_BLUE_NOISE_SOURCE}"
+        --out-rgba "${ZHLN_BLUE_NOISE_COOKED}"
+    DEPENDS
+        "${ZHLN_BLUE_NOISE_SOURCE}"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/ImageCook.cpp"
+    COMMENT "zshader: decoding the blue-noise tile to raw RGBA"
     VERBATIM
 )
 

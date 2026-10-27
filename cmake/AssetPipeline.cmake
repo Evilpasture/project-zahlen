@@ -72,7 +72,6 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             DEPENDS zcook
                     "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
-                    "${zahlen_SOURCE_DIR}/tools/run_blender.py"
             COMMENT "Scanning asset folders and generating assets.ninja..."
         )
     else()
@@ -86,7 +85,6 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             DEPENDS zcook
                     "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
-                    "${zahlen_SOURCE_DIR}/tools/run_blender.py"
             COMMENT "Scanning asset folders and generating assets.ninja..."
         )
     endif()

@@ -120,6 +120,7 @@ include(GitRevision)
 include(LinkerConfig)
 include(Sanitizers)
 include(VulkanSandbox)
+include(PythonProbe)
 include(GovernanceChecks)
 include(ReflectionConfig)
 

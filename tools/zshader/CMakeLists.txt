@@ -34,7 +34,16 @@ set(ZHLN_ZSHADER_SOURCES
 # second kind (see NamesEnumerators()).
 zahlen_transpile_sources(ZHLN_ZSHADER_SOURCES ${ZHLN_ZSHADER_SOURCES})
 
-add_executable(zshader ${ZHLN_ZSHADER_SOURCES})
+set(ZHLN_ZSHADER_IMAGE_COOK_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ImageCook.cpp")
+set_source_files_properties("${ZHLN_ZSHADER_IMAGE_COOK_SOURCE}" PROPERTIES
+    SKIP_PRECOMPILE_HEADERS ON
+    COMPILE_DEFINITIONS "STBI_ONLY_PNG;STBI_NO_STDIO;STBI_NO_LINEAR;STBI_NO_HDR"
+)
+
+add_executable(zshader
+    ${ZHLN_ZSHADER_SOURCES}
+    "${ZHLN_ZSHADER_IMAGE_COOK_SOURCE}"
+)
 
 # libslang comes from cmake/ShaderCompilation.cmake, which is the file that
 # adds this directory: a config package (Vulkan SDK, Slang release) or the
@@ -62,6 +71,7 @@ target_link_libraries(zshader PRIVATE
 # (cmake/HostToolRuntime.cmake), and a plain set would drop it.
 target_include_directories(zshader SYSTEM PRIVATE
     ${ZHLN_SLANG_INCLUDE_DIR}
+    "${CMAKE_SOURCE_DIR}/extern/stb"
 )
 set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
 if(TARGET slang-glslang)

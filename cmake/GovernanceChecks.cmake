@@ -22,65 +22,69 @@
 # cores and caches passing tree fingerprints in ${CMAKE_BINARY_DIR}/.zhln_governance_cache.json
 # keyed by (path, mtime_ns, size) of every governed source, CMake file, checker,
 # and allowlist (set ZHLN_GOVERNANCE_CACHE=0 to force a full uncached sweep).
+#
+# Python is optional (`ZHLN_HAS_PYTHON`): when no Python 3 interpreter is
+# available, the Perl provenance check still runs and the Python checks are
+# skipped without failing configuration.
 
-# --- CHECK INTERPRETER SELECTION ---
-# Resolve the Python 3 interpreter directly via find_program (preferring a
-# repository .venv when present) instead of FindPython3, which spawns 8
-# sysconfig/SOABI C-extension validation subprocesses on every reconfigure.
-if(NOT ZHLN_PYTHON3_EXECUTABLE OR NOT EXISTS "${ZHLN_PYTHON3_EXECUTABLE}")
-  if(EXISTS "${CMAKE_SOURCE_DIR}/.venv")
-    find_program(
-      ZHLN_PYTHON3_EXECUTABLE
-      NAMES python3 python
-      PATHS "${CMAKE_SOURCE_DIR}/.venv/bin" "${CMAKE_SOURCE_DIR}/.venv/Scripts"
-      NO_DEFAULT_PATH)
-  endif()
-  if(NOT ZHLN_PYTHON3_EXECUTABLE)
-    find_program(ZHLN_PYTHON3_EXECUTABLE NAMES python3 python REQUIRED)
-  endif()
-endif()
-set(Python3_EXECUTABLE "${ZHLN_PYTHON3_EXECUTABLE}")
-if(NOT TARGET Python3::Interpreter)
-  add_executable(Python3::Interpreter IMPORTED GLOBAL)
-  set_target_properties(Python3::Interpreter PROPERTIES
-    IMPORTED_LOCATION "${Python3_EXECUTABLE}")
-endif()
+include(PythonProbe)
 find_program(ZHLN_PERL_EXECUTABLE NAMES perl REQUIRED)
 
-execute_process(
-  COMMAND
-    "${Python3_EXECUTABLE}"
-    "${CMAKE_SOURCE_DIR}/configure/run_governance_checks.py"
-    --perl "${ZHLN_PERL_EXECUTABLE}"
-    --cache-file "${CMAKE_BINARY_DIR}/.zhln_governance_cache.json"
-  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-  RESULT_VARIABLE _zhln_check_result
-  OUTPUT_VARIABLE _zhln_check_output
-  ERROR_VARIABLE _zhln_check_error
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  ERROR_STRIP_TRAILING_WHITESPACE)
+if(ZHLN_HAS_PYTHON)
+  execute_process(
+    COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_SOURCE_DIR}/configure/run_governance_checks.py"
+      --perl "${ZHLN_PERL_EXECUTABLE}"
+      --cache-file "${CMAKE_BINARY_DIR}/.zhln_governance_cache.json"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    RESULT_VARIABLE _zhln_check_result
+    OUTPUT_VARIABLE _zhln_check_output
+    ERROR_VARIABLE _zhln_check_error
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE)
 
-if(NOT _zhln_check_result EQUAL 0)
-  message(FATAL_ERROR "${_zhln_check_error}")
+  if(NOT _zhln_check_result EQUAL 0)
+    message(FATAL_ERROR "${_zhln_check_error}")
+  endif()
+
+  if(_zhln_check_output)
+    string(REPLACE ";" "\\;" _zhln_check_lines "${_zhln_check_output}")
+    string(REPLACE "\n" ";" _zhln_check_lines "${_zhln_check_lines}")
+    foreach(_zhln_line IN LISTS _zhln_check_lines)
+      if(_zhln_line)
+        message(STATUS "${_zhln_line}")
+      endif()
+    endforeach()
+  endif()
+
+  # The deep macro-expansion pass needs the libclang Python bindings and is
+  # opt-in: it runs as its own target so a machine without them still configures.
+  add_custom_target(
+    check_macro_expansions
+    COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/configure/check_macro_governance.py" --full
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT
+      "Checking macro expansions with libclang (requires: pip install clang)"
+    VERBATIM)
+else()
+  message(STATUS
+    "Python 3 not found (ZHLN_HAS_PYTHON=OFF): skipping Python configure-time governance checks.")
+  execute_process(
+    COMMAND
+      "${ZHLN_PERL_EXECUTABLE}"
+      "${CMAKE_SOURCE_DIR}/configure/check_include_provenance.pl"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    RESULT_VARIABLE _zhln_perl_result
+    OUTPUT_VARIABLE _zhln_perl_output
+    ERROR_VARIABLE _zhln_perl_error
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE)
+  if(NOT _zhln_perl_result EQUAL 0)
+    message(FATAL_ERROR "${_zhln_perl_error}")
+  endif()
+  if(_zhln_perl_output)
+    message(STATUS "${_zhln_perl_output}")
+  endif()
 endif()
-
-if(_zhln_check_output)
-  string(REPLACE ";" "\\;" _zhln_check_lines "${_zhln_check_output}")
-  string(REPLACE "\n" ";" _zhln_check_lines "${_zhln_check_lines}")
-  foreach(_zhln_line IN LISTS _zhln_check_lines)
-    if(_zhln_line)
-      message(STATUS "${_zhln_line}")
-    endif()
-  endforeach()
-endif()
-
-# The deep macro-expansion pass needs the libclang Python bindings and is
-# opt-in: it runs as its own target so a machine without them still configures.
-add_custom_target(
-  check_macro_expansions
-  COMMAND ${Python3_EXECUTABLE}
-          "${CMAKE_SOURCE_DIR}/configure/check_macro_governance.py" --full
-  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-  COMMENT
-    "Checking macro expansions with libclang (requires: pip install clang)"
-  VERBATIM)
