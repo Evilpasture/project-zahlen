@@ -11,7 +11,11 @@ template <size_t ConcurrentSlots>
 auto ParallelCommandRecorder<ConcurrentSlots>::Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
     _device = device;
     for (size_t i = 0; i < ConcurrentSlots; ++i) {
-        _pools[i] = CommandPool(_device, queueFamily);
+        auto created = CommandPool<QueueType::Graphics>::Create(_device, queueFamily);
+        if (!created) [[unlikely]] {
+            return std::unexpected(created.error());
+        }
+        _pools[i] = std::move(*created);
 
         auto alloc = _pools[i].AllocateSecondary(8);
         if (!alloc) [[unlikely]] {
@@ -24,11 +28,14 @@ auto ParallelCommandRecorder<ConcurrentSlots>::Init(VkDevice device, uint32_t qu
 }
 
 template <size_t ConcurrentSlots>
-void ParallelCommandRecorder<ConcurrentSlots>::Reset() noexcept {
+auto ParallelCommandRecorder<ConcurrentSlots>::Reset() noexcept -> std::expected<void, ErrorCode> {
     for (auto& pool: _pools) {
-        pool.Reset();
+        if (auto reset = pool.Reset(); !reset) [[unlikely]] {
+            return std::unexpected(reset.error());
+        }
     }
     _nextGroup = 0;
+    return {};
 }
 
 template <size_t ConcurrentSlots>

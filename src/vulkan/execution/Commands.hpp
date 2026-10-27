@@ -104,9 +104,15 @@ class CommandRing {
         }
         _timeline = std::move(*timeline);
         for (size_t i = 0; i < Capacity; ++i) {
-            _pools[i] = CommandPool<QType>(device, queueFamily);
-            auto a    = _pools[i].Allocate(1);
-            if (!a) {
+            auto created = CommandPool<QType>::Create(device, queueFamily);
+            if (!created) [[unlikely]] {
+                if (auto cleanup = Cleanup(); !cleanup) {
+                    return std::unexpected(cleanup.error());
+                }
+                return std::unexpected(created.error());
+            }
+            _pools[i] = std::move(*created);
+            if (auto a = _pools[i].Allocate(1); !a) [[unlikely]] {
                 if (auto cleanup = Cleanup(); !cleanup) {
                     return std::unexpected(cleanup.error());
                 }
@@ -156,9 +162,12 @@ class CommandRing {
     }
     [[nodiscard]] auto Acquire() noexcept -> std::expected<Slot, ErrorCode> {
         const uint32_t i = _index.fetch_add(1, std::memory_order_relaxed) % Capacity;
-        if (const VkResult r = WaitValue(_completionValues[i]); r != VK_SUCCESS)
+        if (const VkResult r = WaitValue(_completionValues[i]); r != VK_SUCCESS) {
             return std::unexpected(ToError(r));
-        _pools[i].Reset();
+        }
+        if (auto reset = _pools[i].Reset(); !reset) [[unlikely]] {
+            return std::unexpected(reset.error());
+        }
         return Slot {_cmds[i], i, _completionValues[i]};
     }
     [[nodiscard]] auto Submit(VkQueue queue, Slot slot, ExecutableCommands cmds) noexcept -> std::expected<void, ErrorCode> {

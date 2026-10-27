@@ -70,9 +70,12 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
 
     for (auto& worker: workerCmds) {
         for (auto& pool: worker.pools) {
-            pool     = Vk::CommandPool<Vk::QueueType::Graphics>(ctx.Device(), ctx.PhysicalInfo().graphicsFamily);
-            auto res = pool.AllocateSecondary(256);
-            if (!res) [[unlikely]] {
+            auto created = Vk::CommandPool<Vk::QueueType::Graphics>::Create(ctx.Device(), ctx.PhysicalInfo().graphicsFamily);
+            if (!created) [[unlikely]] {
+                return std::unexpected(created.error());
+            }
+            pool = std::move(*created);
+            if (auto res = pool.AllocateSecondary(256); !res) [[unlikely]] {
                 return std::unexpected(res.error());
             }
         }
@@ -107,10 +110,14 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitCorePipelines(); })
         .and_then([&]() { return presenter.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphicsFamily, cfg.vsync); })
-        .and_then([&]() {
-            computePools = Vk::CommandPools<Vk::kFramesInFlight, Vk::QueueType::Compute>::Create(
+        .and_then([&]() -> std::expected<void, ErrorCode> {
+            auto created = Vk::CommandPools<Vk::kFramesInFlight, Vk::QueueType::Compute>::Create(
                 ctx.Device(), {.queueFamily = ctx.PhysicalInfo().computeFamily, .buffersPerPool = 1}
             );
+            if (!created) [[unlikely]] {
+                return std::unexpected(created.error());
+            }
+            computePools = std::move(*created);
             return InitPostProcessing();
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return SetupUI(); })

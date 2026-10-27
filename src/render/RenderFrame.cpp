@@ -477,12 +477,30 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     // compute timeline is now stepped on-demand in PrepareComputeSubmit()
 
     _impl->diagnostics.gpuProfiler.Reset(frame_index);
-    _impl->computePools[frame_index].Reset();
-    _impl->parallelRecorders[frame_index].Reset();
+    if (auto reset = _impl->computePools[frame_index].Reset(); !reset) [[unlikely]] {
+        if (Vk::IsDeviceLost(reset.error())) {
+            _impl->ctx.Instance().IncrementDeviceLost();
+        }
+        _impl->frameOpen = false;
+        return std::unexpected(AsFrameError(reset.error()));
+    }
+    if (auto reset = _impl->parallelRecorders[frame_index].Reset(); !reset) [[unlikely]] {
+        if (Vk::IsDeviceLost(reset.error())) {
+            _impl->ctx.Instance().IncrementDeviceLost();
+        }
+        _impl->frameOpen = false;
+        return std::unexpected(AsFrameError(reset.error()));
+    }
 
     for (auto& worker: _impl->workerCmds) {
         worker.cmdCount[frame_index].store(0, std::memory_order::relaxed);
-        worker.pools[frame_index].Reset();
+        if (auto reset = worker.pools[frame_index].Reset(); !reset) [[unlikely]] {
+            if (Vk::IsDeviceLost(reset.error())) {
+                _impl->ctx.Instance().IncrementDeviceLost();
+            }
+            _impl->frameOpen = false;
+            return std::unexpected(AsFrameError(reset.error()));
+        }
     }
 
     _impl->destinations.BeginFrame();

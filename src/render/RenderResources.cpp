@@ -1001,8 +1001,12 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     }
     defer _([&] { impl.allocator.DestroyBuffer(*scratchRes); });
 
-    Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl.ctx.Device(), impl.ctx.PhysicalInfo().graphicsFamily);
-    auto                                     allocated = tempPool.Allocate(1);
+    auto tempPoolRes = Vk::CommandPool<Vk::QueueType::Graphics>::Create(impl.ctx.Device(), impl.ctx.PhysicalInfo().graphicsFamily);
+    if (!tempPoolRes) [[unlikely]] {
+        return std::unexpected(tempPoolRes.error());
+    }
+    auto tempPool  = std::move(*tempPoolRes);
+    auto allocated = tempPool.Allocate(1);
     if (!allocated) {
         return std::unexpected(allocated.error());
     }

@@ -45,12 +45,17 @@ auto SwapchainPresenter::Init(const Context& ctx, Allocator& alloc, uint32_t wid
 
     _pacer.Resolve(ctx, surface.Get(), vsync);
 
-    sync       = FrameSync<kFramesInFlight>::Create(ctx.Device());
-    pools      = CommandPools<kFramesInFlight, QueueType::Graphics>::Create(ctx.Device(), {.queueFamily = graphicsFamily, .buffersPerPool = 1});
-    frameIndex = 0;
-    if (!sync.Valid() || !pools.Valid()) {
+    sync = FrameSync<kFramesInFlight>::Create(ctx.Device());
+    if (!sync.Valid()) {
         return std::unexpected(PresentationError::SyncCreationFailed);
     }
+    auto createdPools =
+        CommandPools<kFramesInFlight, QueueType::Graphics>::Create(ctx.Device(), {.queueFamily = graphicsFamily, .buffersPerPool = 1});
+    if (!createdPools) [[unlikely]] {
+        return std::unexpected(createdPools.error());
+    }
+    pools      = std::move(*createdPools);
+    frameIndex = 0;
 
     return Rebuild(width, height);
 }
@@ -117,7 +122,9 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     if (auto res = sync.WaitSlotIdle(slot); !res) {
         return std::unexpected(res.error());
     }
-    pools[slot].Reset();
+    if (auto reset = pools[slot].Reset(); !reset) [[unlikely]] {
+        return std::unexpected(reset.error());
+    }
 
     // 3. Headless fallback path
     if (!swapchain.Valid()) {

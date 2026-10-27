@@ -30,7 +30,7 @@ class ParallelCommandRecorder {
 
     [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode>;
 
-    void Reset() noexcept;
+    [[nodiscard]] auto Reset() noexcept -> std::expected<void, ErrorCode>;
 
     /// Everything a slot must be told before it records: rendering inheritance,
     /// heap inheritance and the frame rows. Held by value, so the recorder owns

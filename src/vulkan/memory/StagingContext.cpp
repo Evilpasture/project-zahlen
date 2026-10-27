@@ -66,7 +66,11 @@ void StagingContext::Abort() && noexcept {
 }
 
 auto StagingContext::Begin(Allocator& allocator, const Context& ctx) noexcept -> std::expected<StagingContext, ErrorCode> {
-    CommandPool<QueueType::Graphics> pool(ctx.Device(), ctx.PhysicalInfo().graphicsFamily);
+    auto poolRes = CommandPool<QueueType::Graphics>::Create(ctx.Device(), ctx.PhysicalInfo().graphicsFamily);
+    if (!poolRes) [[unlikely]] {
+        return std::unexpected(poolRes.error());
+    }
+    auto pool = std::move(*poolRes);
     if (auto allocated = pool.Allocate(1); !allocated) [[unlikely]] {
         return std::unexpected(allocated.error());
     }
