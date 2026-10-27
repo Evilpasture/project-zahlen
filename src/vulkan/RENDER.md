@@ -334,7 +334,7 @@ questions (`Mipmapped()`, `ClampsToBorder()`, `DepthCompare()`, `Valid()`) and
 never hands a field back, so no pass can dismantle a sampler and re-make its
 decision; the packing stays an implementation detail. The 80-byte
 `VkSamplerCreateInfo` is synthesized on the stack by `AsCreateInfo()` only inside
-`SamplerWriteBatch::Flush`, which walks a batch of descriptions sixteen at a
+`DescriptorHeap::Write`, which walks a batch of descriptions sixteen at a
 time, so nothing between the call site and the extension holds a driver struct.
 
 A name that matches nothing is skipped at runtime, which is right for a binding

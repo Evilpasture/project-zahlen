@@ -178,8 +178,9 @@ inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, c
     ZHLN::Assert(b.samplerSlots.size() <= kMaxTrackedSamplers);
     std::array<bool, kMaxTrackedSamplers> initialized {};
 
-    uint32_t written = 0;
-    const auto init  = [&](const auto& sampler) {
+    uint32_t          written = 0;
+    SamplerWriteBatch batch;
+    const auto        init = [&](const auto& sampler) {
         using SamplerT      = std::remove_cvref_t<decltype(sampler)>;
         const auto position = b.FindSamplerPosition(SamplerT::name);
         if (!position) {
@@ -189,10 +190,11 @@ inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, c
             !initialized[*position], "descriptor-heap sampler init: sampler '{}' of set {} is initialized twice", SamplerT::name, b.setIndex
         );
         initialized[*position] = true;
-        heap.BindSampler(SamplerHandle {b.samplerSlots[*position]}, sampler.value);
+        batch.AddSampler(SamplerHandle {b.samplerSlots[*position]}, sampler.value);
         ++written;
     };
     (init(samplers), ...);
+    heap.WriteSamplers(batch);
 
     ZHLN::Assert(
         written == b.samplerSlots.size(), "descriptor-heap sampler init: {} of {} samplers of set {} were initialized; the rest sample an unwritten slot",
@@ -311,7 +313,9 @@ struct WriteShapeMatchesDeclaration {
 };
 
 template <typename Arg>
-[[nodiscard]] auto WriteHeapBinding(HeapManager& heap, uint32_t slot, VkDescriptorType descriptorType, const Arg& arg) noexcept -> bool {
+[[nodiscard]] auto WriteHeapBinding(
+    const HeapManager& heap, ResourceWriteBatch& batch, uint32_t slot, VkDescriptorType descriptorType, const Arg& arg
+) noexcept -> bool {
     using T = std::remove_cvref_t<Arg>;
 
     constexpr WriteSource source = WriteSourceOf<T>();
@@ -329,7 +333,7 @@ template <typename Arg>
                 return true;
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                heap.BindStorageImage(StorageImageHandle {slot}, view, VK_IMAGE_LAYOUT_GENERAL);
+                batch.AddStorageImage(StorageImageHandle {slot}, view, VK_IMAGE_LAYOUT_GENERAL);
             } else {
                 VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                 if constexpr (IsTypedImage<T>::value) {
@@ -339,7 +343,7 @@ template <typename Arg>
                 } else if constexpr (std::is_same_v<T, ImageWrite>) {
                     layout = arg.layout;
                 }
-                heap.BindImage(TextureHandle {slot}, view, layout);
+                batch.AddImage(TextureHandle {slot}, view, layout);
             }
             return true;
         }
@@ -368,9 +372,9 @@ template <typename Arg>
                 slice.address = DeviceAddress<> {heap.BufferAddress(slice.buffer)};
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-                heap.BindUniformBuffer(UniformBufferHandle {slot}, slice);
+                batch.AddBuffer(UniformBufferHandle {slot}, slice);
             } else {
-                heap.BindStorageBuffer(StorageBufferHandle {slot}, slice);
+                batch.AddBuffer(StorageBufferHandle {slot}, slice);
             }
             return true;
         }
@@ -380,7 +384,7 @@ template <typename Arg>
         if constexpr (source != WriteSource::AccelerationStructure) {
             return false;
         } else {
-            heap.BindAccelerationStructure(AccelerationStructureHandle {slot}, arg.address);
+            batch.AddAccelerationStructure(AccelerationStructureHandle {slot}, arg.address);
             return true;
         }
     }
@@ -417,12 +421,13 @@ template <typename Declared, typename... Slots>
         block.has_value(), "descriptor-heap write: the {} transient partition has no room for a {} slot block (set {}); raise its capacity",
         b.lifecycle == HeapLifecycle::Immediate ? "immediate" : "frame", b.resourceBindingCount, b.setIndex
     );
-    const uint32_t partitionBase = b.lifecycle == HeapLifecycle::Immediate ?
-                                       _staticResourceCount + (kFramesInFlight * _frameTransientResourceCount) :
-                                       _staticResourceCount + (_currentFrameIndex * _frameTransientResourceCount);
-    const uint32_t blockBase = block.value_or(partitionBase);
+    if (!block) [[unlikely]] {
+        return HeapBlockBase {};
+    }
+    const uint32_t blockBase = *block;
 
-    const auto write = [&](const auto& slot) {
+    ResourceWriteBatch batch;
+    const auto         write = [&](const auto& slot) {
         using SlotT = std::remove_cvref_t<decltype(slot)>;
 
         const auto ordinal = b.FindResourceOrdinal(SlotT::name);
@@ -435,7 +440,7 @@ template <typename Declared, typename... Slots>
         named[*ordinal] = true;
 
         const auto& binding = b.resources[*ordinal];
-        if (!TemplatedDetail::WriteHeapBinding(*this, blockBase + *ordinal, binding.descriptorType, slot.value)) {
+        if (!TemplatedDetail::WriteHeapBinding(*this, batch, blockBase + *ordinal, binding.descriptorType, slot.value)) {
             ZHLN::Assert(
                 false, "descriptor-heap write: '{}' cannot supply binding '{}' of set {} (descriptor type {}); wrong kind or missing/mismatched image view metadata", SlotT::name,
                 binding.name, b.setIndex, static_cast<int>(binding.descriptorType)
@@ -443,6 +448,7 @@ template <typename Declared, typename... Slots>
         }
     };
     (write(slots), ...);
+    WriteResources(batch);
 
     uint32_t namedCount = 0;
     for (const bool flag: named) {

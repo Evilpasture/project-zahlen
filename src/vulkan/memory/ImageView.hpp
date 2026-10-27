@@ -17,7 +17,6 @@
 namespace ZHLN::Vk {
 
 class Image;
-class ResourceWriteBatch;
 class HeapManager;
 struct ImageSlice;
 

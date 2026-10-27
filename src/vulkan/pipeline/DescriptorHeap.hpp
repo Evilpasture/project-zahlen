@@ -2,16 +2,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "memory/Allocator.hpp"
-#include "DescriptorMapping.hpp"
-
-#include <Zahlen/Threading/Mutex.hpp>
-#include <utility>
-#include <vector>
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
+
+#include "../memory/Allocator.hpp"
+#include "../memory/BufferSlice.hpp"
+#include "../memory/ImageView.hpp"
+#include "DescriptorMapping.hpp"
+#include "Sampler.hpp"
+
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
+#include <cstdint>
+#include <expected>
+#include <span>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace ZHLN::Vk {
 
@@ -58,12 +68,9 @@ class HeapInheritance {
     const VkBindHeapInfoEXT* _resourceBind = nullptr;
 };
 
-class ResourceWriteBatch;
-class SamplerWriteBatch;
 class HeapManager;
 class HeapImmediateScope;
 class HeapFrameScope;
-class Sampler;
 struct HeapPassBindings;
 
 enum class DescriptorHeapType : uint8_t {
@@ -77,15 +84,16 @@ enum class HeapLifecycle : uint8_t {
 };
 
 enum class DescriptorHeapError : uint8_t {
-    ExtensionUnavailable = 1,
-    ResourceSlotsExhausted,
-    SamplerSlotsExhausted,
-    TransientResourceOverflow,
-    FunctionLoaderFailed,
-    AllocationFailed,
-    MappingFailed,
-    DeviceAddressFailed,
-    HeapTooLarge
+    ExtensionUnavailable ZHLN_ANNOTATION(ZHLN::Description<"VK_EXT_descriptor_heap is not enabled on this device">{}) = 1,
+    ResourceSlotsExhausted ZHLN_ANNOTATION(ZHLN::Description<"Static resource descriptor heap slots exhausted">{}),
+    SamplerSlotsExhausted ZHLN_ANNOTATION(ZHLN::Description<"Static sampler descriptor heap slots exhausted">{}),
+    TransientResourceOverflow ZHLN_ANNOTATION(ZHLN::Description<"Transient resource descriptor heap partition overflowed">{}),
+    FunctionLoaderFailed ZHLN_ANNOTATION(ZHLN::Description<"VK_EXT_descriptor_heap entry points failed to load">{}),
+    AllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Descriptor heap buffer allocation failed">{}),
+    MappingFailed ZHLN_ANNOTATION(ZHLN::Description<"Descriptor heap mapping failed">{}),
+    DeviceAddressFailed ZHLN_ANNOTATION(ZHLN::Description<"Descriptor heap buffer device address invalid or misaligned">{}),
+    HeapTooLarge ZHLN_ANNOTATION(ZHLN::Description<"Requested descriptor heap exceeds device maxHeapSize">{}),
+    NoActiveImmediateScope ZHLN_ANNOTATION(ZHLN::Description<"Immediate transient descriptor allocation requires an active immediate scope">{})
 };
 
 template <DescriptorHeapType Heap, VkDescriptorType Type>
@@ -131,9 +139,192 @@ static_assert(sizeof(TextureHandle) == sizeof(uint32_t));
 static_assert(std::is_standard_layout_v<TextureHandle>);
 static_assert(std::is_trivially_copyable_v<TextureHandle>);
 
-template <DescriptorHeapType Type>
+// -----------------------------------------------------------------------------
+// Passive Descriptor Staging Batches
+// -----------------------------------------------------------------------------
+// Pure semantic input payloads: no Vulkan handles, no mapped pointers, no byte
+// strides. DescriptorHeap consumes these directly and synthesizes the C ABI
+// structs on the stack in bounded chunks when writing into its own memory.
+
+struct ResourceWriteEntry {
+    enum class Kind : uint8_t {
+        Image,
+        AddressRange,
+    };
+
+    uint32_t         slot   = 0;
+    VkDescriptorType type   = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+    Kind             kind   = Kind::AddressRange;
+    VkImageLayout    layout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    union Payload {
+        ImageView               view;
+        VkDeviceAddressRangeEXT range;
+
+        constexpr Payload() noexcept: range {} {
+        }
+    } payload {};
+
+    [[nodiscard]] static constexpr auto Image(uint32_t slot, VkDescriptorType type, const ImageView& view, VkImageLayout layout) noexcept
+        -> ResourceWriteEntry {
+        ResourceWriteEntry entry {
+            .slot   = slot,
+            .type   = type,
+            .kind   = Kind::Image,
+            .layout = layout,
+        };
+        entry.payload.view = view;
+        return entry;
+    }
+
+    [[nodiscard]] static constexpr auto Address(uint32_t slot, VkDescriptorType type, VkDeviceAddressRangeEXT range) noexcept
+        -> ResourceWriteEntry {
+        ResourceWriteEntry entry {
+            .slot = slot,
+            .type = type,
+            .kind = Kind::AddressRange,
+        };
+        entry.payload.range = range;
+        return entry;
+    }
+};
+
+static_assert(std::is_trivially_copyable_v<ResourceWriteEntry>);
+
+class ResourceWriteBatch {
+  public:
+    ResourceWriteBatch() noexcept = default;
+
+    void AddImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+        if (handle.Valid() && view.Handle() != VK_NULL_HANDLE) {
+            _entries.push_back(ResourceWriteEntry::Image(handle.index, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, view, layout));
+        }
+    }
+
+    void AddStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+        if (handle.Valid() && view.Handle() != VK_NULL_HANDLE) {
+            _entries.push_back(ResourceWriteEntry::Image(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, view, layout));
+        }
+    }
+
+    void AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept {
+        if (handle.Valid()) {
+            _entries.push_back(
+                ResourceWriteEntry::Address(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, {.address = slice.Address().Get(), .size = slice.Size()})
+            );
+        }
+    }
+
+    void AddBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept {
+        if (handle.Valid()) {
+            _entries.push_back(
+                ResourceWriteEntry::Address(handle.index, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {.address = slice.Address().Get(), .size = slice.Size()})
+            );
+        }
+    }
+
+    void AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept {
+        if (handle.Valid()) {
+            _entries.push_back(ResourceWriteEntry::Address(handle.index, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, {.address = address, .size = 0}));
+        }
+    }
+
+    void Clear() noexcept {
+        _entries.clear();
+    }
+
+    [[nodiscard]] auto Empty() const noexcept -> bool {
+        return _entries.empty();
+    }
+
+    [[nodiscard]] auto Entries() const noexcept -> std::span<const ResourceWriteEntry> {
+        return {_entries.data(), _entries.size()};
+    }
+
+  private:
+    ZHLN::Array<ResourceWriteEntry, 16> _entries {};
+};
+
+struct SamplerWriteEntry {
+    uint32_t slot = 0;
+    Sampler  sampler {};
+};
+
+static_assert(std::is_trivially_copyable_v<SamplerWriteEntry>);
+
+class SamplerWriteBatch {
+  public:
+    SamplerWriteBatch() noexcept = default;
+
+    void AddSampler(SamplerHandle handle, Sampler sampler) noexcept {
+        if (handle.Valid()) {
+            _entries.push_back({.slot = handle.index, .sampler = sampler});
+        }
+    }
+
+    void Clear() noexcept {
+        _entries.clear();
+    }
+
+    [[nodiscard]] auto Empty() const noexcept -> bool {
+        return _entries.empty();
+    }
+
+    [[nodiscard]] auto Entries() const noexcept -> std::span<const SamplerWriteEntry> {
+        return {_entries.data(), _entries.size()};
+    }
+
+  private:
+    ZHLN::Array<SamplerWriteEntry, 16> _entries {};
+};
+
+// -----------------------------------------------------------------------------
+// DescriptorHeap
+// -----------------------------------------------------------------------------
+// Owns a `VK_EXT_descriptor_heap` device-addressable buffer AND its slot
+// partitions, descriptor writes, non-coherent cache flushes, and pipeline
+// mapping offset resolution. Hardware strides, byte offsets, and mapped host
+// addresses never leave this class.
 class DescriptorHeap {
   public:
+    struct PartitionLayout {
+        uint32_t staticSlots             = 0;
+        uint32_t frameTransientSlots     = 0;
+        uint32_t immediateTransientSlots = 0;
+    };
+
+    /// RAII capability token over the immediate transient partition. Minted
+    /// exclusively by `DescriptorHeap::CreateImmediateScope()`; `EnterImmediate`
+    /// and `LeaveImmediate` stay private so callers cannot pass forged or stale
+    /// cursors. Closing scopes out of LIFO order defers cursor rewind until all
+    /// newer overlapping scopes have also closed, avoiding UB or live-slot reuse.
+    class ImmediateScope {
+      public:
+        ImmediateScope() noexcept = default;
+        ~ImmediateScope() noexcept;
+
+        ImmediateScope(const ImmediateScope&)                    = delete;
+        auto operator=(const ImmediateScope&) -> ImmediateScope& = delete;
+
+        ImmediateScope(ImmediateScope&& other) noexcept;
+        auto operator=(ImmediateScope&& other) noexcept -> ImmediateScope&;
+
+        void Reset() noexcept;
+
+        [[nodiscard]] explicit operator bool() const noexcept {
+            return _heap != nullptr;
+        }
+
+      private:
+        friend class DescriptorHeap;
+
+        ImmediateScope(DescriptorHeap& heap, uint64_t scopeId) noexcept: _heap(&heap), _scopeId(scopeId) {
+        }
+
+        DescriptorHeap* _heap    = nullptr;
+        uint64_t        _scopeId = 0;
+    };
+
     DescriptorHeap() = default;
     ~DescriptorHeap() noexcept;
 
@@ -143,15 +334,9 @@ class DescriptorHeap {
     DescriptorHeap(DescriptorHeap&& other) noexcept;
     auto operator=(DescriptorHeap&& other) noexcept -> DescriptorHeap&;
 
-    [[nodiscard]] auto Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, ErrorCode>;
-    void               Cleanup() noexcept;
-
-    void Bind(VkCommandBuffer cmd) const noexcept;
-
-    void Flush(ResourceWriteBatch& batch) noexcept
-        requires(Type == DescriptorHeapType::Resources);
-    void Flush(SamplerWriteBatch& batch) noexcept
-        requires(Type == DescriptorHeapType::Samplers);
+    [[nodiscard]] auto Init(const Context& ctx, Allocator& allocator, DescriptorHeapType type, PartitionLayout layout) noexcept
+        -> std::expected<void, ErrorCode>;
+    void Cleanup() noexcept;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _buffer.Valid();
@@ -160,35 +345,74 @@ class DescriptorHeap {
         return Valid();
     }
 
-    [[nodiscard]] auto SlotOffset(uint32_t slot) const noexcept -> VkDeviceSize {
-        return static_cast<VkDeviceSize>(slot) * _stride;
+    // -------------------------------------------------------------------------
+    // Command Binding & Secondary Inheritance
+    // -------------------------------------------------------------------------
+    void Bind(VkCommandBuffer cmd) const noexcept;
+
+    [[nodiscard]] auto BindInfo() const noexcept -> const VkBindHeapInfoEXT* {
+        return Valid() ? &_bindInfo : nullptr;
     }
-    [[nodiscard]] auto GetStride() const noexcept -> VkDeviceSize {
-        return _stride;
-    }
-    [[nodiscard]] auto GetCapacity() const noexcept -> uint32_t {
-        return _capacity;
-    }
-    [[nodiscard]] auto GetReservedSize() const noexcept -> VkDeviceSize {
-        return _reservedSize;
-    }
+
+    // -------------------------------------------------------------------------
+    // Slot Allocation & Partition Lifecycles
+    // -------------------------------------------------------------------------
+    [[nodiscard]] auto AllocateStatic() noexcept -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto AllocateStaticRange(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
+    void               FreeStatic(uint32_t slot) noexcept;
+
+    void               BeginFrame(uint32_t frameIndex) noexcept;
+    [[nodiscard]] auto CreateImmediateScope() noexcept -> ImmediateScope;
+    [[nodiscard]] auto AllocateTransientRange(uint32_t count, HeapLifecycle lifecycle) noexcept -> std::expected<uint32_t, ErrorCode>;
+
+    // -------------------------------------------------------------------------
+    // Descriptor Writing (Heap owns memory addressing, driver writes & flushes)
+    // -------------------------------------------------------------------------
+    void Write(const ResourceWriteBatch& batch) noexcept;
+    void Write(const SamplerWriteBatch& batch) noexcept;
+    void WriteResource(const ResourceWriteEntry& entry) noexcept;
+    void WriteSampler(SamplerHandle handle, Sampler sampler) noexcept;
+
+    // -------------------------------------------------------------------------
+    // Pipeline Mapping Resolution (Heap resolves slot -> byte offset/stride)
+    // -------------------------------------------------------------------------
+    [[nodiscard]] auto ResolveMapping(const DescriptorMapping& mapping, const DescriptorHeap* pairedSamplerHeap = nullptr) const noexcept
+        -> VkDescriptorSetAndBindingMappingEXT;
 
   private:
-    friend class HeapManager;
+    friend class ImmediateScope;
 
-    [[nodiscard]] auto GetDevice() const noexcept -> VkDevice {
-        return _device;
-    }
-    [[nodiscard]] auto GetMappedPtr() const noexcept -> void* {
-        return _mappedPtr;
-    }
+    struct ImmediateCheckpoint {
+        uint64_t id         = 0;
+        uint32_t baseCursor = 0;
+        bool     closed     = false;
+    };
 
-    void FlushHostCache(VkDeviceSize offset, VkDeviceSize size) noexcept;
+    [[nodiscard]] auto EnterImmediate() noexcept -> uint64_t;
+    void               LeaveImmediate(uint64_t scopeId) noexcept;
+    void               WriteResources(std::span<const ResourceWriteEntry> entries) noexcept;
+    void               WriteSamplers(std::span<const SamplerWriteEntry> entries) noexcept;
+    [[nodiscard]] auto ValidateWriteSlot(uint32_t slot, uint32_t batchCount) const noexcept -> bool;
+    [[nodiscard]] auto IsSlotWritable(uint32_t slot) const noexcept -> bool;
+    void               MarkStaticLive(uint32_t slot) noexcept;
+    void               ClearStaticLive(uint32_t slot) noexcept;
+    [[nodiscard]] auto IsStaticLive(uint32_t slot) const noexcept -> bool;
+    void               FlushHostCache(VkDeviceSize offset, VkDeviceSize size) noexcept;
 
-    VkDevice     _device       = VK_NULL_HANDLE;
-    uint32_t     _capacity     = 0;
-    VkDeviceSize _stride       = 0;
-    VkDeviceSize _reservedSize = 0;
+    VkDevice           _device = VK_NULL_HANDLE;
+    DescriptorHeapType _type   = DescriptorHeapType::Resources;
+
+    uint32_t _capacity                    = 0;
+    uint32_t _staticCapacity              = 0;
+    uint32_t _staticCursor                = 0;
+    uint32_t _frameTransientCapacity      = 0;
+    uint32_t _currentFrameSlot            = 0;
+    uint32_t _frameTransientAllocated     = 0;
+    uint32_t _immediateTransientCapacity  = 0;
+    uint32_t _immediateTransientAllocated = 0;
+
+    VkDeviceSize _stride              = 0;
+    VkDeviceSize _reservedSize        = 0;
     VkDeviceSize _nonCoherentAtomSize = 1;
 
     Allocator*           _allocator = nullptr;
@@ -196,82 +420,11 @@ class DescriptorHeap {
     Buffer::MappedRegion _mappedRegion;
     void*                _mappedPtr = nullptr;
     VkBindHeapInfoEXT    _bindInfo  = {};
-};
 
-class ResourceWriteBatch {
-  public:
-    ResourceWriteBatch() noexcept;
-    ~ResourceWriteBatch() noexcept;
-
-    ResourceWriteBatch(const ResourceWriteBatch&)                    = delete;
-    auto operator=(const ResourceWriteBatch&) -> ResourceWriteBatch& = delete;
-
-    ResourceWriteBatch(ResourceWriteBatch&& other) noexcept;
-    auto operator=(ResourceWriteBatch&& other) noexcept -> ResourceWriteBatch&;
-
-    void AddImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
-    void AddStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
-    void AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
-    void AddBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
-    void AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
-
-    void Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept;
-
-    [[nodiscard]] auto Empty() const noexcept -> bool;
-    [[nodiscard]] auto SlotCount() const noexcept -> uint32_t;
-
-    [[nodiscard]] auto SlotBounds() const noexcept -> std::pair<uint32_t, uint32_t>;
-
-  private:
-    struct Impl;
-    std::unique_ptr<Impl> _impl;
-};
-
-class SamplerWriteBatch {
-  public:
-    SamplerWriteBatch() noexcept;
-    ~SamplerWriteBatch() noexcept;
-
-    SamplerWriteBatch(const SamplerWriteBatch&)                    = delete;
-    auto operator=(const SamplerWriteBatch&) -> SamplerWriteBatch& = delete;
-
-    SamplerWriteBatch(SamplerWriteBatch&& other) noexcept;
-    auto operator=(SamplerWriteBatch&& other) noexcept -> SamplerWriteBatch&;
-
-    void AddSampler(SamplerHandle handle, Sampler sampler) noexcept;
-
-    void Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept;
-
-    [[nodiscard]] auto Empty() const noexcept -> bool;
-    [[nodiscard]] auto SlotCount() const noexcept -> uint32_t;
-    [[nodiscard]] auto SlotsData() const noexcept -> const uint32_t*;
-
-  private:
-    struct Impl;
-    std::unique_ptr<Impl> _impl;
-};
-
-class SlotAllocator {
-  public:
-    SlotAllocator() noexcept;
-    ~SlotAllocator() noexcept;
-
-    SlotAllocator(const SlotAllocator&)                    = delete;
-    auto operator=(const SlotAllocator&) -> SlotAllocator& = delete;
-
-    SlotAllocator(SlotAllocator&& other) noexcept;
-    auto operator=(SlotAllocator&& other) noexcept -> SlotAllocator&;
-
-    void               Init(uint32_t capacity, ErrorCode errorOnExhaustion) noexcept;
-    [[nodiscard]] auto Allocate() noexcept -> std::expected<uint32_t, ErrorCode>;
-    void               Free(uint32_t slot) noexcept;
-    void               Skip(uint32_t count) noexcept;
-    [[nodiscard]] auto Cursor() const noexcept -> uint32_t;
-    void               Clear() noexcept;
-
-  private:
-    struct Impl;
-    std::unique_ptr<Impl> _impl;
+    uint64_t                            _nextImmediateScopeId = 0;
+    ZHLN::Array<ImmediateCheckpoint, 8> _immediateScopes {};
+    std::vector<uint32_t>               _freeStaticSlots;
+    std::vector<uint64_t>               _liveStaticBits;
 };
 
 class HeapManager {
@@ -325,9 +478,11 @@ class HeapManager {
         if (!base) [[unlikely]] {
             return base;
         }
+        SamplerWriteBatch batch;
         for (uint32_t i = 0; i < count; ++i) {
-            BindSampler(SamplerHandle {base->index + i}, samplerAt(i));
+            batch.AddSampler(SamplerHandle {base->index + i}, samplerAt(i));
         }
+        WriteSamplers(batch);
         return base;
     }
 
@@ -356,19 +511,22 @@ class HeapManager {
     void BindStorageBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
     void BindUniformBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
     void BindAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
+    void WriteResources(const ResourceWriteBatch& batch) noexcept;
+    void WriteSamplers(const SamplerWriteBatch& batch) noexcept;
 
     void ReleaseSampler(SamplerHandle handle) noexcept;
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>
     void ReleaseResource(HeapHandle<DescriptorHeapType::Resources, Type> handle) noexcept {
-        FreeStaticResourceSlot(handle.index);
+        if (handle.Valid()) {
+            FreeStaticResourceSlot(handle.index);
+        }
     }
 
     // -------------------------------------------------------------------------
-    // Descriptor mapping. The heap owns its stride, padding and partition layout;
-    // these append semantic entries naming slots, and Materialize() is the only
-    // place that turns those slots into byte offsets. Nothing outside ever calls
-    // ResourceStride()/SamplerOffset() and does the arithmetic itself.
+    // Descriptor mapping. DescriptorHeap owns its stride, padding and partition
+    // layout; these append semantic entries naming slots, and Materialize()
+    // delegates byte-offset resolution to the target heap.
     // -------------------------------------------------------------------------
     void ApplySamplerMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerHandle handle) const noexcept;
     void ApplySamplerArrayMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerHandle base) const noexcept;
@@ -393,18 +551,19 @@ class HeapManager {
     /// (COMBINED_IMAGE_SAMPLER).
     [[nodiscard]] auto ApplyPairedSamplerMapping(DescriptorMapping& entry) noexcept -> std::expected<SamplerHandle, ErrorCode>;
 
-    /// The API boundary: writes `mappings` into `out` as the driver struct, with
-    /// this heap's offsets and strides baked in. `out` must hold
-    /// `mappings.size()` entries; the caller owns its lifetime, so the result
-    /// never outlives the pipeline build that asked for it.
+    /// The API boundary: tells each DescriptorHeap to materialize its semantic
+    /// `mappings` into `out` as the driver struct.
     void Materialize(HeapMappingView mappings, std::span<VkDescriptorSetAndBindingMappingEXT> out) const noexcept;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
+        if (_device == VK_NULL_HANDLE || buffer == VK_NULL_HANDLE) {
+            return 0;
+        }
         const VkBufferDeviceAddressInfo info {
             .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
             .buffer = buffer,
         };
-        return vkGetBufferDeviceAddress(_resourceHeap.GetDevice(), &info);
+        return vkGetBufferDeviceAddress(_device, &info);
     }
 
     template <typename Declared, typename... Slots>
@@ -417,11 +576,9 @@ class HeapManager {
     void BindHeaps(VkCommandBuffer cmd) const noexcept;
 
     /// A handle on where the heap binding state lives, so a secondary command
-    /// buffer can inherit it. The pointers address the two heaps' own
-    /// `_bindInfo` members, which move only when the manager does -- never a
-    /// copy on the caller's stack, which is what this used to hand out.
+    /// buffer can inherit it.
     [[nodiscard]] auto GetInheritance() const noexcept -> HeapInheritance {
-        return HeapInheritance {&_samplerHeap._bindInfo, &_resourceHeap._bindInfo};
+        return HeapInheritance {_samplerHeap.BindInfo(), _resourceHeap.BindInfo()};
     }
 
   private:
@@ -436,54 +593,26 @@ class HeapManager {
     [[nodiscard]] auto AllocateTransientResourceRange(uint32_t count, HeapLifecycle lifecycle) noexcept
         -> std::expected<uint32_t, ErrorCode>;
 
-    void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;
-    void FlushSamplerBatch(SamplerWriteBatch& batch) noexcept;
-
-    [[nodiscard]] auto ResourceStride() const noexcept -> VkDeviceSize {
-        return _resourceHeap.GetStride();
-    }
-    [[nodiscard]] auto SamplerStride() const noexcept -> VkDeviceSize {
-        return _samplerHeap.GetStride();
-    }
-    [[nodiscard]] auto ResourceOffset(uint32_t slot) const noexcept -> VkDeviceSize {
-        return _resourceHeap.SlotOffset(slot);
-    }
-    [[nodiscard]] auto SamplerOffset(uint32_t slot) const noexcept -> VkDeviceSize {
-        return _samplerHeap.SlotOffset(slot);
-    }
-
-    [[nodiscard]] auto EnterImmediateScope() noexcept -> uint32_t;
-    void               LeaveImmediateScope(uint32_t baseCursor) noexcept;
+    [[nodiscard]] auto EnterImmediateScope() noexcept -> DescriptorHeap::ImmediateScope;
+    void               LeaveImmediateScope(DescriptorHeap::ImmediateScope&& scope) noexcept;
     void               EnterFrame(uint32_t frameIndex) noexcept;
     void               LeaveFrame() noexcept;
 
-    ZHLN::Mutex _writeMutex {};
-
-    DescriptorHeap<DescriptorHeapType::Resources> _resourceHeap;
-    DescriptorHeap<DescriptorHeapType::Samplers>  _samplerHeap;
-
-    uint32_t _staticResourceCount             = 0;
-    uint32_t _staticSamplerCount              = 0;
-    uint32_t _frameTransientResourceCount     = 0;
-    uint32_t _immediateTransientResourceCount = 0;
-    uint32_t _currentFrameIndex               = 0;
-
+    ZHLN::Mutex  _writeMutex {};
+    VkDevice     _device          = VK_NULL_HANDLE;
     VkDeviceSize _maxPushDataSize = 0;
 
-    SlotAllocator _staticResourceAlloc;
-    SlotAllocator _staticSamplerAlloc;
-
-    uint32_t _frameTransientAllocated     = 0;
-    uint32_t _immediateTransientAllocated = 0;
+    DescriptorHeap _resourceHeap;
+    DescriptorHeap _samplerHeap;
 };
 
 /// RAII transaction over the immediate transient partition. Allocation inside the
 /// scope bumps the partition; dropping the scope puts the cursor back where the
-/// scope found it. Scopes are LIFO, so overlapping passes get disjoint slot
-/// ranges instead of resetting each other's cursor to zero.
+/// scope found it. Overlapping scopes get disjoint slot ranges instead of
+/// resetting each other's cursor to zero.
 class HeapImmediateScope {
   public:
-    explicit HeapImmediateScope(HeapManager& owner) noexcept;
+    HeapImmediateScope() noexcept = default;
     ~HeapImmediateScope() noexcept;
 
     HeapImmediateScope(const HeapImmediateScope&)                    = delete;
@@ -494,11 +623,16 @@ class HeapImmediateScope {
 
     template <typename Declared, typename... Slots>
     [[nodiscard]] auto WriteParameters(const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase {
+        if (_owner == nullptr) [[unlikely]] {
+            return {};
+        }
         return _owner->template WriteHeapParameters<Declared>(b, slots...);
     }
 
     void Bind(VkCommandBuffer cmd) const noexcept {
-        _owner->BindHeaps(cmd);
+        if (_owner != nullptr) {
+            _owner->BindHeaps(cmd);
+        }
     }
 
     [[nodiscard]] explicit operator bool() const noexcept {
@@ -506,10 +640,13 @@ class HeapImmediateScope {
     }
 
   private:
+    friend class HeapManager;
+
+    explicit HeapImmediateScope(HeapManager& owner) noexcept;
     void Close() noexcept;
 
-    HeapManager* _owner      = nullptr;
-    uint32_t     _baseCursor = 0;
+    HeapManager*                   _owner = nullptr;
+    DescriptorHeap::ImmediateScope _scope {};
 };
 
 /// RAII transaction for one frame's transient partition. The renderer's frame
@@ -517,7 +654,7 @@ class HeapImmediateScope {
 /// frame cursor.
 class HeapFrameScope {
   public:
-    HeapFrameScope(HeapManager& owner, uint32_t frameIndex) noexcept;
+    HeapFrameScope() noexcept = default;
     ~HeapFrameScope() noexcept;
 
     HeapFrameScope(const HeapFrameScope&)                    = delete;
@@ -526,18 +663,18 @@ class HeapFrameScope {
     HeapFrameScope(HeapFrameScope&& other) noexcept;
     auto operator=(HeapFrameScope&& other) noexcept -> HeapFrameScope&;
 
-    [[nodiscard]] auto FrameIndex() const noexcept -> uint32_t {
-        return _frameIndex;
-    }
     [[nodiscard]] explicit operator bool() const noexcept {
         return _owner != nullptr;
     }
 
   private:
+    friend class HeapManager;
+
+    HeapFrameScope(HeapManager& owner, uint32_t frameIndex) noexcept;
     void Close() noexcept;
 
     HeapManager* _owner      = nullptr;
     uint32_t     _frameIndex = 0;
 };
 
-}
+} // namespace ZHLN::Vk
