@@ -292,6 +292,36 @@ template <typename Fn>
             return KEY_PAGEUP;
         case PageDown:
             return KEY_PAGEDOWN;
+        case Insert:
+            return KEY_INSERT;
+        case CapsLock:
+            return KEY_CAPSLOCK;
+        case Pause:
+            return KEY_PAUSE;
+        case PrintScreen:
+            return KEY_SYSRQ;
+        case Minus:
+            return KEY_MINUS;
+        case Equal:
+            return KEY_EQUAL;
+        case LeftBracket:
+            return KEY_LEFTBRACE;
+        case RightBracket:
+            return KEY_RIGHTBRACE;
+        case Backslash:
+            return KEY_BACKSLASH;
+        case Semicolon:
+            return KEY_SEMICOLON;
+        case Apostrophe:
+            return KEY_APOSTROPHE;
+        case GraveAccent:
+            return KEY_GRAVE;
+        case Comma:
+            return KEY_COMMA;
+        case Period:
+            return KEY_DOT;
+        case Slash:
+            return KEY_SLASH;
 
         case LButton:
             return BTN_LEFT;
@@ -299,6 +329,10 @@ template <typename Fn>
             return BTN_RIGHT;
         case MButton:
             return BTN_MIDDLE;
+        case XButton1:
+            return BTN_SIDE;
+        case XButton2:
+            return BTN_EXTRA;
 
         default:
             return 0;

@@ -1009,14 +1009,14 @@ auto main(int argc, char* argv[]) -> int {
     while (kernel->IsRunning()) {
         session.dt = clock.Tick();
         if (auto previewInput = session.previewGui.GetSingleton<ZHLN::Components::InputStateComponent>()) {
-            previewInput->ResetDeltas();
+            previewInput->BeginFrame();
         }
 
         // Mirrors Engine::ProcessEvents: crash poll, then World-side (here
         // registry-side) input bookkeeping, then the Kernel's window pump.
         ZHLN::CheckForCrashes(crashState, nullptr);
         if (auto st = registry.GetSingleton<ZHLN::Components::InputStateComponent>()) {
-            st->ResetDeltas();
+            st->BeginFrame();
         }
         kernel->ProcessEvents();
 

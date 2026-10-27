@@ -10,11 +10,12 @@
 
 namespace ZHLN {
 struct Window::Impl {
-    GLFWwindow*         handle      = nullptr;
-    WindowInputReceiver receiver    = {};
-    bool                quitProcess = false;
-    bool                superDown   = false;
-    std::string         localClipboard;
-    PresentationTarget target;
+    GLFWwindow*                        handle           = nullptr;
+    WindowInputReceiver                receiver         = {};
+    bool                               quitProcess      = false;
+    bool                               superDown        = false;
+    std::array<bool, kMaxGamepads>     gamepadConnected = {};
+    std::string                        localClipboard;
+    PresentationTarget                 target;
 };
 }

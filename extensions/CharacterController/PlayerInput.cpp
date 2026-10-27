@@ -10,6 +10,7 @@
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Entity.hpp"
 #include "Zahlen/Input.hpp"
+#include "Zahlen/InputContext.hpp"
 #include <FreeCam/FreeCam.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <cmath>
@@ -17,61 +18,105 @@
 namespace ZHLN::Character {
 
 namespace {
-[[nodiscard]] auto GetInputState(const ECS::Registry& reg) noexcept -> ZHLN::Optional<const Components::InputStateComponent&> {
-    return reg.GetSingleton<Components::InputStateComponent>();
+[[nodiscard]] auto ResolveSeatInputState(
+    const Engine&        engine,
+    const ECS::Registry& reg,
+    PlayerSeat           seat
+) noexcept -> const Components::InputStateComponent* {
+    if (seat == kPrimarySeat) {
+        if (const auto singleton = reg.GetSingleton<Components::InputStateComponent>()) {
+            return &(*singleton);
+        }
+    }
+    if (engine.GetInput().SeatReceivesKeyboardMouse(seat)) {
+        return &engine.GetInput().SeatKeyboardMouse(seat);
+    }
+    return nullptr;
 }
 } // namespace
 
 void PlayerInputSystem::Update(Engine& engine) {
-    auto&      reg   = engine.GetRegistry();
-    const auto state = GetInputState(reg);
-    if (!state) {
-        return;
-    }
+    auto&               reg      = engine.GetRegistry();
+    const InputContext& inputCtx = engine.GetInput();
 
     for (Entity e: reg.GetEntitiesWith<InputComponent>()) {
         if (auto ic = reg.Get<InputComponent>(e)) {
+            const PlayerSeat seatComp = reg.Get<Components::PlayerSeatComponent>(e)
+                                            .transform([](const Components::PlayerSeatComponent& s) { return s.seat; })
+                                            .value_or(kPrimarySeat);
+
+            const auto* kbm     = ResolveSeatInputState(engine, reg, seatComp);
+            const auto  gamepad = inputCtx.PrimaryGamepadForSeat(seatComp);
+
             float moveX = 0.0f;
             float moveZ = 0.0f;
-            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::W))) {
-                moveZ += 1.0f;
+            if (kbm != nullptr) {
+                if (kbm->IsKeyDown(KeyCode::W)) {
+                    moveZ += 1.0f;
+                }
+                if (kbm->IsKeyDown(KeyCode::S)) {
+                    moveZ -= 1.0f;
+                }
+                if (kbm->IsKeyDown(KeyCode::A)) {
+                    moveX -= 1.0f;
+                }
+                if (kbm->IsKeyDown(KeyCode::D)) {
+                    moveX += 1.0f;
+                }
             }
-            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::S))) {
-                moveZ -= 1.0f;
-            }
-            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::A))) {
-                moveX -= 1.0f;
-            }
-            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::D))) {
-                moveX += 1.0f;
+            if (gamepad) {
+                const StickSample left = gamepad->LeftStick();
+                moveX += left.x;
+                moveZ += left.y;
             }
 
             float len = std::sqrt(moveX * moveX + moveZ * moveZ);
-            if (len > 0.001f) {
+            if (len > 1.0f) {
                 moveX /= len;
                 moveZ /= len;
             }
             ic->localMoveX = moveX;
             ic->localMoveZ = moveZ;
 
-            if (state->IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
-                const float sensitivity = 0.15f;
-                ic->lookYawDelta        = state->GetMouseDeltaX() * sensitivity;
-                ic->lookPitchDelta      = state->GetMouseDeltaY() * sensitivity;
-            } else {
-                ic->lookYawDelta   = 0.0f;
-                ic->lookPitchDelta = 0.0f;
+            float yawDelta   = 0.0f;
+            float pitchDelta = 0.0f;
+            if (kbm != nullptr && kbm->IsMouseButtonDown(MouseButton::Right)) {
+                constexpr float kMouseSensitivity = 0.15f;
+                yawDelta += kbm->GetMouseDeltaX() * kMouseSensitivity;
+                pitchDelta += kbm->GetMouseDeltaY() * kMouseSensitivity;
             }
-
-            float wheel = state->GetMouseWheel();
-            if (std::abs(wheel) > 0.01f) {
-                ic->zoomDelta = wheel * 0.5f;
-            } else {
-                ic->zoomDelta = 0.0f;
+            if (gamepad) {
+                constexpr float kStickDegreesPerTick = 2.5f;
+                const StickSample right              = gamepad->RightStick();
+                yawDelta += right.x * kStickDegreesPerTick;
+                pitchDelta -= right.y * kStickDegreesPerTick;
             }
+            ic->lookYawDelta   = yawDelta;
+            ic->lookPitchDelta = pitchDelta;
 
-            ic->wantsToJump   = state->IsKeyDown(static_cast<uint8_t>(KeyCode::Space));
-            ic->wantsToSprint = state->IsKeyDown(static_cast<uint8_t>(KeyCode::LShift));
+            float zoom = 0.0f;
+            if (kbm != nullptr) {
+                const float wheel = kbm->GetMouseWheel();
+                if (std::abs(wheel) > 0.01f) {
+                    zoom += wheel * 0.5f;
+                }
+            }
+            if (gamepad) {
+                if (gamepad->IsButtonDown(GamepadButton::DPadUp)) {
+                    zoom += 0.25f;
+                }
+                if (gamepad->IsButtonDown(GamepadButton::DPadDown)) {
+                    zoom -= 0.25f;
+                }
+            }
+            ic->zoomDelta = zoom;
+
+            const bool kbmJump    = (kbm != nullptr) && kbm->IsKeyDown(KeyCode::Space);
+            const bool kbmSprint  = (kbm != nullptr) && kbm->IsKeyDown(KeyCode::LShift);
+            const bool padJump    = gamepad && gamepad->IsButtonDown(GamepadButton::South);
+            const bool padSprint  = gamepad && (gamepad->IsButtonDown(GamepadButton::LeftThumb) || gamepad->IsTriggerDown(GamepadAxis::LeftTrigger));
+            ic->wantsToJump       = kbmJump || padJump;
+            ic->wantsToSprint     = kbmSprint || padSprint;
         }
     }
 }

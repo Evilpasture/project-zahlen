@@ -21,6 +21,7 @@
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Frame.hpp>
 #include <Zahlen/FramePlan.hpp>
+#include <Zahlen/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
@@ -38,6 +39,10 @@ namespace { namespace Steps {
 void HostUICallback(Engine& engine, float, FrameContext&) {
     if (const auto cb = engine.GetUICallback(); cb && static_cast<bool>(*cb)) {
         (*cb)(engine);
+    }
+    if (const auto st = engine.GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+        engine.GetInput().SyncCaptureFlags(st->wantCaptureKeyboard, st->wantCaptureMouse);
+        engine.GetInput().RefreshActionsForCurrentFrame(&engine.GetEventBus());
     }
 }
 
@@ -186,6 +191,8 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
     auto& reg = engine.GetRegistry();
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
+
+    reg.GetOrEmplaceSingleton<Components::InputStateComponent>();
 
     reg.Create(Components::MainCameraTagComponent {}, Components::CameraComponent {}, Components::AASettingsComponent {});
 

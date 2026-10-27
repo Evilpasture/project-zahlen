@@ -66,6 +66,8 @@ class ZHLN_API PlatformHost {
 
     void SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept;
 
+    auto SetGamepadRumble(uint8_t slot, const GamepadRumble& rumble) noexcept -> bool;
+
     [[nodiscard]] auto AsWindow() noexcept -> ZHLN::Optional<Window&>;
     [[nodiscard]] auto AsWindow() const noexcept -> ZHLN::Optional<const Window&>;
 

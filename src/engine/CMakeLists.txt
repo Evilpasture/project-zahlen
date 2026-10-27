@@ -17,6 +17,7 @@ set(RAW_ENGINE_SOURCES
     diagnostics/RenderDocInit.cpp
     Engine.cpp
     EngineGlobals.cpp
+    InputContext.cpp
     Kernel.cpp
     World.cpp
     SystemWiring.cpp

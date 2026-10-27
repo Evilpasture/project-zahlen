@@ -26,6 +26,7 @@ struct SceneData;
 class AssetManager;
 class PhysicsContext;
 class AudioContext;
+class InputContext;
 class ArticulationSystem;
 
 // Distinct parameter types for the two otherwise identically typed output
@@ -50,6 +51,7 @@ struct SimServices {
     PhysicsContext&         physics;
     AudioContext&           audio;
     AssetManager&           assets;
+    InputContext&           input;
     ArticulationSystem&     articulation;
     ECS::EventBus&          events;
     ECS::ExtensionServices& extensions;

@@ -22,6 +22,7 @@
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/FramePlan.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/InputContext.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
@@ -241,24 +242,30 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     _impl->world = std::move(world_res.value());
 
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
-        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
+        auto* world = static_cast<World*>(userdata);
+        auto* reg   = &world->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->SetKey(static_cast<uint8_t>(key), pressed);
         if (pressed) {
             state->QueueKeyPress(key);
         }
+        world->GetInput().InjectKey(key, pressed);
     };
 
     auto onMouseMove = [](void* userdata, float x, float y) -> void {
-        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
+        auto* world = static_cast<World*>(userdata);
+        auto* reg   = &world->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyLocalMotion(x, y);
+        world->GetInput().InjectMouseMove(x, y);
     };
 
     auto onMouseScroll = [](void* userdata, float delta) -> void {
-        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
+        auto* world = static_cast<World*>(userdata);
+        auto* reg   = &world->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyWheel(delta);
+        world->GetInput().InjectMouseScroll(delta);
     };
 
     auto onResize = [](void* userdata, Extent2D extent) -> void {
@@ -268,14 +275,31 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     };
 
     auto onChar = [](void* userdata, unsigned int codepoint) -> void {
-        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
+        auto* world = static_cast<World*>(userdata);
+        auto* reg   = &world->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->QueueChar(codepoint);
+        world->GetInput().InjectChar(codepoint);
+    };
+
+    auto onGamepadConnection = [](void* userdata, uint8_t slot, bool connected, std::string_view name) -> void {
+        static_cast<World*>(userdata)->GetInput().InjectGamepadConnection(slot, connected, name);
+    };
+
+    auto onGamepadState = [](void* userdata, uint8_t slot, const GamepadRawSample& sample) -> void {
+        static_cast<World*>(userdata)->GetInput().InjectGamepadSample(slot, sample);
     };
 
     World*              worldPtr = _impl->world.get();
     WindowInputReceiver receiver = {
-        .userdata = worldPtr, .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
+        .userdata            = worldPtr,
+        .onKey               = onKey,
+        .onMouseMove         = onMouseMove,
+        .onMouseScroll       = onMouseScroll,
+        .onResize            = onResize,
+        .onChar              = onChar,
+        .onGamepadConnection = onGamepadConnection,
+        .onGamepadState      = onGamepadState,
     };
 
     auto kernel_res = Kernel::Create(cfg.render, receiver);
@@ -283,6 +307,13 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         return std::unexpected(kernel_res.error());
     }
     _impl->kernel = std::move(kernel_res.value());
+
+    _impl->world->GetInput().SetRumbleSink(
+        [](void* userdata, uint8_t slot, const GamepadRumble& rumble) noexcept {
+            static_cast<PlatformHost*>(userdata)->SetGamepadRumble(slot, rumble);
+        },
+        &_impl->kernel->GetPlatformHost()
+    );
 
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
@@ -318,9 +349,12 @@ auto Engine::IsRunning() const -> bool {
 
 void Engine::ProcessEvents() {
     auto& reg        = _impl->world->GetRegistry();
+    auto& input      = _impl->world->GetInput();
     auto  inputState = reg.GetSingleton<Components::InputStateComponent>();
+
+    input.BeginFrame();
     if (inputState) {
-        inputState->ResetDeltas();
+        inputState->BeginFrame();
     }
 
     _impl->kernel->ProcessEvents();
@@ -330,10 +364,20 @@ void Engine::ProcessEvents() {
         inputState->wantCaptureKeyboard = false;
         inputState->wantCaptureMouse    = false;
     }
+
+    if (inputState) {
+        input.SyncCaptureFlags(inputState->wantCaptureKeyboard, inputState->wantCaptureMouse);
+    }
+    input.RefreshActionsForCurrentFrame(&_impl->world->GetEventBus());
 }
 
 void Engine::PollLateInput() {
     _impl->kernel->ProcessEvents();
+    auto& input = _impl->world->GetInput();
+    if (auto inputState = _impl->world->GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+        input.SyncCaptureFlags(inputState->wantCaptureKeyboard, inputState->wantCaptureMouse);
+    }
+    input.RefreshActionsForCurrentFrame(&_impl->world->GetEventBus());
 }
 
 auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
@@ -403,6 +447,7 @@ void Engine::EnsureSystemGraphs() {
             .physics      = _impl->world->GetPhysics(),
             .audio        = _impl->kernel->GetAudioContext(),
             .assets       = _impl->kernel->GetAssetManager(),
+            .input        = _impl->world->GetInput(),
             .articulation = _impl->world->GetArticulationSystem(),
             .events       = _impl->world->GetEventBus(),
             .extensions   = _impl->extensions,
@@ -462,6 +507,12 @@ auto Engine::GetAssetManager() -> AssetManager& {
 }
 auto Engine::GetAudioContext() -> AudioContext& {
     return _impl->kernel->GetAudioContext();
+}
+auto Engine::GetInput() noexcept -> InputContext& {
+    return _impl->world->GetInput();
+}
+auto Engine::GetInput() const noexcept -> const InputContext& {
+    return _impl->world->GetInput();
 }
 auto Engine::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
     return _impl->kernel->GetFileSystemWatcher();
@@ -650,6 +701,7 @@ auto Engine::InitializeDefaultScene() -> bool {
 
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     _impl->activeGameplayDriver = driver;
+    _impl->world->GetInput().StepHaptics(dt);
 
     FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 

@@ -40,6 +40,7 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestFileSystemWatcher.cpp
     core/TestFontAsset.cpp
     core/TestGraphicsSettings.cpp
+    core/TestInput.cpp
     core/TestMath.cpp
     core/TestOptional.cpp
     core/TestPlatform.cpp

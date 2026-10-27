@@ -138,6 +138,8 @@ class ZHLN_API Engine {
     auto               GetSceneData() -> SceneData&;
     auto               GetAssetManager() -> AssetManager&;
     auto               GetAudioContext() -> AudioContext&;
+    auto               GetInput() noexcept -> InputContext&;
+    [[nodiscard]] auto GetInput() const noexcept -> const InputContext&;
     auto               GetFileSystemWatcher() -> FileSystemWatcher&;
     [[nodiscard]] auto GetRegistry() -> ECS::Registry&;
     [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;

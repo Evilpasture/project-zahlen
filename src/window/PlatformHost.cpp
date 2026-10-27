@@ -6,9 +6,11 @@
 #include "PresentationTarget.hpp"
 #include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Window.hpp>
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -114,6 +116,9 @@ struct WindowedBackend {
     }
     void PollEvents() noexcept {
         glfwPollEvents();
+        if (window != nullptr) {
+            window->ProcessEvents();
+        }
     }
     void Close() const noexcept {
         window->Close();
@@ -334,6 +339,39 @@ void PlatformHost::SetFileDropHandler(void (*handler)(void* userdata, const File
         },
         _impl->backend
     );
+}
+
+auto PlatformHost::SetGamepadRumble(uint8_t slot, [[maybe_unused]] const GamepadRumble& rumble) noexcept -> bool {
+    if (slot >= kMaxGamepads) {
+        return false;
+    }
+#if defined(_WIN32)
+    struct XInputVibration {
+        uint16_t wLeftMotorSpeed;
+        uint16_t wRightMotorSpeed;
+    };
+    using XInputSetStateFn = unsigned long(__stdcall*)(unsigned long, XInputVibration*);
+
+    static XInputSetStateFn s_xinputSetState = []() noexcept -> XInputSetStateFn {
+        HMODULE mod = LoadLibraryW(L"xinput1_4.dll");
+        if (mod == nullptr) {
+            mod = LoadLibraryW(L"xinput9_1_0.dll");
+        }
+        if (mod == nullptr) {
+            return nullptr;
+        }
+        return reinterpret_cast<XInputSetStateFn>(GetProcAddress(mod, "XInputSetState"));
+    }();
+
+    if (s_xinputSetState != nullptr) {
+        XInputVibration vib {
+            .wLeftMotorSpeed  = static_cast<uint16_t>(std::clamp(rumble.lowFrequency, 0.0f, 1.0f) * 65535.0f),
+            .wRightMotorSpeed = static_cast<uint16_t>(std::clamp(rumble.highFrequency, 0.0f, 1.0f) * 65535.0f),
+        };
+        return s_xinputSetState(static_cast<unsigned long>(slot), &vib) == 0UL;
+    }
+#endif
+    return false;
 }
 
 
