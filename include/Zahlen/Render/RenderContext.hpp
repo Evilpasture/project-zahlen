@@ -258,7 +258,7 @@ class ZHLN_API RenderContext {
     void ApplySimulationData(const SceneData& scene) noexcept;
     void ApplyDrawData(const SceneData& scene) noexcept;
     [[nodiscard]] auto                            RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped>;
-    [[nodiscard]] auto                            RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped>;
+    [[nodiscard]] auto                            RenderUI(const UIView& view, UIDrawData uiData) noexcept -> FrameOutcome<FrameSkipped>;
     [[nodiscard]] FrameOutcome<PresentSuboptimal> EndFrame() noexcept;
     void                                          AbortFrame() noexcept;
     void DrawDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material) noexcept;

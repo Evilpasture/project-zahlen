@@ -624,7 +624,7 @@ auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     return std::nullopt;
 }
 
-auto RenderContext::RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped> {
+auto RenderContext::RenderUI(const UIView& view, UIDrawData uiData) noexcept -> FrameOutcome<FrameSkipped> {
     return Pipelines::UIPipeline::Execute(*_impl, view, uiData);
 }
 
@@ -727,7 +727,7 @@ auto FrameScope::RenderScene(const SceneRenderPass& pass, const SceneData& scene
     return _rc->RenderScene(pass.view, pass.settings);
 }
 
-auto FrameScope::RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped> {
+auto FrameScope::RenderUI(const UIView& view, UIDrawData uiData) noexcept -> FrameOutcome<FrameSkipped> {
     if (_rc == nullptr) {
         return FrameSkipped {};
     }

@@ -44,14 +44,14 @@ class UIRenderer {
 
     template <VkFormat Format>
     void Record(const UIColorPass<Format>& pass, Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex,
-                const UIDrawData& uiData) noexcept;
+                UIDrawData uiData) noexcept;
 
     void RecordFallback(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, VkFormat colorFormat,
-                        const UIDrawData& uiData) noexcept;
+                        UIDrawData uiData) noexcept;
 
   private:
     template <typename DrawBatch>
-    void RecordBatches(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, const UIDrawData& uiData,
+    void RecordBatches(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, UIDrawData uiData,
                        DrawBatch&& drawBatch) noexcept;
 
     struct Impl;

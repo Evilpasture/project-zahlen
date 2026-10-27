@@ -110,6 +110,12 @@ constexpr size_t kPointLightIndex = 1;
 
 } // namespace
 
+namespace {
+
+std::unique_ptr<GUI::Context> s_FallbackGui;
+
+} // namespace
+
 auto DefaultPreset::FallbackScene() noexcept -> const Scene::Scene& {
     // Built on first use: a description holds strings and vectors, so it cannot
     // be a constexpr object, and there is no reason to pay for it in a process
@@ -135,6 +141,7 @@ void DefaultPreset::ClearFallback() noexcept {
     s_BtnQuit      = Entity::Null();
     s_AccumTime    = 0.0f;
     s_PopupVisible = true;
+    s_FallbackGui.reset();
 }
 
 void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage) {
@@ -153,7 +160,6 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
 
     Log("[DefaultPreset] Engaging Fallback Scene. Reason: {}", detailMessage);
 
-    auto& rc  = engine.GetRenderContext();
     auto& reg = engine.GetRegistry();
 
     // ========================================================================
@@ -166,17 +172,8 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
         reg.Create(Components::GlobalSettingsTagComponent {});
     }
 
-    TextureHandle fontHandle = TextureHandle::Invalid;
-    if (auto settings = reg.GetSingleton<GUI::UISettingsComponent>()) {
-        fontHandle = settings->fontAtlas.texture;
-        if (fontHandle == TextureHandle::Invalid) {
-            fontHandle = PrefabFactory::CreateFontAtlasTexture(
-                rc, reg, engine.GetAssetManager(), GUI::kDefaultFontAssetID
-            );
-            settings->fontAtlas.texture = fontHandle;
-            settings->defaultFontAtlas  = fontHandle;
-        }
-    }
+    engine.EnsureFontAtlas();
+    s_FallbackGui = std::make_unique<GUI::Context>(engine.GetFontAtlas());
 
     // ========================================================================
     // 1. 3D SCENE SETUP
@@ -247,8 +244,11 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
     // 2. IMMEDIATE-MODE CLAY 2D UI EVALUATION
     if (s_PopupVisible) {
-        GUI::Context ui(engine);
-        ui.BeginFrame(dt);
+        if (!s_FallbackGui) {
+            s_FallbackGui = std::make_unique<GUI::Context>();
+        }
+        s_FallbackGui->SetFontAtlas(engine.GetFontAtlas());
+        GUI::Frame ui = s_FallbackGui->BeginFrame(engine.ConsumeUIInput(dt));
 
         // Full-screen centering container
         ui.BeginBox("FallbackCenterScreen", GUI::BoxConfig {
@@ -331,7 +331,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
         // Bank the geometry: the renderer composes it over the scene once
         // the frame it belongs to is open (RenderSystem's HUD overlay pass).
-        engine.SetPendingUIData(ui.EndFrame());
+        engine.SubmitUI(std::move(ui).End());
 
         // The s_UIPopupBox / s_BtnXxx fields are kept for API compatibility
         // but Clay has no UI entities; leave them as null.

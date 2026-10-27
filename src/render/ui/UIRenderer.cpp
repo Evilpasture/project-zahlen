@@ -239,7 +239,7 @@ void UIRenderer::RecordBatches(
     uint32_t            width,
     uint32_t            height,
     uint32_t            frameIndex,
-    const UIDrawData&   uiData,
+    UIDrawData          uiData,
     DrawBatch&&         drawBatch
 ) noexcept {
     if (_impl == nullptr || uiData.Empty() || width == 0 || height == 0) {
@@ -320,7 +320,7 @@ void UIRenderer::Record(
     uint32_t                   width,
     uint32_t                   height,
     uint32_t                   frameIndex,
-    const UIDrawData&          uiData
+    UIDrawData                 uiData
 ) noexcept {
     if (_impl == nullptr || !_impl->pipelines.Get<Format>().Valid() || uiData.Empty() || width == 0 || height == 0) {
         return;
@@ -338,7 +338,7 @@ void UIRenderer::RecordFallback(
     uint32_t            height,
     uint32_t            frameIndex,
     VkFormat            colorFormat,
-    const UIDrawData&   uiData
+    UIDrawData          uiData
 ) noexcept {
     if (_impl == nullptr || _impl->fallbackFormat != colorFormat || !_impl->fallbackPipeline.Valid()) {
         return;
@@ -352,20 +352,20 @@ void UIRenderer::RecordFallback(
 }
 
 template void UIRenderer::Record<
-    VK_FORMAT_B8G8R8A8_SRGB>(const UIColorPass<VK_FORMAT_B8G8R8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, const UIDrawData&) noexcept;
+    VK_FORMAT_B8G8R8A8_SRGB>(const UIColorPass<VK_FORMAT_B8G8R8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
 template void UIRenderer::Record<
-    VK_FORMAT_B8G8R8A8_UNORM>(const UIColorPass<VK_FORMAT_B8G8R8A8_UNORM>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, const UIDrawData&) noexcept;
+    VK_FORMAT_B8G8R8A8_UNORM>(const UIColorPass<VK_FORMAT_B8G8R8A8_UNORM>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
 template void UIRenderer::Record<
-    VK_FORMAT_R8G8B8A8_SRGB>(const UIColorPass<VK_FORMAT_R8G8B8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, const UIDrawData&) noexcept;
+    VK_FORMAT_R8G8B8A8_SRGB>(const UIColorPass<VK_FORMAT_R8G8B8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
 template void UIRenderer::Record<
-    VK_FORMAT_R8G8B8A8_UNORM>(const UIColorPass<VK_FORMAT_R8G8B8A8_UNORM>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, const UIDrawData&) noexcept;
+    VK_FORMAT_R8G8B8A8_UNORM>(const UIColorPass<VK_FORMAT_R8G8B8A8_UNORM>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
 template void UIRenderer::Record<VK_FORMAT_R16G16B16A16_SFLOAT>(
     const UIColorPass<VK_FORMAT_R16G16B16A16_SFLOAT>&,
     Vk::CommandEncoder&,
     uint32_t,
     uint32_t,
     uint32_t,
-    const UIDrawData&
+    UIDrawData
 ) noexcept;
 
 } // namespace ZHLN

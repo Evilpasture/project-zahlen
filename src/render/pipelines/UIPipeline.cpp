@@ -59,7 +59,7 @@ static_assert(std::same_as<typename RuntimePipeline::value_type, Vk::TypedPipeli
 
 }
 
-auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped> {
+auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, UIDrawData uiData) noexcept -> FrameOutcome<FrameSkipped> {
     if (uiData.Empty()) {
         return FrameSkipped {};
     }

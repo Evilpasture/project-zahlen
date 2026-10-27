@@ -94,29 +94,6 @@ struct CookedAnimTrack {
     uint32_t valueOffset;
 };
 
-struct CookedFontHeader {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t atlasWidth;
-    uint32_t atlasHeight;
-    uint32_t glyphCount;
-    uint32_t firstCodepoint;
-    float    fontSize;
-    float    baseline;
-    float    lineHeight;
-    uint32_t flags;
-    uint32_t pixelDataSize;
-};
-
-inline constexpr uint32_t CookedFontMagic   = 0x30544E46;
-inline constexpr uint32_t CookedFontVersion = 1;
-inline constexpr uint32_t CookedFontFlagSDF = 1u << 0;
-
-struct CookedFontGlyph {
-    float x0, y0, x1, y1;
-    float xoff, yoff, xadvance;
-};
-
 #pragma pack(pop)
 
 using AssetLoadRequest = FS::LoadRequest;

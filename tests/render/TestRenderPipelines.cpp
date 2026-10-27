@@ -485,8 +485,7 @@ struct RenderPipelinesTestSuite {
         //
         // The font atlas is the same shape of bug without the race: a fresh
         // 1024x1024 bindless texture per reset, none of them released. It is
-        // device state now, built once and copied into each new scene's
-        // UISettingsComponent.
+        // device state now, built once on Engine and preserved across scene resets.
         std::expected<void, ZHLN::ErrorCode> scene_reset_rebuilds_engine_state_instead_of_accumulating_it() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("LocalGPUSceneResetTest", 320, 240);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -498,19 +497,17 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectGt(updateSystems, 0);
             ZHLN::Test::ExpectGt(renderSystems, 0);
 
-            const auto firstUI = engine->GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
-            if (!ZHLN::Test::ExpectTrue(firstUI.has_value())) {
-                return {};
-            }
-            const ZHLN::TextureHandle atlas = firstUI->defaultFontAtlas;
+            const ZHLN::FontAtlas& firstFont = engine->GetFontAtlas();
+            const ZHLN::TextureHandle atlas  = firstFont.texture;
+            ZHLN::Test::ExpectTrue(atlas != ZHLN::TextureHandle::Invalid);
             // 'A' is never an empty box in any baked font, so a zero-area
             // entry means the metrics were not carried over. The lookup goes
             // through the atlas's own glyph range -- the bake declares its
             // codepoint span, and the engine no longer assumes ASCII 32..127.
-            const ZHLN::GlyphMetric glyphA = firstUI->fontAtlas.GlyphFor('A');
+            const ZHLN::GlyphMetric glyphA = firstFont.GlyphFor('A');
             ZHLN::Test::ExpectGt(glyphA.x1, glyphA.x0);
-            ZHLN::Test::ExpectGt(firstUI->fontAtlas.glyphCount, 0u);
-            ZHLN::Test::ExpectGt(firstUI->fontAtlas.fontSize, 0.0f);
+            ZHLN::Test::ExpectGt(firstFont.glyphCount, 0u);
+            ZHLN::Test::ExpectGt(firstFont.fontSize, 0.0f);
 
             for (uint32_t pass = 0; pass < 3; ++pass) {
                 ZHLN::Test::Headless::ResetScene(*engine);
@@ -518,15 +515,10 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectEq(engine->GetUpdateGraph().GetSystemCount(), updateSystems);
                 ZHLN::Test::ExpectEq(engine->GetRenderGraph().GetSystemCount(), renderSystems);
 
-                const auto ui = engine->GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
-                if (ZHLN::Test::ExpectTrue(ui.has_value())) {
-                    // Same atlas, and the glyph table came with it: the new
-                    // scene is seeded from the engine's copy rather than
-                    // rebuilt or left blank.
-                    ZHLN::Test::ExpectTrue(ui->defaultFontAtlas == atlas);
-                    ZHLN::Test::ExpectTrue(ui->fontAtlas.texture == atlas);
-                    ZHLN::Test::ExpectTrue(ui->fontAtlas.GlyphFor('A').x1 == glyphA.x1);
-                }
+                const ZHLN::FontAtlas& font = engine->GetFontAtlas();
+                // Same device-scoped atlas across resets rather than rebuilt or left blank.
+                ZHLN::Test::ExpectTrue(font.texture == atlas);
+                ZHLN::Test::ExpectTrue(font.GlyphFor('A').x1 == glyphA.x1);
 
                 // And the rebuilt frame still runs.
                 ZHLN::Test::Headless::TickFrames(*engine, 2);

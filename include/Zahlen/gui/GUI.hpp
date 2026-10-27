@@ -7,23 +7,20 @@
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/gui/TextBuffer.hpp>
 #include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/Input.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/gui/Font.hpp>
+#include <Zahlen/gui/TextBuffer.hpp>
 #include <Zahlen/gui/UIData.hpp>
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-
-namespace ZHLN {
-class Engine;
-namespace ECS {
-class Registry;
-}
-}
 
 namespace ZHLN::GUI {
 
@@ -46,17 +43,12 @@ struct BoxConfig {
     Direction direction    = Direction::Column;
     Alignment alignMain    = Alignment::Start;
     Alignment alignCross   = Alignment::Start;
-    float offsetX = 0.0f;
-    float offsetY = 0.0f;
-    bool clipVertical = false;
+    float     offsetX      = 0.0f;
+    float     offsetY      = 0.0f;
+    bool      clipVertical = false;
 };
 
-struct UISettingsComponent {
-    TextureHandle defaultFontAtlas = TextureHandle::Invalid;
-    FontAtlas     fontAtlas;
-};
-
-// Appearance of the bar drawn by Context::BeginScrollArea. Widths and heights
+// Appearance of the bar drawn by Frame::BeginScrollArea. Widths and heights
 // are in pixels, matching the units Clay lays out in.
 struct ScrollBarStyle {
     float     width           = 6.0f;
@@ -82,6 +74,13 @@ struct ScrollState {
     }
 };
 
+struct ElementRect {
+    float x      = 0.0f;
+    float y      = 0.0f;
+    float width  = 0.0f;
+    float height = 0.0f;
+};
+
 struct TextBounds {
     float              minX = 0.0f;
     float              maxX = 0.0f;
@@ -95,27 +94,86 @@ struct TextBounds {
     }
 };
 
+// Per-frame input snapshot consumed by Context::BeginFrame.
+// Spans are copied internally during BeginFrame and do not need to outlive the call.
+struct UIInput {
+    Extent2D     viewport    = {.width = 1920, .height = 1080};
+    float        dt          = 1.0f / 60.0f;
+    float        mouseX      = -1.0f;
+    float        mouseY      = -1.0f;
+    float        mouseScroll = 0.0f;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
+    bool         mouseDown[3] = {false, false, false};
+    KeyModifiers modifiers    = KeyModifiers::None;
+
+    std::span<const KeyCode>  pressedKeys;
+    std::span<const uint32_t> characterStream;
+
+    TextEdit::ClipboardSink clipboard {};
+};
+
 [[nodiscard]] constexpr auto TextLineHeight(const FontAtlas& font, float scale) noexcept -> float {
     return font.LineHeight(scale);
 }
 
-[[nodiscard]] auto MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept -> TextBounds;
+[[nodiscard]] ZHLN_API auto MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept -> TextBounds;
+
+class Frame;
 
 class ZHLN_API Context {
   public:
+    using ElementRect = GUI::ElementRect;
+
+    Context();
+    explicit Context(const FontAtlas& fontAtlas);
+    ~Context() noexcept;
+
+    Context(const Context&)                    = delete;
+    auto operator=(const Context&) -> Context& = delete;
+    Context(Context&&) noexcept;
+    auto operator=(Context&&) noexcept -> Context&;
+
+    void               SetFontAtlas(const FontAtlas& fontAtlas) noexcept;
+    [[nodiscard]] auto GetFontAtlas() const noexcept -> const FontAtlas&;
+
+    void SetClipboard(TextEdit::ClipboardSink sink) noexcept;
+
+    [[nodiscard]] auto GetLastFrameRect(std::string_view id) const noexcept -> std::optional<ElementRect>;
+    [[nodiscard]] auto GetScrollState(std::string_view id) const noexcept -> ScrollState;
+    [[nodiscard]] auto IsPointerOver(std::string_view id) const noexcept -> bool;
+    [[nodiscard]] auto IsTextInputFocused() const noexcept -> bool;
+    [[nodiscard]] auto WantsCaptureMouse() const noexcept -> bool;
+    [[nodiscard]] auto WantsCaptureKeyboard() const noexcept -> bool;
+    [[nodiscard]] auto HasActiveFrame() const noexcept -> bool;
+
+    // Opens a Clay layout pass for one frame and mints the ephemeral Frame capability token.
+    [[nodiscard]] auto BeginFrame(const UIInput& input = {}) noexcept -> Frame;
+
+  private:
+    friend class Frame;
     struct Impl;
+    std::unique_ptr<Impl> _impl;
+};
 
-    explicit Context(Engine& engine) noexcept;
-    explicit Context(ECS::Registry& registry, Extent2D viewport = {.width = 1920, .height = 1080}) noexcept;
-    ~Context() noexcept = default;
+// Ephemeral capability token gating immediate-mode widget emission to an active frame.
+// Minted exclusively by Context::BeginFrame; std::move(frame).End() commits draw batches,
+// and ~Frame() aborts an un-ended layout pass cleanly.
+class ZHLN_API Frame {
+  public:
+    using ElementRect = GUI::ElementRect;
 
-    Context(const Context&)                        = default;
-    auto operator=(const Context&) -> Context&     = default;
-    Context(Context&&) noexcept                    = default;
-    auto operator=(Context&&) noexcept -> Context& = default;
+    Frame(const Frame&)                        = delete;
+    auto operator=(const Frame&) -> Frame&     = delete;
+    Frame(Frame&& other) noexcept;
+    auto operator=(Frame&&) noexcept -> Frame& = delete;
+    ~Frame() noexcept;
 
-    void BeginFrame(float dt) noexcept;
-    [[nodiscard]] UIDrawData EndFrame() noexcept;
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return _impl != nullptr;
+    }
+
+    [[nodiscard]] auto End() && noexcept -> UIDrawData;
+    void               Cancel() noexcept;
 
     void BeginBox(std::string_view id, const BoxConfig& cfg = {}) noexcept;
     void EndBox() noexcept;
@@ -174,9 +232,8 @@ class ZHLN_API Context {
         ScrollArea(id, cfg, ScrollBarStyle {}, content);
     }
 
-    [[nodiscard]] auto GetScrollState(std::string_view id) const noexcept -> ScrollState;
-
     void Text(std::string_view text, float fontSize = 16.0f, const JPH::Vec4& color = {1, 1, 1, 1}) noexcept;
+
     auto Button(std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}) noexcept
         -> bool;
     auto Button(std::string_view label, const Sizing& width) noexcept -> bool {
@@ -252,21 +309,6 @@ class ZHLN_API Context {
         return clicked;
     }
 
-    [[nodiscard]] auto IsItemHovered() const noexcept -> bool;
-
-    struct ElementRect {
-        float x      = 0.0f;
-        float y      = 0.0f;
-        float width  = 0.0f;
-        float height = 0.0f;
-    };
-    [[nodiscard]] auto GetLastFrameRect(std::string_view id) const noexcept -> std::optional<ElementRect>;
-    [[nodiscard]] auto IsItemActive() const noexcept -> bool;
-
-    [[nodiscard]] auto IsPointerOver(std::string_view id) const noexcept -> bool;
-
-    [[nodiscard]] auto IsPointerPressedThisFrame() const noexcept -> bool;
-
     auto Checkbox(std::string_view label, bool& checked, std::string_view id = {}) noexcept -> bool;
     auto Slider(std::string_view label, float& value, float minVal, float maxVal, std::string_view id = {}) noexcept -> bool;
 
@@ -282,14 +324,6 @@ class ZHLN_API Context {
         return changed;
     }
 
-    void PushKey(KeyCode key, bool pressed) noexcept;
-
-    void PushChar(unsigned int codepoint) noexcept;
-
-    void SetClipboard(TextEdit::ClipboardSink sink) noexcept;
-
-    [[nodiscard]] auto IsTextInputFocused() const noexcept -> bool;
-
     auto Dropdown(std::string_view label, std::span<const std::string_view> options, int& selected, const Sizing& width = {}) noexcept -> bool;
 
     auto BeginCollapsingHeader(std::string_view label, bool defaultOpen = false) noexcept -> bool;
@@ -304,10 +338,26 @@ class ZHLN_API Context {
         }
     }
 
+    [[nodiscard]] auto IsItemHovered() const noexcept -> bool;
+    [[nodiscard]] auto IsItemActive() const noexcept -> bool;
+    [[nodiscard]] auto IsPointerPressedThisFrame() const noexcept -> bool;
+
+    [[nodiscard]] auto Viewport() const noexcept -> Extent2D;
+    [[nodiscard]] auto DeltaTime() const noexcept -> float;
+    [[nodiscard]] auto GetFontAtlas() const noexcept -> const FontAtlas&;
+    [[nodiscard]] auto GetLastFrameRect(std::string_view id) const noexcept -> std::optional<ElementRect>;
+    [[nodiscard]] auto GetScrollState(std::string_view id) const noexcept -> ScrollState;
+    [[nodiscard]] auto IsPointerOver(std::string_view id) const noexcept -> bool;
+    [[nodiscard]] auto IsTextInputFocused() const noexcept -> bool;
+
   private:
+    friend class Context;
+    explicit Frame(Context::Impl* impl, void* prevClayContext) noexcept;
+
     auto TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width, std::string_view id = {}) noexcept -> bool;
 
-    Impl* _impl = nullptr;
+    Context::Impl* _impl            = nullptr;
+    void*          _prevClayContext = nullptr;
 };
 
-}
+} // namespace ZHLN::GUI

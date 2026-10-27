@@ -554,26 +554,30 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 ## 8. Immediate-mode GUI (`Zahlen/gui/GUI.hpp`)
 
 ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
-`GUI::Context` is constructed per frame, `BeginFrame` / `EndFrame` push
-boxes, text, buttons, sliders and dropdowns, and `EndFrame` returns the
+persistent `GUI::Context` owns its Clay layout arena and widget interaction
+state directly (`std::unique_ptr<Impl>`), `BeginFrame(const UIInput&)` mints
+an ephemeral move-only `GUI::Frame` capability token that gates boxes, text,
+buttons, sliders and dropdowns, and `std::move(frame).End()` returns the
 frame's `UIDrawData` — spans of `UIBatch` / `VertexPosition` /
-`VertexSurface` the host hands back through
-`RenderContext::RenderUI(UIView, UIDrawData)`. `RenderContext` is not a GUI
-interface and knows nothing about `GUI::Context`; it forwards the payload to
-the renderer-private `UIRenderer`. The UI shader does not import `common` and
-does not bind GlobalSceneRegistry. A host that builds its UI in the UI phase
-(before the frame is open) banks the payload with
-`Engine::SetPendingUIData`, and `RenderSystem` composes it over the finished
-scene in the same frame.
+`VertexSurface` the host hands back through `FrameScope::RenderUI(UIView, UIDrawData)`.
+`RenderContext` is not a GUI interface and knows nothing about `GUI::Context`;
+it forwards the payload to the renderer-private `UIRenderer`. The UI shader
+does not import `common` and does not bind GlobalSceneRegistry. A host that
+builds its UI in the UI phase (before the frame is open) drains per-frame input
+with `Engine::ConsumeUIInput(dt)` and banks the `UIDrawData` view (batches,
+vertices, and mouse/keyboard capture flags) by value with
+`Engine::SubmitUI(std::move(ui).End())`, which `RenderSystem` composes over the
+finished scene in the same frame.
 
 ```cpp
-GUI::Context ui(engine);
-ui.BeginFrame(dt);
+// Persistent GUI::Context owned by the host session:
+gui.SetFontAtlas(engine.GetFontAtlas());
+GUI::Frame ui = gui.BeginFrame(engine.ConsumeUIInput(dt));
 ui.Box("Panel", cfg, [&]() {
     ui.Text("Hello", 16.0f);
     if (ui.Button("Reload")) { ... }
 });
-engine.SetPendingUIData(ui.EndFrame());   // drawn by RenderSystem
+engine.SubmitUI(std::move(ui).End());   // drawn by RenderSystem
 ```
 
 A host that owns the frame outright (the UI-tree editor) calls `RenderUI`
@@ -581,14 +585,15 @@ itself:
 
 ```cpp
 auto& rc = kernel.GetRenderContext();
-rc.BeginFrame();
+auto began = rc.BeginFrame();
+FrameScope gpuFrame = std::move(**began);
 const auto target = kernel.AcquireTarget(window); // the kernel owns the presentation seam
 if (!target) { ... }                              // acquisition error
 if (!*target) { ... }                             // no drawable image this frame
-const auto ui = rc.RenderUI(UIView {.viewport = ..., .target = **target}, ui.EndFrame());
+const auto ui = gpuFrame.RenderUI(UIView {.viewport = ..., .target = **target}, std::move(uiFrame).End());
 if (!ui) { ... }                                  // hard failure (propagate it)
 else if (ui->has_value()) { ... }                 // FrameSkipped: nowhere drawable this frame
-rc.EndFrame();
+std::move(gpuFrame).End();
 ```
 
 `Kernel::AcquireTarget` (delegated by `Engine`; no argument means the session's
@@ -605,9 +610,14 @@ explicitly acquired frame's command stream. Window presenters persist; their
 acquired images, layout and written state live only with the frame. The two
 are not stored together in a table of versioned texture handles.
 
-The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
-(`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
-link: `DespawnEntity` follows `Components::HierarchyComponent` only.
+`Engine` owns the device-scoped SDF `FontAtlas` (`GetFontAtlas` / `EnsureFontAtlas`),
+rebuilding it automatically across GPU device loss and feeding it as a plain
+asset value into `GUI::Context`. Immediate-mode widget emission is gated behind
+the move-only `GUI::Frame` capability token returned by
+`GUI::Context::BeginFrame(const UIInput&)`, so `zahlen_gui` has zero binary or
+header coupling to `Engine`, `ECS::Registry`, or `PlatformHost`. Core never
+walks a private UI parent link: `DespawnEntity` follows
+`Components::HierarchyComponent` only.
 
 A document cannot store a C++ callback or a `float&`, so a layout that will
 later load from TOML is a `GUI::UINode` tree: `kind` / `label` /

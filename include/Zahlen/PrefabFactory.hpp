@@ -44,9 +44,9 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color =
 auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> TextureHandle;
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, std::string_view path) -> TextureHandle;
+auto CreateFontAtlas(RenderContext& ctx) -> FontAtlas;
+auto CreateFontAtlas(RenderContext& ctx, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> FontAtlas;
+auto CreateFontAtlas(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) -> FontAtlas;
 
 auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool;
 

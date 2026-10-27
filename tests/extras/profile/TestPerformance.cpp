@@ -526,8 +526,8 @@ struct PerformanceTestSuite {
         auto isolated_06_gui_hierarchy_and_gc_churn() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Println("\n  {}--- Subsystem 6: Immediate-Mode GUI & Layout ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
 
-            ZHLN::ECS::Registry registry;
-            constexpr uint64_t  kSimulatedFrames = 100;
+            ZHLN::GUI::Context gui;
+            constexpr uint64_t kSimulatedFrames = 100;
 
             // Every frame built below is captured, and one check after the
             // samples says whether any of them came back without geometry: the
@@ -540,23 +540,22 @@ struct PerformanceTestSuite {
                                .Items(kSimulatedFrames)
                                .Run([&] {
                                    for (uint64_t frame = 1; frame <= kSimulatedFrames; ++frame) {
-                                       ZHLN::GUI::Context gui(registry);
-                                       gui.BeginFrame(0.0166f);
+                                       ZHLN::GUI::Frame ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = {1280, 720}, .dt = 0.0166f});
 
-                                       gui.Box(
+                                       ui.Box(
                                            "MainDashboard",
                                            ZHLN::GUI::BoxConfig {.width = {.fixed = 800.0f}, .height = {.fixed = 600.0f}, .direction = ZHLN::GUI::Direction::Column},
                                            [&]() {
                                                for (int row = 0; row < 20; ++row) {
-                                                   gui.Box("", ZHLN::GUI::BoxConfig {.height = {.fixed = 24.0f}, .direction = ZHLN::GUI::Direction::Row}, [&]() {
-                                                       gui.Text(std::format("Telemetry Channel #{}", row), 14.0f);
-                                                       gui.Button(std::format("Action {}", row));
+                                                   ui.Box("", ZHLN::GUI::BoxConfig {.height = {.fixed = 24.0f}, .direction = ZHLN::GUI::Direction::Row}, [&]() {
+                                                       ui.Text(std::format("Telemetry Channel #{}", row), 14.0f);
+                                                       ui.Button(std::format("Action {}", row));
                                                    });
                                                }
                                            }
                                        );
 
-                                       const ZHLN::UIDrawData draw = gui.EndFrame();
+                                       const ZHLN::UIDrawData draw = std::move(ui).End();
                                        if (draw.Empty() || draw.positions.size() != draw.surfaces.size()) {
                                            ++framesWithoutDrawData;
                                        }
@@ -626,6 +625,7 @@ struct PerformanceTestSuite {
             ZHLN::PhysicsContext physicsContext(physCfg);
             ZHLN::ECS::Registry  registry;
             ZHLN::AudioContext   audio;
+            ZHLN::GUI::Context   hudGui;
             ZHLN::Camera         mainCamera;
             ZHLN::defer _([&] {
                 std::vector<ZHLN::Physics::BodyHandle> handles;
@@ -791,25 +791,24 @@ struct PerformanceTestSuite {
 
                                  // --- PHASE 5: Immediate-Mode HUD / GUI Rebuild ---
                                  {
-                                     ZHLN::GUI::Context gui(registry);
-                                     gui.BeginFrame(kFixedDt);
+                                     ZHLN::GUI::Frame ui = hudGui.BeginFrame(ZHLN::GUI::UIInput {.viewport = {1280, 720}, .dt = kFixedDt});
 
-                                     gui.Box(
+                                     ui.Box(
                                          "UnifiedBenchmarkHUD",
                                          ZHLN::GUI::BoxConfig {.width = {.fixed = 300.0f}, .height = {.fixed = 200.0f}, .direction = ZHLN::GUI::Direction::Column},
                                          [&]() {
-                                             gui.Text(std::format("Simulation Frame: {}", frame), 14.0f);
-                                             gui.Text(std::format("Active Agents: {}", kAgentCount), 14.0f);
-                                             gui.Text(std::format("Rays Processed: {}", totalRaysCast.load()), 14.0f);
+                                             ui.Text(std::format("Simulation Frame: {}", frame), 14.0f);
+                                             ui.Text(std::format("Active Agents: {}", kAgentCount), 14.0f);
+                                             ui.Text(std::format("Rays Processed: {}", totalRaysCast.load()), 14.0f);
 
-                                             gui.Box("", ZHLN::GUI::BoxConfig {.height = {.fixed = 30.0f}, .direction = ZHLN::GUI::Direction::Row}, [&]() {
-                                                 gui.Button("Pause Sim");
-                                                 gui.Button("Dump Stats");
+                                             ui.Box("", ZHLN::GUI::BoxConfig {.height = {.fixed = 30.0f}, .direction = ZHLN::GUI::Direction::Row}, [&]() {
+                                                 ui.Button("Pause Sim");
+                                                 ui.Button("Dump Stats");
                                              });
                                          }
                                      );
 
-                                     const ZHLN::UIDrawData draw = gui.EndFrame();
+                                     const ZHLN::UIDrawData draw = std::move(ui).End();
                                      if (draw.Empty() || draw.positions.size() != draw.surfaces.size()) {
                                          ++framesWithoutDrawData;
                                      }

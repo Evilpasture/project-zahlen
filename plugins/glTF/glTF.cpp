@@ -77,6 +77,7 @@ struct InspectorState {
     std::string                     selectedTitle {};   // details box header
     std::string                     selectedDetails {}; // details box body
     int32_t                         playingClip = -1;   // index into prefab.animations, -1 = stopped
+    ZHLN::GUI::Context              gui {};
 };
 
 [[nodiscard]] JPH::Vec4 ThemeText() noexcept {
@@ -127,17 +128,7 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     );
     reg.Assign<ZHLN::Components::NameComponent>(ground, "glTFInspectorGround");
 
-    auto uiSettingsEnts = reg.GetEntitiesWith<ZHLN::GUI::UISettingsComponent>();
-    if (!uiSettingsEnts.empty()) {
-        if (auto settings = reg.Get<ZHLN::GUI::UISettingsComponent>(uiSettingsEnts[0])) {
-            if (settings->fontAtlas.texture == ZHLN::TextureHandle::Invalid) {
-                settings->fontAtlas.texture = ZHLN::PrefabFactory::CreateFontAtlasTexture(
-                    engine.GetRenderContext(), engine.GetRegistry(), engine.GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
-                );
-                settings->defaultFontAtlas = settings->fontAtlas.texture;
-            }
-        }
-    }
+    engine.EnsureFontAtlas();
 }
 
 void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outCenter, float& outDistance) {
@@ -220,7 +211,7 @@ void ToggleClipPlayback(InspectorState& state, int32_t clipIndex) {
 
 // Draws one indented, selectable tree row via Clay Button.
 void TreeRow(
-    ZHLN::GUI::Context& ui,
+    ZHLN::GUI::Frame& ui,
     InspectorState&     state,
     std::string_view    path,
     int                 depth,
@@ -261,7 +252,7 @@ void TreeRow(
 }
 
 void DrawModelNodeRows(
-    ZHLN::GUI::Context&      ui,
+    ZHLN::GUI::Frame&        ui,
     InspectorState&          state,
     const ZHLN::ModelPrefab& prefab,
     std::string_view         basePath,
@@ -327,7 +318,7 @@ void DrawModelNodeRows(
     return std::format("{}: {}", slot, (handle != ZHLN::TextureHandle::Invalid) ? std::format("#{}", static_cast<uint64_t>(handle)) : std::string("-"));
 }
 
-void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const ZHLN::ModelPrefab& prefab, std::string_view modelPath, int depth) {
+void DrawModelContentRows(ZHLN::GUI::Frame& ui, InspectorState& state, const ZHLN::ModelPrefab& prefab, std::string_view modelPath, int depth) {
     // ---- NODES ----
     const std::string nodesPath = std::format("{}/nodes", modelPath);
     const bool        nodesOpen = state.expanded.contains(nodesPath);
@@ -543,7 +534,7 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
     }
 }
 
-void DrawSceneExplorer(ZHLN::GUI::Context& ui, InspectorState& state) {
+void DrawSceneExplorer(ZHLN::GUI::Frame& ui, InspectorState& state) {
     ui.Box(
         "glTFSceneExplorer",
         ZHLN::GUI::BoxConfig {
@@ -748,7 +739,7 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
     cam.pitch         = state.pitch;
 }
 
-void DrawDropPrompt(ZHLN::GUI::Context& ui) {
+void DrawDropPrompt(ZHLN::GUI::Frame& ui) {
     ui.Box(
         "glTFInspectorPrompt",
         ZHLN::GUI::BoxConfig {
@@ -782,8 +773,8 @@ void RenderFrame(ZHLN::Engine& engine) {
 
     UpdateOrbit(*state, engine);
 
-    ZHLN::GUI::Context ui(engine);
-    ui.BeginFrame(0.016667f);
+    state->gui.SetFontAtlas(engine.GetFontAtlas());
+    ZHLN::GUI::Frame ui = state->gui.BeginFrame(engine.ConsumeUIInput(0.016667f));
 
     if (state->loaded) {
         DrawSceneExplorer(ui, *state);
@@ -791,7 +782,7 @@ void RenderFrame(ZHLN::Engine& engine) {
         DrawDropPrompt(ui);
     }
 
-    engine.SetPendingUIData(ui.EndFrame());
+    engine.SubmitUI(std::move(ui).End());
 }
 
 } // namespace

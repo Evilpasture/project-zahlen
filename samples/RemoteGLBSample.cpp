@@ -1072,6 +1072,7 @@ struct SampleState {
     std::vector<GLBEntry> displayEntries {};
     int                   dropdownSelected = 0;
     bool                  catalogSeeded    = false;
+    ZHLN::GUI::Context    gui {};
 
     bool     rayTraced   = false;
     bool     reported    = false; // this download's outcome has been logged and imported
@@ -1402,8 +1403,8 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
 }
 
 void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
-    ZHLN::GUI::Context ui(engine);
-    ui.BeginFrame(state.dt);
+    state.gui.SetFontAtlas(engine.GetFontAtlas());
+    ZHLN::GUI::Frame ui = state.gui.BeginFrame(engine.ConsumeUIInput(state.dt));
 
     const ZHLN::RenderInfo info    = engine.GetRenderContext().GetInfo();
     const std::string      subject = state.subject.loaded ?
@@ -1460,7 +1461,7 @@ void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
         }
     );
 
-    engine.SetPendingUIData(ui.EndFrame());
+    engine.SubmitUI(std::move(ui).End());
 }
 
 } // namespace

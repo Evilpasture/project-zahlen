@@ -225,10 +225,10 @@ ZHLN_STATIC_API void UpdateTransformMode(
 // pipeline; the panel edits that engine's registry. GUI::Context itself remains
 // stateless with respect to the ECS.
 ZHLN_STATIC_API void DrawHierarchyPanel(
-    ZHLN::GUI::Context& gui,
-    ZHLN::Engine&       engine,
-    EditorState&        state,
-    std::string_view    id = "Hierarchy"
+    ZHLN::GUI::Frame& gui,
+    ZHLN::Engine&     engine,
+    EditorState&      state,
+    std::string_view  id = "Hierarchy"
 );
 
 // Draws the inspector for `state.selectedEntity`: a labelled header plus one
@@ -241,10 +241,10 @@ ZHLN_STATIC_API void DrawHierarchyPanel(
 //
 // NOTE: `reg` is separate from `gui` for the same reason as above.
 ZHLN_STATIC_API void DrawInspectorPanel(
-    ZHLN::GUI::Context&    gui,
-    ZHLN::ECS::Registry&   reg,
-    EditorState&           state,
-    std::string_view       id = "Inspector"
+    ZHLN::GUI::Frame&    gui,
+    ZHLN::ECS::Registry& reg,
+    EditorState&         state,
+    std::string_view     id = "Inspector"
 );
 
 } // namespace ZHLN::Editor

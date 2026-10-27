@@ -11,7 +11,6 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/GUI.hpp>
 
 #if defined(ZHLN_CONSOLE_HAS_LUA)
 #include <lua/ReflectLua.hpp>
@@ -123,7 +122,6 @@ namespace {
             Reflect::ForEachNestedType<Components>([&]<typename Comp>() {
                 map.emplace(Reflect::TypeName<Comp>(), &PatchTypedComponent<Comp>);
             });
-            map.emplace(Reflect::TypeName<GUI::UISettingsComponent>(), &PatchTypedComponent<GUI::UISettingsComponent>);
             return map;
         }();
         return kTable;

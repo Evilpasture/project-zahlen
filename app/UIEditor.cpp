@@ -6,10 +6,10 @@
 // v0.1 UI-tree editor. A second composition-root binary next to `zahlen`:
 // this one edits a GUI::UINode rather than a 3D world.
 //
-// It runs on a Kernel alone -- windows, GPU, audio, assets -- with a bare
-// local registry for the input/GUI singletons. No World, no physics, no
-// camera, no frame scheduler: the document is a UINode tree and the chrome
-// is immediate-mode Clay, so nothing here needs a simulation.
+// It runs on a Kernel alone -- windows, GPU, audio, assets -- with explicit
+// GUI::Context + GUI::UIInput state per window. No World, no ECS::Registry, no
+// physics, no camera, no frame scheduler: the document is a UINode tree and
+// the chrome is immediate-mode Clay, so nothing here needs a simulation.
 //
 //   Left   Hierarchy  -- one row per node id; click selects a container
 //   Center Canvas     -- RenderUITree(..., TreeMode::Design); G/S/R grab,
@@ -28,7 +28,6 @@
 #include <CommandLine/EngineCommandLine.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/PrefabFactory.hpp>
@@ -41,7 +40,6 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Widget/TextFit.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EventBus.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <UI/UITree.hpp>
@@ -93,7 +91,7 @@ constexpr float kHierarchyFontSize     = 13.0f;
     return std::round(value / step) * step;
 }
 
-void SnapSlider(GUI::Context& gui, std::string_view label, float& value, float minVal, float maxVal, float step) {
+void SnapSlider(GUI::Frame& gui, std::string_view label, float& value, float minVal, float maxVal, float step) {
     gui.Slider(label, value, minVal, maxVal);
     value = std::clamp(Snap(value, step), minVal, maxVal);
 }
@@ -163,44 +161,134 @@ void SnapSlider(GUI::Context& gui, std::string_view label, float& value, float m
 
 enum class XformMode : uint8_t { None = 0, Grab, Scale, Rotate };
 
+struct WindowUIInputCollector {
+    static constexpr size_t kQueueCap = 64;
+
+    ZHLN::Components::InputStateComponent state {};
+    std::array<ZHLN::KeyCode, kQueueCap>  pressedKeys {};
+    std::array<uint32_t, kQueueCap>       charStream {};
+    std::array<ZHLN::KeyCode, kQueueCap>  latchedKeys {};
+    std::array<uint32_t, kQueueCap>       latchedChars {};
+    size_t                                pressedCount = 0;
+    size_t                                charCount    = 0;
+    float                                 scrollDelta  = 0.0f;
+
+    [[nodiscard]] auto MakeReceiver() noexcept -> ZHLN::WindowInputReceiver {
+        return ZHLN::WindowInputReceiver {
+            .userdata = this,
+            .onKey =
+                [](void* ud, ZHLN::KeyCode key, bool pressed) -> void {
+                    auto* self = static_cast<WindowUIInputCollector*>(ud);
+                    self->state.SetKey(static_cast<uint8_t>(key), pressed);
+                    if (pressed && self->pressedCount < kQueueCap) {
+                        self->pressedKeys[self->pressedCount++] = key;
+                    }
+                },
+            .onMouseMove =
+                [](void* ud, float x, float y) -> void { static_cast<WindowUIInputCollector*>(ud)->state.ApplyLocalMotion(x, y); },
+            .onMouseScroll =
+                [](void* ud, float delta) -> void {
+                    auto* self = static_cast<WindowUIInputCollector*>(ud);
+                    self->state.ApplyWheel(delta);
+                    self->scrollDelta += delta;
+                },
+            .onResize =
+                [](void* ud, ZHLN::Extent2D extent) -> void { static_cast<WindowUIInputCollector*>(ud)->state.ApplyResize(extent); },
+            .onChar =
+                [](void* ud, unsigned int codepoint) -> void {
+                    auto* self = static_cast<WindowUIInputCollector*>(ud);
+                    if (self->charCount < kQueueCap) {
+                        self->charStream[self->charCount++] = codepoint;
+                    }
+                },
+        };
+    }
+
+    [[nodiscard]] auto Consume(ZHLN::Extent2D viewport, float dt, GUI::TextEdit::ClipboardSink clipboard = {}) noexcept -> GUI::UIInput {
+        const size_t nKeys  = pressedCount;
+        const size_t nChars = charCount;
+        std::copy_n(pressedKeys.data(), nKeys, latchedKeys.data());
+        std::copy_n(charStream.data(), nChars, latchedChars.data());
+        pressedCount = 0;
+        charCount    = 0;
+
+        ZHLN::KeyModifiers mods = ZHLN::KeyModifiers::None;
+        if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
+            state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl))) {
+            mods = mods | ZHLN::KeyModifiers::Ctrl;
+        }
+        if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LShift)) ||
+            state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RShift))) {
+            mods = mods | ZHLN::KeyModifiers::Shift;
+        }
+        if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LAlt)) ||
+            state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RAlt))) {
+            mods = mods | ZHLN::KeyModifiers::Alt;
+        }
+
+        const float scroll = scrollDelta;
+        scrollDelta        = 0.0f;
+
+        return GUI::UIInput {
+            .viewport    = viewport,
+            .dt          = dt,
+            .mouseX      = state.mouseX,
+            .mouseY      = state.mouseY,
+            .mouseScroll = scroll,
+            .mouseDown   = {
+                state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)),
+                state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)),
+                state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::MButton)),
+            },
+            .modifiers       = mods,
+            .pressedKeys     = std::span<const ZHLN::KeyCode>(latchedKeys.data(), nKeys),
+            .characterStream = std::span<const uint32_t>(latchedChars.data(), nChars),
+            .clipboard       = clipboard,
+        };
+    }
+};
+
 struct Session {
-    GUI::UINode                 tree;
-    ZHLN::ECS::EventBus         events;
-    GUI::ActionRegistry         actions;
-    GUI::PropertyStore          properties;
-    std::string                 selectedId;
-    int                         nextNodeIndex = 1;
-    int                         addKindIndex  = 0;
-    bool                        escWasDown    = false;
-    bool                        saveWasDown   = false;
-    bool                        gWasDown      = false;
-    bool                        sWasDown      = false;
-    bool                        rWasDown      = false;
-    bool                        confirmWasDown = false;
-    float                       dt                   = 0.016f;
-    bool                        openPreviewRequested = false;
+    GUI::UINode                   tree;
+    ZHLN::ECS::EventBus           events;
+    GUI::ActionRegistry           actions;
+    GUI::PropertyStore            properties;
+    std::string                   selectedId;
+    int                           nextNodeIndex  = 1;
+    int                           addKindIndex   = 0;
+    bool                          escWasDown     = false;
+    bool                          saveWasDown    = false;
+    bool                          gWasDown       = false;
+    bool                          sWasDown       = false;
+    bool                          rWasDown       = false;
+    bool                          confirmWasDown = false;
+    float                         dt                   = 0.016f;
+    bool                          openPreviewRequested = false;
     ZHLN::Optional<ZHLN::Window&> previewWindow; // kernel-owned; see Kernel::AddWindow
-    ZHLN::ECS::Registry         previewGui;
-    GUI::PropertyStore          previewProperties; // runtime instance; Design keeps `properties`
+    GUI::Context                  editorGui;
+    GUI::Context                  previewGui;
+    WindowUIInputCollector        editorInput;
+    WindowUIInputCollector        previewInput;
+    GUI::PropertyStore            previewProperties; // runtime instance; Design keeps `properties`
 
     // The font the chrome draws with, for measuring a row against its panel
-    // (see DrawHierarchyRow): null until the atlas is built, and the measuring
+    // (see DrawHierarchyRow): empty until the atlas is built, and the measuring
     // falls back to the documented ratio while it is.
-    const ZHLN::FontAtlas* fontAtlas = nullptr;
+    ZHLN::FontAtlas fontAtlas {};
 
-    XformMode    xform        = XformMode::None;
-    GUI::NodeBox xformBackup  {};
-    float        startMouseX  = 0.0f;
-    float        startMouseY  = 0.0f;
-    float        startOffsetX = 0.0f;
-    float        startOffsetY = 0.0f;
-    float        startWidth   = 0.0f;
-    float        startHeight  = 0.0f;
+    XformMode    xform         = XformMode::None;
+    GUI::NodeBox xformBackup   {};
+    float        startMouseX   = 0.0f;
+    float        startMouseY   = 0.0f;
+    float        startOffsetX  = 0.0f;
+    float        startOffsetY  = 0.0f;
+    float        startWidth    = 0.0f;
+    float        startHeight   = 0.0f;
     float        startRotation = 0.0f;
-    float        pivotX       = 0.0f;
-    float        pivotY       = 0.0f;
-    float        startDist    = 1.0f;
-    float        startAngle   = 0.0f;
+    float        pivotX        = 0.0f;
+    float        pivotY        = 0.0f;
+    float        startDist     = 1.0f;
+    float        startAngle    = 0.0f;
 };
 
 void BindHostActions(Session& session) {
@@ -225,7 +313,7 @@ void BindHostActions(Session& session) {
     return child;
 }
 
-void DrawHierarchyRow(GUI::Context& gui, Session& session, const GUI::UINode& node, std::string_view path, int depth) {
+void DrawHierarchyRow(GUI::Frame& gui, Session& session, const GUI::UINode& node, std::string_view path, int depth) {
     const std::string id       = NodeId(node, path);
     const bool        selected = session.selectedId == id;
 
@@ -237,8 +325,9 @@ void DrawHierarchyRow(GUI::Context& gui, Session& session, const GUI::UINode& no
     // <Widget/TextFit.hpp>): the indent is inside the row, the measure is the
     // font the chrome is drawing with, and the cut goes into the buffer the
     // label was formatted into, so a row costs no allocation a frame.
-    const float            indent  = static_cast<float>(depth) * kHierarchyIndent;
-    const float            advance = GUI::Widget::AdvancePerChar(session.fontAtlas, kHierarchyFontSize);
+    const ZHLN::FontAtlas* atlasPtr  = session.fontAtlas.glyphCount > 0 ? &session.fontAtlas : nullptr;
+    const float            indent    = static_cast<float>(depth) * kHierarchyIndent;
+    const float            advance   = GUI::Widget::AdvancePerChar(atlasPtr, kHierarchyFontSize);
     const float            textWidth = std::max(kHierarchyRowTextWidth - indent, 0.0f);
     const std::string_view label = GUI::Widget::FitToWidthInto(
         ZHLN::FormatTo(labelBuf, "{}  {}", id, ZHLN::Reflect::EnumToString(node.kind)), textWidth, advance, labelBuf
@@ -270,7 +359,7 @@ void DrawHierarchyRow(GUI::Context& gui, Session& session, const GUI::UINode& no
     }
 }
 
-void DrawHierarchy(GUI::Context& gui, Session& session) {
+void DrawHierarchy(GUI::Frame& gui, Session& session) {
     gui.Text("Hierarchy", 14.0f, {0.6f, 0.7f, 0.8f, 1.0f});
 
     constexpr auto kKinds = ZHLN::Reflect::EnumNames<GUI::NodeKind>();
@@ -325,7 +414,7 @@ void DrawHierarchy(GUI::Context& gui, Session& session) {
     return {};
 }
 
-void DrawFloat4(GUI::Context& gui, std::string_view prefix, JPH::Float4& value, float minVal, float maxVal, float step) {
+void DrawFloat4(GUI::Frame& gui, std::string_view prefix, JPH::Float4& value, float minVal, float maxVal, float step) {
     for (int axis = 0; axis < 4; ++axis) {
         std::array<char, 64> idBuf {};
         const std::string_view label = ZHLN::FormatTo(idBuf, "{} {}", prefix, "RGBA"[axis]);
@@ -334,7 +423,7 @@ void DrawFloat4(GUI::Context& gui, std::string_view prefix, JPH::Float4& value, 
     }
 }
 
-void DrawInspector(GUI::Context& gui, Session& session) {
+void DrawInspector(GUI::Frame& gui, Session& session) {
     gui.Text("Inspector", 14.0f, {0.6f, 0.7f, 0.8f, 1.0f});
 
     auto node = GUI::FindNodeById(session.tree, session.selectedId);
@@ -430,7 +519,7 @@ void ConfirmXform(Session& session) {
     session.xform = XformMode::None;
 }
 
-void BeginXform(GUI::Context& gui, Session& session, XformMode mode, float mx, float my) {
+void BeginXform(const GUI::Context& gui, Session& session, XformMode mode, float mx, float my) {
     auto node = GUI::FindNodeById(session.tree, session.selectedId);
     if (!node) {
         return;
@@ -515,23 +604,19 @@ void ApplyXform(Session& session, float mx, float my) {
     }
 }
 
-void UpdateCanvasXform(GUI::Context& gui, Session& session, ZHLN::Optional<const ZHLN::Components::InputStateComponent&> state, bool uiOwnsKeyboard) {
-    if (!state) {
-        return;
-    }
-
-    const float mx = state->mouseX;
-    const float my = state->mouseY;
+void UpdateCanvasXform(const GUI::Context& gui, Session& session, const ZHLN::Components::InputStateComponent& state, bool uiOwnsKeyboard) {
+    const float mx = state.mouseX;
+    const float my = state.mouseY;
     const bool controlDown =
-        state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
-        state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl));
-    const bool gDown = state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::G));
-    const bool sDown = state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
-    const bool rDown = state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::R));
+        state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
+        state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl));
+    const bool gDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::G));
+    const bool sDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
+    const bool rDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::R));
     const bool confirmDown =
-        state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Enter)) ||
-        state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
-    const bool cancelDown = state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+        state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Enter)) ||
+        state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
+    const bool cancelDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
 
     if (session.xform != XformMode::None) {
         ApplyXform(session, mx, my);
@@ -568,7 +653,15 @@ void SaveTree(const GUI::UINode& tree, std::string_view path);
 void LoadTree(Session& session, std::string_view path);
 #endif
 
-void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session, ZHLN::FrameScope& gpuFrame) {
+[[nodiscard]] auto MakeHostClipboard(ZHLN::PlatformHost& host) noexcept -> GUI::TextEdit::ClipboardSink {
+    return GUI::TextEdit::ClipboardSink {
+        .userdata = &host,
+        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::PlatformHost*>(ud)->SetClipboardText(text); },
+        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::PlatformHost*>(ud)->GetClipboardText(); },
+    };
+}
+
+void DrawPreview(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFrame) {
     if (!session.previewWindow) {
         return;
     }
@@ -576,12 +669,10 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
     if (previewSize.width == 0 || previewSize.height == 0) {
         return;
     }
-    if (auto src = reg.GetSingleton<GUI::UISettingsComponent>()) {
-        session.previewGui.GetOrEmplaceSingleton<GUI::UISettingsComponent>() = *src;
-    }
-
-    GUI::Context gui(session.previewGui, previewSize);
-    gui.BeginFrame(session.dt);
+    session.previewGui.SetFontAtlas(session.fontAtlas);
+    GUI::Frame gui = session.previewGui.BeginFrame(
+        session.previewInput.Consume(previewSize, session.dt, MakeHostClipboard(kernel.GetPlatformHost()))
+    );
     gui.Box(
         "PreviewRoot",
         GUI::BoxConfig {
@@ -595,8 +686,8 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
             (void) GUI::RenderUITree(gui, session.tree, session.actions, session.previewProperties, GUI::TreeMode::Preview);
         }
     );
-    auto&                   rc     = kernel.GetRenderContext();
-    const ZHLN::UIDrawData  uiData = gui.EndFrame();
+    auto&                  rc     = kernel.GetRenderContext();
+    const ZHLN::UIDrawData uiData = std::move(gui).End();
     if (!uiData.Empty()) {
         const auto target = kernel.AcquireTarget(*session.previewWindow);
         if (!target) {
@@ -639,47 +730,13 @@ void OpenPreview(ZHLN::Kernel& kernel, Session& session) {
     }
     StopPreview(kernel, session);
     session.previewProperties = session.properties;
+    session.previewInput      = {};
+    session.previewGui        = GUI::Context(session.fontAtlas);
 
-    ZHLN::WindowInputReceiver receiver {
-        .userdata = &session,
-        .onKey =
-            [](void* ud, ZHLN::KeyCode key, bool pressed) {
-                auto* s     = static_cast<Session*>(ud);
-                auto& state = s->previewGui.GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-                state.SetKey(static_cast<uint8_t>(key), pressed);
-                if (pressed) {
-                    state.QueueKeyPress(key);
-                }
-            },
-        .onMouseMove =
-            [](void* ud, float x, float y) {
-                auto* s     = static_cast<Session*>(ud);
-                auto& state = s->previewGui.GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-                state.ApplyLocalMotion(x, y);
-            },
-        .onMouseScroll =
-            [](void* ud, float delta) {
-                auto* s     = static_cast<Session*>(ud);
-                auto& state = s->previewGui.GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-                state.ApplyWheel(delta);
-            },
-        .onResize =
-            [](void* ud, ZHLN::Extent2D extent) {
-                auto* s     = static_cast<Session*>(ud);
-                auto& state = s->previewGui.GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-                state.ApplyResize(extent);
-            },
-        .onChar =
-            [](void* ud, unsigned int codepoint) {
-                auto* s     = static_cast<Session*>(ud);
-                auto& state = s->previewGui.GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-                state.QueueChar(codepoint);
-            },
-    };
     // The preview window is an ordinary destination: the editor draws its 2D
     // tree into (and only into) it, so nothing about the window has to declare
     // what kind of content it accepts.
-    session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, receiver);
+    session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, session.previewInput.MakeReceiver());
     if (!session.previewWindow) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
@@ -722,42 +779,34 @@ void LoadTree(Session& session, std::string_view path) {
 }
 #endif
 
-void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session, ZHLN::FrameScope& gpuFrame) {
-    // The registry-only Context ctor: the editor window size replaces the
-    // Engine-backed viewport lookup, and no Engine* is stored in GUI state.
-    GUI::Context gui(reg, kernel.GetPlatformHost().GetSize());
-    gui.SetClipboard(GUI::TextEdit::ClipboardSink {
-        // The userdata is the host, not a window: in a headless or KMS/DRM
-        // session there is no window to point at, and the clipboard is on the
-        // host precisely so this works in all three.
-        .userdata = &kernel.GetPlatformHost(),
-        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::PlatformHost*>(ud)->SetClipboardText(text); },
-        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::PlatformHost*>(ud)->GetClipboardText(); },
-    });
-
-    auto       state          = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
-    const bool uiOwnsKeyboard = gui.IsTextInputFocused() || (state && state->wantCaptureKeyboard);
+void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFrame) {
+    auto&      state          = session.editorInput.state;
+    const bool uiOwnsKeyboard = session.editorGui.IsTextInputFocused() || state.wantCaptureKeyboard;
 
     const bool xformWasActive = session.xform != XformMode::None;
-    UpdateCanvasXform(gui, session, state, uiOwnsKeyboard);
+    UpdateCanvasXform(session.editorGui, session, state, uiOwnsKeyboard);
 
-    const bool escDown = state && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+    const bool escDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
     if (escDown && !session.escWasDown && !uiOwnsKeyboard && !xformWasActive) {
         session.selectedId.clear();
     }
     session.escWasDown = escDown;
 
 #if defined(ZHLN_HAS_UI_TOML)
-    const bool controlDown = state && (state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
-                                       state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl)));
-    const bool saveDown    = controlDown && state && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
+    const bool controlDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
+                             state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl));
+    const bool saveDown = controlDown && state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
     if (saveDown && !session.saveWasDown && !uiOwnsKeyboard) {
         SaveTree(session.tree, kDocumentPath);
     }
     session.saveWasDown = saveDown;
 #endif
 
-    gui.BeginFrame(session.dt);
+    const ZHLN::Extent2D size = kernel.GetPlatformHost().GetSize();
+    session.editorGui.SetFontAtlas(session.fontAtlas);
+    GUI::Frame gui = session.editorGui.BeginFrame(
+        session.editorInput.Consume(size, session.dt, MakeHostClipboard(kernel.GetPlatformHost()))
+    );
     gui.Box(
         "UIEditorWorkspace",
         GUI::BoxConfig {
@@ -866,8 +915,9 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session,
         }
     );
     auto&                  rc     = kernel.GetRenderContext();
-    const ZHLN::Extent2D   size   = kernel.GetPlatformHost().GetSize();
-    const ZHLN::UIDrawData uiData = gui.EndFrame();
+    const ZHLN::UIDrawData uiData = std::move(gui).End();
+    session.editorInput.state.wantCaptureMouse    = uiData.wantsCaptureMouse;
+    session.editorInput.state.wantCaptureKeyboard = uiData.wantsCaptureKeyboard;
     if (uiData.Empty()) {
         return;
     }
@@ -914,40 +964,10 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
 
-    // The editor edits a UINode tree, not a 3D world: no World, no physics, no
-    // frame scheduler. A bare registry holds the input/GUI singletons that the
-    // event pump writes and the Clay chrome reads; the Kernel supplies the
-    // window, GPU, audio and assets. The pump callbacks mirror Engine's: keys
-    // land in InputStateComponent twice over (held-state bitset + press/char
-    // queue for text fields -- see Engine.cpp for the full rationale).
-    ZHLN::ECS::Registry registry;
-    // Singletons must exist before the first event pump writes into them.
-    registry.Create(ZHLN::Components::InputStateComponent {});
-    registry.Create(ZHLN::GUI::UISettingsComponent {});
-
-    auto onKey = [](void* ud, ZHLN::KeyCode key, bool pressed) -> void {
-        auto* state = &static_cast<ZHLN::ECS::Registry*>(ud)->GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-        state->SetKey(static_cast<uint8_t>(key), pressed);
-        if (pressed) {
-            state->QueueKeyPress(key);
-        }
-    };
-    auto onMouseMove = [](void* ud, float x, float y) -> void {
-        static_cast<ZHLN::ECS::Registry*>(ud)->GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>().ApplyLocalMotion(x, y);
-    };
-    auto onMouseScroll = [](void* ud, float delta) -> void {
-        static_cast<ZHLN::ECS::Registry*>(ud)->GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>().ApplyWheel(delta);
-    };
-    auto onResize = [](void* ud, ZHLN::Extent2D extent) -> void {
-        static_cast<ZHLN::ECS::Registry*>(ud)->GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>().ApplyResize(extent);
-    };
-    auto onChar = [](void* ud, unsigned int codepoint) -> void {
-        static_cast<ZHLN::ECS::Registry*>(ud)->GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>().QueueChar(codepoint);
-    };
-
-    ZHLN::WindowInputReceiver receiver {
-        .userdata = &registry, .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
-    };
+    Session session;
+    session.tree       = MakeDemoTree();
+    session.selectedId = "panel";
+    BindHostActions(session);
 
     auto kernelRes = ZHLN::Kernel::Create(
         {.appName           = "Zahlen UI Editor",
@@ -958,7 +978,7 @@ auto main(int argc, char* argv[]) -> int {
          .validationMode    = options.validationMode,
          .headless          = options.headless,
          .enableMeshShading = true},
-        receiver
+        session.editorInput.MakeReceiver()
     );
     if (!kernelRes) {
         ZHLN::LogError("Failed to initialize Kernel: {}", kernelRes.error());
@@ -968,61 +988,38 @@ auto main(int argc, char* argv[]) -> int {
     auto kernel = std::move(kernelRes.value());
     kernel->GetPlatformHost().Focus();
 
-    // The Clay chrome renders text through UISettingsComponent::fontAtlas.
     // Fonts are first-class assets with an AssetID: load the font asset from
-    // paks (or fontbm pair) and create the atlas from its AssetID. Core never
-    // parses an outline font here either.
+    // paks (or fontbm pair), build the GPU FontAtlas value, and feed it
+    // directly into GUI::Context. Core never parses an outline font here either.
+    ZHLN::AssetID activeFontAssetID = ZHLN::GUI::kDefaultFontAssetID;
 #if defined(ZHLN_HAS_FONTS)
-    // Same default as the native host: the vendored JetBrains Mono NF bake (see
-    // Fonts::VendoredDefaultFontSource). Must happen before the atlas is built
-    // just below.
-    auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel->GetAssetManager(), ZHLN::Fonts::VendoredDefaultFontSource());
-    if (!fontAssetID) {
+    if (auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel->GetAssetManager(), ZHLN::Fonts::VendoredDefaultFontSource())) {
+        activeFontAssetID = *fontAssetID;
+    } else {
         ZHLN::LogWarning("Font asset failed to load ({}), falling back to embedded default.", fontAssetID.error());
     }
 #endif
     ZHLN::PrefabFactory::PrimeDefaultBakedFont(kernel->GetAssetManager());
-#if defined(ZHLN_HAS_FONTS)
-    ZHLN::PrefabFactory::CreateFontAtlasTexture(
-        kernel->GetRenderContext(), registry, kernel->GetAssetManager(),
-        fontAssetID.has_value() ? *fontAssetID : ZHLN::GUI::kDefaultFontAssetID
+    session.fontAtlas = ZHLN::PrefabFactory::CreateFontAtlas(
+        kernel->GetRenderContext(), kernel->GetAssetManager(), activeFontAssetID
     );
-#else
-    ZHLN::PrefabFactory::CreateFontAtlasTexture(
-        kernel->GetRenderContext(), registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
-    );
-#endif
-
-    Session session;
-    session.tree       = MakeDemoTree();
-    session.selectedId = "panel";
-    BindHostActions(session);
-
-    // The chrome's type, for measuring a hierarchy row against its panel. The
-    // atlas is the one the Context draws text with; until it exists the rows
-    // measure with the widget's fallback ratio.
-    if (auto settings = registry.GetSingleton<ZHLN::GUI::UISettingsComponent>(); settings && (settings->fontAtlas.glyphCount > 0)) {
-        session.fontAtlas = &settings->fontAtlas;
-    }
+    session.editorGui.SetFontAtlas(session.fontAtlas);
+    session.previewGui.SetFontAtlas(session.fontAtlas);
 
     ZHLN::Clock clock;
     while (kernel->IsRunning()) {
         session.dt = clock.Tick();
-        if (auto previewInput = session.previewGui.GetSingleton<ZHLN::Components::InputStateComponent>()) {
-            previewInput->BeginFrame();
-        }
+        session.previewInput.state.BeginFrame();
 
-        // Mirrors Engine::ProcessEvents: crash poll, then World-side (here
-        // registry-side) input bookkeeping, then the Kernel's window pump.
+        // Mirrors Engine::ProcessEvents: crash poll, per-frame input reset,
+        // then the Kernel's window pump.
         ZHLN::CheckForCrashes(crashState, nullptr);
-        if (auto st = registry.GetSingleton<ZHLN::Components::InputStateComponent>()) {
-            st->BeginFrame();
-        }
+        session.editorInput.state.BeginFrame();
         kernel->ProcessEvents();
 
-        if (auto st = registry.GetSingleton<ZHLN::Components::InputStateComponent>(); st && st->needsResize) {
-            kernel->GetRenderContext().SetResolution(st->newSize);
-            st->needsResize = false;
+        if (session.editorInput.state.needsResize) {
+            kernel->GetRenderContext().SetResolution(session.editorInput.state.newSize);
+            session.editorInput.state.needsResize = false;
         }
 
         if (session.previewWindow && !session.previewWindow->IsRunning()) {
@@ -1033,14 +1030,8 @@ auto main(int argc, char* argv[]) -> int {
             OpenPreview(*kernel, session);
         }
 
-        // The editor owns the frame directly -- an Engine would run this as
-        // RenderSystem inside Tick. BeginFrame/EndFrame only manage fences,
-        // allocators and presentation; every pixel is dispatched explicitly:
-        // RenderUI for the primary chrome and for the preview window, and
-        // nothing at all for a frame that draws no UI. No 3D pass and no
-        // compute shader runs for either window.
-        auto& rc = kernel->GetRenderContext();
-        auto begin = rc.BeginFrame();
+        auto& rc    = kernel->GetRenderContext();
+        auto  begin = rc.BeginFrame();
         if (!begin) {
             using enum ZHLN::FrameResult;
             if (begin.error().Is(DeviceLost)) {
@@ -1048,12 +1039,10 @@ auto main(int argc, char* argv[]) -> int {
                     ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
                     break;
                 }
-                // Re-upload whatever the editor registry tracks on the new
-                // device, then re-bake the font atlas the Clay chrome reads.
-                ZHLN::PrefabFactory::RebuildVulkanResources(rc, registry);
-                ZHLN::PrefabFactory::CreateFontAtlasTexture(
-                    rc, registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
-                );
+                rc.ClearGPUCaches();
+                session.fontAtlas = ZHLN::PrefabFactory::CreateFontAtlas(rc, kernel->GetAssetManager(), activeFontAssetID);
+                session.editorGui.SetFontAtlas(session.fontAtlas);
+                session.previewGui.SetFontAtlas(session.fontAtlas);
             } else {
                 ZHLN::Log("[UIEditor] BeginFrame failed ({})", begin.error());
             }
@@ -1065,9 +1054,9 @@ auto main(int argc, char* argv[]) -> int {
         }
         ZHLN::FrameScope gpuFrame = std::move(**begin);
 
-        DrawFrame(*kernel, registry, session, gpuFrame);
+        DrawFrame(*kernel, session, gpuFrame);
         if (session.previewWindow) {
-            DrawPreview(*kernel, registry, session, gpuFrame);
+            DrawPreview(*kernel, session, gpuFrame);
         }
 
         auto end = std::move(gpuFrame).End();
@@ -1078,10 +1067,10 @@ auto main(int argc, char* argv[]) -> int {
                     ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
                     break;
                 }
-                ZHLN::PrefabFactory::RebuildVulkanResources(rc, registry);
-                ZHLN::PrefabFactory::CreateFontAtlasTexture(
-                    rc, registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
-                );
+                rc.ClearGPUCaches();
+                session.fontAtlas = ZHLN::PrefabFactory::CreateFontAtlas(rc, kernel->GetAssetManager(), activeFontAssetID);
+                session.editorGui.SetFontAtlas(session.fontAtlas);
+                session.previewGui.SetFontAtlas(session.fontAtlas);
             } else {
                 ZHLN::Log("[UIEditor] EndFrame failed ({})", end.error());
             }

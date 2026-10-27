@@ -109,7 +109,7 @@ constexpr auto kComponentKinds =
 //
 // Missing widget types (Reference) are rendered as read-only text until those
 // widgets are implemented in the Clay API.
-[[nodiscard]] auto MakeRowSink(GUI::Context& gui, std::string_view sectionId) {
+[[nodiscard]] auto MakeRowSink(GUI::Frame& gui, std::string_view sectionId) {
     return [&gui, sectionId](std::string_view name, auto& field) -> void {
         using FT = std::remove_cvref_t<decltype(field)>;
 
@@ -519,7 +519,7 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
     state.transformPrevInput = level;
 }
 
-void DrawHierarchyPanel(GUI::Context& gui, ZHLN::Engine& engine, EditorState& state, std::string_view id) {
+void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& state, std::string_view id) {
     auto& reg = engine.GetRegistry();
     struct Row {
         ZHLN::Entity entity;
@@ -626,7 +626,7 @@ void DrawHierarchyPanel(GUI::Context& gui, ZHLN::Engine& engine, EditorState& st
     gui.EndColumn();
 }
 
-void DrawInspectorPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState& state, std::string_view id) {
+void DrawInspectorPanel(GUI::Frame& gui, ZHLN::ECS::Registry& reg, EditorState& state, std::string_view id) {
     gui.BeginColumn(4.0f);
     gui.Text(id, 14.0f, {0.6f, 0.7f, 0.8f, 1.0f});
 

@@ -30,7 +30,6 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/GUI.hpp>
 #include <string_view>
 
 namespace ZHLN {
@@ -203,9 +202,7 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
         Components::CullingStatsComponent {}, Components::DebugSettingsComponent {.physicsDrawMode = 0}
     );
 
-    reg.Create(GUI::UISettingsComponent {});
-
-    engine.SeedSceneFontAtlas(reg);
+    engine.EnsureFontAtlas();
 
     // The graphs are rebuilt per scene; the frame plan is not. A scene reset
     // clears the registry and rebuilds the graphs, and both are scene state --

@@ -324,9 +324,9 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
 // SetPendingUIData is not optional: RenderSystem draws whatever
 // Engine::GetPendingUIData() returns and nothing else fills it in, so a callback
 // that builds a Context and forgets this call renders nothing at all.
-void DrawCrosshairHUD(ZHLN::Engine& engine) {
-    ZHLN::GUI::Context ui(engine);
-    ui.BeginFrame(g_frameDt);
+void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui) {
+    hudGui.SetFontAtlas(engine.GetFontAtlas());
+    ZHLN::GUI::Frame ui = hudGui.BeginFrame(engine.ConsumeUIInput(g_frameDt));
 
     const ZHLN::Extent2D viewport = engine.GetPlatformHost().GetSize();
     const float          cx       = static_cast<float>(viewport.width) * 0.5f;
@@ -424,7 +424,7 @@ void DrawCrosshairHUD(ZHLN::Engine& engine) {
         }
     }
 
-    engine.SetPendingUIData(ui.EndFrame());
+    engine.SubmitUI(std::move(ui).End());
 }
 
 // --- First-person rig -----------------------------------------------------------
@@ -1550,7 +1550,8 @@ auto main(int argc, char* argv[]) -> int {
         SetMouseCaptured(*engine, true);
         ZHLN::Log("[BSPSample] Mouse captured: move to look, no button held. M releases the cursor.");
     }
-    engine->SetUICallback([](ZHLN::Engine& eng) -> void { DrawCrosshairHUD(eng); });
+    ZHLN::GUI::Context hudGui;
+    engine->SetUICallback([&hudGui](ZHLN::Engine& eng) -> void { DrawCrosshairHUD(eng, hudGui); });
 
     // 5. Import BSP into ModelPrefab
     ZHLN::BSP::ImportOptions importOpts {

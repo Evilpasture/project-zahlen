@@ -529,9 +529,10 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
 
     PrepareEngineForTest(engine);
 
+    ZHLN::GUI::Context perfGui(engine.GetFontAtlas());
     engine.SetUICallback([&](ZHLN::Engine& eng) {
-        ZHLN::GUI::Context ui(eng);
-        ui.BeginFrame(0.016f);
+        perfGui.SetFontAtlas(eng.GetFontAtlas());
+        ZHLN::GUI::Frame ui = perfGui.BeginFrame(eng.ConsumeUIInput(0.016f));
 
         ui.Box(
             "PerfDashboard",
@@ -563,7 +564,7 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
             }
         );
 
-        eng.SetPendingUIData(ui.EndFrame());
+        eng.SubmitUI(std::move(ui).End());
     });
 
     constexpr uint32_t         kFrames = 60;
@@ -854,9 +855,10 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     }
 
     // 7. Immediate-Mode UI HUD Callback
+    ZHLN::GUI::Context hudGui(engine.GetFontAtlas());
     engine.SetUICallback([&](ZHLN::Engine& eng) {
-        ZHLN::GUI::Context ui(eng);
-        ui.BeginFrame(0.016f);
+        hudGui.SetFontAtlas(eng.GetFontAtlas());
+        ZHLN::GUI::Frame ui = hudGui.BeginFrame(eng.ConsumeUIInput(0.016f));
 
         ui.Box(
             "GrandBenchmarkHUD",
@@ -881,7 +883,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
             }
         );
 
-        eng.SetPendingUIData(ui.EndFrame());
+        eng.SubmitUI(std::move(ui).End());
     });
 
     // 8. Configure Post-Processing

@@ -108,7 +108,7 @@ struct BarStripStyle {
 // `style.height`, bars standing up from the bottom. `absentBars` slots at the
 // left are drawn first, so the strip reads as a series that is still filling
 // rather than one that starts abruptly. Draws nothing without bars at all.
-void BarStrip(GUI::Context& ui, std::span<const float> samples, const BarStripStyle& style);
+void BarStrip(GUI::Frame& ui, std::span<const float> samples, const BarStripStyle& style);
 
 // The height a bar of `value` takes under a scale of `peak`, in pixels -- the
 // arithmetic above, for a caller that needs the number (a hit test, a label's

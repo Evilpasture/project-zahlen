@@ -17,6 +17,7 @@
 #include <Zahlen/SystemContext.hpp>
 #include <Zahlen/WindowInput.hpp>
 #include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/gui/Font.hpp>
 #include <Zahlen/gui/UIData.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -51,6 +52,10 @@ template <typename Services>
 class SystemGraph;
 class EntityCommandBuffer;
 class EventBus;
+}
+
+namespace GUI {
+struct UIInput;
 }
 
 class ArticulationSystem;
@@ -171,8 +176,15 @@ class ZHLN_API Engine {
 
     void SetUICallback(UICallback callback);
 
-    void               SetPendingUIData(const UIDrawData& uiData) noexcept;
+    void               SetPendingUIData(UIDrawData uiData) noexcept;
     [[nodiscard]] auto GetPendingUIData() const noexcept -> UIDrawData;
+
+    void               SetFontAtlas(const FontAtlas& fontAtlas) noexcept;
+    [[nodiscard]] auto GetFontAtlas() -> const FontAtlas&;
+    [[nodiscard]] auto GetFontAtlas() const noexcept -> const FontAtlas&;
+
+    [[nodiscard]] auto ConsumeUIInput(float dt) noexcept -> GUI::UIInput;
+    void               SubmitUI(UIDrawData uiData) noexcept;
 
     void AddDeviceLostCallback(DeviceLostCallback callback);
 
@@ -243,7 +255,7 @@ class ZHLN_API Engine {
 
     [[nodiscard]] auto FallbackSceneEnabled() const noexcept -> bool;
 
-    void SeedSceneFontAtlas(ECS::Registry& reg);
+    void EnsureFontAtlas();
 
     // Best-effort diagnostic snapshot (engine summary, active camera + SIMD
     // frustum planes, and physics body/contact trace) exposed for caller-owned

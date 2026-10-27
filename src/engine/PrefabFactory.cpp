@@ -15,7 +15,6 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
-#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -81,16 +80,11 @@ void ReleaseOwnedMeshes(RenderContext& ctx, ECS::Registry& reg) {
     }
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
-    return CreateFontAtlasTexture(ctx, registry, std::nullopt, GUI::kDefaultFontAssetID);
+auto CreateFontAtlas(RenderContext& ctx) -> FontAtlas {
+    return CreateFontAtlas(ctx, std::nullopt, GUI::kDefaultFontAssetID);
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> TextureHandle {
-    auto uiSettings = registry.GetSingleton<GUI::UISettingsComponent>();
-    if (!uiSettings) {
-        return TextureHandle::Invalid;
-    }
-
+auto CreateFontAtlas(RenderContext& ctx, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> FontAtlas {
     GUI::BakedFontAsset        ownedAsset;
     const GUI::BakedFontAsset* asset = &ResolveFontAsset(assetMgr, fontID, ownedAsset);
 
@@ -102,7 +96,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::O
 
     if ((asset->atlasWidth == 0) || (asset->atlasHeight == 0) || asset->coverage.empty()) {
         LogWarning("No baked font available; text cannot be drawn.");
-        return TextureHandle::Invalid;
+        return GUI::BuildFontAtlas(*asset, TextureHandle::Invalid);
     }
 
     std::vector<uint32_t> rgbaPixels(asset->coverage.size());
@@ -114,31 +108,13 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::O
     // averages neighbours into each other and any sampled LOD above zero
     // smears text together. Single-level also pins the sampler at mip 0 no
     // matter the LOD range the scene sampler uses.
-    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", {asset->atlasWidth, asset->atlasHeight}, rgbaPixels, false, false);
-
-    FontAtlas& font     = uiSettings->fontAtlas;
-    font                = FontAtlas {};
-    font.texture        = texHandle;
-    font.atlasWidth     = static_cast<float>(asset->atlasWidth);
-    font.atlasHeight    = static_cast<float>(asset->atlasHeight);
-    font.fontSize       = asset->fontSize;
-    font.baseline       = asset->baseline;
-    font.lineHeight     = asset->lineHeight;
-    font.isSDF          = asset->isSDF;
-    font.firstCodepoint = asset->firstCodepoint;
-    font.glyphCount     = static_cast<uint32_t>(std::min<size_t>(asset->glyphs.size(), FontAtlas::kMaxGlyphs));
-    for (uint32_t i = 0; i < font.glyphCount; ++i) {
-        font.glyphs[i] = asset->glyphs[i];
-    }
-
-    uiSettings->defaultFontAtlas = texHandle;
-
-    return texHandle;
+    const TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", {asset->atlasWidth, asset->atlasHeight}, rgbaPixels, false, false);
+    return GUI::BuildFontAtlas(*asset, texHandle);
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, std::string_view path) -> TextureHandle {
+auto CreateFontAtlas(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) -> FontAtlas {
     const AssetID id = path.empty() ? GUI::kDefaultFontAssetID : HashAssetID(path);
-    return CreateFontAtlasTexture(ctx, registry, assetMgr, id);
+    return CreateFontAtlas(ctx, assetMgr, id);
 }
 
 auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool {
@@ -831,7 +807,6 @@ void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
     ZHLN::Log("[Engine] Device Lost: Rebuilding procedural resources; other GPU assets re-upload lazily.");
 
     ctx.ClearGPUCaches();
-    CreateFontAtlasTexture(ctx, reg);
 
     // The scene owns its procedural mesh buffers. Its recipes survive device
     // loss, but its old handles do not; rebuild these with the new context.

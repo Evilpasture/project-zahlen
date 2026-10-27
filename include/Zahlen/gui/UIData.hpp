@@ -25,6 +25,8 @@ struct UIDrawData {
     std::span<const UIBatch>        batches;
     std::span<const VertexPosition> positions;
     std::span<const VertexSurface>  surfaces;
+    bool                            wantsCaptureMouse    = false;
+    bool                            wantsCaptureKeyboard = false;
 
     [[nodiscard]] constexpr bool Empty() const noexcept {
         return batches.empty() || positions.empty() || surfaces.empty();

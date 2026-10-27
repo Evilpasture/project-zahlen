@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <Zahlen/Common.h>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
@@ -42,18 +43,19 @@ inline constexpr AssetID kDefaultFontAssetID = HashAssetID(kDefaultFontAssetPath
 
 using BakedFontLoader = auto (*)(void* user, BakedFontAsset& out) -> bool;
 
-void InstallBakedFontLoader(BakedFontLoader loader, void* user) noexcept;
-void UninstallBakedFontLoader() noexcept;
-[[nodiscard]] auto HasBakedFontLoader() noexcept -> bool;
-[[nodiscard]] auto GetBakedFontLoaderUser() noexcept -> void*;
+ZHLN_API void               InstallBakedFontLoader(BakedFontLoader loader, void* user) noexcept;
+ZHLN_API void               UninstallBakedFontLoader() noexcept;
+[[nodiscard]] ZHLN_API auto HasBakedFontLoader() noexcept -> bool;
+[[nodiscard]] ZHLN_API auto GetBakedFontLoaderUser() noexcept -> void*;
 
-[[nodiscard]] auto LoadBakedFont(BakedFontAsset& out) -> bool;
+[[nodiscard]] ZHLN_API auto LoadBakedFont(BakedFontAsset& out) -> bool;
 
+[[nodiscard]] ZHLN_API auto GetDefaultBakedFont() -> const BakedFontAsset&;
 
-[[nodiscard]] auto GetDefaultBakedFont() -> const BakedFontAsset&;
+ZHLN_API void SetDefaultBakedFont(BakedFontAsset font) noexcept;
 
-void SetDefaultBakedFont(BakedFontAsset font) noexcept;
+[[nodiscard]] ZHLN_API auto BuildFontAtlas(const BakedFontAsset& asset, TextureHandle texture = TextureHandle::Invalid) noexcept -> FontAtlas;
 
-[[nodiscard]] auto DecodeCookedFont(std::span<const std::byte> blob) -> std::expected<BakedFontAsset, ErrorCode>;
+[[nodiscard]] ZHLN_API auto DecodeCookedFont(std::span<const std::byte> blob) -> std::expected<BakedFontAsset, ErrorCode>;
 
 }

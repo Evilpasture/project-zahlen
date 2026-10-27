@@ -336,19 +336,21 @@ struct BenchmarkViewer::Impl {
         };
     }
 
-    void DrawBenchmarkPanel(GUI::Context& ui);
-    void DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& engine);
+    GUI::Context gui;
+
+    void DrawBenchmarkPanel(GUI::Frame& ui);
+    void DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& engine);
 
     // The machine under the frames: CPU usage and clock (machine-wide, then
     // every core as a cell), and the GPU's utilization and clock. Reads the
     // SystemTelemetry the frame telemetry owns; nothing here names a platform.
-    void DrawHardwareSection(GUI::Context& ui, const SystemSnapshot& system, SystemTelemetry& counters);
-    void DrawCoreGrid(GUI::Context& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters);
-    void DrawCoreCell(GUI::Context& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters);
-    void DrawFrameTimeChart(GUI::Context& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats);
-    void DrawStageColumns(GUI::Context& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix);
-    void DrawStageColumn(GUI::Context& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix, size_t column);
-    void DrawStageRow(GUI::Context& ui, const FrameStageRow& row, const TableStyle& style, std::string_view prefix, size_t column, size_t index);
+    void DrawHardwareSection(GUI::Frame& ui, const SystemSnapshot& system, SystemTelemetry& counters);
+    void DrawCoreGrid(GUI::Frame& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters);
+    void DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters);
+    void DrawFrameTimeChart(GUI::Frame& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats);
+    void DrawStageColumns(GUI::Frame& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix);
+    void DrawStageColumn(GUI::Frame& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix, size_t column);
+    void DrawStageRow(GUI::Frame& ui, const FrameStageRow& row, const TableStyle& style, std::string_view prefix, size_t column, size_t index);
     void ToggleCapture();
 
     // `part` tells the row's boxes apart (0 name, 1 value, 2 spark box, 3+ spark
@@ -384,9 +386,9 @@ void BenchmarkViewer::Impl::Advance() noexcept {
 void BenchmarkViewer::Impl::BuildTableStyles(ZHLN::Engine& engine, std::span<const FrameStageRow> gpu, std::span<const FrameStageRow> cpu) {
     // The atlas the Context will draw with, so the columns are sized against the
     // font that is actually on screen rather than a guess at its metrics.
-    const auto             settings = engine.GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
-    const ZHLN::FontAtlas* atlas    = (settings && settings->fontAtlas.glyphCount > 0) ? &settings->fontAtlas : nullptr;
-    const float            advance  = AdvancePerChar(atlas, kTableFontSize);
+    const ZHLN::FontAtlas& font    = engine.GetFontAtlas();
+    const ZHLN::FontAtlas* atlas   = (font.glyphCount > 0) ? &font : nullptr;
+    const float            advance = AdvancePerChar(atlas, kTableFontSize);
 
     // What the screen can give the panel: the window, less the margin it keeps
     // at both edges, less the benchmark panel's half of the left side.
@@ -423,7 +425,7 @@ void BenchmarkViewer::Impl::BuildTableStyles(ZHLN::Engine& engine, std::span<con
     telemetryWidth   = content + (kPanelPadding * 2.0f);
 }
 
-void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Context& ui) {
+void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
     if (benchmark == nullptr) {
         return;
     }
@@ -515,7 +517,7 @@ void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Context& ui) {
     );
 }
 
-void BenchmarkViewer::Impl::DrawFrameTimeChart(GUI::Context& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats) {
+void BenchmarkViewer::Impl::DrawFrameTimeChart(GUI::Frame& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats) {
     if (samples.empty()) {
         return;
     }
@@ -548,7 +550,7 @@ void BenchmarkViewer::Impl::DrawFrameTimeChart(GUI::Context& ui, std::span<const
     );
 }
 
-void BenchmarkViewer::Impl::DrawStageColumns(GUI::Context& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix) {
+void BenchmarkViewer::Impl::DrawStageColumns(GUI::Frame& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix) {
     if (rows.empty()) {
         return;
     }
@@ -565,7 +567,7 @@ void BenchmarkViewer::Impl::DrawStageColumns(GUI::Context& ui, std::span<const F
 }
 
 void BenchmarkViewer::Impl::DrawStageColumn(
-    GUI::Context&                  ui,
+    GUI::Frame&                    ui,
     std::span<const FrameStageRow> rows,
     const TableStyle&              style,
     std::string_view               prefix,
@@ -586,7 +588,7 @@ void BenchmarkViewer::Impl::DrawStageColumn(
 }
 
 void BenchmarkViewer::Impl::DrawStageRow(
-    GUI::Context&        ui,
+    GUI::Frame&          ui,
     const FrameStageRow& row,
     const TableStyle&    style,
     std::string_view     prefix,
@@ -671,7 +673,7 @@ void BenchmarkViewer::Impl::DrawStageRow(
     }
 }
 
-void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Context& ui, const SystemSnapshot& system, SystemTelemetry& counters) {
+void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnapshot& system, SystemTelemetry& counters) {
     // Nothing was read, and the reason is the only useful thing left to draw. It
     // is a note, not an error: a machine whose platform exposes no counters is
     // running the frames perfectly well, and the frame numbers above are
@@ -784,7 +786,7 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Context& ui, const SystemSn
     }
 }
 
-void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Context& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters) {
+void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Frame& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters) {
     if (cores.empty()) {
         return;
     }
@@ -831,7 +833,7 @@ void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Context& ui, std::span<const CoreT
     }
 }
 
-void BenchmarkViewer::Impl::DrawCoreCell(GUI::Context& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters) {
+void BenchmarkViewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters) {
     const std::string_view id = TableId("core", 0, cell, 0);
 
     ui.Box(
@@ -918,7 +920,7 @@ void BenchmarkViewer::Impl::ToggleCapture() {
     ZHLN::LogError("[Bench] frame telemetry capture could not open {}", telemetry.CapturePath().string());
 }
 
-void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& engine) {
+void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& engine) {
     const FrameTelemetrySnapshot&        stats    = telemetry.Snapshot();
     SystemTelemetry&                     system   = telemetry.System();
     const std::span<const float>         chart    = telemetry.ChartSamples();
@@ -1157,18 +1159,18 @@ void BenchmarkViewer::UpdateAndRenderUI(ZHLN::Engine& engine, float dt) {
         return;
     }
 
-    GUI::Context ui(engine);
-    ui.BeginFrame(dt);
+    m_impl->gui.SetFontAtlas(engine.GetFontAtlas());
+    GUI::Frame ui = m_impl->gui.BeginFrame(engine.ConsumeUIInput(dt));
     if (m_impl->visible && m_impl->benchmark != nullptr) {
         m_impl->DrawBenchmarkPanel(ui);
     }
     if (m_impl->telemetryVisible) {
         m_impl->DrawTelemetryPanel(ui, engine);
     }
-    engine.SetPendingUIData(ui.EndFrame());
+    engine.SubmitUI(std::move(ui).End());
 }
 
-void BenchmarkViewer::DrawPanel(GUI::Context& ui, ZHLN::Engine& engine) {
+void BenchmarkViewer::DrawPanel(GUI::Frame& ui, ZHLN::Engine& engine) {
     if (m_impl->benchmark == nullptr) {
         Attach(engine, m_impl->pendingEntities);
     }
@@ -1178,12 +1180,12 @@ void BenchmarkViewer::DrawPanel(GUI::Context& ui, ZHLN::Engine& engine) {
     }
 }
 
-void BenchmarkViewer::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& engine) {
+void BenchmarkViewer::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& engine) {
     Tick(engine);
     m_impl->DrawTelemetryPanel(ui, engine);
 }
 
-void BenchmarkViewer::DrawPanels(GUI::Context& ui, ZHLN::Engine& engine) {
+void BenchmarkViewer::DrawPanels(GUI::Frame& ui, ZHLN::Engine& engine) {
     if (m_impl->benchmark == nullptr) {
         Attach(engine, m_impl->pendingEntities);
     }

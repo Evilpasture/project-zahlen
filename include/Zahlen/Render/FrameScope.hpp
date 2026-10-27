@@ -6,6 +6,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Render/Info.hpp>
+#include <Zahlen/gui/UIData.hpp>
 #include <expected>
 
 namespace ZHLN {
@@ -15,7 +16,6 @@ struct SceneData;
 struct SceneRenderPass;
 struct SceneView;
 struct UIView;
-struct UIDrawData;
 struct GraphicsSettings;
 
 // Capability token for one GPU frame. BeginFrame returns it; End() presents.
@@ -39,7 +39,7 @@ class ZHLN_API FrameScope {
 
     [[nodiscard]] auto RenderScene(const SceneRenderPass& pass, const SceneData& scene) noexcept -> FrameOutcome<FrameSkipped>;
 
-    [[nodiscard]] auto RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped>;
+    [[nodiscard]] auto RenderUI(const UIView& view, UIDrawData uiData) noexcept -> FrameOutcome<FrameSkipped>;
 
     [[nodiscard]] auto End() && noexcept -> FrameOutcome<PresentSuboptimal>;
 

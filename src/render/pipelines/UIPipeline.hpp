@@ -9,7 +9,7 @@
 namespace ZHLN::Pipelines {
 
 struct UIPipeline {
-    [[nodiscard]] static auto Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped>;
+    [[nodiscard]] static auto Execute(RenderContext::Impl& impl, const UIView& view, UIDrawData uiData) noexcept -> FrameOutcome<FrameSkipped>;
 };
 
 }

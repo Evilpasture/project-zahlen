@@ -43,7 +43,7 @@ auto BarHeight(float value, float peak, const BarStripStyle& style) noexcept -> 
     return std::max(style.minBarHeight, fill * style.height);
 }
 
-void BarStrip(GUI::Context& ui, std::span<const float> samples, const BarStripStyle& style) {
+void BarStrip(GUI::Frame& ui, std::span<const float> samples, const BarStripStyle& style) {
     const size_t bars = samples.size() + style.absentBars;
     if (bars == 0 || style.width <= 0.0f || style.height <= 0.0f) {
         return;

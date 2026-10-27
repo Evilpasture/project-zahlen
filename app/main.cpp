@@ -557,9 +557,10 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
 // [Hierarchy | Viewport Toolbar | Inspector]
 void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float dt) {
     auto& reg = engine.GetRegistry();
-    gui.BeginFrame(dt);
+    gui.SetFontAtlas(engine.GetFontAtlas());
+    ZHLN::GUI::Frame ui = gui.BeginFrame(engine.ConsumeUIInput(dt));
 
-    gui.Box(
+    ui.Box(
         "EditorWorkspace",
         ZHLN::GUI::BoxConfig {
             .width     = {.grow = 1.0f},
@@ -569,7 +570,7 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
         },
         [&]() -> void {
             // Left: Hierarchy panel
-            gui.Box(
+            ui.Box(
                 "HierarchyPanel",
                 ZHLN::GUI::BoxConfig {
                     .width        = {.fixed = kLeftPanelWidth},
@@ -580,11 +581,11 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
                     .gap          = 6.0f,
                     .direction    = ZHLN::GUI::Direction::Column
                 },
-                [&]() -> void { ZHLN::Editor::DrawHierarchyPanel(gui, engine, s_NativeEditorState, "Hierarchy"); }
+                [&]() -> void { ZHLN::Editor::DrawHierarchyPanel(ui, engine, s_NativeEditorState, "Hierarchy"); }
             );
 
             // Center: Viewport overlay toolbar
-            gui.Box(
+            ui.Box(
                 "CenterViewportOverlay",
                 ZHLN::GUI::BoxConfig {
                     .width     = {.grow = 1.0f},
@@ -596,7 +597,7 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
                 },
                 [&]() -> void {
                     // Top toolbar in center viewport
-                    gui.Box(
+                    ui.Box(
                         "ViewportToolbar",
                         ZHLN::GUI::BoxConfig {
                             .width        = {.grow = 0.0f, .fit = true},
@@ -609,13 +610,13 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
                             .alignMain    = ZHLN::GUI::Alignment::Center,
                             .alignCross   = ZHLN::GUI::Alignment::Center
                         },
-                        [&]() -> void { gui.Checkbox("Simulate", s_EditorState.simulationRunning); }
+                        [&]() -> void { ui.Checkbox("Simulate", s_EditorState.simulationRunning); }
                     );
                 }
             );
 
             // Right: Inspector panel
-            gui.Box(
+            ui.Box(
                 "InspectorPanel",
                 ZHLN::GUI::BoxConfig {
                     .width        = {.fixed = kRightPanelWidth},
@@ -626,12 +627,12 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
                     .gap          = 6.0f,
                     .direction    = ZHLN::GUI::Direction::Column
                 },
-                [&]() -> void { ZHLN::Editor::DrawInspectorPanel(gui, reg, s_NativeEditorState, "Inspector"); }
+                [&]() -> void { ZHLN::Editor::DrawInspectorPanel(ui, reg, s_NativeEditorState, "Inspector"); }
             );
         }
     );
 
-    engine.SetPendingUIData(gui.EndFrame());
+    engine.SubmitUI(std::move(ui).End());
 }
 
 int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options, ZHLN::CrashState& crashState) {
@@ -656,6 +657,8 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
     bool saveChordWasDown = false;
     bool escWasDown       = false;
 
+    ZHLN::GUI::Context gui(engine.GetFontAtlas());
+
     while (engine.IsRunning()) {
         float frameTime = clock.Tick();
         ZHLN::CheckForCrashes(crashState, &engine);
@@ -665,12 +668,6 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         auto  state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
 
         auto winSize = engine.GetPlatformHost().GetSize();
-
-        // A cheap handle over the Impl the registry owns (GUIStateComponent),
-        // so building it here costs a pointer and lets the viewport bounds and
-        // the gating below ask about last frame's layout and text focus. The
-        // same handle is handed to the frame builder.
-        ZHLN::GUI::Context gui(engine);
 
         // Dynamic scene viewport: the 3D composition targets the centre
         // column between the two panels. Read the panels' REAL boxes from last
@@ -714,17 +711,6 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
                 hadVp  = true;
             }
         }
-
-        // Ctrl+C/X/V in a focused field go to the OS clipboard through the
-        // window. Re-set every frame because the handle is rebuilt; the sink is
-        // stateless, so this is two stores.
-        gui.SetClipboard(
-            ZHLN::GUI::TextEdit::ClipboardSink {
-                .userdata = &engine,
-                .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Engine*>(ud)->GetPlatformHost().SetClipboardText(text); },
-                .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Engine*>(ud)->GetPlatformHost().GetClipboardText(); },
-            }
-        );
 
         // Viewport bounds: center area between the left hierarchy and right inspector
         const bool pointerInViewport = state && state->mouseX >= vpX0 && state->mouseX <= vpX1;

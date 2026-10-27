@@ -7,7 +7,6 @@
 
 #include "TestsFramework.hpp"
 #include <UI/UITree.hpp>
-#include <Zahlen/ecs/ECS.hpp>
 #include <expected>
 #include <string>
 #include <string_view>
@@ -82,9 +81,8 @@ struct UITreeTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> render_ui_tree_walks_without_a_click() {
-            ZHLN::ECS::Registry registry;
-            ZHLN::GUI::Context  gui(registry, {640, 480});
-            gui.BeginFrame(0.016f);
+            ZHLN::GUI::Context gui;
+            ZHLN::GUI::Frame   frame = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = {640, 480}, .dt = 0.016f});
 
             ZHLN::GUI::UINode root;
             root.id   = "panel";
@@ -116,13 +114,13 @@ struct UITreeTestSuite {
             ZHLN::GUI::PropertyStore properties;
             properties.SetBool("post.enableSSR", true);
 
-            const auto result = ZHLN::GUI::RenderUITree(gui, root, actions, properties);
+            const auto result = ZHLN::GUI::RenderUITree(frame, root, actions, properties);
             bus.Drain<SaveEvent>([&](const SaveEvent&) { ++saves; });
 
             // The walk's other half is the payload: a tree of four visible
             // widgets has to hand back the geometry a renderer would draw, and
             // it has to be self-consistent -- one surface per vertex.
-            const ZHLN::UIDrawData draw = gui.EndFrame();
+            const ZHLN::UIDrawData draw = std::move(frame).End();
             if (!ZHLN::Test::ExpectTrue(!draw.Empty() && draw.positions.size() == draw.surfaces.size())) {
                 return std::unexpected(UITreeTestError::RenderWalkFailed);
             }
@@ -186,13 +184,12 @@ struct UITreeTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> design_mode_does_not_invoke_and_accepts_a_selection() {
-            ZHLN::ECS::Registry registry;
-            ZHLN::GUI::Context  gui(registry, {640, 480});
-            gui.BeginFrame(0.016f);
+            ZHLN::GUI::Context gui;
+            ZHLN::GUI::Frame   frame = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = {640, 480}, .dt = 0.016f});
 
             ZHLN::GUI::UINode root;
-            root.id   = "panel";
-            root.kind = ZHLN::GUI::NodeKind::Column;
+            root.id        = "panel";
+            root.kind      = ZHLN::GUI::NodeKind::Column;
             root.box.color = {0.1f, 0.1f, 0.1f, 1.0f};
             root.children.push_back(ZHLN::GUI::UINode {
                 .id            = "save",
@@ -209,11 +206,11 @@ struct UITreeTestSuite {
             ZHLN::GUI::PropertyStore properties;
 
             const auto result =
-                ZHLN::GUI::RenderUITree(gui, root, actions, properties, ZHLN::GUI::TreeMode::Design, "panel");
+                ZHLN::GUI::RenderUITree(frame, root, actions, properties, ZHLN::GUI::TreeMode::Design, "panel");
 
             // Design mode draws the tree too; it just does not activate it. Same
             // payload contract as the non-design walk above.
-            const ZHLN::UIDrawData draw = gui.EndFrame();
+            const ZHLN::UIDrawData draw = std::move(frame).End();
             if (!ZHLN::Test::ExpectTrue(!draw.Empty() && draw.positions.size() == draw.surfaces.size())) {
                 return std::unexpected(UITreeTestError::RenderWalkFailed);
             }

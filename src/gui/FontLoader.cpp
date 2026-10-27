@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 
-#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
+#include <algorithm>
 #include <cstring>
 #include <utility>
 
@@ -83,9 +83,26 @@ auto GetDefaultBakedFont() -> const BakedFontAsset& {
 }
 
 void SetDefaultBakedFont(BakedFontAsset font) noexcept {
-    auto& state        = GetState();
-    state.defaultBake  = std::move(font);
+    auto& state          = GetState();
+    state.defaultBake    = std::move(font);
     state.defaultBakeSet = true;
+}
+
+auto BuildFontAtlas(const BakedFontAsset& asset, TextureHandle texture) noexcept -> FontAtlas {
+    FontAtlas font {};
+    font.texture        = texture;
+    font.atlasWidth     = asset.atlasWidth > 0 ? static_cast<float>(asset.atlasWidth) : 1024.0f;
+    font.atlasHeight    = asset.atlasHeight > 0 ? static_cast<float>(asset.atlasHeight) : 1024.0f;
+    font.fontSize       = asset.fontSize;
+    font.baseline       = asset.baseline;
+    font.lineHeight     = asset.lineHeight;
+    font.isSDF          = asset.isSDF;
+    font.firstCodepoint = asset.firstCodepoint;
+    font.glyphCount     = static_cast<uint32_t>(std::min<size_t>(asset.glyphs.size(), FontAtlas::kMaxGlyphs));
+    for (uint32_t i = 0; i < font.glyphCount; ++i) {
+        font.glyphs[i] = asset.glyphs[i];
+    }
+    return font;
 }
 
 

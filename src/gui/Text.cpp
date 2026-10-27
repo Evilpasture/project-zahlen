@@ -99,19 +99,19 @@ uint32_t AppendTextVertices(
         float x1 = x0 + (g.x1 - g.x0) * scale;
         float y1 = y0 + (g.y1 - g.y0) * scale;
 
-        outPos[writtenCount]    = {{x0, y0, 0.0f}};
-        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v0), .color = packedColor};
-        outPos[writtenCount]    = {{x0, y1, 0.0f}};
-        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v1), .color = packedColor};
-        outPos[writtenCount]    = {{x1, y0, 0.0f}};
-        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v0), .color = packedColor};
+        outPos[writtenCount]       = {{x0, y0, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v0), .color = packedColor, .uv1 = {}};
+        outPos[writtenCount]       = {{x0, y1, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v1), .color = packedColor, .uv1 = {}};
+        outPos[writtenCount]       = {{x1, y0, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v0), .color = packedColor, .uv1 = {}};
 
-        outPos[writtenCount]    = {{x1, y0, 0.0f}};
-        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v0), .color = packedColor};
-        outPos[writtenCount]    = {{x0, y1, 0.0f}};
-        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v1), .color = packedColor};
-        outPos[writtenCount]    = {{x1, y1, 0.0f}};
-        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v1), .color = packedColor};
+        outPos[writtenCount]       = {{x1, y0, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v0), .color = packedColor, .uv1 = {}};
+        outPos[writtenCount]       = {{x0, y1, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v1), .color = packedColor, .uv1 = {}};
+        outPos[writtenCount]       = {{x1, y1, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v1), .color = packedColor, .uv1 = {}};
 
         currentX += g.xadvance * scale;
     }

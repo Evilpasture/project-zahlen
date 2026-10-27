@@ -263,7 +263,7 @@ void ApplySelectionTint(BoxConfig& cfg) {
     cfg.color = cfg.color + JPH::Vec4(0.15f, 0.25f, 0.40f, 0.25f);
 }
 
-void NoteDesignClick(Context& gui, std::string_view id, TreeMode mode, RenderUITreeResult& result) {
+void NoteDesignClick(Frame& gui, std::string_view id, TreeMode mode, RenderUITreeResult& result) {
     if (mode != TreeMode::Design || !result.clickedId.empty()) {
         return;
     }
@@ -305,7 +305,7 @@ auto RemoveImpl(UINode& node, std::string_view targetId, std::string_view path) 
 }
 
 void RenderNode(
-    Context&              gui,
+    Frame&                gui,
     const UINode&         node,
     const ActionRegistry& actions,
     PropertyStore&        properties,
@@ -431,7 +431,7 @@ auto RemoveNodeById(UINode& root, std::string_view targetId) -> bool {
 }
 
 auto RenderUITree(
-    Context&              gui,
+    Frame&                gui,
     const UINode&         root,
     const ActionRegistry& actions,
     PropertyStore&        properties,

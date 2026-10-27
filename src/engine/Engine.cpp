@@ -35,6 +35,7 @@
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/EventBus.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/FontLoader.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
@@ -100,7 +101,10 @@ struct EngineImpl {
     std::unique_ptr<SimGraph>       updateGraph;
     std::unique_ptr<RenderGraph>    renderGraph;
 
-    std::optional<FontAtlas> fontAtlas;
+    FontAtlas             fontAtlas         = GUI::BuildFontAtlas(GUI::GetDefaultBakedFont(), TextureHandle::Invalid);
+    bool                  fontAtlasUploaded = false;
+    std::vector<KeyCode>  uiPressedKeys;
+    std::vector<uint32_t> uiCharacterStream;
 
     void*        gameState    = nullptr;
     uint64_t     frameCounter = 0;
@@ -119,22 +123,16 @@ auto Engine::FallbackSceneEnabled() const noexcept -> bool {
     return _impl->config.enableFallbackScene;
 }
 
-void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
-    if (_impl->fontAtlas.has_value()) {
-        if (auto uiSettings = reg.GetSingleton<GUI::UISettingsComponent>()) {
-            uiSettings->fontAtlas        = *_impl->fontAtlas;
-            uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
-        }
-    } else {
-        PrefabFactory::PrimeDefaultBakedFont(GetAssetManager());
-        PrefabFactory::CreateFontAtlasTexture(
-            GetRenderContext(), reg, GetAssetManager(), GUI::kDefaultFontAssetID
-        );
-        if (const auto uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
-            uiSettings && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
-            _impl->fontAtlas = uiSettings->fontAtlas;
-        }
+void Engine::EnsureFontAtlas() {
+    if (_impl->fontAtlasUploaded) {
+        return;
     }
+    PrefabFactory::PrimeDefaultBakedFont(GetAssetManager());
+    const FontAtlas uploaded = PrefabFactory::CreateFontAtlas(GetRenderContext(), GetAssetManager(), GUI::kDefaultFontAssetID);
+    if (uploaded.glyphCount > 0) {
+        _impl->fontAtlas = uploaded;
+    }
+    _impl->fontAtlasUploaded = true;
 }
 
 void Engine::TraceDiagnostics() const noexcept {
@@ -208,6 +206,8 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
         return std::unexpected(rebuilt.error());
     }
     PrefabFactory::RebuildVulkanResources(_impl->kernel->GetRenderContext(), _impl->world->GetRegistry());
+    _impl->fontAtlasUploaded = false;
+    EnsureFontAtlas();
 
     for (const auto& callback: _impl->deviceLostCallbacks) {
         if (callback) {
@@ -594,12 +594,89 @@ void Engine::SetUICallback(UICallback callback) {
     _impl->uiCallback = std::move(callback);
 }
 
-void Engine::SetPendingUIData(const UIDrawData& uiData) noexcept {
+void Engine::SetPendingUIData(UIDrawData uiData) noexcept {
     _impl->pendingUIData = uiData;
 }
 
 auto Engine::GetPendingUIData() const noexcept -> UIDrawData {
     return _impl->pendingUIData;
+}
+
+void Engine::SetFontAtlas(const FontAtlas& fontAtlas) noexcept {
+    _impl->fontAtlas         = fontAtlas;
+    _impl->fontAtlasUploaded = true;
+}
+
+auto Engine::GetFontAtlas() -> const FontAtlas& {
+    EnsureFontAtlas();
+    return _impl->fontAtlas;
+}
+
+auto Engine::GetFontAtlas() const noexcept -> const FontAtlas& {
+    return _impl->fontAtlas;
+}
+
+auto Engine::ConsumeUIInput(float dt) noexcept -> GUI::UIInput {
+    _impl->uiPressedKeys.clear();
+    _impl->uiCharacterStream.clear();
+
+    GUI::UIInput out {
+        .viewport = GetPlatformHost().GetSize(),
+        .dt       = dt,
+        .clipboard =
+            {
+                .userdata = &GetPlatformHost(),
+                .set      = [](void* ud, std::string_view text) -> void { static_cast<PlatformHost*>(ud)->SetClipboardText(text); },
+                .get      = [](void* ud) -> std::string { return static_cast<PlatformHost*>(ud)->GetClipboardText(); },
+            },
+    };
+
+    if (auto input = GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+        out.mouseX      = input->mouseX;
+        out.mouseY      = input->mouseY;
+        out.mouseScroll = input->mouseWheel;
+        out.mouseDown[0] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+        out.mouseDown[1] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::RButton));
+        out.mouseDown[2] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::MButton));
+
+        KeyModifiers mods = KeyModifiers::None;
+        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LShift)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RShift))) {
+            mods |= KeyModifiers::Shift;
+        }
+        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LControl)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RControl))) {
+            mods |= KeyModifiers::Ctrl;
+        }
+        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LAlt)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RAlt))) {
+            mods |= KeyModifiers::Alt;
+        }
+        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LSuper)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RSuper))) {
+            mods |= KeyModifiers::Super;
+        }
+        out.modifiers = mods;
+
+        for (size_t i = 0; i < input->queuedInputCount; ++i) {
+            const auto& queued = input->queuedInput[i];
+            if (queued.isChar) {
+                _impl->uiCharacterStream.push_back(queued.value);
+            } else {
+                _impl->uiPressedKeys.push_back(static_cast<KeyCode>(queued.value));
+            }
+        }
+        input->ClearQueuedInput();
+    }
+
+    out.pressedKeys     = _impl->uiPressedKeys;
+    out.characterStream = _impl->uiCharacterStream;
+    return out;
+}
+
+void Engine::SubmitUI(UIDrawData uiData) noexcept {
+    SetPendingUIData(uiData);
+    if (auto inputState = _impl->world->GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+        inputState->wantCaptureKeyboard = uiData.wantsCaptureKeyboard;
+        inputState->wantCaptureMouse    = uiData.wantsCaptureMouse;
+    }
+    _impl->world->GetInput().SyncCaptureFlags(uiData.wantsCaptureKeyboard, uiData.wantsCaptureMouse);
 }
 
 void Engine::AddDeviceLostCallback(DeviceLostCallback callback) {

@@ -88,7 +88,7 @@ inline constexpr std::string_view kVendoredFontFntPath = "resources/fonts/JetBra
 /// cached CPU-side, so device-loss rebuilds re-upload without touching disk.
 ///
 /// The hook is process-global and single: install one loader per process, from
-/// the composition root, before the first CreateFontAtlasTexture. This
+/// the composition root, before the first CreateFontAtlas. This
 /// lower-level overload registers no teardown; uninstall with
 /// GUI::UninstallBakedFontLoader() (the Engine& overload below does both).
 void InstallBakedFontLoader(AssetManager& assets, const BakedFontSource& source = {});

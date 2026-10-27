@@ -58,13 +58,13 @@ struct SolidPayload {
 // even if a childless box were laid out to nothing -- the colour is what the
 // capture is asked about, and the text never is a different hue than the box.
 [[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const JPH::Vec4& color, float size) -> SolidPayload {
-    ZHLN::GUI::Context ui(engine);
-    ui.BeginFrame(1.0f / 60.0f);
+    ZHLN::GUI::Context gui(engine.GetFontAtlas());
+    ZHLN::GUI::Frame   ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = engine.GetPlatformHost().GetSize(), .dt = 1.0f / 60.0f});
     ui.Box(
         "Solid", ZHLN::GUI::BoxConfig {.width = {.fixed = size}, .height = {.fixed = size}, .color = color, .padding = 12.0f},
         [&]() { ui.Text("X", 24.0f, color); }
     );
-    const ZHLN::UIDrawData frame = ui.EndFrame();
+    const ZHLN::UIDrawData frame = std::move(ui).End();
 
     SolidPayload payload;
     payload.batches.assign(frame.batches.begin(), frame.batches.end());
@@ -100,9 +100,10 @@ struct UITestSuite {
             auto& rc = engine->GetRenderContext();
 
             // Set up a simple UI scene
+            ZHLN::GUI::Context gui(engine->GetFontAtlas());
             engine->SetUICallback([&](ZHLN::Engine& eng) {
-                ZHLN::GUI::Context ui(eng);
-                ui.BeginFrame(0.016f);
+                gui.SetFontAtlas(eng.GetFontAtlas());
+                ZHLN::GUI::Frame ui = gui.BeginFrame(eng.ConsumeUIInput(0.016f));
 
                 ui.Box(
                     "TestBox",
@@ -117,7 +118,7 @@ struct UITestSuite {
                     }
                 );
 
-                eng.SetPendingUIData(ui.EndFrame());
+                eng.SubmitUI(std::move(ui).End());
             });
 
             constexpr float dt = 1.0f / 60.0f;
@@ -188,9 +189,10 @@ struct UITestSuite {
             bool     wasClickedA = false;
             bool     wasClickedB = false;
 
+            ZHLN::GUI::Context gui(engine->GetFontAtlas());
             engine->SetUICallback([&](ZHLN::Engine& eng) {
-                ZHLN::GUI::Context ui(eng);
-                ui.BeginFrame(0.016f);
+                gui.SetFontAtlas(eng.GetFontAtlas());
+                ZHLN::GUI::Frame ui = gui.BeginFrame(eng.ConsumeUIInput(0.016f));
 
                 ui.Box(
                     "Container",
@@ -212,7 +214,7 @@ struct UITestSuite {
                     }
                 );
 
-                eng.SetPendingUIData(ui.EndFrame());
+                eng.SubmitUI(std::move(ui).End());
             });
 
             constexpr float dt = 1.0f / 60.0f;

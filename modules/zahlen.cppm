@@ -447,20 +447,25 @@ using ZHLN::GUI::Alignment;
 using ZHLN::GUI::BakedFontAsset;
 using ZHLN::GUI::BakedFontLoader;
 using ZHLN::GUI::BoxConfig;
+using ZHLN::GUI::BuildFontAtlas;
 using ZHLN::GUI::Context;
 using ZHLN::GUI::DecodeCookedFont;
 using ZHLN::GUI::Direction;
+using ZHLN::GUI::ElementRect;
+using ZHLN::GUI::Frame;
 using ZHLN::GUI::GetDefaultBakedFont;
 using ZHLN::GUI::HasBakedFontLoader;
 using ZHLN::GUI::InstallBakedFontLoader;
 using ZHLN::GUI::kDefaultFontAssetPath;
 using ZHLN::GUI::LoadBakedFont;
 using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::ScrollBarStyle;
+using ZHLN::GUI::ScrollState;
 using ZHLN::GUI::SetDefaultBakedFont;
 using ZHLN::GUI::Sizing;
 using ZHLN::GUI::TextBounds;
 using ZHLN::GUI::TextLineHeight;
-using ZHLN::GUI::UISettingsComponent;
+using ZHLN::GUI::UIInput;
 using ZHLN::GUI::UninstallBakedFontLoader;
 } // namespace GUI
 
@@ -561,7 +566,7 @@ using ZHLN::World;
 namespace PrefabFactory {
 using ZHLN::PrefabFactory::CreateBox;
 using ZHLN::PrefabFactory::CreateBoxMesh;
-using ZHLN::PrefabFactory::CreateFontAtlasTexture;
+using ZHLN::PrefabFactory::CreateFontAtlas;
 using ZHLN::PrefabFactory::CreatePlane;
 using ZHLN::PrefabFactory::CreatePlaneMesh;
 using ZHLN::PrefabFactory::CreateTetrahedronMesh;
