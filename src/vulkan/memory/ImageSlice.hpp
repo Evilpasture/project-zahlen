@@ -74,12 +74,30 @@ struct ImageSlice {
             format,
             aspect,
             static_cast<uint8_t>(baseMip),
-            static_cast<uint8_t>(mipCount),
+            mipCount == VK_REMAINING_MIP_LEVELS ? ImageView::kRemainingMips : static_cast<uint8_t>(mipCount),
             static_cast<uint16_t>(baseLayer),
-            static_cast<uint16_t>(layerCount),
+            layerCount == VK_REMAINING_ARRAY_LAYERS ? ImageView::kRemainingLayers : static_cast<uint16_t>(layerCount),
             viewType,
         };
     }
+
+    template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+    void Transition(VkCommandBuffer cmd) const noexcept;
+
+    template <VkImageLayout TargetLayout>
+    void DiscardTo(VkCommandBuffer cmd) const noexcept;
+
+    void Transition(VkCommandBuffer cmd, VkImageLayout oldLayout, VkImageLayout newLayout) const noexcept;
+
+    void Transition(
+        VkCommandBuffer       cmd,
+        VkImageLayout         oldLayout,
+        VkImageLayout         newLayout,
+        VkPipelineStageFlags2 srcStage,
+        VkAccessFlags2        srcAccess,
+        VkPipelineStageFlags2 dstStage,
+        VkAccessFlags2        dstAccess
+    ) const noexcept;
 
     [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage {
         return image;

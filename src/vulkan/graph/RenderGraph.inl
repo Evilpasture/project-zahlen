@@ -535,7 +535,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     constexpr auto barrier_plan = BuildBarrierPlan<PassIndex, PassType>();
 
     if constexpr (barrier_plan.count > 0) {
-        std::array<VkImageMemoryBarrier2, barrier_plan.count> barriers {};
+        std::array<ImageBarrier, barrier_plan.count> barriers {};
 
         [&]<size_t... Bs>(std::index_sequence<Bs...>) {
             (
@@ -548,23 +548,20 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
                     constexpr TemplatedDetail::ResourceState prev_state = StateTable[PassIndex][r_idx];
                     const auto&                              resource   = bindings[r_idx];
 
-                    barriers[Bs] = MakeImageBarrier({
-                        .image      = resource.image,
-                        .src_access = prev_state.access,
-                        .dst_access = UsageType::access,
-                        .src_layout = prev_state.layout,
-                        .dst_layout = UsageType::layout,
-                        .src_stage  = prev_state.stage,
-                        .dst_stage  = UsageType::stage,
-                        .aspect     = Img::aspect,
-                        .base_mip   = 0,
-                        .mip_count  = VK_REMAINING_MIP_LEVELS,
-                    });
+                    barriers[Bs] = ImageBarrier::Transition(
+                        resource.View().WithAspect(Img::aspect).AllSubresources(),
+                        prev_state.layout,
+                        UsageType::layout,
+                        prev_state.stage,
+                        prev_state.access,
+                        UsageType::stage,
+                        UsageType::access
+                    );
                 }(),
                 ...);
         }(std::make_index_sequence<barrier_plan.count> {});
 
-        PipelineBarrier(cmd, {}, barriers);
+        ImageBarrier::Record(cmd, barriers);
     }
 
     if constexpr (requires { PassType::is_fork; }) {

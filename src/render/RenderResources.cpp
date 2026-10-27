@@ -730,9 +730,10 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
         return std::unexpected(imageRes.error());
     }
 
-    Vk::Image image = std::move(*imageRes);
-    defer     _([&] { allocator.DestroyImage(image); });
-    auto      staging = stagingRingBuffer.Allocate(bytes);
+    Vk::Image           image = std::move(*imageRes);
+    defer               _([&] { allocator.DestroyImage(image); });
+    const Vk::ImageView view    = image.View();
+    auto                staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {
         return std::unexpected(Vk::StagingError::MemoryMappingFailed);
     }
@@ -741,7 +742,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     if (auto immediate = Vk::ExecuteImmediate(
             ctx, graphicsCmdRing, stagingRingBuffer,
             [&](VkCommandBuffer cmd) {
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image.Handle());
+                view.DiscardTo<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd);
 
                 const VkBufferImageCopy2 region = {
                     .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
@@ -754,14 +755,12 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
                     .imageExtent       = {w, h, 1},
                 };
                 Vk::CopyBufferToImage(cmd, staging.slice.buffer, image.Handle(), region);
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
+                view.Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
             }
         );
         !immediate) [[unlikely]] {
         return std::unexpected(immediate.error());
     }
-
-    const Vk::ImageView view = image.View();
 
     Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
 
@@ -1013,10 +1012,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     }
     auto* const cmd = recording->Handle();
     impl.geometry.RecordPendingUpdates(cmd);
-    Vk::MemoryBarrier(
-        cmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,
-        Vk::BarrierAccess::AccelerationStructureRead
-    );
+    Vk::MemoryBarrier::TransferToAccelerationStructureBuild().Record(cmd);
     Vk::BuildBLAS(cmd, geometry, blas.Get(), Vk::BufferSlice {*scratchRes, impl.ctx.BufferAddress(scratchRes->Handle())});
     auto executable = std::move(*recording).End();
     if (!executable) {
@@ -1093,35 +1089,27 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
         if (auto immediate = Vk::ExecuteImmediate(
                 impl->ctx, impl->graphicsCmdRing,
                 [&](VkCommandBuffer cmd) -> void {
-                    const VkImageMemoryBarrier2 toTransfer = Vk::MakeImageBarrier({
-                        .image      = source,
-                        .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                        .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT,
-                        .src_layout = sourceLayout,
-                        .dst_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                        .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                        .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                        .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-                        .base_mip   = 0,
-                        .mip_count  = VK_REMAINING_MIP_LEVELS,
-                    });
-                    Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toTransfer, 1});
+                    frameImage.image.Transition(
+                        cmd,
+                        sourceLayout,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                        VK_ACCESS_2_TRANSFER_READ_BIT
+                    );
 
                     Vk::CopyImageToBuffer(cmd, source, stagingBuffer.Handle(), extent);
 
-                    const VkImageMemoryBarrier2 toFrame = Vk::MakeImageBarrier({
-                        .image      = source,
-                        .src_access = VK_ACCESS_2_TRANSFER_READ_BIT,
-                        .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                        .src_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                        .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                        .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                        .dst_stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                        .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-                        .base_mip   = 0,
-                        .mip_count  = VK_REMAINING_MIP_LEVELS,
-                    });
-                    Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toFrame, 1});
+                    frameImage.image.Transition(
+                        cmd,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                        VK_ACCESS_2_TRANSFER_READ_BIT,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
+                    );
                 }
             );
             !immediate) [[unlikely]] {
@@ -1175,11 +1163,10 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
     if (auto immediate = Vk::ExecuteImmediate(
             impl->ctx, impl->graphicsCmdRing,
             [&](VkCommandBuffer cmd) -> void {
-                auto* const targetImg = impl->graphResources.hdrSceneColor.image.Handle();
-
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, targetImg);
-                Vk::CopyImageToBuffer(cmd, targetImg, stagingBuffer.Handle(), extent);
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, targetImg);
+                const auto& hdrTarget = impl->graphResources.hdrSceneColor;
+                hdrTarget.Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd);
+                Vk::CopyImageToBuffer(cmd, hdrTarget.image.Handle(), stagingBuffer.Handle(), extent);
+                hdrTarget.Transition<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
             }
         );
         !immediate) [[unlikely]] {

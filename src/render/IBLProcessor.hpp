@@ -97,6 +97,8 @@ class IBLProcessor {
         payload.prefilteredImage  = std::move(*specImg);
         payload.prefilteredFormat = cubeFormat;
         payload.environmentMode   = environmentMode;
+        payload.brdfLutView       = payload.brdfLutImage.View();
+        payload.prefilteredView   = payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, kMipLevels);
 
         if (useVisualSky) {
             auto skyImg = Vk::Image::Create(
@@ -108,6 +110,7 @@ class IBLProcessor {
                 return std::unexpected(skyImg.error());
             }
             payload.visualSkyImage = std::move(*skyImg);
+            payload.visualSkyView  = payload.visualSkyImage.View();
         }
 
         if (!hasPreparedSH) {
@@ -170,10 +173,14 @@ class IBLProcessor {
                 [&](VkCommandBuffer cmd) {
                     heapScope.Bind(cmd);
 
-                    stagedInput->RecordUpload(cmd, useVisualSky ? payload.visualSkyImage.Handle() : VK_NULL_HANDLE);
+                    stagedInput->RecordUpload(cmd, useVisualSky ? payload.visualSkyView : Vk::ImageView {});
 
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, payload.brdfLutImage.Handle());
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, payload.prefilteredImage.Handle());
+                    Vk::ImageBarrier::Record(
+                        cmd, std::array {
+                                 Vk::ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_GENERAL>(payload.brdfLutView),
+                                 Vk::ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_GENERAL>(payload.prefilteredView),
+                             }
+                    );
 
                     brdfPass->DispatchHeapIndexedThreads<Shaders::Modules::BrdfLutCS>(
                         cmd, brdfBlock, kLutSize, kLutSize, 1, BRDFLUTPush {.width = kLutSize, .height = kLutSize, .sampleCount = 128}
@@ -199,8 +206,12 @@ class IBLProcessor {
                         }
                     }
 
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.brdfLutImage.Handle());
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.prefilteredImage.Handle());
+                    Vk::ImageBarrier::Record(
+                        cmd, std::array {
+                                 Vk::ImageBarrier::Transition<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(payload.brdfLutView),
+                                 Vk::ImageBarrier::Transition<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(payload.prefilteredView),
+                             }
+                    );
                 }
             );
             !immediate) [[unlikely]] {
@@ -219,12 +230,6 @@ class IBLProcessor {
                 const auto& rgb     = radiance.diffuseSH[c];
                 payload.shCoeffs[c] = JPH::Vec4(rgb[0], rgb[1], rgb[2], 0.0f);
             }
-        }
-
-        payload.brdfLutView     = payload.brdfLutImage.View();
-        payload.prefilteredView = payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, kMipLevels);
-        if (useVisualSky) {
-            payload.visualSkyView = payload.visualSkyImage.View();
         }
 
         rollback.Dismiss();
@@ -249,8 +254,9 @@ class IBLProcessor {
             allocator.DestroyBuffer(staging);
         }
 
-        void RecordUpload(VkCommandBuffer cmd, VkImage visualSky) const noexcept {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels);
+        void RecordUpload(VkCommandBuffer cmd, Vk::ImageView visualSky) const noexcept {
+            const Vk::ImageView radianceView = image.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels);
+            radianceView.DiscardTo<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd);
 
             const VkBufferImageCopy2 region {
                 .sType            = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
@@ -271,39 +277,23 @@ class IBLProcessor {
                         Vk::CopyBufferToImage(cmd, staging.Handle(), image.Handle(), mipRegion);
                     }
                 }
-                Vk::ImageBarrier(
-                    cmd, Vk::ImageBarrierDesc {
-                             .image      = image.Handle(),
-                             .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                             .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
-                             .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                             .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                             .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                             .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                             .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-                             .base_mip   = 0,
-                             .mip_count  = mipLevels
-                         }
+                radianceView.Transition(
+                    cmd,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                    VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_READ_BIT
                 );
             }
 
-            if (visualSky != VK_NULL_HANDLE) {
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, visualSky);
+            if (visualSky.Valid()) {
+                visualSky.DiscardTo<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd);
                 auto visualRegion         = region;
                 visualRegion.bufferOffset = visualOffset * sizeof(float);
-                Vk::CopyBufferToImage(cmd, staging.Handle(), visualSky, visualRegion);
-                Vk::ImageBarrier(
-                    cmd, {.image      = visualSky,
-                          .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                          .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
-                          .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                          .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                          .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                          .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                          .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-                          .base_mip   = 0,
-                          .mip_count  = 1}
-                );
+                Vk::CopyBufferToImage(cmd, staging.Handle(), visualSky.Handle(), visualRegion);
+                visualSky.Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
             }
         }
     };

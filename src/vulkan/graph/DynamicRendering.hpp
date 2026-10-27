@@ -228,29 +228,6 @@ struct LayoutMap<PresentState> {
     static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 };
 
-template <VkImageLayout Layout>
-struct LayoutTraits;
-
-template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-[[nodiscard]] constexpr auto MakeLayoutBarrierDesc(
-    VkImage            image,
-    VkImageAspectFlags aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-    uint32_t           baseMip  = 0,
-    uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
-) noexcept -> ImageBarrierDesc;
-
-template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-void TransitionLayout(
-    VkCommandBuffer    cmd,
-    VkImage            image,
-    VkImageAspectFlags aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-    uint32_t           baseMip  = 0,
-    uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
-) noexcept;
-
-template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-void TransitionLayout(VkCommandBuffer cmd, VkImage image, const VkImageSubresourceRange& range) noexcept;
-
 template <typename T>
 concept ColorClearTarget = std::same_as<std::remove_cvref_t<T>, VkImage> || requires(const T& target) {
     { target.image.Handle() } -> std::same_as<VkImage>;
@@ -683,20 +660,15 @@ class DynamicPass {
 
 DynamicPass(VkExtent2D) -> DynamicPass<0, false>;
 
-struct PassResource {
-    ImageBarrierDesc barrier;
-};
-
 using PassRecordFn = void (*)(VkCommandBuffer, const void* userData);
 
 struct PassDesc {
-    const char*                   name = "Unnamed Pass";
-    std::span<const PassResource> transitions;
-    PassRecordFn                  record    = nullptr;
-    const void*                   pUserData = nullptr;
+    const char*                    name = "Unnamed Pass";
+    std::span<const ImageBarrier>  transitions;
+    PassRecordFn                   record    = nullptr;
+    const void*                    pUserData = nullptr;
 };
 
-template <size_t MaxStackBarriers = 16>
 void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes) noexcept;
 
 void ClearAttachment(

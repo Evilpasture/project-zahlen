@@ -740,7 +740,7 @@ class ComputeChain {
     template <typename Declared, typename ResourceT, typename PushT, typename... Slots>
     [[gnu::always_inline]] void Step(ResourceT& resource, VkExtent3D extent, const PushT& push, const Slots&... slots) noexcept {
         if (_step++ > 0) {
-            MemoryBarrier(_cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
+            MemoryBarrier::ComputeWriteToRead().Record(_cmd);
         }
         const HeapBlockBase blockBase = _heap.template WriteHeapParameters<Declared>(TemplatedDetail::BindingsOf(resource), slots...);
         Declared::DispatchHeapIndexed(TemplatedDetail::PassOf(resource), _cmd, blockBase, extent.width, extent.height, 1, push);

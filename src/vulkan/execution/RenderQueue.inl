@@ -36,25 +36,6 @@ inline void PipelineBarrier(
     vkCmdPipelineBarrier2(cmd, &dep_info);
 }
 
-inline void MemoryBarrier(VkCommandBuffer cmd, const MemoryBarrierDesc& desc) noexcept {
-    const VkMemoryBarrier2 barrier = MakeMemoryBarrier(desc);
-    PipelineBarrier(cmd, {}, {}, std::span<const VkMemoryBarrier2>(&barrier, 1));
-}
-
-inline void ImageBarrier(VkCommandBuffer cmd, const ImageBarrierDesc& desc) noexcept {
-    const VkImageMemoryBarrier2 barrier = MakeImageBarrier(desc);
-    PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
-}
-
-inline void MemoryBarrier(VkCommandBuffer cmd, BarrierStage srcStage, BarrierAccess srcAccess, BarrierStage dstStage, BarrierAccess dstAccess) noexcept {
-    MemoryBarrier(
-        cmd, {.src_stage  = static_cast<VkPipelineStageFlags2>(srcStage),
-              .src_access = static_cast<VkAccessFlags2>(srcAccess),
-              .dst_stage  = static_cast<VkPipelineStageFlags2>(dstStage),
-              .dst_access = static_cast<VkAccessFlags2>(dstAccess)}
-    );
-}
-
 template <QueueType QType>
 CommandBuffer<QType>::operator VkCommandBuffer() const noexcept {
     return handle;

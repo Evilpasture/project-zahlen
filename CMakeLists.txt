@@ -152,6 +152,9 @@ option(ZHLN_BUILD_RENDER
        ON)
 option(ZHLN_ENABLE_PCH
        "Enable precompiled headers on high-TU non-module GCC targets" ON)
+option(ZHLN_SYNTAX_ONLY
+       "Check C/C++ syntax only (-fsyntax-only) without emitting object code or linking"
+       OFF)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(ZHLN_DEBUG=1)
@@ -337,7 +340,10 @@ set(ZHLN_ENGINE_LIB_TARGETS
     zahlen_audio
     zahlen_gui)
 if(ZHLN_BUILD_RENDER)
-    list(APPEND ZHLN_ENGINE_LIB_TARGETS zahlen_shader_bytecode zahlen_vulkan)
+    list(APPEND ZHLN_ENGINE_LIB_TARGETS zahlen_vulkan)
+    if(TARGET zahlen_shader_bytecode)
+        list(APPEND ZHLN_ENGINE_LIB_TARGETS zahlen_shader_bytecode)
+    endif()
 endif()
 foreach(ZHLN_ENGINE_LIB_TARGET IN LISTS ZHLN_ENGINE_LIB_TARGETS)
     target_compile_definitions(${ZHLN_ENGINE_LIB_TARGET} PRIVATE ZHLN_ENGINE_BUILD)
@@ -439,7 +445,7 @@ endif()
 include(ECSCompiler)
 include(AssetPipeline)
 
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND NOT ZHLN_SYNTAX_ONLY)
     zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
@@ -478,7 +484,9 @@ zahlen_enable_reflection(zcook)
 
 if(ZHLN_BUILD_RENDER)
     zahlen_enable_reflection(zahlen_vulkan)
-    zahlen_enable_reflection(zahlen_shader_bytecode)
+    if(TARGET zahlen_shader_bytecode)
+        zahlen_enable_reflection(zahlen_shader_bytecode)
+    endif()
     zahlen_enable_reflection(zshader)
     zahlen_enable_reflection(HostBlitSwapchain)
 endif()
@@ -647,4 +655,8 @@ endif()
 if(TARGET zahlen_serialization AND EXISTS
                                    "${CMAKE_CURRENT_SOURCE_DIR}/tools/fidelity")
     add_subdirectory(tools/fidelity tools/fidelity)
+endif()
+
+if(ZHLN_SYNTAX_ONLY)
+    include(SyntaxOnly)
 endif()

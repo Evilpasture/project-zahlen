@@ -436,9 +436,9 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
                 ctx, graphicsCmdRing,
                 [&](VkCommandBuffer cmd) -> auto {
                     heapScope.Bind(cmd);
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
+                    view.DiscardTo<VK_IMAGE_LAYOUT_GENERAL>(cmd);
                     pass.DispatchHeapIndexedThreads<Modules...>(cmd, block, width, height, 1, push);
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
+                    view.Transition<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
                 }
             );
             !immediate) [[unlikely]] {

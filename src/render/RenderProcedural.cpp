@@ -65,7 +65,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
             if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapScope.Bind(cmd);
 
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, gpuImage.Handle());
+                writeView.DiscardTo<VK_IMAGE_LAYOUT_GENERAL>(cmd);
 
                 compute.proceduralBake.BindVariant(cmd, variantIdx);
                 Vk::PushHeapData<Shaders::Modules::ProceduralBakeCS>(
@@ -74,7 +74,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                 Vk::PushHeapIndex(cmd, bakeHeapBindings.indexPushOffset, block.slot);
                 compute.proceduralBake.DispatchThreads(cmd, width, height, 1);
 
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
+                writeView.Transition<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
             }); !immediate) [[unlikely]] {
                 return std::unexpected(immediate.error());
             }

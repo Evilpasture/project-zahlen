@@ -183,7 +183,7 @@ endif()
 # there, which matters because an empty list would leave `cmake -E
 # copy_if_different` with a destination and nothing to copy.
 function(zahlen_add_runtime_dlls TARGET_NAME)
-    if(NOT WIN32)
+    if(NOT WIN32 OR ZHLN_SYNTAX_ONLY)
         return()
     endif()
     add_custom_command(TARGET ${TARGET_NAME} POST_BUILD

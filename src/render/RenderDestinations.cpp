@@ -83,13 +83,8 @@ auto RenderContext::Impl::EnsureDepthTarget(FrameDestinations::Window& destinati
     if (destination.IsPrimary()) {
         if (auto immediate = Vk::ExecuteImmediate(
                 ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
-                    constexpr VkImageAspectFlags aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
-                        cmd, target.image.Handle(), aspect
-                    );
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                        cmd, target.image.Handle(), aspect
-                    );
+                    target.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(cmd);
+                    target.Transition<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
                 }
             );
             !immediate) {

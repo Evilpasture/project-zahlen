@@ -142,10 +142,13 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> BatchRe
         }
     }
 
-    Vk::MemoryBarrier(
-        cmd, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::AccelerationStructureBuild | Vk::BarrierStage::Vertex,
-        Vk::BarrierAccess::AccelerationStructureRead | Vk::BarrierAccess::ShaderRead
-    );
+    Vk::MemoryBarrier {
+        Vk::BarrierStage::Compute,
+        Vk::BarrierAccess::ShaderWrite,
+        Vk::BarrierStage::AccelerationStructureBuild | Vk::BarrierStage::Vertex,
+        Vk::BarrierAccess::AccelerationStructureRead | Vk::BarrierAccess::ShaderRead,
+    }
+        .Record(cmd);
 
     if (ctx.RayTracingSupported()) {
         ZHLN::ScopedTimer profTimerBLAS("GPU Skinned BLAS Rebuilds");
@@ -172,10 +175,7 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> BatchRe
             outcome.Add(rebuilt.transform([&](auto addr) -> SkinnedBlasEntry { return {.scratch = drawCmd.skinnedVertexBuffer, .address = addr}; }));
         }
 
-        Vk::MemoryBarrier(
-            cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite, Vk::BarrierStage::AccelerationStructureBuild,
-            Vk::BarrierAccess::AccelerationStructureRead
-        );
+        Vk::MemoryBarrier::AccelerationStructureBuildToBuild().Record(cmd);
     }
     return outcome;
 }
@@ -252,10 +252,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
         cmd, geom, frames.tlas[presenter.frameIndex].Get(), Vk::BufferSlice {scratch, ctx.BufferAddress(scratch.Handle())}, tlasInstancesScratch.size()
     );
 
-    Vk::MemoryBarrier(
-        cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
-        Vk::BarrierStage::Fragment | Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::AccelerationStructureRead
-    );
+    Vk::MemoryBarrier::AccelerationStructureBuildToTrace().Record(cmd);
 }
 
 void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {

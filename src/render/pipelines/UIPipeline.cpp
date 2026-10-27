@@ -79,22 +79,18 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
     const VkCommandBuffer cmd = target.recorder.Handle();
     impl.destinations.SetActive(target.window.id);
 
-    const bool   firstTouch  = target.layout == Vk::AttachmentLayout::Undefined;
+    const bool   firstTouch   = target.layout == Vk::AttachmentLayout::Undefined;
     const auto   sourceLayout = Vk::ToVkImageLayout(target.layout);
     if (sourceLayout != Vk::ToVkImageLayout(Vk::AttachmentLayout::ColorAttachment)) {
-        const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
-            .image      = target.image.Handle(),
-            .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
-            .src_layout = sourceLayout,
-            .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .dst_stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .base_mip   = 0,
-            .mip_count  = VK_REMAINING_MIP_LEVELS,
-        });
-        Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
+        target.image.Transition(
+            cmd,
+            sourceLayout,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT
+        );
     }
 
     const VkExtent2D extent = target.image.Extent2D();

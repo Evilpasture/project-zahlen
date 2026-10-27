@@ -100,11 +100,24 @@ struct RenderTarget {
     auto operator=(RenderTarget&&) noexcept -> RenderTarget& = default;
     ~RenderTarget()                                          = default;
 
+    [[nodiscard]] auto View() const noexcept -> ImageView {
+        return image.View().WithAspect(aspect);
+    }
     [[nodiscard]] auto State() const noexcept -> TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> {
         return AsSlice().template Assume<VK_IMAGE_LAYOUT_UNDEFINED>();
     }
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
         return ImageSlice {image.Handle(), attachmentView, extent, format, aspect};
+    }
+
+    template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+    void Transition(VkCommandBuffer cmd) const noexcept {
+        View().template Transition<OldLayout, NewLayout>(cmd);
+    }
+
+    template <VkImageLayout TargetLayout>
+    void DiscardTo(VkCommandBuffer cmd) const noexcept {
+        View().template DiscardTo<TargetLayout>(cmd);
     }
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return image.Valid() && attachmentView.Valid();

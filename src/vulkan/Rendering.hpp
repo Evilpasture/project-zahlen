@@ -54,6 +54,7 @@
 #include "presentation/Surface.hpp"
 #include "memory/ImageView.hpp"
 #include "memory/ImageSlice.hpp"
+#include "execution/Barriers.hpp"
 #include "memory/DeviceAddress.hpp"
 #include "memory/GeometryView.hpp"
 #include "memory/BufferSlice.hpp"

@@ -48,7 +48,7 @@ void RecordGpuCulled(
     );
     cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
-    Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Indirect, IndirectRead);
+    Vk::MemoryBarrier::ComputeToIndirect().Record(cmd);
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)

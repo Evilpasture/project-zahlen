@@ -208,15 +208,7 @@ void GeometryManager::RecordPendingUpdates(VkCommandBuffer cmd) noexcept {
         }
         const VkBuffer dstBuffer = dstMesh->buffer.Handle();
         if (std::ranges::find(writtenBuffers, dstBuffer) != writtenBuffers.end()) {
-            Vk::MemoryBarrier(
-                cmd,
-                Vk::MemoryBarrierDesc {
-                    .src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
-                    .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                    .dst_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
-                    .dst_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                }
-            );
+            Vk::MemoryBarrier::CopyWriteToWrite().Record(cmd);
         } else {
             writtenBuffers.push_back(dstBuffer);
         }
@@ -244,15 +236,7 @@ void GeometryManager::RecordPendingUpdates(VkCommandBuffer cmd) noexcept {
         dstAccess |= VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
     }
 
-    Vk::MemoryBarrier(
-        cmd,
-        Vk::MemoryBarrierDesc {
-            .src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
-            .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .dst_stage  = dstStage,
-            .dst_access = dstAccess,
-        }
-    );
+    Vk::MemoryBarrier {VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, dstStage, dstAccess}.Record(cmd);
 }
 
 void GeometryManager::AdvanceUploadFrame() noexcept {

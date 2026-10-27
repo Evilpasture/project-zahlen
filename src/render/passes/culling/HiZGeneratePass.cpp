@@ -15,15 +15,13 @@ static_assert(GpuAbi::ScenePassPayload<HiZPushConstants>, "a pass payload that o
 namespace {
 
 void GenerateHiZPyramid(VkCommandBuffer cmd, CullingResources& cull, RenderFrameContext& frame, uint32_t reduceMin) noexcept {
-    using enum Vk::BarrierStage;
-    using enum Vk::BarrierAccess;
     const uint32_t width  = frame.graphResources.hizMap.extent.width;
     const uint32_t height = frame.graphResources.hizMap.extent.height;
     const uint32_t mips   = std::min(frame.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
 
     for (uint32_t mip = 0; mip < mips; ++mip) {
         if (mip > 0) {
-            Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Compute, ShaderRead);
+            Vk::MemoryBarrier::ComputeWriteToRead().Record(cmd);
         }
 
         const uint32_t srcW = std::max(1u, width >> (mip == 0 ? 0 : mip - 1));

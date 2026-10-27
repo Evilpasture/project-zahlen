@@ -10,8 +10,6 @@
 namespace ZHLN::Passes {
 
 void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
-    using enum Vk::BarrierStage;
-    using enum Vk::BarrierAccess;
     using namespace Shaders;
 
     const auto srcHdr     = Vk::Assume<Vk::ComputeRead<Res_HdrSceneColor>>(frame.graphResources.hdrSceneColor);
@@ -46,13 +44,13 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
 
     thresholdChain.Step<BloomThreshold>(frame.post.bloomThreshold, thresh.Extent(), thresholdPush, Vk::Slot<"texInput">(srcHdr), Vk::Slot<"outImage">(thresh));
 
-    Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Compute, ShaderRead);
+    Vk::MemoryBarrier::ComputeWriteToRead().Record(cmd);
 
     downChain.Step<BloomDown>(frame.post.bloomDown, down1.Extent(), Kawase(0, thresh), Vk::Slot<"texInput">(thresh), Vk::Slot<"outImage">(down1));
     downChain.Step<BloomDown>(frame.post.bloomDown, down2.Extent(), Kawase(0, down1), Vk::Slot<"texInput">(down1), Vk::Slot<"outImage">(down2));
     downChain.Step<BloomDown>(frame.post.bloomDown, down3.Extent(), Kawase(0, down2), Vk::Slot<"texInput">(down2), Vk::Slot<"outImage">(down3));
 
-    Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Compute, ShaderRead);
+    Vk::MemoryBarrier::ComputeWriteToRead().Record(cmd);
 
     upChain.Step<BloomUp>(
         frame.post.bloomUp, up2.Extent(), Kawase(1, down3), Vk::Slot<"texInput">(down3), Vk::Slot<"texLow">(down2), Vk::Slot<"outImage">(up2)

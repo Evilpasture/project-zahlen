@@ -123,22 +123,24 @@ inline void GenerateMipmaps(
     uint32_t mipWidth  = width;
     uint32_t mipHeight = height;
     for (uint32_t mip = 1; mip < mipLevels; ++mip) {
-        ImageBarrier(
-            cmd, ImageBarrierDesc {
-                     .image            = image,
-                     .src_access       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                     .dst_access       = VK_ACCESS_2_TRANSFER_READ_BIT,
-                     .src_layout       = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     .dst_layout       = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                     .src_stage        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                     .dst_stage        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                     .aspect           = VK_IMAGE_ASPECT_COLOR_BIT,
-                     .base_mip         = mip - 1,
-                     .mip_count        = 1,
-                     .base_array_layer = 0,
-                     .layer_count      = 1,
-                 }
-        );
+        const VkImageSubresourceRange srcMipRange {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = mip - 1,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1,
+        };
+        ImageBarrier::Transition(
+            image,
+            srcMipRange,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_READ_BIT
+        )
+            .Record(cmd);
 
         const int32_t     nextWidth  = static_cast<int32_t>(std::max(mipWidth / 2, 1U));
         const int32_t     nextHeight = static_cast<int32_t>(std::max(mipHeight / 2, 1U));
@@ -150,43 +152,40 @@ inline void GenerateMipmaps(
         };
         vkCmdBlitImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
 
-        ImageBarrier(
-            cmd, ImageBarrierDesc {
-                     .image            = image,
-                     .src_access       = VK_ACCESS_2_TRANSFER_READ_BIT,
-                     .dst_access       = VK_ACCESS_2_SHADER_READ_BIT,
-                     .src_layout       = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                     .dst_layout       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                     .src_stage        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                     .dst_stage        = shaderReadStage,
-                     .aspect           = VK_IMAGE_ASPECT_COLOR_BIT,
-                     .base_mip         = mip - 1,
-                     .mip_count        = 1,
-                     .base_array_layer = 0,
-                     .layer_count      = 1,
-                 }
-        );
+        ImageBarrier::Transition(
+            image,
+            srcMipRange,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_READ_BIT,
+            shaderReadStage,
+            VK_ACCESS_2_SHADER_READ_BIT
+        )
+            .Record(cmd);
 
         mipWidth  = std::max(mipWidth / 2, 1U);
         mipHeight = std::max(mipHeight / 2, 1U);
     }
 
-    ImageBarrier(
-        cmd, ImageBarrierDesc {
-                 .image            = image,
-                 .src_access       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                 .dst_access       = VK_ACCESS_2_SHADER_READ_BIT,
-                 .src_layout       = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                 .dst_layout       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                 .src_stage        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                 .dst_stage        = shaderReadStage,
-                 .aspect           = VK_IMAGE_ASPECT_COLOR_BIT,
-                 .base_mip         = mipLevels - 1,
-                 .mip_count        = 1,
-                 .base_array_layer = 0,
-                 .layer_count      = 1,
-             }
-    );
+    const VkImageSubresourceRange lastMipRange {
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = mipLevels - 1,
+        .levelCount     = 1,
+        .baseArrayLayer = 0,
+        .layerCount     = 1,
+    };
+    ImageBarrier::Transition(
+        image,
+        lastMipRange,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        shaderReadStage,
+        VK_ACCESS_2_SHADER_READ_BIT
+    )
+        .Record(cmd);
 }
 
 } // namespace ZHLN::Vk

@@ -95,7 +95,14 @@ auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uin
 }
 
 void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, VkBuffer stagingBuf, VkDeviceSize offset) {
-    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(_recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels);
+    const VkImageSubresourceRange allMipsRange {
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0,
+        .levelCount     = mipLevels,
+        .baseArrayLayer = 0,
+        .layerCount     = 1,
+    };
+    ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(dstImage, allMipsRange).Record(_recorder.Handle());
 
     const VkBufferImageCopy2 region {
         .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
@@ -117,14 +124,20 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
     if (mipLevels > 1) {
         GenerateMipmaps(_recorder.Handle(), dstImage, w, h, mipLevels, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
     } else {
-        TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
-        );
+        ImageBarrier::Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(dstImage, allMipsRange)
+            .Record(_recorder.Handle());
     }
 }
 
 void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer stagingBuf, uint32_t baseSize, uint32_t mipLevels) {
-    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(_recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels);
+    const VkImageSubresourceRange cubeRange {
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0,
+        .levelCount     = mipLevels,
+        .baseArrayLayer = 0,
+        .layerCount     = 6,
+    };
+    ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(dstImage, cubeRange).Record(_recorder.Handle());
 
     size_t current_offset = 0;
     for (uint32_t mip = 0; mip < mipLevels; ++mip) {
@@ -148,9 +161,8 @@ void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer staging
         current_offset += (face_size * 6);
     }
 
-    TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
-    );
+    ImageBarrier::Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(dstImage, cubeRange)
+        .Record(_recorder.Handle());
 }
 
 void StagingContext::AddBuffer(Buffer&& buf) {

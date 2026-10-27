@@ -129,12 +129,10 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     if (auto immediate = Vk::ExecuteImmediate(
             _ctx, _ring,
             [&](VkCommandBuffer cmd) -> void {
-                const std::array shadows = {_graph.shadowMap.image.Handle(), _shadowMapPrev.image.Handle(), _graph.shadowAtlas.image.Handle()};
-                for (const auto img: shadows) {
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT);
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                        cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT
-                    );
+                const std::array shadows = {_graph.shadowMap.View(), _shadowMapPrev.View(), _graph.shadowAtlas.View()};
+                for (const auto& view: shadows) {
+                    view.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd);
+                    view.Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
                 }
             }
         );
@@ -188,12 +186,10 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
         if (auto immediate = Vk::ExecuteImmediate(
                 _ctx, _ring,
                 [&](VkCommandBuffer cmd) -> void {
-                    const std::array shadows = {_graph.shadowMap.image.Handle(), _shadowMapPrev.image.Handle()};
-                    for (const auto img: shadows) {
-                        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT);
-                        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                            cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT
-                        );
+                    const std::array shadows = {_graph.shadowMap.View(), _shadowMapPrev.View()};
+                    for (const auto& view: shadows) {
+                        view.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd);
+                        view.Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
                     }
                 }
             );
@@ -212,37 +208,34 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
     );
 
     const std::array colorTargets = {
-        _graph.sceneColor.image.Handle(),       _graph.velocityBuffer.image.Handle(),     _graph.normalRoughnessBuffer.image.Handle(),
-        _graph.bakedMask.image.Handle(),        _graph.hdrSceneColor.image.Handle(),      _graph.lightingTarget.image.Handle(),
-        _graph.lightingGI.image.Handle(),       _graph.lightingAo.image.Handle(),         _graph.smaaEdgeTarget.image.Handle(),
-        _graph.smaaWeightTarget.image.Handle(), _graph.transNormalBuffer.image.Handle(),  _graph.transAnisotropyBuffer.image.Handle(),
-        _graph.transSheenBuffer.image.Handle(), _graph.transLightingTarget.image.Handle()
+        _graph.sceneColor.View(),       _graph.velocityBuffer.View(),     _graph.normalRoughnessBuffer.View(),
+        _graph.bakedMask.View(),        _graph.hdrSceneColor.View(),      _graph.lightingTarget.View(),
+        _graph.lightingGI.View(),       _graph.lightingAo.View(),         _graph.smaaEdgeTarget.View(),
+        _graph.smaaWeightTarget.View(), _graph.transNormalBuffer.View(),  _graph.transAnisotropyBuffer.View(),
+        _graph.transSheenBuffer.View(), _graph.transLightingTarget.View(),
     };
-    for (auto* const img: colorTargets) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+    std::array<Vk::ImageBarrier, colorTargets.size()> toColor {};
+    std::array<Vk::ImageBarrier, colorTargets.size()> toRead {};
+    for (size_t i = 0; i < colorTargets.size(); ++i) {
+        toColor[i] = Vk::ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(colorTargets[i]);
+        toRead[i]  = Vk::ImageBarrier::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(colorTargets[i]);
     }
+    Vk::ImageBarrier::Record(cmd, toColor);
+    Vk::ImageBarrier::Record(cmd, toRead);
 
-    const std::array bloomComputeTargets = {_graph.bloomThresholdTarget.image.Handle(), _graph.bloomDown1.image.Handle(), _graph.bloomDown2.image.Handle(),
-                                            _graph.bloomDown3.image.Handle(),           _graph.bloomUp2.image.Handle(),   _graph.bloomUp1.image.Handle(),
-                                            _graph.bloomFinalTarget.image.Handle()};
-    for (auto* const img: bloomComputeTargets) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-    }
-
-    const std::array rcgiTargets = {
-        _graph.rcgiProbes.image.Handle(), _graph.rcgiCascadeA.image.Handle(), _graph.rcgiCascadeB.image.Handle()
+    const std::array generalTargets = {
+        _graph.bloomThresholdTarget.View(), _graph.bloomDown1.View(), _graph.bloomDown2.View(),      _graph.bloomDown3.View(),
+        _graph.bloomUp2.View(),             _graph.bloomUp1.View(),   _graph.bloomFinalTarget.View(), _graph.rcgiProbes.View(),
+        _graph.rcgiCascadeA.View(),         _graph.rcgiCascadeB.View(),
     };
-    for (auto* const img: rcgiTargets) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+    std::array<Vk::ImageBarrier, generalTargets.size()> toGeneral {};
+    for (size_t i = 0; i < generalTargets.size(); ++i) {
+        toGeneral[i] = Vk::ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_GENERAL>(generalTargets[i]);
     }
+    Vk::ImageBarrier::Record(cmd, toGeneral);
 
-    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
-        cmd, _graph.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-    );
-    Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        cmd, _graph.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-    );
+    _graph.transDepthBuffer.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(cmd);
+    _graph.transDepthBuffer.Transition<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
 
     Vk::ClearColorAndTransition(cmd, _graph.hizMap, 1.0f);
 }

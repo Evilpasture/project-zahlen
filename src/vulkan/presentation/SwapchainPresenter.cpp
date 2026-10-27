@@ -165,19 +165,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
 
 void SwapchainPresenter::PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept {
     if (swapchain.Valid() && recorder) {
-        const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
-            .image      = swapchain.Get().images[imageIndex],
-            .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .dst_access = 0,
-            .src_layout = currentLayout,
-            .dst_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .dst_stage  = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-            .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .base_mip   = 0,
-            .mip_count  = VK_REMAINING_MIP_LEVELS,
-        });
-        Vk::PipelineBarrier(recorder.Handle(), std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
+        ImageBarrier::PreparePresent(swapchain.Get().images[imageIndex], currentLayout).Record(recorder.Handle());
     }
 }
 

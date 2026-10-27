@@ -38,21 +38,19 @@ template <VkImageLayout TargetLayout, typename... Resources>
     if constexpr (count == 0) {
         return std::tuple<> {};
     } else {
-        std::array<VkImageMemoryBarrier2, count> barriers {};
-        size_t                                   idx = 0;
+        std::array<ImageBarrier, count> barriers {};
+        size_t                          idx = 0;
 
         auto populate_barrier = [&](const auto& res) {
             using Traits                       = TemplatedDetail::ResourceTraits<std::decay_t<decltype(res)>>;
             constexpr VkImageLayout old_layout = Traits::old_layout;
-            const ImageSlice&                   slice = Traits::GetSlice(res);
-            barriers[idx++]                    = MakeImageBarrier(
-                MakeLayoutBarrierDesc<old_layout, TargetLayout>(slice.image, slice.aspect)
-            );
+            const ImageSlice        slice      = Traits::GetSlice(res);
+            barriers[idx++]                    = ImageBarrier::Transition<old_layout, TargetLayout>(slice);
         };
 
         (populate_barrier(resources), ...);
 
-        PipelineBarrier(cmd, {}, barriers);
+        ImageBarrier::Record(cmd, barriers);
 
         auto make_typed = [&](const auto& res) {
             using Traits = TemplatedDetail::ResourceTraits<std::decay_t<decltype(res)>>;

@@ -125,6 +125,21 @@ class ImageView {
         return slice;
     }
 
+    [[nodiscard]] constexpr auto WithAspect(VkImageAspectFlags aspect) const noexcept -> ImageView {
+        ImageView slice = *this;
+        slice._aspect   = aspect;
+        return slice;
+    }
+
+    [[nodiscard]] constexpr auto AllSubresources() const noexcept -> ImageView {
+        ImageView slice   = *this;
+        slice._baseMip    = 0;
+        slice._mipCount   = kRemainingMips;
+        slice._baseLayer  = 0;
+        slice._layerCount = kRemainingLayers;
+        return slice;
+    }
+
     [[nodiscard]] constexpr auto ComputeMipExtent(VkExtent2D baseExtent) const noexcept -> VkExtent2D {
         return {
             .width  = std::max(1u, baseExtent.width >> _baseMip),
@@ -170,7 +185,18 @@ class ImageView {
     // -------------------------------------------------------------------------
     // "Tell, Don't Ask": Synchronization Command Injection
     // -------------------------------------------------------------------------
-    /// The view transitions itself without the caller having to extract image or range
+    /// Deduces stages and accesses from LayoutTraits<OldLayout> / LayoutTraits<NewLayout>.
+    template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+    void Transition(VkCommandBuffer cmd) const noexcept;
+
+    /// Discards existing contents (VK_IMAGE_LAYOUT_UNDEFINED -> TargetLayout).
+    template <VkImageLayout TargetLayout>
+    void DiscardTo(VkCommandBuffer cmd) const noexcept;
+
+    /// Runtime layout transition deriving conservative sync masks from oldLayout / newLayout.
+    void Transition(VkCommandBuffer cmd, VkImageLayout oldLayout, VkImageLayout newLayout) const noexcept;
+
+    /// Explicit stage/access override without exposing raw handle or subresource range.
     void Transition(
         VkCommandBuffer       cmd,
         VkImageLayout         oldLayout,
@@ -179,30 +205,7 @@ class ImageView {
         VkAccessFlags2        srcAccess,
         VkPipelineStageFlags2 dstStage,
         VkAccessFlags2        dstAccess
-    ) const noexcept {
-        const VkImageMemoryBarrier2 barrier = {
-            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .pNext               = nullptr,
-            .srcStageMask        = srcStage,
-            .srcAccessMask       = srcAccess,
-            .dstStageMask        = dstStage,
-            .dstAccessMask       = dstAccess,
-            .oldLayout           = oldLayout,
-            .newLayout           = newLayout,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image               = _image,
-            .subresourceRange    = SubresourceRange()
-        };
-
-        const VkDependencyInfo depInfo = {
-            .sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers    = &barrier
-        };
-
-        vkCmdPipelineBarrier2(cmd, &depInfo);
-    }
+    ) const noexcept;
 
     friend constexpr auto operator==(const ImageView&, const ImageView&) noexcept -> bool = default;
 
