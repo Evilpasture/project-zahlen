@@ -464,11 +464,36 @@ using ZHLN::GUI::UISettingsComponent;
 using ZHLN::GUI::UninstallBakedFontLoader;
 } // namespace GUI
 
+using ZHLN::AudioAttenuationDesc;
+using ZHLN::AudioAttenuationModel;
+using ZHLN::AudioBus;
+using ZHLN::AudioBusId;
 using ZHLN::AudioConfig;
 using ZHLN::AudioContext;
+using ZHLN::AudioEvent;
+using ZHLN::AudioEventType;
 using ZHLN::AudioFilterType;
+using ZHLN::AudioHandle;
 using ZHLN::AudioNoiseType;
+using ZHLN::AudioOcclusionDesc;
+using ZHLN::AudioPlaybackMode;
+using ZHLN::AudioReverbConfig;
+using ZHLN::AudioReverbPreset;
 using ZHLN::AudioWaveformType;
+using ZHLN::ComputeOcclusionCutoffHz;
+using ZHLN::ComputeOcclusionDirectGain;
+using ZHLN::EvaluateDistanceAttenuation;
+using ZHLN::kAudioAttenuationModelCount;
+using ZHLN::kAudioBusCount;
+using ZHLN::kAudioEventTypeCount;
+using ZHLN::kAudioFilterTypeCount;
+using ZHLN::kAudioNoiseTypeCount;
+using ZHLN::kAudioPlaybackModeCount;
+using ZHLN::kAudioReverbPresetCount;
+using ZHLN::kAudioWaveformTypeCount;
+using ZHLN::kMaxAudioBuses;
+using ZHLN::MAX_VOICE_SLOTS;
+using ZHLN::VoiceDesc;
 
 using ZHLN::ActionId;
 using ZHLN::ActionKind;

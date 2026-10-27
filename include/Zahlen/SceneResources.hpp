@@ -13,7 +13,7 @@ namespace ZHLN::SceneResources {
 template <typename T>
 inline constexpr bool OwnsExternalResource =
     std::is_same_v<T, Components::PhysicsComponent> || std::is_same_v<T, Components::RagdollComponent> ||
-    std::is_same_v<T, Components::AudioSourceComponent> || std::is_same_v<T, Components::LoopSynthComponent> ||
+    std::is_same_v<T, Components::AudioSourceComponent> ||
     std::is_same_v<T, Components::OwnedMeshComponent> || std::is_same_v<T, Components::SkeletalMeshComponent>;
 
 // Typed, explicit ownership operations for the components that hold external
@@ -22,12 +22,12 @@ inline constexpr bool OwnsExternalResource =
 // do not do so.
 ZHLN_API void Release(PhysicsContext& physics, Components::PhysicsComponent& component);
 ZHLN_API void Release(PhysicsContext& physics, Components::RagdollComponent& component);
+ZHLN_API void Release(AudioContext& audio, Components::AudioSourceComponent& component);
 ZHLN_API void Release(RenderContext& render, Components::OwnedMeshComponent& component);
 
 ZHLN_API void Release(Engine& engine, Components::PhysicsComponent& component);
 ZHLN_API void Release(Engine& engine, Components::RagdollComponent& component);
 ZHLN_API void Release(Engine& engine, Components::AudioSourceComponent& component);
-ZHLN_API void Release(Engine& engine, Components::LoopSynthComponent& component);
 ZHLN_API void Release(Engine& engine, Components::OwnedMeshComponent& component);
 ZHLN_API void Release(Engine& engine, Components::SkeletalMeshComponent& component);
 

@@ -155,7 +155,7 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
     }
     _impl->renderContext = std::move(rc_res.value());
 
-    _impl->audioContext = std::make_unique<AudioContext>();
+    _impl->audioContext = std::make_unique<AudioContext>(AudioConfig {.headless = cfg.headless});
     _impl->assetManager = std::make_unique<AssetManager>();
     _impl->assetManager->UseRenderContext(*_impl->renderContext);
 

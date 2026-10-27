@@ -267,37 +267,30 @@ struct Components {
     static_assert(std::is_trivially_copyable_v<AnimatorComponent>);
 
     struct AudioListenerComponent {
-        bool isPrimary = true;
+        bool      isPrimary = true;
+        JPH::Vec3 velocity  = JPH::Vec3::sZero();
     };
+    static_assert(std::is_trivially_copyable_v<AudioListenerComponent>);
 
     struct AudioSourceComponent {
-        String128 filepath;
-        float     volume        = 1.0f;
-        float     pitch         = 1.0f;
-        float     fadeOut       = 0.05f;
-        bool      isLooping     = false;
-        bool      isSpatialized = true;
-        bool      playOnStart   = true;
-        bool      isPaused      = false;
+        String128            filepath {};
+        float                volume        = 1.0f;
+        float                pitch         = 1.0f;
+        float                fadeOut       = 0.05f;
+        bool                 isLooping     = false;
+        bool                 isSpatialized = true;
+        bool                 playOnStart   = true;
+        bool                 isPaused      = false;
+        AudioBusId           bus           = AudioBus::SFX;
+        AudioPlaybackMode    playbackMode  = AudioPlaybackMode::Decompressed;
+        float                reverbSend    = 0.0f;
+        JPH::Vec3            velocity      = JPH::Vec3::sZero();
+        AudioAttenuationDesc attenuation   {};
+        AudioOcclusionDesc   occlusion     {};
 
         AudioHandle voiceHandle = AudioHandle::Invalid;
     };
-
-    struct LoopSynthComponent {
-        AudioWaveformType waveType1  = AudioWaveformType::Sawtooth;
-        AudioWaveformType waveType2  = AudioWaveformType::Square;
-        AudioFilterType   filterType = AudioFilterType::LowPass;
-
-        float charge     = 0.0f;
-        float baseFreq   = 40.0f;
-        float filterFreq = 500.0f;
-        float volume     = 0.16f;
-        float fadeOut    = 0.08f;
-        bool  isStopping = false;
-
-        SynthHandle synthHandle = SynthHandle::Invalid;
-    };
-    static_assert(std::is_trivially_copyable_v<AudioSourceComponent> && std::is_trivially_copyable_v<LoopSynthComponent>);
+    static_assert(std::is_trivially_copyable_v<AudioSourceComponent>);
     struct PlayerSeatComponent {
         PlayerSeat seat = kPrimarySeat;
     };

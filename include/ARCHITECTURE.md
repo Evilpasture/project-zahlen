@@ -266,7 +266,7 @@ type it spells through its own includes.
 | `AssetID`, `MaterialID`, `HashAssetID`, `InvalidAssetID`, `InvalidMaterialID` | `Zahlen/Core/AssetID.hpp` | asset-facing headers and the components that hold a reference |
 | `ScissorRect`, `ViewportRect` (with `Extent2D`, `Offset2D`) | `Zahlen/Geometry2D.hpp` | GUI, windowing and renderer alike |
 | `VertexPosition`, `VertexTangentFrame`, `VertexSurface`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Vertex.hpp` | the cooker and both consumers of a vertex |
-| `AudioHandle`, `SynthHandle`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
+| `AudioHandle`, `AudioBus`, `AudioBusId`, `AudioAttenuationModel`, `AudioPlaybackMode`, `AudioReverbPreset`, `AudioAttenuationDesc`, `AudioOcclusionDesc`, `AudioReverbConfig`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
 | `UIBatch`, `UIDrawData` | `Zahlen/gui/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
 | `GlyphMetric`, `FontAtlas` | `Zahlen/gui/Font.hpp` | text layout and the atlas bake |
 | `TextureHandle`, `RenderTextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `FrameTarget` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
