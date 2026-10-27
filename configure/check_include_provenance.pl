@@ -139,8 +139,15 @@ my %FIRST_PARTY = (
     Hash32           => ['include/Zahlen/Core/Hash.hpp'],
     HashCombine      => ['include/Zahlen/Core/Hash.hpp'],
     LogLevel         => ['include/Zahlen/Core/LogLevel.hpp'],
-    CommandLineOptions => ['include/Zahlen/CommandLine.hpp'],
-    HandleCommandLine  => ['include/Zahlen/CommandLine.hpp'],
+    GameplayDriver   => ['include/Zahlen/FramePlan.hpp'],
+    GameplayStatus   => ['include/Zahlen/FramePlan.hpp'],
+    ParseCli           => ['extensions/CommandLine/CommandLine.hpp'],
+    CommandLineOptions => ['extensions/CommandLine/EngineCommandLine.hpp'],
+    HandleCommandLine  => ['extensions/CommandLine/EngineCommandLine.hpp'],
+    SignalManager      => ['extensions/Signal/SignalManager.hpp'],
+    CrashState         => ['extensions/Signal/CrashHandler.hpp'],
+    SetupSignalHandler => ['extensions/Signal/CrashHandler.hpp'],
+    CheckForCrashes    => ['extensions/Signal/CrashHandler.hpp'],
     DumpOptions        => ['include/Zahlen/Core/Trace.hpp'],
     MemoryDump         => ['include/Zahlen/Core/Trace.hpp'],
     'ZHLN::Trace'      => ['include/Zahlen/Core/Trace.hpp'],
@@ -183,7 +190,7 @@ my @SKIP_PREFIXES = ('src/vulkan/');
 # be found by looking for the names that exist, so a leftover
 # `#include "Types.hpp"` resolves nowhere and is indistinguishable from an
 # external header by spelling alone.
-my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp');
+my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp');
 
 # Every tracked name in one alternation, so a file is scanned once for all of
 # them rather than once per symbol. Longest first: with word boundaries a

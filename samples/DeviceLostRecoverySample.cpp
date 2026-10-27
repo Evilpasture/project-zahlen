@@ -25,12 +25,13 @@
 //   ./build/samples/DeviceLostRecoverySample --headless
 //   ZHLN_PROVOKE_DEVICE_LOST_FRAME=60 ./build/samples/DeviceLostRecoverySample --headless
 
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
+#include <Signal/SignalManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/Core/SignalManager.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
@@ -168,7 +169,7 @@ auto main(int argc, char* argv[]) -> int {
 
     // Crash diagnostics keep their state in a caller-owned struct; static
     // storage duration is required because its address is copied into the
-    // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
+    // signal handler slots. See <Signal/CrashHandler.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     InstallProvokeSignal();
@@ -238,6 +239,7 @@ auto main(int argc, char* argv[]) -> int {
 
     while (engine->IsRunning()) {
         const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
         auto& registry = engine->GetRegistry();

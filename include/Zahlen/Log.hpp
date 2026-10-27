@@ -4,8 +4,8 @@
 #pragma once
 
 #include "Config.hpp"
-#include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/LogLevel.hpp>
+#include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection/EnumFormat.hpp>
 #include <cstdint>
 #include <cstdio>
@@ -19,12 +19,6 @@
 namespace ZHLN {
 
 extern void ASSERTION_FAILED_AT_COMPILE_TIME();
-
-class Engine;
-
-void SetupSignalHandler(CrashState& state);
-
-void CheckForCrashes(CrashState& state, Engine* engine);
 
 auto GetCustomLogFile(FILE* overrideFile = nullptr) -> FILE*;
 auto GetPoorMansStacktrace() -> std::string;
@@ -142,15 +136,6 @@ inline void Assert(bool condition, std::source_location loc = std::source_locati
         }
     }
 }
-
-namespace Color {
-inline constexpr char Reset[]  = "\033[0m";
-inline constexpr char Gray[]   = "\033[90m";
-inline constexpr char Cyan[]   = "\033[36m";
-inline constexpr char Yellow[] = "\033[33m";
-inline constexpr char Green[]  = "\033[32m";
-inline constexpr char Red[]    = "\033[31m";
-} // namespace Color
 
 void LogManual(std::string_view file, int line, std::string_view message, const char* color = "");
 

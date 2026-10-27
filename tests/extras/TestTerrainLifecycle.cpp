@@ -11,6 +11,8 @@ enum class TerrainLifecycleTestError : uint8_t {
     SlotExhausted ZHLN_ANNOTATION(ZHLN::Description<"Could not allocate a terrain heightmap slot.">{}) = 1,
 };
 
+namespace {
+
 struct TerrainLifecycleTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> standalone_scene_releases_heightmap_handles_before_clear() {
@@ -44,6 +46,4 @@ struct TerrainLifecycleTestSuite {
     };
 };
 
-auto RunTerrainLifecycleSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<TerrainLifecycleTestSuite>();
-}
+} // namespace

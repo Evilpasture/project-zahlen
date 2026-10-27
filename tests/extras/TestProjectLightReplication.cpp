@@ -115,6 +115,8 @@ void Feed(ClientSession& session, MsgPackValue snapshot) {
 
 } // namespace
 
+namespace {
+
 struct TestProjectLightReplicationSuite {
     struct Tests {
         // The module owns its components: DescribeClient names the registrar, and
@@ -329,6 +331,4 @@ struct TestProjectLightReplicationSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<TestProjectLightReplicationSuite>();
-}
+} // namespace

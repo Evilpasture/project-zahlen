@@ -31,6 +31,8 @@ enum class DecalTestError : uint8_t {
     DecalBoundingClippingFailed ZHLN_ANNOTATION(ZHLN::Description<"Decal bled onto geometry outside its projection bounding volume.">{}),
 };
 
+namespace {
+
 struct DecalTestSuite {
     DecalTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -305,9 +307,4 @@ struct DecalTestSuite {
     };
 };
 
-// Exported for the GPU_Lighting group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunDecalSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<DecalTestSuite>();
-}
-
+} // namespace

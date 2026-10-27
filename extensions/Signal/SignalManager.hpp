@@ -1,10 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
-#include <Zahlen/Core/SignalSafetyInspector.hpp>
+#include <Signal/SignalSafetyInspector.hpp>
 #include <cstdint>
 #include <type_traits>
 #include <utility>
@@ -32,7 +31,8 @@ class SignalManager {
             "RegisterSafeHandler requires ZHLN_ANNOTATION(ZHLN::SignalSafe{}) on the handler"
         );
         static_assert(
-            std::is_nothrow_invocable_v<decltype(Fn), const SignalEvent&>, "handler must be invocable as void(const SignalEvent&) noexcept"
+            std::is_nothrow_invocable_v<decltype(Fn), const SignalEvent&>,
+            "handler must be invocable as void(const SignalEvent&) noexcept"
         );
         return RegisterHandlerInternal(sig, [](const SignalEvent& ev) noexcept { Fn(ev); });
     }
@@ -50,7 +50,8 @@ class SignalManager {
             return RegisterStatefulInternal(
                 sig,
                 [](const SignalEvent& ev, void* state) noexcept { (*static_cast<D*>(state))(ev); },
-                &copy, sizeof(D)
+                &copy,
+                sizeof(D)
             );
         }
     }
@@ -64,4 +65,4 @@ class SignalManager {
     static auto RegisterStatefulInternal(Signal sig, StatefulHandler handler, const void* state, uint32_t size) -> uint32_t;
 };
 
-}
+} // namespace ZHLN

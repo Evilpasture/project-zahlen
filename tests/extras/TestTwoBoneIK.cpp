@@ -147,6 +147,8 @@ struct ServiceProbeSystem {
 
 } // namespace
 
+namespace {
+
 struct TwoBoneIKTestSuite {
     TwoBoneIKTestSuite() {
         ZHLN::TaskSystem::Init(4, 32, ZHLN::kMinimumFiberStackSize);
@@ -516,6 +518,4 @@ struct TwoBoneIKTestSuite {
     };
 };
 
-auto RunTwoBoneIKSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<TwoBoneIKTestSuite>();
-}
+} // namespace

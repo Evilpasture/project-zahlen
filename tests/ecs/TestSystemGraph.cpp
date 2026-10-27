@@ -108,6 +108,8 @@ inline constexpr auto ReadLambda = [](ZHLN::ECS::Query<const TestCompA>) {};
 inline constexpr auto ReadLambda2 = [](ZHLN::ECS::Query<const TestCompA>) {};
 } // namespace
 
+namespace {
+
 struct SystemGraphTestSuite {
     SystemGraphTestSuite() {
         ZHLN::Fiber::InitMainThread();
@@ -519,9 +521,4 @@ struct SystemGraphTestSuite {
     };
 };
 
-// Exported for the ecs group binary (RunEcsTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunSystemGraphSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<SystemGraphTestSuite>();
-}
-
+} // namespace

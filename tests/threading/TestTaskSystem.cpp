@@ -32,6 +32,8 @@ static_assert(!std::is_move_constructible_v<ZHLN::TaskSystem::Scope> && !std::is
 // Test Suite Class
 // ============================================================================
 
+namespace {
+
 struct TaskSystemTestSuite {
     // Constructed before the runner's Tests object and retired when the suite
     // exits, never from a process-exit static destructor.
@@ -271,9 +273,4 @@ struct TaskSystemTestSuite {
     };
 };
 
-// Exported for the threading group binary (RunThreadingTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunTaskSystemSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<TaskSystemTestSuite>();
-}
-
+} // namespace

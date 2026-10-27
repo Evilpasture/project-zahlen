@@ -1,79 +1,21 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/RunPipelineTests.cpp
-//
-// Entry point for the GPU_Pipeline group binary: pipeline, resource and culling mechanics,
-// plus PBR robustness at distance.
-//
-// Each Test*.cpp keeps its suite definition and its anonymous-namespace
-// helpers private to its own translation unit and exports a stats-returning
-// function, so grouping files into one link cannot collide on helper names and
-// needs no suite header. Runner::RunDeferred aggregates the results into one
-// summary and one exit code.
-//
-// The trade for 19 links becoming 4 is process isolation: a device-lost or a
-// segfault in one suite takes the rest of this group with it, and the group
-// shares a single CTest TIMEOUT. Suites that need to fail alone belong in
-// their own group.
+// Entry point for GPU_Pipeline: pipeline, resource and culling mechanics,
+// plus PBR robustness at distance. Suites and `test_*` functions auto-register via TestsAutoCollect.hpp.
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <string_view>
 
-auto RunRenderPipelinesSuite() -> ZHLN::Test::TestStats;
-auto RunRenderComputeSuite() -> ZHLN::Test::TestStats;
-auto RunMeshShaderSuite() -> ZHLN::Test::TestStats;
-auto RunDescriptorHeapsSuite() -> ZHLN::Test::TestStats;
-auto RunDescriptorHeapsParallelSuite() -> ZHLN::Test::TestStats;
-auto RunRenderAnimatedMeshSuite() -> ZHLN::Test::TestStats;
-auto RunMorphPosePassSuite() -> ZHLN::Test::TestStats;
-auto RunCameraLookAtSuite() -> ZHLN::Test::TestStats;
-auto RunViewportSubregionSuite() -> ZHLN::Test::TestStats;
-auto RunHiZSuite() -> ZHLN::Test::TestStats;
-auto RunGLTFImportSuite() -> ZHLN::Test::TestStats;
-auto RunGLTFSampleAssetsSuite() -> ZHLN::Test::TestStats;
-auto RunNegativeScaleSuite() -> ZHLN::Test::TestStats;
-auto RunTextureTransformsSuite() -> ZHLN::Test::TestStats;
-auto RunTransparentMaterialsSuite() -> ZHLN::Test::TestStats;
-auto RunUnlitMaterialsSuite() -> ZHLN::Test::TestStats;
-auto RunDistanceStabilitySuite() -> ZHLN::Test::TestStats;
-
-
 auto main(int argc, char** argv) -> int {
-    // Convert frames captured by an earlier failing run instead of re-rendering.
     if (argc >= 3 && std::string_view(argv[1]) == "--convert-ppm") {
         return ZHLN::Test::Image::ConvertPpmToPng(argc, argv) ? 0 : 1;
     }
 
-    // The outer reference for the whole binary. Suites take nested ones, so the
-    // task system stays up and the pooled engine survives every suite boundary
-    // instead of being rebuilt nine times. Released here, after the last suite
-    // and before main returns, which is where a Vulkan device can still be torn
-    // down safely.
-    const ZHLN::Test::Headless::SessionScope session;
-
-    return ZHLN::Test::Runner::RunDeferred(
-        RunRenderPipelinesSuite,
-        RunRenderComputeSuite,
-        RunMeshShaderSuite,
-        RunDescriptorHeapsSuite,
-        RunDescriptorHeapsParallelSuite,
-        RunRenderAnimatedMeshSuite,
-        RunMorphPosePassSuite,
-        RunCameraLookAtSuite,
-        RunViewportSubregionSuite,
-        RunHiZSuite,
-        RunGLTFImportSuite,
-        RunGLTFSampleAssetsSuite,
-        RunNegativeScaleSuite,
-        RunTextureTransformsSuite,
-        RunTransparentMaterialsSuite,
-        RunUnlitMaterialsSuite,
-        // Last: it takes an exclusive engine, evicting the pooled one from
-        // the serial slot first (see its CreateTestEngine). Nothing after it
-        // pays a pool rebuild.
-        RunDistanceStabilitySuite
-    );
+    return ZHLN::Test::Runner::Main(argc, argv, [](auto&& runMatchedSuites) -> int {
+        const ZHLN::Test::Headless::SessionScope session;
+        return runMatchedSuites();
+    });
 }

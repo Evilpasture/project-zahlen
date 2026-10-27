@@ -122,7 +122,6 @@ module;
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
@@ -468,14 +467,11 @@ using ZHLN::AudioWaveformType;
 using ZHLN::AssetLoadRequest;
 using ZHLN::AssetManager;
 using ZHLN::Clock;
-using ZHLN::CommandHandler;
-using ZHLN::CommandLineError;
-using ZHLN::CommandLineOptions;
 using ZHLN::CPUProfiler;
 using ZHLN::Engine;
 using ZHLN::EngineConfig;
 using ZHLN::GameplayDriver;
-using ZHLN::HandleCommandLine;
+using ZHLN::GameplayStatus;
 using ZHLN::Kernel;
 using ZHLN::KeyCode;
 using ZHLN::ModelNode;

@@ -25,6 +25,8 @@ enum class SyncPrimError : uint32_t {
 // Test Suite Class
 // ============================================================================
 
+namespace {
+
 struct SyncPrimTestSuite {
     SyncPrimTestSuite() {
         // Convert main thread to a Fiber context so that Mutex slow-path yielding works correctly
@@ -248,9 +250,4 @@ struct SyncPrimTestSuite {
     };
 };
 
-// Exported for the threading group binary (RunThreadingTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunSyncPrimSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<SyncPrimTestSuite>();
-}
-
+} // namespace

@@ -104,6 +104,8 @@ auto WaitTerminal(ZHLN::Remote::AsyncAssetFetcher& fetcher, ZHLN::Remote::FetchH
 
 } // namespace
 
+namespace {
+
 struct RemoteAssetTestSuite {
     enum class RemoteAssetTestError : uint8_t {
         ServerUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The suite's loopback server did not come up, so there was nothing to fetch."> {}) = 1,
@@ -935,6 +937,4 @@ struct RemoteAssetTestSuite {
     };
 };
 
-auto RunRemoteAssetSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<RemoteAssetTestSuite>();
-}
+} // namespace

@@ -24,6 +24,8 @@ enum class LightningTestError : uint32_t {
     SubEntityMemoryLeak ZHLN_ANNOTATION(ZHLN::Description<"Point-light flash entities were leaked after strike expiration.">{}),
 };
 
+namespace {
+
 struct LightningTestSuite {
     LightningTestSuite() {
         ZHLN::Fiber::InitMainThread();
@@ -316,6 +318,4 @@ struct LightningTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<LightningTestSuite>();
-}
+} // namespace

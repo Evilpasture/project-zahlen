@@ -303,7 +303,3 @@ static_assert(std::is_same_v<ZHLN::SoABlock<SoAPosition>::ProxyRef, ZHLN::Reflec
 #endif
 
 } // namespace
-
-auto RunSoASuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<SoATestSuite>();
-}

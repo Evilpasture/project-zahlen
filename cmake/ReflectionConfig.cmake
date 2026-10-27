@@ -19,6 +19,7 @@ if(COMPILER_HAS_REFLECTION)
     # flag; -freflection alone supplies only P2996. GCC exposes it with
     # -freflection, so the extra flag is Clang-specific.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        zhln_check_cxx_compiler_flag("-fconstexpr-steps=33554432" COMPILER_HAS_CONSTEXPR_STEPS_FLAG)
         zhln_check_cxx_compiler_flag("-freflection -fparameter-reflection" COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
         if(NOT COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
             # Newer forks also provide a unified flag for companion proposals.
@@ -151,6 +152,11 @@ function(zahlen_enable_reflection TARGET_NAME)
             target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-fparameter-reflection>")
         elseif(COMPILER_HAS_REFLECTION_LATEST_FLAG)
             target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-freflection-latest>")
+        endif()
+        if(COMPILER_HAS_CONSTEXPR_STEPS_FLAG)
+            # Match GCC's default -fconstexpr-ops-limit=33554432 (2^25); Clang's
+            # pre-reflection 2^20 default can saturate on large P2996 schemas.
+            target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-fconstexpr-steps=33554432>")
         endif()
         if(ZHLN_HAS_ANNOTATION_ATTRIBUTES)
             # The same set has one more member: the annotation syntax only

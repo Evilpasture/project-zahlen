@@ -153,23 +153,6 @@ if(WIN32)
     message(STATUS "Host tool DLL directories (PATH for the tools the build runs): ${ZHLN_RUNTIME_DLL_DIRS}")
 endif()
 
-# The same directories, for one registered test. A test binary is built into
-# build/tests/... -- not beside the DLLs it links -- so it needs the loader path
-# whether or not it runs a tool of its own, and the ones that run zcook pass it on
-# to a grandchild process.
-#
-# APPEND, because the groups own ENVIRONMENT for their own variables (the
-# sanitizer profile, the Vulkan sandbox pin) and this must not clobber them; and
-# path_list_prepend rather than an ENVIRONMENT entry, which would replace PATH
-# outright and drop whatever PATH the test was started with.
-function(zahlen_add_runtime_dll_path TEST_NAME)
-    if(ZHLN_RUNTIME_DLL_DIRS)
-        set_property(TEST "${TEST_NAME}" APPEND PROPERTY
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${ZHLN_RUNTIME_DLL_PATH}"
-        )
-    endif()
-endfunction()
-
 # The same directories again, this time copied beside one built binary.
 #
 # The two halves of the problem look alike and are not. Rounds 4 and 5 are about

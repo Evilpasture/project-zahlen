@@ -228,7 +228,7 @@ and quietly stay on the vertex pipeline forever — the feature would look
 
 ## 7. Tests
 
-`tests/render/TestMeshShaders.cpp`, in the `GPU_Pipeline` group binary (ctest: `GPU_Pipeline`, or `ctest -R GPU_Pipeline`):
+`tests/render/TestMeshShaders.cpp`, in the `GPU_Pipeline` group binary (`./build/ztest GPU_Pipeline` or `./build/ztest -k MeshShaderSuite`):
 
 | Test | What it proves |
 | --- | --- |

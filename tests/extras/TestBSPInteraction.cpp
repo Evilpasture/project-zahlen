@@ -170,6 +170,8 @@ auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
 
 } // namespace
 
+namespace {
+
 struct BSPInteractionTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> describe_scene_converts_interactive_entities() {
@@ -778,50 +780,4 @@ struct BSPInteractionTestSuite {
     };
 };
 
-auto RunBSPInteractionSuite() -> ZHLN::Test::TestStats {
-    constexpr std::string_view suiteName = "BSPInteractionTestSuite";
-    const char* const          filterEnv = std::getenv("ZHLN_TEST_FILTER");
-    const std::string_view     filter    = filterEnv != nullptr ? std::string_view {filterEnv} : std::string_view {};
-    if (const auto sep = filter.find("::"); sep != std::string_view::npos && filter.substr(0, sep) != suiteName) {
-        return {};
-    }
-
-    BSPInteractionTestSuite::Tests suite;
-    uint32_t                       passed = 0;
-    uint32_t                       failed = 0;
-
-    auto runTest = [&](std::string_view testName, auto testFunc) {
-        if (!filter.empty() && filter != suiteName && filter != testName && filter != "BSPInteractionTestSuite::*" &&
-            filter != std::format("{}::{}", suiteName, testName)) {
-            return;
-        }
-        ZHLN::Println("\033[32m[ RUN      ]\033[0m {}", testName);
-        auto res = testFunc();
-        if (res.has_value()) {
-            ZHLN::Println("\033[32m[       OK ]\033[0m {}", testName);
-            passed++;
-        } else {
-            ZHLN::Println("\033[31m[  FAILED  ]\033[0m {}", testName);
-            failed++;
-        }
-    };
-
-    ZHLN::Println("\033[36m==================================================\033[0m");
-    ZHLN::Println("\033[36mRunning Test Suite: BSPInteractionTestSuite\033[0m");
-    ZHLN::Println("\033[36m==================================================\033[0m");
-
-    runTest("describe_scene_converts_interactive_entities", [&] { return suite.describe_scene_converts_interactive_entities(); });
-    runTest("initialize_bsp_entities_attaches_components", [&] { return suite.initialize_bsp_entities_attaches_components(); });
-    runTest("sliding_door_transform_is_not_the_map_origin", [&] { return suite.sliding_door_transform_is_not_the_map_origin(); });
-    runTest("door_movement_system_state_machine", [&] { return suite.door_movement_system_state_machine(); });
-    runTest("rotating_door_slerp_movement", [&] { return suite.rotating_door_slerp_movement(); });
-    runTest("source_entity_io_wiring", [&] { return suite.source_entity_io_wiring(); });
-    runTest("proximity_trigger_volume_detection", [&] { return suite.proximity_trigger_volume_detection(); });
-    runTest("player_use_interaction_and_locking", [&] { return suite.player_use_interaction_and_locking(); });
-
-    ZHLN::Println("--------------------------------------------------");
-    ZHLN::Println("Summary for BSPInteractionTestSuite: {} Passed, {} Failed", passed, failed);
-    ZHLN::Println("==================================================");
-
-    return {.passed = passed, .failed = failed};
-}
+} // namespace

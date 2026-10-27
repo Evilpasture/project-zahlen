@@ -23,6 +23,8 @@ namespace {
 using namespace ZHLN::ProjectLight;
 }
 
+namespace {
+
 struct TestLuaDataModelSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> binds_existing_luajit_runtime_to_the_canonical_instance_graph() {
@@ -177,6 +179,4 @@ struct TestLuaDataModelSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<TestLuaDataModelSuite>();
-}
+} // namespace

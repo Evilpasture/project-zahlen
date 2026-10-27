@@ -140,6 +140,8 @@ auto CheckRoundTrip(const T& value) -> void {
 
 } // namespace
 
+namespace {
+
 struct TestNetworkWireSuite {
     struct Tests {
         // ------------------------------------------------------------------
@@ -952,6 +954,4 @@ struct TestNetworkWireSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<TestNetworkWireSuite>();
-}
+} // namespace

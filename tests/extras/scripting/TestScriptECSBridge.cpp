@@ -31,6 +31,8 @@ struct BridgeManifest {
     using Comp2 = SubTransform;
 };
 
+namespace {
+
 struct ScriptECSBridgeTestSuite {
     ScriptECSBridgeTestSuite() {
         ZHLN::ScriptBinder::Get().classes.clear();
@@ -98,9 +100,4 @@ struct ScriptECSBridgeTestSuite {
     };
 };
 
-// Exported for the ecs group binary (RunEcsTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunScriptECSBridgeSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ScriptECSBridgeTestSuite>();
-}
-
+} // namespace

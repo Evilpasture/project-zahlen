@@ -37,8 +37,19 @@ enum class DescriptorHeapsParallelTestError : uint8_t {
     SecondaryHeapPathFailed ZHLN_ANNOTATION(ZHLN::Description<"Not all material colors resolved through secondary-command-buffer heap draws."> {}),
 };
 
+namespace {
+
 struct DescriptorHeapsParallelSuite {
     DescriptorHeapsParallelSuite() {
+        // Force the CPU-culling policy BEFORE the first frame records: MainPass1
+        // then draws into parallel secondary command buffers that inherit the
+        // primary's descriptor-heap bindings (Diag::DisableGpuCulling caches the
+        // environment read on first use).
+#if defined(_WIN32)
+        _putenv_s("ZHLN_NO_GPU_CULLING", "1");
+#else
+        setenv("ZHLN_NO_GPU_CULLING", "1", 1);
+#endif
         // Nested in the group binary's session: the task system and the pooled
         // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
@@ -284,18 +295,4 @@ struct DescriptorHeapsParallelSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunDescriptorHeapsParallelSuite() -> ZHLN::Test::TestStats {
-    // Force the CPU-culling policy BEFORE the first frame records: MainPass1
-    // then draws into parallel secondary command buffers that inherit the
-    // primary's descriptor-heap bindings (Diag::DisableGpuCulling caches the
-    // environment read on first use).
-    #if defined(_WIN32)
-    _putenv_s("ZHLN_NO_GPU_CULLING", "1");
-    #else
-    setenv("ZHLN_NO_GPU_CULLING", "1", 1);
-    #endif
-    return ZHLN::Test::RunSuite<DescriptorHeapsParallelSuite>();
-}
-
+} // namespace

@@ -141,6 +141,8 @@ void DisableJitterVignetteAndTargetDrive(ZHLN::ECS::Registry& reg) {
 
 } // namespace
 
+namespace {
+
 struct ViewportSubregionTestSuite {
     ViewportSubregionTestSuite() {
         ZHLN::Test::Headless::BeginSession();
@@ -268,8 +270,4 @@ struct ViewportSubregionTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunViewportSubregionSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ViewportSubregionTestSuite>();
-}
+} // namespace

@@ -888,7 +888,3 @@ struct CDNTestSuite {
 };
 
 } // namespace
-
-auto RunCDNSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<CDNTestSuite>();
-}

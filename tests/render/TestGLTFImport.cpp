@@ -958,6 +958,8 @@ struct SourceDocument {
 
 } // namespace
 
+namespace {
+
 struct GLTFImportTestSuite {
     GLTFImportTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -1952,8 +1954,4 @@ struct GLTFImportTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunGLTFImportSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<GLTFImportTestSuite>();
-}
+} // namespace

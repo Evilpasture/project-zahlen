@@ -69,6 +69,8 @@ struct SchemaContainer {
 // Test Suite
 // ============================================================================
 
+namespace {
+
 struct ReflectionTestSuite {
     enum class ReflectionTestError : uint8_t {
         EnumParseFailed ZHLN_ANNOTATION(ZHLN::Description<"StringToEnum did not produce a value for a name that is a member of the enum."> {}) = 1,
@@ -409,8 +411,4 @@ struct ReflectionTestSuite {
     };
 };
 
-// Exported for the core group binary (RunCoreTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunReflectionSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ReflectionTestSuite>();
-}
+} // namespace

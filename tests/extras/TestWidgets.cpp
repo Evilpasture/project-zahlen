@@ -31,6 +31,8 @@ enum class WidgetTestError : uint8_t {
     HoverCardFailed     ZHLN_ANNOTATION(ZHLN::Description<"The hover card was not stateful, or was placed over the panel it belongs to."> {}),
 };
 
+namespace {
+
 struct WidgetTestSuite {
     struct Tests {
         // The invariant the frame-time chart got wrong: a window that has filled
@@ -373,6 +375,4 @@ struct WidgetTestSuite {
     };
 };
 
-auto RunWidgetsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<WidgetTestSuite>();
-}
+} // namespace

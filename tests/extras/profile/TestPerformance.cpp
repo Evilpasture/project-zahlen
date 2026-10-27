@@ -12,7 +12,6 @@
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Core/Array.hpp>
@@ -26,6 +25,7 @@
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/FramePlan.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Frame.hpp>
 #include <Zahlen/Threading/Channel.hpp>
@@ -97,6 +97,8 @@ struct SpatialPerceptionComponent {
 // ============================================================================
 // Performance Test Suite
 // ============================================================================
+
+namespace {
 
 struct PerformanceTestSuite {
     PerformanceTestSuite() {
@@ -835,8 +837,4 @@ struct PerformanceTestSuite {
     };
 };
 
-// Exported for the perf group binary (RunPerfTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunPerformanceSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<PerformanceTestSuite>();
-}
+} // namespace

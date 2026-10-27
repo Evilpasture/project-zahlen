@@ -226,6 +226,8 @@ constexpr NormalizedRect kLitControl {.x0 = 0.49, .y0 = 0.77, .x1 = 0.51, .y1 = 
 
 } // namespace
 
+namespace {
+
 struct UnlitMaterialsTestSuite {
     UnlitMaterialsTestSuite() { ZHLN::Test::Headless::BeginSession(); }
     ~UnlitMaterialsTestSuite() { ZHLN::Test::Headless::EndSession(); }
@@ -362,6 +364,4 @@ struct UnlitMaterialsTestSuite {
     };
 };
 
-auto RunUnlitMaterialsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<UnlitMaterialsTestSuite>();
-}
+} // namespace

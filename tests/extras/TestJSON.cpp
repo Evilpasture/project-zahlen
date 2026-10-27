@@ -87,6 +87,8 @@ static_assert(kStaticParsed.window.height == 1080);
 // Test Suite Class
 // ============================================================================
 
+namespace {
+
 struct JSONTestSuite {
     enum class JSONTestError : uint8_t {
         ParseFailed ZHLN_ANNOTATION(ZHLN::Description<"ReflectJSON::Parse rejected a document that should have deserialized."> {}) = 1,
@@ -294,6 +296,4 @@ struct JSONTestSuite {
     };
 };
 
-auto RunJSONSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<JSONTestSuite>();
-}
+} // namespace

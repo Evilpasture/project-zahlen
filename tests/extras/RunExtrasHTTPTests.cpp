@@ -5,32 +5,16 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <cstdlib>
 
-auto RunHTTPSuite() -> ZHLN::Test::TestStats;
-#if defined(ZHLN_HAS_REMOTE_ASSET_SUITE)
-auto RunRemoteAssetSuite() -> ZHLN::Test::TestStats;
-#endif
-#if defined(ZHLN_HAS_CDN_SUITE)
-auto RunCDNSuite() -> ZHLN::Test::TestStats;
-#endif
-
-auto main() -> int {
-    ZHLN::TaskSystem::Scope taskScope;
-    for (const char* name : {"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"}) {
+auto main(int argc, char** argv) -> int {
+    return ZHLN::Test::Runner::Main(argc, argv, [](auto&& runMatchedSuites) -> int {
+        ZHLN::TaskSystem::Scope taskScope;
+        for (const char* name: {"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"}) {
 #if defined(_WIN32)
-        _putenv_s(name, "");
+            _putenv_s(name, "");
 #else
-        unsetenv(name);
+            unsetenv(name);
 #endif
-    }
-    return ZHLN::Test::Runner::RunDeferred(
-        RunHTTPSuite
-#if defined(ZHLN_HAS_REMOTE_ASSET_SUITE)
-        ,
-        RunRemoteAssetSuite
-#endif
-#if defined(ZHLN_HAS_CDN_SUITE)
-        ,
-        RunCDNSuite
-#endif
-    );
+        }
+        return runMatchedSuites();
+    });
 }

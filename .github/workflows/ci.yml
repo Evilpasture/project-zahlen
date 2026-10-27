@@ -19,9 +19,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Step 1: Build up to the builder stage and execute CTest
-      # If CTest encounters a failure, the action fails here
-      - name: Build Engine and Run CTest Suite
+      # Step 1: Build up to the builder stage and execute ztest
+      # If ztest encounters a failure, the action fails here
+      - name: Build Engine and Run ztest Suite
         uses: docker/build-push-action@v5
         with:
           context: .

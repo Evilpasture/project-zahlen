@@ -22,6 +22,8 @@ using namespace ZHLN::ProjectLight;
 
 } // namespace
 
+namespace {
+
 struct TestDataModelSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> preserves_explicit_ids_and_known_classes() {
@@ -310,6 +312,4 @@ struct TestDataModelSuite {
     };
 };
 
-auto RunDataModelSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<TestDataModelSuite>();
-}
+} // namespace

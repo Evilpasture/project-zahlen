@@ -3,7 +3,6 @@
 
 // gameplay/FallbackScene/FallbackScene.cpp
 #include "FallbackScene.hpp"
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/PrefabFactory.hpp>

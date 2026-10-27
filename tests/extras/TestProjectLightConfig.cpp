@@ -9,6 +9,8 @@
 #include <expected>
 #include <string_view>
 
+namespace {
+
 struct TestProjectLightConfigSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> dotenv_settings_have_no_compiled_connection_defaults() {
@@ -100,6 +102,4 @@ struct TestProjectLightConfigSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<TestProjectLightConfigSuite>();
-}
+} // namespace

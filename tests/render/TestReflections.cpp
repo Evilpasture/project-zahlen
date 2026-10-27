@@ -16,6 +16,8 @@
 // Test Suite
 // ============================================================================
 
+namespace {
+
 struct ReflectionsTestSuite {
     ReflectionsTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -643,8 +645,4 @@ struct ReflectionsTestSuite {
     };
 };
 
-// Exported for the GPU_Lighting group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunReflectionsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ReflectionsTestSuite>();
-}
+} // namespace

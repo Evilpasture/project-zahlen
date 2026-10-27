@@ -5,33 +5,32 @@ if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_extras)
     return()
 endif()
 
-# Register a standalone extras test executable with CTest.
+# Register a standalone extras test executable with ztest.
 function(zahlen_register_extras_test TARGET_NAME)
-    add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-    set_tests_properties(${TARGET_NAME} PROPERTIES
-        LABELS "CPU;Fast;Extras"
-        ${ARGN}
-    )
     set(EXTRAS_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
     list(APPEND EXTRAS_TEST_ENVIRONMENT ${ZHLN_VULKAN_SANDBOX_ENVIRONMENT})
-    if(EXTRAS_TEST_ENVIRONMENT)
-        set_tests_properties(${TARGET_NAME} PROPERTIES
-            ENVIRONMENT "${EXTRAS_TEST_ENVIRONMENT}"
-        )
-    endif()
 
-    zahlen_add_runtime_dll_path(${TARGET_NAME})
+    zahlen_register_ztest_target(${TARGET_NAME}
+        POOL cpu
+        TIMEOUT 120
+        LABELS "CPU;Fast;Extras"
+        ENV ${EXTRAS_TEST_ENVIRONMENT}
+        ${ARGN}
+    )
+
     zahlen_add_runtime_dlls(${TARGET_NAME})
 endfunction()
 
 # Shared setup for a grouped non-module extras binary (Extras_*).
 function(zahlen_add_extras_group GROUP_TARGET)
-    add_executable(${GROUP_TARGET} ${ARGN})
+    zahlen_wrap_ztest_sources(_wrapped_sources _rel_files ${ARGN})
+    add_executable(${GROUP_TARGET} ${_wrapped_sources})
 
     set_target_properties(${GROUP_TARGET} PROPERTIES
         CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
+        ZHLN_ZTEST_SOURCE_FILES "${_rel_files}"
     )
 
     target_include_directories(${GROUP_TARGET} PRIVATE
@@ -56,35 +55,20 @@ function(zahlen_add_extras_group GROUP_TARGET)
     zahlen_add_runtime_dlls(${GROUP_TARGET})
 endfunction()
 
-# Register one suite inside a grouped Extras_* binary under its historical
-# target/CTest name: `ninja <ALIAS_NAME>` builds the group binary, and
-# `ctest -R <ALIAS_NAME>` runs just `<SUITE_FILTER>` in an isolated process.
-function(zahlen_register_extras_group_member GROUP_TARGET ALIAS_NAME SUITE_FILTER)
+# Preserve historical suite build target names (`cmake --build build --target TestCDN`).
+function(zahlen_add_extras_build_alias GROUP_TARGET ALIAS_NAME)
     if(NOT TARGET ${ALIAS_NAME})
         add_custom_target(${ALIAS_NAME} DEPENDS ${GROUP_TARGET})
     endif()
-
-    add_test(NAME ${ALIAS_NAME} COMMAND ${GROUP_TARGET})
-    set_tests_properties(${ALIAS_NAME} PROPERTIES
-        LABELS "CPU;Fast;Extras;${GROUP_TARGET}"
-        ${ARGN}
-    )
-
-    set(EXTRAS_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
-    list(APPEND EXTRAS_TEST_ENVIRONMENT ${ZHLN_VULKAN_SANDBOX_ENVIRONMENT})
-    list(APPEND EXTRAS_TEST_ENVIRONMENT "ZHLN_TEST_FILTER=${SUITE_FILTER}")
-    set_tests_properties(${ALIAS_NAME} PROPERTIES
-        ENVIRONMENT "${EXTRAS_TEST_ENVIRONMENT}"
-    )
-
-    zahlen_add_runtime_dll_path(${ALIAS_NAME})
 endfunction()
 
 # --- Standalone C++20 Module Suites (isolated BMI scan scope) ---
 
 set(TARGET_NAME TestProceduralAnimation)
+zahlen_wrap_ztest_sources(_proc_anim_sources _proc_anim_files TestProceduralAnimation.cpp)
 add_executable(${TARGET_NAME}
-    TestProceduralAnimation.cpp
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+    ${_proc_anim_sources}
 )
 
 set_target_properties(${TARGET_NAME} PROPERTIES
@@ -92,6 +76,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     CXX_SCAN_FOR_MODULES ON
+    ZHLN_ZTEST_SOURCE_FILES "${_proc_anim_files}"
 )
 
 target_link_libraries(${TARGET_NAME} PRIVATE
@@ -126,13 +111,18 @@ endif()
 zahlen_register_extras_test(${TARGET_NAME})
 
 set(TARGET_NAME TestNetworkWire)
-add_executable(${TARGET_NAME} TestNetworkWire.cpp)
+zahlen_wrap_ztest_sources(_net_wire_sources _net_wire_files TestNetworkWire.cpp)
+add_executable(${TARGET_NAME}
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+    ${_net_wire_sources}
+)
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     CXX_SCAN_FOR_MODULES ON
+    ZHLN_ZTEST_SOURCE_FILES "${_net_wire_files}"
 )
 
 target_link_libraries(${TARGET_NAME} PRIVATE
@@ -165,7 +155,7 @@ zahlen_register_extras_test(${TARGET_NAME})
 
 # 1. Extras_UI: UI schema, widgets, console debugger, and baked font loader.
 zahlen_add_extras_group(Extras_UI
-    RunExtrasUITests.cpp
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestUITree.cpp
     TestWidgets.cpp
     TestConsoleDebugger.cpp
@@ -178,14 +168,15 @@ target_link_libraries(Extras_UI PRIVATE
     zahlen_console
     zahlen_fonts
 )
-zahlen_register_extras_group_member(Extras_UI TestUITree "UITreeTestSuite::*")
-zahlen_register_extras_group_member(Extras_UI TestWidgets "WidgetTestSuite::*")
-zahlen_register_extras_group_member(Extras_UI TestConsoleDebugger "ConsoleDebuggerTestSuite::*")
-zahlen_register_extras_group_member(Extras_UI TestBakedFontLoader "BakedFontLoaderTestSuite::*")
+zahlen_register_extras_test(Extras_UI)
+zahlen_add_extras_build_alias(Extras_UI TestUITree)
+zahlen_add_extras_build_alias(Extras_UI TestWidgets)
+zahlen_add_extras_build_alias(Extras_UI TestConsoleDebugger)
+zahlen_add_extras_build_alias(Extras_UI TestBakedFontLoader)
 
 # 2. Extras_Simulation: TwoBoneIK (skeletal domain, module-free), terrain, ALife, DataModel.
 zahlen_add_extras_group(Extras_Simulation
-    RunExtrasSimulationTests.cpp
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestTwoBoneIK.cpp
     TestTerrainLifecycle.cpp
     TestALife.cpp
@@ -198,14 +189,15 @@ target_link_libraries(Extras_Simulation PRIVATE
     zahlen_alife
     zahlen_datamodel
 )
-zahlen_register_extras_group_member(Extras_Simulation TestTwoBoneIK "TwoBoneIKTestSuite::*")
-zahlen_register_extras_group_member(Extras_Simulation TestTerrainLifecycle "TerrainLifecycleTestSuite::*")
-zahlen_register_extras_group_member(Extras_Simulation TestALife "ALifeTestSuite::*")
-zahlen_register_extras_group_member(Extras_Simulation TestDataModel "TestDataModelSuite::*")
+zahlen_register_extras_test(Extras_Simulation)
+zahlen_add_extras_build_alias(Extras_Simulation TestTwoBoneIK)
+zahlen_add_extras_build_alias(Extras_Simulation TestTerrainLifecycle)
+zahlen_add_extras_build_alias(Extras_Simulation TestALife)
+zahlen_add_extras_build_alias(Extras_Simulation TestDataModel)
 
 # 3. Extras_Serialization: JSON, TOML, ReflectLua, and zcook GLB container inspection.
 zahlen_add_extras_group(Extras_Serialization
-    RunExtrasSerializationTests.cpp
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestJSON.cpp
     TestTOML.cpp
     TestReflectLua.cpp
@@ -218,12 +210,13 @@ target_link_libraries(Extras_Serialization PRIVATE
     zahlen_ragdoll_authoring
 )
 add_dependencies(Extras_Serialization zcook)
-zahlen_register_extras_group_member(Extras_Serialization TestJSON "JSONTestSuite::*")
-zahlen_register_extras_group_member(Extras_Serialization TestTOML "TOMLTestSuite::*")
-zahlen_register_extras_group_member(Extras_Serialization TestReflectLua "ReflectLuaSuite::*")
-zahlen_register_extras_group_member(Extras_Serialization TestCookerGLB "CookerGlbTestSuite::*"
+zahlen_register_extras_test(Extras_Serialization
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/.."
 )
+zahlen_add_extras_build_alias(Extras_Serialization TestJSON)
+zahlen_add_extras_build_alias(Extras_Serialization TestTOML)
+zahlen_add_extras_build_alias(Extras_Serialization TestReflectLua)
+zahlen_add_extras_build_alias(Extras_Serialization TestCookerGLB)
 
 # 4. Extras_HTTP: loopback HTTP, RemoteAsset cache/fetcher, and CDN layer.
 if(TARGET zahlen_http)
@@ -253,18 +246,19 @@ if(TARGET zahlen_http)
         target_compile_definitions(Extras_HTTP PRIVATE ZHLN_HAS_CDN_SUITE=1)
     endif()
 
-    zahlen_register_extras_group_member(Extras_HTTP TestHTTP "HTTPTestSuite::*")
+    zahlen_register_extras_test(Extras_HTTP)
+    zahlen_add_extras_build_alias(Extras_HTTP TestHTTP)
     if(TARGET zahlen_remote_asset)
-        zahlen_register_extras_group_member(Extras_HTTP TestRemoteAsset "RemoteAssetTestSuite::*")
+        zahlen_add_extras_build_alias(Extras_HTTP TestRemoteAsset)
     endif()
     if(TARGET zahlen_cdn)
-        zahlen_register_extras_group_member(Extras_HTTP TestCDN "CDNTestSuite::*")
+        zahlen_add_extras_build_alias(Extras_HTTP TestCDN)
     endif()
 endif()
 
 # 5. Extras_BSP: BSP interactive entities, VMT/VTF materials, static props, StudioModel, VRAD/lighting.
 zahlen_add_extras_group(Extras_BSP
-    RunExtrasBSPTests.cpp
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestBSPInteraction.cpp
     TestBSPMaterials.cpp
     TestBSPStaticProps.cpp
@@ -277,22 +271,28 @@ target_link_libraries(Extras_BSP PRIVATE
     zahlen_interaction
     zahlen_character_controller
 )
-zahlen_register_extras_group_member(Extras_BSP TestBSPInteraction "BSPInteractionTestSuite::*")
-zahlen_register_extras_group_member(Extras_BSP TestBSPMaterials "BSPMaterialsTestSuite::*")
-zahlen_register_extras_group_member(Extras_BSP TestBSPStaticProps "BSPStaticPropsTestSuite::*")
-zahlen_register_extras_group_member(Extras_BSP TestBSPStudioModel "BSPStudioModelTestSuite::*")
-zahlen_register_extras_group_member(Extras_BSP TestBSPLighting "BSPLightingTestSuite::*")
+zahlen_register_extras_test(Extras_BSP)
+zahlen_add_extras_build_alias(Extras_BSP TestBSPInteraction)
+zahlen_add_extras_build_alias(Extras_BSP TestBSPMaterials)
+zahlen_add_extras_build_alias(Extras_BSP TestBSPStaticProps)
+zahlen_add_extras_build_alias(Extras_BSP TestBSPStudioModel)
+zahlen_add_extras_build_alias(Extras_BSP TestBSPLighting)
 
 # --- Remaining Domain-Specific Suites ---
 
 if(TARGET zahlen_project_light_lua)
     set(TARGET_NAME TestLuaDataModel)
-    add_executable(${TARGET_NAME} TestLuaDataModel.cpp)
+    zahlen_wrap_ztest_sources(_lua_dm_sources _lua_dm_files TestLuaDataModel.cpp)
+    add_executable(${TARGET_NAME}
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+        ${_lua_dm_sources}
+    )
 
     set_target_properties(${TARGET_NAME} PROPERTIES
         CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
+        ZHLN_ZTEST_SOURCE_FILES "${_lua_dm_files}"
     )
 
     target_link_libraries(${TARGET_NAME} PRIVATE
@@ -322,15 +322,17 @@ if(TARGET zahlen_project_light_lua)
 endif()
 
 set(TARGET_NAME TestPerformance)
+zahlen_wrap_ztest_sources(_perf_sources _perf_files profile/TestPerformance.cpp)
 add_executable(${TARGET_NAME}
-    profile/RunPerfTests.cpp
-    profile/TestPerformance.cpp
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+    ${_perf_sources}
 )
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
+    ZHLN_ZTEST_SOURCE_FILES "${_perf_files}"
 )
 
 target_link_libraries(${TARGET_NAME} PRIVATE
@@ -361,17 +363,21 @@ endif()
 zahlen_register_extras_test(${TARGET_NAME})
 
 set(TARGET_NAME TestScripting)
-add_executable(${TARGET_NAME}
-    scripting/RunScriptingTests.cpp
+zahlen_wrap_ztest_sources(_scripting_sources _scripting_files
     scripting/TestScriptBinder.cpp
     scripting/TestScriptECSBridge.cpp
     scripting/TestScriptValueTypes.cpp
+)
+add_executable(${TARGET_NAME}
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+    ${_scripting_sources}
 )
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
+    ZHLN_ZTEST_SOURCE_FILES "${_scripting_files}"
 )
 
 target_link_libraries(${TARGET_NAME} PRIVATE
@@ -402,12 +408,17 @@ zahlen_register_extras_test(${TARGET_NAME})
 
 if(TARGET zahlen_svg)
     set(TARGET_NAME TestSVG)
-    add_executable(${TARGET_NAME} TestSVG.cpp)
+    zahlen_wrap_ztest_sources(_svg_sources _svg_files TestSVG.cpp)
+    add_executable(${TARGET_NAME}
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+        ${_svg_sources}
+    )
 
     set_target_properties(${TARGET_NAME} PROPERTIES
         CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
+        ZHLN_ZTEST_SOURCE_FILES "${_svg_files}"
     )
 
     target_link_libraries(${TARGET_NAME} PRIVATE

@@ -25,6 +25,8 @@ enum class CombatFXTestError : uint32_t {
     TransientVfxCleanupFailed ZHLN_ANNOTATION(ZHLN::Description<"Sparks or shockwave rings were not cleanly erased after exceeding max lifetime.">{}),
 };
 
+namespace {
+
 struct CombatFXTestSuite {
     CombatFXTestSuite() {
         ZHLN::Fiber::InitMainThread();
@@ -216,6 +218,4 @@ struct CombatFXTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<CombatFXTestSuite>();
-}
+} // namespace

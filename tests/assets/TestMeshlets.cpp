@@ -66,6 +66,8 @@ bool StreamsEqual(const ZHLN::MeshletBuildResult& a, const ZHLN::MeshletBuildRes
 
 } // namespace
 
+namespace {
+
 struct MeshletTestSuite {
     struct Tests {
         // The cooker and JIT importer write the same independent SoA streams.
@@ -220,9 +222,4 @@ struct MeshletTestSuite {
     };
 };
 
-// Exported for the assets group binary (RunAssetsTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunMeshletsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<MeshletTestSuite>();
-}
-
+} // namespace

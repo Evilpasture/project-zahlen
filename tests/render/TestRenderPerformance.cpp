@@ -987,6 +987,8 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 // Concrete Suite Bindings
 // ============================================================================
 
+namespace {
+
 struct RenderPerformanceValidationSuite {
     static inline std::unique_ptr<ZHLN::Engine> s_engine;
 
@@ -1060,6 +1062,10 @@ struct RenderPerformanceValidationSuite {
     };
 };
 
+} // namespace
+
+namespace {
+
 struct RenderPerformanceThroughputSuite {
     static inline std::unique_ptr<ZHLN::Engine> s_engine;
 
@@ -1131,23 +1137,8 @@ struct RenderPerformanceThroughputSuite {
     };
 };
 
+} // namespace
+
 // ============================================================================
 // Group Binary Entry Point
 // ============================================================================
-
-// Exported for the GPU_Performance group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunRenderPerformanceSuites() -> ZHLN::Test::TestStats {
-    ZHLN::Test::TestStats total {};
-    {
-        const auto s = ZHLN::Test::RunSuite<RenderPerformanceValidationSuite>();
-        total.passed += s.passed;
-        total.failed += s.failed;
-    }
-    {
-        const auto s = ZHLN::Test::RunSuite<RenderPerformanceThroughputSuite>();
-        total.passed += s.passed;
-        total.failed += s.failed;
-    }
-    return total;
-}

@@ -9,12 +9,11 @@
 #include "Platform.hpp"
 #include "SystemWiring.hpp"
 #include "SceneCleanupSystem.hpp"
-#include "diagnostics/CrashObservers.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Core/Arena.hpp>
+#include <Zahlen/Core/Diagnostics.hpp>
 #include <Zahlen/Core/Trace.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/AssetManager.hpp>
@@ -135,41 +134,42 @@ void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
     }
 }
 
-namespace {
+void Engine::TraceDiagnostics() const noexcept {
+    const auto writeSection = [](std::string_view title) noexcept {
+        auto header = ZHLN::Format("\n{}--- {} STATE ---{}\n", Color::Cyan, title, Color::Reset);
+        Diagnostics::WriteDiagnosticError(header.string_view());
+    };
 
+    writeSection("ENGINE");
+    ZHLN::Trace(*this);
 
-void DumpEngineState(void* context, const SignalEvent& ) noexcept {
-    ZHLN::Trace(*static_cast<Engine*>(context));
-}
+    if (_impl == nullptr || _impl->world == nullptr) {
+        return;
+    }
 
-void DumpCameraState(void* context, const SignalEvent& ) noexcept {
-    // A crash dump is best-effort and must not assert: resolve the camera the
-    // way the frame does, but tolerate a world that has no camera entity.
-    auto&      world   = *static_cast<World*>(context);
+    writeSection("CAMERA DEEP");
+    auto&      world   = *_impl->world;
     const auto camComp = world.GetRegistry().GetSingleton<Components::CameraComponent>();
 
     if (camComp) {
         const Camera& cam     = camComp->camera;
         auto          cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
         auto          cam_dir = ZHLN::Format("  Direction: Yaw: {}, Pitch: {}\n", cam.yaw, cam.pitch);
-        Diagnostics::WriteCrashOutput(cam_pos);
-        Diagnostics::WriteCrashOutput(cam_dir);
+        Diagnostics::WriteDiagnosticError(cam_pos.string_view());
+        Diagnostics::WriteDiagnosticError(cam_dir.string_view());
     } else {
-        Diagnostics::WriteCrashOutput("  (no main camera entity)\n");
+        Diagnostics::WriteDiagnosticError("  (no main camera entity)\n");
     }
 
-    // The planes are derived, not stored: the culling pass keeps its own scratch,
-    // so the dump derives the same planes the pass culled against -- from the
-    // view-projection it used, frozen or not.
-    Frustum      f {};
-    const auto   stats   = world.GetRegistry().GetSingleton<Components::CullingStatsComponent>();
-    const bool   frozen  = stats && stats->stats.FreezeFrustum;
+    Frustum    f {};
+    const auto stats  = world.GetRegistry().GetSingleton<Components::CullingStatsComponent>();
+    const bool frozen = stats && stats->stats.FreezeFrustum;
     if (camComp) {
         f.Update(frozen ? camComp->frozenViewProj : camComp->unjitteredViewProj);
     }
-    auto  frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n", Color::Cyan, Color::Reset);
-    Diagnostics::WriteCrashOutput(frust_hdr);
-    const char* names[] = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
+    auto        frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n", Color::Cyan, Color::Reset);
+    const char* names[]   = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
+    Diagnostics::WriteDiagnosticError(frust_hdr.string_view());
 
     for (int i = 0; i < 6; ++i) {
         const int block     = i / 4;
@@ -177,22 +177,13 @@ void DumpCameraState(void* context, const SignalEvent& ) noexcept {
         auto      plane_str = ZHLN::Format(
             "  Plane {}: [{}x {}y {}z] offset: {}\n", names[i], f.mX[block].mF32[lane], f.mY[block].mF32[lane], f.mZ[block].mF32[lane], f.mW[block].mF32[lane]
         );
-        Diagnostics::WriteCrashOutput(plane_str);
+        Diagnostics::WriteDiagnosticError(plane_str.string_view());
     }
 
     ZHLN::Dump(f);
-}
 
-void DumpPhysicsState(void* context, const SignalEvent& ) noexcept {
-    static_cast<PhysicsContext*>(context)->TraceDiagnostics();
-}
-
-void RegisterCrashObservers(CrashState& state, Engine& engine, World& world) {
-    Diagnostics::RegisterCrashObserver(state, "ENGINE", DumpEngineState, &engine);
-    Diagnostics::RegisterCrashObserver(state, "CAMERA DEEP", DumpCameraState, &world);
-    Diagnostics::RegisterCrashObserver(state, "PHYSICS", DumpPhysicsState, &world.GetPhysics());
-}
-
+    writeSection("PHYSICS");
+    world.GetPhysics().TraceDiagnostics();
 }
 
 Engine::Engine(): _impl(nullptr) {
@@ -293,20 +284,12 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
 
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
-    if (_impl->config.crashState != nullptr) {
-        RegisterCrashObservers(*_impl->config.crashState, *this, *_impl->world);
-    }
-
     return {};
 }
 
 Engine::~Engine() {
     if (_impl == nullptr) {
         return;
-    }
-
-    if (_impl->config.crashState != nullptr) {
-        Diagnostics::ClearCrashObservers(*_impl->config.crashState);
     }
 
     if (_impl->kernel != nullptr && _impl->world != nullptr) {
@@ -332,10 +315,6 @@ auto Engine::IsRunning() const -> bool {
 }
 
 void Engine::ProcessEvents() {
-    if (_impl->config.crashState != nullptr) {
-        ZHLN::CheckForCrashes(*_impl->config.crashState, this);
-    }
-
     auto& reg        = _impl->world->GetRegistry();
     auto  inputState = reg.GetSingleton<Components::InputStateComponent>();
     if (inputState) {
@@ -676,30 +655,28 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     return ctx.status;
 }
 
-auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback, ModuleInstaller installModules)
+auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstaller installModules)
     -> std::expected<void, ErrorCode> {
     Platform::Init();
-    ZHLN::SetupSignalHandler(crashState);
     // Construct before the engine so its destructor (and any cleanup tasks)
     // finishes before the worker threads and fibers are retired.
     TaskSystem::Scope tasks;
 
-    uint32_t w = options.fullscreen ? 0 : 1280;
-    uint32_t h = options.fullscreen ? 0 : 720;
+    uint32_t w = runConfig.fullscreen ? 0 : 1280;
+    uint32_t h = runConfig.fullscreen ? 0 : 720;
 
     EngineConfig config {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
         .render =
             {
-                .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+                .appName        = String64(runConfig.appName),
                 .width          = w,
                 .height         = h,
-                .vsync          = options.vsync,
-                .fullscreen     = options.fullscreen,
-                .validationMode = options.validationMode,
-                .headless       = options.headless,
+                .vsync          = runConfig.vsync,
+                .fullscreen     = runConfig.fullscreen,
+                .validationMode = runConfig.validationMode,
+                .headless       = runConfig.headless,
             },
-        .crashState = &crashState,
     };
 
     auto engine_res = Engine::Create(config);
@@ -723,10 +700,13 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
         engine->SetUICallback(std::move(uiCallback));
     }
 
-    const double targetFrameTime = options.fpsLimit > 0 ? 1.0 / static_cast<double>(options.fpsLimit) : 0.0;
+    const double targetFrameTime = runConfig.fpsLimit > 0 ? 1.0 / static_cast<double>(runConfig.fpsLimit) : 0.0;
     auto         frameStart      = std::chrono::high_resolution_clock::now();
 
     while (engine->IsRunning()) {
+        if (runConfig.onFrameEvents) {
+            runConfig.onFrameEvents(*engine);
+        }
         engine->ProcessEvents();
 
         auto   frameEnd = std::chrono::high_resolution_clock::now();
@@ -744,19 +724,19 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
             }
         }
 
-        constexpr double           kFpsCapSlack = 1.05;
-        const std::optional<float> pacedDt      = engine->GetRenderContext().GetPacedDeltaTime();
-        const bool                 displayPaced = pacedDt.has_value() &&
-                                 (options.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
+        constexpr double           kFpsCapSlack  = 1.05;
+        const std::optional<float> pacedDt       = engine->GetRenderContext().GetPacedDeltaTime();
+        const bool                 displayPaced  = pacedDt.has_value() &&
+                                  (runConfig.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
         float tickDt = displayPaced ? *pacedDt : rawDt;
 
-        GameplayStatus status = engine->Tick(tickDt, options.driver);
+        GameplayStatus status = engine->Tick(tickDt, runConfig.driver);
         if (status == GameplayStatus::RequestQuit) {
             engine->GetPlatformHost().Close();
             break;
         }
 
-        if (options.fpsLimit > 0 && !displayPaced) {
+        if (runConfig.fpsLimit > 0 && !displayPaced) {
             auto   now          = std::chrono::high_resolution_clock::now();
             double frameElapsed = std::chrono::duration<double>(now - frameStart).count();
             if (frameElapsed < targetFrameTime) {

@@ -4,10 +4,8 @@
 #pragma once
 
 #include <Jolt/Jolt.h>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
@@ -26,6 +24,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string_view>
 
 namespace ZHLN {
 
@@ -54,6 +53,18 @@ class EntityCommandBuffer;
 }
 
 class ArticulationSystem;
+class Engine;
+
+struct EngineRunConfig {
+    std::string_view             appName        = "Zahlen Engine";
+    bool                         vsync          = true;
+    bool                         fullscreen     = false;
+    ValidationMode               validationMode = ValidationMode::On;
+    bool                         headless       = false;
+    uint32_t                     fpsLimit       = 0;
+    GameplayDriver               driver         = GameplayDriver::Cpp;
+    std::function<void(Engine&)> onFrameEvents  = nullptr;
+};
 
 class ZHLN_API Engine {
   public:
@@ -229,12 +240,18 @@ class ZHLN_API Engine {
 
     void SeedSceneFontAtlas(ECS::Registry& reg);
 
+    // Best-effort diagnostic snapshot (engine summary, active camera + SIMD
+    // frustum planes, and physics body/contact trace) exposed for caller-owned
+    // crash/signal handlers without exposing Engine internals.
+    void TraceDiagnostics() const noexcept;
+
     // The composition root's install pass, run once the engine exists and before
     // the first scene. It names the modules the engine runs with; the engine
     // cannot name them itself (ARCHITECTURE.md 1.2).
     using ModuleInstaller = void (*)(Engine&);
+    using RunConfig       = EngineRunConfig;
 
-    static auto Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr)
+    static auto Run(const RunConfig& runConfig = {}, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr)
         -> std::expected<void, ErrorCode>;
 
   private:

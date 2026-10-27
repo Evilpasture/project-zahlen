@@ -123,6 +123,8 @@ constexpr int kSize = 128;
 
 } // namespace
 
+namespace {
+
 struct NoiseMetricTestSuite {
     struct Tests {
         // The discriminator: a lattice must read as anisotropic and periodic,
@@ -308,8 +310,4 @@ struct NoiseMetricTestSuite {
     };
 };
 
-// Exported for the core group binary (RunCoreTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunRayTracedNoiseMetricsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<NoiseMetricTestSuite>();
-}
+} // namespace

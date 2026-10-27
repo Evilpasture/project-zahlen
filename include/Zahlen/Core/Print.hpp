@@ -91,4 +91,19 @@ inline void Println(FILE* stream) noexcept {
     Detail::RawWrite(fd, "\n", 1);
 }
 
+namespace Color {
+inline constexpr char Reset[]   = "\033[0m";
+inline constexpr char Bold[]    = "\033[1m";
+inline constexpr char Dim[]     = "\033[2m";
+inline constexpr char Gray[]    = "\033[90m";
+inline constexpr char Cyan[]    = "\033[36m";
+inline constexpr char Yellow[]  = "\033[33m";
+inline constexpr char Green[]   = "\033[32m";
+inline constexpr char Red[]     = "\033[31m";
+inline constexpr char BCyan[]   = "\033[1;36m";
+inline constexpr char BGreen[]  = "\033[1;32m";
+inline constexpr char BYellow[] = "\033[1;33m";
+inline constexpr char BRed[]    = "\033[1;31m";
+} // namespace Color
+
 }

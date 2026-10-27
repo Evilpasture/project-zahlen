@@ -46,6 +46,8 @@ enum class DescriptorHeapsTestError : uint8_t {
     ),
 };
 
+namespace {
+
 struct DescriptorHeapsSuite {
     static constexpr uint32_t kTextureCount = 64;
     static constexpr uint32_t kGridCols     = 8;
@@ -536,9 +538,4 @@ struct DescriptorHeapsSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunDescriptorHeapsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<DescriptorHeapsSuite>();
-}
-
+} // namespace

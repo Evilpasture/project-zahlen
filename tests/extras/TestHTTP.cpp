@@ -105,6 +105,8 @@ struct Echo {
 
 } // namespace
 
+namespace {
+
 struct HTTPTestSuite {
     enum class HTTPTestError : uint8_t {
         ServerUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The suite's loopback server did not come up, so there was nothing to fetch."> {}) = 1,
@@ -664,6 +666,4 @@ struct HTTPTestSuite {
     };
 };
 
-auto RunHTTPSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<HTTPTestSuite>();
-}
+} // namespace

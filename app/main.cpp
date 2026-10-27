@@ -12,11 +12,12 @@
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
@@ -633,7 +634,7 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
     engine.SetPendingUIData(gui.EndFrame());
 }
 
-int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options) {
+int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options, ZHLN::CrashState& crashState) {
     ZHLN::Clock clock;
     // The editor poses the world's camera: a world with no main camera entity has
     // none to pose.
@@ -657,6 +658,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
     while (engine.IsRunning()) {
         float frameTime = clock.GetDeltaTime();
+        ZHLN::CheckForCrashes(crashState, &engine);
         engine.ProcessEvents();
 
         auto& reg   = engine.GetRegistry();
@@ -901,7 +903,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 auto main(int argc, char* argv[]) -> int {
     // Crash diagnostics keep their state in a caller-owned struct; static
     // storage duration is required because its address is copied into the
-    // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
+    // signal handler slots. See <Signal/CrashHandler.hpp>.
     static ZHLN::CrashState crashState;
     s_HostLaunchConfig = {};
 
@@ -994,19 +996,32 @@ auto main(int argc, char* argv[]) -> int {
             engine->GetPlatformHost().Focus();
             engine->InitializeDefaultScene();
 
-            RunWorldEditor(*engine, options);
+            RunWorldEditor(*engine, options, crashState);
             return {};
 #endif
             }
+
+            ZHLN::SetupSignalHandler(crashState);
+            const auto pollCrashes = [](ZHLN::Engine& eng) { ZHLN::CheckForCrashes(crashState, &eng); };
+            const ZHLN::Engine::RunConfig runConfig {
+                .appName        = "Zahlen Engine",
+                .vsync          = options.vsync,
+                .fullscreen     = options.fullscreen,
+                .validationMode = options.validationMode,
+                .headless       = options.headless,
+                .fpsLimit       = options.fpsLimit,
+                .driver         = options.driver,
+                .onFrameEvents  = pollCrashes,
+            };
 
             // Runs the engine game loop and propagates any initialization/runtime Error.
             // The UI callback is the benchmark panel: F3 toggles it, and an app
             // that never presses F3 draws exactly what it drew before (the
             // callback returns without touching the UI frame while hidden).
 #if defined(ZHLN_HAS_BENCHMARK)
-            return ZHLN::Engine::Run(options, crashState, MakeBenchmarkOverlay(), &InstallHostWithState);
+            return ZHLN::Engine::Run(runConfig, MakeBenchmarkOverlay(), &InstallHostWithState);
 #else
-            return ZHLN::Engine::Run(options, crashState, nullptr, &InstallHostWithState);
+            return ZHLN::Engine::Run(runConfig, nullptr, &InstallHostWithState);
 #endif
         })
         .transform([]() -> int {

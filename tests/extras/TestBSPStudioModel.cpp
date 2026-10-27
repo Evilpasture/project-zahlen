@@ -307,6 +307,8 @@ auto BuildSyntheticPHY(int32_t checksum, int32_t solidCount = 1) -> std::vector<
 
 } // namespace
 
+namespace {
+
 struct BSPStudioModelTestSuite {
     struct Tests {
         auto studiomodel_header_parsing() -> std::expected<void, std::string> {
@@ -502,48 +504,4 @@ struct BSPStudioModelTestSuite {
     };
 };
 
-auto RunBSPStudioModelSuite() -> ZHLN::Test::TestStats {
-    constexpr std::string_view suiteName = "BSPStudioModelTestSuite";
-    const char* const          filterEnv = std::getenv("ZHLN_TEST_FILTER");
-    const std::string_view     filter    = filterEnv != nullptr ? std::string_view {filterEnv} : std::string_view {};
-    if (const auto sep = filter.find("::"); sep != std::string_view::npos && filter.substr(0, sep) != suiteName) {
-        return {};
-    }
-
-    BSPStudioModelTestSuite::Tests suite;
-    uint32_t                       passed = 0;
-    uint32_t                       failed = 0;
-
-    auto runTest = [&](std::string_view testName, auto testFunc) {
-        if (!filter.empty() && filter != suiteName && filter != testName && filter != "BSPStudioModelTestSuite::*" &&
-            filter != std::format("{}::{}", suiteName, testName)) {
-            return;
-        }
-        ZHLN::Println("\033[32m[ RUN      ]\033[0m {}", testName);
-        auto res = testFunc();
-        if (res.has_value()) {
-            ZHLN::Println("\033[32m[       OK ]\033[0m {}", testName);
-            passed++;
-        } else {
-            ZHLN::Println("\033[31m[  FAILED  ]\033[0m {}", testName);
-            failed++;
-        }
-    };
-
-    ZHLN::Println("\033[36m==================================================\033[0m");
-    ZHLN::Println("\033[36mRunning Test Suite: BSPStudioModelTestSuite\033[0m");
-    ZHLN::Println("\033[36m==================================================\033[0m");
-
-    runTest("studiomodel_header_parsing", [&] { return suite.studiomodel_header_parsing(); });
-    runTest("checksum_mismatch_detection", [&] { return suite.checksum_mismatch_detection(); });
-    runTest("vvd_fixup_table_lod", [&] { return suite.vvd_fixup_table_lod(); });
-    runTest("vtx_strip_groups_and_indices", [&] { return suite.vtx_strip_groups_and_indices(); });
-    runTest("phy_collision_parsing", [&] { return suite.phy_collision_parsing(); });
-    runTest("end_to_end_studiomodel_assembly", [&] { return suite.end_to_end_studiomodel_assembly(); });
-
-    ZHLN::Println("--------------------------------------------------");
-    ZHLN::Println("Summary for BSPStudioModelTestSuite: {} Passed, {} Failed", passed, failed);
-    ZHLN::Println("==================================================");
-
-    return {.passed = passed, .failed = failed};
-}
+} // namespace

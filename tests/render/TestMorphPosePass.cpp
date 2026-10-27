@@ -89,6 +89,8 @@ enum class MorphPosePassTestError : uint8_t {
     IdleMorphWeightsChanged ZHLN_ANNOTATION(ZHLN::Description<"An idle animator changed the authored default morph weights during settle frames."> {}),
 };
 
+namespace {
+
 struct MorphPosePassSuite {
     // Morph targets per part. The pose pass clamps a node's channel to four;
     // two is enough to prove per-target weights are not crossed.
@@ -567,8 +569,4 @@ struct MorphPosePassSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunMorphPosePassSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<MorphPosePassSuite>();
-}
+} // namespace

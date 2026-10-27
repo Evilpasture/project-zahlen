@@ -22,9 +22,9 @@
 #include "TestsFramework.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Camera.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/FramePlan.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
@@ -348,13 +348,35 @@ inline void EndSession() {
     }
 }
 
-// RAII form for a group binary's main.
-struct SessionScope {
+// RAII form for a group binary's main, and SessionFixture for DI consumers.
+struct ZHLN_ANNOTATION(ZHLN::Test::SessionFixture {}) SessionScope {
     explicit SessionScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32) { BeginSession(workerThreads, maxFibers); }
     ~SessionScope() { EndSession(); }
 
     SessionScope(const SessionScope&)                    = delete;
     auto operator=(const SessionScope&) -> SessionScope& = delete;
+};
+
+// Per-test headless Vulkan engine handle backed by the process-wide pool:
+// resets the scene and default camera on entry without recreating VkDevice.
+class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
+  public:
+    explicit PooledEngine(SessionScope&) : _handle(AcquireEngine()) {}
+    ~PooledEngine() = default;
+
+    PooledEngine(const PooledEngine&)            = delete;
+    PooledEngine& operator=(const PooledEngine&) = delete;
+    PooledEngine(PooledEngine&&)                 = delete;
+    PooledEngine& operator=(PooledEngine&&)      = delete;
+
+    [[nodiscard]] auto Get() const noexcept -> ZHLN::Engine* { return _handle.get(); }
+    [[nodiscard]] auto Handle() const noexcept -> EngineHandle { return _handle; }
+    auto               operator->() const noexcept -> ZHLN::Engine* { return _handle.get(); }
+    auto               operator*() const noexcept -> ZHLN::Engine& { return *_handle; }
+    explicit           operator bool() const noexcept { return static_cast<bool>(_handle); }
+
+  private:
+    EngineHandle _handle;
 };
 
 // Turns off TAA and zeroes the jitter history.

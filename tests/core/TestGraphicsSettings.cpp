@@ -81,6 +81,8 @@ struct BlitStyle {
 
 } // namespace
 
+namespace {
+
 struct GraphicsSettingsSuite {
     GraphicsSettingsSuite() {
         // Suites mirror the framework layout used by TestECS: stateless setup,
@@ -346,8 +348,4 @@ struct GraphicsSettingsSuite {
     };
 };
 
-// Exported for the core group binary (RunCoreTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunGraphicsSettingsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<GraphicsSettingsSuite>();
-}
+} // namespace

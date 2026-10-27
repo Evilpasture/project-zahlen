@@ -179,32 +179,38 @@ endif()
 In your game's source folder, create `src/main.cpp` or anything you want. The engine provides a high-level, framework-like `ZHLN::Engine::Run` method that manages process initialization, engine setup, the synchronized 12-step frame loop, and command-line flags (such as `--editor` or `--fps-limit`):
 
 ```cpp
-#include <Zahlen/CommandLine.hpp>
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <span>
 
 int main(int argc, char* argv[]) {
+    static ZHLN::CrashState crashState;
+    ZHLN::SetupSignalHandler(crashState);
+
     return ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
         .transform_error([](ZHLN::ErrorCode code) -> int {
-            // ErrorCode carries the category and the value; promote to Error
-            // where somebody actually reads the text.
             ZHLN::Log("CommandLine Error: {}", ZHLN::Error(code).Message());
             return EXIT_FAILURE;
         })
         .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<int, int> {
             if (options.helpRequested || options.versionRequested || options.printGraphRequested) {
-                return 0; // Clean exit for CLI queries
+                return 0;
             }
 
             ZHLN::SetLogLevel(options.logLevel);
-
-            // ZHLN::Engine::Run automatically manages:
-            // 1. Engine creation & window setup
-            // 2. Branching to WorldEditor if --editor is passed
-            // 3. Loading & hot-reloading libgameplay.so / gameplay.dll via NativeScriptModule
-            // 4. Executing the 12-step synchronized frame pipeline
-            return ZHLN::Engine::Run(options);
+            const auto pollCrashes = [](ZHLN::Engine& eng) { ZHLN::CheckForCrashes(crashState, &eng); };
+            const auto ran = ZHLN::Engine::Run(ZHLN::Engine::RunConfig {
+                .vsync          = options.vsync,
+                .fullscreen     = options.fullscreen,
+                .validationMode = options.validationMode,
+                .headless       = options.headless,
+                .fpsLimit       = options.fpsLimit,
+                .driver         = options.driver,
+                .onFrameEvents  = pollCrashes,
+            });
+            return ran ? std::expected<int, int> {0} : std::unexpected(EXIT_FAILURE);
         })
         .or_else([](int errorCode) -> std::expected<int, int> { return errorCode; })
         .value();
@@ -217,8 +223,8 @@ Your gameplay logic must implement the `NativeGameplayUpdate` hook, which is dyn
 Create `gameplay/gameplay.cpp` or whatever the hell you want:
 
 ```cpp
-#include <Zahlen/CommandLine.hpp> // GameplayStatus
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/FramePlan.hpp> // GameplayStatus
 
 #if defined(_WIN32)
 #define GAMEPLAY_API extern "C" __declspec(dllexport)

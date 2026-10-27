@@ -33,10 +33,11 @@
 // error. See scripts/run_fidelity.sh for the driver that feeds it the Khronos
 // scenario set and compares the frames against the reference goldens.
 
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Geometry2D.hpp>
@@ -715,7 +716,7 @@ auto main(int argc, char* argv[]) -> int {
 
     // Crash diagnostics keep their state in a caller-owned struct; static
     // storage duration is required because its address is copied into the
-    // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
+    // signal handler slots. See <Signal/CrashHandler.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
@@ -860,6 +861,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Clock clock;
     for (int frame = 0; frame < 8 && engine->IsRunning(); ++frame) {
         const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
         // The camera is authored once; a re-apply keeps it pinned through the
         // settle ticks in case a system resets the view on the first frames.

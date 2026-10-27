@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <cstdint>
@@ -24,9 +23,9 @@ enum class Signal : uint32_t {
 };
 
 struct SignalEvent {
-    Signal   signal        = Signal::Interrupt;
-    void*    faultAddress  = nullptr;
-    uint64_t threadId      = 0;
+    Signal   signal       = Signal::Interrupt;
+    void*    faultAddress = nullptr;
+    uint64_t threadId     = 0;
 };
 
-}
+} // namespace ZHLN

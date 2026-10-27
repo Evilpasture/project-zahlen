@@ -3,7 +3,6 @@
 
 #pragma once
 #include <Zahlen/Common.h>
-#include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Core/Diagnostics.hpp>
 #include <bit>
@@ -197,8 +196,7 @@ struct RenderConfig {
 struct EngineConfig {
     PhysicsConfig physics;
     RenderConfig  render;
-    bool enableFallbackScene = true;
-    CrashState* crashState = nullptr;
+    bool          enableFallbackScene = true;
 };
 
 }

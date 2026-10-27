@@ -1,20 +1,22 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Signal/SignalManager.hpp>
 #include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/Core/SignalManager.hpp>
+#include <array>
 #include <atomic>
 #include <csignal>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 
 #ifndef _WIN32
-#include <pthread.h>
-#include <unistd.h>
-#if defined(__linux__)
-#include <sys/syscall.h>
-#endif
+    #include <pthread.h>
+    #include <unistd.h>
+    #if defined(__linux__)
+        #include <sys/syscall.h>
+    #endif
 #endif
 
 namespace ZHLN {
@@ -52,7 +54,9 @@ auto CurrentNativeThreadId() noexcept -> uint64_t {
 
 #ifndef _WIN32
 
-constexpr std::array kPosixSignals = {SIGINT, SIGTERM, SIGQUIT, SIGUSR1, SIGUSR2, SIGSEGV, SIGILL, SIGFPE, SIGBUS, SIGABRT};
+constexpr std::array kPosixSignals = {
+    SIGINT, SIGTERM, SIGQUIT, SIGUSR1, SIGUSR2, SIGSEGV, SIGILL, SIGFPE, SIGBUS, SIGABRT
+};
 
 auto FromNative(int sig) noexcept -> Signal {
     switch (sig) {
@@ -99,8 +103,8 @@ auto IsKnownNative(int sig) noexcept -> bool {
     }
 }
 
-std::array<struct sigaction, sizeof(kPosixSignals) / sizeof(kPosixSignals[0])> s_previous {};
-std::array<bool, sizeof(kPosixSignals) / sizeof(kPosixSignals[0])>             s_havePrevious {};
+std::array<struct sigaction, kPosixSignals.size()> s_previous {};
+std::array<bool, kPosixSignals.size()>             s_havePrevious {};
 
 void PosixHandler(int sig, siginfo_t* info, void* /*unused*/) {
     if (!IsKnownNative(sig)) {
@@ -208,7 +212,7 @@ void SignalManager::Install() noexcept {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_SIGINFO;
 
-    for (size_t i = 0; i < sizeof(kPosixSignals) / sizeof(kPosixSignals[0]); ++i) {
+    for (size_t i = 0; i < kPosixSignals.size(); ++i) {
         s_havePrevious[i] = sigaction(kPosixSignals[i], &sa, &s_previous[i]) == 0;
     }
 #endif
@@ -232,7 +236,7 @@ void SignalManager::Uninstall() noexcept {
     }
     std::signal(SIGABRT, SIG_DFL);
 #else
-    for (size_t i = 0; i < sizeof(kPosixSignals) / sizeof(kPosixSignals[0]); ++i) {
+    for (size_t i = 0; i < kPosixSignals.size(); ++i) {
         if (s_havePrevious[i]) {
             sigaction(kPosixSignals[i], &s_previous[i], nullptr);
             s_havePrevious[i] = false;

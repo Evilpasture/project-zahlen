@@ -150,7 +150,7 @@ never committed:
 ```sh
 cmake -DZHLN_FETCH_SAMPLE_ASSETS=ON ...   # shallow clone into build/sample-assets/
 # or: git clone --depth 1 https://github.com/KhronosGroup/glTF-Sample-Assets.git <dir>
-#     ZHLN_SAMPLE_ASSETS=<dir> ctest -R GPU_Pipeline
+#     ZHLN_SAMPLE_ASSETS=<dir> ./build/ztest GPU_Pipeline
 ```
 
 Resolution order is `$ZHLN_SAMPLE_ASSETS`, then the configured default;

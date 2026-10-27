@@ -177,6 +177,8 @@ void WriteDiffImage(std::string_view path, const Image& a, const Image& b) {
 // Test Suite
 // ============================================================================
 
+namespace {
+
 struct MeshShaderTestSuite {
     MeshShaderTestSuite() {
         // Two-phase GPU culling is disabled process-wide (before any device
@@ -956,9 +958,4 @@ struct MeshShaderTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunMeshShaderSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<MeshShaderTestSuite>();
-}
-
+} // namespace

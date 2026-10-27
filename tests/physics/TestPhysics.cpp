@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/CommonFixtures.hpp"
 
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -29,47 +30,28 @@ enum class PhysicsTestError : uint32_t {
     LockFreeConcurrencyFailed ZHLN_ANNOTATION(ZHLN::Description<"Concurrent ping-pong transform reads or mailbox commands failed during Step.">{}),
 };
 
-struct PhysicsTestSuite {
-    PhysicsTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+namespace ZHLN::Test {
+namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
-        JPH::RegisterDefaultAllocator();
-        if (JPH::Factory::sInstance == nullptr) {
-            JPH::Factory::sInstance = new JPH::Factory();
-            JPH::RegisterTypes();
-        }
-    }
-
-    ~PhysicsTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
-        JPH::UnregisterTypes();
-        if (JPH::Factory::sInstance != nullptr) {
-            delete JPH::Factory::sInstance;
-            JPH::Factory::sInstance = nullptr;
-        }
-    }
-
-    struct Tests {
-        std::expected<void, ZHLN::ErrorCode> rigid_body_raycast_and_overlap() {
+        std::expected<void, ZHLN::ErrorCode> test_rigid_body_raycast_and_overlap() {
             ZHLN::PhysicsConfig  cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
             // Create static ground box at (0, 0, 0) with half-extents (10, 1, 10)
             auto         boxShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 10.0f, 1.0f, 10.0f);
             ZHLN::Physics::BodyHandle ground = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
-            ZHLN::Test::ExpectTrue(ground != ZHLN::Physics::BodyHandle::Null());
+            ZHLN::Test::Expect(ground) != ZHLN::Physics::BodyHandle::Null();
 
             pc.OptimizeBroadphase();
 
             // 1. Raycast downwards from (0, 10, 0) -> (0, -1, 0)
             auto hit = pc.Raycast(JPH::RVec3(0, 10, 0), JPH::Vec3(0, -1, 0), 20.0f);
-            ZHLN::Test::ExpectTrue(hit.hasHit);
-            ZHLN::Test::ExpectEq(hit.handle.Pack(), ground.Pack());
+            ZHLN::Test::Expect(hit.hasHit);
+            ZHLN::Test::Expect(hit.handle.Pack()) == ground.Pack();
 
             // Ground box top surface is at Y = 1.0
-            ZHLN::Test::ExpectLt(std::abs(hit.position.GetY() - 1.0f), 0.05f);
-            ZHLN::Test::ExpectGt(hit.normal.GetY(), 0.9f);
+            ZHLN::Test::Expect(hit.position.GetY()) == ZHLN::Test::Approx(1.0f, 0.05f);
+            ZHLN::Test::Expect(hit.normal.GetY()) > 0.9f;
 
             // 2. Sphere overlap at (0, 0, 0)
             JPH::Array<ZHLN::Physics::BodyHandle> overlapResults;
@@ -79,7 +61,7 @@ struct PhysicsTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> dynamic_body_simulation_step() {
+        std::expected<void, ZHLN::ErrorCode> test_dynamic_body_simulation_step() {
             ZHLN::PhysicsConfig  cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
@@ -124,7 +106,7 @@ struct PhysicsTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> explicit_body_detach_and_batched_destruction() {
+        std::expected<void, ZHLN::ErrorCode> test_explicit_body_detach_and_batched_destruction() {
             using Body = ZHLN::Components::PhysicsComponent;
             using Handle = ZHLN::Physics::BodyHandle;
             ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
@@ -178,7 +160,7 @@ struct PhysicsTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> ragdoll_handles_are_released_explicitly() {
+        std::expected<void, ZHLN::ErrorCode> test_ragdoll_handles_are_released_explicitly() {
             ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
             ZHLN::ECS::Registry registry;
@@ -216,7 +198,7 @@ struct PhysicsTestSuite {
         // address and which stays null until a Step's sync pass runs. The
         // handle's generation must also be validated so a stale handle cannot
         // resolve to a slot's new occupant.
-        std::expected<void, ZHLN::ErrorCode> is_body_dynamic_reports_motion_type_and_rejects_stale_handles() {
+        std::expected<void, ZHLN::ErrorCode> test_is_body_dynamic_reports_motion_type_and_rejects_stale_handles() {
             ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
@@ -252,7 +234,7 @@ struct PhysicsTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> parallel_characters_and_concurrent_state_queries() {
+        std::expected<void, ZHLN::ErrorCode> test_parallel_characters_and_concurrent_state_queries() {
             ZHLN::PhysicsConfig  cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
@@ -303,7 +285,7 @@ struct PhysicsTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> lock_free_ping_pong_reads_and_concurrent_command_mailbox() {
+        std::expected<void, ZHLN::ErrorCode> test_lock_free_ping_pong_reads_and_concurrent_command_mailbox() {
             ZHLN::PhysicsConfig  cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
@@ -418,12 +400,6 @@ struct PhysicsTestSuite {
 
             return {};
         }
-    };
-};
 
-// Exported for the physics group binary (RunPhysicsTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunPhysicsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<PhysicsTestSuite>();
-}
-
+} // namespace
+} // namespace ZHLN::Test

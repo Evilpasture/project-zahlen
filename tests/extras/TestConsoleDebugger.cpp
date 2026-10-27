@@ -43,6 +43,8 @@ auto JoinedLogs(const ZHLN::GameConsole& console) -> std::string {
 
 } // namespace
 
+namespace {
+
 struct ConsoleDebuggerTestSuite {
     ConsoleDebuggerTestSuite() {
         ZHLN::ScriptBinder::Get().classes.clear();
@@ -230,6 +232,4 @@ struct ConsoleDebuggerTestSuite {
     };
 };
 
-auto RunConsoleDebuggerSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ConsoleDebuggerTestSuite>();
-}
+} // namespace

@@ -428,8 +428,3 @@ struct OptionalTestSuite {
 };
 
 } // namespace
-
-// Exported for the existing CPU_Core group; this translation unit has no main.
-auto RunOptionalSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<OptionalTestSuite>();
-}

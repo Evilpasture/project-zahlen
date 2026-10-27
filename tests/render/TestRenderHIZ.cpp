@@ -30,6 +30,8 @@ enum class HiZTestError : uint32_t {
     DynamicResizeFailed ZHLN_ANNOTATION(ZHLN::Description<"Rebuilding the Hi-Z pyramid upon viewport resize resulted in invalid targets or views.">{}),
 };
 
+namespace {
+
 struct HiZTestSuite {
     HiZTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -263,9 +265,4 @@ struct HiZTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunHiZSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<HiZTestSuite>();
-}
-
+} // namespace

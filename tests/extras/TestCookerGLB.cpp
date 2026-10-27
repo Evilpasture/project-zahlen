@@ -25,33 +25,18 @@
 
 namespace fs = std::filesystem;
 
-struct CookerGlbTestSuite {
-    CookerGlbTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(kWorkerThreadCount, kFiberCount, kFiberStackSize);
-    }
+namespace ZHLN::Test {
+namespace {
 
-    ~CookerGlbTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
-    }
-
-    CookerGlbTestSuite(const CookerGlbTestSuite&)                = delete;
-    CookerGlbTestSuite& operator=(const CookerGlbTestSuite&)     = delete;
-    CookerGlbTestSuite(CookerGlbTestSuite&&) noexcept            = delete;
-    CookerGlbTestSuite& operator=(CookerGlbTestSuite&&) noexcept = delete;
-
-    struct Tests {
-        // --- 6. Offline GLB Container Generation (zcook glb) ---
-        std::expected<void, ZHLN::ErrorCode> offline_glb_container_generation() {
-            fs::path zcook = FindZcookExecutable();
-            if (zcook.empty()) {
+// --- Offline GLB Container Generation (zcook glb) ---
+std::expected<void, ZHLN::ErrorCode> test_offline_glb_container_generation(CookerFixture& cooker) {
+            if (cooker.zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);
             }
 
-            TempSandbox sandbox("cook_glb");
-            fs::path    metaPath    = sandbox.SubPath("metadata.bin");
-            fs::path    geomBinPath = sandbox.SubPath("cube_geom.bin");
-            fs::path    outGlb      = sandbox.SubPath("level.glb");
+            fs::path metaPath    = cooker.SubPath("metadata.bin");
+            fs::path geomBinPath = cooker.SubPath("cube_geom.bin");
+            fs::path outGlb      = cooker.SubPath("level.glb");
 
             std::vector<float> rawFloats = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f,
                                             1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f,
@@ -99,8 +84,8 @@ struct CookerGlbTestSuite {
             }
 
             std::string args     = std::format(R"(glb --meta "{}" -o "{}")", metaPath.string(), outGlb.string());
-            int         exitCode = RunZcook(zcook, args);
-            ZHLN::Test::ExpectEq(exitCode, 0);
+            int         exitCode = cooker.Run(args);
+            ZHLN::Test::Expect(exitCode) == 0;
 
             if (exitCode != 0) {
                 return std::unexpected(CookerTestError::GLBEmissionFailed);
@@ -144,9 +129,6 @@ struct CookerGlbTestSuite {
 
             return {};
         }
-    };
-};
 
-auto RunCookerGlbSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<CookerGlbTestSuite>();
-}
+} // namespace
+} // namespace ZHLN::Test

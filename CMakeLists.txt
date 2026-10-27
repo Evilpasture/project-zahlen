@@ -246,10 +246,10 @@ target_compile_definitions(
           JPH_SHARED_LIBRARY)
 
 set_source_files_properties(
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/CommandLine.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/EngineGlobals.cpp
   PROPERTIES SKIP_PRECOMPILE_HEADERS ON
              COMPILE_DEFINITIONS
-             "ZHLN_GIT_COMMIT_HASH=\"${ZHLN_GIT_HASH}\";ZHLN_COMPILER_FLAGS=\"${COMPILER_FLAGS_LIST}\";ZHLN_META_BUILDER=\"CMake ${CMAKE_VERSION}\";ZHLN_BUILD_TOOL=\"${CMAKE_GENERATOR}\";ZHLN_TARGET_TRIPLE=\"${ZHLN_TARGET_TRIPLE}\";ZHLN_LINKER_NAME=\"${ZHLN_LINKER}\"")
+             "ZHLN_GIT_COMMIT_HASH=\"${ZHLN_GIT_HASH}\"")
 
 # Bloomberg clang-p2996's PCH ASTReader crashes when deserializing P2996
 # reflection expressions inside variable-template initializers; keep PCH on GCC.
@@ -398,8 +398,11 @@ if(WIN32)
     target_compile_options(zahlen_engine PRIVATE -Wno-unknown-pragmas -D_CRT_SECURE_NO_WARNINGS)
 endif()
 
+add_subdirectory(extensions/Signal)
+add_subdirectory(extensions/CommandLine)
+
 add_executable(zahlen app/main.cpp)
-target_link_libraries(zahlen PRIVATE zahlen_engine Jolt)
+target_link_libraries(zahlen PRIVATE zahlen_engine zahlen_engine_cli zahlen_signal Jolt)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
 # The engine's DLL is written next to it; Jolt's is not, and PE has no rpath to
@@ -419,6 +422,7 @@ if(ZHLN_BUILD_EXTRAS)
     # add_subdirectory(extensions) further down: a link item resolves to its
     # target by generate time, whatever the order here.
     target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine
+                          zahlen_engine_cli zahlen_signal
                           zahlen_widgets Jolt)
     target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
 
@@ -467,7 +471,9 @@ zahlen_enable_reflection(zahlen_gui)
 zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen_filesystem)
 zahlen_enable_reflection(zahlen)
-zahlen_enable_reflection(zahlen_ui_editor)
+if(TARGET zahlen_ui_editor)
+    zahlen_enable_reflection(zahlen_ui_editor)
+endif()
 zahlen_enable_reflection(zcook)
 
 if(ZHLN_BUILD_RENDER)
@@ -611,6 +617,8 @@ if(ZHLN_BUILD_EXTRAS)
         target_compile_definitions(zahlen_project_light_app PRIVATE JPH_DOUBLE_PRECISION)
         target_link_libraries(zahlen_project_light_app PRIVATE
       zahlen_engine
+      zahlen_engine_cli
+      zahlen_signal
       Jolt
       zahlen_project_light_client
       zahlen_character_controller
@@ -627,8 +635,9 @@ if(ZHLN_BUILD_EXTRAS)
 endif()
 
 if(ZHLN_BUILD_TESTS)
-    enable_testing()
+    include(cmake/ZTest.cmake)
     add_subdirectory(tests)
+    zahlen_finalize_ztest_manifest()
 endif()
 
 if(ZHLN_BUILD_SAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/samples")

@@ -265,7 +265,3 @@ struct ScriptValueTypesTestSuite {
 };
 
 } // namespace
-
-auto RunScriptValueTypesSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ScriptValueTypesTestSuite>();
-}

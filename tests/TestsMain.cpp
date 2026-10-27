@@ -3,8 +3,6 @@
 
 #include "TestsFramework.hpp"
 
-auto RunRadianceSuite() -> ZHLN::Test::TestStats;
-
-auto main() -> int {
-    return ZHLN::Test::Runner::RunDeferred(RunRadianceSuite);
+auto main(int argc, char** argv) -> int {
+    return ZHLN::Test::Runner::Main(argc, argv);
 }

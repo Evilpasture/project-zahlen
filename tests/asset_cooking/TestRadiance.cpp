@@ -151,6 +151,8 @@ struct RadianceFixture {
 
 } // namespace
 
+namespace {
+
 struct RadianceTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> flat_rgbe_decodes_top_down() {
@@ -458,6 +460,4 @@ struct RadianceTestSuite {
     };
 };
 
-auto RunRadianceSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<RadianceTestSuite>();
-}
+} // namespace

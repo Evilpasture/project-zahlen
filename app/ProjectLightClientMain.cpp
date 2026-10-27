@@ -8,16 +8,18 @@
 #include <ProjectLightClient/ClientConfig.hpp>
 #include <CharacterController/CharacterController.hpp>
 #include <Camera/TargetCamera.hpp>
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
 
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <format>
-#include <iostream>
+#include <print>
 #include <span>
 #include <string>
 #include <string_view>
@@ -43,7 +45,7 @@ void InstallProjectLightExtensions(ZHLN::Engine& engine) {
 }
 
 void PrintConfigError(std::string_view message) {
-    std::cerr << "project-light client: " << message << '\n';
+    std::println(stderr, "project-light client: {}", message);
 }
 
 } // namespace
@@ -101,9 +103,21 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     static ZHLN::CrashState crashState;
-    auto run = ZHLN::Engine::Run(*options, crashState, nullptr, &InstallProjectLightExtensions);
+    ZHLN::SetupSignalHandler(crashState);
+    const auto pollCrashes = [](ZHLN::Engine& eng) { ZHLN::CheckForCrashes(crashState, &eng); };
+    const ZHLN::Engine::RunConfig runConfig {
+        .appName        = "Project Light Client",
+        .vsync          = options->vsync,
+        .fullscreen     = options->fullscreen,
+        .validationMode = options->validationMode,
+        .headless       = options->headless,
+        .fpsLimit       = options->fpsLimit,
+        .driver         = options->driver,
+        .onFrameEvents  = pollCrashes,
+    };
+    auto run = ZHLN::Engine::Run(runConfig, nullptr, &InstallProjectLightExtensions);
     if (!run) {
-        std::cerr << "Fatal project-light client error: " << run.error().ToError().Message() << '\n';
+        std::println(stderr, "Fatal project-light client error: {}", run.error().ToError().Message());
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;

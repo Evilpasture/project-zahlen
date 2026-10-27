@@ -143,6 +143,8 @@ void LogRegion(std::string_view name, const RegionStats& s) {
 
 } // namespace
 
+namespace {
+
 struct RTRPBRReflectionTestSuite {
     RTRPBRReflectionTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -683,9 +685,4 @@ struct RTRPBRReflectionTestSuite {
     };
 };
 
-// Exported for the GPU_Lighting group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunRTRPBRReflectionSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<RTRPBRReflectionTestSuite>();
-}
-
+} // namespace

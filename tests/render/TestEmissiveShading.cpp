@@ -227,6 +227,8 @@ struct UnlitMeasurement {
 
 } // namespace
 
+namespace {
+
 struct EmissiveShadingTestSuite {
     EmissiveShadingTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -416,7 +418,4 @@ struct EmissiveShadingTestSuite {
     };
 };
 
-// Exported for the GPU_Lighting group binary.
-auto RunEmissiveShadingSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<EmissiveShadingTestSuite>();
-}
+} // namespace

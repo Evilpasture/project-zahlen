@@ -1065,12 +1065,10 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
     // viewer only has to be the thing its UI phase calls. The options are the
     // defaults (windowed, vsync, validation on) because the CLI is the host's
     // to parse, not the tool's -- see the header.
-    ZHLN::CommandLineOptions options {};
-    options.driver = ZHLN::GameplayDriver::Cpp;
-
-    // Static storage duration is required: the crash handler keeps the address
-    // of this struct in its signal slots. See <Zahlen/Core/CrashState.hpp>.
-    static ZHLN::CrashState crashState;
+    const ZHLN::Engine::RunConfig runConfig {
+        .appName = "Zahlen Benchmark Viewer",
+        .driver  = ZHLN::GameplayDriver::Cpp,
+    };
 
     BenchmarkViewer* self = this;
     ZHLN::Clock      uiClock;
@@ -1078,8 +1076,10 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
     m_impl->visible          = true;
     m_impl->telemetryVisible = true; // the standalone tool is the window for both panels
 
-    auto ran =
-        ZHLN::Engine::Run(options, crashState, [self, &uiClock](ZHLN::Engine& engine) -> void { self->UpdateAndRenderUI(engine, uiClock.GetDeltaTime()); });
+    auto ran = ZHLN::Engine::Run(
+        runConfig,
+        [self, &uiClock](ZHLN::Engine& engine) -> void { self->UpdateAndRenderUI(engine, uiClock.GetDeltaTime()); }
+    );
 
     // The engine is gone, and with it the scheduler the benchmark's World waits
     // on at teardown (see the lifetime note in the header). Release the

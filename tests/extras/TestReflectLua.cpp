@@ -404,7 +404,3 @@ struct ReflectLuaSuite {
 };
 
 } // namespace
-
-auto RunReflectLuaSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ReflectLuaSuite>();
-}

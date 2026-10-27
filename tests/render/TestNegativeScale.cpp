@@ -227,6 +227,8 @@ const std::array<JPH::Vec3, 5> kCenters {
 
 } // namespace
 
+namespace {
+
 struct NegativeScaleTestSuite {
     NegativeScaleTestSuite() { ZHLN::Test::Headless::BeginSession(); }
     ~NegativeScaleTestSuite() { ZHLN::Test::Headless::EndSession(); }
@@ -247,6 +249,4 @@ struct NegativeScaleTestSuite {
     };
 };
 
-auto RunNegativeScaleSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<NegativeScaleTestSuite>();
-}
+} // namespace

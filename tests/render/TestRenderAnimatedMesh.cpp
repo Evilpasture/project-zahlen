@@ -49,6 +49,8 @@ enum class AnimatedMeshTestError : uint8_t {
     MissingEmissiveGlow ZHLN_ANNOTATION(ZHLN::Description<"Automated pixel analysis detected zero emissive purple pixels.">{}),
 };
 
+namespace {
+
 struct RenderAnimatedMeshTestSuite {
     RenderAnimatedMeshTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -201,9 +203,4 @@ struct RenderAnimatedMeshTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunRenderAnimatedMeshSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<RenderAnimatedMeshTestSuite>();
-}
-
+} // namespace

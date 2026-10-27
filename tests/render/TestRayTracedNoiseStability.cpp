@@ -61,6 +61,8 @@ constexpr double kChangeThreshold = 2.0;
 
 } // namespace
 
+namespace {
+
 struct RayTracedNoiseStabilityTestSuite {
     RayTracedNoiseStabilityTestSuite() {
         ZHLN::Test::Headless::BeginSession();
@@ -367,8 +369,4 @@ struct RayTracedNoiseStabilityTestSuite {
     };
 };
 
-// Exported for the GPU_Lighting group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunRayTracedNoiseStabilitySuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<RayTracedNoiseStabilityTestSuite>();
-}
+} // namespace

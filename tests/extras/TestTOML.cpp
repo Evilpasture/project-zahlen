@@ -71,6 +71,8 @@ struct Config {
 
 } // namespace
 
+namespace {
+
 struct TOMLTestSuite {
     struct Tests {
         // ====================================================================
@@ -755,6 +757,4 @@ onClickAction = "editor.save_scene"
     };
 };
 
-auto RunTOMLSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<TOMLTestSuite>();
-}
+} // namespace

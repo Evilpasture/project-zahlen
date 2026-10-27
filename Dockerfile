@@ -47,7 +47,7 @@ ENV CMAKE_PREFIX_PATH="/opt/vulkansdk/x86_64"
 
 # CI deliberately uses the system Lavapipe and validation layer packages.
 # CMake disables the checked-in Arch-built sandbox in ZHLN_IN_DOCKER mode,
-# leaving these environment variables as the source of truth for CTest.
+# leaving these environment variables as the source of truth for ztest.
 ENV VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 ENV VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d
@@ -63,12 +63,12 @@ RUN cmake -B build -S . -G Ninja \
     -DUSE_SANITIZERS=ON \
     -DZHLN_IN_DOCKER=ON
 
-# 2. Build everything (Engine, Asset Cooker, and Test Executables)
+# 2. Build everything (Engine, Asset Cooker, ztest, and Test Executables)
 RUN cmake --build build
 
 # 3. RUN THE TESTS
 # If any test fails, Docker build fails and stops the CI pipeline immediately!
-RUN ctest --test-dir build --output-on-failure -V
+RUN ./build/ztest --test-dir build -V
 
 # 4. Collect the runtime payload: the binaries, the cooked asset pak and the
 #    script tree the engine loads.

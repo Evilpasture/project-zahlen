@@ -13,6 +13,13 @@
 # Benchmark is last and depends on none of them: it links core and nothing
 # else, and its Viewer sub-target links the headless half, which is why one
 # add_subdirectory() covers both targets.
+if(NOT TARGET zahlen_signal)
+    add_subdirectory(Signal)
+endif()
+if(NOT TARGET zahlen_command_line)
+    add_subdirectory(CommandLine)
+endif()
+
 add_subdirectory(FreeCam)
 add_subdirectory(CharacterController)
 add_subdirectory(Camera)

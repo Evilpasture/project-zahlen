@@ -6,6 +6,8 @@
 #include <expected>
 #include <limits>
 
+namespace {
+
 struct AudioTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> audio_event_defaults_and_payload() {
@@ -86,9 +88,4 @@ struct AudioTestSuite {
     };
 };
 
-// Exported for the audio group binary (RunAudioTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunAudioSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<AudioTestSuite>();
-}
-
+} // namespace

@@ -64,6 +64,8 @@ consteval std::string_view ReflectFieldName(std::string_view fallback) noexcept 
 // Test Suite Class
 // ============================================================================
 
+namespace {
+
 struct ScriptBinderTestSuite {
     // Isolate binder singleton registration state before and after execution
     ScriptBinderTestSuite() {
@@ -169,8 +171,4 @@ struct ScriptBinderTestSuite {
     };
 };
 
-// Exported for the scripting group binary (RunScriptingTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunScriptBinderSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ScriptBinderTestSuite>();
-}
+} // namespace

@@ -75,6 +75,8 @@ struct SolidPayload {
 
 } // namespace
 
+namespace {
+
 struct UITestSuite {
     UITestSuite() {
         ZHLN::Test::Headless::BeginSession();
@@ -581,6 +583,4 @@ struct UITestSuite {
     };
 };
 
-auto RunUISuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<UITestSuite>();
-}
+} // namespace

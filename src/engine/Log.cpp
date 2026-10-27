@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "diagnostics/DiagnosticsInternal.hpp"
+#include "tty/TTYBackend.hpp"
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Log.hpp>
@@ -260,6 +261,14 @@ void WriteToChannel(uint8_t channel, std::string_view msg) noexcept {
         ::write(2, msg.data(), msg.size());
 #endif
     }
+}
+
+void WriteDiagnosticError(std::string_view msg) noexcept {
+    WriteErr(msg);
+}
+
+void EmergencyRestoreTerminal() noexcept {
+    TTYBackend::EmergencyRestore();
 }
 
 } // namespace ZHLN::Diagnostics

@@ -9,7 +9,7 @@
 
 option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
 
-# Shared CTest environment. Keep this list independent of the sanitizer option:
+# Shared ztest worker environment. Keep this list independent of the sanitizer option:
 # the Vulkan sandbox must reach every test in a normal build as well.
 set(ZHLN_TEST_ENVIRONMENT "")
 

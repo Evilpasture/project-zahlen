@@ -19,6 +19,8 @@ enum class UITreeTestError : uint8_t {
     TreeMutationFailed   ZHLN_ANNOTATION(ZHLN::Description<"FindNodeById / InsertChild / RemoveNodeById did not mutate the tree as specified."> {}),
 };
 
+namespace {
+
 struct UITreeTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> action_registry_bind_invoke_and_missing_ids() {
@@ -224,6 +226,4 @@ struct UITreeTestSuite {
     };
 };
 
-auto RunUITreeSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<UITreeTestSuite>();
-}
+} // namespace

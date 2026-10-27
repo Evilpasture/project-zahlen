@@ -56,6 +56,8 @@ static_assert(std::is_constructible_v<ZHLN::ErrorCode, CodecError>, "the enum co
 // Test Suite Class
 // ============================================================================
 
+namespace {
+
 struct ErrorTestSuite {
     struct Tests {
         // --- 1. Basic Error Type & State ---
@@ -269,9 +271,4 @@ struct ErrorTestSuite {
     };
 };
 
-// Exported for the core group binary (RunCoreTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunErrorSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ErrorTestSuite>();
-}
-
+} // namespace

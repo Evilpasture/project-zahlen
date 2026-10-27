@@ -13,6 +13,8 @@ enum class ChannelTestError : uint32_t {
     MessageLost          ZHLN_ANNOTATION(ZHLN::Description<"One or more messages were dropped during channel push/pop."> {}),
 };
 
+namespace {
+
 struct ChannelTestSuite {
     ChannelTestSuite() {
         ZHLN::Fiber::InitMainThread();
@@ -97,8 +99,4 @@ struct ChannelTestSuite {
     };
 };
 
-// Exported for the threading group binary (RunThreadingTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunChannelSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ChannelTestSuite>();
-}
+} // namespace

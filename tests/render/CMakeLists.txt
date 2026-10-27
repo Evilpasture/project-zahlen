@@ -20,7 +20,7 @@
 set(GPU_HELPER_IMPL ${PROJECT_SOURCE_DIR}/tests/helpers/ImageWriteImpl.cpp)
 
 function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
-    set(GROUP_SOURCES ${ARGN})
+    zahlen_wrap_ztest_sources(GROUP_SOURCES GROUP_REL_FILES ${ARGN})
 
     add_executable(${TARGET_NAME} ${GROUP_SOURCES} ${GPU_HELPER_IMPL})
 
@@ -28,6 +28,7 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
         CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
+        ZHLN_ZTEST_SOURCE_FILES "${GROUP_REL_FILES}"
     )
 
     target_link_libraries(${TARGET_NAME} PRIVATE
@@ -70,20 +71,6 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
         endif()
     endif()
 
-    add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-    set_tests_properties(${TARGET_NAME} PROPERTIES
-        LABELS "GPU;LocalOnly"
-        TIMEOUT ${TIMEOUT_SECONDS}
-    )
-
-    # Each vkCreateInstance dlopen()s the Vulkan ICD, which on the NVIDIA driver
-    # pulls in libnvidia-tls.so. glibc's static TLS surplus is finite and is not
-    # fully reclaimed on dlclose, so a binary that builds many engines eventually
-    # fails with "cannot allocate memory in static TLS block" and every remaining
-    # test reports "vkCreateInstance: Found no drivers!". The suites pool their
-    # engines (see tests/helpers/HeadlessEngineFixture.hpp); this raises the
-    # surplus as well, so a suite that still churns engines degrades late instead
-    # of falling over.
     set(GPU_TEST_ENVIRONMENT "")
     if(UNIX AND NOT APPLE)
         list(APPEND GPU_TEST_ENVIRONMENT "GLIBC_TUNABLES=glibc.rtld.optional_static_tls=4096")
@@ -92,17 +79,17 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     # (ZHLN_VULKAN_SANDBOX_ENVIRONMENT) is deliberately NOT inherited: these
     # groups are "local hardware required", and VK_DRIVER_FILES replaces the
     # loader's ICD search path, which would hide the very GPU they exist to
-    # exercise and quietly run them on lavapipe instead. To force a render
-    # suite onto the sandbox ICD, export VK_DRIVER_FILES yourself when invoking
-    # the test binary directly.
+    # exercise and quietly run them on lavapipe instead. Pass `ztest --sandbox`
+    # explicitly if you want to run a GPU suite against the vendored ICD.
     list(APPEND GPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
-    if(GPU_TEST_ENVIRONMENT)
-        set_tests_properties(${TARGET_NAME} PROPERTIES
-            ENVIRONMENT "${GPU_TEST_ENVIRONMENT}"
-        )
-    endif()
 
-    zahlen_add_runtime_dll_path(${TARGET_NAME})
+    zahlen_register_ztest_target(${TARGET_NAME}
+        POOL gpu
+        TIMEOUT ${TIMEOUT_SECONDS}
+        LABELS "GPU;LocalOnly"
+        ENV ${GPU_TEST_ENVIRONMENT}
+    )
+
     zahlen_add_runtime_dlls(${TARGET_NAME})
 endfunction()
 

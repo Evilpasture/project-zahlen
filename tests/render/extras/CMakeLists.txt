@@ -25,14 +25,19 @@ set(EXTRAS_RENDER_TEST_SOURCES
 
 foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
     get_filename_component(TARGET_NAME ${TEST_SRC} NAME_WLE)
+    zahlen_wrap_ztest_sources(_vfx_sources _vfx_files ${TEST_SRC})
 
-    add_executable(${TARGET_NAME} ${TEST_SRC})
+    add_executable(${TARGET_NAME}
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+        ${_vfx_sources}
+    )
 
     set_target_properties(${TARGET_NAME} PROPERTIES
         CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
         CXX_SCAN_FOR_MODULES ON
+        ZHLN_ZTEST_SOURCE_FILES "${_vfx_files}"
     )
 
     target_link_libraries(${TARGET_NAME} PRIVATE
@@ -76,35 +81,20 @@ foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
         endif()
     endif()
 
-    add_test(NAME GPU_EXTRAS_${TARGET_NAME} COMMAND ${TARGET_NAME})
-    set_tests_properties(GPU_EXTRAS_${TARGET_NAME} PROPERTIES
-        LABELS "GPU;Extras;LocalOnly"
-        TIMEOUT 60
-    )
-
-    # Each vkCreateInstance dlopen()s the Vulkan ICD, which on the NVIDIA driver
-    # pulls in libnvidia-tls.so. glibc's static TLS surplus is finite and is not
-    # fully reclaimed on dlclose, so a binary that builds many engines eventually
-    # fails with "cannot allocate memory in static TLS block" and every remaining
-    # test reports "vkCreateInstance: Found no drivers!". The suites pool their
-    # engines (see tests/helpers/HeadlessEngineFixture.hpp); this raises the
-    # surplus as well, so a suite that still churns engines degrades late instead
-    # of falling over.
     set(GPU_TEST_ENVIRONMENT "")
     if(UNIX AND NOT APPLE)
         list(APPEND GPU_TEST_ENVIRONMENT "GLIBC_TUNABLES=glibc.rtld.optional_static_tls=4096")
     endif()
-    # Include the shared sanitizer and Vulkan sandbox settings regardless of
-    # whether sanitizers are enabled.
     list(APPEND GPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
-    if(GPU_TEST_ENVIRONMENT)
-        set_tests_properties(GPU_EXTRAS_${TARGET_NAME} PROPERTIES
-            ENVIRONMENT "${GPU_TEST_ENVIRONMENT}"
-        )
-    endif()
 
-    zahlen_add_runtime_dll_path(GPU_EXTRAS_${TARGET_NAME})
-    zahlen_add_runtime_dlls(GPU_EXTRAS_${TARGET_NAME})
+    zahlen_register_ztest_target(${TARGET_NAME}
+        POOL gpu
+        TIMEOUT 60
+        LABELS "GPU;Extras;LocalOnly"
+        ENV ${GPU_TEST_ENVIRONMENT}
+    )
+
+    zahlen_add_runtime_dlls(${TARGET_NAME})
 endforeach()
 
 

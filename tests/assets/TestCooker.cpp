@@ -28,29 +28,16 @@
 #endif
 
 // ============================================================================
-// Test Suite Implementation
+// Asset Cooker Tests (zero-boilerplate namespace collection)
 // ============================================================================
 
-struct CookerTestSuite {
-    CookerTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(kWorkerThreadCount, kFiberCount, kFiberStackSize);
-    }
+namespace ZHLN::Test {
+namespace {
 
-    ~CookerTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
-    }
-
-    CookerTestSuite(const CookerTestSuite&)                = delete;
-    CookerTestSuite& operator=(const CookerTestSuite&)     = delete;
-    CookerTestSuite(CookerTestSuite&&) noexcept            = delete;
-    CookerTestSuite& operator=(CookerTestSuite&&) noexcept = delete;
-
-    struct Tests {
-        // --- 1. Locate zcook Compiler Executable ---
-        std::expected<void, ZHLN::ErrorCode> locate_zcook_compiler_binary() {
-            fs::path zcook = FindZcookExecutable();
-            ZHLN::Test::ExpectFalse(zcook.empty());
+// --- 1. Locate zcook Compiler Executable ---
+std::expected<void, ZHLN::ErrorCode> test_locate_zcook_compiler_binary(CookerSession& session) {
+            const fs::path& zcook = session.ZcookPath();
+            ZHLN::Test::Expect(!zcook.empty());
 
             if (zcook.empty()) {
                 ZHLN::Println("    [Compiler Error] Could not find 'zcook' in current build directory!");
@@ -62,16 +49,14 @@ struct CookerTestSuite {
         }
 
         // --- 2. Offline Mesh Compilation (zcook mesh) ---
-        std::expected<void, ZHLN::ErrorCode> offline_mesh_compilation_and_header_verification() {
-            fs::path zcook = FindZcookExecutable();
-            if (zcook.empty()) {
+        std::expected<void, ZHLN::ErrorCode> test_offline_mesh_compilation_and_header_verification(CookerFixture& cooker) {
+            if (cooker.zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);
             }
 
-            TempSandbox sandbox("cook_mesh");
-            fs::path    metaPath    = sandbox.SubPath("level_metadata.bin");
-            fs::path    rawGeomPath = sandbox.SubPath("cube_geom.bin");
-            fs::path    outZmesh    = sandbox.SubPath("cube.zmesh");
+            fs::path metaPath    = cooker.SubPath("level_metadata.bin");
+            fs::path rawGeomPath = cooker.SubPath("cube_geom.bin");
+            fs::path outZmesh    = cooker.SubPath("cube.zmesh");
 
             // Write 3-vertex raw triangle (stride 13: v_idx, px, py, pz, nx, ny, nz, u, v, r, g, b, a)
             std::vector<float> rawFloats = {0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f,
@@ -102,8 +87,8 @@ struct CookerTestSuite {
 
             std::string args =
                 std::format(R"(mesh --meta "{}" --id "Mesh_Pillar" -i "{}" -o "{}")", metaPath.string(), rawGeomPath.string(), outZmesh.string());
-            int exitCode = RunZcook(zcook, args);
-            ZHLN::Test::ExpectEq(exitCode, 0);
+            int exitCode = cooker.Run(args);
+            ZHLN::Test::Expect(exitCode) == 0;
 
             if (exitCode != 0) {
                 return std::unexpected(CookerTestError::MeshCompilationFailed);
@@ -151,16 +136,14 @@ struct CookerTestSuite {
         }
 
         // --- 3. Offline Animation Compilation (zcook anim) ---
-        std::expected<void, ZHLN::ErrorCode> offline_animation_compilation_and_hashing() {
-            fs::path zcook = FindZcookExecutable();
-            if (zcook.empty()) {
+        std::expected<void, ZHLN::ErrorCode> test_offline_animation_compilation_and_hashing(CookerFixture& cooker) {
+            if (cooker.zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);
             }
 
-            TempSandbox sandbox("cook_anim");
-            fs::path    metaPath = sandbox.SubPath("metadata.bin");
-            fs::path    animBin  = sandbox.SubPath("anim_payload.bin");
-            fs::path    outZanim = sandbox.SubPath("walk.zanim");
+            fs::path metaPath = cooker.SubPath("metadata.bin");
+            fs::path animBin  = cooker.SubPath("anim_payload.bin");
+            fs::path outZanim = cooker.SubPath("walk.zanim");
 
             std::vector<float> timeKeys   = {0.0f, 0.5f, 1.0f};
             std::vector<float> translKeys = {0.0f, 0.0f, 0.0f, 0.0f, kSampleTranslY, 0.0f, 0.0f, 0.0f, 0.0f};
@@ -197,8 +180,8 @@ struct CookerTestSuite {
             }
 
             std::string args     = std::format(R"(anim --meta "{}" --id "Anim_Walk" -o "{}")", metaPath.string(), outZanim.string());
-            int         exitCode = RunZcook(zcook, args);
-            ZHLN::Test::ExpectEq(exitCode, 0);
+            int         exitCode = cooker.Run(args);
+            ZHLN::Test::Expect(exitCode) == 0;
 
             if (exitCode != 0) {
                 return std::unexpected(CookerTestError::AnimationCompilationFailed);
@@ -223,15 +206,13 @@ struct CookerTestSuite {
         }
 
         // --- 4. Offline Texture Cooking (zcook tex) ---
-        std::expected<void, ZHLN::ErrorCode> offline_texture_cooking_passthrough() {
-            fs::path zcook = FindZcookExecutable();
-            if (zcook.empty()) {
+        std::expected<void, ZHLN::ErrorCode> test_offline_texture_cooking_passthrough(CookerFixture& cooker) {
+            if (cooker.zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);
             }
 
-            TempSandbox sandbox("cook_tex");
-            fs::path    inTex  = sandbox.SubPath("albedo.png");
-            fs::path    outTex = sandbox.SubPath("albedo.ztex");
+            fs::path inTex  = cooker.SubPath("albedo.png");
+            fs::path outTex = cooker.SubPath("albedo.ztex");
 
             std::vector<uint8_t> dummyPng = {kPngMagicHeader0, 'P', 'N', 'G', '\r', '\n', kPngMagicSub, '\n', 0x00, 0x00, 0x00, kPngHeaderLen};
             {
@@ -240,8 +221,8 @@ struct CookerTestSuite {
             }
 
             std::string args     = std::format(R"(tex -i "{}" -o "{}")", inTex.string(), outTex.string());
-            int         exitCode = RunZcook(zcook, args);
-            ZHLN::Test::ExpectEq(exitCode, 0);
+            int         exitCode = cooker.Run(args);
+            ZHLN::Test::Expect(exitCode) == 0;
 
             if (exitCode != 0) {
                 return std::unexpected(CookerTestError::TextureCookingFailed);
@@ -255,19 +236,17 @@ struct CookerTestSuite {
         }
 
         // --- 5. Offline PAK Archive Creation (zcook pak) & Engine VFS Mount ---
-        std::expected<void, ZHLN::ErrorCode> offline_pak_archive_creation_and_vfs_mount() {
-            fs::path zcook = FindZcookExecutable();
-            if (zcook.empty()) {
+        std::expected<void, ZHLN::ErrorCode> test_offline_pak_archive_creation_and_vfs_mount(CookerFixture& cooker) {
+            if (cooker.zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);
             }
 
-            TempSandbox sandbox("cook_pak");
-            fs::path    pakPath      = sandbox.SubPath("data/base.pak");
-            fs::path    manifestPath = sandbox.SubPath("build_assets/manifest.txt");
+            fs::path pakPath      = cooker.SubPath("data/base.pak");
+            fs::path manifestPath = cooker.SubPath("build_assets/manifest.txt");
 
-            fs::path f1 = sandbox.SubPath("build_assets/player.zmesh");
-            fs::path f2 = sandbox.SubPath("build_assets/albedo.ztex");
-            fs::path f3 = sandbox.SubPath("build_assets/walk.zanim");
+            fs::path f1 = cooker.SubPath("build_assets/player.zmesh");
+            fs::path f2 = cooker.SubPath("build_assets/albedo.ztex");
+            fs::path f3 = cooker.SubPath("build_assets/walk.zanim");
 
             std::string content1 = "MSH0_SAMPLE_MESH_PAYLOAD";
             std::string content2 = "TEX0_SAMPLE_IMAGE_PAYLOAD";
@@ -287,8 +266,8 @@ struct CookerTestSuite {
             }
 
             std::string args     = std::format(R"(pak -o "{}" -i "{}")", pakPath.string(), manifestPath.string());
-            int         exitCode = RunZcook(zcook, args);
-            ZHLN::Test::ExpectEq(exitCode, 0);
+            int         exitCode = cooker.Run(args);
+            ZHLN::Test::Expect(exitCode) == 0;
 
             if (exitCode != 0) {
                 return std::unexpected(CookerTestError::PakArchiveFailed);
@@ -326,49 +305,44 @@ struct CookerTestSuite {
 
 
         // --- 7. Compiler CLI Error Handling & Input Validation ---
-        std::expected<void, ZHLN::ErrorCode> zcook_cli_subcommand_error_handling() {
-            fs::path zcook = FindZcookExecutable();
-            if (zcook.empty()) {
+        ZHLN_ANNOTATION(ZHLN::Test::Cases {
+            ZHLN::Test::NamedCase {"invalid_command", 0},
+            ZHLN::Test::NamedCase {"mesh_missing_flags", 1},
+            ZHLN::Test::NamedCase {"anim_missing_id", 2},
+            ZHLN::Test::NamedCase {"pak_missing_manifest", 3},
+            ZHLN::Test::NamedCase {"glb_missing_meta", 4},
+        })
+        std::expected<void, ZHLN::ErrorCode> test_zcook_cli_subcommand_error_handling(CookerFixture& cooker, int variant) {
+            if (cooker.zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);
             }
 
-            TempSandbox sandbox("cli_errors");
-            fs::path    badMetaPath = sandbox.SubPath("missing_meta.bin");
-            fs::path    badOutPath  = sandbox.SubPath("out.pak");
-            fs::path    badManPath  = sandbox.SubPath("non_existent_manifest.txt");
-
-            // Test 1: Unsupported subcommand
-            int rc1 = RunZcook(zcook, "invalid_command");
-            ZHLN::Test::ExpectEq(rc1, 1);
-
-            // Test 2: Cook mesh missing required flags
-            std::string args2 = std::format(R"(mesh --meta "{}")", badMetaPath.string());
-            int         rc2   = RunZcook(zcook, args2);
-            ZHLN::Test::ExpectEq(rc2, 1);
-
-            // Test 3: Cook anim missing ID
-            std::string args3 = std::format(R"(anim -o "{}")", sandbox.SubPath("out.zanim").string());
-            int         rc3   = RunZcook(zcook, args3);
-            ZHLN::Test::ExpectEq(rc3, 1);
-
-            // Test 4: Pack missing manifest
-            std::string args4 = std::format(R"(pak -o "{}" -i "{}")", badOutPath.string(), badManPath.string());
-            int         rc4   = RunZcook(zcook, args4);
-            ZHLN::Test::ExpectEq(rc4, 1);
-
-            // Test 5: Cook GLB missing metadata
-            std::string args5 = std::format(R"(glb -o "{}")", sandbox.SubPath("out.glb").string());
-            int         rc5   = RunZcook(zcook, args5);
-            ZHLN::Test::ExpectEq(rc5, 1);
-
+            std::string args;
+            switch (variant) {
+                case 0:
+                    args = "invalid_command";
+                    break;
+                case 1:
+                    args = std::format(R"(mesh --meta "{}")", cooker.SubPath("missing_meta.bin").string());
+                    break;
+                case 2:
+                    args = std::format(R"(anim -o "{}")", cooker.SubPath("out.zanim").string());
+                    break;
+                case 3:
+                    args = std::format(
+                        R"(pak -o "{}" -i "{}")",
+                        cooker.SubPath("out.pak").string(),
+                        cooker.SubPath("non_existent_manifest.txt").string()
+                    );
+                    break;
+                default:
+                    args = std::format(R"(glb -o "{}")", cooker.SubPath("out.glb").string());
+                    break;
+            }
+            const int rc = cooker.Run(args);
+            ZHLN::Test::Expect(rc) == 1;
             return {};
         }
-    };
-};
 
-// Exported for the assets group binary (RunAssetsTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunCookerSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<CookerTestSuite>();
-}
-
+} // namespace
+} // namespace ZHLN::Test

@@ -164,6 +164,8 @@ struct ScratchDir {
 
 } // namespace
 
+namespace {
+
 struct SVGTestSuite {
     enum class SVGTestError : uint8_t {
         ParseFailed  ZHLN_ANNOTATION(ZHLN::Description<"plugins/SVG refused to parse a document the suite expected it to accept."> {}) = 1,
@@ -913,8 +915,4 @@ struct SVGTestSuite {
     };
 };
 
-// The extras test binaries are one suite per process (see
-// tests/extras/CMakeLists.txt), so this owns its own entry point.
-int main() {
-    return ZHLN::Test::Runner::Run<SVGTestSuite>();
-}
+} // namespace

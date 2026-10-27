@@ -11,12 +11,10 @@
 
 set(RAW_ENGINE_SOURCES
     Log.cpp
-    diagnostics/CrashHandler.cpp
     diagnostics/StackTrace.cpp
     diagnostics/MemoryInspector.cpp
     diagnostics/SanitizerBridges.cpp
     diagnostics/RenderDocInit.cpp
-    SignalManager.cpp
     Engine.cpp
     EngineGlobals.cpp
     Kernel.cpp
@@ -39,7 +37,6 @@ set(RAW_ENGINE_SOURCES
     system/LODSystem.cpp
     system/SceneResources.cpp
     system/SceneCleanupSystem.cpp
-    CommandLine.cpp
     FramePlan.cpp
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp

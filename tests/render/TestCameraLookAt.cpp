@@ -48,6 +48,8 @@ void DisableJitterAndVignette(ZHLN::ECS::Registry& reg) {
 
 } // namespace
 
+namespace {
+
 struct CameraLookAtTestSuite {
     CameraLookAtTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -179,9 +181,4 @@ struct CameraLookAtTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunCameraLookAtSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<CameraLookAtTestSuite>();
-}
-
+} // namespace

@@ -22,6 +22,8 @@ namespace {
 
 } // namespace
 
+namespace {
+
 struct EnvironmentImageTestSuite {
     struct Tests {
         auto missing_environment_is_not_loaded_implicitly() -> std::expected<void, ZHLN::ErrorCode> {
@@ -123,6 +125,4 @@ struct EnvironmentImageTestSuite {
     };
 };
 
-auto RunEnvironmentImageSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<EnvironmentImageTestSuite>();
-}
+} // namespace

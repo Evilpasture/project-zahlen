@@ -2,24 +2,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+
+// CommandLine/EngineCommandLine.hpp
+//
+// Engine-host command-line preset built on <CommandLine/CommandLine.hpp>.
+// Provides windowing, validation, framerate, RenderDoc, frame-graph dump, and
+// gameplay-driver flags for interactive/headless engine applications (`app/`
+// and `samples/`), keeping standalone CLI tools free of renderer/editor flags.
+
+#include <CommandLine/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/LogLevel.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/FramePlan.hpp>
+
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
 #include <functional>
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace ZHLN {
-
-enum class CommandLineError : uint8_t { InvalidValue = 1, MissingValue, UnknownArgument };
-
-enum class GameplayDriver : uint8_t { Cpp };
-
-enum class GameplayStatus : int8_t { OK = 0, RequestQuit = 1, RequestReload = 2, Error = -1 };
 
 struct CommandLineOptions;
 
@@ -67,6 +73,9 @@ struct EngineError {
 
 // Engine handlers win on key collisions: an application handler sharing an
 // engine key is unreachable.
-ZHLN_API auto HandleCommandLine(std::span<char* const> args, std::span<const CommandHandler> appHandlers = {}) -> std::expected<CommandLineOptions, ErrorCode>;
+[[nodiscard]] auto HandleCommandLine(
+    std::span<char* const>          args,
+    std::span<const CommandHandler> appHandlers = {}
+) -> std::expected<CommandLineOptions, ErrorCode>;
 
 } // namespace ZHLN

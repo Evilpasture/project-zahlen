@@ -168,6 +168,8 @@ enum class CoreContainersTestError : uint32_t {
 // Test Suite Class
 // ============================================================================
 
+namespace {
+
 struct ContainersTestSuite {
     ContainersTestSuite() {
         ZHLN::Fiber::InitMainThread();
@@ -749,9 +751,4 @@ struct ContainersTestSuite {
     };
 };
 
-// Exported for the core group binary (RunCoreTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunContainersSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ContainersTestSuite>();
-}
-
+} // namespace

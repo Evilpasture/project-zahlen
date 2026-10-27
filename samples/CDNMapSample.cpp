@@ -11,12 +11,13 @@
 
 #include <Animation/AnimationSystem.hpp>
 #include <CDN/CDN.hpp>
+#include <CommandLine/EngineCommandLine.hpp>
 #include <FreeCam/FreeCam.hpp>
 #include <RemoteAsset/DiskCache.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
@@ -234,6 +235,7 @@ auto main(int argc, char* argv[]) -> int {
 
     ZHLN::Clock clock;
     while (engine->IsRunning()) {
+        ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
         const float dt = std::min(clock.GetDeltaTime(), 0.05f);
 

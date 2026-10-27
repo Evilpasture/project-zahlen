@@ -453,7 +453,12 @@ template <typename SceneFn>
 // Test Suite
 // ============================================================================
 
-struct DistanceStabilitySuite {
+// Priority<100> runs this suite last in GPU_Pipeline regardless of link order:
+// CreateTestEngine evicts the pooled engine for an exclusive one, so running it
+// last avoids rebuilding the pool for any suite after it.
+namespace {
+
+struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
     DistanceStabilitySuite() {
         // Nested in the group binary's session: the task system and the pooled
         // engine outlive this suite (see HeadlessEngineFixture.hpp). A raw
@@ -1108,13 +1113,8 @@ struct DistanceStabilitySuite {
     };
 };
 
+} // namespace
+
 // ============================================================================
 // Group Binary Entry Point
 // ============================================================================
-
-// Exported for the GPU_Performance group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunDistanceStabilitySuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<DistanceStabilitySuite>();
-}
-

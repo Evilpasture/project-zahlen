@@ -116,6 +116,8 @@ void FitCameraToPrefab(ZHLN::Camera& camera, const ZHLN::ModelPrefab& prefab, fl
 
 } // namespace
 
+namespace {
+
 struct GLTFSampleAssetsTestSuite {
     GLTFSampleAssetsTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -200,8 +202,4 @@ struct GLTFSampleAssetsTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunGLTFSampleAssetsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<GLTFSampleAssetsTestSuite>();
-}
+} // namespace

@@ -86,14 +86,16 @@
 // reflections, R re-download, C re-crawl the model list.
 
 #include <Animation/AnimationSystem.hpp>
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/FramePlan.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -1477,7 +1479,7 @@ auto main(int argc, char* argv[]) -> int {
 
     // Crash diagnostics keep their state in a caller-owned struct; static storage
     // duration is required because its address is copied into the signal handler
-    // slots. See <Zahlen/Core/CrashState.hpp>.
+    // slots. See <Signal/CrashHandler.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
@@ -1602,6 +1604,7 @@ auto main(int argc, char* argv[]) -> int {
         state.now = clock.GetTotalTime();
         state.fps = (state.fps * 0.90f) + ((state.dt > 0.0f ? 1.0f / state.dt : 0.0f) * 0.10f);
 
+        ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
         HandleInput(*engine, state);
         PollFetch(*engine, state);

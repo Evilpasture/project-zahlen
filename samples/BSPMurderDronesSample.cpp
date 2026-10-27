@@ -32,13 +32,14 @@
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
+#include <CommandLine/EngineCommandLine.hpp>
 #include <FreeCam/FreeCam.hpp>
 #include <Interaction/BSPInteraction.hpp>
 #include <Interaction/InteractionSystem.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Optional.hpp>
@@ -1877,6 +1878,7 @@ auto main(int argc, char* argv[]) -> int {
 
     ZHLN::Clock clock;
     while (engine->IsRunning()) {
+        ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
         const float dt = std::min(clock.GetDeltaTime(), 0.05f);
         g_frameDt      = dt;
