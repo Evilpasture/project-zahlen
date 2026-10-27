@@ -1007,7 +1007,7 @@ auto main(int argc, char* argv[]) -> int {
 
     ZHLN::Clock clock;
     while (kernel->IsRunning()) {
-        session.dt = clock.GetDeltaTime();
+        session.dt = clock.Tick();
         if (auto previewInput = session.previewGui.GetSingleton<ZHLN::Components::InputStateComponent>()) {
             previewInput->ResetDeltas();
         }

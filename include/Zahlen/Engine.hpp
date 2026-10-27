@@ -50,6 +50,7 @@ class Registry;
 template <typename Services>
 class SystemGraph;
 class EntityCommandBuffer;
+class EventBus;
 }
 
 class ArticulationSystem;
@@ -144,6 +145,8 @@ class ZHLN_API Engine {
     auto GetUpdateGraph() -> SimGraph&;
     auto GetRenderGraph() -> RenderGraph&;
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
+    auto GetEventBus() noexcept -> ECS::EventBus&;
+    [[nodiscard]] auto GetEventBus() const noexcept -> const ECS::EventBus&;
     // Run the batched cleanup pass now (normally after ECB playback each frame).
     void ProcessPendingDestroy();
     // Release every scene-owned resource before clearing the registry/ECB.

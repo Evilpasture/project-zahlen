@@ -137,7 +137,6 @@ module;
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/Pages.hpp>
-#include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Prefetch.hpp>
 #include <Zahlen/Core/Print.hpp>
@@ -152,7 +151,7 @@ module;
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/FileSystem/FileWatcher.hpp>
+#include <Zahlen/FileSystem.hpp>
 #include <Zahlen/Format.hpp>
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
@@ -262,7 +261,10 @@ using ZHLN::FS::FileWatchCallback;
 using ZHLN::FS::FileWatchEvent;
 using ZHLN::FS::FileWatchHandle;
 using ZHLN::FS::HashPath;
+using ZHLN::FS::kPakFormatVersion;
 using ZHLN::FS::LoadRequest;
+using ZHLN::FS::MapAccess;
+using ZHLN::FS::MappedFile;
 using ZHLN::FS::PakEntry;
 using ZHLN::FS::PakHeader;
 using ZHLN::FS::VirtualFileSystem;
@@ -397,6 +399,9 @@ using ZHLN::ECS::Access;
 using ZHLN::ECS::ComponentAccess;
 using ZHLN::ECS::ComponentFamily;
 using ZHLN::ECS::EntityCommandBuffer;
+using ZHLN::ECS::EventBus;
+using ZHLN::ECS::EventReader;
+using ZHLN::ECS::EventWriter;
 using ZHLN::ECS::OptionRes;
 using ZHLN::ECS::Query;
 using ZHLN::ECS::Read;
@@ -467,9 +472,11 @@ using ZHLN::AudioWaveformType;
 using ZHLN::AssetLoadRequest;
 using ZHLN::AssetManager;
 using ZHLN::Clock;
+using ZHLN::ClockConfig;
 using ZHLN::CPUProfiler;
 using ZHLN::Engine;
 using ZHLN::EngineConfig;
+using ZHLN::FixedStepBatch;
 using ZHLN::GameplayDriver;
 using ZHLN::GameplayStatus;
 using ZHLN::Kernel;

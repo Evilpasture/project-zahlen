@@ -11,6 +11,7 @@
 #include "SceneCleanupSystem.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
+#include <Zahlen/Clock.hpp>
 #include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Core/Diagnostics.hpp>
 #include <Zahlen/Core/Trace.hpp>
@@ -31,6 +32,7 @@
 #include <Zahlen/World.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ecs/EventBus.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
@@ -402,6 +404,7 @@ void Engine::EnsureSystemGraphs() {
             .audio        = _impl->kernel->GetAudioContext(),
             .assets       = _impl->kernel->GetAssetManager(),
             .articulation = _impl->world->GetArticulationSystem(),
+            .events       = _impl->world->GetEventBus(),
             .extensions   = _impl->extensions,
             .poseUploads  = _impl->poseUploads,
         }
@@ -483,6 +486,12 @@ auto Engine::GetRenderGraph() -> RenderGraph& {
 auto Engine::GetMainECB() -> ECS::EntityCommandBuffer& {
     return _impl->world->GetMainECB();
 }
+auto Engine::GetEventBus() noexcept -> ECS::EventBus& {
+    return _impl->world->GetEventBus();
+}
+auto Engine::GetEventBus() const noexcept -> const ECS::EventBus& {
+    return _impl->world->GetEventBus();
+}
 
 void Engine::ProcessPendingDestroy() {
     SceneCleanupSystem::ProcessPending(*this);
@@ -490,6 +499,7 @@ void Engine::ProcessPendingDestroy() {
 
 void Engine::ClearScene() {
     SceneCleanupSystem::ClearAll(*this);
+    _impl->world->GetEventBus().ClearEvents();
 }
 
 auto Engine::AddSceneCleanupPass(SceneCleanupPass pass) -> bool {
@@ -701,19 +711,16 @@ auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstal
     }
 
     const double targetFrameTime = runConfig.fpsLimit > 0 ? 1.0 / static_cast<double>(runConfig.fpsLimit) : 0.0;
-    auto         frameStart      = std::chrono::high_resolution_clock::now();
+    Clock        runClock({.maxDeltaTime = 0.1f});
 
     while (engine->IsRunning()) {
+        const auto frameStart = Clock::SteadyClock::now();
         if (runConfig.onFrameEvents) {
             runConfig.onFrameEvents(*engine);
         }
         engine->ProcessEvents();
 
-        auto   frameEnd = std::chrono::high_resolution_clock::now();
-        double elapsed  = std::chrono::duration<double>(frameEnd - frameStart).count();
-        frameStart      = std::chrono::high_resolution_clock::now();
-
-        float rawDt = std::min(static_cast<float>(elapsed), 0.1f);
+        const float rawDt = runClock.Tick();
 
         {
             auto& r = engine->GetRegistry();
@@ -737,14 +744,14 @@ auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstal
         }
 
         if (runConfig.fpsLimit > 0 && !displayPaced) {
-            auto   now          = std::chrono::high_resolution_clock::now();
+            auto   now          = Clock::SteadyClock::now();
             double frameElapsed = std::chrono::duration<double>(now - frameStart).count();
             if (frameElapsed < targetFrameTime) {
                 double sleepTime = targetFrameTime - frameElapsed;
                 if (sleepTime > 0.002) {
                     std::this_thread::sleep_for(std::chrono::microseconds(static_cast<int64_t>((sleepTime - 0.001) * 1e6)));
                 }
-                while (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - frameStart).count() < targetFrameTime) {
+                while (std::chrono::duration<double>(Clock::SteadyClock::now() - frameStart).count() < targetFrameTime) {
                     CPURelax();
                 }
             }

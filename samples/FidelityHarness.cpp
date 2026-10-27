@@ -858,9 +858,9 @@ auto main(int argc, char* argv[]) -> int {
     // resource publishes settle before the capture — the same settle pattern
     // the render tests use (tests/render/TestPBR.cpp renders 15 before
     // capturing), kept to a handful for suite throughput.
-    ZHLN::Clock clock;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     for (int frame = 0; frame < 8 && engine->IsRunning(); ++frame) {
-        const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        const float dt = clock.Tick();
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
         // The camera is authored once; a re-apply keeps it pinned through the

@@ -757,8 +757,7 @@ auto main(int argc, char* argv[]) -> int {
 
     SetHandgunVisibility(engine->GetRegistry(), handgun, false);
 
-    ZHLN::Clock clock;
-    float       sampleTime      = 0.0f;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     bool        handgunEquipped = false;
     bool        equipKeyWasDown = false;
     bool        slowMotion      = false;
@@ -769,7 +768,7 @@ auto main(int argc, char* argv[]) -> int {
     );
 
     while (engine->IsRunning()) {
-        const auto dt = std::min(clock.GetDeltaTime(), 0.05f);
+        clock.Tick();
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
@@ -822,6 +821,7 @@ auto main(int argc, char* argv[]) -> int {
         viewState.toggleKeyWasDown = viewKeyDown;
         if (tabKeyDown && !tabKeyWasDown) {
             slowMotion = !slowMotion;
+            clock.SetTimeScale(slowMotion ? 0.25f : 1.0f);
             ZHLN::Log("[Sample] Slow motion: {}.", slowMotion ? "ON (0.25x)" : "OFF (1.0x)");
         }
         tabKeyWasDown = tabKeyDown;
@@ -833,14 +833,13 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         // 2. Update Procedural Look-At Orbit via Multi-Component Patch
-        sampleTime += dt;
+        const auto sampleTime = static_cast<float>(clock.UnscaledElapsedTime());
         registry.Patch<ZHLN::Components::TransformComponent, ZHLN::ProceduralLookAtComponent>(player, [&](const auto& trans, auto& lookAt) -> auto {
             lookAt.targetWorldPos = trans.position + trans.rotation * JPH::Vec3(std::sin(sampleTime * 0.65f) * 2.2f, 1.65f, 4.0f);
         });
 
-        // 3. Synchronized Engine Tick (apply slow motion time scale)
-        const float scaledDt = slowMotion ? dt * 0.25f : dt;
-        const auto status = engine->Tick(scaledDt, ZHLN::GameplayDriver::Cpp);
+        // 3. Synchronized Engine Tick (uses Clock's scaled DeltaTime)
+        const auto status = engine->Tick(clock.DeltaTime(), ZHLN::GameplayDriver::Cpp);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
             engine->GetPlatformHost().Close();
             break;

@@ -1876,11 +1876,11 @@ auto main(int argc, char* argv[]) -> int {
     bool benchKeyWasDown     = false;
     bool telemetryKeyWasDown = false;
 
-    ZHLN::Clock clock;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     while (engine->IsRunning()) {
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
-        const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        const float dt = clock.Tick();
         g_frameDt      = dt;
 
         // Hoisted out of the block that used to own it: the free-camera, mouse

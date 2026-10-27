@@ -9,6 +9,7 @@
 #include <Zahlen/World.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ecs/EventBus.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <new>
@@ -26,6 +27,7 @@ enum class WorldInitError : uint8_t {
 struct World::Impl {
     std::unique_ptr<PhysicsContext> physicsContext;
     ECS::Registry                   registry;
+    ECS::EventBus                   eventBus;
 
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
     std::unique_ptr<ArticulationSystem>       articulationSystem;
@@ -109,6 +111,12 @@ auto World::GetPhysics() -> PhysicsContext& {
 }
 auto World::GetMainECB() -> ECS::EntityCommandBuffer& {
     return *_impl->mainECB;
+}
+auto World::GetEventBus() noexcept -> ECS::EventBus& {
+    return _impl->eventBus;
+}
+auto World::GetEventBus() const noexcept -> const ECS::EventBus& {
+    return _impl->eventBus;
 }
 
 auto World::GetArticulationSystem() -> ArticulationSystem& {

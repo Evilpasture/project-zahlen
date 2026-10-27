@@ -518,6 +518,115 @@ struct SystemGraphTestSuite {
             }
             return {};
         }
+
+        std::expected<void, ZHLN::ErrorCode> event_reader_writer_hazards_and_parallel_execution() {
+            using ZHLN::ECS::EventBus;
+            using ZHLN::ECS::EventReader;
+            using ZHLN::ECS::EventWriter;
+            using ZHLN::ECS::ResMut;
+            using ZHLN::ECS::SystemInfo;
+            using ZHLN::ECS::SystemSignature;
+
+            struct DamageEvt {
+                int value = 0;
+            };
+            struct AudioEvt {
+                int cue = 0;
+            };
+            struct BusServices {
+                EventBus& events;
+            };
+
+            static_assert(!ZHLN::ECS::ResolvableFrom<ZHLN::ECS::Carrier<ZHLN::ECS::NoServices>, EventReader<DamageEvt>>);
+            static_assert(!ZHLN::ECS::ResolvableFrom<ZHLN::ECS::Carrier<ZHLN::ECS::NoServices>, EventWriter<DamageEvt>>);
+            static_assert(ZHLN::ECS::ResolvableFrom<ZHLN::ECS::Carrier<BusServices>, EventReader<DamageEvt>>);
+            static_assert(ZHLN::ECS::ResolvableFrom<ZHLN::ECS::Carrier<BusServices>, EventWriter<DamageEvt>>);
+
+            static constexpr auto writeDamage = [](EventWriter<DamageEvt> out) {
+                out.Push({.value = 10});
+                out.Push({.value = 32});
+            };
+            static constexpr auto writeAudio = [](EventWriter<AudioEvt> out) {
+                out.Push({.cue = 7});
+            };
+            static std::atomic<int> sumReader1 {0};
+            static std::atomic<int> sumReader2 {0};
+            static constexpr auto   readDamage1 = [](EventReader<DamageEvt> in) {
+                int total = 0;
+                for (const DamageEvt& e: in) {
+                    total += e.value;
+                }
+                sumReader1.store(total, std::memory_order_relaxed);
+            };
+            static constexpr auto readDamage2 = [](EventReader<DamageEvt> in) {
+                int total = 0;
+                for (const DamageEvt& e: in) {
+                    total += e.value * 2;
+                }
+                sumReader2.store(total, std::memory_order_relaxed);
+            };
+            static constexpr auto mutateWholeBus = [](ResMut<EventBus> bus) {
+                bus->ClearEvents();
+            };
+            static constexpr auto invalidAliased = [](EventReader<DamageEvt>, EventWriter<DamageEvt>) {};
+            static_assert(!ZHLN::ECS::TemplatedDetail::EventParametersAreDisjoint<invalidAliased>());
+            static_assert(ZHLN::ECS::TemplatedDetail::EventParametersAreDisjoint<writeDamage>());
+
+            const SystemInfo infoWriteDmg {.access_pattern = SystemSignature<writeDamage>::PopulateAccessPattern()};
+            const SystemInfo infoWriteAud {.access_pattern = SystemSignature<writeAudio>::PopulateAccessPattern()};
+            const SystemInfo infoReadDmg1 {.access_pattern = SystemSignature<readDamage1>::PopulateAccessPattern()};
+            const SystemInfo infoReadDmg2 {.access_pattern = SystemSignature<readDamage2>::PopulateAccessPattern()};
+            const SystemInfo infoMutBus {.access_pattern = SystemSignature<mutateWholeBus>::PopulateAccessPattern()};
+
+            // Multi-reader on same event and multi-writer on distinct events must NOT conflict;
+            // same-event Writer/Reader, Writer/Writer, and ResMut<EventBus> MUST conflict!
+            if (ZHLN::ECS::SystemGraphCore::HasConflict(infoReadDmg1, infoReadDmg2) ||
+                ZHLN::ECS::SystemGraphCore::HasConflict(infoWriteDmg, infoWriteAud) ||
+                !ZHLN::ECS::SystemGraphCore::HasConflict(infoWriteDmg, infoReadDmg1) ||
+                !ZHLN::ECS::SystemGraphCore::HasConflict(infoWriteDmg, infoWriteDmg) ||
+                !ZHLN::ECS::SystemGraphCore::HasConflict(infoReadDmg1, infoMutBus) ||
+                !ZHLN::ECS::SystemGraphCore::HasConflict(infoWriteAud, infoMutBus)) {
+                return std::unexpected(SystemGraphTestError::HazardMismatch);
+            }
+
+            ZHLN::ECS::Registry reg;
+            EventBus            bus;
+            BusServices         services {.events = bus};
+            sumReader1.store(0);
+            sumReader2.store(0);
+
+            ZHLN::ECS::SystemGraph<BusServices> graph {reg, services};
+            graph.AddSystem<writeDamage>();
+            graph.AddSystem<writeAudio>();
+            graph.AddSystem<readDamage1>();
+            graph.AddSystem<readDamage2>();
+            graph.Compile();
+            graph.Execute(ZHLN::Frame {.frame = 1, .alpha = 0.0f, .dt = TestDeltaTime});
+
+            if (sumReader1.load() != 42 || sumReader2.load() != 84 || bus.Count<AudioEvt>() != 1 || bus.View<AudioEvt>()[0].cue != 7) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
+            }
+
+            // Also verify ExtensionServices fallback when EventBus is installed dynamically.
+            struct ExtOnlyServices {
+                ZHLN::ECS::ExtensionServices& extensions;
+            };
+            ZHLN::ECS::ExtensionServices ext;
+            auto&                        extBus = ext.Emplace<EventBus>();
+            ExtOnlyServices              extServices {.extensions = ext};
+            sumReader1.store(0);
+
+            ZHLN::ECS::SystemGraph<ExtOnlyServices> extGraph {reg, extServices};
+            extGraph.AddSystem<writeDamage>();
+            extGraph.AddSystem<readDamage1>();
+            extGraph.Compile();
+            extGraph.Execute(ZHLN::Frame {.frame = 2, .alpha = 0.0f, .dt = TestDeltaTime});
+
+            if (sumReader1.load() != 42 || extBus.Count<DamageEvt>() != 2) {
+                return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+            }
+            return {};
+        }
     };
 };
 

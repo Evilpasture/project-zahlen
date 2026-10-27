@@ -24,6 +24,10 @@ bool AssetManager::MountDirectory(std::string_view directory) {
     return _vfs.MountDirectory(directory);
 }
 
+bool AssetManager::UnmountDirectory(std::string_view directory) {
+    return _vfs.UnmountDirectory(directory);
+}
+
 void AssetManager::LoadAsync(RestrictSpan<AssetLoadRequest> requests, TaskSystem::Counter* counter) {
     _vfs.LoadAsync(requests, counter);
 }

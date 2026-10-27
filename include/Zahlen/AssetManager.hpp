@@ -131,6 +131,7 @@ class AssetManager {
 
     bool MountPak(std::string_view pakFilePath);
     bool MountDirectory(std::string_view directory);
+    bool UnmountDirectory(std::string_view directory);
 
     void LoadAsync(RestrictSpan<AssetLoadRequest> requests, TaskSystem::Counter* counter);
     bool LoadSync(AssetLoadRequest& request);
@@ -141,6 +142,7 @@ class AssetManager {
     }
 
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool { return _vfs.Exists(assetID); }
+    [[nodiscard]] auto Exists(std::string_view virtualPath) const noexcept -> bool { return _vfs.Exists(virtualPath); }
 
     [[nodiscard]] auto GetCachedPrefab(uint64_t hash) -> ZHLN::Optional<ModelPrefab&>;
     [[nodiscard]] auto GetCachedPrefab(uint64_t hash) const noexcept -> ZHLN::Optional<const ModelPrefab&>;

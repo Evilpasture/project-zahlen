@@ -4,7 +4,6 @@
 #pragma once
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/EnumFlags.hpp>
-#include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Render/Handles.hpp>
 // clang-format off

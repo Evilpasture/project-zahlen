@@ -30,11 +30,13 @@ set(ZHLN_CPU_TEST_SOURCES
     assets/TestMeshlets.cpp
     assets/TestPackaging.cpp
     audio/TestsAudio.cpp
+    core/TestClock.cpp
     core/TestCommandLine.cpp
     core/TestContainers.cpp
     core/TestDefer.cpp
     core/TestEnumFlags.cpp
     core/TestError.cpp
+    core/TestFileSystem.cpp
     core/TestFileSystemWatcher.cpp
     core/TestFontAsset.cpp
     core/TestGraphicsSettings.cpp
@@ -48,6 +50,7 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestTestFramework.cpp
     core/TestTextEdit.cpp
     ecs/TestECS.cpp
+    ecs/TestEventBus.cpp
     ecs/TestSystemGraph.cpp
     physics/TestPhysics.cpp
     threading/TestChannel.cpp

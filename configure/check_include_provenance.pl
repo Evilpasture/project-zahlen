@@ -190,7 +190,7 @@ my @SKIP_PREFIXES = ('src/vulkan/');
 # be found by looking for the names that exist, so a leftover
 # `#include "Types.hpp"` resolves nowhere and is indistinguishable from an
 # external header by spelling alone.
-my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp');
+my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp');
 
 # Every tracked name in one alternation, so a file is scanned once for all of
 # them rather than once per symbol. Longest first: with word boundaries a

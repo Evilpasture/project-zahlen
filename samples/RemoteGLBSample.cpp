@@ -1565,7 +1565,7 @@ auto main(int argc, char* argv[]) -> int {
     FrameSubject(state.orbit, state.subject);
     ApplyOrbit(*engine, state.orbit, state.subject);
 
-    ZHLN::Clock clock;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     const uint32_t timeoutSeconds = EnvironmentU32("ZHLN_REMOTE_GLB_TIMEOUT", kFetchTimeout);
 
     // The download side of the sample, in two locals: the cache directory
@@ -1595,13 +1595,13 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[RemoteGLB] Asset: {}", state.assetUrl);
     ZHLN::Log("[RemoteGLB] Cache: {}", (diskCache.Root() / resolvedAsset.cacheFileName).string());
     state.activeRequest = fetcher.Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, EnvironmentFlag("ZHLN_REMOTE_GLB_REFRESH"));
-    state.fetchStartedAt = clock.GetTotalTime();
+    state.fetchStartedAt = clock.WallTimeSinceStart();
 
     engine->SetUICallback([&state](ZHLN::Engine& eng) -> void { DrawHUD(eng, state); });
 
     while (engine->IsRunning()) {
-        state.dt  = std::min(clock.GetDeltaTime(), 0.05f);
-        state.now = clock.GetTotalTime();
+        state.dt  = clock.Tick();
+        state.now = clock.WallTimeSinceStart();
         state.fps = (state.fps * 0.90f) + ((state.dt > 0.0f ? 1.0f / state.dt : 0.0f) * 0.10f);
 
         ZHLN::CheckForCrashes(crashState, engine.get());

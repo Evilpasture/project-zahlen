@@ -38,6 +38,10 @@ struct VisibleShadowEntities {
     JPH::Array<Entity>& values;
 };
 
+namespace ECS {
+class EventBus;
+} // namespace ECS
+
 // What the simulation graph provides. References: the engine owns these for its
 // whole life, so a system never sees a null service and a resolver never checks
 // for one. The simulation domain has no renderer -- see PoseUploadQueue for the
@@ -47,6 +51,7 @@ struct SimServices {
     AudioContext&           audio;
     AssetManager&           assets;
     ArticulationSystem&     articulation;
+    ECS::EventBus&          events;
     ECS::ExtensionServices& extensions;
     PoseUploadQueue&        poseUploads;
 };

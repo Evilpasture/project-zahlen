@@ -1,15 +1,22 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
+#include <Zahlen/Common.h>
 #include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Span.hpp>
+#include <Zahlen/FileSystem/MappedFile.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace ZHLN::TaskSystem {
 struct Counter;
@@ -42,6 +49,21 @@ static_assert(sizeof(PakHeader) == 20, "PakHeader is the .pak header ABI: zcook 
 
 inline constexpr uint32_t kPakFormatVersion = 2;
 
+constexpr auto HashPath(std::string_view path) noexcept -> uint64_t {
+    return Hash64(path);
+}
+
+struct PakArchive {
+    MappedFile mapped;
+    uint32_t   version    = 0;
+    uint32_t   entryCount = 0;
+};
+
+struct CatalogEntry {
+    PakEntry    entry;
+    PakArchive* archive;
+};
+
 struct LoadRequest {
     uint64_t assetID    = 0;
     void*    outData    = nullptr;
@@ -50,53 +72,54 @@ struct LoadRequest {
     bool     isZeroCopy = false;
 };
 
-struct CatalogEntry {
-    PakEntry           entry;
-    struct PakArchive* archive;
-};
-
-class VirtualFileSystem {
+// Virtual file system layering loose mounted directories above memory-mapped `.pak` archives.
+//
+// Overlay precedence:
+//   1. Mounted directories in reverse mount order (most recently mounted wins).
+//   2. Mounted `.pak` archives (`MountPak`), where later `.pak` mounts override earlier catalog entries.
+//
+// Relative virtual paths are sanitized (`\` normalized to `/`, `.` collapsed, and
+// absolute paths or `..` parent traversal segments rejected) so loose-file queries
+// cannot escape any mounted directory root.
+class ZHLN_API VirtualFileSystem {
   public:
-    VirtualFileSystem() = default;
+    VirtualFileSystem();
     ~VirtualFileSystem();
 
-    VirtualFileSystem(const VirtualFileSystem&) = delete;
+    VirtualFileSystem(const VirtualFileSystem&)            = delete;
     VirtualFileSystem& operator=(const VirtualFileSystem&) = delete;
 
-    bool MountPak(std::string_view pakFilePath);
+    auto MountPak(std::string_view pakFilePath) -> bool;
+    auto MountDirectory(std::string_view directoryPath) -> bool;
+    auto UnmountDirectory(std::string_view directoryPath) -> bool;
 
-    bool MountDirectory(std::string_view directory);
+    [[nodiscard]] auto MountedDirectoryCount() const noexcept -> size_t;
 
     void LoadAsync(RestrictSpan<LoadRequest> requests, ::ZHLN::TaskSystem::Counter* counter);
-    bool LoadSync(LoadRequest& request);
-    void FreeMemory(LoadRequest& req);
+    auto LoadSync(LoadRequest& request) -> bool;
+    static void FreeMemory(LoadRequest& req);
 
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool;
+    [[nodiscard]] auto Exists(std::string_view virtualPath) const noexcept -> bool;
 
+    // Copies the asset into `outData` (up to `outCapacity`) and returns its byte size,
+    // or returns the byte size without reading when `outData == nullptr`. Returns `0`
+    // if missing, empty, invalid, or larger than `outCapacity`.
     [[nodiscard]] auto ReadFile(std::string_view virtualPath, void* outData, size_t outCapacity) const -> size_t;
 
   private:
     void ExecuteLoad(LoadRequest* req);
-    // Attempts a direct-directory load. The outcome travels in the request
-    // (success/outData/outSize) -- the single result channel ExecuteLoad and
-    // LoadSync already use. Currently declines every request.
-    void LoadFromDirectories(LoadRequest& req) const;
+    auto LoadFromDirectories(LoadRequest& req) const -> bool;
+    void IndexDirectoryTreeLocked(const std::filesystem::path& mountRoot) const;
+    void RebuildDirectoryIndexLocked() const;
 
-    struct PakArchive** _archives        = nullptr;
-    size_t              _archiveCount    = 0;
-    size_t              _archiveCapacity = 0;
+    mutable ZHLN::Mutex                      _catalogMutex;
+    HashMap<uint64_t, CatalogEntry>          _catalog;
+    std::vector<std::unique_ptr<PakArchive>> _archives;
 
-    HashMap<uint64_t, CatalogEntry> _catalog;
-    mutable Mutex _catalogMutex {};
-
-    static constexpr size_t kMaxMountDirs = 8;
-    std::string _mountDirs[kMaxMountDirs];
-    size_t      _mountDirCount = 0;
-    mutable Mutex _mountDirMutex {};
+    mutable ZHLN::Mutex                    _mountDirMutex;
+    std::vector<std::filesystem::path>     _mountDirs;
+    mutable HashMap<uint64_t, std::string> _directoryIndex;
 };
 
-constexpr uint64_t HashPath(std::string_view path) noexcept {
-    return Hash64(path);
-}
-
-}
+} // namespace ZHLN::FS

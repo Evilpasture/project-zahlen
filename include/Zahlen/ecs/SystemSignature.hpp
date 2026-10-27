@@ -56,6 +56,32 @@ struct ResourceView<ResMut<T>> {
     using Target                = T;
 };
 
+// Typed event channel hazard token: distinct from both ComponentFamily storage
+// and ServiceToken<T>, so `EventReader<A>` + `EventReader<A>` and
+// `EventWriter<A>` + `EventWriter<B>` run in parallel while `EventWriter<A>` is
+// ordered against `EventReader<A>` / `EventWriter<A>` (and any `ResMut<EventBus>`).
+template <typename T>
+struct EventToken {};
+
+template <typename Clean>
+struct EventParamTraits {
+    static constexpr bool value = false;
+};
+
+template <typename T>
+struct EventParamTraits<EventReader<T>> {
+    static constexpr bool   value = true;
+    using Event                   = T;
+    static constexpr Access mode  = Access::Read;
+};
+
+template <typename T>
+struct EventParamTraits<EventWriter<T>> {
+    static constexpr bool   value = true;
+    using Event                   = T;
+    static constexpr Access mode  = Access::Write;
+};
+
 } // namespace TemplatedDetail
 
 // ECS policy over a reusable callable inspector. The signature supplies the
@@ -98,6 +124,12 @@ struct SystemSignature {
                     constexpr Access mode = std::is_same_v<Clean, ResMut<Target>> ? Access::Write : Access::Read;
                     appendAccess(ComponentFamily::GetTypeID<TemplatedDetail::ServiceToken<Target>>(), mode);
                 }
+            } else if constexpr (TemplatedDetail::EventParamTraits<Clean>::value) {
+                using Event = typename TemplatedDetail::EventParamTraits<Clean>::Event;
+                if constexpr (CompleteType<Event>) {
+                    appendAccess(ComponentFamily::GetTypeID<TemplatedDetail::EventToken<Event>>(), TemplatedDetail::EventParamTraits<Clean>::mode);
+                }
+                appendAccess(ComponentFamily::GetTypeID<TemplatedDetail::ServiceToken<EventBus>>(), Access::Read);
             } else if constexpr (std::is_same_v<Param, Registry&>) {
                 // Direct mutable registry access can touch any component,
                 // including families not listed in this system's Query parameters.

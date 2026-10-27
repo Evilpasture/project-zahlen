@@ -161,6 +161,46 @@ struct ParameterResolver<ResMut<T>> {
     }
 };
 
+template <typename T>
+struct ParameterResolver<EventReader<T>> {
+    template <typename CarrierType>
+        requires(Reflect::BundleProvides<EventBus, typename CarrierType::Services>() ||
+                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
+    static auto Resolve(CarrierType& carrier) noexcept -> EventReader<T> {
+        if constexpr (Reflect::BundleProvides<EventBus, typename CarrierType::Services>()) {
+            const EventBus* bus = Reflect::FindService<EventBus>(carrier.services);
+            ZHLN::Assert(bus != nullptr, "EventBus missing from service bundle");
+            return bus->template Reader<T>();
+        } else {
+            const auto* extensions = Reflect::FindService<ExtensionServices>(carrier.services);
+            ZHLN::Assert(extensions != nullptr, "ExtensionServices missing from service bundle");
+            auto found = extensions->template Get<EventBus>();
+            ZHLN::Assert(found.has_value(), "System requested EventReader<T> without an EventBus in services or ExtensionServices");
+            return found->template Reader<T>();
+        }
+    }
+};
+
+template <typename T>
+struct ParameterResolver<EventWriter<T>> {
+    template <typename CarrierType>
+        requires(Reflect::BundleProvides<EventBus, typename CarrierType::Services>() ||
+                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
+    static auto Resolve(CarrierType& carrier) -> EventWriter<T> {
+        if constexpr (Reflect::BundleProvides<EventBus, typename CarrierType::Services>()) {
+            EventBus* bus = Reflect::FindService<EventBus>(carrier.services);
+            ZHLN::Assert(bus != nullptr, "EventBus missing from service bundle");
+            return bus->template Writer<T>();
+        } else {
+            auto* extensions = Reflect::FindService<ExtensionServices>(carrier.services);
+            ZHLN::Assert(extensions != nullptr, "ExtensionServices missing from service bundle");
+            auto found = extensions->template Get<EventBus>();
+            ZHLN::Assert(found.has_value(), "System requested EventWriter<T> without an EventBus in services or ExtensionServices");
+            return found->template Writer<T>();
+        }
+    }
+};
+
 // A node's own state. The block was allocated for *this* node from the layout its
 // signature produced, so the lookup is a walk over a handful of slots for the
 // family id of LocalToken<T> -- no TypeId resolution, no world, and nothing
@@ -417,6 +457,38 @@ consteval auto LocalParametersShadowNoService() -> bool {
     return clean;
 }
 
+template <typename Inspector, std::size_t I, std::size_t J>
+consteval auto EventPairConflictsInSameSignature() -> bool {
+    using ParamI = std::remove_cvref_t<typename Inspector::template ParameterType<I>>;
+    using ParamJ = std::remove_cvref_t<typename Inspector::template ParameterType<J>>;
+    if constexpr (EventParamTraits<ParamI>::value && EventParamTraits<ParamJ>::value) {
+        if constexpr (std::is_same_v<typename EventParamTraits<ParamI>::Event, typename EventParamTraits<ParamJ>::Event>) {
+            return EventParamTraits<ParamI>::mode == Access::Write || EventParamTraits<ParamJ>::mode == Access::Write;
+        }
+    }
+    return false;
+}
+
+template <auto SystemFn, std::size_t I>
+consteval auto EventRowIsDisjoint() -> bool {
+    using Inspector = Reflect::CallableInspector<SystemFn>;
+    bool clean      = true;
+    [&]<std::size_t... Js>(std::index_sequence<Js...>) {
+        ((clean = clean && !(Js > I && EventPairConflictsInSameSignature<Inspector, I, Js>())), ...);
+    }(std::make_index_sequence<Inspector::ParameterCount()> {});
+    return clean;
+}
+
+template <auto SystemFn>
+consteval auto EventParametersAreDisjoint() -> bool {
+    using Inspector = Reflect::CallableInspector<SystemFn>;
+    bool clean      = true;
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        ((clean = clean && EventRowIsDisjoint<SystemFn, Is>()), ...);
+    }(std::make_index_sequence<Inspector::ParameterCount()> {});
+    return clean;
+}
+
 template <auto SystemFn>
 consteval auto SignatureUsesCommandBuffer() -> bool {
     using Inspector = Reflect::CallableInspector<SystemFn>;
@@ -469,10 +541,16 @@ consteval void AdmitParameters() {
         "and shared at the same time. Keep the Local<T> for scratch the system owns, or the service for state the domain shares."
     );
     static_assert(
+        TemplatedDetail::EventParametersAreDisjoint<SystemFn>(),
+        "This system names conflicting EventWriter<T> / EventReader<T> parameters for the same event type T in one signature. "
+        "Split producer and consumer into separate systems or take a single EventWriter<T>."
+    );
+    static_assert(
         EveryParameterResolvable<CarrierT, SystemFn>(std::make_index_sequence<Reflect::CallableInspector<SystemFn>::ParameterCount()> {}),
         "A system parameter cannot be resolved by this graph. Either add the service it asks for to the graph's service bundle, "
         "or ask for something every graph resolves: Query<...>, EntityCommandBuffer&, Registry&, FrameDt/FrameAlpha/FrameIndex, Local<T> "
-        "for the node's own state, Res<T>/ResMut<T>/Optional<T&> for a service the bundle provides, SoAScratch<T, N> or LinearArena&."
+        "for the node's own state, EventReader<T>/EventWriter<T> (with EventBus in services), Res<T>/ResMut<T>/Optional<T&> for a service "
+        "the bundle provides, SoAScratch<T, N> or LinearArena&."
     );
 }
 

@@ -259,13 +259,9 @@ inline constexpr float kChartScaleLows    = 1.5f;
 struct BenchmarkViewer::Impl {
     std::unique_ptr<LogicBenchmark> benchmark;
 
-    // The viewer's own wall clock: the accumulator that turns a host's frame
-    // rate into the benchmark's fixed one. It is read every frame even while
-    // paused, because Clock::GetDeltaTime is what moves the clock forward --
-    // one that fell behind would hand the first frame after a resume a
-    // backlog of ticks.
-    Clock frameClock;
-    float accumulatorSeconds = 0.0f;
+    // The viewer's own monotonic clock (`maxDeltaTime = 0.25f`), with built-in
+    // pause resync and fixed-step accumulation for stepping the benchmark.
+    Clock frameClock {ClockConfig {.maxDeltaTime = 0.25f}};
 
     // The engine frame this viewer has already been ticked for. Both drawing
     // entry points advance the benchmark and sample the telemetry, and a host
@@ -364,27 +360,24 @@ struct BenchmarkViewer::Impl {
 };
 
 void BenchmarkViewer::Impl::Advance() noexcept {
-    const float dt = std::min(frameClock.GetDeltaTime(), 0.25f);
+    frameClock.SetPaused(!running || benchmark == nullptr);
+    frameClock.Tick();
 
     if (benchmark == nullptr || !running) {
-        accumulatorSeconds = 0.0f;
+        frameClock.ResetFixedAccumulator();
         return;
     }
 
-    accumulatorSeconds += dt;
-
-    int steps = 0;
-    while (accumulatorSeconds >= kFixedStep && steps < kMaxTicksPerFrame) {
+    const FixedStepBatch batch = frameClock.ConsumeFixedSteps(kFixedStep, static_cast<uint32_t>(kMaxTicksPerFrame));
+    for (uint32_t step = 0; step < batch.steps; ++step) {
         benchmark->Step(kFixedStep);
-        accumulatorSeconds -= kFixedStep;
-        ++steps;
     }
 
-    if (steps >= kMaxTicksPerFrame) {
+    if (batch.steps >= static_cast<uint32_t>(kMaxTicksPerFrame)) {
         // The host's frame was longer than the whole budget. Drop the backlog
         // instead of carrying it: a measuring tool that stutters the thing it
         // is measuring has stopped measuring it.
-        accumulatorSeconds = 0.0f;
+        frameClock.ResetFixedAccumulator();
     }
 }
 
@@ -1078,7 +1071,7 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
 
     auto ran = ZHLN::Engine::Run(
         runConfig,
-        [self, &uiClock](ZHLN::Engine& engine) -> void { self->UpdateAndRenderUI(engine, uiClock.GetDeltaTime()); }
+        [self, &uiClock](ZHLN::Engine& engine) -> void { self->UpdateAndRenderUI(engine, uiClock.Tick()); }
     );
 
     // The engine is gone, and with it the scheduler the benchmark's World waits
@@ -1087,7 +1080,7 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
     // leaving a World for whoever destroys the viewer afterwards. The viewer is
     // empty again and a later Attach() re-arms it.
     m_impl->benchmark.reset();
-    m_impl->accumulatorSeconds = 0.0f;
+    m_impl->frameClock.ResetFixedAccumulator();
 
     // A capture started from the panel ends with the run: the summary line and
     // the flush belong to this call, not to whichever destructor comes next.
@@ -1112,7 +1105,7 @@ void BenchmarkViewer::Attach(ZHLN::Engine& engine, size_t initialEntities) {
         return;
     }
 
-    m_impl->accumulatorSeconds = 0.0f;
+    m_impl->frameClock.Reset();
     ZHLN::Log("[Bench] viewer attached to the engine: {} entities, panel {}.", initialEntities, m_impl->visible ? "shown" : "hidden");
 }
 
@@ -1230,12 +1223,10 @@ void BenchmarkViewer::ToggleTelemetryVisible() noexcept {
 
 void BenchmarkViewer::SetRunning(bool running) noexcept {
     if (running && !m_impl->running) {
-        // Resume where the pause ended: the clock is read once so the interval
-        // just spent paused is not replayed as ticks.
-        static_cast<void>(m_impl->frameClock.GetDeltaTime());
-        m_impl->accumulatorSeconds = 0.0f;
+        m_impl->frameClock.ResetFixedAccumulator();
     }
     m_impl->running = running;
+    m_impl->frameClock.SetPaused(!running);
 }
 
 auto BenchmarkViewer::IsRunning() const noexcept -> bool {

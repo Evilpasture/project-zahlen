@@ -77,9 +77,9 @@ auto main(int argc, char* argv[]) -> int {
     // the orbit camera. The inspector owns the frame loop from here on.
     ZHLN::glTF::Initialize(*engine);
 
-    ZHLN::Clock clock;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     while (engine->IsRunning()) {
-        const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        const float dt = clock.Tick();
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 

@@ -450,7 +450,7 @@ inline constexpr uint64_t kBenchmarkTicks    = 5000;
         if (!state->viewer.IsVisible() && !state->viewer.IsTelemetryVisible()) {
             return;
         }
-        state->viewer.UpdateAndRenderUI(engine, state->clock.GetDeltaTime());
+        state->viewer.UpdateAndRenderUI(engine, state->clock.Tick());
     };
 }
 
@@ -657,7 +657,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
     bool escWasDown       = false;
 
     while (engine.IsRunning()) {
-        float frameTime = clock.GetDeltaTime();
+        float frameTime = clock.Tick();
         ZHLN::CheckForCrashes(crashState, &engine);
         engine.ProcessEvents();
 

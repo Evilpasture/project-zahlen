@@ -233,12 +233,12 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("[DeviceLostRecoverySample] Will ProvokeDeviceLost on frame {}.", autoProvokeFrame);
     }
 
-    ZHLN::Clock clock;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     bool        f9WasDown    = false;
     bool        autoProvoked = false;
 
     while (engine->IsRunning()) {
-        const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        const float dt = clock.Tick();
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 

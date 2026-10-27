@@ -233,11 +233,11 @@ auto main(int argc, char* argv[]) -> int {
         }
     }
 
-    ZHLN::Clock clock;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     while (engine->IsRunning()) {
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
-        const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        const float dt = clock.Tick();
 
         {
             auto& r = engine->GetRegistry();
