@@ -21,14 +21,13 @@ void RecordGpuCulled(
     uint32_t                     drawCount,
     const GBufferTargets&        in
 ) noexcept {
-    using enum Vk::BarrierStage;
-    using enum Vk::BarrierAccess;
-    auto* const    cmd        = encoder.cmd;
-    const uint32_t frameIndex = ctx.presenter.frameIndex;
+    auto* const    cmd         = encoder.cmd;
+    const uint32_t frameIndex  = ctx.presenter.frameIndex;
+    const auto&    indirectBuf = ctx.frames.indirectCommandsBuffersPass2[frameIndex];
 
-    Vk::BufferBarrier(cmd, ctx.frames.indirectCommandsBuffersPass2[frameIndex].Handle(), Compute | Indirect, ShaderWrite | IndirectRead, Clear, TransferWrite);
-    Vk::FillBuffer(cmd, ctx.frames.indirectCommandsBuffersPass2[frameIndex]);
-    Vk::BufferBarrier(cmd, ctx.frames.indirectCommandsBuffersPass2[frameIndex].Handle(), Transfer, TransferWrite, Compute, ShaderWrite | ShaderRead);
+    Vk::BufferBarrier::IndirectToTransfer(indirectBuf).Record(cmd);
+    Vk::FillBuffer(cmd, indirectBuf);
+    Vk::BufferBarrier::TransferToCompute(indirectBuf).Record(cmd);
 
     const auto             hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
     const auto             sceneVp = ctx.EffectiveViewport();
@@ -41,14 +40,14 @@ void RecordGpuCulled(
     };
     const auto block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
         cull.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[frameIndex]),
-        Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffersPass2[frameIndex]),
+        Vk::Slot<"g_indirectCommands">(indirectBuf),
         Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
         Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[frameIndex]),
         Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[frameIndex])
     );
     cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
-    Vk::MemoryBarrier::ComputeToIndirect().Record(cmd);
+    Vk::BufferBarrier::ComputeToIndirect(indirectBuf).Record(cmd);
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)
@@ -65,7 +64,7 @@ void RecordGpuCulled(
                 encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                     {
                         .pipeline       = group.material->pipeline,
-                        .argumentBuffer = ctx.frames.indirectCommandsBuffersPass2[frameIndex].Handle(),
+                        .argumentBuffer = indirectBuf.Handle(),
                         .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                         .drawCount      = group.count,
                     },

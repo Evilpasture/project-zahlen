@@ -24,7 +24,7 @@ void RebuildClusterBounds(RenderContext::Impl& impl, VkCommandBuffer cmd, uint32
         impl.culling.clusterBoundsHeapBindings, Vk::Slot<"out_Bounds">(impl.clusterBoundsBuffer), Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
     );
     impl.culling.clusterBoundsPass.DispatchHeapIndexed(cmd, block);
-    Vk::MemoryBarrier::ComputeWriteToRead().Record(cmd);
+    Vk::BufferBarrier::ComputeWriteToRead(impl.clusterBoundsBuffer).Record(cmd);
     impl.frameState.clusterBoundsDirty = false;
 }
 

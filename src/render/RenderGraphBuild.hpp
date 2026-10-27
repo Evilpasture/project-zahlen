@@ -14,8 +14,8 @@
 #include "passes/forward/ForwardPass.hpp"
 #include "passes/forward/OpaqueSceneCopyPass.hpp"
 #include "passes/forward/TranslucentPrePass.hpp"
-#include "passes/gbuffer/DecalPass.hpp"
 #include "passes/gbuffer/BackgroundGBufferPass.hpp"
+#include "passes/gbuffer/DecalPass.hpp"
 #include "passes/gbuffer/GBufferBasePass.hpp"
 #include "passes/gbuffer/GBufferResolvePass.hpp"
 #include "passes/gbuffer/ViewmodelPass.hpp"
@@ -113,19 +113,14 @@ template <AAMode Mode>
 
     auto core = Vk::MakePassPack(
         Passes::ShadowPass {.particles = self.meshParticles, .frame = self}, Passes::GBufferBasePass {.cull = self.culling, .frame = self},
-        Passes::BackgroundGBufferPass {.frame = self},
-        Passes::HiZGeneratePass {.cull = self.culling, .frame = self},
+        Passes::BackgroundGBufferPass {.frame = self}, Passes::HiZGeneratePass {.cull = self.culling, .frame = self},
         Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self},
         Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.frame = self},
         Passes::SsrHiZGeneratePass {.cull = self.culling, .frame = self}, Passes::TranslucentPrePass {.frame = self},
-        Passes::ComputePass<Passes::GtaoDesc> {.frame = self, .pc = pc},
-        Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc},
-        Passes::RcgiCascadePass {.frame = self},
-        Passes::RtgiCompositePass {.frame = self}, Passes::EmissivePass {.forward = self.forward, .frame = self},
-        Passes::LightingMipPass {.frame = self},
-        OpaqueReflectionPass {.frame = self, .pc = pc}, TranslucentReflectionPass {.frame = self, .pc = pc},
-        Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self},
-        Passes::BloomPass {.frame = self}
+        Passes::ComputePass<Passes::GtaoDesc> {.frame = self, .pc = pc}, Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc},
+        Passes::RcgiCascadePass {.frame = self}, Passes::RtgiCompositePass {.frame = self}, Passes::EmissivePass {.forward = self.forward, .frame = self},
+        Passes::LightingMipPass {.frame = self}, OpaqueReflectionPass {.frame = self, .pc = pc}, TranslucentReflectionPass {.frame = self, .pc = pc},
+        Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self}, Passes::BloomPass {.frame = self}
     );
 
     auto aa = [&] {
@@ -159,11 +154,7 @@ template <AAMode Mode>
         }
     }();
 
-    auto blit = Vk::MakePassPack(
-        Passes::TonemapBlitPass<Mode> {
-            .post = self.post, .frame = self, .getSwapchainImage = getSwapchain
-        }
-    );
+    auto blit = Vk::MakePassPack(Passes::TonemapBlitPass<Mode> {.post = self.post, .frame = self, .getSwapchainImage = getSwapchain});
 
     return (std::move(core) + std::move(aa) + std::move(blit)).BuildGraph();
 }

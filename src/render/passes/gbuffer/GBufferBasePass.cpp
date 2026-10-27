@@ -8,6 +8,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
+#include <array>
 #include <tuple>
 
 namespace ZHLN::Passes {
@@ -68,16 +69,13 @@ void RecordGpuCulled(
     uint32_t                    drawCount,
     const GBufferTargets&       in
 ) noexcept {
-    using enum Vk::BarrierStage;
-    using enum Vk::BarrierAccess;
     auto* const cmd        = encoder.cmd;
     const auto  frameIndex = ctx.presenter.frameIndex;
+    const auto& countBuf   = ctx.frames.secondPassCountBuffers[frameIndex];
 
-    Vk::BufferBarrier(cmd, ctx.frames.secondPassCountBuffers[frameIndex].Handle(), Compute | Indirect, ShaderWrite | IndirectRead, Clear, TransferWrite);
-
-    Vk::FillBuffer(cmd, ctx.frames.secondPassCountBuffers[frameIndex]);
-
-    Vk::BufferBarrier(cmd, ctx.frames.secondPassCountBuffers[frameIndex].Handle(), Transfer, TransferWrite, Compute, ShaderWrite | ShaderRead);
+    Vk::BufferBarrier::ComputeToTransfer(countBuf).Record(cmd);
+    Vk::FillBuffer(cmd, countBuf);
+    Vk::BufferBarrier::TransferToCompute(countBuf).Record(cmd);
 
     const auto     sceneVp = ctx.EffectiveViewport();
     const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
@@ -95,11 +93,18 @@ void RecordGpuCulled(
         Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffers[frameIndex]),
         Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
         Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[frameIndex]),
-        Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[frameIndex])
+        Vk::Slot<"g_secondPassCount">(countBuf)
     );
     cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
-    Vk::MemoryBarrier::ComputeToIndirect().Record(cmd);
+    Vk::BufferBarrier::Record(
+        cmd,
+        std::to_array({
+            Vk::BufferBarrier::ComputeToIndirect(ctx.frames.indirectCommandsBuffers[frameIndex]),
+            Vk::BufferBarrier::ComputeWriteToRead(ctx.frames.secondPassCandidatesBuffers[frameIndex]),
+            Vk::BufferBarrier::ComputeWriteToRead(countBuf),
+        })
+    );
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)

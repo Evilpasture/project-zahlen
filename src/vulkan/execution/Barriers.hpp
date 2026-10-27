@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../memory/BufferSlice.hpp"
 #include "../memory/ImageSlice.hpp"
 #include "../memory/ImageView.hpp"
 #include "RenderQueue.hpp"
@@ -601,6 +602,513 @@ class MemoryBarrier {
 static_assert(sizeof(MemoryBarrier) == 32, "MemoryBarrier must be exactly 32 bytes.");
 static_assert(std::is_trivially_copyable_v<MemoryBarrier>);
 
+class Buffer;
+
+// =============================================================================
+// BufferBarrier (64 bytes, 1 cache line)
+// =============================================================================
+// First-class value type describing a buffer or sub-buffer synchronization
+// hazard and optional queue-family ownership transfer.
+//
+// `VkBufferMemoryBarrier2` is 80 bytes with sType/pNext overhead. `BufferBarrier`
+// fits in a single 64-byte L1 cache line and synthesizes the C ABI struct on the
+// stack immediately where `vkCmdPipelineBarrier2` consumes it.
+class BufferBarrier {
+  public:
+    constexpr BufferBarrier() noexcept = default;
+
+    constexpr BufferBarrier(
+        VkBuffer              buffer,
+        VkPipelineStageFlags2 srcStage,
+        VkAccessFlags2        srcAccess,
+        VkPipelineStageFlags2 dstStage,
+        VkAccessFlags2        dstAccess,
+        VkDeviceSize          offset         = 0,
+        VkDeviceSize          size           = VK_WHOLE_SIZE,
+        uint32_t              srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
+        uint32_t              dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
+    ) noexcept:
+        _buffer(buffer),
+        _offset(offset),
+        _size(size),
+        _srcStage(srcStage),
+        _srcAccess(srcAccess),
+        _dstStage(dstStage),
+        _dstAccess(dstAccess),
+        _srcQueueFamily(srcQueueFamily),
+        _dstQueueFamily(dstQueueFamily) {
+    }
+
+    constexpr BufferBarrier(
+        VkBuffer      buffer,
+        BarrierStage  srcStage,
+        BarrierAccess srcAccess,
+        BarrierStage  dstStage,
+        BarrierAccess dstAccess,
+        VkDeviceSize  offset         = 0,
+        VkDeviceSize  size           = VK_WHOLE_SIZE,
+        uint32_t      srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
+        uint32_t      dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
+    ) noexcept:
+        BufferBarrier(
+            buffer,
+            static_cast<VkPipelineStageFlags2>(srcStage),
+            static_cast<VkAccessFlags2>(srcAccess),
+            static_cast<VkPipelineStageFlags2>(dstStage),
+            static_cast<VkAccessFlags2>(dstAccess),
+            offset,
+            size,
+            srcQueueFamily,
+            dstQueueFamily
+        ) {
+    }
+
+    constexpr BufferBarrier(
+        BufferSlice           slice,
+        VkPipelineStageFlags2 srcStage,
+        VkAccessFlags2        srcAccess,
+        VkPipelineStageFlags2 dstStage,
+        VkAccessFlags2        dstAccess,
+        uint32_t              srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
+        uint32_t              dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
+    ) noexcept:
+        BufferBarrier(slice.buffer, srcStage, srcAccess, dstStage, dstAccess, slice.offset, slice.size, srcQueueFamily, dstQueueFamily) {
+    }
+
+    constexpr BufferBarrier(
+        BufferSlice   slice,
+        BarrierStage  srcStage,
+        BarrierAccess srcAccess,
+        BarrierStage  dstStage,
+        BarrierAccess dstAccess,
+        uint32_t      srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
+        uint32_t      dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
+    ) noexcept:
+        BufferBarrier(
+            slice.buffer,
+            static_cast<VkPipelineStageFlags2>(srcStage),
+            static_cast<VkAccessFlags2>(srcAccess),
+            static_cast<VkPipelineStageFlags2>(dstStage),
+            static_cast<VkAccessFlags2>(dstAccess),
+            slice.offset,
+            slice.size,
+            srcQueueFamily,
+            dstQueueFamily
+        ) {
+    }
+
+    BufferBarrier(
+        const Buffer&         buffer,
+        VkPipelineStageFlags2 srcStage,
+        VkAccessFlags2        srcAccess,
+        VkPipelineStageFlags2 dstStage,
+        VkAccessFlags2        dstAccess,
+        VkDeviceSize          offset         = 0,
+        VkDeviceSize          size           = VK_WHOLE_SIZE,
+        uint32_t              srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
+        uint32_t              dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
+    ) noexcept;
+
+    BufferBarrier(
+        const Buffer& buffer,
+        BarrierStage  srcStage,
+        BarrierAccess srcAccess,
+        BarrierStage  dstStage,
+        BarrierAccess dstAccess,
+        VkDeviceSize  offset         = 0,
+        VkDeviceSize  size           = VK_WHOLE_SIZE,
+        uint32_t      srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
+        uint32_t      dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
+    ) noexcept;
+
+    // -------------------------------------------------------------------------
+    // Semantic Intent Factories
+    // -------------------------------------------------------------------------
+
+    /// Transfer/clear write (`vkCmdFillBuffer`, `vkCmdCopyBuffer2`) to compute shader read/write.
+    [[nodiscard]] static constexpr auto
+        TransferToCompute(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
+        return {
+            buffer,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+            offset,
+            size,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto TransferToCompute(BufferSlice slice) noexcept -> BufferBarrier {
+        return TransferToCompute(slice.buffer, slice.offset, slice.size);
+    }
+
+    [[nodiscard]] static auto
+        TransferToCompute(const Buffer& buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier;
+
+    /// Compute shader read/write to subsequent transfer/clear write.
+    [[nodiscard]] static constexpr auto
+        ComputeToTransfer(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
+        return {
+            buffer,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            offset,
+            size,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto ComputeToTransfer(BufferSlice slice) noexcept -> BufferBarrier {
+        return ComputeToTransfer(slice.buffer, slice.offset, slice.size);
+    }
+
+    [[nodiscard]] static auto
+        ComputeToTransfer(const Buffer& buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier;
+
+    /// Compute write + indirect draw consumption to subsequent transfer/clear reset.
+    [[nodiscard]] static constexpr auto
+        IndirectToTransfer(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
+        return {
+            buffer,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+            VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            offset,
+            size,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto IndirectToTransfer(BufferSlice slice) noexcept -> BufferBarrier {
+        return IndirectToTransfer(slice.buffer, slice.offset, slice.size);
+    }
+
+    [[nodiscard]] static auto
+        IndirectToTransfer(const Buffer& buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier;
+
+    /// Compute culling / command generation write to indirect draw/dispatch argument read.
+    [[nodiscard]] static constexpr auto
+        ComputeToIndirect(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
+        return {
+            buffer,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            VK_ACCESS_2_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+            offset,
+            size,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto ComputeToIndirect(BufferSlice slice) noexcept -> BufferBarrier {
+        return ComputeToIndirect(slice.buffer, slice.offset, slice.size);
+    }
+
+    [[nodiscard]] static auto
+        ComputeToIndirect(const Buffer& buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier;
+
+    /// Compute shader SSBO/BDA write to subsequent compute shader SSBO/BDA read.
+    [[nodiscard]] static constexpr auto
+        ComputeWriteToRead(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
+        return {
+            buffer,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            VK_ACCESS_2_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            VK_ACCESS_2_SHADER_READ_BIT,
+            offset,
+            size,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto ComputeWriteToRead(BufferSlice slice) noexcept -> BufferBarrier {
+        return ComputeWriteToRead(slice.buffer, slice.offset, slice.size);
+    }
+
+    [[nodiscard]] static auto
+        ComputeWriteToRead(const Buffer& buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier;
+
+    /// Serialize overlapping staged copy writes targeting the same destination buffer range.
+    [[nodiscard]] static constexpr auto
+        CopyWriteToWrite(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
+        return {
+            buffer,
+            VK_PIPELINE_STAGE_2_COPY_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_COPY_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            offset,
+            size,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto CopyWriteToWrite(BufferSlice slice) noexcept -> BufferBarrier {
+        return CopyWriteToWrite(slice.buffer, slice.offset, slice.size);
+    }
+
+    [[nodiscard]] static auto
+        CopyWriteToWrite(const Buffer& buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier;
+
+    /// Transfer/copy write to indirect draw/dispatch argument read.
+    [[nodiscard]] static constexpr auto
+        TransferToIndirect(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
+        return {
+            buffer,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+            offset,
+            size,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto TransferToIndirect(BufferSlice slice) noexcept -> BufferBarrier {
+        return TransferToIndirect(slice.buffer, slice.offset, slice.size);
+    }
+
+    [[nodiscard]] static auto
+        TransferToIndirect(const Buffer& buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier;
+
+    /// Staged upload / transfer write to vertex attribute, index, and vertex shader BDA reads.
+    [[nodiscard]] static constexpr auto
+        TransferToVertex(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
+        return {
+            buffer,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+            VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+            offset,
+            size,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto TransferToVertex(BufferSlice slice) noexcept -> BufferBarrier {
+        return TransferToVertex(slice.buffer, slice.offset, slice.size);
+    }
+
+    [[nodiscard]] static auto
+        TransferToVertex(const Buffer& buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier;
+
+    /// Queue-family ownership release on the source queue.
+    [[nodiscard]] static constexpr auto QueueRelease(
+        VkBuffer              buffer,
+        VkPipelineStageFlags2 srcStage,
+        VkAccessFlags2        srcAccess,
+        uint32_t              srcQueueFamily,
+        uint32_t              dstQueueFamily,
+        VkDeviceSize          offset = 0,
+        VkDeviceSize          size   = VK_WHOLE_SIZE
+    ) noexcept -> BufferBarrier {
+        return {
+            buffer,
+            srcStage,
+            srcAccess,
+            VK_PIPELINE_STAGE_2_NONE,
+            0,
+            offset,
+            size,
+            srcQueueFamily,
+            dstQueueFamily,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto QueueRelease(
+        BufferSlice           slice,
+        VkPipelineStageFlags2 srcStage,
+        VkAccessFlags2        srcAccess,
+        uint32_t              srcQueueFamily,
+        uint32_t              dstQueueFamily
+    ) noexcept -> BufferBarrier {
+        return QueueRelease(slice.buffer, srcStage, srcAccess, srcQueueFamily, dstQueueFamily, slice.offset, slice.size);
+    }
+
+    [[nodiscard]] static auto QueueRelease(
+        const Buffer&         buffer,
+        VkPipelineStageFlags2 srcStage,
+        VkAccessFlags2        srcAccess,
+        uint32_t              srcQueueFamily,
+        uint32_t              dstQueueFamily,
+        VkDeviceSize          offset = 0,
+        VkDeviceSize          size   = VK_WHOLE_SIZE
+    ) noexcept -> BufferBarrier;
+
+    /// Queue-family ownership acquire on the destination queue.
+    [[nodiscard]] static constexpr auto QueueAcquire(
+        VkBuffer              buffer,
+        VkPipelineStageFlags2 dstStage,
+        VkAccessFlags2        dstAccess,
+        uint32_t              srcQueueFamily,
+        uint32_t              dstQueueFamily,
+        VkDeviceSize          offset = 0,
+        VkDeviceSize          size   = VK_WHOLE_SIZE
+    ) noexcept -> BufferBarrier {
+        return {
+            buffer,
+            VK_PIPELINE_STAGE_2_NONE,
+            0,
+            dstStage,
+            dstAccess,
+            offset,
+            size,
+            srcQueueFamily,
+            dstQueueFamily,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto QueueAcquire(
+        BufferSlice           slice,
+        VkPipelineStageFlags2 dstStage,
+        VkAccessFlags2        dstAccess,
+        uint32_t              srcQueueFamily,
+        uint32_t              dstQueueFamily
+    ) noexcept -> BufferBarrier {
+        return QueueAcquire(slice.buffer, dstStage, dstAccess, srcQueueFamily, dstQueueFamily, slice.offset, slice.size);
+    }
+
+    [[nodiscard]] static auto QueueAcquire(
+        const Buffer&         buffer,
+        VkPipelineStageFlags2 dstStage,
+        VkAccessFlags2        dstAccess,
+        uint32_t              srcQueueFamily,
+        uint32_t              dstQueueFamily,
+        VkDeviceSize          offset = 0,
+        VkDeviceSize          size   = VK_WHOLE_SIZE
+    ) noexcept -> BufferBarrier;
+
+    // -------------------------------------------------------------------------
+    // Execution ("Tell the barrier to record")
+    // -------------------------------------------------------------------------
+
+    void Record(VkCommandBuffer cmd) const noexcept {
+        if (cmd == VK_NULL_HANDLE || !Valid()) {
+            return;
+        }
+        const VkBufferMemoryBarrier2 barrier = AsVkBarrier();
+        const VkDependencyInfo       dep {
+            .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers    = &barrier,
+        };
+        vkCmdPipelineBarrier2(cmd, &dep);
+    }
+
+    /// Zero-allocation stack submission of a fixed-size buffer barrier batch.
+    template <size_t N>
+    static void Record(VkCommandBuffer cmd, const std::array<BufferBarrier, N>& barriers) noexcept {
+        if constexpr (N == 0) {
+            return;
+        } else {
+            if (cmd == VK_NULL_HANDLE) {
+                return;
+            }
+            std::array<VkBufferMemoryBarrier2, N> vkBarriers {};
+            uint32_t                              count = 0;
+            for (size_t i = 0; i < N; ++i) {
+                if (barriers[i].Valid()) {
+                    vkBarriers[count++] = barriers[i].AsVkBarrier();
+                }
+            }
+            if (count == 0) {
+                return;
+            }
+            const VkDependencyInfo dep {
+                .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .bufferMemoryBarrierCount = count,
+                .pBufferMemoryBarriers    = vkBarriers.data(),
+            };
+            vkCmdPipelineBarrier2(cmd, &dep);
+        }
+    }
+
+    /// Dynamic-count batch submission (stack-allocated up to 16 barriers).
+    static void Record(VkCommandBuffer cmd, std::span<const BufferBarrier> barriers) noexcept {
+        if (barriers.empty() || cmd == VK_NULL_HANDLE) {
+            return;
+        }
+
+        constexpr size_t kStackLimit = 16;
+        if (barriers.size() <= kStackLimit) {
+            std::array<VkBufferMemoryBarrier2, kStackLimit> vkBarriers {};
+            uint32_t                                        count = 0;
+            for (const auto& b: barriers) {
+                if (b.Valid()) {
+                    vkBarriers[count++] = b.AsVkBarrier();
+                }
+            }
+            if (count == 0) {
+                return;
+            }
+            const VkDependencyInfo dep {
+                .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .bufferMemoryBarrierCount = count,
+                .pBufferMemoryBarriers    = vkBarriers.data(),
+            };
+            vkCmdPipelineBarrier2(cmd, &dep);
+        } else {
+            std::vector<VkBufferMemoryBarrier2> heapBarriers;
+            heapBarriers.reserve(barriers.size());
+            for (const auto& b: barriers) {
+                if (b.Valid()) {
+                    heapBarriers.push_back(b.AsVkBarrier());
+                }
+            }
+            if (heapBarriers.empty()) {
+                return;
+            }
+            const VkDependencyInfo dep {
+                .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .bufferMemoryBarrierCount = static_cast<uint32_t>(heapBarriers.size()),
+                .pBufferMemoryBarriers    = heapBarriers.data(),
+            };
+            vkCmdPipelineBarrier2(cmd, &dep);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // JIT Stack Synthesis
+    // -------------------------------------------------------------------------
+
+    [[nodiscard]] constexpr auto AsVkBarrier() const noexcept -> VkBufferMemoryBarrier2 {
+        return {
+            .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+            .pNext               = nullptr,
+            .srcStageMask        = _srcStage,
+            .srcAccessMask       = _srcAccess,
+            .dstStageMask        = _dstStage,
+            .dstAccessMask       = _dstAccess,
+            .srcQueueFamilyIndex = _srcQueueFamily,
+            .dstQueueFamilyIndex = _dstQueueFamily,
+            .buffer              = _buffer,
+            .offset              = _offset,
+            .size                = _size,
+        };
+    }
+
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return _buffer != VK_NULL_HANDLE && _size != 0;
+    }
+
+    friend constexpr auto operator==(const BufferBarrier&, const BufferBarrier&) noexcept -> bool = default;
+
+  private:
+    VkBuffer              _buffer         = VK_NULL_HANDLE;
+    VkDeviceSize          _offset         = 0;
+    VkDeviceSize          _size           = VK_WHOLE_SIZE;
+    VkPipelineStageFlags2 _srcStage       = VK_PIPELINE_STAGE_2_NONE;
+    VkAccessFlags2        _srcAccess      = 0;
+    VkPipelineStageFlags2 _dstStage       = VK_PIPELINE_STAGE_2_NONE;
+    VkAccessFlags2        _dstAccess      = 0;
+    uint32_t              _srcQueueFamily = VK_QUEUE_FAMILY_IGNORED;
+    uint32_t              _dstQueueFamily = VK_QUEUE_FAMILY_IGNORED;
+};
+
+static_assert(sizeof(BufferBarrier) == 64, "BufferBarrier must be exactly 64 bytes.");
+static_assert(std::is_trivially_copyable_v<BufferBarrier>);
+
 // -----------------------------------------------------------------------------
 // Inline ImageView & ImageSlice Synchronization Delegations
 // -----------------------------------------------------------------------------
@@ -704,6 +1212,42 @@ static_assert([]() consteval {
            c2r.dstAccessMask == VK_ACCESS_2_SHADER_READ_BIT &&
            c2i.dstStageMask == VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT &&
            c2i.dstAccessMask == VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+}());
+
+static_assert([]() consteval {
+    const BufferSlice            subSlice {VK_NULL_HANDLE, 0x1000, 256, 1024};
+    const VkBufferMemoryBarrier2 t2c = BufferBarrier::TransferToCompute(subSlice).AsVkBarrier();
+    const VkBufferMemoryBarrier2 i2t = BufferBarrier::IndirectToTransfer(VK_NULL_HANDLE, 64, 512).AsVkBarrier();
+    const VkBufferMemoryBarrier2 rel =
+        BufferBarrier::QueueRelease(subSlice, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, 2, 0).AsVkBarrier();
+    const VkBufferMemoryBarrier2 acq =
+        BufferBarrier::QueueAcquire(subSlice, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT, 2, 0).AsVkBarrier();
+
+    return t2c.sType == VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 &&
+           t2c.pNext == nullptr &&
+           t2c.offset == 256 &&
+           t2c.size == 1024 &&
+           t2c.srcStageMask == VK_PIPELINE_STAGE_2_TRANSFER_BIT &&
+           t2c.srcAccessMask == VK_ACCESS_2_TRANSFER_WRITE_BIT &&
+           t2c.dstStageMask == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT &&
+           t2c.dstAccessMask == (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT) &&
+           t2c.srcQueueFamilyIndex == VK_QUEUE_FAMILY_IGNORED &&
+           t2c.dstQueueFamilyIndex == VK_QUEUE_FAMILY_IGNORED &&
+           i2t.offset == 64 &&
+           i2t.size == 512 &&
+           i2t.srcStageMask == (VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT) &&
+           i2t.srcAccessMask == (VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT) &&
+           i2t.dstStageMask == VK_PIPELINE_STAGE_2_TRANSFER_BIT &&
+           i2t.dstAccessMask == VK_ACCESS_2_TRANSFER_WRITE_BIT &&
+           rel.dstStageMask == VK_PIPELINE_STAGE_2_NONE &&
+           rel.dstAccessMask == 0 &&
+           rel.srcQueueFamilyIndex == 2 &&
+           rel.dstQueueFamilyIndex == 0 &&
+           acq.srcStageMask == VK_PIPELINE_STAGE_2_NONE &&
+           acq.srcAccessMask == 0 &&
+           acq.srcQueueFamilyIndex == 2 &&
+           acq.dstQueueFamilyIndex == 0 &&
+           !BufferBarrier {}.Valid();
 }());
 
 } // namespace ZHLN::Vk

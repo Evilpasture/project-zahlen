@@ -78,9 +78,7 @@ void ExecuteSceneGraph(
     const GraphicsSettings&             settings,
     RenderGraphDetail::SwapchainImageFn getSwapchain
 ) {
-    auto graph = RenderGraphDetail::BuildFrameGraph<Mode>(
-        self, RenderGraphDetail::AssembleScenePushConstants(self, view, settings), getSwapchain
-    );
+    auto graph = RenderGraphDetail::BuildFrameGraph<Mode>(self, RenderGraphDetail::AssembleScenePushConstants(self, view, settings), getSwapchain);
 
     typename decltype(graph)::Binder binder;
     binder.AutoBind(self);

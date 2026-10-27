@@ -464,15 +464,88 @@ inline void CopyBuffer(VkCommandBuffer cmd, BufferSlice src, BufferSlice dst) {
     }
 }
 
-inline void BufferBarrier(
-    VkCommandBuffer cmd,
-    const Buffer&   buffer,
-    BarrierStage    srcStage,
-    BarrierAccess   srcAccess,
-    BarrierStage    dstStage,
-    BarrierAccess   dstAccess
-) noexcept {
-    BufferBarrier(cmd, buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess);
+inline BufferBarrier::BufferBarrier(
+    const Buffer&         buffer,
+    VkPipelineStageFlags2 srcStage,
+    VkAccessFlags2        srcAccess,
+    VkPipelineStageFlags2 dstStage,
+    VkAccessFlags2        dstAccess,
+    VkDeviceSize          offset,
+    VkDeviceSize          size,
+    uint32_t              srcQueueFamily,
+    uint32_t              dstQueueFamily
+) noexcept:
+    BufferBarrier(buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess, offset, size, srcQueueFamily, dstQueueFamily) {
+}
+
+inline BufferBarrier::BufferBarrier(
+    const Buffer& buffer,
+    BarrierStage  srcStage,
+    BarrierAccess srcAccess,
+    BarrierStage  dstStage,
+    BarrierAccess dstAccess,
+    VkDeviceSize  offset,
+    VkDeviceSize  size,
+    uint32_t      srcQueueFamily,
+    uint32_t      dstQueueFamily
+) noexcept:
+    BufferBarrier(buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess, offset, size, srcQueueFamily, dstQueueFamily) {
+}
+
+inline auto BufferBarrier::TransferToCompute(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return TransferToCompute(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::ComputeToTransfer(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return ComputeToTransfer(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::IndirectToTransfer(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return IndirectToTransfer(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::ComputeToIndirect(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return ComputeToIndirect(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::ComputeWriteToRead(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return ComputeWriteToRead(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::CopyWriteToWrite(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return CopyWriteToWrite(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::TransferToIndirect(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return TransferToIndirect(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::TransferToVertex(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return TransferToVertex(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::QueueRelease(
+    const Buffer&         buffer,
+    VkPipelineStageFlags2 srcStage,
+    VkAccessFlags2        srcAccess,
+    uint32_t              srcQueueFamily,
+    uint32_t              dstQueueFamily,
+    VkDeviceSize          offset,
+    VkDeviceSize          size
+) noexcept -> BufferBarrier {
+    return QueueRelease(buffer.Handle(), srcStage, srcAccess, srcQueueFamily, dstQueueFamily, offset, size);
+}
+
+inline auto BufferBarrier::QueueAcquire(
+    const Buffer&         buffer,
+    VkPipelineStageFlags2 dstStage,
+    VkAccessFlags2        dstAccess,
+    uint32_t              srcQueueFamily,
+    uint32_t              dstQueueFamily,
+    VkDeviceSize          offset,
+    VkDeviceSize          size
+) noexcept -> BufferBarrier {
+    return QueueAcquire(buffer.Handle(), dstStage, dstAccess, srcQueueFamily, dstQueueFamily, offset, size);
 }
 
 class StagingRingBuffer {

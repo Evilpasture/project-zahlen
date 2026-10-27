@@ -15,27 +15,6 @@ constexpr auto operator|(BarrierAccess a, BarrierAccess b) noexcept -> BarrierAc
     return static_cast<BarrierAccess>(static_cast<std::underlying_type_t<BarrierAccess>>(a) | static_cast<std::underlying_type_t<BarrierAccess>>(b));
 }
 
-inline void PipelineBarrier(
-    VkCommandBuffer                         cmd,
-    std::span<const VkBufferMemoryBarrier2> buffers,
-    std::span<const VkImageMemoryBarrier2>  images,
-    std::span<const VkMemoryBarrier2>       memory
-) noexcept {
-    if (buffers.empty() && images.empty() && memory.empty()) {
-        return;
-    }
-    const VkDependencyInfo dep_info = {
-        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .memoryBarrierCount       = static_cast<uint32_t>(memory.size()),
-        .pMemoryBarriers          = memory.data(),
-        .bufferMemoryBarrierCount = static_cast<uint32_t>(buffers.size()),
-        .pBufferMemoryBarriers    = buffers.data(),
-        .imageMemoryBarrierCount  = static_cast<uint32_t>(images.size()),
-        .pImageMemoryBarriers     = images.data(),
-    };
-    vkCmdPipelineBarrier2(cmd, &dep_info);
-}
-
 template <QueueType QType>
 CommandBuffer<QType>::operator VkCommandBuffer() const noexcept {
     return handle;

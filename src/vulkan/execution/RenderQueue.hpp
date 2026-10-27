@@ -158,13 +158,6 @@ enum class BarrierAccess : VkAccessFlags2 {
 [[nodiscard]] constexpr auto operator|(BarrierStage a, BarrierStage b) noexcept -> BarrierStage;
 [[nodiscard]] constexpr auto operator|(BarrierAccess a, BarrierAccess b) noexcept -> BarrierAccess;
 
-inline void PipelineBarrier(
-    VkCommandBuffer cmd,
-    std::span<const VkBufferMemoryBarrier2> buffers = {},
-    std::span<const VkImageMemoryBarrier2>  images  = {},
-    std::span<const VkMemoryBarrier2>       memory  = {}
-) noexcept;
-
 enum class QueueType : uint8_t { Graphics, Compute, Transfer };
 
 template <QueueType QType>
@@ -175,40 +168,6 @@ struct CommandBuffer {
                        operator VkCommandBuffer() const noexcept;
     [[nodiscard]] bool Valid() const noexcept;
 };
-
-[[nodiscard]] constexpr auto MakeBufferBarrier(
-    VkBuffer      buffer,
-    BarrierStage  srcStage,
-    BarrierAccess srcAccess,
-    BarrierStage  dstStage,
-    BarrierAccess dstAccess
-) noexcept -> VkBufferMemoryBarrier2 {
-    return {
-        .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-        .pNext               = nullptr,
-        .srcStageMask        = static_cast<VkPipelineStageFlags2>(srcStage),
-        .srcAccessMask       = static_cast<VkAccessFlags2>(srcAccess),
-        .dstStageMask        = static_cast<VkPipelineStageFlags2>(dstStage),
-        .dstAccessMask       = static_cast<VkAccessFlags2>(dstAccess),
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .buffer              = buffer,
-        .offset              = 0,
-        .size                = VK_WHOLE_SIZE
-    };
-}
-
-inline void BufferBarrier(
-    VkCommandBuffer cmd,
-    VkBuffer        buffer,
-    BarrierStage    srcStage,
-    BarrierAccess   srcAccess,
-    BarrierStage    dstStage,
-    BarrierAccess   dstAccess
-) noexcept {
-    const VkBufferMemoryBarrier2 barrier = MakeBufferBarrier(buffer, srcStage, srcAccess, dstStage, dstAccess);
-    PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2>(&barrier, 1));
-}
 
 template <QueueType QType>
 [[nodiscard]] constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue;
