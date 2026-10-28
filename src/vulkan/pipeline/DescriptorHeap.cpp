@@ -38,6 +38,7 @@ DescriptorHeap::~DescriptorHeap() noexcept {
 DescriptorHeap::DescriptorHeap(DescriptorHeap&& other) noexcept:
     _device(std::exchange(other._device, VK_NULL_HANDLE)),
     _type(other._type),
+    _config(std::exchange(other._config, HeapConfig {})),
     _capacity(std::exchange(other._capacity, 0)),
     _staticCapacity(std::exchange(other._staticCapacity, 0)),
     _staticCursor(std::exchange(other._staticCursor, 0)),
@@ -68,6 +69,7 @@ auto DescriptorHeap::operator=(DescriptorHeap&& other) noexcept -> DescriptorHea
         Cleanup();
         _device                      = std::exchange(other._device, VK_NULL_HANDLE);
         _type                        = other._type;
+        _config                      = std::exchange(other._config, HeapConfig {});
         _capacity                    = std::exchange(other._capacity, 0);
         _staticCapacity              = std::exchange(other._staticCapacity, 0);
         _staticCursor                = std::exchange(other._staticCursor, 0);
@@ -101,6 +103,7 @@ void DescriptorHeap::Cleanup() noexcept {
         _allocator->DestroyBuffer(_buffer);
     }
     _device                      = VK_NULL_HANDLE;
+    _config                      = {};
     _allocator                   = nullptr;
     _mappedPtr                   = nullptr;
     _capacity                    = 0;
@@ -121,11 +124,12 @@ void DescriptorHeap::Cleanup() noexcept {
 }
 
 auto DescriptorHeap::Init(
-    const Context& ctx, Allocator& allocator, DescriptorHeapType type, PartitionLayout layout
+    const Context& ctx, Allocator& allocator, DescriptorHeapType type, PartitionLayout layout, HeapConfig config
 ) noexcept -> std::expected<void, ErrorCode> {
     Cleanup();
     _device                     = ctx.Device();
     _type                       = type;
+    _config                     = config;
     _allocator                  = &allocator;
     _staticCapacity             = layout.staticSlots;
     _frameTransientCapacity     = layout.frameTransientSlots;
@@ -292,8 +296,9 @@ void DescriptorHeap::FreeStatic(uint32_t slot) noexcept {
 }
 
 void DescriptorHeap::BeginFrame(uint32_t frameIndex) noexcept {
-    if constexpr (isDev) {
-        if (_frameTransientCapacity > 0 && uint64_t {_frameTransientAllocated} * 4ULL > uint64_t {_frameTransientCapacity} * 3ULL) [[unlikely]] {
+    if (_config.enableCapacityWarnings && _frameTransientCapacity > 0) {
+        const uint64_t threshold = std::min<uint64_t>(_config.warningThresholdPercent, 100ULL);
+        if (uint64_t {_frameTransientAllocated} * 100ULL > uint64_t {_frameTransientCapacity} * threshold) [[unlikely]] {
             ZHLN::Log(
                 "[VK_EXT_descriptor_heap] frame transient partition {}% full ({} of {} slots); raise kFrameTransientResourceSlots.",
                 (uint64_t {_frameTransientAllocated} * 100ULL) / uint64_t {_frameTransientCapacity}, _frameTransientAllocated, _frameTransientCapacity
@@ -599,7 +604,8 @@ auto HeapManager::Init(
     uint32_t       staticResourceCount,
     uint32_t       staticSamplerCount,
     uint32_t       frameTransientResourceCount,
-    uint32_t       immediateTransientResourceCount
+    uint32_t       immediateTransientResourceCount,
+    HeapConfig     config
 ) noexcept -> std::expected<void, ErrorCode> {
     _device = ctx.Device();
 
@@ -609,7 +615,8 @@ auto HeapManager::Init(
             .staticSlots             = staticResourceCount,
             .frameTransientSlots     = frameTransientResourceCount,
             .immediateTransientSlots = immediateTransientResourceCount,
-        }
+        },
+        config
     );
     if (!resInit.has_value()) [[unlikely]] {
         return std::unexpected(resInit.error());
@@ -619,7 +626,8 @@ auto HeapManager::Init(
         ctx, allocator, DescriptorHeapType::Samplers,
         {
             .staticSlots = staticSamplerCount,
-        }
+        },
+        config
     );
     if (!sampInit.has_value()) [[unlikely]] {
         return std::unexpected(sampInit.error());

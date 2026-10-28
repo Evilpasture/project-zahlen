@@ -103,7 +103,7 @@ auto RenderContext::Impl::InitSceneHeaps(Vk::Sampler globalSamplerValue, Vk::Sam
     clampSampler  = clampSamplerValue;
     auto init_res = heapManager.Init(
         ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots, kSceneStaticSamplerSlots + kPassStaticSamplerSlots, kFrameTransientResourceSlots,
-        kImmediateTransientResourceSlots
+        kImmediateTransientResourceSlots, Vk::HeapConfig {.enableCapacityWarnings = isDev}
     );
     if (!init_res) {
         return std::unexpected(init_res.error());

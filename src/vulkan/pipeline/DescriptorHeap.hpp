@@ -83,6 +83,11 @@ enum class HeapLifecycle : uint8_t {
     Immediate
 };
 
+struct HeapConfig {
+    uint32_t warningThresholdPercent = 75;
+    bool     enableCapacityWarnings  = false;
+};
+
 enum class DescriptorHeapError : uint8_t {
     ExtensionUnavailable ZHLN_ANNOTATION(ZHLN::Description<"VK_EXT_descriptor_heap is not enabled on this device">{}) = 1,
     ResourceSlotsExhausted ZHLN_ANNOTATION(ZHLN::Description<"Static resource descriptor heap slots exhausted">{}),
@@ -334,8 +339,9 @@ class DescriptorHeap {
     DescriptorHeap(DescriptorHeap&& other) noexcept;
     auto operator=(DescriptorHeap&& other) noexcept -> DescriptorHeap&;
 
-    [[nodiscard]] auto Init(const Context& ctx, Allocator& allocator, DescriptorHeapType type, PartitionLayout layout) noexcept
-        -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto Init(
+        const Context& ctx, Allocator& allocator, DescriptorHeapType type, PartitionLayout layout, HeapConfig config = {}
+    ) noexcept -> std::expected<void, ErrorCode>;
     void Cleanup() noexcept;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
@@ -401,6 +407,7 @@ class DescriptorHeap {
 
     VkDevice           _device = VK_NULL_HANDLE;
     DescriptorHeapType _type   = DescriptorHeapType::Resources;
+    HeapConfig         _config {};
 
     uint32_t _capacity                    = 0;
     uint32_t _staticCapacity              = 0;
@@ -444,7 +451,8 @@ class HeapManager {
         uint32_t       staticResourceCount,
         uint32_t       staticSamplerCount,
         uint32_t       frameTransientResourceCount,
-        uint32_t       immediateTransientResourceCount
+        uint32_t       immediateTransientResourceCount,
+        HeapConfig     config = {}
     ) noexcept -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {

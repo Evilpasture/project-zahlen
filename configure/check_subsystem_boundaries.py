@@ -16,8 +16,26 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_ROOT = REPOSITORY_ROOT / "src"
-SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".ixx", ".cppm"}
+SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".ixx", ".cppm", ".inl", ".ipp"}
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*([<"])([^">]+)[">]', re.MULTILINE)
+COMMENT_OR_STRING_RE = re.compile(
+    r"//[^\n]*"
+    r"|/\*[\s\S]*?\*/"
+    r'|"(?:\\[\s\S]|[^"\\])*"'
+    r"|'(?:\\[\s\S]|[^'\\])*'"
+)
+VULKAN_BUILD_MODE_TOKEN_RE = re.compile(r"\b(?:isDev|isDebug|ZHLN_DEV_MODE|ZHLN_DEBUG)\b")
+
+
+def _blank_match(match: re.Match[str]) -> str:
+    span = match.group(0)
+    if "\n" not in span:
+        return " " * len(span)
+    return "\n".join(" " * len(part) for part in span.split("\n"))
+
+
+def strip_comments_and_strings(text: str) -> str:
+    return COMMENT_OR_STRING_RE.sub(_blank_match, text)
 
 
 def source_subsystem(path: Path) -> str | None:
@@ -56,6 +74,7 @@ def main() -> int:
         return 2
 
     violations: list[tuple[Path, str, str, str]] = []
+    policy_violations: list[tuple[Path, int, str]] = []
     for source in sorted(path for path in SOURCE_ROOT.rglob("*") if path.is_file() and path.suffix in SOURCE_SUFFIXES):
         owner = source_subsystem(source)
         if owner is None:
@@ -74,15 +93,30 @@ def main() -> int:
             if dependency is not None and dependency != owner:
                 violations.append((source, include, owner, dependency))
 
-    if violations:
-        print("Subsystem private-header boundary violations:", file=sys.stderr)
-        for source, include, owner, dependency in violations:
-            print(
-                f"  {source.relative_to(REPOSITORY_ROOT)}: #include <{include}> crosses {owner} -> {dependency} "
-                f"(private header: {SOURCE_ROOT.joinpath(include).relative_to(REPOSITORY_ROOT)})",
-                file=sys.stderr,
-            )
-        print("Use a public header under include/Zahlen/ or move the needed operation behind the owning subsystem's façade.", file=sys.stderr)
+        if owner == "vulkan":
+            clean = strip_comments_and_strings(text)
+            for match in VULKAN_BUILD_MODE_TOKEN_RE.finditer(clean):
+                line = clean.count("\n", 0, match.start()) + 1
+                policy_violations.append((source, line, match.group(0)))
+
+    if violations or policy_violations:
+        if violations:
+            print("Subsystem private-header boundary violations:", file=sys.stderr)
+            for source, include, owner, dependency in violations:
+                print(
+                    f"  {source.relative_to(REPOSITORY_ROOT)}: #include <{include}> crosses {owner} -> {dependency} "
+                    f"(private header: {SOURCE_ROOT.joinpath(include).relative_to(REPOSITORY_ROOT)})",
+                    file=sys.stderr,
+                )
+            print("Use a public header under include/Zahlen/ or move the needed operation behind the owning subsystem's façade.", file=sys.stderr)
+        if policy_violations:
+            print("RHI build-mode policy leak violations in src/vulkan/:", file=sys.stderr)
+            for source, line, token in policy_violations:
+                print(
+                    f"  {source.relative_to(REPOSITORY_ROOT)}:{line}: hardcoded `{token}` in src/vulkan/; "
+                    "pass an explicit runtime config/policy struct from the caller instead.",
+                    file=sys.stderr,
+                )
         return 1
 
     subsystem_count = sum(1 for path in SOURCE_ROOT.iterdir() if path.is_dir())
