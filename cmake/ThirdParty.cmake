@@ -508,32 +508,109 @@ if(ZHLN_BUILD_RENDER)
     )
 endif()
 
-# --- simdjson (vendored at extern/simdjson) ---
-# plugins/json is its only consumer. Provisioned here like every other extern/
-# entry so no platform needs a system simdjson: pkg-config discovery has no
-# story on a bare Windows toolchain, which is exactly what used to break
-# plugins/json there. As a subproject simdjson turns its developer mode and
-# install rules off by itself; BUILD_SHARED_LIBS is OFF project-wide, so its
-# simdjson target is a static archive, aliased as simdjson::simdjson.
+# --- simdjson ---
+# plugins/json is its only consumer (via simdjson::simdjson). Prefer a system
+# simdjson package on Unix when available, and fall back to building the
+# vendored extern/simdjson from source otherwise (including bare Windows
+# toolchains with no system package manager).
 #
-# simdjson's own C++26 static-reflection APIs stay OFF, even though the engine
-# is built with -freflection. Since simdjson 5.0 they are auto-detected from
-# the feature-test macros (see simdjson/compiler_check.h) in every TU that
-# includes <simdjson.h>, and simdjson/annotations.h reports misuse with
-# `throw std::meta::exception(...)` in consteval functions. GCC rejects any
-# throw-expression under the project's -fno-exceptions, consteval or not, so
-# plugins/json/JSON.cpp fails to compile despite only using the DOM parser.
-# Zahlen does its own reflection-driven serialisation (JSONSchema.hpp) and
-# never uses simdjson's reflected (de)serialisation, so opt out through
-# upstream's switch: MODE=OFF makes the simdjson target export
-# SIMDJSON_STATIC_REFLECTION=0 PUBLIC, keeping the definition identical for
-# simdjson.cpp and for its consumers.
-set(SIMDJSON_STATIC_REFLECTION_MODE "OFF" CACHE STRING "" FORCE)
-# C++26 guarantees <bit>; pre-seeding skips simdjson's try_compile check, and
-# disabling PCH on this single-TU library avoids building a throwaway .pch.
-set(SIMDJSON_HAS_BIT_HEADER TRUE CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/simdjson EXCLUDE_FROM_ALL SYSTEM)
-set_target_properties(simdjson PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+# simdjson's own C++26 static-reflection APIs must stay OFF even though the
+# engine compiles with -freflection: since simdjson 5.0 they are auto-detected
+# from feature-test macros in every TU that includes <simdjson.h> unless
+# SIMDJSON_STATIC_REFLECTION=0 is defined (upstream's default AUTO mode omits
+# that flag from installed simdjsonTargets.cmake), and simdjson/annotations.h
+# contains `throw std::meta::exception(...)` in consteval functions which GCC
+# rejects under -fno-exceptions. Zahlen uses its own reflection serializer
+# (JSONSchema.hpp), so force SIMDJSON_STATIC_REFLECTION=0 in both the system
+# and vendored paths.
+option(ZHLN_SIMDJSON_VENDORED
+    "Build and use the vendored extern/simdjson, ignoring any system simdjson" OFF)
+
+set(ZHLN_HAS_SIMDJSON FALSE)
+if(UNIX AND NOT ZHLN_SIMDJSON_VENDORED)
+    find_path(_ZHLN_PROBE_SIMDJSON_H
+        NAMES simdjson.h
+        HINTS "${SIMDJSON_ROOT}" ENV SIMDJSON_ROOT /opt/homebrew/opt/simdjson /usr/local
+        PATH_SUFFIXES include
+        QUIET
+    )
+    if(NOT _ZHLN_PROBE_SIMDJSON_H)
+        unset(_ZHLN_PROBE_SIMDJSON_H CACHE)
+    endif()
+
+    if(_ZHLN_PROBE_SIMDJSON_H OR DEFINED ENV{PKG_CONFIG_PATH})
+        # Omit a version argument here: upstream simdjson writes
+        # COMPATIBILITY SameMinorVersion into simdjson-config-version.cmake, so
+        # `find_package(simdjson 3.0)` would reject 3.1+, 4.x, and 5.x.
+        find_package(simdjson CONFIG QUIET)
+        if(simdjson_FOUND AND TARGET simdjson::simdjson)
+            set_target_properties(simdjson::simdjson PROPERTIES IMPORTED_GLOBAL TRUE)
+            get_target_property(_zhln_sys_simdjson_inc simdjson::simdjson INTERFACE_INCLUDE_DIRECTORIES)
+            if(_zhln_sys_simdjson_inc)
+                target_include_directories(simdjson::simdjson SYSTEM INTERFACE ${_zhln_sys_simdjson_inc})
+            endif()
+            get_target_property(_zhln_sys_simdjson_defs simdjson::simdjson INTERFACE_COMPILE_DEFINITIONS)
+            if(_zhln_sys_simdjson_defs)
+                list(REMOVE_ITEM _zhln_sys_simdjson_defs "SIMDJSON_STATIC_REFLECTION=1")
+                set_target_properties(simdjson::simdjson PROPERTIES
+                    INTERFACE_COMPILE_DEFINITIONS "${_zhln_sys_simdjson_defs}")
+            endif()
+            target_compile_definitions(simdjson::simdjson INTERFACE SIMDJSON_STATIC_REFLECTION=0)
+            set(ZHLN_HAS_SIMDJSON TRUE)
+            message(STATUS "Using system simdjson ${simdjson_VERSION} (CMake package)")
+        endif()
+
+        if(NOT ZHLN_HAS_SIMDJSON)
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(ZHLN_SYS_SIMDJSON QUIET IMPORTED_TARGET simdjson)
+            endif()
+            if(ZHLN_SYS_SIMDJSON_FOUND AND TARGET PkgConfig::ZHLN_SYS_SIMDJSON)
+                add_library(simdjson::simdjson INTERFACE IMPORTED GLOBAL)
+                target_link_libraries(simdjson::simdjson INTERFACE PkgConfig::ZHLN_SYS_SIMDJSON)
+                if(ZHLN_SYS_SIMDJSON_INCLUDE_DIRS)
+                    target_include_directories(simdjson::simdjson SYSTEM INTERFACE ${ZHLN_SYS_SIMDJSON_INCLUDE_DIRS})
+                elseif(_ZHLN_PROBE_SIMDJSON_H)
+                    target_include_directories(simdjson::simdjson SYSTEM INTERFACE "${_ZHLN_PROBE_SIMDJSON_H}")
+                endif()
+                target_compile_definitions(simdjson::simdjson INTERFACE SIMDJSON_STATIC_REFLECTION=0)
+                set(ZHLN_HAS_SIMDJSON TRUE)
+                message(STATUS "Using system simdjson ${ZHLN_SYS_SIMDJSON_VERSION} (pkg-config)")
+            endif()
+        endif()
+
+        if(NOT ZHLN_HAS_SIMDJSON AND _ZHLN_PROBE_SIMDJSON_H)
+            find_library(_ZHLN_SYS_SIMDJSON_LIB
+                NAMES simdjson
+                HINTS "${SIMDJSON_ROOT}" ENV SIMDJSON_ROOT /opt/homebrew/opt/simdjson /usr/local
+                QUIET
+            )
+            if(_ZHLN_SYS_SIMDJSON_LIB)
+                find_package(Threads QUIET)
+                add_library(simdjson::simdjson INTERFACE IMPORTED GLOBAL)
+                target_include_directories(simdjson::simdjson SYSTEM INTERFACE "${_ZHLN_PROBE_SIMDJSON_H}")
+                target_link_libraries(simdjson::simdjson INTERFACE "${_ZHLN_SYS_SIMDJSON_LIB}" Threads::Threads)
+                target_compile_definitions(simdjson::simdjson INTERFACE
+                    SIMDJSON_THREADS_ENABLED=1
+                    SIMDJSON_STATIC_REFLECTION=0
+                )
+                set(ZHLN_HAS_SIMDJSON TRUE)
+                message(STATUS "Using system simdjson: ${_ZHLN_SYS_SIMDJSON_LIB} (${_ZHLN_PROBE_SIMDJSON_H})")
+            else()
+                unset(_ZHLN_SYS_SIMDJSON_LIB CACHE)
+            endif()
+        endif()
+    endif()
+endif()
+
+if(NOT ZHLN_HAS_SIMDJSON)
+    set(SIMDJSON_STATIC_REFLECTION_MODE "OFF" CACHE STRING "" FORCE)
+    # C++26 guarantees <bit>; pre-seeding skips simdjson's try_compile check, and
+    # disabling PCH on this single-TU library avoids building a throwaway .pch.
+    set(SIMDJSON_HAS_BIT_HEADER TRUE CACHE BOOL "" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/simdjson EXCLUDE_FROM_ALL SYSTEM)
+    set_target_properties(simdjson PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+endif()
 
 # --- test-harness toggles for vendor projects ---
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)

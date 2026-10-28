@@ -239,6 +239,7 @@ INCLUDE_DIRS = (
     "extern/miniaudio",
     "extern/mimalloc/include",
     "extern/meshoptimizer",
+    "extern/simdjson/include",
     "extern/LuaJIT/src",
 )
 
