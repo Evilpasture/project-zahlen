@@ -23,24 +23,21 @@ The renderer is a C++26 Vulkan subsystem organized by responsibility. It calls V
 The renderer does **not** link the Vulkan loader. [Volk](https://github.com/zeux/volk), pinned in `extern/volk`, acquires it at runtime and dispatches Vulkan calls through its function pointers:
 
 * `VulkanHeader.hpp` includes `volk.h`; include it (through `Rendering.hpp`) before any header that pulls in Vulkan declarations.
-* `EnumerateInstanceExtensions()` and `InstanceBuilder::Build()` call `volkInitialize()` before using instance-level dispatch. The instance builder loads its newly created instance; `ContextBuilder` also initializes Volk and loads the supplied `InstanceView`, including when borrowing an external instance. Device setup calls `volkLoadDevice()` after `vkCreateDevice()`.
-* Loader initialization failure is returned through the instance and context builders instead of causing a link-time dependency on a Vulkan loader.
+* `EnumerateInstanceExtensions()` and `Instance::Create()` call `volkInitialize()` before using instance-level dispatch. `Instance::Create()` loads its newly created instance; `ContextBuilder` also initializes Volk and loads the supplied `InstanceView`, including when borrowing an external instance. Device setup calls `volkLoadDevice()` after `vkCreateDevice()`.
+* Loader initialization failure is returned through `Instance::Create()` and `ContextBuilder` instead of causing a link-time dependency on a Vulkan loader.
 
-Volk's dispatch tables are process-global in this build. The supported Engine path currently permits one library-owned Vulkan instance at a time; an internal dispatch lease refuses a concurrent second instance rather than silently replacing dispatch state. This lease is separate from diagnostics ownership and is not general multi-context support: until per-instance/per-device Volk tables are added, callers must not let a second logical device/context rebind the global device table while another is active. A borrowed `InstanceView` does not claim ownership or extend the external instance's lifetime; the host must keep it alive through its `Context` and dependent resources, and coordinate any use of Volk's global tables with other contexts.
+Volk's dispatch tables are process-global in this build. The supported Engine path currently permits one library-owned Vulkan instance at a time; an internal dispatch lease refuses a concurrent second instance rather than silently replacing dispatch state. Until per-instance/per-device Volk tables are added, callers must not let a second logical device/context rebind the global device table while another is active. A borrowed `InstanceView` does not claim ownership or extend the external instance's lifetime; the host must keep it alive through its `Context` and dependent resources, and coordinate any use of Volk's global tables with other contexts.
 
-### Instance and Context Builders
+### Instance Creation and Context Builder
 
-`InstanceBuilder` creates an owning `Vk::Instance`; `ContextBuilder` creates the logical device and context. Pass a `Vk::Instance&&` to `ContextBuilder::Instance()` to transfer ownership into the resulting context. Pass an `InstanceView` to borrow instead; constructing a view from a raw `VkInstance` is explicit (`InstanceView{raw}`), and the external owner must outlive the context and its resources. The context destroys only an instance it owns.
+`Vk::Instance::Create()` creates a zero-overhead owning `Vk::Instance`; `ContextBuilder` creates the logical device and context. Pass a `Vk::Instance&&` to `ContextBuilder::Instance()` to transfer ownership into the resulting context. Pass an `InstanceView` to borrow instead; constructing a view from a raw `VkInstance` is explicit (`InstanceView{raw}`), and the external owner must outlive the context and its resources. The context destroys only an instance it owns.
 
-### Diagnostics Ownership (Vk::Instance)
+### Diagnostics Ownership (Vk::GPUDiagnostics)
 
-`Vk::Instance` owns stable, heap-allocated callback state (`InstanceDiagnostics`) and passes that state directly through Vulkan's `pUserData`. The callback state contains per-instance validation/device-loss counters and the optional GPU address tracker; it has no back-pointer to the movable `Instance` object.
+`Vk::Instance` owns only its `VkInstance` handle and optional validation messenger, forwarding validation diagnostics directly to `ZHLN::LogError` / `ZHLN::LogWarning` with zero heap-allocated callback state or test-sink plumbing.
 
-* Long-lived observers provide a `DiagnosticsSink` through `RenderConfig::diagnostics`, for example the test framework. The sink points to caller-owned atomics that receive events directly, including teardown-time validation callbacks. Those atomics must outlive the engine through Vulkan instance teardown. If no valid sink is supplied, counters remain local to that instance.
-* `RenderContext::GetValidationErrorCount()` and `GetDeviceLostCount()` are **instance methods** that report the counters associated with that context. Use them for workload-scoped snapshots (RenderPerformance, RTR, mesh shaders, …); there is no active-instance lookup or diagnostics registration step.
-* A separate INFO-only messenger subscribes to device-address-binding events and forwards the binding payload plus callback `pObjects` to the owning instance's `GPUAddressTracker`. The tracker is cleared after device teardown and is not a singleton.
-* `InstanceView` carries a non-owning pointer to the stable diagnostics state. Device-loss events observed on void paths increment that instance's counter through its view; nothing reads the counter for control flow -- recovery rides the monadic frame-result chain.
-* Moving an `Instance` transfers its owning pointer without moving the callback state itself, so Vulkan callbacks remain valid throughout builder-to-context ownership transfers.
+* `Vk::GPUDiagnostics` owns `GPUAddressTracker` directly in-place and manages the `VK_EXT_device_address_binding_report` messenger for the logical device's lifetime, detaching before device/instance teardown.
+* Observers (such as automated tests or fidelity harnesses) intercept `ZHLN::LogError` via `ZHLN::SetLogObserver()` rather than plumbing test counters through `RenderConfig`, `RenderContext`, or `Vk::Instance`.
 
 ### One dispatch table per image
 

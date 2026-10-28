@@ -4,7 +4,6 @@
 #pragma once
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Core/Diagnostics.hpp>
 #include <bit>
 #include <cstdint>
 #include <span>
@@ -187,10 +186,6 @@ struct RenderConfig {
     // teardown.
     std::span<const uint8_t> initialPipelineBinaryData;
     std::string crashDumpPath;
-    // Explicit diagnostics sink: the caller owns the counters, the renderer
-    // writes to them. The sink and counters must outlive RenderContext,
-    // including teardown callbacks. Nullptr keeps the instance-local counters.
-    DiagnosticsSink* diagnostics = nullptr;
 };
 
 struct EngineConfig {

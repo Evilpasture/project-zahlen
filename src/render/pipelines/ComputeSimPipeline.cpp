@@ -100,7 +100,7 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
 
     if (!submitted) [[unlikely]] {
         if (Vk::IsDeviceLost(submitted.error())) {
-            impl.ctx.Instance().IncrementDeviceLost();
+            impl.NoteDeviceLost("DispatchSimulations");
         } else {
             ZHLN::Log("[DispatchSimulations] Compute submission failed ({}).", submitted.error());
         }

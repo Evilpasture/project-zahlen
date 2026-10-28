@@ -137,12 +137,9 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
 
     return GetPlatformInstanceExtensions(target)
         .and_then([&](auto&& inst_exts) -> std::expected<void, ErrorCode> {
-            return Vk::InstanceBuilder()
-                .AppName(impl->appName)
-                .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
-                .Extensions(inst_exts)
-                .Diagnostics(cfg.diagnostics)
-                .Build()
+            return Vk::Instance::Create(
+                       impl->appName, VK_MAKE_API_VERSION(0, 1, 0, 0), inst_exts, static_cast<Vk::ValidationMode>(cfg.validationMode)
+                   )
                 .transform([&](Vk::Instance inst) -> void {
                     instanceObject = std::move(inst);
                     instanceView   = Vk::InstanceView(instanceObject);
@@ -209,9 +206,7 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
                         .Build()
                         .transform([&](auto&& context) -> auto {
                             impl->ctx = std::forward<decltype(context)>(context);
-                            impl->diagnostics.gpuDiagnostics.Create(
-                                impl->ctx.Device(), impl->ctx.Instance().AddressTracker(), {.crashDumpPath = cfg.crashDumpPath}
-                            );
+                            impl->diagnostics.gpuDiagnostics.Create(impl->ctx, {.crashDumpPath = cfg.crashDumpPath});
                         });
                 });
         })
@@ -239,13 +234,14 @@ void RenderContext::Destroy() noexcept {
         return;
     }
 
-    const bool deviceLost = GetDeviceLostCount() > 0;
-
     if (_impl->ctx.Device() != nullptr) {
-        if (deviceLost) {
+        if (_impl->deviceLost.load(std::memory_order::relaxed)) {
             _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
-        } else {
-            if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
+        } else if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
+            if (Vk::IsDeviceLost(idle.error())) {
+                _impl->NoteDeviceLost("RenderContext::Destroy");
+                _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
+            } else {
                 ZHLN::LogError("Failed to wait for idle while destroying destinations ({})", idle.error());
             }
         }

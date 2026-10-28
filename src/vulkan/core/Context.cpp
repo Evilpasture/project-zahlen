@@ -15,32 +15,28 @@
 namespace ZHLN::Vk {
 
 Context::~Context() noexcept {
-    _device.Reset();
-    if (_addressBindingReportEnabled) {
-        if (auto* const tracker = _instance.AddressTracker(); tracker != nullptr) {
-            tracker->SetEnabled(false);
-        }
+    if (_addressTracker != nullptr) {
+        _addressTracker->SetEnabled(false);
+        _addressTracker = nullptr;
     }
+    _device.Reset();
 }
 
 Context::Context(Context&& other) noexcept:
     _ownedInstance(std::move(other._ownedInstance)), _instance(std::exchange(other._instance, InstanceView {})),
     _surface(std::exchange(other._surface, VK_NULL_HANDLE)), _physical(std::exchange(other._physical, PhysicalDeviceInfo {})),
     _device(std::move(other._device)), _present(other._present), _enabledFeatures(std::move(other._enabledFeatures)),
+    _addressTracker(std::exchange(other._addressTracker, nullptr)),
     _addressBindingReportEnabled(std::exchange(other._addressBindingReportEnabled, false)) {
 }
 
 auto Context::operator=(Context&& other) noexcept -> Context& {
     if (this != &other) {
-        const bool         previous_address_report = _addressBindingReportEnabled;
-        const InstanceView previous_instance       = _instance;
-
-        _device.Reset();
-        if (previous_address_report) {
-            if (auto* const tracker = previous_instance.AddressTracker(); tracker != nullptr) {
-                tracker->SetEnabled(false);
-            }
+        if (_addressTracker != nullptr) {
+            _addressTracker->SetEnabled(false);
+            _addressTracker = nullptr;
         }
+        _device.Reset();
 
         _ownedInstance               = std::move(other._ownedInstance);
         _instance                    = std::exchange(other._instance, InstanceView {});
@@ -49,13 +45,8 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
         _device                      = std::move(other._device);
         _present                     = other._present;
         _enabledFeatures             = std::move(other._enabledFeatures);
+        _addressTracker              = std::exchange(other._addressTracker, nullptr);
         _addressBindingReportEnabled = std::exchange(other._addressBindingReportEnabled, false);
-
-        if (_addressBindingReportEnabled) {
-            if (auto* const tracker = _instance.AddressTracker(); tracker != nullptr) {
-                tracker->SetEnabled(true);
-            }
-        }
     }
     return *this;
 }
@@ -267,7 +258,7 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
     context._surface  = _surface;
     context._physical = _physical;
 
-    const bool has_address_binding_messenger = _instance.HasAddressBindingMessenger();
+    const bool debug_utils_enabled = _instance.DebugUtilsEnabled();
 
     auto configured =
         DeviceConfigurator<>(_physical.handle)
@@ -306,7 +297,7 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
             .OptionalExtension<VkPhysicalDeviceAddressBindingReportFeaturesEXT>(
                 VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME, [](auto& feature) { feature.reportAddressBinding = VK_TRUE; },
                 [](VkPhysicalDevice, const auto& enabled) { return enabled.reportAddressBinding == VK_TRUE; },
-                _validationMode != ValidationMode::Off && has_address_binding_messenger && vkCreateDebugUtilsMessengerEXT != nullptr
+                _validationMode != ValidationMode::Off && debug_utils_enabled && vkCreateDebugUtilsMessengerEXT != nullptr
             )
             .OptionalExtension<VkPhysicalDeviceShaderConstantDataFeaturesKHR>(
                 VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME, [](auto& feature) { feature.shaderConstantData = VK_TRUE; }
@@ -341,7 +332,7 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
         }
     }
 
-    const bool address_binding_report_enabled = _validationMode != ValidationMode::Off && has_address_binding_messenger &&
+    const bool address_binding_report_enabled = _validationMode != ValidationMode::Off && debug_utils_enabled &&
                                                 vkCreateDebugUtilsMessengerEXT != nullptr &&
                                                 ExtensionEnabled(enabled_extensions, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME) &&
                                                 FeatureBitEnabled(
@@ -349,9 +340,6 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
                                                     offsetof(VkPhysicalDeviceAddressBindingReportFeaturesEXT, reportAddressBinding)
                                                 );
 
-    if (auto* const tracker = _instance.AddressTracker(); tracker != nullptr) {
-        tracker->SetEnabled(address_binding_report_enabled);
-    }
     auto logical_device = BuildLogicalDevice(
         _physical, enabled_extensions, feature_root,
         FeatureBitEnabled(
@@ -363,9 +351,6 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
         ) && FeatureBitEnabled(feature_root, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, offsetof(VkPhysicalDeviceRayQueryFeaturesKHR, rayQuery))
     );
     if (!logical_device) {
-        if (auto* const tracker = _instance.AddressTracker(); tracker != nullptr) {
-            tracker->SetEnabled(false);
-        }
         return std::unexpected(logical_device.error());
     }
 

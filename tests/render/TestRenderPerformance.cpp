@@ -123,7 +123,6 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
             .fullscreen     = false,
             .validationMode = mode,
             .headless       = true,
-            .diagnostics    = &ZHLN::Test::g_renderDiagnostics
         },
         .enableFallbackScene = false,
     };
@@ -249,7 +248,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     cam.pitch    = -30.0f;
     cam.fov      = 60.0f;
 
-    uint32_t valBefore = engine.GetRenderContext().GetValidationErrorCount();
+    uint32_t valBefore = ZHLN::Test::ValidationErrorCount();
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -266,7 +265,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     }
     double durationMs = timer.ElapsedMilliseconds();
 
-    uint32_t valRaised = engine.GetRenderContext().GetValidationErrorCount() - valBefore;
+    uint32_t valRaised = ZHLN::Test::ValidationErrorCount() - valBefore;
     if (mode == ZHLN::ValidationMode::On) {
         ZHLN::Test::ExpectEq(valRaised, 0u);
     }
@@ -912,7 +911,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     ZHLN::Camera& cam = camComp->camera;
     cam.fov   = 60.0f;
 
-    uint32_t valBefore = engine.GetRenderContext().GetValidationErrorCount();
+    uint32_t valBefore = ZHLN::Test::ValidationErrorCount();
 
     // 9. Execute 120 Frame Heavy Benchmark Simulation (Framework Managed)
     constexpr uint32_t         kTotalFrames = 120;
@@ -959,7 +958,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     (void) ZHLN::Test::Image::WritePPM(ppmPath, outputImg); // diagnostic mirror
     uint32_t litPixels = CountLitPixels(outputImg, 15);
 
-    uint32_t valRaised = engine.GetRenderContext().GetValidationErrorCount() - valBefore;
+    uint32_t valRaised = ZHLN::Test::ValidationErrorCount() - valBefore;
     if (mode == ZHLN::ValidationMode::On) {
         ZHLN::Test::ExpectEq(valRaised, 0u);
         if (valRaised > 0) {

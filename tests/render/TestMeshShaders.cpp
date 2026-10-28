@@ -524,7 +524,7 @@ struct MeshShaderTestSuite {
             // Any VUID raised from here on is attributable to the frames this
             // test renders. A suite that prints validation errors and still
             // reports PASS is not verifying anything.
-            const uint32_t validationBefore = vertexEngine->GetRenderContext().GetValidationErrorCount();
+            const uint32_t validationBefore = ZHLN::Test::ValidationErrorCount();
 
             if (auto setupResult = setupScene(*vertexEngine); !setupResult) {
                 return std::unexpected(setupResult.error());
@@ -543,7 +543,7 @@ struct MeshShaderTestSuite {
             const Image meshImage = capture(*meshEngine, "headless_meshshader_mesh.ppm");
             ZHLN::Test::ExpectTrue(meshEngine->GetRenderContext().GetInfo().meshShadingActive);
 
-            const uint32_t validationRaised = meshEngine->GetRenderContext().GetValidationErrorCount() - validationBefore;
+            const uint32_t validationRaised = ZHLN::Test::ValidationErrorCount() - validationBefore;
 
             if (!(ZHLN::Test::ExpectTrue(meshImage.Valid()) && ZHLN::Test::ExpectTrue(vertexA.Valid()) && ZHLN::Test::ExpectTrue(vertexB.Valid()))) {
                 return std::unexpected(MeshShaderTestError::RenderOutputBlank);

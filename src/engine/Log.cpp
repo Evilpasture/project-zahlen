@@ -41,7 +41,8 @@ auto TemplatedDetail::GetRegistryHead() noexcept -> std::atomic<TemplatedDetail:
 
 namespace {
 
-std::atomic<LogLevel> s_LogLevel {LogLevel::Moderate};
+std::atomic<LogLevel>    s_LogLevel {LogLevel::Moderate};
+std::atomic<LogObserver> s_LogObserver {nullptr};
 
 // Test-quiet capture buffer (see BeginLogCapture in <Zahlen/Log.hpp>).
 // Engine fibers log from worker threads, so every access takes the mutex;
@@ -105,6 +106,14 @@ auto GetLogLevel() noexcept -> LogLevel {
     return s_LogLevel.load(std::memory_order::acquire);
 }
 
+void SetLogObserver(LogObserver observer) noexcept {
+    s_LogObserver.store(observer, std::memory_order::release);
+}
+
+auto GetLogObserver() noexcept -> LogObserver {
+    return s_LogObserver.load(std::memory_order::acquire);
+}
+
 void BeginLogCapture(bool suppressOutput) {
     std::lock_guard<std::mutex> lock(s_CaptureMutex);
     s_Capturing      = true;
@@ -143,6 +152,9 @@ auto GetCustomLogFile(FILE* overrideFile) -> FILE* {
 }
 
 void InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint32_t line, std::string_view message) {
+    if (const LogObserver observer = s_LogObserver.load(std::memory_order::acquire); observer != nullptr) {
+        observer(static_cast<LogSeverity>(severity), message);
+    }
     if (s_LogLevel.load(std::memory_order::acquire) == LogLevel::Quiet) {
         return;
     }

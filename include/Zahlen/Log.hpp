@@ -30,8 +30,13 @@ enum class LogChannel : uint8_t { StdErr, StdOut, File };
 // Warning yellow and Error red; Info keeps the historical plain layout.
 enum class LogSeverity : uint8_t { Debug, Info, Warning, Error };
 
+using LogObserver = void (*)(LogSeverity severity, std::string_view message) noexcept;
+
 void SetLogLevel(LogLevel level) noexcept;
 auto GetLogLevel() noexcept -> LogLevel;
+
+ZHLN_API void SetLogObserver(LogObserver observer) noexcept;
+ZHLN_API auto GetLogObserver() noexcept -> LogObserver;
 
 // Test-quiet log capture. While capturing, InternalWriteLog records every
 // formatted line into a bounded buffer; when suppressOutput is set the lines
@@ -62,6 +67,10 @@ void              InternalWriteLog(uint8_t channel, uint8_t severity, const char
 template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate, LogSeverity Severity = LogSeverity::Info, typename... Args>
 void Log(LogContext ctx, Args&&... args) {
     if (static_cast<uint8_t>(GetLogLevel()) < static_cast<uint8_t>(Level)) {
+        if (const LogObserver observer = GetLogObserver(); observer != nullptr) {
+            std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
+            observer(Severity, formatted);
+        }
         return;
     }
     std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));

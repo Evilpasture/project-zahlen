@@ -163,7 +163,7 @@ std::expected<void, ErrorCode> Allocator::Init(VkInstance instance, VkPhysicalDe
 std::expected<void, ErrorCode> Allocator::Init(const Context& ctx) noexcept {
     auto result = Init(ctx.Instance().Handle(), ctx.Physical(), ctx.Device());
     if (result) {
-        _addressTracker = ctx.Instance().AddressTracker();
+        _addressTracker = ctx.AddressTracker();
     }
     return result;
 }

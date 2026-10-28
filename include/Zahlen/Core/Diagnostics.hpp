@@ -4,26 +4,11 @@
 #pragma once
 
 #include <Zahlen/Common.h>
-#include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <span>
 #include <string_view>
 
-namespace ZHLN {
-
-// Explicit diagnostics sink: the caller owns the counters, the renderer
-// writes to them. Passed through RenderConfig; never ambient state.
-struct DiagnosticsSink {
-    std::atomic<uint32_t>* validation = nullptr;
-    std::atomic<uint32_t>* deviceLost = nullptr;
-
-    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
-        return validation != nullptr && deviceLost != nullptr;
-    }
-};
-
-namespace Diagnostics {
+namespace ZHLN::Diagnostics {
 
 // Signal-free low-level diagnostic hooks exposed for caller-owned crash/signal
 // frontends (e.g. extensions/Signal). None of these touch OS signal tables or
@@ -34,6 +19,4 @@ ZHLN_API void DumpFaultRegion(const void* faultAddress) noexcept;
 ZHLN_API void WriteDiagnosticError(std::string_view msg) noexcept;
 ZHLN_API void EmergencyRestoreTerminal() noexcept;
 
-} // namespace Diagnostics
-
-} // namespace ZHLN
+} // namespace ZHLN::Diagnostics

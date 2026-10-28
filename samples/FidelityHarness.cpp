@@ -65,6 +65,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -80,6 +81,14 @@
 #include <vector>
 
 namespace {
+
+std::atomic<uint32_t> g_validationErrors {0};
+
+void OnFidelityLog(ZHLN::LogSeverity severity, std::string_view message) noexcept {
+    if (severity == ZHLN::LogSeverity::Error && message.starts_with("[Vulkan]")) {
+        g_validationErrors.fetch_add(1, std::memory_order::relaxed);
+    }
+}
 
 // The Khronos generator captures (and compares) every golden at
 // DEVICE_PIXEL_RATIO = 2 of the scenario dimensions -- see the
@@ -732,6 +741,8 @@ auto main(int argc, char* argv[]) -> int {
     }
     const FidelityScenario scenario = *parsed;
 
+    ZHLN::SetLogObserver(&OnFidelityLog);
+
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
          .render  = {
@@ -878,7 +889,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("[Fidelity] Render host stopped before capture.");
         return EXIT_FAILURE;
     }
-    if (const uint32_t errors = engine->GetRenderContext().GetValidationErrorCount(); errors != 0) {
+    if (const uint32_t errors = g_validationErrors.load(std::memory_order::relaxed); errors != 0) {
         ZHLN::Log("[Fidelity] {} Vulkan validation errors; refusing to publish an invalid capture.", errors);
         return EXIT_FAILURE;
     }

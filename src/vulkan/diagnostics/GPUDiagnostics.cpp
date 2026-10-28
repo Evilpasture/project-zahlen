@@ -17,7 +17,7 @@ namespace ZHLN::Vk {
 
 namespace {
 
-void LogFaultAddress(GPUAddressTracker* tracker, std::string_view label, const VkDeviceFaultAddressInfoKHR& address) noexcept {
+void LogFaultAddress(const GPUAddressTracker* tracker, std::string_view label, const VkDeviceFaultAddressInfoKHR& address) noexcept {
     if (address.addressType == VK_DEVICE_FAULT_ADDRESS_TYPE_NONE_KHR) {
         return;
     }
@@ -113,7 +113,7 @@ void LogShaderAbortMessages(const void* data, uint64_t size) noexcept {
     }
 }
 
-void DumpKhrDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string_view crashDumpPath) noexcept {
+void DumpKhrDeviceFault(VkDevice device, const GPUAddressTracker* tracker, std::string_view crashDumpPath) noexcept {
     if (vkGetDeviceFaultReportsKHR == nullptr) {
         return;
     }
@@ -181,7 +181,7 @@ void DumpKhrDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string
     WriteVendorBinary(debugInfo.pVendorBinaryData, debugInfo.vendorBinarySize, crashDumpPath);
 }
 
-void DumpExtDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string_view crashDumpPath) noexcept {
+void DumpExtDeviceFault(VkDevice device, const GPUAddressTracker* tracker, std::string_view crashDumpPath) noexcept {
     if (vkGetDeviceFaultInfoEXT == nullptr) {
         return;
     }
@@ -222,19 +222,66 @@ void DumpExtDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string
 
 } // namespace
 
-void GPUDiagnostics::Create(VkDevice device, GPUAddressTracker* addressTracker, DiagnosticConfig config) noexcept {
+auto VKAPI_CALL GPUDiagnostics::AddressBindingCallback(
+    const VkDebugUtilsMessageSeverityFlagBitsEXT /*severity*/,
+    const VkDebugUtilsMessageTypeFlagsEXT        type,
+    const VkDebugUtilsMessengerCallbackDataEXT*  callbackData,
+    void*                                        userData
+) noexcept -> VkBool32 {
+    if ((type & VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT) != 0 && callbackData != nullptr && userData != nullptr) {
+        for (const auto* node = static_cast<const VkBaseInStructure*>(callbackData->pNext); node != nullptr; node = node->pNext) {
+            if (node->sType == VK_STRUCTURE_TYPE_DEVICE_ADDRESS_BINDING_CALLBACK_DATA_EXT) {
+                static_cast<GPUAddressTracker*>(userData)->OnBindingEvent(
+                    *reinterpret_cast<const VkDeviceAddressBindingCallbackDataEXT*>(node), callbackData
+                );
+                break;
+            }
+        }
+    }
+    return VK_FALSE;
+}
+
+void GPUDiagnostics::Create(Context& ctx, DiagnosticConfig config) noexcept {
     Shutdown();
-    _device         = device;
-    _addressTracker = addressTracker;
-    _config         = std::move(config);
-    _markersActive  = _config.enableMarkers && vkCmdInsertDebugUtilsLabelEXT != nullptr && _device != VK_NULL_HANDLE;
+    _ctx           = &ctx;
+    _instance      = ctx.Instance().Handle();
+    _device        = ctx.Device();
+    _config        = std::move(config);
+    _markersActive = _config.enableMarkers && vkCmdInsertDebugUtilsLabelEXT != nullptr && _device != VK_NULL_HANDLE;
+
+    ctx.SetAddressTracker(&_addressTracker);
+
+    if (ctx.DeviceAddressBindingReportEnabled() && _instance != VK_NULL_HANDLE && vkCreateDebugUtilsMessengerEXT != nullptr) {
+        _addressTracker.SetEnabled(true);
+        const VkDebugUtilsMessengerCreateInfoEXT addressBindingInfo {
+            .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+            .pNext           = nullptr,
+            .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
+            .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT,
+            .pfnUserCallback = &GPUDiagnostics::AddressBindingCallback,
+            .pUserData       = &_addressTracker,
+        };
+        if (vkCreateDebugUtilsMessengerEXT(_instance, &addressBindingInfo, nullptr, &_addressBindingMessenger) != VK_SUCCESS) {
+            _addressBindingMessenger = VK_NULL_HANDLE;
+            _addressTracker.SetEnabled(false);
+        }
+    }
 }
 
 void GPUDiagnostics::Shutdown() noexcept {
-    _device         = VK_NULL_HANDLE;
-    _addressTracker = nullptr;
-    _markersActive  = false;
-    _config         = {};
+    _addressTracker.SetEnabled(false);
+    if (_addressBindingMessenger != VK_NULL_HANDLE && _instance != VK_NULL_HANDLE && vkDestroyDebugUtilsMessengerEXT != nullptr) {
+        vkDestroyDebugUtilsMessengerEXT(_instance, _addressBindingMessenger, nullptr);
+    }
+    if (_ctx != nullptr) {
+        _ctx->SetAddressTracker(nullptr);
+        _ctx = nullptr;
+    }
+    _addressBindingMessenger = VK_NULL_HANDLE;
+    _instance                = VK_NULL_HANDLE;
+    _device                  = VK_NULL_HANDLE;
+    _markersActive           = false;
+    _config                  = {};
 }
 
 void GPUDiagnostics::WriteCheckpointSlow(VkCommandBuffer cmd, std::string_view name) const noexcept {
@@ -253,9 +300,9 @@ void GPUDiagnostics::OnDeviceLost() const noexcept {
     }
 
     if (vkGetDeviceFaultReportsKHR != nullptr) {
-        DumpKhrDeviceFault(_device, _addressTracker, _config.crashDumpPath);
+        DumpKhrDeviceFault(_device, &_addressTracker, _config.crashDumpPath);
     } else if (vkGetDeviceFaultInfoEXT != nullptr) {
-        DumpExtDeviceFault(_device, _addressTracker, _config.crashDumpPath);
+        DumpExtDeviceFault(_device, &_addressTracker, _config.crashDumpPath);
     }
 }
 

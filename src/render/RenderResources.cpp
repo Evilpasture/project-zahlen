@@ -396,14 +396,6 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->deletionQueue.Drain();
 }
 
-uint32_t RenderContext::GetValidationErrorCount() const noexcept {
-    return _impl->ctx.Instance().ValidationErrorCount();
-}
-
-uint32_t RenderContext::GetDeviceLostCount() const noexcept {
-    return _impl->ctx.Instance().DeviceLostCount();
-}
-
 void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
     if (auto* const cmd = _impl->FrameCommand(); cmd != VK_NULL_HANDLE) {
         _impl->diagnostics.gpuDiagnostics.WriteCheckpoint(cmd, name);
@@ -1117,6 +1109,9 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
                 }
             );
             !immediate) [[unlikely]] {
+            if (Vk::IsDeviceLost(immediate.error())) {
+                impl->deviceLost.store(true, std::memory_order::relaxed);
+            }
             return std::unexpected(immediate.error());
         }
 
@@ -1174,6 +1169,9 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
             }
         );
         !immediate) [[unlikely]] {
+        if (Vk::IsDeviceLost(immediate.error())) {
+            impl->deviceLost.store(true, std::memory_order::relaxed);
+        }
         return std::unexpected(immediate.error());
     }
 
@@ -1236,6 +1234,9 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
 
 void RenderContext::ProvokeDeviceLost() {
     if (auto provoked = _impl->ProvokeDeviceLostInternal(); !provoked) [[unlikely]] {
+        if (Vk::IsDeviceLost(provoked.error())) {
+            _impl->deviceLost.store(true, std::memory_order::relaxed);
+        }
         ZHLN::Log("Failed to submit the device-loss dispatch.");
     }
 }

@@ -394,7 +394,7 @@ template <typename SceneFn>
             ZHLN::Println("    [WARN] {}: Vulkan device lost; engine hot-rebuilt. Re-warming and retrying (attempt {}/{}).", label, attempt, kMaxDeviceLostRecoveries);
         }
 
-        const uint32_t validationBefore = engine.GetRenderContext().GetValidationErrorCount();
+        const uint32_t validationBefore = ZHLN::Test::ValidationErrorCount();
 
         ZHLN::RenderContext* const preWarmup = &engine.GetRenderContext();
         TickFrames(engine, warmupFrames);
@@ -406,7 +406,7 @@ template <typename SceneFn>
         const bool                 ok      = sceneFn(engine);
         if (ok && &engine.GetRenderContext() == preWork) {
             if (outValidationDelta != nullptr) {
-                *outValidationDelta = engine.GetRenderContext().GetValidationErrorCount() - validationBefore;
+                *outValidationDelta = ZHLN::Test::ValidationErrorCount() - validationBefore;
             }
             return StableRunResult::Ok;
         }
@@ -491,7 +491,6 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 // Keep the default path, but allow an isolated vertex-path
                 // run to distinguish task-stage culling from a hue failure.
                 .enableMeshShading = std::getenv("ZHLN_TEST_NO_MESH_SHADING") == nullptr,
-                .diagnostics       = &ZHLN::Test::g_renderDiagnostics
             },
             .enableFallbackScene = false,
         };

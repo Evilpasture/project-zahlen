@@ -102,7 +102,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
         if (!executable) {
             const bool lost = Vk::IsDeviceLost(executable.error());
             if (lost) {
-                ctx.Instance().IncrementDeviceLost();
+                NoteDeviceLost("PresentUsedWindows::End");
             }
             presented.EmplaceError(PresentFailure {.windowId = windowId, .error = AsFrameError(executable.error())});
             dest.acquired.reset();
@@ -121,7 +121,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
         if (!result) {
             const bool lost = Vk::IsDeviceLost(result.error());
             if (lost) {
-                ctx.Instance().IncrementDeviceLost();
+                NoteDeviceLost("PresentUsedWindows::Present");
             }
             ZHLN::Log("[Render] Present for window {:p} failed ({}); presenting other windows.", static_cast<const void*>(dest.target), result.error());
             presented.EmplaceError(PresentFailure {.windowId = windowId, .error = AsFrameError(result.error())});

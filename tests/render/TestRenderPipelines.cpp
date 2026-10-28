@@ -62,7 +62,6 @@ struct RenderPipelinesTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true,
-                    .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };
@@ -124,7 +123,7 @@ struct RenderPipelinesTestSuite {
             const auto boxMesh = reg.Get<ZHLN::Components::MeshComponent>(box);
             if (ZHLN::Test::ExpectTrue(boxMesh.has_value() && rc.GetGPUMaterial(boxMesh->materialAsset).has_value())) {
                 const ZHLN::MaterialID boxMaterial = boxMesh->materialAsset;
-                const auto validationErrors = engine->GetRenderContext().GetValidationErrorCount();
+                const auto validationErrors = ZHLN::Test::ValidationErrorCount();
                 engine->ProcessEvents();
                 ZHLN::Test::ExpectEq(engine->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK);
                 rc.UnregisterGPUMaterial(boxMaterial);
@@ -142,7 +141,7 @@ struct RenderPipelinesTestSuite {
                     return std::unexpected(recreated.error());
                 }
                 ZHLN::Test::ExpectNe(recreated->pipeline, loose->pipeline);
-                ZHLN::Test::ExpectEq(engine->GetRenderContext().GetValidationErrorCount(), validationErrors);
+                ZHLN::Test::ExpectEq(ZHLN::Test::ValidationErrorCount(), validationErrors);
             }
 
             return {};
@@ -167,7 +166,6 @@ struct RenderPipelinesTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true,
-                    .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };
@@ -186,10 +184,10 @@ struct RenderPipelinesTestSuite {
             // Before the first presented frame, the headless image is still
             // UNDEFINED. A capture must fail without submitting an invalid
             // COLOR_ATTACHMENT -> TRANSFER_SRC readback barrier.
-            const auto errorsBefore = engine->GetRenderContext().GetValidationErrorCount();
+            const auto errorsBefore = ZHLN::Test::ValidationErrorCount();
             const auto emptyCapture = engine->GetRenderContext().CaptureFrame();
             ZHLN::Test::ExpectFalse(emptyCapture.has_value());
-            ZHLN::Test::ExpectEq(engine->GetRenderContext().GetValidationErrorCount(), errorsBefore);
+            ZHLN::Test::ExpectEq(ZHLN::Test::ValidationErrorCount(), errorsBefore);
             return {};
         }
 
@@ -562,7 +560,6 @@ struct RenderPipelinesTestSuite {
                         .fullscreen     = false,
                         .validationMode = ZHLN::ValidationMode::On,
                         .headless       = true,
-                        .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                     },
                     .enableFallbackScene = false,
                 };

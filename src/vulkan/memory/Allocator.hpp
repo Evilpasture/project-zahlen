@@ -90,6 +90,9 @@ class Allocator {
 
     void DestroyBuffer(Buffer& buffer) const noexcept;
     void DestroyImage(Image& image) const noexcept;
+    void DetachAddressTracker() noexcept {
+        _addressTracker = nullptr;
+    }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _handle != nullptr;

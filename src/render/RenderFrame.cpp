@@ -479,14 +479,14 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     _impl->diagnostics.gpuProfiler.Reset(frame_index);
     if (auto reset = _impl->computePools[frame_index].Reset(); !reset) [[unlikely]] {
         if (Vk::IsDeviceLost(reset.error())) {
-            _impl->ctx.Instance().IncrementDeviceLost();
+            _impl->NoteDeviceLost("BeginFrame::computePool");
         }
         _impl->frameOpen = false;
         return std::unexpected(AsFrameError(reset.error()));
     }
     if (auto reset = _impl->parallelRecorders[frame_index].Reset(); !reset) [[unlikely]] {
         if (Vk::IsDeviceLost(reset.error())) {
-            _impl->ctx.Instance().IncrementDeviceLost();
+            _impl->NoteDeviceLost("BeginFrame::parallelRecorders");
         }
         _impl->frameOpen = false;
         return std::unexpected(AsFrameError(reset.error()));
@@ -496,7 +496,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
         worker.cmdCount[frame_index].store(0, std::memory_order::relaxed);
         if (auto reset = worker.pools[frame_index].Reset(); !reset) [[unlikely]] {
             if (Vk::IsDeviceLost(reset.error())) {
-                _impl->ctx.Instance().IncrementDeviceLost();
+                _impl->NoteDeviceLost("BeginFrame::workerPool");
             }
             _impl->frameOpen = false;
             return std::unexpected(AsFrameError(reset.error()));

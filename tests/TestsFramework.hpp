@@ -35,9 +35,6 @@
 #include <utility>
 #include <vector>
 
-// Render diagnostics: the framework owns persistent counters and passes them
-// explicitly through RenderConfig::diagnostics. The sink outlives every test
-// engine, including teardown where Vulkan validation callbacks can still fire.
 #include <Zahlen/Render/Render.hpp>
 
 // Performance baselines live in tests/extras/profile/PerfBaseline.hpp, because
@@ -467,12 +464,34 @@ struct Param {
 template <typename... Us>
 Param(Us&&...) -> Param<typename TemplatedDetail::StructuralParamDecay<Us>::Type...>;
 
-// Diagnostics totals owned by this framework. Engines receive this sink
-// explicitly through their RenderConfig; it remains alive through engine and
-// Vulkan teardown so post-mortem callbacks are included in test deltas.
+// Telemetry counters populated via ZHLN::SetLogObserver without plumbing test
+// sinks through RenderConfig, RenderContext, or RHI instance internals.
 inline std::atomic<uint32_t> g_validationErrors {0};
 inline std::atomic<uint32_t> g_deviceLost {0};
-inline DiagnosticsSink       g_renderDiagnostics {&g_validationErrors, &g_deviceLost};
+
+inline void OnTestLog(ZHLN::LogSeverity severity, std::string_view message) noexcept {
+    if (severity != ZHLN::LogSeverity::Error) {
+        return;
+    }
+    if (message.starts_with("[Vulkan]")) {
+        g_validationErrors.fetch_add(1, std::memory_order::relaxed);
+    } else if (message.starts_with("[DeviceLost]")) {
+        g_deviceLost.fetch_add(1, std::memory_order::relaxed);
+    }
+}
+
+inline const bool g_testLogObserverInstalled = []() noexcept {
+    ZHLN::SetLogObserver(&OnTestLog);
+    return true;
+}();
+
+[[nodiscard]] inline uint32_t ValidationErrorCount() noexcept {
+    return g_validationErrors.load(std::memory_order::relaxed);
+}
+
+[[nodiscard]] inline uint32_t DeviceLostCount() noexcept {
+    return g_deviceLost.load(std::memory_order::relaxed);
+}
 
 // Internal to the framework: this is what the runner seeds a result with
 // before invoking a case. Timeouts instead exit the process with status 124.
@@ -2702,6 +2721,10 @@ inline auto ExecuteSuiteRuntime(
     bool           hasAnyMatch      = false;
     bool           needsSuiteObject = false;
     SkipUntilState probeSkip        = skipState;
+
+    if (ZHLN::GetLogObserver() == nullptr) {
+        ZHLN::SetLogObserver(&OnTestLog);
+    }
 
     for (const auto& desc: cases) {
         if (opts.maxFail > 0 && cumulativeFailed >= opts.maxFail) {

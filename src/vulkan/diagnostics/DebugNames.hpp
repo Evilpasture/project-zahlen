@@ -16,7 +16,7 @@
 
 namespace ZHLN::Vk::Debug {
 
-inline void SetObjectName(GPUAddressTracker& tracker, VkDevice device, uint64_t handle, VkObjectType type, const char* name) noexcept {
+inline void SetObjectName(VkDevice device, uint64_t handle, VkObjectType type, const char* name, GPUAddressTracker* tracker = nullptr) noexcept {
     if (device == VK_NULL_HANDLE || handle == 0 || name == nullptr || vkSetDebugUtilsObjectNameEXT == nullptr) {
         return;
     }
@@ -27,42 +27,44 @@ inline void SetObjectName(GPUAddressTracker& tracker, VkDevice device, uint64_t 
         .objectHandle = handle,
         .pObjectName  = name,
     };
-    if (vkSetDebugUtilsObjectNameEXT(device, &info) == VK_SUCCESS) {
-        tracker.SetObjectName(type, handle, name);
+    if (vkSetDebugUtilsObjectNameEXT(device, &info) == VK_SUCCESS && tracker != nullptr) {
+        tracker->SetObjectName(type, handle, name);
     }
 }
 
-inline void SetObjectName(GPUAddressTracker& tracker, VkDevice device, uint64_t handle, VkObjectType type, std::string_view name) noexcept {
+inline void SetObjectName(VkDevice device, uint64_t handle, VkObjectType type, std::string_view name, GPUAddressTracker* tracker = nullptr) noexcept {
     if (name.size() < 64) {
         std::array<char, 64> buf;
         std::memcpy(buf.data(), name.data(), name.size());
         buf[name.size()] = '\0';
-        SetObjectName(tracker, device, handle, type, buf.data());
+        SetObjectName(device, handle, type, buf.data(), tracker);
     } else {
         std::string name_str(name);
-        SetObjectName(tracker, device, handle, type, name_str.c_str());
+        SetObjectName(device, handle, type, name_str.c_str(), tracker);
     }
+}
+
+inline void SetObjectName(GPUAddressTracker& tracker, VkDevice device, uint64_t handle, VkObjectType type, const char* name) noexcept {
+    SetObjectName(device, handle, type, name, &tracker);
+}
+
+inline void SetObjectName(GPUAddressTracker& tracker, VkDevice device, uint64_t handle, VkObjectType type, std::string_view name) noexcept {
+    SetObjectName(device, handle, type, name, &tracker);
 }
 
 template <typename CtxT>
 inline void SetImageName(const CtxT& ctx, VkImage image, std::string_view name) noexcept {
-    if (auto* const tracker = ctx.Instance().AddressTracker(); tracker != nullptr) {
-        SetObjectName(*tracker, ctx.Device(), reinterpret_cast<uint64_t>(image), VK_OBJECT_TYPE_IMAGE, name);
-    }
+    SetObjectName(ctx.Device(), reinterpret_cast<uint64_t>(image), VK_OBJECT_TYPE_IMAGE, name, ctx.AddressTracker());
 }
 
 template <typename CtxT>
 inline void SetImageViewName(const CtxT& ctx, VkImageView view, std::string_view name) noexcept {
-    if (auto* const tracker = ctx.Instance().AddressTracker(); tracker != nullptr) {
-        SetObjectName(*tracker, ctx.Device(), reinterpret_cast<uint64_t>(view), VK_OBJECT_TYPE_IMAGE_VIEW, name);
-    }
+    SetObjectName(ctx.Device(), reinterpret_cast<uint64_t>(view), VK_OBJECT_TYPE_IMAGE_VIEW, name, ctx.AddressTracker());
 }
 
 template <typename CtxT>
 inline void SetBufferName(const CtxT& ctx, VkBuffer buffer, std::string_view name) noexcept {
-    if (auto* const tracker = ctx.Instance().AddressTracker(); tracker != nullptr) {
-        SetObjectName(*tracker, ctx.Device(), reinterpret_cast<uint64_t>(buffer), VK_OBJECT_TYPE_BUFFER, name);
-    }
+    SetObjectName(ctx.Device(), reinterpret_cast<uint64_t>(buffer), VK_OBJECT_TYPE_BUFFER, name, ctx.AddressTracker());
 }
 
 } // namespace ZHLN::Vk::Debug

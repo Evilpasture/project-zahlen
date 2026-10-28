@@ -364,10 +364,10 @@ endforeach()
 #   dbghelp    the symbol resolver in src/engine/diagnostics/StackTrace.cpp; its
 #              #pragma comment(lib, "dbghelp.lib") is MSVC-only, so MinGW needs
 #              the import library named.
-#   atomic     std::atomic<ZHLN::Vk::DiagnosticsSink> is a 16-byte object, and
-#              GCC calls libatomic's __atomic_load_16/__atomic_store_16 for it
-#              unless -mcx16 is on -- it is not, this tree asks for -mavx2 and
-#              friends rather than an ISA level.
+#   atomic     16-byte std::atomic instantiations on x86_64 call libatomic's
+#              __atomic_load_16/__atomic_store_16 under GCC unless -mcx16 is on
+#              -- it is not, this tree asks for -mavx2 and friends rather than
+#              an ISA level.
 target_link_libraries(
   zahlen_engine
   PUBLIC $<$<AND:$<BOOL:${MINGW}>,$<CXX_COMPILER_ID:GNU>>:stdc++exp>)

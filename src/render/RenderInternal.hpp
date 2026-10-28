@@ -298,6 +298,13 @@ struct RenderContext::Impl: RenderFrameContext {
     void PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept;
 
     RenderDiagnostics diagnostics;
+    std::atomic<bool> deviceLost {false};
+
+    void NoteDeviceLost(std::string_view site) noexcept {
+        if (!deviceLost.exchange(true, std::memory_order::relaxed)) {
+            ZHLN::LogError("[DeviceLost] Vulkan device lost ({})", site);
+        }
+    }
 
     PipelineRegistry pipelines;
 
@@ -319,9 +326,13 @@ struct RenderContext::Impl: RenderFrameContext {
     }
 
     ~Impl() {
-        if (ctx.Device() != VK_NULL_HANDLE) {
+        if (ctx.Device() != VK_NULL_HANDLE && !deviceLost.load(std::memory_order::relaxed)) {
             if (auto waited = Vk::WaitIdle(ctx.Device()); !waited) {
-                ZHLN::LogError("[Render] device idle wait during teardown failed: {}", waited.error());
+                if (Vk::IsDeviceLost(waited.error())) {
+                    NoteDeviceLost("RenderContext::~Impl");
+                } else {
+                    ZHLN::LogError("[Render] device idle wait during teardown failed: {}", waited.error());
+                }
             }
         }
         submittedStaging.reset();
@@ -354,6 +365,8 @@ struct RenderContext::Impl: RenderFrameContext {
         allocator.DestroyBuffer(morphDeltasBuffer);
 
         deletionQueue.Drain();
+        allocator.DetachAddressTracker();
+        diagnostics.gpuDiagnostics.Shutdown();
     }
 
     [[nodiscard]] std::expected<void, ErrorCode> InitSubsystems(const RenderConfig& cfg, int width, int height);

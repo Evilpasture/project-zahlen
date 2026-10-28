@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../core/Context.hpp"
 #include "GPUAddressTracker.hpp"
 #include <cstdint>
 #include <cstring>
@@ -29,13 +30,22 @@ class GPUDiagnostics {
         Shutdown();
     }
 
-    GPUDiagnostics(const GPUDiagnostics&)                        = delete;
-    auto operator=(const GPUDiagnostics&) -> GPUDiagnostics&     = delete;
-    GPUDiagnostics(GPUDiagnostics&&) noexcept                    = default;
-    auto operator=(GPUDiagnostics&&) noexcept -> GPUDiagnostics& = default;
+    // Owns `_addressTracker` at a stable address for `VK_EXT_device_address_binding_report`
+    // messenger callbacks; must not move once created.
+    GPUDiagnostics(const GPUDiagnostics&)                    = delete;
+    auto operator=(const GPUDiagnostics&) -> GPUDiagnostics& = delete;
+    GPUDiagnostics(GPUDiagnostics&&)                         = delete;
+    auto operator=(GPUDiagnostics&&) -> GPUDiagnostics&      = delete;
 
-    void Create(VkDevice device, GPUAddressTracker* addressTracker, DiagnosticConfig config = {}) noexcept;
+    void Create(Context& ctx, DiagnosticConfig config = {}) noexcept;
     void Shutdown() noexcept;
+
+    [[nodiscard]] auto AddressTracker() noexcept -> GPUAddressTracker& {
+        return _addressTracker;
+    }
+    [[nodiscard]] auto AddressTracker() const noexcept -> const GPUAddressTracker& {
+        return _addressTracker;
+    }
 
     // --- HOT PATH: Zero virtual/variant overhead ---
     [[gnu::always_inline]]
@@ -57,13 +67,22 @@ class GPUDiagnostics {
     }
 
   private:
-    void WriteCheckpointSlow(VkCommandBuffer cmd, std::string_view name) const noexcept;
-    void DumpDeviceFault() const noexcept;
+    static auto VKAPI_CALL AddressBindingCallback(
+        VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
+        VkDebugUtilsMessageTypeFlagsEXT             type,
+        const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
+        void*                                       userData
+    ) noexcept -> VkBool32;
 
-    VkDevice           _device         = VK_NULL_HANDLE;
-    GPUAddressTracker* _addressTracker = nullptr;
-    DiagnosticConfig   _config {};
-    bool               _markersActive = false;
+    void WriteCheckpointSlow(VkCommandBuffer cmd, std::string_view name) const noexcept;
+
+    Context*                 _ctx                     = nullptr;
+    VkInstance               _instance                = VK_NULL_HANDLE;
+    VkDevice                 _device                  = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT _addressBindingMessenger = VK_NULL_HANDLE;
+    GPUAddressTracker        _addressTracker {};
+    DiagnosticConfig         _config {};
+    bool                     _markersActive = false;
 };
 
 } // namespace ZHLN::Vk

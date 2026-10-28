@@ -12,7 +12,7 @@ namespace ZHLN {
 namespace {
 
 [[nodiscard]] auto AcquireDestinationImage(
-    FrameDestinations& destinations, uint64_t& nextAcquisitionSerial, FrameDestinations::Window& dest, Vk::InstanceView instance
+    FrameDestinations& destinations, uint64_t& nextAcquisitionSerial, FrameDestinations::Window& dest
 ) noexcept
     -> std::expected<ZHLN::Optional<FrameDestinations::Acquired&>, ErrorCode> {
     if (dest.acquired.has_value()) {
@@ -28,9 +28,6 @@ namespace {
     auto                    acquired      = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, !dest.IsPrimary());
 
     if (!acquired) {
-        if (Vk::IsDeviceLost(acquired.error())) {
-            instance.IncrementDeviceLost();
-        }
         destinations.AbortRecording(dest.id);
         dest.cachedGeneration = destPresenter.resourceGeneration;
         return std::unexpected(AsFrameError(acquired.error()));
@@ -198,8 +195,11 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
         }
     }
 
-    const auto acquired = AcquireDestinationImage(destinations, nextAcquisition, dest, ctx.Instance());
+    const auto acquired = AcquireDestinationImage(destinations, nextAcquisition, dest);
     if (!acquired) {
+        if (acquired.error().Is(FrameResult::DeviceLost)) {
+            NoteDeviceLost("AcquireDestinationImage");
+        }
         return std::unexpected(acquired.error());
     }
     if (!acquired->has_value()) {
@@ -275,9 +275,9 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
     if (!entry || entry->IsPrimary()) {
         return;
     }
-    if (ctx.Device() != VK_NULL_HANDLE) {
+    if (ctx.Device() != VK_NULL_HANDLE && !deviceLost.load(std::memory_order::relaxed)) {
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && Vk::IsDeviceLost(waited.error())) {
-            ctx.Instance().IncrementDeviceLost();
+            NoteDeviceLost("ReleaseTarget");
         }
     }
     destinations.AbortRecording(entry->id);
@@ -286,9 +286,9 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
 }
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
-    if (ctx.Device() != VK_NULL_HANDLE) {
+    if (ctx.Device() != VK_NULL_HANDLE && !deviceLost.load(std::memory_order::relaxed)) {
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && Vk::IsDeviceLost(waited.error())) {
-            ctx.Instance().IncrementDeviceLost();
+            NoteDeviceLost("DestroyDestinations");
         }
     }
     destinations.AbortRecordings();

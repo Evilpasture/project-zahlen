@@ -5,8 +5,8 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Core/Diagnostics.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Geometry2D.hpp>
@@ -61,7 +61,6 @@ struct RenderContext::Impl {
     Extent2D                                  resolution      {.width = 1280, .height = 720};
     ViewportRect                              viewport        {};
     GraphicsSettings                          settings        {};
-    DiagnosticsSink*                          diagnostics     = nullptr;
     uint32_t                                  frameIndex      = 0;
     uint64_t                                  frameToken      = 1;
     uint64_t                                  nextAcquisition = 1;
@@ -69,8 +68,6 @@ struct RenderContext::Impl {
     uint64_t                                  nextTextureId   = 4; // Reserve SystemTextures {0..3}.
     uint64_t                                  nextPipelineId  = 1;
     uint32_t                                  morphCursor     = 0;
-    uint32_t                                  localValidation = 0;
-    uint32_t                                  localDeviceLost = 0;
     bool                                      frameOpen       = false;
     bool                                      destroyed       = false;
     std::unordered_set<uint64_t>              liveBuffers;
@@ -82,8 +79,7 @@ struct RenderContext::Impl {
 
     Impl(PresentationTarget& target, const RenderConfig& cfg) noexcept:
         primaryTarget(target),
-        resolution {.width = cfg.width != 0 ? cfg.width : 1280u, .height = cfg.height != 0 ? cfg.height : 720u},
-        diagnostics(cfg.diagnostics) {
+        resolution {.width = cfg.width != 0 ? cfg.width : 1280u, .height = cfg.height != 0 ? cfg.height : 720u} {
         const Extent2D targetExtent = target.GetFramebufferExtent();
         if (targetExtent.width != 0 && targetExtent.height != 0) {
             resolution = targetExtent;
@@ -479,20 +475,6 @@ auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32
     return base;
 }
 
-auto RenderContext::GetValidationErrorCount() const noexcept -> uint32_t {
-    if (_impl->diagnostics != nullptr && _impl->diagnostics->validation != nullptr) {
-        return _impl->diagnostics->validation->load(std::memory_order_relaxed);
-    }
-    return _impl->localValidation;
-}
-
-auto RenderContext::GetDeviceLostCount() const noexcept -> uint32_t {
-    if (_impl->diagnostics != nullptr && _impl->diagnostics->deviceLost != nullptr) {
-        return _impl->diagnostics->deviceLost->load(std::memory_order_relaxed);
-    }
-    return _impl->localDeviceLost;
-}
-
 void RenderContext::WriteCheckpoint(std::string_view /*name*/) noexcept {
 }
 
@@ -513,10 +495,7 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
 }
 
 void RenderContext::ProvokeDeviceLost() {
-    ++_impl->localDeviceLost;
-    if (_impl->diagnostics != nullptr && _impl->diagnostics->deviceLost != nullptr) {
-        _impl->diagnostics->deviceLost->fetch_add(1, std::memory_order_relaxed);
-    }
+    ZHLN::LogError("[DeviceLost] Simulated null-renderer device lost");
 }
 
 auto RenderContext::BakeProceduralTexture(

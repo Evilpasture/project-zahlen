@@ -52,7 +52,6 @@ struct LightningTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true,
-                    .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };
@@ -166,7 +165,6 @@ struct LightningTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true,
-                    .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };
@@ -232,7 +230,6 @@ struct LightningTestSuite {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
                 .render  = {.appName = "Lightning Component Resource Test", .width = 320, .height = 240, .vsync = false,
                             .fullscreen = false, .validationMode = ZHLN::ValidationMode::On, .headless = true,
-                            .diagnostics = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };

@@ -7,6 +7,8 @@
 #endif
 
 #include "../VkError.hpp"
+#include <Zahlen/Log.hpp>
+
 namespace ZHLN::Vk {
 
 struct DrawState {
@@ -238,8 +240,7 @@ template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename R
 
     if (const VkResult waited = ring.WaitValue(*submitted); waited != VK_SUCCESS) [[unlikely]] {
         if (waited == VK_ERROR_DEVICE_LOST) {
-
-            ctx.Instance().IncrementDeviceLost();
+            ZHLN::LogError("[DeviceLost] Vulkan immediate submission lost device");
         }
         return std::unexpected(ToError(waited));
     }
@@ -281,7 +282,7 @@ template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename R
     };
     if (const VkResult waited = vkWaitSemaphores(ctx.Device(), &waitInfo, UINT64_MAX); waited != VK_SUCCESS) [[unlikely]] {
         if (waited == VK_ERROR_DEVICE_LOST) {
-            ctx.Instance().IncrementDeviceLost();
+            ZHLN::LogError("[DeviceLost] Vulkan immediate submission lost device");
         }
         return std::unexpected(ToError(waited));
     }
