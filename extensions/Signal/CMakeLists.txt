@@ -31,6 +31,12 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/include
 )
 
+# Match `zahlen_engine`'s `-fno-exceptions -fno-rtti` dialect on standalone
+# consumers (`ztest`) and avoid mixed RTTI / `-fsanitize=vptr` COMDAT vtables.
+target_compile_options(${TARGET_NAME} PUBLIC
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+)
+
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()

@@ -49,10 +49,12 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     if(USE_SANITIZERS)
         target_compile_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
             -fno-omit-frame-pointer
         )
         target_link_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
         )
         target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 

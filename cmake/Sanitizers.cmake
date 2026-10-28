@@ -14,8 +14,14 @@ option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
 set(ZHLN_TEST_ENVIRONMENT "")
 
 if(USE_SANITIZERS)
-    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address,undefined)
+    # Zahlen builds with `-fno-rtti`, which sets Itanium ABI `vptr[-1]`
+    # (`type_info*`) to null across engine vtables. Clang automatically strips
+    # `vptr` from `-fsanitize=undefined` under `-fno-rtti`, whereas GCC still
+    # enables `-fsanitize=vptr` in any TU (such as vendored C++ archives) that
+    # omits `-fno-rtti`, causing false-positive `_Sink` vptr aborts when COMDAT
+    # vtables deduplicate against `-fno-rtti` TUs. Disable `vptr` explicitly.
+    add_compile_options(-fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined -fno-sanitize=vptr)
     # Marks the whole sanitizer profile. Tests whose consteval code builds
     # std::strings are broken by GCC bug 71962 (-fsanitize=undefined rejects
     # pointer null-checks during constant evaluation); see

@@ -108,10 +108,12 @@ add_dependencies(ztest_cpu zcook)
 if(USE_SANITIZERS)
     target_compile_options(ztest_cpu PRIVATE
         -fsanitize=address,undefined
+        -fno-sanitize=vptr
         -fno-omit-frame-pointer
     )
     target_link_options(ztest_cpu PRIVATE
         -fsanitize=address,undefined
+        -fno-sanitize=vptr
     )
     target_compile_definitions(ztest_cpu PRIVATE __ASAN_ENABLED__)
 

@@ -33,10 +33,12 @@ if(TARGET zahlen_project_light_client)
     if(USE_SANITIZERS)
         target_compile_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
             -fno-omit-frame-pointer
         )
         target_link_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
         )
         target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
     endif()
@@ -73,10 +75,12 @@ if(TARGET zahlen_project_light_client)
     if(USE_SANITIZERS)
         target_compile_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
             -fno-omit-frame-pointer
         )
         target_link_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
         )
         target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
     endif()

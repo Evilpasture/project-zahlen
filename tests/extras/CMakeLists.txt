@@ -55,10 +55,12 @@ function(zahlen_add_extras_group GROUP_TARGET)
     if(USE_SANITIZERS)
         target_compile_options(${GROUP_TARGET} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
             -fno-omit-frame-pointer
         )
         target_link_options(${GROUP_TARGET} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
         )
         target_compile_definitions(${GROUP_TARGET} PRIVATE __ASAN_ENABLED__)
     endif()
@@ -111,10 +113,12 @@ zahlen_enable_reflection(${TARGET_NAME})
 if(USE_SANITIZERS)
     target_compile_options(${TARGET_NAME} PRIVATE
         -fsanitize=address,undefined
+        -fno-sanitize=vptr
         -fno-omit-frame-pointer
     )
     target_link_options(${TARGET_NAME} PRIVATE
         -fsanitize=address,undefined
+        -fno-sanitize=vptr
     )
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
@@ -152,10 +156,12 @@ zahlen_enable_reflection(${TARGET_NAME})
 if(USE_SANITIZERS)
     target_compile_options(${TARGET_NAME} PRIVATE
         -fsanitize=address,undefined
+        -fno-sanitize=vptr
         -fno-omit-frame-pointer
     )
     target_link_options(${TARGET_NAME} PRIVATE
         -fsanitize=address,undefined
+        -fno-sanitize=vptr
     )
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
@@ -321,10 +327,12 @@ if(TARGET zahlen_project_light_lua)
     if(USE_SANITIZERS)
         target_compile_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
             -fno-omit-frame-pointer
         )
         target_link_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
         )
         target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
     endif()
@@ -363,10 +371,12 @@ zahlen_enable_reflection(${TARGET_NAME})
 if(USE_SANITIZERS)
     target_compile_options(${TARGET_NAME} PRIVATE
         -fsanitize=address,undefined
+        -fno-sanitize=vptr
         -fno-omit-frame-pointer
     )
     target_link_options(${TARGET_NAME} PRIVATE
         -fsanitize=address,undefined
+        -fno-sanitize=vptr
     )
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
@@ -409,10 +419,12 @@ zahlen_enable_reflection(${TARGET_NAME})
 if(USE_SANITIZERS)
     target_compile_options(${TARGET_NAME} PRIVATE
         -fsanitize=address,undefined
+        -fno-sanitize=vptr
         -fno-omit-frame-pointer
     )
     target_link_options(${TARGET_NAME} PRIVATE
         -fsanitize=address,undefined
+        -fno-sanitize=vptr
     )
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
@@ -450,10 +462,12 @@ if(TARGET zahlen_svg)
     if(USE_SANITIZERS)
         target_compile_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
             -fno-omit-frame-pointer
         )
         target_link_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
         )
         target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
     endif()

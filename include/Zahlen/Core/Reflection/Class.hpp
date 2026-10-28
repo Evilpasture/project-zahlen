@@ -68,10 +68,10 @@ struct MethodCollector {
 
 template <std::meta::info EntityInfo, std::size_t Index>
 consteval auto ExtractAnnotationConstantAt() {
-    constexpr auto annotations = AnnotationsOf<EntityInfo>();
-    constexpr auto type        = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotations[Index])));
-    using AnnotationType       = typename[:type:];
-    return std::meta::extract<AnnotationType>(annotations[Index]);
+    constexpr auto annotation = std::meta::annotations_of(EntityInfo)[Index];
+    constexpr auto type       = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotation)));
+    using AnnotationType      = typename[:type:];
+    return std::meta::extract<AnnotationType>(annotation);
 }
 
 template <std::meta::info EntityInfo>

@@ -36,6 +36,16 @@ target_include_directories(zahlen_command_line PUBLIC
     ${PROJECT_SOURCE_DIR}/include
 )
 
+# Standalone CLI targets (`ztest`) intentionally do not link `zahlen_engine`,
+# so propagate the engine-wide C++ dialect (`-fno-exceptions -fno-rtti`)
+# directly. Without `-fno-rtti`, GCC enables `-fsanitize=vptr` under
+# `-fsanitize=undefined` on `CommandLine.cpp` while `-fno-rtti` consumers emit
+# null `type_info*` slots (`vptr[-1] == nullptr`) in shared COMDAT vtables
+# such as `libstdc++`'s `std::__format::_Sink<char>`.
+target_compile_options(zahlen_command_line PUBLIC
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+)
+
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(zahlen_command_line)
 endif()

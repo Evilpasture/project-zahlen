@@ -53,6 +53,9 @@ target_sources(zahlen_engine PRIVATE ${ENGINE_SOURCES})
 if(USE_SANITIZERS)
     add_library(zahlen_sanitizer_options OBJECT diagnostics/SanitizerOptions.cpp)
     set_target_properties(zahlen_sanitizer_options PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_options(zahlen_sanitizer_options PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+    )
     target_sources(zahlen_engine INTERFACE
         $<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:$<TARGET_OBJECTS:zahlen_sanitizer_options>>
     )
