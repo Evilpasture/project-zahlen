@@ -8,9 +8,12 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp> // Required for InitMainThread
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <expected>
+#include <latch>
 #include <memory>
+#include <thread>
 
 // ============================================================================
 // Local Test Enums (Self-Contained)
@@ -18,6 +21,7 @@
 
 enum class SyncPrimError : uint32_t {
     ConcurrencyFailure ZHLN_ANNOTATION(ZHLN::Description<"A race condition was detected; mutual exclusion violated.">{}) = 1,
+    ConcurrentReadersFailed ZHLN_ANNOTATION(ZHLN::Description<"SharedMutex failed to admit concurrent readers or wake a parked writer.">{}),
     SignalingFailure ZHLN_ANNOTATION(ZHLN::Description<"Condition variable signaling failed or timed out.">{}),
 };
 
@@ -31,7 +35,7 @@ struct SyncPrimTestSuite {
     SyncPrimTestSuite() {
         // Convert main thread to a Fiber context so that Mutex slow-path yielding works correctly
         ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        ZHLN::TaskSystem::Init(2, 128, ZHLN::kMinimumFiberStackSize);
     }
 
     ~SyncPrimTestSuite() {
@@ -98,18 +102,21 @@ struct SyncPrimTestSuite {
             ZHLN::Mutex               mutex {};
             ZHLN::ConditionalVariable cv {};
             bool                      ready          = false;
+            bool                      workerWaiting  = false;
             bool                      workerFinished = false;
 
             struct WorkerData {
                 ZHLN::Mutex*               m;
                 ZHLN::ConditionalVariable* cv;
                 bool*                      ready;
+                bool*                      waiting;
                 bool*                      finished;
             };
 
             auto worker_fn = [](void* arg) {
                 auto* d = static_cast<WorkerData*>(arg);
                 d->m->lock();
+                *d->waiting = true;
                 while (!(*d->ready)) {
                     d->cv->Wait(*d->m);
                 }
@@ -117,25 +124,30 @@ struct SyncPrimTestSuite {
                 d->m->unlock();
             };
 
-            WorkerData             wData {&mutex, &cv, &ready, &workerFinished};
+            WorkerData             wData {&mutex, &cv, &ready, &workerWaiting, &workerFinished};
             ZHLN::TaskSystem::Task task {worker_fn, &wData};
 
             ZHLN::TaskSystem::Counter sync;
             ZHLN::TaskSystem::Dispatch({&task, 1}, &sync);
 
-            // Yield briefly to ensure worker thread has entered the CV wait path
-            for (int i = 0; i < 50; ++i) {
-                ZHLN::CPURelax();
+            // Deterministically wait until the worker acquires `mutex` and releases it inside `cv.Wait(mutex)`.
+            for (;;) {
+                mutex.lock();
+                if (workerWaiting) {
+                    ready = true;
+                    mutex.unlock();
+                    break;
+                }
+                mutex.unlock();
+                std::this_thread::yield();
             }
-
-            mutex.lock();
-            ready = true;
-            mutex.unlock();
             cv.NotifyOne();
 
             ZHLN::TaskSystem::Wait(&sync);
 
-            ZHLN::Test::ExpectTrue(workerFinished);
+            if (!ZHLN::Test::ExpectTrue(workerFinished)) {
+                return std::unexpected(SyncPrimError::SignalingFailure);
+            }
             return {};
         }
 
@@ -143,19 +155,22 @@ struct SyncPrimTestSuite {
         std::expected<void, ZHLN::ErrorCode> condvar_notify_all() {
             ZHLN::Mutex               mutex {};
             ZHLN::ConditionalVariable cv {};
-            bool                      ready      = false;
-            int                       awakeCount = 0;
+            bool                      ready        = false;
+            int                       waitingCount = 0;
+            int                       awakeCount   = 0;
 
             struct WorkerData {
                 ZHLN::Mutex*               m;
                 ZHLN::ConditionalVariable* cv;
                 bool*                      ready;
+                int*                       waiting;
                 int*                       count;
             };
 
             auto worker_fn = [](void* arg) {
                 auto* d = static_cast<WorkerData*>(arg);
                 d->m->lock();
+                (*d->waiting)++;
                 while (!(*d->ready)) {
                     d->cv->Wait(*d->m);
                 }
@@ -163,7 +178,7 @@ struct SyncPrimTestSuite {
                 d->m->unlock();
             };
 
-            WorkerData                            wData {&mutex, &cv, &ready, &awakeCount};
+            WorkerData                            wData {&mutex, &cv, &ready, &waitingCount, &awakeCount};
             std::array<ZHLN::TaskSystem::Task, 4> tasks;
             for (auto& task: tasks) {
                 task = {worker_fn, &wData};
@@ -172,19 +187,24 @@ struct SyncPrimTestSuite {
             ZHLN::TaskSystem::Counter sync;
             ZHLN::TaskSystem::Dispatch(tasks, &sync);
 
-            // Yield briefly to ensure all workers have blocked inside the parking lot
-            for (int i = 0; i < 50; ++i) {
-                ZHLN::CPURelax();
+            // Deterministically wait until all 4 workers have parked inside `cv.Wait(mutex)`.
+            for (;;) {
+                mutex.lock();
+                if (waitingCount == 4) {
+                    ready = true;
+                    mutex.unlock();
+                    break;
+                }
+                mutex.unlock();
+                std::this_thread::yield();
             }
-
-            mutex.lock();
-            ready = true;
-            mutex.unlock();
             cv.NotifyAll();
 
             ZHLN::TaskSystem::Wait(&sync);
 
-            ZHLN::Test::ExpectEq(awakeCount, 4);
+            if (!ZHLN::Test::ExpectEq(awakeCount, 4)) {
+                return std::unexpected(SyncPrimError::SignalingFailure);
+            }
             return {};
         }
 
@@ -201,9 +221,75 @@ struct SyncPrimTestSuite {
             initialized->unlock();
             std::destroy_at(initialized);
 
+            // Phase A: Deterministic concurrent-reader rendezvous & parked-writer handoff
+            // (independent of OS thread scheduling speed or available vCPU count).
+            {
+                ZHLN::SharedMutex     rwLock {};
+                std::atomic<uint32_t> activeReaders {0};
+                std::atomic<uint32_t> peakReaders {0};
+                std::atomic<bool>     writerObservedReader {false};
+                std::atomic<bool>     writerCompleted {false};
+                std::latch            bothReadersInside {2};
+                std::latch            releaseReaders {1};
+                std::latch            writerStarting {1};
+
+                auto readerFn = [&] {
+                    ZHLN::Fiber::InitMainThread();
+                    ZHLN::SharedLock(rwLock, [&] {
+                        const uint32_t cur = activeReaders.fetch_add(1, std::memory_order::acq_rel) + 1;
+                        uint32_t       old = peakReaders.load(std::memory_order::relaxed);
+                        while (cur > old && !peakReaders.compare_exchange_weak(old, cur, std::memory_order::relaxed)) {
+                        }
+
+                        bothReadersInside.arrive_and_wait();
+                        releaseReaders.wait();
+
+                        activeReaders.fetch_sub(1, std::memory_order::acq_rel);
+                    });
+                };
+
+                std::thread readerA(readerFn);
+                std::thread readerB(readerFn);
+
+                bothReadersInside.wait();
+                const bool writerTryWhileShared = rwLock.try_lock();
+
+                std::thread writerThread([&] {
+                    ZHLN::Fiber::InitMainThread();
+                    writerStarting.count_down();
+                    ZHLN::WriteLock(rwLock, [&] {
+                        if (activeReaders.load(std::memory_order::acquire) != 0u) {
+                            writerObservedReader.store(true, std::memory_order::relaxed);
+                        }
+                        writerCompleted.store(true, std::memory_order::release);
+                    });
+                });
+
+                writerStarting.wait();
+                while (rwLock.try_lock_shared()) {
+                    rwLock.unlock_shared();
+                    std::this_thread::yield();
+                }
+
+                const bool writerPremature = writerCompleted.load(std::memory_order::acquire);
+
+                releaseReaders.count_down();
+                readerA.join();
+                readerB.join();
+                writerThread.join();
+
+                if (!ZHLN::Test::ExpectEq(peakReaders.load(std::memory_order::relaxed), 2u) ||
+                    !ZHLN::Test::ExpectFalse(writerTryWhileShared) ||
+                    !ZHLN::Test::ExpectFalse(writerPremature) ||
+                    !ZHLN::Test::ExpectFalse(writerObservedReader.load(std::memory_order::relaxed)) ||
+                    !ZHLN::Test::ExpectTrue(writerCompleted.load(std::memory_order::acquire))) {
+                    return std::unexpected(SyncPrimError::ConcurrentReadersFailed);
+                }
+            }
+
+            // Phase B: High-contention fiber/worker stress test for mutual-exclusion invariants.
             ZHLN::SharedMutex     rwLock {};
             std::atomic<uint32_t> activeReaders {0};
-            std::atomic<uint32_t> maxReaders {0};
             std::atomic<bool>     writerActive {false};
             std::atomic<bool>     violated {false};
             uint32_t              sharedValue = 0;
@@ -224,10 +310,7 @@ struct SyncPrimTestSuite {
                             if (writerActive.load(std::memory_order::acquire)) {
                                 violated.store(true, std::memory_order::relaxed);
                             }
-                            const uint32_t cur = activeReaders.fetch_add(1, std::memory_order::acq_rel) + 1;
-                            uint32_t        old = maxReaders.load(std::memory_order::relaxed);
-                            while (cur > old && !maxReaders.compare_exchange_weak(old, cur, std::memory_order::relaxed)) {
-                            }
+                            activeReaders.fetch_add(1, std::memory_order::acq_rel);
                             for (int spin = 0; spin < 8; ++spin) {
                                 ZHLN::CPURelax();
                             }
@@ -241,8 +324,7 @@ struct SyncPrimTestSuite {
                 }
             });
 
-            if (violated.load(std::memory_order::relaxed) || !ZHLN::Test::ExpectEq(sharedValue, 256u) ||
-                !ZHLN::Test::ExpectGt(maxReaders.load(std::memory_order::relaxed), 1u)) {
+            if (violated.load(std::memory_order::relaxed) || !ZHLN::Test::ExpectEq(sharedValue, 256u)) {
                 return std::unexpected(SyncPrimError::ConcurrencyFailure);
             }
             return {};
