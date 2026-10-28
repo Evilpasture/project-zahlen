@@ -2,12 +2,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#if defined(_WIN32)
-#include <cstddef>
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#endif
-
 #include <ProjectLightClient/LightProtocol.hpp>
 
 #include <CharacterController/CharacterComponents.hpp>
@@ -28,9 +22,10 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <format>
 #include <limits>
 #include <span>
@@ -40,85 +35,15 @@
 #include <utility>
 #include <vector>
 
-#if !defined(_WIN32)
-#include <arpa/inet.h>
-#include <cerrno>
-#include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
-
 namespace ZHLN::ProjectLight {
 namespace {
 
 constexpr int kConnectTimeoutMs = 5000;
 constexpr size_t kReceiveChunkBytes = 64 * 1024;
 constexpr float kSendRateSeconds = 1.0f / 60.0f;
-#if defined(_WIN32)
-using NativeSocket = SOCKET;
-constexpr NativeSocket kInvalidSocket = INVALID_SOCKET;
-
-auto AsNativeSocket(intptr_t socket) noexcept -> NativeSocket { return static_cast<NativeSocket>(socket); }
-auto LastSocketError() noexcept -> int { return WSAGetLastError(); }
-auto IsInterrupted(int error) noexcept -> bool { return error == WSAEINTR; }
-auto IsWouldBlock(int error) noexcept -> bool { return error == WSAEWOULDBLOCK || error == WSAEINPROGRESS; }
-auto IsConnectInProgress(int error) noexcept -> bool { return IsWouldBlock(error); }
-void CloseNativeSocket(NativeSocket socket) noexcept { if (socket != kInvalidSocket) closesocket(socket); }
-#else
-using NativeSocket = int;
-constexpr NativeSocket kInvalidSocket = -1;
-
-auto AsNativeSocket(intptr_t socket) noexcept -> NativeSocket { return static_cast<NativeSocket>(socket); }
-auto LastSocketError() noexcept -> int { return errno; }
-auto IsInterrupted(int error) noexcept -> bool { return error == EINTR; }
-auto IsWouldBlock(int error) noexcept -> bool {
-#if EAGAIN == EWOULDBLOCK
-    return error == EAGAIN;
-#else
-    return error == EAGAIN || error == EWOULDBLOCK;
-#endif
-}
-auto IsConnectInProgress(int error) noexcept -> bool { return error == EINPROGRESS || IsWouldBlock(error); }
-void CloseNativeSocket(NativeSocket socket) noexcept { if (socket != kInvalidSocket) close(socket); }
-#endif
-
-auto SetNonBlocking(NativeSocket socket) noexcept -> bool {
-#if defined(_WIN32)
-    u_long mode = 1;
-    return ioctlsocket(socket, FIONBIO, &mode) == 0;
-#else
-    const int flags = fcntl(socket, F_GETFL, 0);
-    return flags >= 0 && fcntl(socket, F_SETFL, flags | O_NONBLOCK) == 0;
-#endif
-}
-
-auto WaitWritable(NativeSocket socket, int timeoutMs) noexcept -> bool {
-    fd_set writable;
-    FD_ZERO(&writable);
-    FD_SET(socket, &writable);
-    timeval timeout {.tv_sec = timeoutMs / 1000, .tv_usec = (timeoutMs % 1000) * 1000};
-#if defined(_WIN32)
-    return select(0, nullptr, &writable, nullptr, &timeout) > 0;
-#else
-    if (socket >= FD_SETSIZE) return false;
-    return select(socket + 1, nullptr, &writable, nullptr, &timeout) > 0;
-#endif
-}
 
 auto SocketErrorText(std::string_view operation, int error) -> std::string {
     return std::format("{} failed (socket error {})", operation, error);
-}
-
-auto AsSocketAddress(const std::array<uint8_t, 128>& storage) noexcept -> const sockaddr* {
-    return reinterpret_cast<const sockaddr*>(storage.data());
-}
-
-auto AsSocketAddress(std::array<uint8_t, 128>& storage) noexcept -> sockaddr* {
-    return reinterpret_cast<sockaddr*>(storage.data());
 }
 
 auto ReadReference(const MsgPackValue& value) noexcept -> uint64_t {
@@ -473,12 +398,9 @@ ClientSession::~ClientSession() noexcept {
 }
 
 void ClientSession::CloseSockets() noexcept {
-    const NativeSocket tcp = AsNativeSocket(m_tcpSocket);
-    const NativeSocket udp = AsNativeSocket(m_udpSocket);
-    CloseNativeSocket(tcp);
-    CloseNativeSocket(udp);
-    m_tcpSocket = -1;
-    m_udpSocket = -1;
+    m_tcpSocket.Close();
+    m_udpSocket.Close();
+    m_serverEndpoint = {};
     m_connected = false;
     m_snapshotComplete = false;
     m_realtimeOverTcp = false;
@@ -487,12 +409,6 @@ void ClientSession::CloseSockets() noexcept {
     m_tcpRxBuffer.clear();
     m_tcpTxBuffer.clear();
     m_tcpTxOffset = 0;
-#if defined(_WIN32)
-    if (m_winsockStarted) {
-        WSACleanup();
-        m_winsockStarted = false;
-    }
-#endif
 }
 
 auto ClientSession::Connect(const LaunchConfig& config) -> std::expected<void, std::string> {
@@ -523,126 +439,82 @@ auto ClientSession::Connect(const LaunchConfig& config) -> std::expected<void, s
 
     Log("[ProjectLight][net] opening TCP connection to {}:{} (authentication values are not logged).", config.host, config.port);
 
-#if defined(_WIN32)
-    WSADATA wsaData {};
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return std::unexpected("WSAStartup failed");
-    m_winsockStarted = true;
-#endif
-
-    addrinfo hints {};
-    hints.ai_family   = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    const std::string portText = std::to_string(config.port);
-    addrinfo* addresses = nullptr;
-    const int resolveResult = getaddrinfo(config.host.c_str(), portText.c_str(), &hints, &addresses);
-    if (resolveResult != 0 || addresses == nullptr) {
-        CloseSockets();
-#if defined(_WIN32)
-        return std::unexpected(std::format("could not resolve server host '{}' (error {})", config.host, resolveResult));
-#else
-        return std::unexpected(std::format("could not resolve server host '{}': {}", config.host, gai_strerror(resolveResult)));
-#endif
+    auto addresses = Net::ResolveSocketEndpoints(
+        config.host, config.port, Net::SocketAddressFamily::IPv4, Net::SocketType::Stream
+    );
+    if (!addresses) {
+        return std::unexpected(std::format(
+            "could not resolve server host '{}' (resolver error {})", config.host, addresses.error().nativeCode
+        ));
     }
 
-    NativeSocket tcp = kInvalidSocket;
-    sockaddr_in serverAddress {};
-    std::string connectError = "no IPv4 address was returned";
-    for (addrinfo* address = addresses; address != nullptr; address = address->ai_next) {
-        if (address->ai_family != AF_INET || address->ai_addrlen > sizeof serverAddress) continue;
-        NativeSocket candidate = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (candidate == kInvalidSocket) {
-            connectError = SocketErrorText("TCP socket", LastSocketError());
-            continue;
-        }
-        if (!SetNonBlocking(candidate)) {
-            connectError = SocketErrorText("set nonblocking TCP", LastSocketError());
-            CloseNativeSocket(candidate);
+    Net::Socket      tcp;
+    std::string      connectError = "no IPv4 address was returned";
+    for (const Net::SocketEndpoint& endpoint: *addresses) {
+        auto candidate = Net::OpenSocket(Net::SocketType::Stream, endpoint.family);
+        if (!candidate) {
+            connectError = SocketErrorText("TCP socket", candidate.error().nativeCode);
             continue;
         }
 
-        int rc = connect(candidate, address->ai_addr, static_cast<int>(address->ai_addrlen));
-        if (rc != 0) {
-            const int error = LastSocketError();
-            if (!IsConnectInProgress(error) || !WaitWritable(candidate, kConnectTimeoutMs)) {
-                connectError = SocketErrorText("connect", error);
-                CloseNativeSocket(candidate);
-                continue;
-            }
-            int socketError = 0;
-#if defined(_WIN32)
-            int errorLength = sizeof socketError;
-#else
-            socklen_t errorLength = sizeof socketError;
-#endif
-            if (getsockopt(candidate, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&socketError), &errorLength) != 0 || socketError != 0) {
-                connectError = SocketErrorText("connect", socketError == 0 ? LastSocketError() : socketError);
-                CloseNativeSocket(candidate);
-                continue;
-            }
+        auto connection = candidate->Connect(endpoint, std::chrono::milliseconds(kConnectTimeoutMs));
+        if (!connection) {
+            connectError = SocketErrorText("connect", connection.error().nativeCode);
+            continue;
         }
 
-        tcp = candidate;
-        std::memcpy(&serverAddress, address->ai_addr, sizeof serverAddress);
+        auto noDelay = candidate->SetNoDelay(true);
+        if (!noDelay) {
+            LogWarning("[ProjectLight][net] TCP_NODELAY could not be set (socket error {}).", noDelay.error().nativeCode);
+        }
+
+        tcp = std::move(*candidate);
+        m_serverEndpoint = endpoint;
         break;
     }
-    freeaddrinfo(addresses);
-    if (tcp == kInvalidSocket) {
+    if (!tcp.IsOpen()) {
         CloseSockets();
         return std::unexpected(connectError);
     }
 
-    int noDelay = 1;
-    setsockopt(tcp, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&noDelay), sizeof noDelay);
+    auto openedUdp = Net::OpenSocket(Net::SocketType::Datagram, m_serverEndpoint.family);
+    if (!openedUdp) {
+        const std::string error = SocketErrorText("create UDP socket", openedUdp.error().nativeCode);
+        CloseSockets();
+        return std::unexpected(error);
+    }
+    Net::Socket udp = std::move(*openedUdp);
 
-    NativeSocket udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (udp == kInvalidSocket || !SetNonBlocking(udp)) {
-        const std::string error = SocketErrorText("create UDP socket", LastSocketError());
-        CloseNativeSocket(tcp);
-        CloseNativeSocket(udp);
+    auto nonblocking = udp.SetNonBlocking(true);
+    if (!nonblocking) {
+        const std::string error = SocketErrorText("set nonblocking UDP", nonblocking.error().nativeCode);
         CloseSockets();
         return std::unexpected(error);
     }
 
-    sockaddr_in bindAddress {};
-    bindAddress.sin_family      = AF_INET;
-    bindAddress.sin_addr.s_addr = htonl(INADDR_ANY);
-    bindAddress.sin_port        = htons(0);
-    if (bind(udp, reinterpret_cast<const sockaddr*>(&bindAddress), sizeof bindAddress) != 0) {
-        const std::string error = SocketErrorText("bind UDP socket", LastSocketError());
-        CloseNativeSocket(tcp);
-        CloseNativeSocket(udp);
+    auto bound = udp.Bind(Net::SocketEndpoint::IPv4Any(0));
+    if (!bound) {
+        const std::string error = SocketErrorText("bind UDP socket", bound.error().nativeCode);
         CloseSockets();
         return std::unexpected(error);
     }
 
-    sockaddr_in localAddress {};
-#if defined(_WIN32)
-    int localAddressLength = sizeof localAddress;
-#else
-    socklen_t localAddressLength = sizeof localAddress;
-#endif
-    if (getsockname(udp, reinterpret_cast<sockaddr*>(&localAddress), &localAddressLength) != 0) {
-        const std::string error = SocketErrorText("query UDP port", LastSocketError());
-        CloseNativeSocket(tcp);
-        CloseNativeSocket(udp);
+    auto localEndpoint = udp.LocalEndpoint();
+    if (!localEndpoint) {
+        const std::string error = SocketErrorText("query UDP port", localEndpoint.error().nativeCode);
         CloseSockets();
         return std::unexpected(error);
     }
 
-    m_tcpSocket = static_cast<intptr_t>(tcp);
-    m_udpSocket = static_cast<intptr_t>(udp);
-    m_serverAddress.fill(0);
-    std::memcpy(m_serverAddress.data(), &serverAddress, sizeof serverAddress);
-    m_serverAddressBytes = sizeof serverAddress;
-    m_localUdpPort = ntohs(localAddress.sin_port);
+    m_tcpSocket = std::move(tcp);
+    m_udpSocket = std::move(udp);
+    m_localUdpPort = localEndpoint->port;
     m_connected = true;
 
     Log("[ProjectLight][net] TCP transport connected to {}:{}; local UDP port {}.", config.host, config.port, m_localUdpPort);
     if (!SendTcpPacket(BuildConnectPacket(config, m_localUdpPort))) {
-        const std::string error = SocketErrorText("send connect packet", LastSocketError());
         CloseSockets();
-        return std::unexpected(error);
+        return std::unexpected("send connect packet failed");
     }
     FlushTcpTxBuffer();
     const size_t pendingBytes = m_tcpTxBuffer.size() - std::min(m_tcpTxOffset, m_tcpTxBuffer.size());
@@ -660,7 +532,7 @@ void ClientSession::Disconnect() noexcept {
 }
 
 auto ClientSession::SendTcpPacket(const MsgPackValue& packet) -> bool {
-    if (!m_connected || m_tcpSocket == -1) return false;
+    if (!m_connected || !m_tcpSocket.IsOpen()) return false;
     auto frame = EncodeStreamFrame(packet, false);
     if (!frame) {
         Log("[ProjectLight] TCP packet encode failed: {}", frame.error());
@@ -676,25 +548,26 @@ auto ClientSession::SendTcpPacket(const MsgPackValue& packet) -> bool {
 }
 
 void ClientSession::FlushTcpTxBuffer() noexcept {
-    if (!m_connected || m_tcpSocket == -1) return;
-    const NativeSocket tcp = AsNativeSocket(m_tcpSocket);
+    if (!m_connected || !m_tcpSocket.IsOpen()) return;
     while (m_tcpTxOffset < m_tcpTxBuffer.size()) {
         const size_t remaining = m_tcpTxBuffer.size() - m_tcpTxOffset;
-#if defined(_WIN32)
-        const int sent = send(tcp, reinterpret_cast<const char*>(m_tcpTxBuffer.data() + m_tcpTxOffset), static_cast<int>(remaining), 0);
-#else
-        const ssize_t sent = send(tcp, m_tcpTxBuffer.data() + m_tcpTxOffset, remaining, 0);
-#endif
-        if (sent > 0) {
-            m_tcpTxOffset += static_cast<size_t>(sent);
-            m_tcpBytesSent += static_cast<uint64_t>(sent);
-            continue;
+        const auto   bytes = std::span<const uint8_t>(m_tcpTxBuffer.data() + m_tcpTxOffset, remaining);
+        auto         result = m_tcpSocket.Send(bytes);
+        if (!result) {
+            Log("[ProjectLight] TCP send failed (socket error {}); disconnecting.", result.error().nativeCode);
+            CloseSockets();
+            return;
         }
-        if (sent < 0 && IsInterrupted(LastSocketError())) continue;
-        if (sent < 0 && IsWouldBlock(LastSocketError())) break;
-        Log("[ProjectLight] TCP send failed; disconnecting.");
-        CloseSockets();
-        return;
+        if (result->state == Net::SocketIOState::WouldBlock) {
+            break;
+        }
+        if (result->state != Net::SocketIOState::Complete || result->bytes == 0) {
+            Log("[ProjectLight] TCP send made no progress; disconnecting.");
+            CloseSockets();
+            return;
+        }
+        m_tcpTxOffset += result->bytes;
+        m_tcpBytesSent += static_cast<uint64_t>(result->bytes);
     }
     if (m_tcpTxOffset == m_tcpTxBuffer.size()) {
         m_tcpTxBuffer.clear();
@@ -706,19 +579,18 @@ auto ClientSession::SendRealtimePacket(const MsgPackValue& packet) -> bool {
     if (!m_connected) return false;
     const std::vector<uint8_t> packed = EncodeMsgPack(packet);
     if (m_realtimeOverTcp || packed.size() > MAX_SAFE_UDP_PAYLOAD_BYTES) return SendTcpPacket(packet);
-    if (m_udpSocket == -1 || m_serverAddressBytes == 0) return false;
-    const NativeSocket udp = AsNativeSocket(m_udpSocket);
-#if defined(_WIN32)
-    const int sent = sendto(udp, reinterpret_cast<const char*>(packed.data()), static_cast<int>(packed.size()), 0,
-                           AsSocketAddress(m_serverAddress), static_cast<int>(m_serverAddressBytes));
-#else
-    const ssize_t sent = sendto(udp, packed.data(), packed.size(), 0, AsSocketAddress(m_serverAddress), static_cast<socklen_t>(m_serverAddressBytes));
-#endif
-    if (sent < 0 && !IsWouldBlock(LastSocketError()) && !IsInterrupted(LastSocketError())) {
-        Log("[ProjectLight] UDP send failed (socket error {}).", LastSocketError());
+    if (!m_udpSocket.IsOpen() || !m_serverEndpoint.IsValid()) return false;
+
+    auto result = m_udpSocket.SendTo(std::span<const uint8_t>(packed), m_serverEndpoint);
+    if (!result) {
+        Log("[ProjectLight] UDP send failed (socket error {}).", result.error().nativeCode);
         return false;
     }
-    const bool complete = sent >= 0 && static_cast<size_t>(sent) == packed.size();
+    if (result->state == Net::SocketIOState::WouldBlock) {
+        return false;
+    }
+
+    const bool complete = result->state == Net::SocketIOState::Complete && result->bytes == packed.size();
     if (complete) {
         ++m_udpDatagramsSent;
         m_udpBytesSent += static_cast<uint64_t>(packed.size());
@@ -1140,7 +1012,6 @@ void ClientSession::PollNetwork(Engine& engine) {
     FlushTcpTxBuffer();
     if (!m_connected) return;
 
-    const NativeSocket tcp = AsNativeSocket(m_tcpSocket);
     std::array<uint8_t, kReceiveChunkBytes> buffer {};
     auto logStatus = [&]() {
         size_t partCount = 0;
@@ -1265,88 +1136,82 @@ void ClientSession::PollNetwork(Engine& engine) {
     };
 
     while (true) {
-#if defined(_WIN32)
-        const int received = recv(tcp, reinterpret_cast<char*>(buffer.data()), static_cast<int>(buffer.size()), 0);
-#else
-        const ssize_t received = recv(tcp, buffer.data(), buffer.size(), 0);
-#endif
-        if (received > 0) {
-            m_tcpBytesReceived += static_cast<uint64_t>(received);
-            m_tcpRxBuffer.insert(m_tcpRxBuffer.end(), buffer.begin(), buffer.begin() + received);
-            if (m_tcpRxBuffer.size() > MAX_STREAM_FRAME_BYTES + 4 + kReceiveChunkBytes || !drainFrames()) {
-                if (m_connected) {
-                    Log("[ProjectLight] incoming TCP frame buffer exceeds the configured limit; disconnecting.");
-                    CloseSockets();
-                }
-                return;
-            }
-            continue;
+        auto received = m_tcpSocket.Receive(std::span<uint8_t>(buffer));
+        if (!received) {
+            const int error = received.error().nativeCode;
+            if (!m_streamErrorLogged) Log("[ProjectLight] TCP receive failed (socket error {}).", error);
+            m_streamErrorLogged = true;
+            CloseSockets();
+            return;
         }
-        if (received == 0) {
+        if (received->state == Net::SocketIOState::WouldBlock) break;
+        if (received->state == Net::SocketIOState::PeerClosed) {
             if (!m_streamErrorLogged) Log("[ProjectLight] server closed the TCP connection.");
             m_streamErrorLogged = true;
             CloseSockets();
             return;
         }
-        const int error = LastSocketError();
-        if (IsInterrupted(error)) continue;
-        if (IsWouldBlock(error)) break;
-        if (!m_streamErrorLogged) Log("[ProjectLight] TCP receive failed (socket error {}).", error);
-        m_streamErrorLogged = true;
-        CloseSockets();
-        return;
+        const size_t receivedBytes = received->bytes;
+        if (receivedBytes == 0) break;
+
+        m_tcpBytesReceived += static_cast<uint64_t>(receivedBytes);
+        m_tcpRxBuffer.insert(
+            m_tcpRxBuffer.end(), buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(receivedBytes)
+        );
+        if (m_tcpRxBuffer.size() > MAX_STREAM_FRAME_BYTES + 4 + kReceiveChunkBytes || !drainFrames()) {
+            if (m_connected) {
+                Log("[ProjectLight] incoming TCP frame buffer exceeds the configured limit; disconnecting.");
+                CloseSockets();
+            }
+            return;
+        }
     }
     if (!drainFrames()) return;
 
-    if (m_udpSocket != -1) {
-        const NativeSocket udp = AsNativeSocket(m_udpSocket);
+    if (m_udpSocket.IsOpen()) {
         std::array<uint8_t, 65536> datagram {};
         while (true) {
-#if defined(_WIN32)
-            const int received = recvfrom(udp, reinterpret_cast<char*>(datagram.data()), static_cast<int>(datagram.size()), 0, nullptr, nullptr);
-#else
-            const ssize_t received = recvfrom(udp, datagram.data(), datagram.size(), 0, nullptr, nullptr);
-#endif
-            if (received > 0) {
-                ++m_udpDatagramsReceived;
-                m_udpBytesReceived += static_cast<uint64_t>(received);
-                auto packet = DecodeMsgPack(std::span<const uint8_t>(datagram.data(), static_cast<size_t>(received)));
-                if (!packet) {
-                    ++m_udpDecodeErrors;
-                    if (m_udpDecodeErrors <= 4u) {
-                        LogWarning("[ProjectLight][net] malformed UDP datagram #{} ({} bytes): {}", m_udpDatagramsReceived,
-                                   received, packet.error());
-                    }
-                    continue;
-                }
-                if (!packet->IsMap()) {
-                    ++m_udpDecodeErrors;
-                    if (m_udpDecodeErrors <= 4u) {
-                        LogWarning("[ProjectLight][net] UDP datagram #{} decoded to a non-map MessagePack value.", m_udpDatagramsReceived);
-                    }
-                    continue;
-                }
-                const bool handled = HandlePacket(*packet);
-                if (!handled) {
-                    ++m_unrecognizedPackets;
-                    if (m_unrecognizedPackets <= 8u) {
-                        const std::string_view action = GetFrameAction(*packet);
-                        LogWarning("[ProjectLight][net] unhandled UDP packet #{}: action='{}', fields={}", m_unrecognizedPackets,
-                                   action.empty() ? "<none>" : std::string(action), NetworkPacketSummary(*packet));
-                    }
-                }
-                if (m_udpDatagramsReceived <= 3u) {
-                    Log("[ProjectLight][net] RX UDP datagram #{} ({} bytes): {}; replicatedObjects={}", m_udpDatagramsReceived,
-                        received, NetworkPacketSummary(*packet), m_objects.size());
+            auto received = m_udpSocket.ReceiveFrom(std::span<uint8_t>(datagram));
+            if (!received) {
+                Log("[ProjectLight] UDP receive failed (socket error {}).", received.error().nativeCode);
+                break;
+            }
+            if (received->io.state == Net::SocketIOState::WouldBlock) break;
+            if (received->io.state != Net::SocketIOState::Complete) break;
+            const size_t receivedBytes = received->io.bytes;
+            if (receivedBytes == 0) continue;
+
+            ++m_udpDatagramsReceived;
+            m_udpBytesReceived += static_cast<uint64_t>(receivedBytes);
+            auto packet = DecodeMsgPack(std::span<const uint8_t>(datagram.data(), receivedBytes));
+            if (!packet) {
+                ++m_udpDecodeErrors;
+                if (m_udpDecodeErrors <= 4u) {
+                    LogWarning("[ProjectLight][net] malformed UDP datagram #{} ({} bytes): {}", m_udpDatagramsReceived,
+                               receivedBytes, packet.error());
                 }
                 continue;
             }
-            if (received == 0) break;
-            const int error = LastSocketError();
-            if (IsInterrupted(error)) continue;
-            if (IsWouldBlock(error)) break;
-            Log("[ProjectLight] UDP receive failed (socket error {}).", error);
-            break;
+            if (!packet->IsMap()) {
+                ++m_udpDecodeErrors;
+                if (m_udpDecodeErrors <= 4u) {
+                    LogWarning("[ProjectLight][net] UDP datagram #{} decoded to a non-map MessagePack value.", m_udpDatagramsReceived);
+                }
+                continue;
+            }
+            const bool handled = HandlePacket(*packet);
+            if (!handled) {
+                ++m_unrecognizedPackets;
+                if (m_unrecognizedPackets <= 8u) {
+                    const std::string_view action = GetFrameAction(*packet);
+                    LogWarning("[ProjectLight][net] unhandled UDP packet #{}: action='{}', fields={}", m_unrecognizedPackets,
+                               action.empty() ? "<none>" : std::string(action), NetworkPacketSummary(*packet));
+                }
+            }
+            if (m_udpDatagramsReceived <= 3u) {
+                Log("[ProjectLight][net] RX UDP datagram #{} ({} bytes): {}; replicatedObjects={}", m_udpDatagramsReceived,
+                    receivedBytes, NetworkPacketSummary(*packet), m_objects.size());
+            }
         }
     }
     FlushTcpTxBuffer();

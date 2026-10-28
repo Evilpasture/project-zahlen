@@ -521,6 +521,7 @@ if(ZHLN_BUILD_EXTRAS)
     target_link_libraries(zahlen_extras INTERFACE
     zahlen_module
     zahlen_animation
+    zahlen_socket
     zahlen_network
     zahlen_datamodel
     zahlen_vfx

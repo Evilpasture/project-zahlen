@@ -3,17 +3,9 @@
 
 // extensions/net/HTTP/HTTPServer.cpp
 //
-// Every platform difference the loopback server has lives here, the way all of
-// libcurl lives in HTTP.cpp: the handle type, recv and send taking an int length
-// on Windows and a size_t one on POSIX, WSAStartup being per-process and
-// refcounted, and close being closesocket. HTTPServer.hpp names none of it, so a
-// consumer that includes it compiles the same everywhere, and never has to get
-// winsock2.h in ahead of windows.h in its own include order.
-//
-// The class holds a socket as a std::intptr_t, because that is the one spelling
-// both platforms fit into without this header knowing either: -1 is a bad fd on
-// POSIX and INVALID_SOCKET on Windows read at the same width, and the
-// constructor asserts the two agree. Listener() below is the crossing back.
+// The loopback fixture uses zahlen_socket for every socket operation. This
+// translation unit owns the listener and the accepted connection values; the
+// POSIX/Win32 details and Winsock lifetime stay inside the socket extension.
 
 #include <HTTP/HTTPServer.hpp>
 #include <cctype>
@@ -22,141 +14,50 @@
 #include <cstdlib>
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
-#if defined(_WIN32)
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
-
 namespace ZHLN::HTTP {
-namespace {
-
-#if defined(_WIN32)
-using SocketHandle                      = SOCKET;
-inline constexpr SocketHandle kNoSocket = INVALID_SOCKET;
-
-// getsockname's address length is an int here and a socklen_t elsewhere.
-using SocketLength = int;
-
-// WSAStartup is per-process and refcounted, so one is held for as long as any
-// socket exists. The server's constructor keeps exactly one, as a static.
-struct WinsockScope {
-    WSADATA data {};
-
-    WinsockScope() {
-        WSAStartup(MAKEWORD(2, 2), &data);
-    }
-    ~WinsockScope() {
-        WSACleanup();
-    }
-
-    WinsockScope(const WinsockScope&)            = delete;
-    WinsockScope& operator=(const WinsockScope&) = delete;
-};
-
-auto CloseSocket(SocketHandle socket) noexcept -> void {
-    if (socket != kNoSocket) {
-        closesocket(socket);
-    }
-}
-#else
-using SocketHandle                      = int;
-inline constexpr SocketHandle kNoSocket = -1;
-using SocketLength                      = socklen_t;
-
-struct WinsockScope {};
-
-auto CloseSocket(SocketHandle socket) noexcept -> void {
-    if (socket != kNoSocket) {
-        close(socket);
-    }
-}
-#endif
-
-// recv and send take an int length on Windows and a size_t one on POSIX. The
-// casts live here so the server reads the same on both.
-auto Receive(SocketHandle socket, char* buffer, size_t capacity) -> ptrdiff_t {
-#if defined(_WIN32)
-    return recv(socket, buffer, static_cast<int>(capacity), 0);
-#else
-    return recv(socket, buffer, capacity, 0);
-#endif
-}
-
-auto Transmit(SocketHandle socket, const char* buffer, size_t length) -> ptrdiff_t {
-#if defined(_WIN32)
-    return send(socket, buffer, static_cast<int>(length), 0);
-#else
-    return send(socket, buffer, length, 0);
-#endif
-}
-
-// A socket the class holds, as this platform's handle. The header only ever
-// sees the integer.
-auto Listener(std::intptr_t held) noexcept -> SocketHandle {
-    return static_cast<SocketHandle>(held);
-}
-
-} // namespace
 
 LoopbackServer::LoopbackServer() {
-    // kNoListener is the header's spelling of "no socket": -1, which is a bad
-    // fd on POSIX and INVALID_SOCKET on Windows read as a signed integer of the
-    // same width. If those two ever disagree, IsListening() lies.
-    static_assert(static_cast<std::intptr_t>(kNoSocket) == kNoListener, "the header's sentinel is this platform's");
+    auto listener = Net::OpenSocket(Net::SocketType::Stream, Net::SocketAddressFamily::IPv4);
+    if (!listener) {
+        return;
+    }
+    _listener = std::move(*listener);
 
-#if defined(_WIN32)
-    static WinsockScope winsock;
-    (void) winsock;
-#endif
-    _listener = static_cast<std::intptr_t>(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
-    if (_listener == kNoListener) {
+    auto reuseAddress = _listener.SetReuseAddress(true);
+    if (!reuseAddress) {
+        _listener.Close();
         return;
     }
 
-    // One handle for the rest of the constructor: it does not change again until
-    // a failure below clears it.
-    const SocketHandle listener = Listener(_listener);
-
-    // TIME_WAIT from a previous run of the suite would otherwise make the
-    // bind fail, and a bind failure is a failed test rather than a skipped
-    // one.
-    const int reuse = 1;
-    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
-
-    sockaddr_in address {};
-    address.sin_family = AF_INET;
-    address.sin_port   = htons(0); // an ephemeral port: two suites can run at once
-    inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
-
-    if (bind(listener, reinterpret_cast<const sockaddr*>(&address), static_cast<SocketLength>(sizeof(address))) != 0) {
-        CloseSocket(listener);
-        _listener = kNoListener;
+    auto bound = _listener.Bind(Net::SocketEndpoint::IPv4Loopback(0));
+    if (!bound) {
+        _listener.Close();
         return;
     }
 
-    sockaddr_in  bound {};
-    SocketLength boundLength = sizeof(bound);
-    if (getsockname(listener, reinterpret_cast<sockaddr*>(&bound), &boundLength) != 0) {
-        CloseSocket(listener);
-        _listener = kNoListener;
+    auto endpoint = _listener.LocalEndpoint();
+    if (!endpoint) {
+        _listener.Close();
         return;
     }
-    _port = ntohs(bound.sin_port);
+    _port = endpoint->port;
 
-    if (listen(listener, 64) != 0) {
-        CloseSocket(listener);
-        _listener = kNoListener;
+    auto listening = _listener.Listen(64);
+    if (!listening) {
+        _listener.Close();
+        return;
+    }
+
+    auto nonblocking = _listener.SetNonBlocking(true);
+    if (!nonblocking) {
+        _listener.Close();
         return;
     }
 
@@ -166,22 +67,8 @@ LoopbackServer::LoopbackServer() {
 LoopbackServer::~LoopbackServer() {
     _stop.store(true);
 
-    // The accept loop is blocked in accept(), which no flag reaches, so it
-    // gets a connection to wake it: one to itself, closed straight away.
-    if (_listener != kNoListener) {
-        const SocketHandle wake = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (wake != kNoSocket) {
-            sockaddr_in address {};
-            address.sin_family = AF_INET;
-            address.sin_port   = htons(_port);
-            inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
-            connect(wake, reinterpret_cast<const sockaddr*>(&address), static_cast<SocketLength>(sizeof(address)));
-            CloseSocket(wake);
-        }
-    }
-
-    // The acceptor first, so no new handler appears while the list is being
-    // joined, then the handlers, then the socket they were accepted from.
+    // AcceptLoop polls with a short timeout, so shutdown does not need a raw
+    // wake-up connection or a platform-specific shutdown call.
     if (_acceptor.joinable()) {
         _acceptor.join();
     }
@@ -194,8 +81,7 @@ LoopbackServer::~LoopbackServer() {
         }
         _handlers.clear();
     }
-    CloseSocket(Listener(_listener));
-    _listener = kNoListener;
+    _listener.Close();
 }
 
 auto LoopbackServer::Url(std::string_view path) const -> std::string {
@@ -209,35 +95,55 @@ void LoopbackServer::SetResource(std::string path, Resource resource) {
 
 void LoopbackServer::AcceptLoop() {
     while (!_stop.load()) {
-        const SocketHandle accepted = accept(Listener(_listener), nullptr, nullptr);
-        if (accepted == kNoSocket) {
+        auto readiness = _listener.WaitFor(true, false, std::chrono::milliseconds(50));
+        if (!readiness) {
             if (_stop.load()) {
                 return;
             }
             continue;
         }
-        // Handle takes a socket the way the header spells one, which is the
-        // only spelling that crosses into it.
-        const auto connection = static_cast<std::intptr_t>(accepted);
+        if (readiness->error || readiness->closed) {
+            return;
+        }
+        if (!readiness->readable) {
+            continue;
+        }
+
+        auto accepted = Net::AcceptSocket(_listener);
+        if (!accepted) {
+            if (_stop.load()) {
+                return;
+            }
+            continue;
+        }
+        auto blocking = accepted->SetNonBlocking(false);
+        if (!blocking) {
+            accepted->Close();
+            continue;
+        }
 
         const std::lock_guard lock(_handlersMutex);
-        _handlers.emplace_back([this, connection](std::stop_token) { Handle(connection); });
+        _handlers.emplace_back(
+            [this, connection = std::move(*accepted)](std::stop_token) mutable {
+                Handle(std::move(connection));
+            }
+        );
     }
 }
 
-void LoopbackServer::Handle(std::intptr_t connection) {
+void LoopbackServer::Handle(Net::Socket connection) {
     _requests.fetch_add(1);
 
-    std::string received;
-    char        buffer[8192];
-    size_t      headerEnd = std::string::npos;
+    std::string      received;
+    uint8_t          buffer[8192];
+    size_t           headerEnd = std::string::npos;
     while ((headerEnd = received.find("\r\n\r\n")) == std::string::npos) {
-        const auto count = Receive(Listener(connection), buffer, sizeof(buffer));
-        if (count <= 0) {
-            CloseSocket(Listener(connection));
+        auto count = connection.Receive(std::span<uint8_t>(buffer));
+        if (!count || count->state != Net::SocketIOState::Complete || count->bytes == 0) {
+            connection.Close();
             return;
         }
-        received.append(buffer, static_cast<size_t>(count));
+        received.append(reinterpret_cast<const char*>(buffer), count->bytes);
     }
 
     const std::string head = received.substr(0, headerEnd);
@@ -267,26 +173,39 @@ void LoopbackServer::Handle(std::intptr_t connection) {
         }
     }
     while (body.size() < expected) {
-        const auto count = Receive(Listener(connection), buffer, sizeof(buffer));
-        if (count <= 0) {
+        auto count = connection.Receive(std::span<uint8_t>(buffer));
+        if (!count || count->state != Net::SocketIOState::Complete || count->bytes == 0) {
             break;
         }
-        body.append(buffer, static_cast<size_t>(count));
+        body.append(reinterpret_cast<const char*>(buffer), count->bytes);
     }
 
     const std::string answer = Route(requestLine, std::span(lines).subspan(lines.empty() ? 0 : 1), body);
     SendAll(connection, answer);
-    CloseSocket(Listener(connection));
+    connection.Close();
 }
 
-void LoopbackServer::SendAll(std::intptr_t connection, std::string_view answer) {
+void LoopbackServer::SendAll(Net::Socket& connection, const std::string_view answer) {
     size_t sent = 0;
     while (sent < answer.size()) {
-        const auto count = Transmit(Listener(connection), answer.data() + sent, answer.size() - sent);
-        if (count <= 0) {
+        const auto bytes = std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(answer.data() + sent), answer.size() - sent
+        );
+        auto result = connection.Send(bytes);
+        if (!result) {
             return;
         }
-        sent += static_cast<size_t>(count);
+        if (result->state == Net::SocketIOState::WouldBlock) {
+            auto readiness = connection.WaitFor(false, true, std::chrono::seconds(5));
+            if (!readiness || !readiness->writable) {
+                return;
+            }
+            continue;
+        }
+        if (result->state != Net::SocketIOState::Complete || result->bytes == 0) {
+            return;
+        }
+        sent += result->bytes;
     }
 }
 

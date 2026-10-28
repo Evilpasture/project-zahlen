@@ -3,6 +3,7 @@
 
 # Network and platform I/O extensions. Keep the low-level Zahlen wire protocol,
 # HTTP transport, remote-asset cache and GitHub adapter independent targets.
+add_subdirectory(Socket)
 add_subdirectory(Network)
 add_subdirectory(HTTP)
 add_subdirectory(RemoteAsset)

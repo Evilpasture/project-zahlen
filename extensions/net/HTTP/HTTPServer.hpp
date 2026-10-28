@@ -8,15 +8,13 @@
 // A loopback HTTP/1.1 server for tests that fetch: this extra's own suite in
 // tests/extras/TestHTTP.cpp, and any consumer's test that would otherwise need
 // a host out on the internet to assert against. No engine header and nothing
-// third-party -- the platform's sockets and the standard library are the whole
-// dependency, and both of those live in HTTPServer.cpp.
+// third-party -- the standard library and the platform-neutral zahlen_socket
+// target are the whole dependency.
 //
-// This header names no platform type and includes no socket header, the way
-// HTTP.hpp names no curl type and includes no curl header. A socket crosses this
-// boundary as a std::intptr_t, with kNoListener standing for "there is none",
-// and HTTPServer.cpp is the only translation unit that knows whether that is a
-// SOCKET or an fd. Including this header is therefore not enough on its own: a
-// target links zahlen_http, which on Windows is also what brings ws2_32 along.
+// This header exposes only the platform-neutral RAII socket value, never an OS
+// socket type or handle. HTTPServer.cpp owns the listener and each accepted
+// connection; zahlen_socket centralizes the POSIX/Win32 implementation and the
+// Winsock lifetime/link dependency.
 //
 // It binds an ephemeral port on 127.0.0.1 and never on an interface, answers
 // every request with "Connection: close" so a handler never has to think about
@@ -38,6 +36,7 @@
 // header parsing, /gzip for the decoded body, /slow for a peer that never
 // answers, and /echo for what the client actually sent. Anything else is a 404.
 
+#include <Socket/Socket.hpp>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -76,15 +75,14 @@ class LoopbackServer {
     LoopbackServer& operator=(const LoopbackServer&) = delete;
 
     [[nodiscard]] auto IsListening() const noexcept -> bool {
-        return _listener != kNoListener;
+        return _listener.IsOpen();
     }
 
     // The URL of a route on this server, port included.
     [[nodiscard]] auto Url(std::string_view path) const -> std::string;
 
-    // Connections accepted so far, wake-up connection included. The smuggling
-    // test reads it before and after a refused request: what the client declined
-    // to send must not have reached anyone.
+    // Connections accepted so far. The smuggling test reads it before and after
+    // a refused request: what the client declined to send must not have reached anyone.
     [[nodiscard]] auto Requests() const noexcept -> uint64_t {
         return _requests.load();
     }
@@ -113,19 +111,13 @@ class LoopbackServer {
     }
 
   private:
-    // What _listener holds when there is no socket: -1, which is a bad fd on
-    // POSIX and INVALID_SOCKET on Windows read as a signed integer of the same
-    // width. The constructor in HTTPServer.cpp asserts the two agree at compile
-    // time, which is what lets IsListening() above be one spelling on both.
-    static constexpr std::intptr_t kNoListener = -1;
-
     void AcceptLoop();
 
     // Reads one request, answers it, closes. A handler owns its socket from
     // here on.
-    void Handle(std::intptr_t connection);
+    void Handle(Net::Socket connection);
 
-    static void SendAll(std::intptr_t connection, std::string_view answer);
+    static void SendAll(Net::Socket& connection, std::string_view answer);
 
     std::string Route(std::string_view requestLine, std::span<const std::string> headerLines, std::string_view body);
 
@@ -144,7 +136,7 @@ class LoopbackServer {
     std::atomic<uint64_t>           _conditionalRequests {0};
     std::atomic<uint64_t>           _notModifiedResponses {0};
 
-    std::intptr_t             _listener = kNoListener;
+    Net::Socket               _listener;
     uint16_t                  _port     = 0;
     std::atomic<bool>         _stop {false};
     std::atomic<uint64_t>     _requests {0};

@@ -5,7 +5,7 @@
 // ============================================================================
 // NetworkClient — TCP handshake + framed stream, UDP realtime channel.
 //
-//   Connect:    non-blocking TCP connect (select-based timeout), ClientHello
+//   Connect:    non-blocking TCP connect (socket-backed timeout), ClientHello
 //               frame, waits for the ServerWelcome that announces the UDP
 //               realtime port, then connects the UDP socket.
 //   PollEvents: drains both sockets, reassembles stream frames, verifies
@@ -18,36 +18,20 @@
 
 module;
 
-#if defined(_WIN32)
-// winsock2.h reaches <cstdlib> through winnt.h's intrinsic headers. Load
-// libstdc++'s configuration with C++ linkage first, as the module interfaces do.
-#include <cstddef>
-// clang-format off
-#include <winsock2.h>
-#include <ws2tcpip.h>
-// clang-format on
-#else
-#include <arpa/inet.h>
-#include <cerrno>
-#include <cstring>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
-
+#include <Socket/Socket.hpp>
 #include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 module ZHLN.Network;
@@ -59,136 +43,55 @@ namespace {
 constexpr int    HANDSHAKE_TIMEOUT_MS = 5000;
 constexpr size_t RECV_CHUNK_BYTES     = 64 * 1024;
 
-#if defined(_WIN32)
-using SocketHandle              = SOCKET;
-constexpr SocketHandle kInvalid = INVALID_SOCKET;
+enum class RecvStatus { Data, Closed, Blocked, Failed };
 
-auto LastSocketError() -> int {
-    return WSAGetLastError();
-}
-
-auto WouldBlockError() -> bool {
-    const int error = WSAGetLastError();
-    return error == WSAEWOULDBLOCK || error == WSAEINPROGRESS;
-}
-
-auto InterruptedError() -> bool {
-    return WSAGetLastError() == WSAEINTR;
-}
-
-auto CloseSocket(SocketHandle& fd) -> void {
-    if (fd != kInvalid) {
-        closesocket(fd);
-    }
-    fd = kInvalid;
-}
-#else
-using SocketHandle              = int;
-constexpr SocketHandle kInvalid = -1;
-
-auto LastSocketError() -> int {
-    return errno;
-}
-
-auto WouldBlockError() -> bool {
-#if EAGAIN != EWOULDBLOCK
-    return errno == EAGAIN || errno == EWOULDBLOCK;
-#else
-    return errno == EAGAIN; // EWOULDBLOCK is the same value on this platform
-#endif
-}
-
-auto InterruptedError() -> bool {
-    return errno == EINTR;
-}
-
-auto CloseSocket(SocketHandle& fd) -> void {
-    if (fd != kInvalid) {
-        close(fd);
-    }
-    fd = kInvalid;
-}
-#endif
-
-auto SetNonBlocking(SocketHandle fd) -> bool {
-#if defined(_WIN32)
-    u_long mode = 1;
-    return ioctlsocket(fd, FIONBIO, &mode) == 0;
-#else
-    const int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0) {
-        return false;
-    }
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
-#endif
-}
+struct RecvResult {
+    RecvStatus status     = RecvStatus::Failed;
+    size_t     bytes      = 0;
+    int        nativeCode = 0;
+};
 
 // Waits until the socket is readable/writable or the timeout expires.
-auto WaitForSocket(SocketHandle fd, bool writable, int timeoutMs) -> bool {
-    if (fd == kInvalid) {
-        return false;
-    }
-    fd_set      set;
-    struct timeval tv;
-    tv.tv_sec  = timeoutMs / 1000;
-    tv.tv_usec = (timeoutMs % 1000) * 1000;
-    FD_ZERO(&set);
-    FD_SET(fd, &set);
-#if defined(_WIN32)
-    const int ready = select(0, writable ? nullptr : &set, writable ? &set : nullptr, nullptr, &tv);
-#else
-    if (static_cast<long>(fd) >= FD_SETSIZE) {
-        return false; // select() cannot handle this descriptor
-    }
-    const int ready = select(fd + 1, writable ? nullptr : &set, writable ? &set : nullptr, nullptr, &tv);
-#endif
-    return ready > 0;
+auto WaitForSocket(Socket& socket, const bool writable, const int timeoutMs) -> bool {
+    auto readiness = socket.WaitFor(!writable, writable, std::chrono::milliseconds(timeoutMs));
+    return readiness.has_value() && (writable ? readiness->writable : readiness->readable);
 }
 
-auto SendAll(SocketHandle fd, std::span<const uint8_t> bytes, int timeoutMs) -> bool {
+auto SendAll(Socket& socket, const std::span<const uint8_t> bytes, const int timeoutMs) -> bool {
     size_t sent = 0;
     while (sent < bytes.size()) {
-        const int n = static_cast<int>(
-            send(fd, reinterpret_cast<const char*>(bytes.data() + sent), static_cast<int>(bytes.size() - sent), 0)
-        );
-        if (n > 0) {
-            sent += static_cast<size_t>(n);
-            continue;
+        auto result = socket.Send(bytes.subspan(sent));
+        if (!result) {
+            return false;
         }
-        if (n < 0 && InterruptedError()) {
-            continue;
-        }
-        if (n < 0 && WouldBlockError()) {
-            if (!WaitForSocket(fd, true, timeoutMs)) {
+        if (result->state == SocketIOState::WouldBlock) {
+            if (!WaitForSocket(socket, true, timeoutMs)) {
                 return false;
             }
             continue;
         }
-        return false;
+        if (result->state != SocketIOState::Complete || result->bytes == 0) {
+            return false;
+        }
+        sent += result->bytes;
     }
     return true;
 }
 
-enum class RecvStatus { Data, Closed, Blocked, Failed };
-
-auto RecvSome(SocketHandle fd, uint8_t* destination, size_t capacity, size_t& outBytes) -> RecvStatus {
-    while (true) {
-        const int n = static_cast<int>(recv(fd, reinterpret_cast<char*>(destination), static_cast<int>(capacity), 0));
-        if (n > 0) {
-            outBytes = static_cast<size_t>(n);
-            return RecvStatus::Data;
-        }
-        if (n == 0) {
-            return RecvStatus::Closed;
-        }
-        if (InterruptedError()) {
-            continue;
-        }
-        if (WouldBlockError()) {
-            return RecvStatus::Blocked;
-        }
-        return RecvStatus::Failed;
+auto RecvSome(Socket& socket, const std::span<uint8_t> destination) -> RecvResult {
+    auto result = socket.Receive(destination);
+    if (!result) {
+        return RecvResult {.status = RecvStatus::Failed, .nativeCode = result.error().nativeCode};
     }
+    switch (result->state) {
+        case SocketIOState::Complete:
+            return RecvResult {.status = RecvStatus::Data, .bytes = result->bytes};
+        case SocketIOState::WouldBlock:
+            return RecvResult {.status = RecvStatus::Blocked};
+        case SocketIOState::PeerClosed:
+            return RecvResult {.status = RecvStatus::Closed};
+    }
+    return {};
 }
 
 // Which socket a message arrived on. The same envelope over the stream and over
@@ -215,16 +118,16 @@ struct MessageMiss {
 using MessageBatch = BatchResult<MessageType, MessageMiss>;
 
 // Reads exactly one complete TCP frame (blocking with timeout).
-auto RecvExactFrame(SocketHandle fd, Wire::Buffer& stream, int timeoutMs) -> Wire::Result<std::vector<uint8_t>> {
+auto RecvExactFrame(Socket& socket, Wire::Buffer& stream, int timeoutMs) -> Wire::Result<std::vector<uint8_t>> {
     uint8_t chunk[4096];
     while (stream.Size() < 4) {
-        if (!WaitForSocket(fd, false, timeoutMs)) {
+        if (!WaitForSocket(socket, false, timeoutMs)) {
             return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame, "timed out waiting for the frame header"));
         }
-        size_t got = 0;
-        switch (RecvSome(fd, chunk, sizeof chunk, got)) {
+        const RecvResult received = RecvSome(socket, std::span<uint8_t>(chunk));
+        switch (received.status) {
             case RecvStatus::Data: {
-                auto appended = stream.Append({chunk, got});
+                auto appended = stream.Append({chunk, received.bytes});
                 if (!appended) {
                     return std::unexpected(appended.error());
                 }
@@ -236,7 +139,7 @@ auto RecvExactFrame(SocketHandle fd, Wire::Buffer& stream, int timeoutMs) -> Wir
                 return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame, "connection closed mid-frame"));
             case RecvStatus::Failed:
                 return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame,
-                                                         std::format("socket error {} while reading the frame header", LastSocketError())));
+                                                         std::format("socket error {} while reading the frame header", received.nativeCode)));
         }
     }
 
@@ -246,13 +149,13 @@ auto RecvExactFrame(SocketHandle fd, Wire::Buffer& stream, int timeoutMs) -> Wir
     }
 
     while (stream.Size() < 4 + static_cast<size_t>(*length)) {
-        if (!WaitForSocket(fd, false, timeoutMs)) {
+        if (!WaitForSocket(socket, false, timeoutMs)) {
             return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame, "timed out waiting for the frame body"));
         }
-        size_t got = 0;
-        switch (RecvSome(fd, chunk, sizeof chunk, got)) {
+        const RecvResult received = RecvSome(socket, std::span<uint8_t>(chunk));
+        switch (received.status) {
             case RecvStatus::Data: {
-                auto appended = stream.Append({chunk, got});
+                auto appended = stream.Append({chunk, received.bytes});
                 if (!appended) {
                     return std::unexpected(appended.error());
                 }
@@ -264,7 +167,7 @@ auto RecvExactFrame(SocketHandle fd, Wire::Buffer& stream, int timeoutMs) -> Wir
                 return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame, "connection closed mid-frame"));
             case RecvStatus::Failed:
                 return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame,
-                                                         std::format("socket error {} while reading the frame body", LastSocketError())));
+                                                         std::format("socket error {} while reading the frame body", received.nativeCode)));
         }
     }
 
@@ -280,17 +183,16 @@ auto RecvExactFrame(SocketHandle fd, Wire::Buffer& stream, int timeoutMs) -> Wir
 // ============================================================================
 
 struct NetworkClient::Impl {
-    SocketHandle tcpSocket       = kInvalid;
-    SocketHandle udpSocket       = kInvalid;
+    Socket tcpSocket;
+    Socket udpSocket;
     bool         isConnected     = false;
     bool         isRealtimeReady = false;
 
     uint64_t    userId = 0;
     std::string token;
 
-    sockaddr_in serverAddress {};
-    uint16_t    realtimePort  = 0;
-    uint32_t    inputSequence = 0;
+    SocketEndpoint serverAddress {};
+    uint32_t       inputSequence = 0;
 
     Wire::Buffer tcpStream {MAX_STREAM_FRAME_BYTES};
 
@@ -307,8 +209,9 @@ struct NetworkClient::Impl {
     auto operator=(const Impl&) -> Impl& = delete;
 
     void CloseSockets() {
-        CloseSocket(tcpSocket);
-        CloseSocket(udpSocket);
+        tcpSocket.Close();
+        udpSocket.Close();
+        serverAddress   = {};
         isConnected     = false;
         isRealtimeReady = false;
         tcpStream.Clear();
@@ -350,25 +253,24 @@ struct NetworkClient::Impl {
     auto PumpTcp(Engine& engine, MessageBatch& ledger) -> ErrorCode {
         uint8_t chunk[RECV_CHUNK_BYTES];
         while (true) {
-            size_t got = 0;
-            const RecvStatus status = RecvSome(tcpSocket, chunk, sizeof chunk, got);
-            if (status == RecvStatus::Data) {
-                auto appended = tcpStream.Append({chunk, got});
+            const RecvResult received = RecvSome(tcpSocket, std::span<uint8_t>(chunk));
+            if (received.status == RecvStatus::Data) {
+                auto appended = tcpStream.Append({chunk, received.bytes});
                 if (!appended) {
                     Log("Net: {} — closing stream", appended.error().Format());
                     CloseSockets();
                     return ErrorCode(NetworkError::InvalidPayload);
                 }
-                if (got < sizeof chunk) {
+                if (received.bytes < sizeof chunk) {
                     break; // socket buffer likely drained
                 }
                 continue;
             }
-            if (status == RecvStatus::Closed) {
+            if (received.status == RecvStatus::Closed) {
                 CloseSockets();
                 return ErrorCode(NetworkError::ServerDisconnected);
             }
-            if (status == RecvStatus::Failed) {
+            if (received.status == RecvStatus::Failed) {
                 CloseSockets();
                 return ErrorCode(NetworkError::SocketError);
             }
@@ -406,21 +308,20 @@ struct NetworkClient::Impl {
     }
 
     auto PumpUdp(Engine& engine, MessageBatch& ledger) -> ErrorCode {
-        if (udpSocket == kInvalid) {
+        if (!udpSocket.IsOpen()) {
             return {};
         }
         uint8_t datagram[RECV_CHUNK_BYTES];
         while (true) {
-            size_t got = 0;
-            const RecvStatus status = RecvSome(udpSocket, datagram, sizeof datagram, got);
-            if (status != RecvStatus::Data) {
-                if (status == RecvStatus::Failed) {
+            const RecvResult received = RecvSome(udpSocket, std::span<uint8_t>(datagram));
+            if (received.status != RecvStatus::Data) {
+                if (received.status == RecvStatus::Failed) {
                     return ErrorCode(NetworkError::SocketError);
                 }
                 break; // blocked or "closed": nothing more to read
             }
 
-            auto payload = DecodeDatagram({datagram, got});
+            auto payload = DecodeDatagram({datagram, received.bytes});
             if (!payload) {
                 ledger.EmplaceError(
                     MessageMiss {.channel = Channel::Udp, .error = ErrorCode(NetworkError::InvalidPayload), .detail = payload.error().Format()}
@@ -458,69 +359,41 @@ auto NetworkClient::operator=(NetworkClient&&) noexcept -> NetworkClient& = defa
 
 auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userId, std::string_view token) noexcept
     -> std::expected<void, ErrorCode> {
-#if defined(_WIN32)
-    WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        return std::unexpected(ErrorCode(NetworkError::SocketError));
-    }
-#endif
     _impl->CloseSockets();
 
-    // --- TCP: non-blocking connect with timeout -----------------------------
-    SocketHandle tcp = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (tcp == kInvalid) {
-        return std::unexpected(ErrorCode(NetworkError::SocketError));
-    }
-
-    sockaddr_in address {};
-    address.sin_family = AF_INET;
-    address.sin_port   = htons(port);
-    if (inet_pton(AF_INET, std::string(host).c_str(), &address.sin_addr) != 1) {
-        CloseSocket(tcp);
+    auto endpoints = ResolveSocketEndpoints(host, port, SocketAddressFamily::IPv4, SocketType::Stream);
+    if (!endpoints) {
         return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
     }
 
-    if (!SetNonBlocking(tcp)) {
-        CloseSocket(tcp);
-        return std::unexpected(ErrorCode(NetworkError::SocketError));
+    Socket tcp;
+    bool   connected = false;
+    for (const SocketEndpoint& endpoint: *endpoints) {
+        auto opened = OpenSocket(SocketType::Stream, endpoint.family);
+        if (!opened) {
+            continue;
+        }
+        auto connection = opened->Connect(endpoint, std::chrono::milliseconds(HANDSHAKE_TIMEOUT_MS));
+        if (!connection) {
+            continue;
+        }
+        auto noDelay = opened->SetNoDelay(true);
+        if (!noDelay) {
+            Log("Net: TCP_NODELAY could not be set (socket error {})", noDelay.error().nativeCode);
+        }
+        tcp                         = std::move(*opened);
+        _impl->serverAddress        = endpoint;
+        connected                   = true;
+        break;
+    }
+    if (!connected) {
+        return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
     }
 
-    const int rc = connect(tcp, reinterpret_cast<sockaddr*>(&address), sizeof address);
-    if (rc != 0) {
-#if defined(_WIN32)
-        const bool inProgress = WSAGetLastError() == WSAEWOULDBLOCK;
-#else
-        const bool inProgress = errno == EINPROGRESS;
-#endif
-        if (!inProgress) {
-            CloseSocket(tcp);
-            return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
-        }
-        if (!WaitForSocket(tcp, true, HANDSHAKE_TIMEOUT_MS)) {
-            CloseSocket(tcp);
-            return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
-        }
-        int soError = 0;
-#if defined(_WIN32)
-        int soLen = sizeof soError;
-#else
-        socklen_t soLen = sizeof soError;
-#endif
-        getsockopt(tcp, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soError), &soLen);
-        if (soError != 0) {
-            CloseSocket(tcp);
-            return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
-        }
-    }
-
-    int nodelay = 1;
-    setsockopt(tcp, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&nodelay), sizeof nodelay);
-
-    _impl->tcpSocket       = tcp;
-    _impl->serverAddress   = address;
-    _impl->userId          = userId;
-    _impl->token           = std::string(token);
-    _impl->inputSequence   = 0;
+    _impl->tcpSocket     = std::move(tcp);
+    _impl->userId        = userId;
+    _impl->token         = std::string(token);
+    _impl->inputSequence = 0;
 
     // --- Handshake: ClientHello → ServerWelcome ------------------------------
     const ClientHello hello {.protocolVersion = PROTOCOL_VERSION, .userId = userId, .token = std::string(token)};
@@ -528,7 +401,7 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
     if (encodedHello) {
         auto frame = EncodeFrame(*encodedHello);
         if (frame) {
-            if (!SendAll(tcp, *frame, HANDSHAKE_TIMEOUT_MS)) {
+            if (!SendAll(_impl->tcpSocket, *frame, HANDSHAKE_TIMEOUT_MS)) {
                 _impl->CloseSockets();
                 return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
             }
@@ -544,7 +417,7 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
     }
 
     Wire::Buffer handshakeStream {MAX_STREAM_FRAME_BYTES};
-    auto         welcomeFrame = RecvExactFrame(tcp, handshakeStream, HANDSHAKE_TIMEOUT_MS);
+    auto         welcomeFrame = RecvExactFrame(_impl->tcpSocket, handshakeStream, HANDSHAKE_TIMEOUT_MS);
     if (!welcomeFrame) {
         Log("Net: no ServerWelcome — {}", welcomeFrame.error().Format());
         _impl->CloseSockets();
@@ -558,27 +431,27 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
     }
 
     // --- UDP: realtime channel -----------------------------------------------
-    SocketHandle udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (udp == kInvalid) {
+    auto openedUdp = OpenSocket(SocketType::Datagram, _impl->serverAddress.family);
+    if (!openedUdp) {
         _impl->CloseSockets();
         return std::unexpected(ErrorCode(NetworkError::SocketError));
     }
-    if (!SetNonBlocking(udp)) {
-        CloseSocket(udp);
-        _impl->CloseSockets();
-        return std::unexpected(ErrorCode(NetworkError::SocketError));
-    }
-
-    sockaddr_in udpAddress = address;
-    udpAddress.sin_port     = htons(welcome->realtimePort);
-    if (connect(udp, reinterpret_cast<sockaddr*>(&udpAddress), sizeof udpAddress) != 0) {
-        CloseSocket(udp);
+    Socket udp = std::move(*openedUdp);
+    auto   nonblocking = udp.SetNonBlocking(true);
+    if (!nonblocking) {
         _impl->CloseSockets();
         return std::unexpected(ErrorCode(NetworkError::SocketError));
     }
 
-    _impl->udpSocket       = udp;
-    _impl->realtimePort    = welcome->realtimePort;
+    SocketEndpoint udpAddress = _impl->serverAddress;
+    udpAddress.port = welcome->realtimePort;
+    auto udpConnection = udp.Connect(udpAddress, std::chrono::milliseconds(HANDSHAKE_TIMEOUT_MS));
+    if (!udpConnection) {
+        _impl->CloseSockets();
+        return std::unexpected(ErrorCode(NetworkError::SocketError));
+    }
+
+    _impl->udpSocket       = std::move(udp);
     _impl->isConnected     = true;
     _impl->isRealtimeReady = true;
     return {};
@@ -589,7 +462,7 @@ void NetworkClient::Disconnect() noexcept {
 }
 
 auto NetworkClient::PollEvents(Engine& engine) noexcept -> std::expected<void, ErrorCode> {
-    if (!_impl->isConnected || _impl->tcpSocket == kInvalid) {
+    if (!_impl->isConnected || !_impl->tcpSocket.IsOpen()) {
         return {};
     }
     // Both channels drain into one ledger, and every message that did not make
@@ -623,7 +496,7 @@ auto NetworkClient::PollEvents(Engine& engine) noexcept -> std::expected<void, E
 }
 
 void NetworkClient::SendInputs(bool forward, bool backward, bool left, bool right, bool jump, float yaw) noexcept {
-    if (!_impl->isConnected || _impl->udpSocket == kInvalid) {
+    if (!_impl->isConnected || !_impl->udpSocket.IsOpen()) {
         return;
     }
 
@@ -662,7 +535,10 @@ void NetworkClient::SendInputs(bool forward, bool backward, bool left, bool righ
         return;
     }
 
-    (void) send(_impl->udpSocket, reinterpret_cast<const char*>(datagram->data()), static_cast<int>(datagram->size()), 0);
+    auto sent = _impl->udpSocket.Send(*datagram);
+    if (!sent) {
+        Log("Net: input datagram send failed (socket error {})", sent.error().nativeCode);
+    }
 }
 
 bool NetworkClient::IsConnected() const noexcept {

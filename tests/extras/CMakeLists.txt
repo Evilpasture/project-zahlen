@@ -168,9 +168,21 @@ endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
 
-# --- Grouped Non-Module Extras Binaries (5 links instead of 19) ---
+# --- Grouped Non-Module Extras Binaries (6 links instead of 20) ---
 
-# 1. Extras_UI: UI schema, widgets, console debugger, and baked font loader.
+# 1. Extras_Socket: POSIX/Win32 socket ownership, TCP, and UDP loopback.
+zahlen_add_extras_group(Extras_Socket
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+    TestSocket.cpp
+)
+target_link_libraries(Extras_Socket PRIVATE
+    zahlen_engine
+    zahlen_socket
+)
+zahlen_register_extras_test(Extras_Socket)
+zahlen_add_extras_build_alias(Extras_Socket TestSocket)
+
+# 2. Extras_UI: UI schema, widgets, console debugger, and baked font loader.
 zahlen_add_extras_group(Extras_UI
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestUITree.cpp
@@ -191,7 +203,7 @@ zahlen_add_extras_build_alias(Extras_UI TestWidgets)
 zahlen_add_extras_build_alias(Extras_UI TestConsoleDebugger)
 zahlen_add_extras_build_alias(Extras_UI TestBakedFontLoader)
 
-# 2. Extras_Simulation: TwoBoneIK (skeletal domain, module-free), terrain, ALife, DataModel.
+# 3. Extras_Simulation: TwoBoneIK (skeletal domain, module-free), terrain, ALife, DataModel.
 zahlen_add_extras_group(Extras_Simulation
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestTwoBoneIK.cpp
@@ -212,7 +224,7 @@ zahlen_add_extras_build_alias(Extras_Simulation TestTerrainLifecycle)
 zahlen_add_extras_build_alias(Extras_Simulation TestALife)
 zahlen_add_extras_build_alias(Extras_Simulation TestDataModel)
 
-# 3. Extras_Serialization: JSON, TOML, ReflectLua, and zcook GLB container inspection.
+# 4. Extras_Serialization: JSON, TOML, ReflectLua, and zcook GLB container inspection.
 zahlen_add_extras_group(Extras_Serialization
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestJSON.cpp
@@ -235,7 +247,7 @@ zahlen_add_extras_build_alias(Extras_Serialization TestTOML)
 zahlen_add_extras_build_alias(Extras_Serialization TestReflectLua)
 zahlen_add_extras_build_alias(Extras_Serialization TestCookerGLB)
 
-# 4. Extras_HTTP: loopback HTTP, RemoteAsset cache/fetcher, and CDN layer.
+# 5. Extras_HTTP: loopback HTTP, RemoteAsset cache/fetcher, and CDN layer.
 if(TARGET zahlen_http)
     set(ZHLN_EXTRAS_HTTP_SOURCES
         RunExtrasHTTPTests.cpp
@@ -273,7 +285,7 @@ if(TARGET zahlen_http)
     endif()
 endif()
 
-# 5. Extras_BSP: BSP interactive entities, VMT/VTF materials, static props, StudioModel, VRAD/lighting.
+# 6. Extras_BSP: BSP interactive entities, VMT/VTF materials, static props, StudioModel, VRAD/lighting.
 zahlen_add_extras_group(Extras_BSP
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestBSPInteraction.cpp

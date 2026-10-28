@@ -8,6 +8,7 @@
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <ProjectLightClient/SceneMirror.hpp>
+#include <Socket/Socket.hpp>
 #include <Replication/ClassVocabulary.hpp>
 #include <Replication/ReplicaState.hpp>
 #include <Replication/ReplicationComponents.hpp>
@@ -253,16 +254,14 @@ class ClientSession {
     void               CloseSockets() noexcept;
 
     LaunchConfig m_config {};
-    intptr_t     m_tcpSocket = -1;
-    intptr_t     m_udpSocket = -1;
-    alignas(16) std::array<uint8_t, 128> m_serverAddress {};
-    uint32_t                                             m_serverAddressBytes       = 0u;
-    uint16_t                                             m_localUdpPort             = 0u;
-    bool                                                 m_connected                = false;
-    bool                                                 m_snapshotComplete         = false;
-    bool                                                 m_realtimeOverTcp          = false;
-    bool                                                 m_serverAuthority          = false;
-    bool                                                 m_winsockStarted           = false;
+    Net::Socket  m_tcpSocket;
+    Net::Socket  m_udpSocket;
+    Net::SocketEndpoint                         m_serverEndpoint {};
+    uint16_t                                    m_localUdpPort             = 0u;
+    bool                                        m_connected                = false;
+    bool                                        m_snapshotComplete         = false;
+    bool                                        m_realtimeOverTcp          = false;
+    bool                                        m_serverAuthority          = false;
     bool                                                 m_streamErrorLogged        = false;
     bool                                                 m_realtimeModeReceived     = false;
     bool                                                 m_networkPollStarted       = false;

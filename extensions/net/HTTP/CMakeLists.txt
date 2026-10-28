@@ -198,6 +198,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 # archive.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
+    zahlen_socket
 )
 
 # libcurl stays PRIVATE, the way resvg does in plugins/SVG and simdjson does in
@@ -247,17 +248,6 @@ endif()
 target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions/net
 )
-
-# HTTPServer.cpp is winsock, and winsock is a library. PRIVATE, the way libcurl
-# is above: the sockets are compiled into this archive, so a consumer that
-# includes HTTPServer.hpp needs no winsock header of its own -- and CMake still
-# carries ws2_32 through to that consumer's link line as a link-only dependency,
-# which is where this archive's undefined WSAStartup and friends get resolved.
-if(ZHLN_HAVE_WINSOCK)
-    target_link_libraries(${TARGET_NAME} PRIVATE
-        ws2_32
-    )
-endif()
 
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
