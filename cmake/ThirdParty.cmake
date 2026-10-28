@@ -8,9 +8,140 @@
 # includes this once, before the core subsystems, so the vendor cache variables
 # below are settled before any vendor CMakeLists runs.
 
-# Vulkan-Headers is a vendored submodule. Its CMake project provides the
-# Vulkan-Headers interface target; no installed SDK or loader is required.
-if(ZHLN_BUILD_RENDER)
+# --- Vulkan-Headers ---
+# Vulkan-Headers is header-only; the renderer needs no Vulkan SDK or loader.
+# Prefer a compatible system copy on Unix, but the renderer's Vulkan 1.4 and
+# extension declarations are newer than many distro packages. Verify every
+# extension-name macro consumed by the code before using it; otherwise use the
+# pinned submodule so old headers fail over at configure time, not mid-build.
+option(ZHLN_VULKAN_HEADERS_VENDORED
+    "Build and use the vendored extern/Vulkan-Headers, ignoring system headers" OFF)
+
+set(ZHLN_HAS_VULKAN_HEADERS FALSE)
+if(ZHLN_BUILD_RENDER AND UNIX AND NOT ZHLN_VULKAN_HEADERS_VENDORED)
+    find_path(_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE
+        NAMES vulkan/vulkan_core.h
+        HINTS
+            "${VULKAN_HEADERS_ROOT}"
+            ENV VULKAN_HEADERS_ROOT
+            ENV VULKAN_SDK
+            /opt/homebrew/opt/vulkan-headers
+            /usr/local/opt/vulkan-headers
+            /usr/local
+        PATH_SUFFIXES include
+        QUIET
+    )
+    if(NOT _ZHLN_PROBE_VULKAN_HEADERS_INCLUDE)
+        unset(_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE CACHE)
+    endif()
+
+    if(_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE)
+        set(_zhln_sys_vulkan_core "${_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE}/vulkan/vulkan_core.h")
+        set(_zhln_required_vulkan_macros
+            VK_HEADER_VERSION
+            VK_VERSION_1_4
+            VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME
+            VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+            VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME
+            VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME
+            VK_EXT_DEVICE_FAULT_EXTENSION_NAME
+            VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME
+            VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME
+            VK_EXT_LAYER_SETTINGS_EXTENSION_NAME
+            VK_EXT_MESH_SHADER_EXTENSION_NAME
+            VK_EXT_PRESENT_MODE_FIFO_LATEST_READY_EXTENSION_NAME
+            VK_EXT_PRESENT_TIMING_EXTENSION_NAME
+            VK_EXT_ROBUSTNESS_2_EXTENSION_NAME
+            VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME
+            VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME
+            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
+            VK_KHR_DEVICE_FAULT_EXTENSION_NAME
+            VK_KHR_DISPLAY_EXTENSION_NAME
+            VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME
+            VK_KHR_MAINTENANCE_5_EXTENSION_NAME
+            VK_KHR_PIPELINE_BINARY_EXTENSION_NAME
+            VK_KHR_PRESENT_ID_2_EXTENSION_NAME
+            VK_KHR_PRESENT_MODE_FIFO_LATEST_READY_EXTENSION_NAME
+            VK_KHR_RAY_QUERY_EXTENSION_NAME
+            VK_KHR_SHADER_ABORT_EXTENSION_NAME
+            VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME
+            VK_KHR_SURFACE_EXTENSION_NAME
+            VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME
+            VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME
+            VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME
+        )
+        file(STRINGS "${_zhln_sys_vulkan_core}" _zhln_sys_vulkan_macro_lines
+            REGEX "^#define[ \\t]+(VK_HEADER_VERSION|VK_VERSION_1_4|VK_[A-Z0-9_]+_EXTENSION_NAME)[ \\t]")
+        set(_zhln_sys_vulkan_macros)
+        set(_zhln_sys_vulkan_header_version "unknown")
+        foreach(_line IN LISTS _zhln_sys_vulkan_macro_lines)
+            if(_line MATCHES "^#define[ \\t]+([A-Za-z0-9_]+)")
+                list(APPEND _zhln_sys_vulkan_macros "${CMAKE_MATCH_1}")
+            endif()
+            if(_line MATCHES "^#define[ \\t]+VK_HEADER_VERSION[ \\t]+([0-9]+)")
+                set(_zhln_sys_vulkan_header_version "${CMAKE_MATCH_1}")
+            endif()
+        endforeach()
+
+        set(_zhln_missing_vulkan_macros)
+        foreach(_macro IN LISTS _zhln_required_vulkan_macros)
+            list(FIND _zhln_sys_vulkan_macros "${_macro}" _macro_index)
+            if(_macro_index EQUAL -1)
+                list(APPEND _zhln_missing_vulkan_macros "${_macro}")
+            endif()
+        endforeach()
+
+        if(NOT _zhln_missing_vulkan_macros)
+            add_library(Vulkan-Headers INTERFACE IMPORTED GLOBAL)
+            if(NOT TARGET Vulkan::Headers)
+                add_library(Vulkan::Headers ALIAS Vulkan-Headers)
+            endif()
+            set(_zhln_sys_vulkan_include_is_implicit FALSE)
+            foreach(_implicit_include IN LISTS
+                CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES
+                CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES
+            )
+                if("${_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE}" STREQUAL "${_implicit_include}")
+                    set(_zhln_sys_vulkan_include_is_implicit TRUE)
+                    break()
+                endif()
+            endforeach()
+            # Do not emit an explicit -isystem /usr/include: it is already in
+            # the compiler's default search path and can break #include_next.
+            if(NOT _zhln_sys_vulkan_include_is_implicit)
+                target_include_directories(Vulkan-Headers SYSTEM INTERFACE
+                    "${_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE}")
+            endif()
+            set(ZHLN_HAS_VULKAN_HEADERS TRUE)
+            message(STATUS
+                "Using system Vulkan-Headers revision ${_zhln_sys_vulkan_header_version} "
+                "(${_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE})")
+        else()
+            string(JOIN ", " _zhln_missing_vulkan_macro_list ${_zhln_missing_vulkan_macros})
+            message(STATUS
+                "System Vulkan-Headers revision ${_zhln_sys_vulkan_header_version} "
+                "(${_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE}) lacks required renderer declarations "
+                "(${_zhln_missing_vulkan_macro_list}); using the vendored headers")
+        endif()
+
+        unset(_zhln_sys_vulkan_core)
+        unset(_zhln_required_vulkan_macros)
+        unset(_zhln_sys_vulkan_macro_lines)
+        unset(_zhln_sys_vulkan_macros)
+        unset(_zhln_sys_vulkan_header_version)
+        unset(_zhln_missing_vulkan_macros)
+        unset(_zhln_missing_vulkan_macro_list)
+        unset(_zhln_sys_vulkan_include_is_implicit)
+        unset(_line)
+        unset(_macro)
+        unset(_macro_index)
+        unset(_implicit_include)
+    endif()
+endif()
+
+if(ZHLN_BUILD_RENDER AND NOT ZHLN_HAS_VULKAN_HEADERS)
     add_subdirectory(${CMAKE_SOURCE_DIR}/extern/Vulkan-Headers EXCLUDE_FROM_ALL SYSTEM)
 endif()
 
