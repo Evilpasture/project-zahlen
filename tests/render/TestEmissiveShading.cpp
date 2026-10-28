@@ -108,13 +108,13 @@ const JPH::Float4 kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f
 // The halo frames run the bloom composite here, not at the engine default
 // 0.0 (which multiplies the whole Kawase chain by zero at composite --
 // blit.slang -- and made the patch-2 explicit on/off match bit-for-bit).
-// 0.01 is the production default (0.5) scaled by source energy: this neon
+// 0.003 is the production default (0.5) scaled by source energy: this neon
 // is 80x while production HDR sources are ~2-4, so a full-strength
 // composite would white out the room. Working point is on-halo in the
 // tens of luma (the feed gate needs > dark + 4, the slab bound < 127):
 // if a future run reads halo > 100, halve this; if < 15, double it.
 // Level the scene here, never in the gates.
-constexpr float kHaloBloomStrength = 0.01f;
+constexpr float kHaloBloomStrength = 0.003f;
 
 // Builds the unlit scene: one box at the origin, no lights of any kind, and
 // ambient/GI dialled out so nothing but emission can brighten a surface.

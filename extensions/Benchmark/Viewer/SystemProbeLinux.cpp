@@ -480,6 +480,18 @@ enum class NvmlFailure : uint8_t {
 // enumerator above, which is the common case and is not a fault.
 class NvmlProbe {
   public:
+    NvmlProbe() = default;
+    ~NvmlProbe() noexcept {
+        if (_initialized && _shutdown != nullptr) {
+            _shutdown();
+        }
+    }
+
+    NvmlProbe(const NvmlProbe&)                    = delete;
+    auto operator=(const NvmlProbe&) -> NvmlProbe& = delete;
+    NvmlProbe(NvmlProbe&&)                         = delete;
+    auto operator=(NvmlProbe&&) -> NvmlProbe&      = delete;
+
     [[nodiscard]] auto Init(std::string_view gpuNameHint) -> std::expected<void, ErrorCode>;
 
     // One reading. Never fails: a driver that answers with nothing gives a
@@ -511,10 +523,12 @@ class NvmlProbe {
     }
 
     ZHLN::SharedLibrary _library;
+    ShutdownFn          _shutdown       = nullptr;
     GetUtilizationFn    _getUtilization = nullptr;
     GetClockInfoFn      _getClockInfo   = nullptr;
 
-    void*       _device = nullptr;
+    void*       _device      = nullptr;
+    bool        _initialized = false;
     std::string _name;
 };
 
@@ -529,19 +543,21 @@ auto NvmlProbe::Init(std::string_view gpuNameHint) -> std::expected<void, ErrorC
     if (init == nullptr) {
         init = _library.Symbol<InitFn>("nvmlInit");
     }
+    _shutdown       = _library.Symbol<ShutdownFn>("nvmlShutdown");
     _getUtilization = _library.Symbol<GetUtilizationFn>("nvmlDeviceGetUtilizationRates");
     _getClockInfo   = _library.Symbol<GetClockInfoFn>("nvmlDeviceGetClockInfo");
 
     const auto getCount  = _library.Symbol<GetCountFn>("nvmlDeviceGetCount_v2");
     const auto getHandle = _library.Symbol<GetHandleByIndexFn>("nvmlDeviceGetHandleByIndex_v2");
     const auto getName   = _library.Symbol<GetNameFn>("nvmlDeviceGetName");
-    if (init == nullptr || getCount == nullptr || getHandle == nullptr) {
+    if (init == nullptr || _shutdown == nullptr || getCount == nullptr || getHandle == nullptr) {
         return std::unexpected(NvmlFailure::EntryPointsMissing);
     }
 
     if (init() != kNvmlSuccess) {
         return std::unexpected(NvmlFailure::InitFailed);
     }
+    _initialized = true;
 
     unsigned int count = 0;
     if (getCount(&count) != kNvmlSuccess || count == 0) {

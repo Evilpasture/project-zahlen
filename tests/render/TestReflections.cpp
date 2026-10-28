@@ -479,6 +479,7 @@ struct ReflectionsTestSuite {
                 if (!settingsEnts.empty()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                         pp.fullBright      = 0;
+                        pp.exposure        = 0.015f;
                         pp.ambientExposure = 6.0f;
                         pp.enableSSR       = 1;
                         pp.enableRTR       = 0;

@@ -50,6 +50,7 @@ struct ClusteredLightingTestSuite {
                 if (!settingsEnts.empty()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                         pp.fullBright      = 0;
+                        pp.exposure        = 0.015f;
                         pp.ambientExposure = 10.0f;
                         pp.enableSSR       = 1;
                         pp.enableRTR       = 0;
@@ -481,6 +482,7 @@ struct ClusteredLightingTestSuite {
                 if (!settingsEnts.empty()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                         pp.fullBright      = 0;
+                        pp.exposure        = 0.015f;
                         pp.ambientExposure = 2.0f;
                         pp.enableSSR       = 1;
                         pp.enableRTR       = 0;
@@ -615,6 +617,7 @@ struct ClusteredLightingTestSuite {
                 if (!settingsEnts.empty()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                         pp.fullBright      = 0;
+                        pp.exposure        = 0.015f;
                         pp.ambientExposure = 1.0f;
                         pp.enableSSR       = 0;
                         pp.enableRTR       = 0;
@@ -875,6 +878,7 @@ struct ClusteredLightingTestSuite {
                 if (!settingsEnts.empty()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                         pp.fullBright      = 0;
+                        pp.exposure        = 0.015f;
                         pp.ambientExposure = 8.0f;
                         pp.enableSSR       = 1;
                         pp.enableRTR       = 0;

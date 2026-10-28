@@ -294,11 +294,6 @@ struct RayTracedReflectionNoiseTestSuite {
         // contract: the glossy plate must change when the switch flips, its
         // jitter must advance between two on-frames, and the rough top of the
         // frame must stay still.
-        ZHLN_ANNOTATION(ZHLN::Test::Quarantine<
-            "RTR switch shifts 3.4% of the roughness-cutoff probe rows through a non-dithering path "
-            "(on/on-top control reads exactly 0 with top meanAbs 0.12 vs 0.00: systematic sub-luma post coupling, bloom/exposure suspected)",
-            "tests/INVARIANT_TESTING.md verdict 14; remove when topChanged < 0.002 runs green unquarantined"
-        > {})
         std::expected<void, ZHLN::ErrorCode> rtr_is_live_and_rough_surfaces_stay_still() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {

@@ -255,12 +255,29 @@ LightingOutput PSMain(VSOutput input) {
     float3 ambientDiffuseAndGI = ambientData.rgb;
     float ao                   = ambientData.a;
 
-    float3 L_sun    = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
-    float3 H_sun    = SafeNormalize(V + L_sun, N);
-    float NdotL_sun = saturate(dot(N, L_sun));
+    float3 L_sun       = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
+    float3 H_sun       = SafeNormalize(V + L_sun, N);
+    float  NdotL_sun   = saturate(dot(N, L_sun));
+    float3 sunRadiance = frame.sunRadiance.xyz;
+
+    float3 F      = SpecularFresnel(saturate(dot(H_sun, V)), F0, f90);
+    float3 spec   = SpecularGGX(N, V, L_sun, H_sun, roughness, F, T, B, anisoStrength);
+    float3 kD_sun = (float3(1.0f, 1.0f, 1.0f) - F) * (1.0f - metallic);
+
+    // A lightmapped map's sun was compiled into the bake together with its
+    // shadows, so its diffuse is withheld wherever the lightmap owns direct
+    // light. The specular lobe is not: no lightmap stores one, so the highlight
+    // on a lightmapped surface has to come from here or not at all.
+    const float  sunDiffuseOwnership = 1.0f - bakedDirect;
+    const float3 unshadowedSun       = (kD_sun * albedoRaw.rgb / 3.14159265f * sunDiffuseOwnership + spec) * sunRadiance * NdotL_sun;
+    // Skip cascade PCSS and hardware contact-shadow ray traversal whenever the
+    // unshadowed sun response is negligible (sun disabled, back-facing, pure
+    // metal outside the GGX sun highlight, or diffuse-baked pixel outside the
+    // highlight): `0 * shadow == 0`.
+    const bool hasSunContribution = max(unshadowedSun.r, max(unshadowedSun.g, unshadowedSun.b)) > 1e-4f;
 
     float cascadeShadow = 1.0f;
-    if (NdotL_sun > 0.0f) {
+    if (hasSunContribution) {
         uint cascadeIndex = 0;
         if (viewDepth > frame.cascadeSplits.x)
             cascadeIndex = 1;
@@ -305,26 +322,15 @@ LightingOutput PSMain(VSOutput input) {
 
     float rtContactShadow = 1.0f;
 #ifndef DISABLE_RTR
-    // Pixels already in Cascade PCSS umbra (`cascadeShadow <= 0.001f`) or facing
-    // away from the sun skip the hardware ray completely (`0 * rtContact = 0`).
-    if (ENABLE_RTR != 0 && pc.enableRTR != 0 && NdotL_sun > 0.0f && cascadeShadow > 0.001f && viewDepth < 100.0f) {
+    // Pixels already in Cascade PCSS umbra (`cascadeShadow <= 0.001f`) or with
+    // no direct sun contribution skip the hardware ray completely (`0 * rtContact = 0`).
+    if (ENABLE_RTR != 0 && pc.enableRTR != 0 && hasSunContribution && cascadeShadow > 0.001f && viewDepth < 100.0f) {
         rtContactShadow = TraceSunContactShadow(worldPos, N, L_sun, NdotL_sun, viewDepth);
     }
 #endif
 
-    float shadow = cascadeShadow * rtContactShadow;
-
-    float3 F     = SpecularFresnel(saturate(dot(H_sun, V)), F0, f90);
-    float3 spec  = SpecularGGX(N, V, L_sun, H_sun, roughness, F, T, B, anisoStrength);
-    float3 kD_sun = (float3(1.0f, 1.0f, 1.0f) - F) * (1.0f - metallic);
-
-    float3 sunRadiance = frame.sunRadiance.xyz;
-    // A lightmapped map's sun was compiled into the bake together with its
-    // shadows, so its diffuse is withheld wherever the lightmap owns direct
-    // light. The specular lobe is not: no lightmap stores one, so the highlight
-    // on a lightmapped surface has to come from here or not at all.
-    const float sunDiffuseOwnership = 1.0f - bakedDirect;
-    float3 directSun = (kD_sun * albedoRaw.rgb / 3.14159265f * sunDiffuseOwnership + spec) * sunRadiance * NdotL_sun * shadow;
+    float  shadow    = cascadeShadow * rtContactShadow;
+    float3 directSun = unshadowedSun * shadow;
 
     float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
 

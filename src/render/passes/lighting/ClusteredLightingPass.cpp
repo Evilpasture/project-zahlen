@@ -10,7 +10,7 @@ namespace ZHLN::Passes {
 void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     const auto fIdx         = frame.presenter.frameIndex;
     const bool hasTlas      = frame.ctx.RayTracingSupported() && frame.frames.tlasAddresses[fIdx] != nullptr;
-    const auto lightVariant = (frame.settings.rayTracing.enableShadows && hasTlas) ? 1 : 0;
+    const auto lightVariant = ((frame.settings.rayTracing.enableReflections || frame.settings.rayTracing.enableShadows) && hasTlas) ? 1 : 0;
     const Vk::AsAddressWrite tlas {.address = hasTlas ? frame.frames.tlasAddresses[fIdx].Get() : 0};
 
     const auto block = post.lighting.WriteHeapParameters<Shaders::Lighting>(

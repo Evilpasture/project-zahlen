@@ -443,13 +443,27 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     // or transmissive surface that sits on a lightmapped wall.
     float3 irradiance  = EvaluateSH(Ns, scene.frame.sh) * scene.frame.ambientExposure;
     float3 diffuseIBL  = albedo.rgb * (1.0f - F_rough) * (1.0f - metallic) * irradiance;
-    float3 litBase = (diffuseIBL + specularIBL) * surface.occlusion;
+    float3 litBase     = (diffuseIBL + specularIBL) * surface.occlusion;
+    float3 sunRadiance = scene.frame.sunRadiance.xyz;
+    float3 L_sun       = SafeNormalize(scene.frame.lightDir.xyz, Ns);
+    float  NdotLs      = max(dot(Ns, L_sun), 0.0f);
+    if (NdotLs > 0.0f && any(sunRadiance > 0.0f)) {
+        float3 H_sun   = SafeNormalize(Vs + L_sun, Ns);
+        float3 F_sun   = SpecularFresnel(saturate(dot(H_sun, Vs)), F0, f90Sum);
+        float3 specSun = SpecularGGX(Ns, Vs, L_sun, H_sun, roughness, F_sun, anisotropicT, anisotropicB, aniso.z);
+        float3 kD_sun  = (1.0f - F_sun) * (1.0f - metallic);
+        litBase += (kD_sun * albedo.rgb / 3.14159265f + specSun) * sunRadiance * NdotLs;
+    }
     float3 sheenColor = surface.sheen.rgb;
     if (any(sheenColor > 0.0f)) {
         float attenuation = SheenAlbedoScaling(sheenColor, surface.sheen.a, NdotVs, NdotVs);
         float3 sheenEnv = scene.prefilteredMap.SampleLevel(scene.clampSampler, reflect(-Vs, Ns), max(surface.sheen.a, 0.2f) * 5.0f).rgb;
         litBase = litBase * attenuation + sheenEnv * scene.frame.ambientExposure *
                   SheenEnvironmentWeight(sheenColor, NdotVs) * surface.occlusion;
+        if (NdotLs > 0.0f && any(sunRadiance > 0.0f)) {
+            float3 H_sun = SafeNormalize(Vs + L_sun, Ns);
+            litBase += sheenColor * SheenCharlieBRDF(Ns, Vs, L_sun, H_sun, surface.sheen.a) * sunRadiance * NdotLs;
+        }
     }
     return float4(litBase + emissive, albedo.a);
 }

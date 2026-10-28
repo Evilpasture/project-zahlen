@@ -537,6 +537,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             if (!settingsEnts.empty()) {
                 reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                     pp.fullBright      = 0;
+                    pp.exposure        = 0.015f;
                     pp.ambientExposure = 10.0f;
                     pp.enableSSR       = 1;
                     pp.enableRTR       = 0;

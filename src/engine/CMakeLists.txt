@@ -50,6 +50,14 @@ set(RAW_ENGINE_SOURCES
 zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})
 target_sources(zahlen_engine PRIVATE ${ENGINE_SOURCES})
 
+if(USE_SANITIZERS)
+    add_library(zahlen_sanitizer_options OBJECT diagnostics/SanitizerOptions.cpp)
+    set_target_properties(zahlen_sanitizer_options PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_sources(zahlen_engine INTERFACE
+        $<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:$<TARGET_OBJECTS:zahlen_sanitizer_options>>
+    )
+endif()
+
 target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/system
