@@ -35,10 +35,6 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/plugins
 )
 
-target_include_directories(${TARGET_NAME} SYSTEM PRIVATE
-    ${PROJECT_SOURCE_DIR}/extern/LuaJIT/src
-)
-
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()

@@ -193,11 +193,68 @@ endif()
 # --- LuaJIT ---
 # Lua is strictly a sandboxed, reflection-driven state and configuration layer
 # (plugins/lua/ReflectLua); FFI isolation is enforced at VM creation by never
-# opening luaopen_ffi or luaopen_package. Keep LUAJIT_DISABLE_FFI OFF because
-# extern/LuaJIT/CMakeLists.txt hardcodes `-D FFI` in DASM_FLAGS and omits
-# LUAJIT_FEATURES_DEFINITIONS on luaJIT_buildvm on POSIX.
-set(LUAJIT_DISABLE_FFI OFF CACHE BOOL "Keep LuaJIT buildvm and lib_buffer consistent on POSIX" FORCE)
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LuaJIT SYSTEM)
+# opening luaopen_ffi or luaopen_package.
+#
+# Prefer a system LuaJIT 2.1+ package on Unix when available (e.g. `luajit` on
+# Arch/NixOS, `libluajit-5.1-dev` on Debian/Ubuntu, `luajit-devel` on Fedora),
+# and fall back to building the vendored extern/LuaJIT from source otherwise.
+option(ZHLN_LUAJIT_VENDORED
+    "Build and use the vendored extern/LuaJIT, ignoring any system LuaJIT" OFF)
+
+set(ZHLN_HAS_LUAJIT FALSE)
+if(UNIX AND NOT ZHLN_LUAJIT_VENDORED)
+    find_path(_ZHLN_PROBE_LUAJIT_H
+        NAMES luajit.h
+        HINTS "${LUAJIT_ROOT}" ENV LUAJIT_ROOT /opt/homebrew/opt/luajit /usr/local
+        PATH_SUFFIXES luajit-2.1 include/luajit-2.1
+        QUIET
+    )
+    if(NOT _ZHLN_PROBE_LUAJIT_H)
+        unset(_ZHLN_PROBE_LUAJIT_H CACHE)
+    endif()
+
+    if(_ZHLN_PROBE_LUAJIT_H OR DEFINED ENV{PKG_CONFIG_PATH})
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(ZHLN_SYS_LUAJIT QUIET IMPORTED_TARGET luajit>=2.1)
+        endif()
+
+        if(ZHLN_SYS_LUAJIT_FOUND AND TARGET PkgConfig::ZHLN_SYS_LUAJIT)
+            add_library(LuaJIT INTERFACE IMPORTED GLOBAL)
+            target_link_libraries(LuaJIT INTERFACE PkgConfig::ZHLN_SYS_LUAJIT)
+            if(ZHLN_SYS_LUAJIT_INCLUDE_DIRS)
+                target_include_directories(LuaJIT SYSTEM INTERFACE ${ZHLN_SYS_LUAJIT_INCLUDE_DIRS})
+            elseif(_ZHLN_PROBE_LUAJIT_H)
+                target_include_directories(LuaJIT SYSTEM INTERFACE "${_ZHLN_PROBE_LUAJIT_H}")
+            endif()
+            set(ZHLN_HAS_LUAJIT TRUE)
+            message(STATUS "Using system LuaJIT ${ZHLN_SYS_LUAJIT_VERSION} (pkg-config)")
+        elseif(_ZHLN_PROBE_LUAJIT_H AND EXISTS "${_ZHLN_PROBE_LUAJIT_H}/lua.hpp")
+            find_library(_ZHLN_SYS_LUAJIT_LIB
+                NAMES luajit-5.1 luajit
+                HINTS "${LUAJIT_ROOT}" ENV LUAJIT_ROOT /opt/homebrew/opt/luajit /usr/local
+                QUIET
+            )
+            if(_ZHLN_SYS_LUAJIT_LIB)
+                add_library(LuaJIT INTERFACE IMPORTED GLOBAL)
+                target_include_directories(LuaJIT SYSTEM INTERFACE "${_ZHLN_PROBE_LUAJIT_H}")
+                target_link_libraries(LuaJIT INTERFACE "${_ZHLN_SYS_LUAJIT_LIB}" ${CMAKE_DL_LIBS} m)
+                set(ZHLN_HAS_LUAJIT TRUE)
+                message(STATUS "Using system LuaJIT: ${_ZHLN_SYS_LUAJIT_LIB} (${_ZHLN_PROBE_LUAJIT_H})")
+            else()
+                unset(_ZHLN_SYS_LUAJIT_LIB CACHE)
+            endif()
+        endif()
+    endif()
+endif()
+
+if(NOT ZHLN_HAS_LUAJIT)
+    # Keep LUAJIT_DISABLE_FFI OFF because extern/LuaJIT/CMakeLists.txt hardcodes
+    # `-D FFI` in DASM_FLAGS and omits LUAJIT_FEATURES_DEFINITIONS on
+    # luaJIT_buildvm on POSIX.
+    set(LUAJIT_DISABLE_FFI OFF CACHE BOOL "Keep LuaJIT buildvm and lib_buffer consistent on POSIX" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LuaJIT SYSTEM)
+endif()
 
 # --- Jolt Physics ---
 option(ZHLN_ENABLE_THIRDPARTY_LTO "Enable interprocedural optimization (LTO) on vendored third-party libraries" OFF)
