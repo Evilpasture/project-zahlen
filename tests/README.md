@@ -81,11 +81,11 @@ not terminate the worker process.
 After building `ztest` and the test worker, run it with:
 
 ```sh
-./build/ztest tests/core/TestOptional.cpp
+./build/bin/ztest tests/core/TestOptional.cpp
 # or filter by directory / boolean expression:
-./build/ztest tests/assets/
-./build/ztest -k "Optional and not exception"
-./build/ztest --collect-only
+./build/bin/ztest tests/assets/
+./build/bin/ztest -k "Optional and not exception"
+./build/bin/ztest --collect-only
 ```
 
 ## Zero-Boilerplate `namespace ZHLN::Test` Authoring
@@ -128,23 +128,23 @@ every `test_*` function in that namespace.
 
 ## Running & Filtering with `ztest`
 
-`ztest` (`tools/ztest/main.cpp`, built into `<build>/ztest` when
+`ztest` (`tools/ztest/main.cpp`, built into `<build>/bin/ztest` when
 `ZHLN_BUILD_TESTS=ON`) is the project's native pytest-style test orchestrator:
 
-- `./build/ztest` — collects individual `tests/.../File.cpp::test_*` items, shards
+- `./build/bin/ztest` — collects individual `tests/.../File.cpp::test_*` items, shards
   CPU execution per source file in parallel across `-j N` isolated workers, and
   pools `GPU` workers per binary (`--cpu` or `--gpu` selects one pool).
-- `./build/ztest tests/assets/` or `./build/ztest tests/core/TestMath.cpp` or
-  `./build/ztest tests/core/TestMath.cpp::test_scalar_math` — runs a directory,
+- `./build/bin/ztest tests/assets/` or `./build/bin/ztest tests/core/TestMath.cpp` or
+  `./build/bin/ztest tests/core/TestMath.cpp::test_scalar_math` — runs a directory,
   file, or single test node ID.
-- `./build/ztest -k "<expr>"` — boolean substring expression (`and`, `or`,
+- `./build/bin/ztest -k "<expr>"` — boolean substring expression (`and`, `or`,
   `not`, parentheses) matched against `tests/.../File.cpp::test_name`.
-- `./build/ztest -m "<expr>"` — boolean mark/tag expression against CMake target
+- `./build/bin/ztest -m "<expr>"` — boolean mark/tag expression against CMake target
   labels (`cpu`, `gpu`, `fast`, `extras`) and C++26 `ZHLN_ANNOTATION(...)` marks
   (`Tag<"...">`, `Tags<...>`, `quarantine`, `skip`).
-- `./build/ztest --lf` — re-runs only items recorded in `<build>/.ztest_cache`
+- `./build/bin/ztest --lf` — re-runs only items recorded in `<build>/.ztest_cache`
   from the previous failing run.
-- `./build/ztest --durations 10` — prints the slowest individual test items.
+- `./build/bin/ztest --durations 10` — prints the slowest individual test items.
 - Crash / timeout isolation: if an item crashes or hits its
   `Timeout<Seconds>` / watchdog deadline, `ztest` attributes the failure to that
   exact node ID and automatically respawns the remaining items in that file/group
@@ -206,7 +206,7 @@ Both suites are registered already when their optional targets are available:
 
 ```sh
 cmake --build build --target ztest TestRemoteAsset TestCDN
-./build/ztest -k "RemoteAssetTestSuite or CDNTestSuite"
+./build/bin/ztest -k "RemoteAssetTestSuite or CDNTestSuite"
 ```
 
 See [CDN caching](../extensions/net/CDN/README.md) for the policy contract.

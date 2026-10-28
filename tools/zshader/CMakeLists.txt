@@ -44,6 +44,7 @@ add_executable(zshader
     ${ZHLN_ZSHADER_SOURCES}
     "${ZHLN_ZSHADER_IMAGE_COOK_SOURCE}"
 )
+zahlen_set_bin_output(zshader)
 
 # libslang comes from cmake/ShaderCompilation.cmake, which is the file that
 # adds this directory: a config package (Vulkan SDK, Slang release) or the

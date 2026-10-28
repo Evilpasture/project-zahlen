@@ -20,6 +20,7 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 
@@ -51,6 +52,9 @@
 #if defined(_WIN32)
 #include <io.h>
 #else
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -713,6 +717,53 @@ auto ParseCommandLine(int argc, char** argv) -> std::optional<ZtestOptions> {
 // Manifest Discovery & Child Environment Construction
 // ============================================================================
 
+[[nodiscard]] auto SelfExecutablePath(const char* argv0) -> fs::path {
+    std::error_code ec;
+#if defined(__APPLE__)
+    uint32_t probe = 0;
+    _NSGetExecutablePath(nullptr, &probe);
+    if (probe > 0) {
+        std::string buffer(probe, '\0');
+        if (_NSGetExecutablePath(buffer.data(), &probe) == 0) {
+            const fs::path canonical = fs::weakly_canonical(fs::path {buffer.c_str()}, ec);
+            return ec ? fs::path {buffer.c_str()} : canonical;
+        }
+    }
+#elif defined(_WIN32)
+    std::wstring buffer(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD written = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (written == 0) {
+            break;
+        }
+        if (written < buffer.size()) {
+            buffer.resize(written);
+            const fs::path canonical = fs::weakly_canonical(fs::path {buffer}, ec);
+            return ec ? fs::path {buffer} : canonical;
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+#elif defined(__linux__)
+    std::string buffer(4096, '\0');
+    const auto  written = ::readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+    if (written > 0) {
+        buffer.resize(static_cast<size_t>(written));
+        const fs::path canonical = fs::weakly_canonical(fs::path {buffer}, ec);
+        return ec ? fs::path {buffer} : canonical;
+    }
+#endif
+    if (argv0 != nullptr && *argv0 != '\0') {
+        const fs::path raw {argv0};
+        if (raw.has_parent_path()) {
+            const fs::path canonical = fs::weakly_canonical(raw, ec);
+            if (!ec) {
+                return canonical;
+            }
+        }
+    }
+    return {};
+}
+
 auto LocateManifest(const ZtestOptions& opts, const char* argv0) -> std::optional<fs::path> {
     std::error_code ec;
     if (!opts.testDir.empty()) {
@@ -725,18 +776,20 @@ auto LocateManifest(const ZtestOptions& opts, const char* argv0) -> std::optiona
     }
 
     std::vector<fs::path> candidates;
-    candidates.reserve(4);
-    if (argv0 != nullptr && *argv0 != '\0') {
-        const fs::path exePath = fs::weakly_canonical(fs::path {argv0}, ec);
-        if (!ec && exePath.has_parent_path()) {
-            candidates.push_back(exePath.parent_path() / "ztest_manifest.txt");
-            if (exePath.parent_path().has_parent_path()) {
-                candidates.push_back(exePath.parent_path().parent_path() / "ztest_manifest.txt");
-            }
+    candidates.reserve(5);
+    const fs::path exePath = SelfExecutablePath(argv0);
+    if (!exePath.empty() && exePath.has_parent_path()) {
+        candidates.push_back(exePath.parent_path() / "ztest_manifest.txt");
+        if (exePath.parent_path().has_parent_path()) {
+            candidates.push_back(exePath.parent_path().parent_path() / "ztest_manifest.txt");
         }
     }
-    candidates.push_back(fs::current_path(ec) / "ztest_manifest.txt");
-    candidates.push_back(fs::current_path(ec) / "build" / "ztest_manifest.txt");
+    const fs::path cwd = fs::current_path(ec);
+    if (!ec && !cwd.empty()) {
+        candidates.push_back(cwd / "ztest_manifest.txt");
+        candidates.push_back(cwd / "build" / "current" / "ztest_manifest.txt");
+        candidates.push_back(cwd / "build" / "ztest_manifest.txt");
+    }
 
     for (const auto& c: candidates) {
         if (fs::exists(c, ec)) {

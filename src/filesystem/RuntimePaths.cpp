@@ -198,6 +198,12 @@ auto FindDataFile(std::string_view relative) -> std::optional<std::filesystem::p
             return found;
         }
     }
+    if (const auto parent = executable.parent_path();
+        !parent.empty() && parent != executable && (executable.filename() == "bin" || executable.filename() == "samples")) {
+        if (auto found = probe_dir(parent)) {
+            return found;
+        }
+    }
     if (auto found = exists(std::filesystem::path(relative))) {
         return found;
     }

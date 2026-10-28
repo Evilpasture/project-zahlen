@@ -168,5 +168,5 @@ With the project's normal toolchain and optional HTTP/CDN targets enabled:
 
 ```sh
 cmake --build build --target ztest TestRemoteAsset TestCDN
-./build/ztest -k "RemoteAssetTestSuite or CDNTestSuite"
+./build/bin/ztest -k "RemoteAssetTestSuite or CDNTestSuite"
 ```

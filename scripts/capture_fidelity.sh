@@ -51,7 +51,7 @@ fi
 TOOL_BIN="${ZHLN_FIDELITY_TOOL:-}"
 if [[ -z "$TOOL_BIN" || ! -x "$TOOL_BIN" ]]; then
     shopt -s nullglob
-    for cand in build/*/tools/fidelity/fidelity build/tools/fidelity/fidelity tools/fidelity/fidelity; do
+    for cand in build/current/bin/fidelity build/*/bin/fidelity build/bin/fidelity build/*/tools/fidelity/fidelity build/tools/fidelity/fidelity tools/fidelity/fidelity; do
         [[ -f "$cand" && -x "$cand" ]] && { TOOL_BIN="$cand"; break; }
     done
     shopt -u nullglob

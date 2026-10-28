@@ -243,6 +243,7 @@ endif()
 
 set_target_properties(zahlen_engine PROPERTIES CXX_STANDARD 26
                                                CXX_STANDARD_REQUIRED ON)
+zahlen_set_bin_output(zahlen_engine)
 
 target_compile_definitions(
   zahlen_engine
@@ -421,6 +422,7 @@ target_include_directories(zahlen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 set_target_properties(zahlen PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED
                                                         ON)
+zahlen_set_bin_output(zahlen)
 
 if(ZHLN_BUILD_EXTRAS)
     add_executable(zahlen_ui_editor app/UIEditor.cpp)
@@ -437,6 +439,7 @@ if(ZHLN_BUILD_EXTRAS)
     zahlen_add_runtime_dlls(zahlen_ui_editor)
     set_target_properties(zahlen_ui_editor PROPERTIES CXX_STANDARD 26
                                                     CXX_STANDARD_REQUIRED ON)
+    zahlen_set_bin_output(zahlen_ui_editor)
 else()
     message(
     STATUS
@@ -624,6 +627,7 @@ if(ZHLN_BUILD_EXTRAS)
       CXX_EXTENSIONS OFF
       OUTPUT_NAME "project-light-client"
     )
+        zahlen_set_bin_output(zahlen_project_light_app)
         target_compile_definitions(zahlen_project_light_app PRIVATE JPH_DOUBLE_PRECISION)
         target_link_libraries(zahlen_project_light_app PRIVATE
       zahlen_engine

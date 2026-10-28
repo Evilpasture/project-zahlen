@@ -194,3 +194,18 @@ function(zahlen_add_runtime_dlls TARGET_NAME)
         COMMENT "Copying the runtime DLLs beside ${TARGET_NAME}"
     )
 endfunction()
+
+# Primary applications and CLI/host toolchain executables are emitted into
+# ${CMAKE_BINARY_DIR}/bin/ (while samples stay in samples/ and test workers stay
+# in tests/). Setting RUNTIME_OUTPUT_DIRECTORY on zahlen_engine as well places
+# libzahlen_engine.dll directly into bin/ on Windows PE without moving
+# libzahlen_engine.so / .dylib on ELF or Mach-O (which follow LIBRARY_OUTPUT_DIRECTORY).
+set(ZHLN_BIN_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin")
+
+function(zahlen_set_bin_output)
+    foreach(_tgt IN LISTS ARGN)
+        set_target_properties(${_tgt} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${ZHLN_BIN_OUTPUT_DIR}"
+        )
+    endforeach()
+endfunction()

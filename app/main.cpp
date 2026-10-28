@@ -343,7 +343,7 @@ void InstallHostWithState(ZHLN::Engine& engine) {
 // display and the number comparable across machines. Workload sizes come from
 // the environment so a CI job can pin them without a rebuild:
 //
-//   ZHLN_BENCH_ENTITIES=4000 ZHLN_BENCH_TICKS=20000 ./build/current/zahlen --benchmark
+//   ZHLN_BENCH_ENTITIES=4000 ZHLN_BENCH_TICKS=20000 ./build/current/bin/zahlen --benchmark
 //
 // The sizes below are the defaults: big enough that a tick is dominated by the
 // engine rather than by the timer's resolution, small enough that a workstation

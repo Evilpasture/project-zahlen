@@ -68,7 +68,7 @@ RUN cmake --build build
 
 # 3. RUN THE TESTS
 # If any test fails, Docker build fails and stops the CI pipeline immediately!
-RUN ./build/ztest --test-dir build -V
+RUN ./build/bin/ztest --test-dir build -V
 
 # 4. Collect the runtime payload: the binaries, the cooked asset pak and the
 #    script tree the engine loads.
@@ -78,7 +78,7 @@ RUN ./build/ztest --test-dir build -V
 #    tree -- and a symlink copied into the runner stage resolves to a path that
 #    does not exist there. Dereferencing here means the runner copies real files.
 RUN mkdir -p /workspace/dist/data && \
-    cp /workspace/build/zahlen /workspace/dist/ && \
+    cp /workspace/build/bin/zahlen /workspace/dist/ && \
     cp /workspace/build/libzahlen_engine.so /workspace/dist/ && \
     find /workspace/build -name "libJolt.so*" -exec cp -P {} /workspace/dist/ \; && \
     cp -L /workspace/build/data/base.pak /workspace/dist/data/base.pak && \
