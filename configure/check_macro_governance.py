@@ -351,6 +351,11 @@ def check_expansions_libclang(
             if sys_luajit.is_dir():
                 flags.append(f"-isystem{sys_luajit}")
                 break
+    if not (ROOT / "extern/glfw/include/GLFW/glfw3.h").is_file():
+        for sys_glfw in (Path("/usr/local/include"), Path("/opt/homebrew/include")):
+            if (sys_glfw / "GLFW/glfw3.h").is_file():
+                flags.append(f"-isystem{sys_glfw}")
+                break
     # libclang does not know this project's toolchain. Without the right
     # -isystem/-D it stops at the first libc++ header, and ZHLN_LIBCLANG_FLAGS
     # is how a caller hands it one.

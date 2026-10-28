@@ -119,74 +119,221 @@ int main(void) { return sizeof(ZHLNBlock) == 0; }
 endif()
 
 # --- GLFW ---
-set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-if(UNIX AND NOT APPLE)
-    # GLFW 3.4+ always compiles the null platform. X11/Wayland are extra
-    # backends that need their -dev packages; without them, glfwInit fails
-    # over to TTY/KMS instead of failing configure.
-    # Guard FindX11 (4 try_compiles + 30 find_library calls) and Wayland
-    # pkg-config spawns behind fast header probes; unsetting NOTFOUND entries
-    # keeps warm reconfigures sub-millisecond while still picking up newly
-    # installed -dev packages without wiping the build directory.
-    set(_zhln_glfw_x11 FALSE)
-    find_path(_ZHLN_PROBE_XLIB_H NAMES X11/Xlib.h QUIET)
-    if(_ZHLN_PROBE_XLIB_H)
-        find_package(X11 QUIET)
-        if(X11_FOUND
-           AND X11_Xrandr_INCLUDE_PATH
-           AND X11_Xinerama_INCLUDE_PATH
-           AND X11_Xkb_INCLUDE_PATH
-           AND X11_Xcursor_INCLUDE_PATH
-           AND X11_Xi_INCLUDE_PATH
-           AND X11_Xshape_INCLUDE_PATH)
-            set(_zhln_glfw_x11 TRUE)
-        endif()
-    else()
-        unset(_ZHLN_PROBE_XLIB_H CACHE)
+# Prefer a system GLFW 3.4+ package on Unix when available (Window.cpp and
+# EngineGlobals.cpp require GLFW 3.4's runtime platform selection APIs:
+# glfwGetPlatform, GLFW_PLATFORM_WAYLAND/X11, glfwInitHint(GLFW_PLATFORM, ...)),
+# and fall back to building the vendored extern/glfw from source otherwise.
+option(ZHLN_GLFW_VENDORED
+    "Build and use the vendored extern/glfw, ignoring any system GLFW" OFF)
+
+set(ZHLN_HAS_GLFW FALSE)
+if(UNIX AND NOT ZHLN_GLFW_VENDORED)
+    find_path(_ZHLN_PROBE_GLFW_H
+        NAMES GLFW/glfw3.h
+        HINTS "${GLFW_ROOT}" ENV GLFW_ROOT /opt/homebrew/opt/glfw /usr/local
+        PATH_SUFFIXES include
+        QUIET
+    )
+    if(NOT _ZHLN_PROBE_GLFW_H)
+        unset(_ZHLN_PROBE_GLFW_H CACHE)
     endif()
 
-    set(_zhln_glfw_wayland FALSE)
-    find_path(_ZHLN_PROBE_WAYLAND_H NAMES wayland-client.h QUIET)
-    if(_ZHLN_PROBE_WAYLAND_H)
-        find_package(PkgConfig QUIET)
-        if(PkgConfig_FOUND)
-            pkg_check_modules(ZHLN_WAYLAND QUIET
-                wayland-client>=0.2.7
-                wayland-cursor>=0.2.7
-                wayland-egl>=0.2.7
-                xkbcommon>=0.5.0)
-            find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
-            if(ZHLN_WAYLAND_FOUND AND WAYLAND_SCANNER_EXECUTABLE)
-                set(_zhln_glfw_wayland TRUE)
+    if(_ZHLN_PROBE_GLFW_H OR DEFINED ENV{PKG_CONFIG_PATH})
+        find_package(glfw3 3.4 CONFIG QUIET)
+        if(glfw3_FOUND AND TARGET glfw)
+            set_target_properties(glfw PROPERTIES IMPORTED_GLOBAL TRUE)
+            get_target_property(_zhln_sys_glfw_inc glfw INTERFACE_INCLUDE_DIRECTORIES)
+            if(_zhln_sys_glfw_inc)
+                target_include_directories(glfw SYSTEM INTERFACE ${_zhln_sys_glfw_inc})
+            endif()
+            set(ZHLN_HAS_GLFW TRUE)
+            message(STATUS "Using system GLFW ${glfw3_VERSION} (CMake package)")
+        endif()
+
+        if(NOT ZHLN_HAS_GLFW)
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(ZHLN_SYS_GLFW QUIET IMPORTED_TARGET glfw3>=3.4)
+            endif()
+            if(ZHLN_SYS_GLFW_FOUND AND TARGET PkgConfig::ZHLN_SYS_GLFW)
+                add_library(glfw INTERFACE IMPORTED GLOBAL)
+                target_link_libraries(glfw INTERFACE PkgConfig::ZHLN_SYS_GLFW)
+                if(ZHLN_SYS_GLFW_INCLUDE_DIRS)
+                    target_include_directories(glfw SYSTEM INTERFACE ${ZHLN_SYS_GLFW_INCLUDE_DIRS})
+                elseif(_ZHLN_PROBE_GLFW_H)
+                    target_include_directories(glfw SYSTEM INTERFACE "${_ZHLN_PROBE_GLFW_H}")
+                endif()
+                set(ZHLN_HAS_GLFW TRUE)
+                message(STATUS "Using system GLFW ${ZHLN_SYS_GLFW_VERSION} (pkg-config)")
             endif()
         endif()
-    else()
-        unset(_ZHLN_PROBE_WAYLAND_H CACHE)
-    endif()
 
-    set(GLFW_BUILD_X11 ${_zhln_glfw_x11} CACHE BOOL "Build GLFW with X11" FORCE)
-    set(GLFW_BUILD_WAYLAND ${_zhln_glfw_wayland} CACHE BOOL "Build GLFW with Wayland" FORCE)
-    if(_zhln_glfw_x11 OR _zhln_glfw_wayland)
-        message(STATUS "GLFW window backends: X11=${_zhln_glfw_x11} Wayland=${_zhln_glfw_wayland}")
-    else()
-        message(STATUS "No X11/Wayland development files; GLFW builds the null platform only.")
+        if(NOT ZHLN_HAS_GLFW AND _ZHLN_PROBE_GLFW_H AND EXISTS "${_ZHLN_PROBE_GLFW_H}/GLFW/glfw3native.h")
+            file(STRINGS "${_ZHLN_PROBE_GLFW_H}/GLFW/glfw3.h" _zhln_glfw_ver_lines
+                REGEX "^#define GLFW_VERSION_(MAJOR|MINOR)[ \t]+[0-9]+")
+            set(_zhln_glfw_major 0)
+            set(_zhln_glfw_minor 0)
+            foreach(_line IN LISTS _zhln_glfw_ver_lines)
+                if(_line MATCHES "GLFW_VERSION_MAJOR[ \t]+([0-9]+)")
+                    set(_zhln_glfw_major "${CMAKE_MATCH_1}")
+                elseif(_line MATCHES "GLFW_VERSION_MINOR[ \t]+([0-9]+)")
+                    set(_zhln_glfw_minor "${CMAKE_MATCH_1}")
+                endif()
+            endforeach()
+            if("${_zhln_glfw_major}.${_zhln_glfw_minor}" VERSION_GREATER_EQUAL "3.4")
+                find_library(_ZHLN_SYS_GLFW_LIB
+                    NAMES glfw glfw3
+                    HINTS "${GLFW_ROOT}" ENV GLFW_ROOT /opt/homebrew/opt/glfw /usr/local
+                    QUIET
+                )
+                if(_ZHLN_SYS_GLFW_LIB)
+                    find_package(Threads QUIET)
+                    add_library(glfw INTERFACE IMPORTED GLOBAL)
+                    target_include_directories(glfw SYSTEM INTERFACE "${_ZHLN_PROBE_GLFW_H}")
+                    target_link_libraries(glfw INTERFACE "${_ZHLN_SYS_GLFW_LIB}" Threads::Threads ${CMAKE_DL_LIBS})
+                    set(ZHLN_HAS_GLFW TRUE)
+                    message(STATUS "Using system GLFW ${_zhln_glfw_major}.${_zhln_glfw_minor}: ${_ZHLN_SYS_GLFW_LIB}")
+                else()
+                    unset(_ZHLN_SYS_GLFW_LIB CACHE)
+                endif()
+            endif()
+        endif()
     endif()
 endif()
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
-target_compile_definitions(glfw INTERFACE GLFW_INCLUDE_NONE)
 
-# The macOS SDK marks sprintf deprecated and the vendored cocoa joystick
-# still uses it; silence the deprecation noise on the vendored target only.
-if(APPLE)
-    target_compile_options(glfw PRIVATE
-        -Wno-deprecated-declarations
-        "$<$<OR:$<COMPILE_LANGUAGE:C>,$<COMPILE_LANGUAGE:OBJC>>:-fblocks>"
-    )
-    if(_zhln_use_blocks_clang)
-        set_property(TARGET glfw PROPERTY C_COMPILER_LAUNCHER "${ZHLN_BLOCKS_C_COMPILER_LAUNCHER}")
-        set_property(TARGET glfw PROPERTY OBJC_COMPILER_LAUNCHER "${ZHLN_BLOCKS_C_COMPILER_LAUNCHER}")
+if(ZHLN_HAS_GLFW)
+    target_compile_definitions(glfw INTERFACE GLFW_INCLUDE_NONE)
+
+    if(UNIX AND NOT APPLE)
+        # src/window/CMakeLists.txt gates ZHLN_WINDOW_NATIVE_{X11,WAYLAND} on
+        # _zhln_glfw_{x11,wayland}, which makes Window.cpp include
+        # <GLFW/glfw3native.h> and call glfwGet{X11,Wayland}{Display,Window}.
+        # Probe both header availability and exported symbols on the system
+        # library so native Vulkan surfaces match what system GLFW compiled in.
+        include(CheckCSourceCompiles)
+
+        set(_zhln_glfw_x11 FALSE)
+        find_path(_ZHLN_PROBE_XLIB_H NAMES X11/Xlib.h QUIET)
+        find_path(_ZHLN_PROBE_XRANDR_H NAMES X11/extensions/Xrandr.h QUIET)
+        if(_ZHLN_PROBE_XLIB_H AND _ZHLN_PROBE_XRANDR_H)
+            block(PROPAGATE ZHLN_SYS_GLFW_HAS_X11)
+                set(CMAKE_REQUIRED_INCLUDES "${_ZHLN_PROBE_XLIB_H}" "${_ZHLN_PROBE_XRANDR_H}")
+                set(CMAKE_REQUIRED_LIBRARIES glfw)
+                check_c_source_compiles([=[
+#define GLFW_INCLUDE_NONE
+#define GLFW_EXPOSE_NATIVE_X11
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+int main(void) { return glfwGetX11Display() != 0; }
+]=] ZHLN_SYS_GLFW_HAS_X11)
+            endblock()
+            if(ZHLN_SYS_GLFW_HAS_X11)
+                set(_zhln_glfw_x11 TRUE)
+                target_include_directories(glfw SYSTEM INTERFACE "${_ZHLN_PROBE_XLIB_H}" "${_ZHLN_PROBE_XRANDR_H}")
+            endif()
+        else()
+            if(NOT _ZHLN_PROBE_XLIB_H)
+                unset(_ZHLN_PROBE_XLIB_H CACHE)
+            endif()
+            if(NOT _ZHLN_PROBE_XRANDR_H)
+                unset(_ZHLN_PROBE_XRANDR_H CACHE)
+            endif()
+        endif()
+
+        set(_zhln_glfw_wayland FALSE)
+        find_path(_ZHLN_PROBE_WAYLAND_H NAMES wayland-client.h QUIET)
+        if(_ZHLN_PROBE_WAYLAND_H)
+            block(PROPAGATE ZHLN_SYS_GLFW_HAS_WAYLAND)
+                set(CMAKE_REQUIRED_INCLUDES "${_ZHLN_PROBE_WAYLAND_H}")
+                set(CMAKE_REQUIRED_LIBRARIES glfw)
+                check_c_source_compiles([=[
+#define GLFW_INCLUDE_NONE
+#define GLFW_EXPOSE_NATIVE_WAYLAND
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+int main(void) { return glfwGetWaylandDisplay() != 0; }
+]=] ZHLN_SYS_GLFW_HAS_WAYLAND)
+            endblock()
+            if(ZHLN_SYS_GLFW_HAS_WAYLAND)
+                set(_zhln_glfw_wayland TRUE)
+                target_include_directories(glfw SYSTEM INTERFACE "${_ZHLN_PROBE_WAYLAND_H}")
+            endif()
+        else()
+            unset(_ZHLN_PROBE_WAYLAND_H CACHE)
+        endif()
+
+        message(STATUS "System GLFW native backends: X11=${_zhln_glfw_x11} Wayland=${_zhln_glfw_wayland}")
+    endif()
+else()
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    if(UNIX AND NOT APPLE)
+        # GLFW 3.4+ always compiles the null platform. X11/Wayland are extra
+        # backends that need their -dev packages; without them, glfwInit fails
+        # over to TTY/KMS instead of failing configure.
+        # Guard FindX11 (4 try_compiles + 30 find_library calls) and Wayland
+        # pkg-config spawns behind fast header probes; unsetting NOTFOUND entries
+        # keeps warm reconfigures sub-millisecond while still picking up newly
+        # installed -dev packages without wiping the build directory.
+        set(_zhln_glfw_x11 FALSE)
+        find_path(_ZHLN_PROBE_XLIB_H NAMES X11/Xlib.h QUIET)
+        if(_ZHLN_PROBE_XLIB_H)
+            find_package(X11 QUIET)
+            if(X11_FOUND
+               AND X11_Xrandr_INCLUDE_PATH
+               AND X11_Xinerama_INCLUDE_PATH
+               AND X11_Xkb_INCLUDE_PATH
+               AND X11_Xcursor_INCLUDE_PATH
+               AND X11_Xi_INCLUDE_PATH
+               AND X11_Xshape_INCLUDE_PATH)
+                set(_zhln_glfw_x11 TRUE)
+            endif()
+        else()
+            unset(_ZHLN_PROBE_XLIB_H CACHE)
+        endif()
+
+        set(_zhln_glfw_wayland FALSE)
+        find_path(_ZHLN_PROBE_WAYLAND_H NAMES wayland-client.h QUIET)
+        if(_ZHLN_PROBE_WAYLAND_H)
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(ZHLN_WAYLAND QUIET
+                    wayland-client>=0.2.7
+                    wayland-cursor>=0.2.7
+                    wayland-egl>=0.2.7
+                    xkbcommon>=0.5.0)
+                find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
+                if(ZHLN_WAYLAND_FOUND AND WAYLAND_SCANNER_EXECUTABLE)
+                    set(_zhln_glfw_wayland TRUE)
+                endif()
+            endif()
+        else()
+            unset(_ZHLN_PROBE_WAYLAND_H CACHE)
+        endif()
+
+        set(GLFW_BUILD_X11 ${_zhln_glfw_x11} CACHE BOOL "Build GLFW with X11" FORCE)
+        set(GLFW_BUILD_WAYLAND ${_zhln_glfw_wayland} CACHE BOOL "Build GLFW with Wayland" FORCE)
+        if(_zhln_glfw_x11 OR _zhln_glfw_wayland)
+            message(STATUS "GLFW window backends: X11=${_zhln_glfw_x11} Wayland=${_zhln_glfw_wayland}")
+        else()
+            message(STATUS "No X11/Wayland development files; GLFW builds the null platform only.")
+        endif()
+    endif()
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
+    target_compile_definitions(glfw INTERFACE GLFW_INCLUDE_NONE)
+
+    # The macOS SDK marks sprintf deprecated and the vendored cocoa joystick
+    # still uses it; silence the deprecation noise on the vendored target only.
+    if(APPLE)
+        target_compile_options(glfw PRIVATE
+            -Wno-deprecated-declarations
+            "$<$<OR:$<COMPILE_LANGUAGE:C>,$<COMPILE_LANGUAGE:OBJC>>:-fblocks>"
+        )
+        if(_zhln_use_blocks_clang)
+            set_property(TARGET glfw PROPERTY C_COMPILER_LAUNCHER "${ZHLN_BLOCKS_C_COMPILER_LAUNCHER}")
+            set_property(TARGET glfw PROPERTY OBJC_COMPILER_LAUNCHER "${ZHLN_BLOCKS_C_COMPILER_LAUNCHER}")
+        endif()
     endif()
 endif()
 
