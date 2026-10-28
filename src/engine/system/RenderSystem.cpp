@@ -556,24 +556,25 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         engine.SetPendingUIData(UIDrawData {});
     }
 
-    if (const auto& host = engine.GetPlatformHost(); host.IsTTY() && !host.IsMouseCaptured()) {
-        if (const auto input = reg.GetSingleton<Components::InputStateComponent>()) {
-            const Extent2D hostSize = host.GetSize();
-            const float    cursorX  = hostSize.width > 0 ? std::clamp(input->mouseX, 0.0f, static_cast<float>(hostSize.width - 1)) : input->mouseX;
-            const float    cursorY  = hostSize.height > 0 ? std::clamp(input->mouseY, 0.0f, static_cast<float>(hostSize.height - 1)) : input->mouseY;
+    if (const auto& host = engine.GetPlatformHost(); host.UsesCustomCursor()) {
+        const auto     input    = reg.GetSingleton<Components::InputStateComponent>();
+        const Extent2D hostSize = host.GetSize();
+        const float    rawX     = input ? input->mouseX : static_cast<float>(hostSize.width) * 0.5f;
+        const float    rawY     = input ? input->mouseY : static_cast<float>(hostSize.height) * 0.5f;
+        const float    cursorX  = hostSize.width > 0 ? std::clamp(rawX, 0.0f, static_cast<float>(hostSize.width - 1)) : rawX;
+        const float    cursorY  = hostSize.height > 0 ? std::clamp(rawY, 0.0f, static_cast<float>(hostSize.height - 1)) : rawY;
 
-            const SoftwareCursorDot cursorDot(cursorX, cursorY);
-            if (auto cursor_res = gpuFrame.RenderUI(
-                    UIView {
-                        .viewport   = {},
-                        .target     = attachment,
-                        .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
-                    },
-                    cursorDot.DrawData()
-                );
-                !cursor_res) {
-                return std::unexpected(cursor_res.error());
-            }
+        const CustomCursor cursor(cursorX, cursorY);
+        if (auto cursor_res = gpuFrame.RenderUI(
+                UIView {
+                    .viewport   = {},
+                    .target     = attachment,
+                    .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+                },
+                cursor.DrawData()
+            );
+            !cursor_res) {
+            return std::unexpected(cursor_res.error());
         }
     }
 

@@ -28,6 +28,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -191,6 +192,8 @@ inline void ResetScene(ZHLN::Engine& engine) {
     // is the one ASan caught). A fresh engine has no callback, so neither
     // does a reset one.
     engine.SetUICallback(nullptr);
+    engine.GetPlatformHost().SetCursorMode(ZHLN::CursorMode::System);
+    engine.GetPlatformHost().CaptureMouse(false);
 }
 
 namespace Detail {

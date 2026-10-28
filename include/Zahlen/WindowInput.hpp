@@ -12,6 +12,11 @@
 
 namespace ZHLN {
 
+enum class CursorMode : uint8_t {
+    System = 0,
+    Custom = 1,
+};
+
 struct FileDrop {
     std::string          format;
     std::string          fileName;

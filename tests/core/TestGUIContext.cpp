@@ -322,24 +322,30 @@ auto test_gui_multiple_contexts_remain_isolated() -> std::expected<void, ZHLN::E
     return {};
 }
 
-auto test_software_cursor_dot_geometry_and_batch_invariants() -> std::expected<void, ZHLN::ErrorCode> {
-    const ZHLN::SoftwareCursorDot cursor(640.0f, 360.0f, 3.5f, 5.5f);
-    const ZHLN::UIDrawData        draw = cursor.DrawData();
+auto test_custom_cursor_geometry_and_batch_invariants() -> std::expected<void, ZHLN::ErrorCode> {
+    const ZHLN::CustomCursorStyle style {
+        .innerRadius   = 3.5f,
+        .outlineRadius = 5.5f,
+        .innerColor    = {.data = 0xFAFFFFFFu},
+        .outlineColor  = {.data = 0xE6140E0Eu},
+    };
+    const ZHLN::CustomCursor cursor(640.0f, 360.0f, style);
+    const ZHLN::UIDrawData   draw = cursor.DrawData();
 
     ExpectFalse(draw.Empty());
     ExpectEq(draw.batches.size(), size_t {1});
-    ExpectEq(draw.positions.size(), ZHLN::SoftwareCursorDot::kVertexCount);
-    ExpectEq(draw.surfaces.size(), ZHLN::SoftwareCursorDot::kVertexCount);
+    ExpectEq(draw.positions.size(), ZHLN::CustomCursor::kVertexCount);
+    ExpectEq(draw.surfaces.size(), ZHLN::CustomCursor::kVertexCount);
     ExpectEq(draw.batches[0].texture, ZHLN::TextureHandle::Invalid);
     ExpectEq(draw.batches[0].vertexStart, 0u);
-    ExpectEq(draw.batches[0].vertexCount, static_cast<uint32_t>(ZHLN::SoftwareCursorDot::kVertexCount));
+    ExpectEq(draw.batches[0].vertexCount, static_cast<uint32_t>(ZHLN::CustomCursor::kVertexCount));
     ExpectFalse(draw.batches[0].useScissor);
     ExpectFalse(draw.batches[0].isSDF);
 
     for (const auto& pos : draw.positions) {
         const float dx = pos.position[0] - 640.0f;
         const float dy = pos.position[1] - 360.0f;
-        ExpectTrue(dx * dx + dy * dy <= 5.5f * 5.5f + 1e-3f);
+        ExpectTrue(dx * dx + dy * dy <= style.outlineRadius * style.outlineRadius + 1e-3f);
         ExpectEq(pos.position[2], 0.0f);
     }
 

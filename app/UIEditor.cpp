@@ -690,9 +690,10 @@ void DrawPreview(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFr
             (void) GUI::RenderUITree(gui, session.tree, session.actions, session.previewProperties, GUI::TreeMode::Preview);
         }
     );
-    auto&                  rc     = kernel.GetRenderContext();
-    const ZHLN::UIDrawData uiData = std::move(gui).End();
-    if (!uiData.Empty()) {
+    auto&                  rc               = kernel.GetRenderContext();
+    const ZHLN::UIDrawData uiData           = std::move(gui).End();
+    const bool             drawCustomCursor = session.previewWindow->UsesCustomCursor();
+    if (!uiData.Empty() || drawCustomCursor) {
         const auto target = kernel.AcquireTarget(*session.previewWindow);
         if (!target) {
             ZHLN::Log("[UIEditor] Preview window acquisition failed: {}", target.error());
@@ -701,16 +702,38 @@ void DrawPreview(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFr
         if (!target->has_value()) {
             return;
         }
-        if (const auto drawn = gpuFrame.RenderUI(
-                ZHLN::UIView {
-                    .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
-                    .target     = **target,
-                    .frameIndex = rc.GetFrameIndex(),
-                },
-                uiData
-            );
-            !drawn) {
-            ZHLN::Log("[UIEditor] Preview UI draw failed: {}", drawn.error());
+        if (!uiData.Empty()) {
+            if (const auto drawn = gpuFrame.RenderUI(
+                    ZHLN::UIView {
+                        .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
+                        .target     = **target,
+                        .frameIndex = rc.GetFrameIndex(),
+                    },
+                    uiData
+                );
+                !drawn) {
+                ZHLN::Log("[UIEditor] Preview UI draw failed: {}", drawn.error());
+            }
+        }
+        if (drawCustomCursor) {
+            const float cursorX = previewSize.width > 0
+                                      ? std::clamp(session.previewInput.state.mouseX, 0.0f, static_cast<float>(previewSize.width - 1))
+                                      : session.previewInput.state.mouseX;
+            const float cursorY = previewSize.height > 0
+                                      ? std::clamp(session.previewInput.state.mouseY, 0.0f, static_cast<float>(previewSize.height - 1))
+                                      : session.previewInput.state.mouseY;
+            const ZHLN::CustomCursor cursor(cursorX, cursorY);
+            if (const auto drawn = gpuFrame.RenderUI(
+                    ZHLN::UIView {
+                        .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
+                        .target     = **target,
+                        .frameIndex = rc.GetFrameIndex(),
+                    },
+                    cursor.DrawData()
+                );
+                !drawn) {
+                ZHLN::Log("[UIEditor] Preview custom cursor draw failed: {}", drawn.error());
+            }
         }
     }
 }
@@ -922,7 +945,8 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
     const ZHLN::UIDrawData uiData = std::move(gui).End();
     session.editorInput.state.wantCaptureMouse    = uiData.wantsCaptureMouse;
     session.editorInput.state.wantCaptureKeyboard = uiData.wantsCaptureKeyboard;
-    if (uiData.Empty()) {
+    const bool drawCustomCursor                   = kernel.GetPlatformHost().UsesCustomCursor();
+    if (uiData.Empty() && !drawCustomCursor) {
         return;
     }
     // Pure 2D frame: the editor draws into this frame's acquired window target.
@@ -934,34 +958,36 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
     if (!target->has_value()) {
         return;
     }
-    if (const auto drawn = gpuFrame.RenderUI(
-            ZHLN::UIView {
-                .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
-                .target     = **target,
-                .frameIndex = rc.GetFrameIndex(),
-            },
-            uiData
-        );
-        !drawn) {
-        ZHLN::Log("[UIEditor] Window UI draw failed: {}", drawn.error());
-    }
-
-    if (const auto& host = kernel.GetPlatformHost(); host.IsTTY() && !host.IsMouseCaptured()) {
-        const float cursorX =
-            size.width > 0 ? std::clamp(session.editorInput.state.mouseX, 0.0f, static_cast<float>(size.width - 1)) : session.editorInput.state.mouseX;
-        const float cursorY =
-            size.height > 0 ? std::clamp(session.editorInput.state.mouseY, 0.0f, static_cast<float>(size.height - 1)) : session.editorInput.state.mouseY;
-        const ZHLN::SoftwareCursorDot cursorDot(cursorX, cursorY);
+    if (!uiData.Empty()) {
         if (const auto drawn = gpuFrame.RenderUI(
                 ZHLN::UIView {
                     .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
                     .target     = **target,
                     .frameIndex = rc.GetFrameIndex(),
                 },
-                cursorDot.DrawData()
+                uiData
             );
             !drawn) {
-            ZHLN::Log("[UIEditor] Software cursor draw failed: {}", drawn.error());
+            ZHLN::Log("[UIEditor] Window UI draw failed: {}", drawn.error());
+        }
+    }
+
+    if (drawCustomCursor) {
+        const float cursorX =
+            size.width > 0 ? std::clamp(session.editorInput.state.mouseX, 0.0f, static_cast<float>(size.width - 1)) : session.editorInput.state.mouseX;
+        const float cursorY =
+            size.height > 0 ? std::clamp(session.editorInput.state.mouseY, 0.0f, static_cast<float>(size.height - 1)) : session.editorInput.state.mouseY;
+        const ZHLN::CustomCursor cursor(cursorX, cursorY);
+        if (const auto drawn = gpuFrame.RenderUI(
+                ZHLN::UIView {
+                    .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
+                    .target     = **target,
+                    .frameIndex = rc.GetFrameIndex(),
+                },
+                cursor.DrawData()
+            );
+            !drawn) {
+            ZHLN::Log("[UIEditor] Custom cursor draw failed: {}", drawn.error());
         }
     }
 }

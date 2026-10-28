@@ -11,6 +11,8 @@ namespace ZHLN {
 struct Window::Impl {
     GLFWwindow*                        handle           = nullptr;
     WindowInputReceiver                receiver         = {};
+    CursorMode                         cursorMode       = CursorMode::System;
+    bool                               mouseCaptured    = false;
     bool                               quitProcess      = false;
     bool                               superDown        = false;
     std::array<bool, kMaxGamepads>     gamepadConnected = {};

@@ -582,6 +582,84 @@ struct UITestSuite {
             }
             return {};
         }
+
+        // 7. System vs. Custom Cursor Mode across PlatformHost + RenderSystem
+        std::expected<void, ZHLN::ErrorCode> system_vs_custom_cursor_mode() {
+            auto engine = CreateTestEngine(640, 480);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(UITestError::EngineInitFailed);
+            }
+
+            auto& host  = engine->GetPlatformHost();
+            auto& input = engine->GetRegistry().GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+            input.ApplyLocalMotion(320.0f, 240.0f);
+
+            if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::System) ||
+                !ZHLN::Test::ExpectFalse(host.IsMouseCaptured()) ||
+                !ZHLN::Test::ExpectFalse(host.UsesCustomCursor())) {
+                return std::unexpected(UITestError::UINotRendered);
+            }
+
+            auto countBrightCenterPixels = [](const RgbImage& img) -> uint32_t {
+                uint32_t bright = 0;
+                for (int y = 236; y <= 244 && y < img.height; ++y) {
+                    for (int x = 316; x <= 324 && x < img.width; ++x) {
+                        const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3;
+                        if (img.rgb[idx] > 200 && img.rgb[idx + 1] > 200 && img.rgb[idx + 2] > 200) {
+                            ++bright;
+                        }
+                    }
+                }
+                return bright;
+            };
+
+            // System mode: no custom cursor rendered into headless target.
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            const auto systemFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_system.ppm");
+            if (!systemFrame.Valid()) {
+                return std::unexpected(UITestError::RenderOutputBlank);
+            }
+            const uint32_t systemBright = countBrightCenterPixels(systemFrame);
+
+            // Custom mode: custom cursor rendered at (320, 240).
+            host.SetCursorMode(ZHLN::CursorMode::Custom);
+            if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::Custom) ||
+                !ZHLN::Test::ExpectTrue(host.UsesCustomCursor())) {
+                return std::unexpected(UITestError::UINotRendered);
+            }
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            const auto customFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_custom.ppm");
+            if (!customFrame.Valid()) {
+                return std::unexpected(UITestError::RenderOutputBlank);
+            }
+            const uint32_t customBright = countBrightCenterPixels(customFrame);
+
+            // Mouse capture hides custom cursor while preserving CursorMode::Custom.
+            host.CaptureMouse(true);
+            if (!ZHLN::Test::ExpectTrue(host.IsMouseCaptured()) ||
+                !ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::Custom) ||
+                !ZHLN::Test::ExpectFalse(host.UsesCustomCursor())) {
+                return std::unexpected(UITestError::UINotRendered);
+            }
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            const auto capturedFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_captured.ppm");
+            if (!capturedFrame.Valid()) {
+                return std::unexpected(UITestError::RenderOutputBlank);
+            }
+            const uint32_t capturedBright = countBrightCenterPixels(capturedFrame);
+
+            host.CaptureMouse(false);
+            const bool restoredCustom = host.UsesCustomCursor();
+            host.SetCursorMode(ZHLN::CursorMode::System);
+
+            if (!ZHLN::Test::ExpectEq(systemBright, 0u) ||
+                !ZHLN::Test::ExpectGt(customBright, 12u) ||
+                !ZHLN::Test::ExpectEq(capturedBright, 0u) ||
+                !ZHLN::Test::ExpectTrue(restoredCustom)) {
+                return std::unexpected(UITestError::UINotRendered);
+            }
+            return {};
+        }
     };
 };
 

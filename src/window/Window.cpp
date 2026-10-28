@@ -622,10 +622,49 @@ void Window::Close() const noexcept {
     _impl->target.Close();
 }
 
-void Window::CaptureMouse(bool captured) {
-    if (_impl->handle != nullptr) {
-        glfwSetInputMode(_impl->handle, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+namespace {
+
+void ApplyGlfwCursorMode(GLFWwindow* handle, CursorMode cursorMode, bool mouseCaptured) noexcept {
+    if (handle == nullptr) {
+        return;
     }
+    int glfwMode = GLFW_CURSOR_NORMAL;
+    if (mouseCaptured) {
+        glfwMode = GLFW_CURSOR_DISABLED;
+    } else if (cursorMode == CursorMode::Custom) {
+        glfwMode = GLFW_CURSOR_HIDDEN;
+    }
+    glfwSetInputMode(handle, GLFW_CURSOR, glfwMode);
+}
+
+} // namespace
+
+void Window::CaptureMouse(bool captured) {
+    _impl->mouseCaptured = captured;
+    ApplyGlfwCursorMode(_impl->handle, _impl->cursorMode, _impl->mouseCaptured);
+}
+
+auto Window::IsMouseCaptured() const noexcept -> bool {
+    return _impl->mouseCaptured;
+}
+
+void Window::SetCursorMode(CursorMode mode) {
+    _impl->cursorMode = mode;
+    ApplyGlfwCursorMode(_impl->handle, _impl->cursorMode, _impl->mouseCaptured);
+    if (mode == CursorMode::Custom && !_impl->mouseCaptured && _impl->handle != nullptr && _impl->receiver.onMouseMove != nullptr) {
+        double xpos = 0.0;
+        double ypos = 0.0;
+        glfwGetCursorPos(_impl->handle, &xpos, &ypos);
+        _impl->receiver.onMouseMove(_impl->receiver.userdata, static_cast<float>(xpos), static_cast<float>(ypos));
+    }
+}
+
+auto Window::GetCursorMode() const noexcept -> CursorMode {
+    return _impl->cursorMode;
+}
+
+auto Window::UsesCustomCursor() const noexcept -> bool {
+    return _impl->handle != nullptr && _impl->cursorMode == CursorMode::Custom && !_impl->mouseCaptured;
 }
 
 auto Window::GetInputReceiver() const noexcept -> const WindowInputReceiver& {

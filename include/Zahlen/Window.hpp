@@ -54,7 +54,12 @@ class ZHLN_API Window {
     [[nodiscard]] WindowPlatform GetPlatform() const noexcept;
 
     void Close() const noexcept;
-    void CaptureMouse(bool captured);
+
+    void                       CaptureMouse(bool captured);
+    [[nodiscard]] bool         IsMouseCaptured() const noexcept;
+    void                       SetCursorMode(CursorMode mode);
+    [[nodiscard]] CursorMode   GetCursorMode() const noexcept;
+    [[nodiscard]] bool         UsesCustomCursor() const noexcept;
 
     [[nodiscard]] const WindowInputReceiver& GetInputReceiver() const noexcept;
 

@@ -35,14 +35,21 @@ struct UIDrawData {
     }
 };
 
-// Stack-resident software cursor dot (dark outline disc + bright white fill)
-// for environments without an OS compositor cursor plane (Linux KMS/DRM TTY).
-class SoftwareCursorDot {
+struct CustomCursorStyle {
+    float       innerRadius   = 3.5f;
+    float       outlineRadius = 5.5f;
+    PackedRGBA8 innerColor    = {.data = 0xFAFFFFFFu};
+    PackedRGBA8 outlineColor  = {.data = 0xE6140E0Eu};
+};
+
+// Stack-resident custom cursor geometry (dark outline disc + bright fill disc)
+// shared across windowed, TTY, and headless hosts in CursorMode::Custom.
+class CustomCursor {
   public:
     static constexpr size_t kSegments    = 16;
     static constexpr size_t kVertexCount = kSegments * 6;
 
-    constexpr SoftwareCursorDot(float x, float y, float innerRadius = 3.5f, float outlineRadius = 5.5f) noexcept {
+    constexpr CustomCursor(float x, float y, const CustomCursorStyle& style = {}) noexcept {
         constexpr std::array<std::array<float, 2>, kSegments> kUnitCircle {{
             {1.0000000f, 0.0000000f},
             {0.9238795f, 0.3826834f},
@@ -62,14 +69,11 @@ class SoftwareCursorDot {
             {0.9238795f, -0.3826834f},
         }};
 
-        constexpr PackedRGBA8 kOutlineColor {.data = 0xE6140E0Eu};
-        constexpr PackedRGBA8 kInnerColor {.data = 0xFAFFFFFFu};
-
-        size_t cursor = 0;
+        size_t cursor   = 0;
         auto   emitDisc = [&](float radius, PackedRGBA8 color) noexcept {
             const VertexSurface surface {.uv = {.data = 0u}, .color = color, .uv1 = {.data = 0u}};
             for (size_t i = 0; i < kSegments; ++i) {
-                const size_t next = (i + 1) % kSegments;
+                const size_t next      = (i + 1) % kSegments;
                 _positions[cursor]     = {{x, y, 0.0f}};
                 _positions[cursor + 1] = {{x + kUnitCircle[i][0] * radius, y + kUnitCircle[i][1] * radius, 0.0f}};
                 _positions[cursor + 2] = {{x + kUnitCircle[next][0] * radius, y + kUnitCircle[next][1] * radius, 0.0f}};
@@ -80,8 +84,8 @@ class SoftwareCursorDot {
             }
         };
 
-        emitDisc(outlineRadius, kOutlineColor);
-        emitDisc(innerRadius, kInnerColor);
+        emitDisc(style.outlineRadius, style.outlineColor);
+        emitDisc(style.innerRadius, style.innerColor);
 
         _batches[0] = UIBatch {
             .texture     = TextureHandle::Invalid,
@@ -92,11 +96,11 @@ class SoftwareCursorDot {
         };
     }
 
-    SoftwareCursorDot(const SoftwareCursorDot&)                    = delete;
-    auto operator=(const SoftwareCursorDot&) -> SoftwareCursorDot& = delete;
-    SoftwareCursorDot(SoftwareCursorDot&&)                         = delete;
-    auto operator=(SoftwareCursorDot&&) -> SoftwareCursorDot&      = delete;
-    ~SoftwareCursorDot() noexcept                                  = default;
+    CustomCursor(const CustomCursor&)                    = delete;
+    auto operator=(const CustomCursor&) -> CustomCursor& = delete;
+    CustomCursor(CustomCursor&&)                         = delete;
+    auto operator=(CustomCursor&&) -> CustomCursor&      = delete;
+    ~CustomCursor() noexcept                             = default;
 
     [[nodiscard]] constexpr auto DrawData() const noexcept -> UIDrawData {
         return UIDrawData {
@@ -107,9 +111,9 @@ class SoftwareCursorDot {
     }
 
   private:
-    std::array<UIBatch, 1>                     _batches {};
-    std::array<VertexPosition, kVertexCount>   _positions {};
-    std::array<VertexSurface, kVertexCount>    _surfaces {};
+    std::array<UIBatch, 1>                   _batches {};
+    std::array<VertexPosition, kVertexCount> _positions {};
+    std::array<VertexSurface, kVertexCount>  _surfaces {};
 };
 
 }
