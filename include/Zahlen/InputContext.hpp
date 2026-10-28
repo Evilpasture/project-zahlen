@@ -485,6 +485,7 @@ class ZHLN_API InputContext {
 
     void InjectKey(KeyCode key, bool down, PlayerSeat targetSeat = kPrimarySeat) noexcept;
     void InjectMouseMove(float x, float y, PlayerSeat targetSeat = kPrimarySeat) noexcept;
+    void InjectMouseRelative(float x, float y, float dx, float dy, PlayerSeat targetSeat = kPrimarySeat) noexcept;
     void InjectMouseScroll(float delta, PlayerSeat targetSeat = kPrimarySeat) noexcept;
     void InjectChar(uint32_t codepoint, PlayerSeat targetSeat = kPrimarySeat) noexcept;
     void SyncCaptureFlags(bool wantCaptureKeyboard, bool wantCaptureMouse, PlayerSeat seat = kPrimarySeat) noexcept;

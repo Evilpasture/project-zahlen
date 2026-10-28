@@ -30,10 +30,11 @@ enum class ContextError : uint8_t {
 class GPUAddressTracker;
 
 struct DevicePresentSupport {
-    bool fifoLatestReady       = false;
-    bool presentTiming         = false;
-    bool presentAtAbsoluteTime = false;
-    bool presentId2            = false;
+    bool swapchainMutableFormat = false;
+    bool fifoLatestReady        = false;
+    bool presentTiming          = false;
+    bool presentAtAbsoluteTime  = false;
+    bool presentId2             = false;
 };
 
 class Context {

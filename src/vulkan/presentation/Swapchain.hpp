@@ -78,7 +78,8 @@ class Swapchain {
         VkExtent2D                extent,
         bool                      vsync,
         VkPresentModeKHR          requestedPresentMode,
-        bool                      enablePresentTiming
+        bool                      enablePresentTiming,
+        bool                      allowMutableFormat = false
     ) noexcept -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto AcquireNext(VkSemaphore signalSemaphore, uint64_t timeout = UINT64_MAX) noexcept
@@ -89,6 +90,7 @@ class Swapchain {
 
     VkDevice      _device = VK_NULL_HANDLE;
     SwapchainData _data {};
+    bool          _mutableViewActive = false;
 };
 
 } // namespace ZHLN::Vk

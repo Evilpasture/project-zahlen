@@ -362,6 +362,16 @@ struct Components {
             lastY = y;
         }
 
+        void ApplyRelativeMotion(float x, float y, float dx, float dy) noexcept {
+            mouseX     = x;
+            mouseY     = y;
+            lastX      = x;
+            lastY      = y;
+            firstMouse = false;
+            mouseDeltaX += dx;
+            mouseDeltaY += dy;
+        }
+
         void ApplyWheel(float delta) noexcept {
             mouseWheel += delta;
         }

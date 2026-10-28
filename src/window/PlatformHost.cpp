@@ -93,16 +93,27 @@ struct TTYBackendState {
     }
     void PollEvents() noexcept {
         if (ttyContext != nullptr) {
+            const Extent2D extent = target.GetFramebufferExtent();
+            TTYBackend::SetScreenSize(ttyContext, extent.width, extent.height);
             TTYBackend::ProcessEvents(ttyContext, receiver);
         }
     }
     void Close() const noexcept {
         target.Close();
     }
+    void CaptureMouse(bool captured) noexcept {
+        if (ttyContext != nullptr) {
+            TTYBackend::SetMouseCaptured(ttyContext, captured);
+        }
+    }
+    [[nodiscard]] auto IsMouseCaptured() const noexcept -> bool {
+        return ttyContext != nullptr && TTYBackend::IsMouseCaptured(ttyContext);
+    }
 };
 
 struct WindowedBackend {
     std::unique_ptr<Window> window;
+    bool                    mouseCaptured = false;
 
     explicit WindowedBackend(std::unique_ptr<Window> win) noexcept: window(std::move(win)) {
     }
@@ -121,6 +132,15 @@ struct WindowedBackend {
     }
     void Close() const noexcept {
         window->Close();
+    }
+    void CaptureMouse(bool captured) noexcept {
+        mouseCaptured = captured;
+        if (window != nullptr) {
+            window->CaptureMouse(captured);
+        }
+    }
+    [[nodiscard]] auto IsMouseCaptured() const noexcept -> bool {
+        return mouseCaptured;
     }
 };
 
@@ -253,6 +273,34 @@ auto PlatformHost::GetSize() const noexcept -> Extent2D {
 
 auto PlatformHost::HasNativeSurface() const noexcept -> bool {
     return Target().GetNativeSurface().Valid();
+}
+
+auto PlatformHost::IsTTY() const noexcept -> bool {
+    return Target().IsTTY();
+}
+
+void PlatformHost::CaptureMouse(bool captured) noexcept {
+    std::visit(
+        Overloaded {
+            [](std::monostate&) noexcept {},
+            [](HeadlessBackend&) noexcept {},
+            [captured](TTYBackendState& backend) noexcept { backend.CaptureMouse(captured); },
+            [captured](WindowedBackend& backend) noexcept { backend.CaptureMouse(captured); },
+        },
+        _impl->backend
+    );
+}
+
+auto PlatformHost::IsMouseCaptured() const noexcept -> bool {
+    return std::visit(
+        Overloaded {
+            [](const std::monostate&) noexcept -> bool { return false; },
+            [](const HeadlessBackend&) noexcept -> bool { return false; },
+            [](const TTYBackendState& backend) noexcept -> bool { return backend.IsMouseCaptured(); },
+            [](const WindowedBackend& backend) noexcept -> bool { return backend.IsMouseCaptured(); },
+        },
+        _impl->backend
+    );
 }
 
 

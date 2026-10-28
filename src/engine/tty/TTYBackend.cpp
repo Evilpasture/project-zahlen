@@ -5,6 +5,7 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Window.hpp>
+#include <algorithm>
 
 #ifdef __linux__
 #include <Zahlen/Core/SharedLibrary.hpp>
@@ -42,9 +43,15 @@ struct TTYState {
     int            tty_fd      = -1;
     int            old_kb_mode = 0;
     struct termios old_termios {};
-    uint32_t       width   = 0;
-    uint32_t       height  = 0;
-    bool           running = true;
+    uint32_t       width            = 0;
+    uint32_t       height           = 0;
+    float          mouseX           = 0.0f;
+    float          mouseY           = 0.0f;
+    bool           mouseInitialized = false;
+    bool           mouseCaptured    = false;
+    bool           ctrlDown         = false;
+    bool           altDown          = false;
+    bool           running          = true;
 
     int                      epoll_fd = -1;
     std::vector<TakenDevice> taken_devices;
@@ -556,10 +563,51 @@ void EmergencyRestore() {
     }
 }
 
+void SetScreenSize(void* context, uint32_t width, uint32_t height) noexcept {
+    auto* state = static_cast<TTYState*>(context);
+    if (state == nullptr || width == 0 || height == 0) {
+        return;
+    }
+    state->width  = width;
+    state->height = height;
+    if (state->mouseInitialized && !state->mouseCaptured) {
+        state->mouseX = std::clamp(state->mouseX, 0.0f, static_cast<float>(width - 1));
+        state->mouseY = std::clamp(state->mouseY, 0.0f, static_cast<float>(height - 1));
+    }
+}
+
+void SetMouseCaptured(void* context, bool captured) noexcept {
+    auto* state = static_cast<TTYState*>(context);
+    if (state == nullptr) {
+        return;
+    }
+    state->mouseCaptured = captured;
+    if (!captured && state->mouseInitialized && state->width > 0 && state->height > 0) {
+        state->mouseX = std::clamp(state->mouseX, 0.0f, static_cast<float>(state->width - 1));
+        state->mouseY = std::clamp(state->mouseY, 0.0f, static_cast<float>(state->height - 1));
+    }
+}
+
+auto IsMouseCaptured(const void* context) noexcept -> bool {
+    const auto* state = static_cast<const TTYState*>(context);
+    return state != nullptr && state->mouseCaptured;
+}
+
 void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
     auto* state = static_cast<TTYState*>(context);
     if ((state == nullptr) || state->epoll_fd < 0) {
         return;
+    }
+
+    if (!state->mouseInitialized && state->width > 0 && state->height > 0) {
+        state->mouseX           = static_cast<float>(state->width) * 0.5f;
+        state->mouseY           = static_cast<float>(state->height) * 0.5f;
+        state->mouseInitialized = true;
+        if (receiver.onMouseRelative != nullptr) {
+            receiver.onMouseRelative(receiver.userdata, state->mouseX, state->mouseY, 0.0f, 0.0f);
+        } else if (receiver.onMouseMove != nullptr) {
+            receiver.onMouseMove(receiver.userdata, state->mouseX, state->mouseY);
+        }
     }
 
     std::array<epoll_event, 16> events {};
@@ -568,9 +616,6 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
     float mouseAccumX = 0.0f;
     float mouseAccumY = 0.0f;
     bool  mouseMoved  = false;
-
-    static bool ctrlDown = false;
-    static bool altDown  = false;
 
     for (int i = 0; i < n; i++) {
         if (events[i].data.ptr == state->seat) {
@@ -601,13 +646,13 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
 
             if (ev.type == EV_KEY) {
                 if (ev.code == KEY_LEFTCTRL || ev.code == KEY_RIGHTCTRL) {
-                    ctrlDown = (ev.value != 0);
+                    state->ctrlDown = (ev.value != 0);
                 }
                 if (ev.code == KEY_LEFTALT || ev.code == KEY_RIGHTALT) {
-                    altDown = (ev.value != 0);
+                    state->altDown = (ev.value != 0);
                 }
 
-                if (ctrlDown && altDown && ev.code == KEY_BACKSPACE && ev.value == 1) {
+                if (state->ctrlDown && state->altDown && ev.code == KEY_BACKSPACE && ev.value == 1) {
                     ZHLN::Log("[TTY] Emergency Escape Hatch triggered! Restoring terminal...");
                     EmergencyRestore();
                     _exit(0);
@@ -643,14 +688,26 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
         }
     }
 
-    if (mouseMoved && (receiver.onMouseMove != nullptr)) {
-        static float virtualMouseX = 960.0f;
-        static float virtualMouseY = 540.0f;
+    if (mouseMoved) {
+        if (!state->mouseInitialized) {
+            state->mouseX           = state->width > 0 ? static_cast<float>(state->width) * 0.5f : 960.0f;
+            state->mouseY           = state->height > 0 ? static_cast<float>(state->height) * 0.5f : 540.0f;
+            state->mouseInitialized = true;
+        }
 
-        virtualMouseX += mouseAccumX;
-        virtualMouseY += mouseAccumY;
+        state->mouseX += mouseAccumX;
+        state->mouseY += mouseAccumY;
 
-        receiver.onMouseMove(receiver.userdata, virtualMouseX, virtualMouseY);
+        if (!state->mouseCaptured && state->width > 0 && state->height > 0) {
+            state->mouseX = std::clamp(state->mouseX, 0.0f, static_cast<float>(state->width - 1));
+            state->mouseY = std::clamp(state->mouseY, 0.0f, static_cast<float>(state->height - 1));
+        }
+
+        if (receiver.onMouseRelative != nullptr) {
+            receiver.onMouseRelative(receiver.userdata, state->mouseX, state->mouseY, mouseAccumX, mouseAccumY);
+        } else if (receiver.onMouseMove != nullptr) {
+            receiver.onMouseMove(receiver.userdata, state->mouseX, state->mouseY);
+        }
     }
 }
 
@@ -674,6 +731,13 @@ void Shutdown(void*) {
 void EmergencyRestore() {
 }
 void ProcessEvents(void*, const WindowInputReceiver&) {
+}
+void SetScreenSize(void*, uint32_t, uint32_t) noexcept {
+}
+void SetMouseCaptured(void*, bool) noexcept {
+}
+bool IsMouseCaptured(const void*) noexcept {
+    return false;
 }
 std::vector<std::string_view> GetRequiredInstanceExtensions() {
     return {};

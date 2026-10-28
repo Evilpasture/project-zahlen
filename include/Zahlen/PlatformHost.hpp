@@ -54,6 +54,11 @@ class ZHLN_API PlatformHost {
 
     [[nodiscard]] auto HasNativeSurface() const noexcept -> bool;
 
+    [[nodiscard]] auto IsTTY() const noexcept -> bool;
+
+    void               CaptureMouse(bool captured) noexcept;
+    [[nodiscard]] auto IsMouseCaptured() const noexcept -> bool;
+
 
     void               Focus() noexcept;
     [[nodiscard]] auto IsFocused() const noexcept -> bool;

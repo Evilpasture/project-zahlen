@@ -414,4 +414,39 @@ void test_ecs_system_graph_input_context_service_resolution() {
     Expect(Near(summary->moveX, 1.0f));
 }
 
+void test_relative_mouse_motion_preserves_deltas_when_cursor_clamped() {
+    Components::InputStateComponent kbm {};
+    static_assert(std::is_trivially_copyable_v<Components::InputStateComponent>);
+
+    // Initial center seed (dx=0, dy=0) sets cursor coordinates without spurious jump delta.
+    kbm.ApplyRelativeMotion(960.0f, 540.0f, 0.0f, 0.0f);
+    Expect(Near(kbm.mouseX, 960.0f));
+    Expect(Near(kbm.mouseY, 540.0f));
+    Expect(Near(kbm.mouseDeltaX, 0.0f));
+    Expect(Near(kbm.mouseDeltaY, 0.0f));
+
+    // Cursor clamped at right screen edge (1919) still accumulates full relative evdev motion.
+    kbm.ApplyRelativeMotion(1919.0f, 540.0f, 32.0f, -6.0f);
+    kbm.ApplyRelativeMotion(1919.0f, 540.0f, 18.0f, -4.0f);
+    Expect(Near(kbm.mouseX, 1919.0f));
+    Expect(Near(kbm.mouseDeltaX, 50.0f));
+    Expect(Near(kbm.mouseDeltaY, -10.0f));
+
+    InputContext   input;
+    ECS::EventBus  bus;
+    auto&          map  = input.CreateActionMap("TTYLook", 0);
+    const ActionId look =
+        map.AddAction("Look", ActionKind::Axis2D).SetClampUnitCircle(false).Bind(InputBinding::MouseDelta2D(1.0f, 1.0f)).Id();
+
+    input.BeginFrame();
+    input.InjectMouseRelative(1919.0f, 1079.0f, 24.0f, 12.0f);
+    input.InjectMouseRelative(1919.0f, 1079.0f, 16.0f, -4.0f);
+    input.RefreshActionsForCurrentFrame(&bus);
+
+    const auto axis = input.ActionAxis2D(look);
+    Expect(Near(axis.x, 40.0f));
+    Expect(Near(axis.y, 8.0f));
+    ExpectEq(input.LastActiveDevice(), InputDeviceKind::KeyboardMouse);
+}
+
 } // namespace ZHLN::Test

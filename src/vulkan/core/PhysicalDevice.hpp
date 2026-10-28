@@ -40,6 +40,10 @@ struct MeshShaderLimits {
     bool     supported                            = false;
 };
 
+[[nodiscard]] auto DefaultDeviceScore(const PhysicalDeviceInfo& info) noexcept -> int32_t;
+
+[[nodiscard]] auto InspectPhysicalDevice(VkPhysicalDevice physical, VkSurfaceKHR surface) noexcept -> PhysicalDeviceInfo;
+
 [[nodiscard]] auto SelectPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, DeviceScoreFunction score = nullptr, const void* userdata = nullptr) noexcept
     -> std::optional<PhysicalDeviceInfo>;
 

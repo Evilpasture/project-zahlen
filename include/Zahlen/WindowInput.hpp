@@ -24,6 +24,7 @@ struct WindowInputReceiver {
     void* userdata                                                                                   = nullptr;
     void (*onKey)(void* userdata, KeyCode key, bool pressed)                                         = nullptr;
     void (*onMouseMove)(void* userdata, float x, float y)                                            = nullptr;
+    void (*onMouseRelative)(void* userdata, float x, float y, float dx, float dy)                    = nullptr;
     void (*onMouseScroll)(void* userdata, float delta)                                               = nullptr;
     void (*onResize)(void* userdata, Extent2D extent)                                                = nullptr;
     void (*onChar)(void* userdata, unsigned int codepoint)                                           = nullptr;

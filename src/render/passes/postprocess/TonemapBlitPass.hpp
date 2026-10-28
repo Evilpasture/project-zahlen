@@ -16,6 +16,25 @@ namespace ZHLN::Passes {
 template <AAMode Mode>
 using BlitInputRes = std::conditional_t<Mode != AAMode::None, Res_AccumCurrent, Res_HdrSceneColor>;
 
+[[nodiscard]] constexpr auto NeedsManualSrgbOetf(const VkFormat format) noexcept -> bool {
+    switch (format) {
+        case VK_FORMAT_UNDEFINED:
+        case VK_FORMAT_R8_SRGB:
+        case VK_FORMAT_R8G8_SRGB:
+        case VK_FORMAT_R8G8B8_SRGB:
+        case VK_FORMAT_B8G8R8_SRGB:
+        case VK_FORMAT_R8G8B8A8_SRGB:
+        case VK_FORMAT_B8G8R8A8_SRGB:
+        case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
+        case VK_FORMAT_R16G16B16A16_SFLOAT:
+        case VK_FORMAT_R32G32B32A32_SFLOAT:
+        case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
+            return false;
+        default:
+            return true;
+    }
+}
+
 template <AAMode Mode>
 struct TonemapBlitPass:
     Vk::RenderPass<"Blit", Vk::ShaderRead<BlitInputRes<Mode>>, Vk::ShaderRead<Res_BloomFinal>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_Swapchain>> {
@@ -30,6 +49,8 @@ struct TonemapBlitPass:
     // binding, so the graph must not wrap this one in AutoCtx.
     void operator()(VkCommandBuffer cmd) const noexcept {
         using namespace Shaders;
+        const auto swapchainTarget = getSwapchainImage();
+
         FullscreenPassRecorder<Blit, Modules::BlitPS>::RecordCustom(
             frame, cmd, post.blit,
             [&]() {
@@ -52,7 +73,7 @@ struct TonemapBlitPass:
                     .saturation        = frame.settings.post.saturation,
                     .tonemapper        = frame.settings.post.tonemapper,
                     .colorFilter       = {frame.settings.post.colorFilter[0], frame.settings.post.colorFilter[1], frame.settings.post.colorFilter[2]},
-                    ._padding          = 0.0f
+                    .applySrgbOetf     = NeedsManualSrgbOetf(swapchainTarget.GetFormat()) ? 1 : 0
                 };
 
                 return MakeFullscreenPassArgs(
@@ -62,8 +83,7 @@ struct TonemapBlitPass:
                     Vk::Unread<"frame">(frame.frames.frameUniformBuffers[fIdx])
                 );
             },
-            [this](RenderFrameContext&, VkCommandBuffer drawCmd, auto&& execute) {
-                const auto swapchainTarget = getSwapchainImage();
+            [&swapchainTarget](RenderFrameContext&, VkCommandBuffer drawCmd, auto&& execute) {
                 Vk::DynamicPass(swapchainTarget.Extent()).OverwriteColor(swapchainTarget).Execute(drawCmd, [&]() { execute(); });
             }
         );

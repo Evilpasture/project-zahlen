@@ -110,10 +110,11 @@ namespace {
         FeatureBitEnabled(features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR, offsetof(VkPhysicalDevicePresentId2FeaturesKHR, presentId2));
 
     return DevicePresentSupport {
-        .fifoLatestReady       = fifo_ext && fifo_bit,
-        .presentTiming         = timing_group && timing_bit,
-        .presentAtAbsoluteTime = timing_group && absolute_bit,
-        .presentId2            = timing_group && id2_bit,
+        .swapchainMutableFormat = ExtensionEnabled(extensions, VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME),
+        .fifoLatestReady        = fifo_ext && fifo_bit,
+        .presentTiming          = timing_group && timing_bit,
+        .presentAtAbsoluteTime  = timing_group && absolute_bit,
+        .presentId2             = timing_group && id2_bit,
     };
 }
 

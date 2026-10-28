@@ -171,23 +171,37 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg) 
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
+            const Vk::DeviceScoreFunction ttyScorer =
+                (target.IsTTY() && mode == PresentationMode::NativeSwapchain)
+                    ? +[](const Vk::PhysicalDeviceInfo& info, const void*) noexcept -> int32_t {
+                          const int32_t base = Vk::DefaultDeviceScore(info);
+                          if (base < 0) {
+                              return -1;
+                          }
+                          return Vk::HasConnectedDisplay(info.handle) ? (base + 2'000'000) : base;
+                      }
+                    : nullptr;
             return Vk::ContextBuilder()
                 .Instance(instanceView)
                 .Surface(raw_surface)
+                .ScoreFunction(ttyScorer)
                 .SelectPhysicalDevice()
                 .transform([&](const Vk::PhysicalDeviceInfo& info) -> void { physicalInfo = info; });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             if (target.IsTTY() && mode == PresentationMode::NativeSwapchain) {
-                uint32_t modeWidth  = 0;
-                uint32_t modeHeight = 0;
-                auto     surfaceRes = Vk::CreateDisplaySurface(instanceView.Handle(), physicalInfo.handle, modeWidth, modeHeight);
+                auto surfaceRes = Vk::CreateDisplaySurface(instanceView.Handle(), physicalInfo.handle);
                 if (!surfaceRes) {
                     return std::unexpected(surfaceRes.error());
                 }
-                width       = static_cast<int>(modeWidth);
-                height      = static_cast<int>(modeHeight);
-                raw_surface = surfaceRes->Release();
+                physicalInfo = Vk::InspectPhysicalDevice(physicalInfo.handle, surfaceRes->surface.Get());
+                if (!physicalInfo.hasPresent) {
+                    return std::unexpected(Vk::SurfaceCreationError::IncompatibleDisplay);
+                }
+                width       = static_cast<int>(surfaceRes->extent.width);
+                height      = static_cast<int>(surfaceRes->extent.height);
+                raw_surface = surfaceRes->surface.Release();
+                target.SetFramebufferExtent(surfaceRes->extent.width, surfaceRes->extent.height);
             }
             return {};
         })

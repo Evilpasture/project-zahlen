@@ -260,6 +260,14 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         world->GetInput().InjectMouseMove(x, y);
     };
 
+    auto onMouseRelative = [](void* userdata, float x, float y, float dx, float dy) -> void {
+        auto* world = static_cast<World*>(userdata);
+        auto* reg   = &world->GetRegistry();
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
+        state->ApplyRelativeMotion(x, y, dx, dy);
+        world->GetInput().InjectMouseRelative(x, y, dx, dy);
+    };
+
     auto onMouseScroll = [](void* userdata, float delta) -> void {
         auto* world = static_cast<World*>(userdata);
         auto* reg   = &world->GetRegistry();
@@ -295,6 +303,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         .userdata            = worldPtr,
         .onKey               = onKey,
         .onMouseMove         = onMouseMove,
+        .onMouseRelative     = onMouseRelative,
         .onMouseScroll       = onMouseScroll,
         .onResize            = onResize,
         .onChar              = onChar,
@@ -358,12 +367,6 @@ void Engine::ProcessEvents() {
     }
 
     _impl->kernel->ProcessEvents();
-
-    const auto& host = _impl->kernel->GetPlatformHost();
-    if (inputState && !host.AsWindow() && host.HasNativeSurface()) {
-        inputState->wantCaptureKeyboard = false;
-        inputState->wantCaptureMouse    = false;
-    }
 
     if (inputState) {
         input.SyncCaptureFlags(inputState->wantCaptureKeyboard, inputState->wantCaptureMouse);

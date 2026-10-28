@@ -46,7 +46,14 @@ class Surface {
     VkSurfaceKHR _handle   = VK_NULL_HANDLE;
 };
 
-[[nodiscard]] auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t& outWidth, uint32_t& outHeight) noexcept
-    -> std::expected<Surface, ErrorCode>;
+struct DisplaySurface {
+    Surface    surface;
+    VkExtent2D extent {};
+};
+
+[[nodiscard]] auto HasConnectedDisplay(VkPhysicalDevice physicalDevice) noexcept -> bool;
+
+[[nodiscard]] auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice) noexcept
+    -> std::expected<DisplaySurface, ErrorCode>;
 
 } // namespace ZHLN::Vk

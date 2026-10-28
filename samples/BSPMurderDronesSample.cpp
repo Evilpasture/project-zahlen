@@ -231,9 +231,7 @@ ZHLN::Bench::BenchmarkViewer* g_benchmarkViewer = nullptr;
 
 void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
     g_mouseCaptured = captured;
-    if (auto window = engine.GetWindow(); window) {
-        window->CaptureMouse(captured);
-    }
+    engine.GetPlatformHost().CaptureMouse(captured);
 }
 
 // Camera::GetViewMatrix builds its direction inline and exposes no accessor.

@@ -34,8 +34,13 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         return std::unexpected(Vk::PresentationError::SwapchainCreationFailed);
     }
 
+    const VkExtent2D targetExt = presenter.Extent();
+    if (presentationTarget.IsTTY() && targetExt.width > 0 && targetExt.height > 0) {
+        presentationTarget.SetFramebufferExtent(targetExt.width, targetExt.height);
+    }
+
     auto depthTarget = Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
-        allocator, ctx.Device(), presenter.Extent(), {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
+        allocator, ctx.Device(), targetExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
     );
     if (!depthTarget) {
         return std::unexpected(depthTarget.error());
@@ -59,14 +64,14 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
 
     for (auto& history: accumulationHistory) {
         auto result = assign(history, Vk::RenderTarget<Res_AccumCurrent>::Create(
-            allocator, ctx.Device(), ext, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferDst}
+            allocator, ctx.Device(), targetExt, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferDst}
         ));
         if (!result) {
             return result;
         }
     }
 
-    if (auto targets_res = targets.Recreate(ext, voxelExt); !targets_res) {
+    if (auto targets_res = targets.Recreate(targetExt, voxelExt); !targets_res) {
         return targets_res;
     }
 

@@ -78,6 +78,15 @@ float3 ACESHillFilm(float3 color) {
     return saturate(color);
 }
 
+float LinearChannelToSRGB(float x) {
+    x = saturate(x);
+    return (x <= 0.0031308f) ? (x * 12.92f) : (1.055f * pow(x, 1.0f / 2.4f) - 0.055f);
+}
+
+float3 LinearToSRGB(float3 color) {
+    return float3(LinearChannelToSRGB(color.r), LinearChannelToSRGB(color.g), LinearChannelToSRGB(color.b));
+}
+
 // tonemapper push-constant IDs: 0 linear, 1 Narkowicz ACES, 2 Reinhard,
 // 3 Khronos PBR Neutral, 4 ACES Hill with the generator's 1/0.6 boost.
 float4 PSMain(VSOutput input) : SV_Target0 {
@@ -86,7 +95,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float alpha = hdrSample.a;
 
     if (pc.fullBright != 0) {
-        return float4(hdrColor, alpha);
+        return float4(pc.applySrgbOetf != 0 ? LinearToSRGB(hdrColor) : hdrColor, alpha);
     }
 
     float3 bloom = texBloom.SampleLevel(smp, input.uv, 0).rgb;
@@ -117,6 +126,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float vignette = saturate(1.0f - dot(uvDist, uvDist));
         vignette       = pow(vignette, max(pc.vignettePower, 0.01f));
         finalColor *= vignette;
+    }
+
+    if (pc.applySrgbOetf != 0) {
+        finalColor = LinearToSRGB(finalColor);
     }
 
     return float4(finalColor, alpha);

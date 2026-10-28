@@ -885,6 +885,19 @@ void InputContext::InjectMouseMove(float x, float y, PlayerSeat targetSeat) noex
     }
 }
 
+void InputContext::InjectMouseRelative(float x, float y, float dx, float dy, PlayerSeat targetSeat) noexcept {
+    if (targetSeat >= kMaxPlayerSeats) {
+        return;
+    }
+    SeatRuntime& seat   = _seats[targetSeat];
+    const float  before = std::abs(seat.kbm.mouseDeltaX) + std::abs(seat.kbm.mouseDeltaY);
+    seat.kbm.ApplyRelativeMotion(x, y, dx, dy);
+    const float after = std::abs(seat.kbm.mouseDeltaX) + std::abs(seat.kbm.mouseDeltaY);
+    if (after > before + 0.5f) {
+        seat.lastActiveDevice = InputDeviceKind::KeyboardMouse;
+    }
+}
+
 void InputContext::InjectMouseScroll(float delta, PlayerSeat targetSeat) noexcept {
     if (targetSeat >= kMaxPlayerSeats) {
         return;

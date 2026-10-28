@@ -88,7 +88,8 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
 
     const VkExtent2D requested_extent {.width = width, .height = height};
     auto             swapchain_result = swapchain.Rebuild(
-        _ctx->Device(), _ctx->PhysicalInfo(), surface.Get(), requested_extent, _vsync, _pacer.RequestedPresentMode(), _pacer.WantsPresentTiming()
+        _ctx->Device(), _ctx->PhysicalInfo(), surface.Get(), requested_extent, _vsync, _pacer.RequestedPresentMode(), _pacer.WantsPresentTiming(),
+        _ctx->PresentSupport().swapchainMutableFormat
     );
     if (!swapchain_result) {
         return std::unexpected(swapchain_result.error());

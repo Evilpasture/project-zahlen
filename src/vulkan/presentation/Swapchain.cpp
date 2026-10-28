@@ -85,12 +85,22 @@ template <typename T, typename Enumerate>
     return VK_PRESENT_MODE_MAX_ENUM_KHR;
 }
 
+[[nodiscard]] constexpr auto MatchingSrgbFormat(const VkFormat format) noexcept -> VkFormat {
+    switch (format) {
+        case VK_FORMAT_B8G8R8A8_UNORM:
+            return VK_FORMAT_B8G8R8A8_SRGB;
+        case VK_FORMAT_R8G8B8A8_UNORM:
+            return VK_FORMAT_R8G8B8A8_SRGB;
+        case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
+            return VK_FORMAT_A8B8G8R8_SRGB_PACK32;
+        default:
+            return format;
+    }
+}
+
 [[nodiscard]] auto ChooseFormat(const std::span<const VkSurfaceFormatKHR> formats) noexcept -> VkSurfaceFormatKHR {
-    const auto preferred = std::ranges::find_if(formats, [](const VkSurfaceFormatKHR& format) {
-        return format.format == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    });
-    if (preferred != formats.end()) {
-        return *preferred;
+    if (formats.empty()) {
+        return VkSurfaceFormatKHR {};
     }
     if (formats.size() == 1 && formats.front().format == VK_FORMAT_UNDEFINED) {
         return VkSurfaceFormatKHR {
@@ -98,7 +108,33 @@ template <typename T, typename Enumerate>
             .colorSpace = formats.front().colorSpace,
         };
     }
-    return formats.empty() ? VkSurfaceFormatKHR {} : formats.front();
+
+    constexpr std::array<VkFormat, 6> preferred_formats {
+        VK_FORMAT_B8G8R8A8_SRGB,
+        VK_FORMAT_R8G8B8A8_SRGB,
+        VK_FORMAT_A8B8G8R8_SRGB_PACK32,
+        VK_FORMAT_B8G8R8A8_UNORM,
+        VK_FORMAT_R8G8B8A8_UNORM,
+        VK_FORMAT_A8B8G8R8_UNORM_PACK32,
+    };
+
+    for (const VkFormat wanted: preferred_formats) {
+        const auto match = std::ranges::find_if(formats, [wanted](const VkSurfaceFormatKHR& format) {
+            return format.format == wanted && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+        });
+        if (match != formats.end()) {
+            return *match;
+        }
+    }
+
+    for (const VkFormat wanted: preferred_formats) {
+        const auto match = std::ranges::find_if(formats, [wanted](const VkSurfaceFormatKHR& format) { return format.format == wanted; });
+        if (match != formats.end()) {
+            return *match;
+        }
+    }
+
+    return formats.front();
 }
 
 [[nodiscard]] auto ChooseExtent(const VkSurfaceCapabilitiesKHR& capabilities, const VkExtent2D requested) noexcept -> VkExtent2D {
@@ -156,14 +192,17 @@ Swapchain::~Swapchain() noexcept {
     Destroy();
 }
 
-Swapchain::Swapchain(Swapchain&& other) noexcept: _device(std::exchange(other._device, VK_NULL_HANDLE)), _data(std::exchange(other._data, {})) {
+Swapchain::Swapchain(Swapchain&& other) noexcept:
+    _device(std::exchange(other._device, VK_NULL_HANDLE)), _data(std::exchange(other._data, {})),
+    _mutableViewActive(std::exchange(other._mutableViewActive, false)) {
 }
 
 auto Swapchain::operator=(Swapchain&& other) noexcept -> Swapchain& {
     if (this != &other) {
         Destroy();
-        _device = std::exchange(other._device, VK_NULL_HANDLE);
-        _data   = std::exchange(other._data, {});
+        _device            = std::exchange(other._device, VK_NULL_HANDLE);
+        _data              = std::exchange(other._data, {});
+        _mutableViewActive = std::exchange(other._mutableViewActive, false);
     }
     return *this;
 }
@@ -175,7 +214,8 @@ auto Swapchain::Rebuild(
     const VkExtent2D          extent,
     const bool                vsync,
     const VkPresentModeKHR    requestedPresentMode,
-    const bool                enablePresentTiming
+    const bool                enablePresentTiming,
+    const bool                allowMutableFormat
 ) noexcept -> std::expected<void, ErrorCode> {
     if (device == VK_NULL_HANDLE || physical.handle == VK_NULL_HANDLE || surface == VK_NULL_HANDLE || (Valid() && _device != device)) {
         return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
@@ -218,20 +258,35 @@ auto Swapchain::Rebuild(
         .presentModeCount = 1,
         .pPresentModes    = &present_mode,
     };
-    const VkSwapchainCreateInfoKHR create_info {
-        .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .pNext            = supports_present_mode_chain ? &present_modes_info : nullptr,
-        .flags            = enablePresentTiming ?
-                                static_cast<VkSwapchainCreateFlagsKHR>(VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT | VK_SWAPCHAIN_CREATE_PRESENT_ID_2_BIT_KHR) :
-                                VkSwapchainCreateFlagsKHR {0},
-        .surface          = surface,
-        .minImageCount    = image_count,
-        .imageFormat      = format.format,
-        .imageColorSpace  = format.colorSpace,
-        .imageExtent      = chosen_extent,
-        .imageArrayLayers = 1,
-        .imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-        .imageSharingMode = shared_queue ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT,
+
+    const void* base_pnext = supports_present_mode_chain ? static_cast<const void*>(&present_modes_info) : nullptr;
+    const auto  base_flags = enablePresentTiming ?
+                                 static_cast<VkSwapchainCreateFlagsKHR>(VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT | VK_SWAPCHAIN_CREATE_PRESENT_ID_2_BIT_KHR) :
+                                 VkSwapchainCreateFlagsKHR {0};
+
+    const VkFormat srgb_view_format = (format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) ? MatchingSrgbFormat(format.format) : format.format;
+    bool           use_mutable_srgb = allowMutableFormat && srgb_view_format != format.format && (!Valid() || _mutableViewActive);
+
+    const std::array<VkFormat, 2>   view_formats {format.format, srgb_view_format};
+    const VkImageFormatListCreateInfo format_list_info {
+        .sType           = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO,
+        .pNext           = base_pnext,
+        .viewFormatCount = static_cast<uint32_t>(view_formats.size()),
+        .pViewFormats    = view_formats.data(),
+    };
+
+    VkSwapchainCreateInfoKHR create_info {
+        .sType                 = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .pNext                 = use_mutable_srgb ? static_cast<const void*>(&format_list_info) : base_pnext,
+        .flags                 = use_mutable_srgb ? static_cast<VkSwapchainCreateFlagsKHR>(base_flags | VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR) : base_flags,
+        .surface               = surface,
+        .minImageCount         = image_count,
+        .imageFormat           = format.format,
+        .imageColorSpace       = format.colorSpace,
+        .imageExtent           = chosen_extent,
+        .imageArrayLayers      = 1,
+        .imageUsage            = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .imageSharingMode      = shared_queue ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT,
         .queueFamilyIndexCount = shared_queue ? 0U : static_cast<uint32_t>(queue_families.size()),
         .pQueueFamilyIndices   = shared_queue ? nullptr : queue_families.data(),
         .preTransform          = support.capabilities.currentTransform,
@@ -242,7 +297,13 @@ auto Swapchain::Rebuild(
     };
 
     VkSwapchainKHR new_handle = VK_NULL_HANDLE;
-    const VkResult created    = vkCreateSwapchainKHR(device, &create_info, nullptr, &new_handle);
+    VkResult       created    = vkCreateSwapchainKHR(device, &create_info, nullptr, &new_handle);
+    if (created != VK_SUCCESS && use_mutable_srgb && !Valid()) {
+        use_mutable_srgb  = false;
+        create_info.pNext = base_pnext;
+        create_info.flags = base_flags;
+        created           = vkCreateSwapchainKHR(device, &create_info, nullptr, &new_handle);
+    }
     if (created != VK_SUCCESS) {
         return std::unexpected(ToError(created));
     }
@@ -253,12 +314,14 @@ auto Swapchain::Rebuild(
         return std::unexpected(images_result.error());
     }
 
+    const VkFormat view_format = use_mutable_srgb ? srgb_view_format : format.format;
+
     SwapchainData next {
         .handle      = new_handle,
         .images      = std::move(*images_result),
         .views       = {},
         .imageCount  = 0,
-        .format      = format.format,
+        .format      = view_format,
         .extent      = chosen_extent,
         .presentMode = present_mode,
     };
@@ -266,7 +329,7 @@ auto Swapchain::Rebuild(
     next.views.resize(next.images.size(), VK_NULL_HANDLE);
 
     for (size_t i = 0; i < next.images.size(); ++i) {
-        const ImageView swapView {next.images[i], format.format, VK_IMAGE_ASPECT_COLOR_BIT};
+        const ImageView swapView {next.images[i], view_format, VK_IMAGE_ASPECT_COLOR_BIT};
         // The create info exists only across the vkCreateImageView call.
         const VkImageViewCreateInfo view_info = swapView.AsCreateInfo();
 
@@ -283,8 +346,9 @@ auto Swapchain::Rebuild(
     }
 
     Destroy();
-    _device = device;
-    _data   = std::move(next);
+    _device            = device;
+    _data              = std::move(next);
+    _mutableViewActive = use_mutable_srgb;
     return {};
 }
 
@@ -322,8 +386,9 @@ void Swapchain::Destroy() noexcept {
             vkDestroySwapchainKHR(_device, _data.handle, nullptr);
         }
     }
-    _data   = {};
-    _device = VK_NULL_HANDLE;
+    _data              = {};
+    _device            = VK_NULL_HANDLE;
+    _mutableViewActive = false;
 }
 
 } // namespace ZHLN::Vk

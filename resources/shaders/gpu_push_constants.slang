@@ -116,7 +116,7 @@ public struct BlitPushConstants {
     public float saturation;
     public int tonemapper;
     public float3 colorFilter;
-    public float _padding;
+    public int applySrgbOetf;
 };
 
 // --- The remaining push-payload exports (migrated 2026-10-18 from the host

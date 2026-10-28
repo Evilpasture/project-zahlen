@@ -186,6 +186,10 @@ struct WindowUIInputCollector {
                 },
             .onMouseMove =
                 [](void* ud, float x, float y) -> void { static_cast<WindowUIInputCollector*>(ud)->state.ApplyLocalMotion(x, y); },
+            .onMouseRelative =
+                [](void* ud, float x, float y, float dx, float dy) -> void {
+                    static_cast<WindowUIInputCollector*>(ud)->state.ApplyRelativeMotion(x, y, dx, dy);
+                },
             .onMouseScroll =
                 [](void* ud, float delta) -> void {
                     auto* self = static_cast<WindowUIInputCollector*>(ud);
@@ -940,6 +944,25 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
         );
         !drawn) {
         ZHLN::Log("[UIEditor] Window UI draw failed: {}", drawn.error());
+    }
+
+    if (const auto& host = kernel.GetPlatformHost(); host.IsTTY() && !host.IsMouseCaptured()) {
+        const float cursorX =
+            size.width > 0 ? std::clamp(session.editorInput.state.mouseX, 0.0f, static_cast<float>(size.width - 1)) : session.editorInput.state.mouseX;
+        const float cursorY =
+            size.height > 0 ? std::clamp(session.editorInput.state.mouseY, 0.0f, static_cast<float>(size.height - 1)) : session.editorInput.state.mouseY;
+        const ZHLN::SoftwareCursorDot cursorDot(cursorX, cursorY);
+        if (const auto drawn = gpuFrame.RenderUI(
+                ZHLN::UIView {
+                    .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
+                    .target     = **target,
+                    .frameIndex = rc.GetFrameIndex(),
+                },
+                cursorDot.DrawData()
+            );
+            !drawn) {
+            ZHLN::Log("[UIEditor] Software cursor draw failed: {}", drawn.error());
+        }
     }
 }
 

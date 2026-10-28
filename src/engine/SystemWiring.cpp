@@ -38,6 +38,12 @@ namespace { namespace Steps {
 void HostUICallback(Engine& engine, float, FrameContext&) {
     if (const auto cb = engine.GetUICallback(); cb && static_cast<bool>(*cb)) {
         (*cb)(engine);
+        if (engine.GetPendingUIData().Empty()) {
+            if (auto st = engine.GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+                st->wantCaptureKeyboard = false;
+                st->wantCaptureMouse    = false;
+            }
+        }
     }
     if (const auto st = engine.GetRegistry().GetSingleton<Components::InputStateComponent>()) {
         engine.GetInput().SyncCaptureFlags(st->wantCaptureKeyboard, st->wantCaptureMouse);

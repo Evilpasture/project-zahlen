@@ -544,7 +544,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     if (const UIDrawData uiData = engine.GetPendingUIData(); !uiData.Empty()) {
         if (auto ui_res = gpuFrame.RenderUI(
                 UIView {
-                    .viewport   = viewport,
+                    .viewport   = {},
                     .target     = attachment,
                     .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
                 },
@@ -554,6 +554,27 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
             return std::unexpected(ui_res.error());
         }
         engine.SetPendingUIData(UIDrawData {});
+    }
+
+    if (const auto& host = engine.GetPlatformHost(); host.IsTTY() && !host.IsMouseCaptured()) {
+        if (const auto input = reg.GetSingleton<Components::InputStateComponent>()) {
+            const Extent2D hostSize = host.GetSize();
+            const float    cursorX  = hostSize.width > 0 ? std::clamp(input->mouseX, 0.0f, static_cast<float>(hostSize.width - 1)) : input->mouseX;
+            const float    cursorY  = hostSize.height > 0 ? std::clamp(input->mouseY, 0.0f, static_cast<float>(hostSize.height - 1)) : input->mouseY;
+
+            const SoftwareCursorDot cursorDot(cursorX, cursorY);
+            if (auto cursor_res = gpuFrame.RenderUI(
+                    UIView {
+                        .viewport   = {},
+                        .target     = attachment,
+                        .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+                    },
+                    cursorDot.DrawData()
+                );
+                !cursor_res) {
+                return std::unexpected(cursor_res.error());
+            }
+        }
     }
 
     if (auto end_res = std::move(gpuFrame).End(); !end_res) {

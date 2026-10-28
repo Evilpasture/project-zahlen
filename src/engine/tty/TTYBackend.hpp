@@ -23,6 +23,12 @@ bool IsRunning(void* context);
 
 void ProcessEvents(void* context, const WindowInputReceiver& receiver);
 
+void SetScreenSize(void* context, uint32_t width, uint32_t height) noexcept;
+
+void SetMouseCaptured(void* context, bool captured) noexcept;
+
+[[nodiscard]] bool IsMouseCaptured(const void* context) noexcept;
+
 std::vector<std::string_view> GetRequiredInstanceExtensions();
 
 void EmergencyRestore();
