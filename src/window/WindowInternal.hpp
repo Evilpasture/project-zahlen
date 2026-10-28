@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "NativeSurfaceInternal.hpp"
 #include "PresentationTarget.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Window.hpp>

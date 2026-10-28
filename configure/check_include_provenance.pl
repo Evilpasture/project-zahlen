@@ -197,7 +197,7 @@ my @SKIP_PREFIXES = ('src/vulkan/');
 # be found by looking for the names that exist, so a leftover
 # `#include "Types.hpp"` resolves nowhere and is indistinguishable from an
 # external header by spelling alone.
-my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp');
+my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp', 'NativeSurfaceInternal.hpp');
 
 # Every tracked name in one alternation, so a file is scanned once for all of
 # them rather than once per symbol. Longest first: with word boundaries a
@@ -421,9 +421,10 @@ for my $rel (keys %tree_files) {
 # Where a quoted include of $including may legitimately look: beside the
 # including file, then up through the directories that own it, then the public
 # tree and src/ itself, then the documented cross-subsystem seams -- each one
-# a PRIVATE include path in CMake (src/render reaches src/window and src/vulkan
-# for the presentation seam and the RHI, src/window reaches src/engine for the
-# TTY backend, the engine keeps its systems in a second include directory).
+# a PRIVATE include path in CMake (src/render reaches src/presentation and
+# src/vulkan for the presentation seam and the RHI, src/window reaches
+# src/presentation and src/engine for the presentation seam and TTY backend,
+# the engine keeps its systems in a second include directory).
 # Searching every root in the repository would resolve
 # `#include "Types.hpp"` against an unrelated subsystem's private header of
 # the same name, which is how a broken include hides.
@@ -445,9 +446,10 @@ sub quoted_roots {
     for my $seam (
         ['src/engine/',        "$ROOT/src/engine/system"],
         ['src/engine/system/', "$ROOT/src/engine"],
-        ['src/render/',        "$ROOT/src/window"],
+        ['src/render/',        "$ROOT/src/presentation"],
         ['src/render/',        "$ROOT/src/vulkan"],
         ['src/render/',        "$ROOT/src/render/init"],
+        ['src/window/',        "$ROOT/src/presentation"],
         ['src/window/',        "$ROOT/src/engine"],
     ) {
         my ($prefix, $extra) = @$seam;

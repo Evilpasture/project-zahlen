@@ -32,3 +32,8 @@
 - [x] **Phase 4: Governance, End-to-End World-Only Build & Test Verification**
   - Run `configure/run_governance_checks.py --no-cache` and `configure/check_include_governance.py`.
   - Configure and build `zahlen`, `zcook`, `zahlen_module`, all `CPU_*` test suites, all `Extras_*` test suites, and `samples/*` with `-DZHLN_BUILD_RENDER=OFF` (with zero Vulkan/Slang submodules initialized!), and run `ctest` + headless engine smoke verification.
+
+- [x] **Phase 5: Sever `zahlen_render` Binary & Linker Coupling to `zahlen_window` and `zahlen_filesystem`**
+  - Extract `PresentationTarget` and `NativeSurfaceHandle` into a zero-allocation, header-only `zahlen_presentation` `INTERFACE` seam (`src/presentation/PresentationTarget.hpp`), removing `PresentationTarget.cpp`, `NativeSurfaceHandle.cpp`, `${PROJECT_SOURCE_DIR}/src/window`, and `PRIVATE zahlen_window` (plus transitive `glfw` link propagation) from `zahlen_render`.
+  - Invert shader hot-reload file watching into `Kernel` (`RenderContext::NotifyShaderChanged(std::string_view)`), eliminating `<Zahlen/FileSystem/FileWatcher.hpp>` and all `ZHLN::FS::FileSystemWatcher` symbol references from `zahlen_render`.
+  - Harden `configure/check_subsystem_boundaries.py` to resolve bare cross-subsystem headers, enforce the internal seam DAG, and forbid `zahlen_window` / `zahlen_filesystem` link or header edges in `src/render/` and `src/vulkan/`.

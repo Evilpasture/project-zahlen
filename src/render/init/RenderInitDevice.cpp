@@ -119,9 +119,9 @@ RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept:
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, ZHLN::Optional<FS::FileSystemWatcher&> fileSystemWatcher) noexcept
+auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg) noexcept
     -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
-    auto impl               = std::make_unique<Impl>(target, fileSystemWatcher);
+    auto impl               = std::make_unique<Impl>(target);
     impl->appName           = cfg.appName;
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
 
@@ -224,7 +224,6 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return impl->InitSubsystems(cfg, width, height); })
         .transform([&]() -> std::unique_ptr<ZHLN::RenderContext> {
-            impl->diagnostics.BeginShaderObservation();
             return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl));
         });
 }

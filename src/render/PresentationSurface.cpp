@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PresentationSurface.hpp"
-#include "NativeSurfaceInternal.hpp"
+#include "PresentationTarget.hpp"
 #include "Rendering.hpp"
 #include <Zahlen/Log.hpp>
 

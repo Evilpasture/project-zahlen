@@ -8,8 +8,6 @@
 #include "ShaderReloadRegistry.hpp"
 #include "diagnostics/GPUDiagnostics.hpp"
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Render/PipelineStats.hpp>
 #include <atomic>
 #include <cstdint>
@@ -18,7 +16,7 @@
 namespace ZHLN {
 
 struct RenderDiagnostics {
-    RenderDiagnostics(Vk::Context& device, Optional<FS::FileSystemWatcher&> watcher) noexcept: ctx(device), fileSystemWatcher(watcher) {
+    explicit RenderDiagnostics(Vk::Context& device) noexcept: ctx(device) {
     }
 
     Vk::Context& ctx;
@@ -28,17 +26,12 @@ struct RenderDiagnostics {
 
     GpuPipelineCounters pendingPipelineCounters {};
 
-    Optional<FS::FileSystemWatcher&> fileSystemWatcher;
-    FS::FileWatchHandle              shaderDirectoryWatch = 0;
-    ShaderReloadRegistry             shaderReloads;
+    ShaderReloadRegistry shaderReloads;
 
     std::atomic<uint32_t> invalidDrawWarningCount {0};
     bool                  warnedUnwrittenTarget = false;
 
-    void BeginShaderObservation();
-    void HandleShaderFileEvent(const FS::FileWatchEvent& event);
-
-    void StopShaderObservation() noexcept;
+    void NotifyShaderChanged(std::string_view changedPath);
 };
 
 } // namespace ZHLN

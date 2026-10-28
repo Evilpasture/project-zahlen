@@ -23,7 +23,7 @@ method that does the work.
    out of line, and holding it by ``std::unique_ptr`` in a private member.
    Comments and string literals are stripped before matching.
 
-2. The presentation seam. ``PresentationTarget`` (src/window/PresentationTarget.hpp)
+2. The presentation seam. ``PresentationTarget`` (src/presentation/PresentationTarget.hpp)
    is an engine internal: the renderer's low-level verbs take one, and the kernel
    -- which owns the session and every window in it -- is what resolves a frame's
    destination and hands callers an attachment. So:

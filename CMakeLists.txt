@@ -163,6 +163,7 @@ endif()
 
 include(ThirdParty)
 
+add_subdirectory(src/presentation)
 add_subdirectory(src/window)
 if(ZHLN_BUILD_RENDER)
     add_subdirectory(src/vulkan)

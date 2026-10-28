@@ -39,7 +39,6 @@
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -321,8 +320,8 @@ struct RenderContext::Impl: RenderFrameContext {
         diagnostics.gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
 
-    Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
-        presentationTarget(target), diagnostics(ctx, watcher), pipelines(ctx, heapManager, pipelineBinaries, sceneHeapMappings, deletionQueue) {
+    explicit Impl(PresentationTarget& target):
+        presentationTarget(target), diagnostics(ctx), pipelines(ctx, heapManager, pipelineBinaries, sceneHeapMappings, deletionQueue) {
     }
 
     ~Impl() {
@@ -338,7 +337,6 @@ struct RenderContext::Impl: RenderFrameContext {
         submittedStaging.reset();
         DestroyDestinations();
         frameOpen = false;
-        diagnostics.StopShaderObservation();
 
         ClearEmitterBuffers();
         geometry.RetireAll();

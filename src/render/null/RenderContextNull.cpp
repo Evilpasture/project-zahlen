@@ -130,11 +130,12 @@ auto RenderContext::GetPipelineBinaryData() const noexcept -> std::vector<uint8_
     return {};
 }
 
-auto RenderContext::Create(
-    PresentationTarget& target, const RenderConfig& cfg, ZHLN::Optional<FileSystemWatcher&> /*fileSystemWatcher*/
-) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
+auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl = std::make_unique<Impl>(target, cfg);
     return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl));
+}
+
+void RenderContext::NotifyShaderChanged(std::string_view /*changedPath*/) {
 }
 
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {

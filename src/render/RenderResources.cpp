@@ -629,28 +629,15 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     };
 }
 
-void RenderDiagnostics::BeginShaderObservation() {
+void RenderDiagnostics::NotifyShaderChanged(std::string_view changedPath) {
     if constexpr (isDev) {
-        if (fileSystemWatcher && shaderDirectoryWatch == 0) {
-            shaderDirectoryWatch = fileSystemWatcher->WatchDirectory(
-                "resources/shaders", [this](const FS::FileWatchEvent& event) { HandleShaderFileEvent(event); }, true, ".slang",
-                FS::FileSystemWatcher::kDefaultDebounceMs
-            );
-        }
+        shaderReloads.Dispatch(changedPath, [this] { vkDeviceWaitIdle(ctx.Device()); });
     }
 }
 
-void RenderDiagnostics::HandleShaderFileEvent(const FS::FileWatchEvent& event) {
+void RenderContext::NotifyShaderChanged(std::string_view changedPath) {
     if constexpr (isDev) {
-        shaderReloads.Dispatch(event.path.lexically_normal().generic_string(), [this] { vkDeviceWaitIdle(ctx.Device()); });
-    }
-}
-
-void RenderDiagnostics::StopShaderObservation() noexcept {
-    if constexpr (isDev) {
-        if (fileSystemWatcher && shaderDirectoryWatch != 0) {
-            static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
-        }
+        _impl->diagnostics.NotifyShaderChanged(changedPath);
     }
 }
 

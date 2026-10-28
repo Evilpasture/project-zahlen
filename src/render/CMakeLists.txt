@@ -14,14 +14,13 @@ if(NOT ZHLN_BUILD_RENDER)
     target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
     target_include_directories(zahlen_render PRIVATE
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/src/window
     )
     target_include_directories(zahlen_render SYSTEM PRIVATE
         ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
     )
     target_link_libraries(zahlen_render
         PUBLIC  Jolt
-        PRIVATE zahlen_window
+        PRIVATE zahlen_presentation
         PRIVATE zahlen_warnings
     )
     return()
@@ -146,14 +145,14 @@ target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exce
 target_link_libraries(zahlen_render
     PUBLIC  zahlen_vulkan
     PUBLIC  Jolt
-    PRIVATE zahlen_window
+    PRIVATE zahlen_presentation
+    PRIVATE zahlen_threading
 )
 
 target_include_directories(zahlen_render PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/init
     ${PROJECT_SOURCE_DIR}/src/vulkan
-    ${PROJECT_SOURCE_DIR}/src/window
 )
 
 target_include_directories(zahlen_render SYSTEM PRIVATE

@@ -4,8 +4,6 @@
 
 set(RAW_WINDOW_SOURCES
     PlatformHost.cpp
-    PresentationTarget.cpp
-    NativeSurfaceHandle.cpp
     Window.cpp
 )
 
@@ -35,6 +33,7 @@ target_compile_options(zahlen_window PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exce
 target_link_libraries(zahlen_window
     PRIVATE
         glfw
+        zahlen_presentation
 )
 
 target_include_directories(zahlen_window

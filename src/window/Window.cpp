@@ -341,7 +341,7 @@ void Window::RebuildNativeSurface() noexcept {
         _impl->target.SetNativeSurface(NativeSurfaceHandle());
         return;
     }
-    _impl->target.SetNativeSurface(NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(QueryNativeTarget(_impl->handle))));
+    _impl->target.SetNativeSurface(NativeSurfaceHandle(QueryNativeTarget(_impl->handle)));
 }
 
 Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver): _impl(std::make_unique<Impl>()) {

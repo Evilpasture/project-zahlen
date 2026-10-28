@@ -39,10 +39,6 @@
 namespace ZHLN {
 
 struct Camera;
-namespace FS {
-class FileSystemWatcher;
-}
-using FileSystemWatcher = FS::FileSystemWatcher;
 class PipelineStatsCapture;
 class PresentationTarget;
 
@@ -83,7 +79,11 @@ class ZHLN_API RenderContext {
     auto operator=(const RenderContext&) -> RenderContext& = delete;
 
     [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, ErrorCode>
-        Create(PresentationTarget& target, const RenderConfig& cfg, ZHLN::Optional<FileSystemWatcher&> fileSystemWatcher = std::nullopt) noexcept;
+        Create(PresentationTarget& target, const RenderConfig& cfg) noexcept;
+
+    // Host-pushed notification that a shader source file changed on disk; the
+    // renderer never watches or depends on the filesystem subsystem directly.
+    void NotifyShaderChanged(std::string_view changedPath);
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 
-#include "NativeSurfaceInternal.hpp"
 #include "PresentationTarget.hpp"
 #include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
@@ -50,7 +49,7 @@ struct TTYBackendState {
     TTYBackendState(uint32_t width, uint32_t height, const WindowInputReceiver& rx) noexcept: receiver(rx) {
         ttyContext = TTYBackend::Init(width, height);
 
-        auto surface = NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(DrmTarget {.fd = -1, .connectorId = 0, .crtcId = 0}));
+        auto surface = NativeSurfaceHandle(DrmTarget {.fd = -1, .connectorId = 0, .crtcId = 0});
         target       = PresentationTarget::ForTTY(
             ttyContext, [](void* ) noexcept {  }, {.width = width, .height = height},
             std::move(surface)
