@@ -185,12 +185,12 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectEq(scene.entities[0].name, std::string {"worldspawn"});
             ZHLN::Test::ExpectTrue(scene.entities[0].body == ZHLN::Scene::BodyKind::Static);
 
-            // 2. func_door (door_main)
+            // 2. func_door (door_main): authored submodel prefab
             const auto& door = scene.entities[1];
             ZHLN::Test::ExpectEq(door.name, std::string {"door_main"});
             ZHLN::Test::ExpectTrue(door.body == ZHLN::Scene::BodyKind::Kinematic);
-            ZHLN::Test::ExpectTrue(door.shape == ZHLN::Scene::ShapeKind::Box);
-            ZHLN::Test::ExpectEq(door.source, std::string {"*1"});
+            ZHLN::Test::ExpectTrue(door.shape == ZHLN::Scene::ShapeKind::Prefab);
+            ZHLN::Test::ExpectEq(door.source, std::string {"maps/test.bsp#model_1"});
             ZHLN::Test::ExpectGt(door.halfExtents.x, 0.0f);
             ZHLN::Test::ExpectGt(door.halfExtents.y, 0.0f);
             ZHLN::Test::ExpectGt(door.halfExtents.z, 0.0f);
@@ -202,18 +202,18 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectTrue(rotDoor.shape == ZHLN::Scene::ShapeKind::Prefab);
             ZHLN::Test::ExpectEq(rotDoor.source, std::string {"models/props/door01.glb"});
 
-            // 4. func_button (btn_entry)
+            // 4. func_button (btn_entry): authored submodel prefab
             const auto& button = scene.entities[3];
             ZHLN::Test::ExpectEq(button.name, std::string {"btn_entry"});
             ZHLN::Test::ExpectTrue(button.body == ZHLN::Scene::BodyKind::Kinematic);
-            ZHLN::Test::ExpectTrue(button.shape == ZHLN::Scene::ShapeKind::Box);
-            ZHLN::Test::ExpectEq(button.source, std::string {"*2"});
+            ZHLN::Test::ExpectTrue(button.shape == ZHLN::Scene::ShapeKind::Prefab);
+            ZHLN::Test::ExpectEq(button.source, std::string {"maps/test.bsp#model_2"});
 
-            // 5. trigger_multiple (trig_entrance)
+            // 5. trigger_multiple (trig_entrance): logic-only volume (no rendered geometry)
             const auto& trig = scene.entities[4];
             ZHLN::Test::ExpectEq(trig.name, std::string {"trig_entrance"});
             ZHLN::Test::ExpectTrue(trig.body == ZHLN::Scene::BodyKind::None);
-            ZHLN::Test::ExpectTrue(trig.shape == ZHLN::Scene::ShapeKind::Box);
+            ZHLN::Test::ExpectTrue(trig.shape == ZHLN::Scene::ShapeKind::Empty);
             ZHLN::Test::ExpectEq(trig.source, std::string {"*3"});
 
             // 6. trigger_once (trig_secret)

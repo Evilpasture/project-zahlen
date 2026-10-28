@@ -7,15 +7,26 @@ endif()
 
 # Register a standalone extras test executable with ztest.
 function(zahlen_register_extras_test TARGET_NAME)
+    cmake_parse_arguments(EXTRAS "" "POOL;TIMEOUT" "LABELS" ${ARGN})
+    if(NOT EXTRAS_POOL)
+        set(EXTRAS_POOL cpu)
+    endif()
+    if(NOT EXTRAS_TIMEOUT)
+        set(EXTRAS_TIMEOUT 120)
+    endif()
+    if(NOT EXTRAS_LABELS)
+        set(EXTRAS_LABELS "CPU;Fast;Extras")
+    endif()
+
     set(EXTRAS_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
     list(APPEND EXTRAS_TEST_ENVIRONMENT ${ZHLN_VULKAN_SANDBOX_ENVIRONMENT})
 
     zahlen_register_ztest_target(${TARGET_NAME}
-        POOL cpu
-        TIMEOUT 120
-        LABELS "CPU;Fast;Extras"
+        POOL ${EXTRAS_POOL}
+        TIMEOUT ${EXTRAS_TIMEOUT}
+        LABELS ${EXTRAS_LABELS}
         ENV ${EXTRAS_TEST_ENVIRONMENT}
-        ${ARGN}
+        ${EXTRAS_UNPARSED_ARGUMENTS}
     )
 
     zahlen_add_runtime_dlls(${TARGET_NAME})
@@ -360,7 +371,9 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-zahlen_register_extras_test(${TARGET_NAME})
+zahlen_register_extras_test(${TARGET_NAME}
+    POOL serial
+)
 
 set(TARGET_NAME TestScripting)
 zahlen_wrap_ztest_sources(_scripting_sources _scripting_files

@@ -285,10 +285,11 @@ void GPUDiagnostics::Shutdown() noexcept {
 }
 
 void GPUDiagnostics::WriteCheckpointSlow(VkCommandBuffer cmd, std::string_view name) const noexcept {
+    const String128            labelName(name);
     const VkDebugUtilsLabelEXT label {
         .sType      = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
         .pNext      = nullptr,
-        .pLabelName = String128(name),
+        .pLabelName = labelName.c_str(),
         .color      = {0.20F, 0.65F, 1.0F, 1.0F},
     };
     vkCmdInsertDebugUtilsLabelEXT(cmd, &label);

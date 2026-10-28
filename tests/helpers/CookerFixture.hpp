@@ -174,16 +174,24 @@ inline bool ReadValue(std::istream& stream, T& outValue) {
 // step between there and the group: tests/ is one down, tests/asset_cooking/
 // is two.
 fs::path FindZcookExecutable() {
-    std::vector<fs::path> candidates = {"zcook",
+    std::vector<fs::path> candidates = {"../bin/zcook",
+                                        "../../bin/zcook",
+                                        "../../../bin/zcook",
+                                        "bin/zcook",
+                                        "build/current/bin/zcook",
+                                        "zcook",
                                         "./zcook",
                                         "../zcook",
                                         "../../zcook",
-                                        "bin/zcook",
+                                        "../bin/zcook.exe",
+                                        "../../bin/zcook.exe",
+                                        "../../../bin/zcook.exe",
+                                        "bin/zcook.exe",
+                                        "build/current/bin/zcook.exe",
                                         "zcook.exe",
                                         "./zcook.exe",
                                         "../zcook.exe",
-                                        "../../zcook.exe",
-                                        "bin/zcook.exe"};
+                                        "../../zcook.exe"};
 
     for (const auto& candidate: candidates) {
         std::error_code ec;

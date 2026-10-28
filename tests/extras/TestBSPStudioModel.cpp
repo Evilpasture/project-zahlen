@@ -293,7 +293,7 @@ auto BuildSyntheticPHY(int32_t checksum, int32_t solidCount = 1) -> std::vector<
 
     for (int32_t i = 0; i < solidCount; ++i) {
         ZHLN::BSP::PhyCompactSurface surf {};
-        surf.size = sizeof(ZHLN::BSP::PhyCompactSurface);
+        surf.size = static_cast<int32_t>(sizeof(ZHLN::BSP::PhyCompactSurface) - sizeof(int32_t));
         std::memcpy(surf.vphysicsId, "VPHY", 4);
         surf.version = 0x0100;
         surf.modelType = 0;

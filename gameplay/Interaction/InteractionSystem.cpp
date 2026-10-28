@@ -187,11 +187,11 @@ void InteractionSystem::Update(
             }
 
             if (newlyEntered) {
-                FireEntityOutputs(registry, triggerEnt, "OnTrigger", audio);
-                FireEntityOutputs(registry, triggerEnt, "OnStartTouch", audio);
+                const uint32_t firedTrigger    = FireEntityOutputs(registry, triggerEnt, "OnTrigger", audio);
+                const uint32_t firedStartTouch = FireEntityOutputs(registry, triggerEnt, "OnStartTouch", audio);
                 if ((trigger.flags & TriggerFlags::Teleports) != TriggerFlags::None) {
                     TeleportPlayer(registry, physics, playerEnt, std::string_view(trigger.target), audio);
-                } else if (!trigger.target.empty()) {
+                } else if (firedTrigger == 0 && firedStartTouch == 0 && !trigger.target.empty()) {
                     FireEntityInput(registry, std::string_view(trigger.target), "Toggle", "", audio);
                 }
                 if ((trigger.flags & TriggerFlags::TriggerOnce) != TriggerFlags::None) {
@@ -428,12 +428,12 @@ void ButtonMovementSystem::Update(
             case ButtonState::MovingIn: {
                 button->progress += deltaTime * button->speed;
                 if (button->progress >= 1.0f) {
-                    button->progress  = 1.0f;
-                    button->state     = ButtonState::Pressed;
-                    button->waitTimer = button->wait;
-                    FireEntityOutputs(registry, e, "OnPressed", audio);
-                    FireEntityOutputs(registry, e, "OnIn", audio);
-                    if (!button->target.empty()) {
+                    button->progress          = 1.0f;
+                    button->state             = ButtonState::Pressed;
+                    button->waitTimer         = button->wait;
+                    const uint32_t firedPress = FireEntityOutputs(registry, e, "OnPressed", audio);
+                    const uint32_t firedIn    = FireEntityOutputs(registry, e, "OnIn", audio);
+                    if (firedPress == 0 && firedIn == 0 && !button->target.empty()) {
                         FireEntityInput(registry, std::string_view(button->target), "Toggle", "", audio);
                     }
                 }

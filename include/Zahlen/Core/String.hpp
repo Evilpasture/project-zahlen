@@ -46,15 +46,20 @@ class FixedString {
         _data[_len] = '\0';
     }
 
-    [[nodiscard]] constexpr auto data() noexcept -> char* {
+    [[nodiscard]] constexpr auto data() & noexcept -> char* {
         return _data.data();
     }
-    [[nodiscard]] constexpr auto data() const noexcept -> const char* {
+    [[nodiscard]] constexpr auto data() const& noexcept -> const char* {
         return _data.data();
     }
-    [[nodiscard]] constexpr auto c_str() const noexcept -> const char* {
+    constexpr auto data() &&      = delete;
+    constexpr auto data() const&& = delete;
+
+    [[nodiscard]] constexpr auto c_str() const& noexcept -> const char* {
         return _data.data();
     }
+    constexpr auto c_str() const&& = delete;
+
     [[nodiscard]] constexpr auto size() const noexcept -> size_t {
         return _len;
     }
@@ -65,16 +70,17 @@ class FixedString {
         return Capacity;
     }
 
-    constexpr auto operator[](size_t i) noexcept -> char& {
+    constexpr auto operator[](size_t i) & noexcept -> char& {
         return _data[i];
     }
-    constexpr auto operator[](size_t i) const noexcept -> const char& {
+    constexpr auto operator[](size_t i) const& noexcept -> const char& {
         return _data[i];
     }
 
-    [[nodiscard]] constexpr operator std::string_view() const noexcept {
+    [[nodiscard]] constexpr operator std::string_view() const& noexcept {
         return std::string_view {_data.data(), _len};
     }
+    constexpr operator std::string_view() const&& = delete;
 
     constexpr auto operator<=>(const FixedString& other) const noexcept {
         return std::string_view(*this) <=> std::string_view(other);
@@ -84,9 +90,10 @@ class FixedString {
         return std::string_view(*this) == std::string_view(other);
     }
 
-    [[nodiscard]] constexpr operator const char*() const noexcept {
+    [[nodiscard]] constexpr operator const char*() const& noexcept {
         return _data.data();
     }
+    constexpr operator const char*() const&& = delete;
 
     constexpr void clear() noexcept {
         _len     = 0;

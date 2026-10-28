@@ -339,7 +339,13 @@ struct ReflectLuaSuite {
 
         auto TestShippedConfigProfiles() -> std::expected<void, ZHLN::ErrorCode> {
             const auto findConfig = [](std::string_view fileName) -> std::filesystem::path {
-                for (std::string_view prefix: {"config", "../config", "../../config"}) {
+                if (!ZHLN::ProjectRoot.empty()) {
+                    std::filesystem::path fromRoot = std::filesystem::path(ZHLN::ProjectRoot) / "config" / fileName;
+                    if (std::filesystem::exists(fromRoot)) {
+                        return fromRoot;
+                    }
+                }
+                for (std::string_view prefix: {"config", "../config", "../../config", "../../../config"}) {
                     std::filesystem::path candidate = std::filesystem::path(prefix) / fileName;
                     if (std::filesystem::exists(candidate)) {
                         return candidate;

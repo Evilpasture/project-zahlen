@@ -330,7 +330,9 @@ namespace TemplatedDetail {
 
 template <std::size_t N>
 struct StructuralStringLiteral {
-    char data[N] {};
+    static constexpr std::size_t kStorageSize = (((N > 0 ? N : 1) + 7u) / 8u) * 8u;
+
+    char data[kStorageSize] {};
 
     constexpr StructuralStringLiteral() = default;
     constexpr StructuralStringLiteral(const char (&str)[N]) {
@@ -414,13 +416,13 @@ struct NamedCase {
     static constexpr bool        hasCustomName = true;
     static constexpr std::size_t arity         = sizeof...(Ts);
 
-    TemplatedDetail::StructuralStringLiteral<NameN> caseId;
     TemplatedDetail::StructuralTuple<Ts...>         values;
+    TemplatedDetail::StructuralStringLiteral<NameN> caseId;
 
     template <typename... Us>
         requires (sizeof...(Us) == sizeof...(Ts))
     constexpr explicit NamedCase(const char (&id)[NameN], Us&&... args)
-        : caseId(id), values(std::forward<Us>(args)...) {}
+        : values(std::forward<Us>(args)...), caseId(id) {}
 };
 
 template <std::size_t NameN, typename... Us>
@@ -2296,8 +2298,9 @@ decltype(auto) ResolveMixedParameter([[maybe_unused]] FixtureRuntimeContext& fix
     if constexpr (IsTestFixture<CleanParam>) {
         return ResolveFixtureParameter<ParamType>(fixtures);
     } else {
-        constexpr std::size_t ord = NonFixtureOrdinal<Method, ParamIdx>();
-        return ConvertCaseArgument<ParamType>(GetStructuralElement<ord>(RowConstant.values));
+        constexpr std::size_t ord  = NonFixtureOrdinal<Method, ParamIdx>();
+        static constexpr auto elem = GetStructuralElement<ord>(RowConstant.values);
+        return ConvertCaseArgument<ParamType>(elem);
     }
 }
 

@@ -874,12 +874,14 @@ auto ComputeOcclusionDirectGain(const AudioOcclusionDesc& desc) noexcept -> floa
 }
 
 struct AudioContext::Impl {
-    ma_engine engine {};
-    bool      initialized = false;
-    bool      headless    = false;
-    uint32_t  sampleRate  = kDefaultSampleRate;
-    uint32_t  channels    = kDefaultChannels;
-    JPH::Vec3 listenerPos = JPH::Vec3::sZero();
+    ma_resource_manager headlessResourceManager {};
+    bool                hasHeadlessResourceManager = false;
+    ma_engine           engine {};
+    bool                initialized = false;
+    bool                headless    = false;
+    uint32_t            sampleRate  = kDefaultSampleRate;
+    uint32_t            channels    = kDefaultChannels;
+    JPH::Vec3           listenerPos = JPH::Vec3::sZero();
 
     std::array<BusSlot, kMaxAudioBuses> buses {};
     ReverbAuxNode                       reverbNode {};
@@ -904,6 +906,47 @@ struct AudioContext::Impl {
     mutable ZHLN::Mutex voiceMutex {};
     ZHLN::Mutex         transientMutex {};
     ZHLN::Mutex         eventMutex {};
+    ZHLN::Mutex         headlessJobMutex {};
+
+    [[nodiscard]] auto InitHeadlessResourceManager(uint32_t targetSampleRate) -> bool {
+        if (hasHeadlessResourceManager) {
+            return true;
+        }
+        ma_resource_manager_config rmCfg = ma_resource_manager_config_init();
+        rmCfg.decodedFormat              = ma_format_f32;
+        rmCfg.decodedChannels            = 0;
+        rmCfg.decodedSampleRate          = targetSampleRate;
+        rmCfg.jobThreadCount             = 0;
+        rmCfg.flags                      = MA_RESOURCE_MANAGER_FLAG_NO_THREADING | MA_RESOURCE_MANAGER_FLAG_NON_BLOCKING;
+        if (ma_resource_manager_init(&rmCfg, &headlessResourceManager) != MA_SUCCESS) {
+            return false;
+        }
+        hasHeadlessResourceManager = true;
+        return true;
+    }
+
+    void UninitHeadlessResourceManager() noexcept {
+        if (!hasHeadlessResourceManager) {
+            return;
+        }
+        DrainHeadlessResourceManagerJobs();
+        ma_resource_manager_uninit(&headlessResourceManager);
+        hasHeadlessResourceManager = false;
+    }
+
+    void DrainHeadlessResourceManagerJobs() noexcept {
+        if (!hasHeadlessResourceManager) {
+            return;
+        }
+        Lock(headlessJobMutex, [&]() noexcept -> void {
+            for (uint32_t i = 0; i < 1024; ++i) {
+                const ma_result res = ma_resource_manager_process_next_job(&headlessResourceManager);
+                if (res == MA_NO_DATA_AVAILABLE || res == MA_CANCELLED) {
+                    break;
+                }
+            }
+        });
+    }
 
     [[nodiscard]] auto ResolveBusIndexLocked(AudioBusId bus) const noexcept -> uint8_t {
         if (bus.index < kMaxAudioBuses && buses[bus.index].allocated) {
@@ -1168,6 +1211,7 @@ struct AudioContext::Impl {
         auto*           sound = soundPool.Create();
         ma_sound_group* group = ResolveGroupPtr(ev.bus);
         if (ma_sound_init_from_file(&engine, ev.filepath.c_str(), MA_SOUND_FLAG_NO_SPATIALIZATION, group, nullptr, sound) == MA_SUCCESS) {
+            DrainHeadlessResourceManagerJobs();
             ma_sound_set_volume(sound, std::max(0.0f, ev.volume));
             ma_sound_set_pitch(sound, std::max(0.01f, ev.pitch));
             ma_sound_start(sound);
@@ -1184,6 +1228,7 @@ struct AudioContext::Impl {
         auto*           sound = soundPool.Create();
         ma_sound_group* group = ResolveGroupPtr(ev.bus);
         if (ma_sound_init_from_file(&engine, ev.filepath.c_str(), 0, group, nullptr, sound) == MA_SUCCESS) {
+            DrainHeadlessResourceManagerJobs();
             ma_sound_set_position(sound, ev.position.GetX(), ev.position.GetY(), ev.position.GetZ());
             ma_sound_set_volume(sound, std::max(0.0f, ev.volume));
             ma_sound_set_pitch(sound, std::max(0.01f, ev.pitch));
@@ -1298,16 +1343,25 @@ struct AudioContext::Impl {
 AudioContext::AudioContext(const AudioConfig& cfg) : _impl(std::make_unique<Impl>()) {
     _impl->activeVoiceSlots.reserve(MAX_VOICE_SLOTS);
 
+    const uint32_t targetSampleRate = (cfg.sampleRate > 0) ? cfg.sampleRate : kDefaultSampleRate;
+    const uint32_t targetChannels   = (cfg.channels > 0) ? std::min(cfg.channels, kMaxNodeChannels) : kDefaultChannels;
+
     ma_engine_config engineCfg = ma_engine_config_init();
-    engineCfg.sampleRate       = (cfg.sampleRate > 0) ? cfg.sampleRate : kDefaultSampleRate;
-    engineCfg.channels         = (cfg.channels > 0) ? std::min(cfg.channels, kMaxNodeChannels) : kDefaultChannels;
+    engineCfg.sampleRate       = targetSampleRate;
+    engineCfg.channels         = targetChannels;
     engineCfg.noDevice         = cfg.headless ? MA_TRUE : MA_FALSE;
+    if (cfg.headless && _impl->InitHeadlessResourceManager(targetSampleRate)) {
+        engineCfg.pResourceManager = &_impl->headlessResourceManager;
+    }
 
     ma_result result = ma_engine_init(&engineCfg, &_impl->engine);
     if (result != MA_SUCCESS && !cfg.headless) {
         // Gracefully fall back to a headless miniaudio graph on machines without an audio device (e.g. CI containers).
         engineCfg.noDevice = MA_TRUE;
-        result             = ma_engine_init(&engineCfg, &_impl->engine);
+        if (_impl->InitHeadlessResourceManager(targetSampleRate)) {
+            engineCfg.pResourceManager = &_impl->headlessResourceManager;
+        }
+        result = ma_engine_init(&engineCfg, &_impl->engine);
         if (result == MA_SUCCESS) {
             _impl->headless = true;
             ZHLN::LogWarning("[Audio] No playback device available; running AudioContext in headless mixer mode.");
@@ -1317,6 +1371,7 @@ AudioContext::AudioContext(const AudioConfig& cfg) : _impl(std::make_unique<Impl
     }
 
     if (result != MA_SUCCESS) {
+        _impl->UninitHeadlessResourceManager();
         ZHLN::LogError("Failed to initialize miniaudio engine! Result code: {}", static_cast<int>(result));
         return;
     }
@@ -1351,6 +1406,7 @@ AudioContext::AudioContext(const AudioConfig& cfg) : _impl(std::make_unique<Impl
             }
         }
         ma_engine_uninit(&_impl->engine);
+        _impl->UninitHeadlessResourceManager();
         return;
     }
 
@@ -1407,6 +1463,7 @@ AudioContext::~AudioContext() {
         }
 
         ma_engine_uninit(&_impl->engine);
+        _impl->UninitHeadlessResourceManager();
         _impl->initialized = false;
     }
 }
@@ -1860,6 +1917,7 @@ auto AudioContext::CreateVoice(std::string_view filepath, const VoiceDesc& desc)
                     slot.sendNode.nodeInit = false;
                     return AudioHandle::Invalid;
                 }
+                _impl->DrainHeadlessResourceManagerJobs();
 
                 slot.hasMemoryDecoder = false;
                 _impl->FinalizeVoiceSlotStateLocked(slot, i, busIdx, desc);
@@ -2002,7 +2060,11 @@ auto AudioContext::SeekVoiceSeconds(AudioHandle handle, float seconds) -> bool {
         if (!slot.inUse.load(std::memory_order::relaxed) || slot.generation.load(std::memory_order::relaxed) != gen) {
             return false;
         }
-        return ma_sound_seek_to_second(&slot.sound, std::max(0.0f, seconds)) == MA_SUCCESS;
+        const bool ok = ma_sound_seek_to_second(&slot.sound, std::max(0.0f, seconds)) == MA_SUCCESS;
+        if (ok) {
+            _impl->DrainHeadlessResourceManagerJobs();
+        }
+        return ok;
     });
 }
 
@@ -2495,11 +2557,24 @@ auto AudioContext::RenderOfflineFrames(std::span<float> interleavedOutput) -> ui
         return 0;
     }
     std::ranges::fill(interleavedOutput, 0.0f);
-    ma_uint64 framesRead = 0;
-    if (ma_engine_read_pcm_frames(&_impl->engine, interleavedOutput.data(), frameCapacity, &framesRead) != MA_SUCCESS) {
-        return 0;
+
+    // Step in sub-page chunks (~85 ms at 48 kHz vs 1000 ms resource-manager pages)
+    // so stream page-refill jobs posted on page boundaries execute inline before
+    // the alternate page is exhausted.
+    constexpr ma_uint64 kMaxChunkFrames = 4096;
+    ma_uint64           totalFramesRead = 0;
+    while (totalFramesRead < frameCapacity) {
+        _impl->DrainHeadlessResourceManagerJobs();
+        const ma_uint64 chunkTarget = std::min(kMaxChunkFrames, frameCapacity - totalFramesRead);
+        float*          dst         = interleavedOutput.data() + static_cast<size_t>(totalFramesRead * _impl->channels);
+        ma_uint64       chunkRead   = 0;
+        if (ma_engine_read_pcm_frames(&_impl->engine, dst, chunkTarget, &chunkRead) != MA_SUCCESS || chunkRead == 0) {
+            break;
+        }
+        totalFramesRead += chunkRead;
     }
-    return static_cast<uint64_t>(framesRead);
+    _impl->DrainHeadlessResourceManagerJobs();
+    return static_cast<uint64_t>(totalFramesRead);
 }
 
 } // namespace ZHLN

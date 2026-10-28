@@ -85,9 +85,9 @@ void FireEntityInput(
                         button->state     = ((button->flags & ButtonFlags::DontMove) != ButtonFlags::None) ? ButtonState::Pressed : ButtonState::MovingIn;
                         button->waitTimer = button->wait;
                         if ((button->flags & ButtonFlags::DontMove) != ButtonFlags::None) {
-                            button->progress = 1.0f;
-                            FireEntityOutputs(registry, e, "OnPressed", audio);
-                            if (!button->target.empty()) {
+                            button->progress          = 1.0f;
+                            const uint32_t firedCount = FireEntityOutputs(registry, e, "OnPressed", audio);
+                            if (firedCount == 0 && !button->target.empty()) {
                                 FireEntityInput(registry, std::string_view(button->target), "Toggle", "", audio);
                             }
                         }
@@ -160,12 +160,13 @@ void FireEntityInput(
     }
 }
 
-void FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio) {
+uint32_t FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio) {
     auto conn = registry.Get<EntityConnectionComponent>(entity);
     if (!conn) {
-        return;
+        return 0;
     }
 
+    uint32_t fired = 0;
     for (uint32_t i = 0; i < conn->outputCount; ++i) {
         auto& out = conn->outputs[i];
         if (std::string_view(out.event) == event) {
@@ -177,8 +178,10 @@ void FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view 
             }
 
             FireEntityInput(registry, std::string_view(out.target), std::string_view(out.input), std::string_view(out.parameter), audio);
+            ++fired;
         }
     }
+    return fired;
 }
 
 // --- The translation pass ---------------------------------------------------

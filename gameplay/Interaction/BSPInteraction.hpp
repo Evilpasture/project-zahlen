@@ -51,8 +51,9 @@ void FireEntityInput(
     ZHLN::Optional<AudioContext&> audio     = std::nullopt
 );
 
-// Evaluates and fires entity outputs for a specific event ("OnPressed", "OnOpen", etc.)
-void FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio = std::nullopt);
+// Evaluates and fires entity outputs for a specific event ("OnPressed", "OnOpen", etc.),
+// returning the number of matching outputs dispatched.
+uint32_t FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio = std::nullopt);
 
 // Translates a map's interactive entities into this layer's components:
 // DoorComponent, ButtonComponent, TriggerComponent, EntityConnectionComponent

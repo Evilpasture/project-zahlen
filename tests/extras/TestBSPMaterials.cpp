@@ -751,15 +751,16 @@ struct BSPMaterialsTestSuite {
                 }
             }
 
-            // A lit shader with a bright panel and no keyvalues: the texture
-            // luminance carries it, at the VertexLitGeneric scale.
+            // An ordinary lit shader (VertexLitGeneric) with a bright texture
+            // and no $selfillum does not emit: lit paint is shaded by scene
+            // lighting rather than glowing on its own.
             {
                 const Parsed parsed = parseMaterial("lights/panel_lit");
                 if (!ZHLN::Test::ExpectTrue(parsed.ok)) {
                     return Fail();
                 }
                 const auto emission = ZHLN::BSP::ResolveVmtEmission(vfs, parsed.material);
-                if (!ZHLN::Test::ExpectInRange(emission.strength, 0.549f, 0.551f)) {
+                if (!ZHLN::Test::ExpectInRange(emission.strength, 0.0f, 0.0f)) {
                     return Fail();
                 }
             }

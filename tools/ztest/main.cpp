@@ -58,6 +58,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -144,18 +145,110 @@ auto IsStdoutInteractive() noexcept -> bool {
 #endif
 }
 
+auto QueryTerminalColumns() noexcept -> std::size_t {
+#if defined(_WIN32)
+    CONSOLE_SCREEN_BUFFER_INFO csbi {};
+    if (::GetConsoleScreenBufferInfo(::GetStdHandle(STD_OUTPUT_HANDLE), &csbi) != 0) {
+        const int width = static_cast<int>(csbi.srWindow.Right) - static_cast<int>(csbi.srWindow.Left) + 1;
+        if (width > 1) {
+            return static_cast<std::size_t>(width);
+        }
+    }
+#else
+    for (const int fd: {STDOUT_FILENO, STDERR_FILENO, STDIN_FILENO}) {
+        struct winsize ws {};
+        if (::ioctl(fd, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 1) {
+            return static_cast<std::size_t>(ws.ws_col);
+        }
+    }
+#endif
+    if (const char* envCols = std::getenv("COLUMNS"); envCols != nullptr) {
+        const std::string_view sv {envCols};
+        std::size_t            parsed = 0;
+        const auto [ptr, ec]          = std::from_chars(sv.data(), sv.data() + sv.size(), parsed);
+        if (ec == std::errc {} && ptr == sv.data() + sv.size() && parsed > 1) {
+            return parsed;
+        }
+    }
+    return 120;
+}
+
+auto TrimUtf8Prefix(std::string_view sv, std::size_t maxBytes) noexcept -> std::string_view {
+    if (sv.size() <= maxBytes) {
+        return sv;
+    }
+    std::size_t end = maxBytes;
+    while (end > 0 && (static_cast<unsigned char>(sv[end]) & 0xC0u) == 0x80u) {
+        --end;
+    }
+    return sv.substr(0, end);
+}
+
+auto TrimUtf8Suffix(std::string_view sv, std::size_t maxBytes) noexcept -> std::string_view {
+    if (sv.size() <= maxBytes) {
+        return sv;
+    }
+    std::size_t start = sv.size() - maxBytes;
+    while (start < sv.size() && (static_cast<unsigned char>(sv[start]) & 0xC0u) == 0x80u) {
+        ++start;
+    }
+    return sv.substr(start);
+}
+
+auto ElideMiddleToFit(std::string_view text, std::size_t maxCols) -> std::string {
+    if (text.size() <= maxCols) {
+        return std::string {text};
+    }
+    if (maxCols <= 3) {
+        return std::string {TrimUtf8Prefix(text, maxCols)};
+    }
+    const std::size_t bodyCols = maxCols - 3;
+    if (bodyCols <= 3) {
+        return std::format("...{}", TrimUtf8Suffix(text, bodyCols));
+    }
+    const std::size_t headCols = (bodyCols * 2) / 5;
+    const std::size_t tailCols = bodyCols - headCols;
+    return std::format("{}...{}", TrimUtf8Prefix(text, headCols), TrimUtf8Suffix(text, tailCols));
+}
+
+auto FormatFittedStatusLine(
+    std::string_view prefix,
+    std::string_view subject,
+    std::string_view suffix,
+    std::size_t      maxCols
+) -> std::string {
+    if (prefix.size() + subject.size() + suffix.size() <= maxCols) {
+        return std::format("{}{}{}", prefix, subject, suffix);
+    }
+    const std::size_t fixedCols = prefix.size() + suffix.size();
+    if (fixedCols + 4 <= maxCols) {
+        const std::string elidedSubject = ElideMiddleToFit(subject, maxCols - fixedCols);
+        return std::format("{}{}{}", prefix, elidedSubject, suffix);
+    }
+    const std::string full = std::format("{}{}{}", prefix, subject, suffix);
+    if (maxCols <= 3) {
+        return std::string {TrimUtf8Prefix(full, maxCols)};
+    }
+    return std::format("{}...", TrimUtf8Prefix(full, maxCols - 3));
+}
+
 class LiveStatusLine {
   public:
     explicit LiveStatusLine(bool enabled) noexcept: m_enabled(enabled) {}
 
-    void Update(std::string_view message) noexcept {
+    void Update(std::string_view prefix, std::string_view subject, std::string_view suffix) {
         if (!m_enabled) {
             return;
         }
-        constexpr std::size_t kMaxCols = 108;
-        const std::string_view clipped = message.size() > kMaxCols ? message.substr(0, kMaxCols) : message;
-        ZHLN::Print("{}{}{}{}", kClearStatusLn, ZHLN::Color::Gray, clipped, ZHLN::Color::Reset);
+        const std::size_t cols       = QueryTerminalColumns();
+        const std::size_t usableCols = cols > 1 ? cols - 1 : 1;
+        const std::string fitted     = FormatFittedStatusLine(prefix, subject, suffix, usableCols);
+        ZHLN::Print("{}{}{}{}", kClearStatusLn, ZHLN::Color::Gray, fitted, ZHLN::Color::Reset);
         m_visible = true;
+    }
+
+    void Update(std::string_view message) {
+        Update("", message, "");
     }
 
     void Clear() noexcept {
@@ -292,7 +385,7 @@ struct TargetSpec {
     std::string              name;
     std::string              binaryPath;
     std::string              workingDir;
-    std::string              pool       = "cpu"; // "cpu" or "gpu"
+    std::string              pool       = "cpu"; // "cpu", "gpu", or "serial"
     uint32_t                 timeoutSec = 120;
     std::vector<std::string> labels;
     std::vector<std::string> envVars;
@@ -1579,14 +1672,11 @@ auto CollectItems(
         if (active.size() > 3) {
             activeNames.append(", ...");
         }
-        statusLine.Update(std::format(
-            "  discovering [{}/{}] {} ({} item(s), {:.1f}s)...",
-            completedBins,
-            discoveryItems.size(),
-            activeNames.empty() ? "starting" : activeNames,
-            discovered.size(),
-            elapsedSec
-        ));
+        statusLine.Update(
+            std::format("  discovering [{}/{}] ", completedBins, discoveryItems.size()),
+            activeNames.empty() ? std::string_view {"starting"} : std::string_view {activeNames},
+            std::format(" ({} item(s), {:.1f}s)...", discovered.size(), elapsedSec)
+        );
     };
 
     refreshDiscoveryStatus(true);
@@ -1670,9 +1760,11 @@ auto CollectItems(
             return discovered;
         }
         const auto& item = discoveryItems[idx];
-        statusLine.Update(std::format(
-            "  discovering [{}/{}] {}...", idx, discoveryItems.size(), item.target->name
-        ));
+        statusLine.Update(
+            std::format("  discovering [{}/{}] ", idx, discoveryItems.size()),
+            item.target->name,
+            "..."
+        );
         const auto res = RunWorkerSyncWin32(mf, item, opts, true);
         for (const auto& line: SplitChar(res.rawOutput, '\n', false)) {
             parseListLine(*item.target, line);
@@ -1762,6 +1854,10 @@ auto BuildShardedExecutionQueue(
             }
         }
     }
+
+    std::ranges::stable_partition(queue, [](const WorkItem& item) {
+        return !EqualsIgnoreCase(item.target->pool, "serial");
+    });
     return queue;
 }
 
@@ -2082,14 +2178,11 @@ auto main(int argc, char** argv) -> int {
         if (focus.empty()) {
             focus = active.front().item.shardLabel;
         }
-        statusLine.Update(std::format(
-            "  running [{}/{}] ({} active: {}) {:.1f}s",
-            completedSoFar,
-            totalExpected,
-            active.size(),
+        statusLine.Update(
+            std::format("  running [{}/{}] ({} active: ", completedSoFar, totalExpected, active.size()),
             focus,
-            elapsedSec
-        ));
+            std::format(") {:.1f}s", elapsedSec)
+        );
     };
 
     while (!pending.empty() || !active.empty()) {
@@ -2111,10 +2204,13 @@ auto main(int argc, char** argv) -> int {
             pending.clear();
         }
 
-        uint32_t runningCpu = 0;
-        uint32_t runningGpu = 0;
+        uint32_t runningCpu    = 0;
+        uint32_t runningGpu    = 0;
+        bool     runningSerial = false;
         for (const auto& w: active) {
-            if (EqualsIgnoreCase(w.item.target->pool, "gpu")) {
+            if (EqualsIgnoreCase(w.item.target->pool, "serial")) {
+                runningSerial = true;
+            } else if (EqualsIgnoreCase(w.item.target->pool, "gpu")) {
                 ++runningGpu;
             } else {
                 ++runningCpu;
@@ -2122,13 +2218,18 @@ auto main(int argc, char** argv) -> int {
         }
 
         bool spawnedAny = false;
-        for (std::size_t idx = 0; idx < pending.size();) {
-            const bool isGpu = EqualsIgnoreCase(pending[idx].target->pool, "gpu");
-            if (isGpu && runningGpu >= opts.gpuJobs) {
+        for (std::size_t idx = 0; !runningSerial && idx < pending.size();) {
+            const bool isSerial = EqualsIgnoreCase(pending[idx].target->pool, "serial");
+            const bool isGpu    = EqualsIgnoreCase(pending[idx].target->pool, "gpu");
+            if (isSerial) {
+                if (!active.empty()) {
+                    ++idx;
+                    continue;
+                }
+            } else if (isGpu && runningGpu >= opts.gpuJobs) {
                 ++idx;
                 continue;
-            }
-            if (!isGpu && runningCpu >= opts.cpuJobs) {
+            } else if (!isGpu && runningCpu >= opts.cpuJobs) {
                 ++idx;
                 continue;
             }
@@ -2144,7 +2245,9 @@ auto main(int argc, char** argv) -> int {
             }
             active.push_back(std::move(*spawned));
             spawnedAny = true;
-            if (isGpu) {
+            if (isSerial) {
+                runningSerial = true;
+            } else if (isGpu) {
                 ++runningGpu;
             } else {
                 ++runningCpu;
@@ -2324,7 +2427,11 @@ auto main(int argc, char** argv) -> int {
         WorkItem item = std::move(pending.front());
         pending.erase(pending.begin());
 
-        statusLine.Update(std::format("  running [{}/{}] {}...", completedSoFar, totalExpected, item.shardLabel));
+        statusLine.Update(
+            std::format("  running [{}/{}] ", completedSoFar, totalExpected),
+            item.shardLabel,
+            "..."
+        );
         const ProcessResult res = RunWorkerSyncWin32(mf, item, opts, false);
         std::string         inFile;
         std::string         inNodeId;
