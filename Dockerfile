@@ -70,19 +70,19 @@ RUN cmake --build build
 # If any test fails, Docker build fails and stops the CI pipeline immediately!
 RUN ./build/bin/ztest --test-dir build -V
 
-# 4. Collect the runtime payload: the binaries, the cooked asset pak and the
-#    script tree the engine loads.
-#    cp -L is the point of this step. The build tree symlinks both non-binary
-#    payloads -- build/data/base.pak points into the shared cooked-asset cache,
-#    and the static script files under build/scripts point back into the source
-#    tree -- and a symlink copied into the runner stage resolves to a path that
-#    does not exist there. Dereferencing here means the runner copies real files.
+# 4. Collect the runtime payload: the binaries, the cooked asset pak and, when
+#    configured, the gameplay script module. build/data/base.pak points into the
+#    shared cooked-asset cache, so dereference it for the runner image. A staged
+#    build/scripts tree may also be a symlink into the source tree; the script
+#    module is optional, so only copy that tree when the build produced it.
 RUN mkdir -p /workspace/dist/data && \
     cp /workspace/build/bin/zahlen /workspace/dist/ && \
     cp /workspace/build/libzahlen_engine.so /workspace/dist/ && \
     find /workspace/build -name "libJolt.so*" -exec cp -P {} /workspace/dist/ \; && \
     cp -L /workspace/build/data/base.pak /workspace/dist/data/base.pak && \
-    cp -rL /workspace/build/scripts /workspace/dist/scripts
+    if [ -d /workspace/build/scripts ]; then \
+        cp -rL /workspace/build/scripts /workspace/dist/scripts; \
+    fi
 
 
 # ==============================================================================
