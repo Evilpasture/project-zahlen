@@ -11,8 +11,8 @@
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Physics/Collision/CastResult.h>
 #include <CommandLine/EngineCommandLine.hpp>
+#include <Jolt/Physics/Collision/CastResult.h>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Audio.hpp>
@@ -89,7 +89,9 @@
 #if defined(ZHLN_HAS_RAGDOLL_AUTHORING)
 #include <RagdollAuthoring/RagdollAuthoring.hpp>
 #endif
-
+#if defined(ZHLN_HAS_DISCORD)
+#include <Discord/EngineIntegration.hpp>
+#endif
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -281,6 +283,29 @@ void BootHostStateStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContext& /
         return;
     }
     svc->bootApplied = true;
+
+#if defined(ZHLN_HAS_DISCORD)
+    // --- 1. Start Discord Presence ---
+    const std::string discordAppId = "1548152303939358720";
+
+    if (auto started = ZHLN::Discord::StartPresence(engine, discordAppId); !started) {
+        ZHLN::LogWarning("[Discord] Failed to start presence: {}", started.error());
+    } else {
+        // --- 2. Configure initial Rich Presence activity ---
+        ZHLN::Discord::RichPresence presence;
+        presence.details        = "Testing Zahlen Engine";
+        presence.state          = "Exploring World";
+        presence.startTimestamp = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        presence.largeImage     = "logo"; // Name of the asset uploaded to Discord Dev Portal (or URL)
+        presence.largeText      = "Zahlen Engine v" ZHLN_VERSION_STR;
+
+        if (auto setRes = ZHLN::Discord::SetPresence(engine, std::move(presence)); !setRes) {
+            ZHLN::LogWarning("[Discord] Failed to set activity: {}", setRes.error());
+        } else {
+            ZHLN::Log("[Discord] Rich presence initialized successfully.");
+        }
+    }
+#endif
 
     if (!s_HostLaunchConfig.scenePath.empty()) {
         if (!LoadSceneDocument(engine, s_HostLaunchConfig.scenePath)) {
@@ -835,7 +860,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             continue;
         }
 
-        #if defined(ZHLN_HAS_FREECAM)
+#if defined(ZHLN_HAS_FREECAM)
         {
             const ZHLN::Entity camEnt = engine.GetRegistry().SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
             if (camEnt != ZHLN::Entity::Null()) {
@@ -898,27 +923,25 @@ auto main(int argc, char* argv[]) -> int {
             .key         = "--scene",
             .placeholder = "<file.toml|file.lua>",
             .description = "Instantiate a TOML or Lua scene recipe on boot",
-            .action =
-                [](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
-                    if (v.empty()) {
-                        return std::unexpected(ZHLN::CommandLineError::MissingValue);
-                    }
-                    s_HostLaunchConfig.scenePath = std::filesystem::path(v);
-                    return {};
-                },
+            .action      = [](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                if (v.empty()) {
+                    return std::unexpected(ZHLN::CommandLineError::MissingValue);
+                }
+                s_HostLaunchConfig.scenePath = std::filesystem::path(v);
+                return {};
+            },
         },
         ZHLN::CommandHandler {
             .key         = "--graphics-config",
             .placeholder = "<file.lua>",
             .description = "Path to declarative Lua graphics profile (default: config/graphics.lua)",
-            .action =
-                [](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
-                    if (v.empty()) {
-                        return std::unexpected(ZHLN::CommandLineError::MissingValue);
-                    }
-                    s_HostLaunchConfig.graphicsConfigPath = std::filesystem::path(v);
-                    return {};
-                },
+            .action      = [](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                if (v.empty()) {
+                    return std::unexpected(ZHLN::CommandLineError::MissingValue);
+                }
+                s_HostLaunchConfig.graphicsConfigPath = std::filesystem::path(v);
+                return {};
+            },
         },
     };
 
@@ -936,11 +959,10 @@ auto main(int argc, char* argv[]) -> int {
             // would open a window or a scene.
             if (options.benchmark) {
 #if defined(ZHLN_HAS_BENCHMARK)
-                return RunLogicBenchmark() ? std::expected<void, ZHLN::ErrorCode> {}
-                                           : std::unexpected(ZHLN::CommandLineError::InvalidValue);
+                return RunLogicBenchmark() ? std::expected<void, ZHLN::ErrorCode> {} : std::unexpected(ZHLN::CommandLineError::InvalidValue);
 #else
-                ZHLN::Log("[Bench] --benchmark requested, but this build has no zahlen_benchmark extension (ZHLN_BUILD_EXTRAS=OFF).");
-                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+            ZHLN::Log("[Bench] --benchmark requested, but this build has no zahlen_benchmark extension (ZHLN_BUILD_EXTRAS=OFF).");
+            return std::unexpected(ZHLN::CommandLineError::InvalidValue);
 #endif
             }
 
@@ -988,7 +1010,7 @@ auto main(int argc, char* argv[]) -> int {
             }
 
             ZHLN::SetupSignalHandler(crashState);
-            const auto pollCrashes = [](ZHLN::Engine& eng) { ZHLN::CheckForCrashes(crashState, &eng); };
+            const auto                    pollCrashes = [](ZHLN::Engine& eng) { ZHLN::CheckForCrashes(crashState, &eng); };
             const ZHLN::Engine::RunConfig runConfig {
                 .appName        = "Zahlen Engine",
                 .vsync          = options.vsync,
@@ -1000,14 +1022,14 @@ auto main(int argc, char* argv[]) -> int {
                 .onFrameEvents  = pollCrashes,
             };
 
-            // Runs the engine game loop and propagates any initialization/runtime Error.
-            // The UI callback is the benchmark panel: F3 toggles it, and an app
-            // that never presses F3 draws exactly what it drew before (the
-            // callback returns without touching the UI frame while hidden).
+        // Runs the engine game loop and propagates any initialization/runtime Error.
+        // The UI callback is the benchmark panel: F3 toggles it, and an app
+        // that never presses F3 draws exactly what it drew before (the
+        // callback returns without touching the UI frame while hidden).
 #if defined(ZHLN_HAS_BENCHMARK)
             return ZHLN::Engine::Run(runConfig, MakeBenchmarkOverlay(), &InstallHostWithState);
 #else
-            return ZHLN::Engine::Run(runConfig, nullptr, &InstallHostWithState);
+        return ZHLN::Engine::Run(runConfig, nullptr, &InstallHostWithState);
 #endif
         })
         .transform([]() -> int {

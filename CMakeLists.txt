@@ -546,6 +546,11 @@ if(ZHLN_BUILD_EXTRAS)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_LUA=1)
     endif()
 
+    if(TARGET zahlen_discord_engine)
+        target_link_libraries(zahlen PRIVATE zahlen_discord_engine)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_DISCORD=1)
+    endif()
+
     # The ragdoll authoring module used to arrive as a link dependency of the
     # scripting runtime, which is what made SetupRagdoll a scripting-layer
     # command. It is now a module the application installs, so it is the

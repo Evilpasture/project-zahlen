@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Socket/LocalEndpoint.hpp>
 #include <Socket/LocalStream.hpp>
-
 #include <algorithm>
 #include <cerrno>
 #include <climits>
@@ -15,6 +15,50 @@
 #include <utility>
 
 namespace ZHLN::Net {
+
+namespace {
+
+auto GetCandidateDirectories(IpcScope scope) -> std::vector<std::string_view> {
+    if (scope == IpcScope::SystemWide) {
+        return {"/tmp", "/var/run"};
+    }
+    // User-session priority order
+    static constexpr std::array   kEnvVars = {"XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"};
+    std::vector<std::string_view> dirs;
+    for (const char* var: kEnvVars) {
+        if (const char* val = std::getenv(var); val && val[0] != '\0') {
+            dirs.push_back(val);
+        }
+    }
+    dirs.push_back("/tmp");
+    return dirs;
+}
+} // namespace
+
+auto EnumerateLocalEndpoints(const LocalEndpointPattern pattern) -> std::vector<std::string> {
+    std::vector<std::string> endpoints;
+    auto                     dirs = GetCandidateDirectories(pattern.scope);
+
+    for (std::string_view dir: dirs) {
+        std::string base(dir);
+        if (base.back() != '/') {
+            base.push_back('/');
+        }
+        base.append(pattern.serviceName);
+
+        for (uint32_t i = 0; i < pattern.maxInstances; ++i) {
+            std::string path = base;
+            if (pattern.indexed) {
+                path.push_back('-');
+                path.append(std::to_string(i));
+            }
+            if (std::find(endpoints.begin(), endpoints.end(), path) == endpoints.end()) {
+                endpoints.push_back(std::move(path));
+            }
+        }
+    }
+    return endpoints;
+}
 
 class LocalStreamAccess {
   public:
@@ -45,18 +89,15 @@ using Clock = std::chrono::steady_clock;
     return static_cast<int>(std::clamp<int64_t>(remaining, 1, INT_MAX));
 }
 
-enum class WaitResult : uint8_t {
-    Ready,
-    TimedOut
-};
+enum class WaitResult : uint8_t { Ready, TimedOut };
 
-[[nodiscard]] auto WaitForEvent(const int descriptor, const short events, const std::chrono::milliseconds timeout) noexcept
-    -> std::expected<WaitResult, SocketFailure> {
+[[nodiscard]] auto
+    WaitForEvent(const int descriptor, const short events, const std::chrono::milliseconds timeout) noexcept -> std::expected<WaitResult, SocketFailure> {
     const auto deadline = Clock::now() + std::max(timeout, std::chrono::milliseconds::zero());
-    pollfd  event {.fd = descriptor, .events = events, .revents = 0};
+    pollfd     event {.fd = descriptor, .events = events, .revents = 0};
 
     for (;;) {
-        event.revents = 0;
+        event.revents    = 0;
         const int result = ::poll(&event, 1, RemainingMilliseconds(deadline));
         if (result > 0) {
             if ((event.revents & POLLNVAL) != 0) {
@@ -118,7 +159,7 @@ auto LocalStream::operator=(LocalStream&& other) noexcept -> LocalStream& {
     if (this != &other) {
         Close();
         _nativeHandle = std::exchange(other._nativeHandle, 0);
-        _state = std::exchange(other._state, State::Closed);
+        _state        = std::exchange(other._state, State::Closed);
     }
     return *this;
 }
@@ -127,12 +168,11 @@ void LocalStream::Close() noexcept {
     if (_state == State::Open) {
         ::close(LocalStreamAccess::Get(*this));
         _nativeHandle = 0;
-        _state = State::Closed;
+        _state        = State::Closed;
     }
 }
 
-auto LocalStream::Send(const std::span<const uint8_t> bytes, const std::chrono::milliseconds timeout) noexcept
-    -> std::expected<SocketIOResult, SocketFailure> {
+auto LocalStream::Send(const std::span<const uint8_t> bytes, const std::chrono::milliseconds timeout) noexcept -> std::expected<SocketIOResult, SocketFailure> {
     if (_state != State::Open) {
         return std::unexpected(Failure(SocketError::InvalidSocket, EBADF));
     }
@@ -140,8 +180,8 @@ auto LocalStream::Send(const std::span<const uint8_t> bytes, const std::chrono::
         return SocketIOResult {};
     }
 
-    const int descriptor = LocalStreamAccess::Get(*this);
-    const auto deadline = ConnectDeadline(timeout);
+    const int  descriptor = LocalStreamAccess::Get(*this);
+    const auto deadline   = ConnectDeadline(timeout);
 #if defined(MSG_NOSIGNAL)
     constexpr int NoSignalFlag = MSG_NOSIGNAL;
 #else
@@ -182,8 +222,7 @@ auto LocalStream::Send(const std::span<const uint8_t> bytes, const std::chrono::
     }
 }
 
-auto LocalStream::Receive(const std::span<uint8_t> bytes, const std::chrono::milliseconds timeout) noexcept
-    -> std::expected<SocketIOResult, SocketFailure> {
+auto LocalStream::Receive(const std::span<uint8_t> bytes, const std::chrono::milliseconds timeout) noexcept -> std::expected<SocketIOResult, SocketFailure> {
     if (_state != State::Open) {
         return std::unexpected(Failure(SocketError::InvalidSocket, EBADF));
     }
@@ -191,8 +230,8 @@ auto LocalStream::Receive(const std::span<uint8_t> bytes, const std::chrono::mil
         return SocketIOResult {};
     }
 
-    const int descriptor = LocalStreamAccess::Get(*this);
-    const auto deadline = ConnectDeadline(timeout);
+    const int  descriptor = LocalStreamAccess::Get(*this);
+    const auto deadline   = ConnectDeadline(timeout);
     for (;;) {
         auto ready = WaitForEvent(descriptor, POLLIN, RemainingDuration(deadline));
         if (!ready) {
@@ -227,8 +266,7 @@ auto LocalStream::Receive(const std::span<uint8_t> bytes, const std::chrono::mil
     }
 }
 
-auto ConnectLocalStream(const std::string_view endpoint, const std::chrono::milliseconds timeout) noexcept
-    -> std::expected<LocalStream, SocketFailure> {
+auto ConnectLocalStream(const std::string_view endpoint, const std::chrono::milliseconds timeout) noexcept -> std::expected<LocalStream, SocketFailure> {
     if (endpoint.empty() || endpoint.find('\0') != std::string_view::npos) {
         return std::unexpected(Failure(SocketError::InvalidEndpoint, EINVAL));
     }
@@ -256,8 +294,7 @@ auto ConnectLocalStream(const std::string_view endpoint, const std::chrono::mill
     }
 
     const int connectError = errno;
-    if (connectError != EINPROGRESS && connectError != EALREADY && connectError != EINTR &&
-        connectError != EAGAIN && connectError != EWOULDBLOCK) {
+    if (connectError != EINPROGRESS && connectError != EALREADY && connectError != EINTR && connectError != EAGAIN && connectError != EWOULDBLOCK) {
         ::close(descriptor);
         return std::unexpected(Failure(SocketError::ConnectFailed, connectError));
     }
@@ -273,7 +310,7 @@ auto ConnectLocalStream(const std::string_view endpoint, const std::chrono::mill
         return std::unexpected(Failure(SocketError::ConnectTimedOut, ETIMEDOUT));
     }
 
-    int       socketError = 0;
+    int       socketError       = 0;
     socklen_t socketErrorLength = sizeof(socketError);
     if (::getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &socketError, &socketErrorLength) != 0) {
         const int error = errno;

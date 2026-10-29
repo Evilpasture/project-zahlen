@@ -1,15 +1,33 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Socket/LocalEndpoint.hpp>
 #include <Socket/LocalStream.hpp>
 #include <Zahlen/Core/Platform.hpp>
-
 #include <algorithm>
 #include <limits>
 #include <string>
 #include <utility>
 
 namespace ZHLN::Net {
+
+auto EnumerateLocalEndpoints(const LocalEndpointPattern pattern) -> std::vector<std::string> {
+    std::vector<std::string> endpoints;
+    endpoints.reserve(pattern.maxInstances);
+
+    constexpr std::string_view PipePrefix = R"(\\?\pipe\)";
+
+    for (uint32_t i = 0; i < pattern.maxInstances; ++i) {
+        std::string path(PipePrefix);
+        path.append(pattern.serviceName);
+        if (pattern.indexed) {
+            path.push_back('-');
+            path.append(std::to_string(i));
+        }
+        endpoints.push_back(std::move(path));
+    }
+    return endpoints;
+}
 
 class LocalStreamAccess {
   public:
@@ -24,15 +42,9 @@ class LocalStreamAccess {
 
 namespace {
 
-enum class PipeError : uint8_t {
-    Other,
-    PeerClosed
-};
+enum class PipeError : uint8_t { Other, PeerClosed };
 
-enum class TransferKind : uint8_t {
-    Send,
-    Receive
-};
+enum class TransferKind : uint8_t { Send, Receive };
 
 [[nodiscard]] auto ClassifyPipeError(const DWORD error) noexcept -> PipeError {
     switch (error) {
@@ -46,11 +58,7 @@ enum class TransferKind : uint8_t {
 }
 
 [[nodiscard]] auto Failure(const SocketError error, const DWORD nativeCode = ERROR_SUCCESS) noexcept -> SocketFailure {
-    return SocketFailure {
-        .error = error,
-        .domain = SocketErrorDomain::LocalIPC,
-        .nativeCode = static_cast<int>(nativeCode)
-    };
+    return SocketFailure {.error = error, .domain = SocketErrorDomain::LocalIPC, .nativeCode = static_cast<int>(nativeCode)};
 }
 
 [[nodiscard]] auto TimeoutValue(const std::chrono::milliseconds timeout) noexcept -> DWORD {
@@ -63,27 +71,27 @@ enum class TransferKind : uint8_t {
 
 template <typename Byte, typename IoOperation>
 [[nodiscard]] auto Transfer(
-    const HANDLE handle,
-    const std::span<Byte> bytes,
+    const HANDLE                    handle,
+    const std::span<Byte>           bytes,
     const std::chrono::milliseconds timeout,
-    const TransferKind kind,
-    const SocketError ioError,
-    IoOperation&& transfer
+    const TransferKind              kind,
+    const SocketError               ioError,
+    IoOperation&&                   transfer
 ) noexcept -> std::expected<SocketIOResult, SocketFailure> {
     if (bytes.empty()) {
         return SocketIOResult {};
     }
 
     const DWORD length = bytes.size() >= static_cast<size_t>(MAXDWORD) ? MAXDWORD : static_cast<DWORD>(bytes.size());
-    HANDLE     event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE      event  = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (event == nullptr) {
         return std::unexpected(Failure(SocketError::CreationFailed, GetLastError()));
     }
 
     OVERLAPPED operation {};
-    operation.hEvent = event;
-    DWORD transferred = 0;
-    const BOOL completed = transfer(length, transferred, operation);
+    operation.hEvent       = event;
+    DWORD      transferred = 0;
+    const BOOL completed   = transfer(length, transferred, operation);
 
     if (completed == FALSE) {
         const DWORD operationError = GetLastError();
@@ -152,7 +160,7 @@ auto LocalStream::operator=(LocalStream&& other) noexcept -> LocalStream& {
     if (this != &other) {
         Close();
         _nativeHandle = std::exchange(other._nativeHandle, 0);
-        _state = std::exchange(other._state, State::Closed);
+        _state        = std::exchange(other._state, State::Closed);
     }
     return *this;
 }
@@ -161,76 +169,46 @@ void LocalStream::Close() noexcept {
     if (_state == State::Open) {
         CloseHandle(LocalStreamAccess::Get(*this));
         _nativeHandle = 0;
-        _state = State::Closed;
+        _state        = State::Closed;
     }
 }
 
-auto LocalStream::Send(const std::span<const uint8_t> bytes, const std::chrono::milliseconds timeout) noexcept
-    -> std::expected<SocketIOResult, SocketFailure> {
+auto LocalStream::Send(const std::span<const uint8_t> bytes, const std::chrono::milliseconds timeout) noexcept -> std::expected<SocketIOResult, SocketFailure> {
     if (_state != State::Open) {
         return std::unexpected(Failure(SocketError::InvalidSocket, ERROR_INVALID_HANDLE));
     }
-    const auto writeFile = [handle = LocalStreamAccess::Get(*this), bytes](
-                               const DWORD length,
-                               DWORD& transferred,
-                               OVERLAPPED& operation
-                           ) noexcept -> BOOL {
+    const auto writeFile = [handle = LocalStreamAccess::Get(*this), bytes](const DWORD length, DWORD& transferred, OVERLAPPED& operation) noexcept -> BOOL {
         return WriteFile(handle, bytes.data(), length, &transferred, &operation);
     };
     return Transfer(LocalStreamAccess::Get(*this), bytes, timeout, TransferKind::Send, SocketError::SendFailed, writeFile);
 }
 
-auto LocalStream::Receive(const std::span<uint8_t> bytes, const std::chrono::milliseconds timeout) noexcept
-    -> std::expected<SocketIOResult, SocketFailure> {
+auto LocalStream::Receive(const std::span<uint8_t> bytes, const std::chrono::milliseconds timeout) noexcept -> std::expected<SocketIOResult, SocketFailure> {
     if (_state != State::Open) {
         return std::unexpected(Failure(SocketError::InvalidSocket, ERROR_INVALID_HANDLE));
     }
-    const auto readFile = [handle = LocalStreamAccess::Get(*this), bytes](
-                              const DWORD length,
-                              DWORD& transferred,
-                              OVERLAPPED& operation
-                          ) noexcept -> BOOL {
+    const auto readFile = [handle = LocalStreamAccess::Get(*this), bytes](const DWORD length, DWORD& transferred, OVERLAPPED& operation) noexcept -> BOOL {
         return ReadFile(handle, bytes.data(), length, &transferred, &operation);
     };
     return Transfer(LocalStreamAccess::Get(*this), bytes, timeout, TransferKind::Receive, SocketError::ReceiveFailed, readFile);
 }
 
-auto ConnectLocalStream(const std::string_view endpoint, const std::chrono::milliseconds timeout) noexcept
-    -> std::expected<LocalStream, SocketFailure> {
+auto ConnectLocalStream(const std::string_view endpoint, const std::chrono::milliseconds timeout) noexcept -> std::expected<LocalStream, SocketFailure> {
     constexpr std::string_view NamedPipePrefix = R"(\\?\pipe\)";
     if (!endpoint.starts_with(NamedPipePrefix) || endpoint.find('\0') != std::string_view::npos) {
         return std::unexpected(Failure(SocketError::InvalidEndpoint, ERROR_INVALID_NAME));
     }
 
     const std::string pipeName(endpoint);
-    HANDLE            handle = CreateFileA(
-        pipeName.c_str(),
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_FLAG_OVERLAPPED,
-        nullptr
-    );
+    HANDLE            handle = CreateFileA(pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
         DWORD error = GetLastError();
         if (error == ERROR_PIPE_BUSY) {
             if (WaitNamedPipeA(pipeName.c_str(), TimeoutValue(timeout)) == FALSE) {
                 error = GetLastError();
-                return std::unexpected(Failure(
-                    error == ERROR_SEM_TIMEOUT ? SocketError::ConnectTimedOut : SocketError::ConnectFailed,
-                    error
-                ));
+                return std::unexpected(Failure(error == ERROR_SEM_TIMEOUT ? SocketError::ConnectTimedOut : SocketError::ConnectFailed, error));
             }
-            handle = CreateFileA(
-                pipeName.c_str(),
-                GENERIC_READ | GENERIC_WRITE,
-                0,
-                nullptr,
-                OPEN_EXISTING,
-                FILE_FLAG_OVERLAPPED,
-                nullptr
-            );
+            handle = CreateFileA(pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
         }
         if (handle == INVALID_HANDLE_VALUE) {
             return std::unexpected(Failure(SocketError::ConnectFailed, GetLastError()));

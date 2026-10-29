@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Discord/RichPresence.hpp>
-
+#include <Socket/LocalEndpoint.hpp>
 #include <Socket/LocalStream.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <json/JSONSchema.hpp>
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <cstddef>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdlib>
+#include <json/JSONSchema.hpp>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -33,7 +33,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 constexpr uint32_t MaxRpcPayloadSize = 1024U * 1024U;
-constexpr auto     IoTimeout = std::chrono::milliseconds(100);
+constexpr auto     IoTimeout         = std::chrono::milliseconds(100);
 constexpr auto     InitialRetryDelay = std::chrono::seconds(1);
 constexpr auto     MaximumRetryDelay = std::chrono::seconds(30);
 
@@ -52,33 +52,33 @@ struct RpcAssets {
 };
 
 struct RpcActivity {
-    uint32_t                    type = 0;
-    std::optional<std::string>  details;
-    std::optional<std::string>  state;
+    uint32_t                     type = 0;
+    std::optional<std::string>   details;
+    std::optional<std::string>   state;
     std::optional<RpcTimestamps> timestamps;
-    std::optional<RpcAssets>    assets;
+    std::optional<RpcAssets>     assets;
 };
 
 struct ActivityArguments {
-    uint64_t                 pid = 0;
+    uint64_t                   pid = 0;
     std::optional<RpcActivity> activity;
 };
 
 struct SetActivityPayload {
-    std::string        cmd;
+    std::string       cmd;
     ActivityArguments args;
-    std::string        nonce;
+    std::string       nonce;
 };
 
 struct ClearActivityArguments {
-    uint64_t                 pid = 0;
+    uint64_t                   pid = 0;
     std::optional<std::string> activity;
 };
 
 struct ClearActivityPayload {
-    std::string             cmd;
+    std::string            cmd;
     ClearActivityArguments args;
-    std::string             nonce;
+    std::string            nonce;
 };
 
 struct RpcErrorData {
@@ -87,45 +87,20 @@ struct RpcErrorData {
 };
 
 struct RpcEvent {
-    std::optional<std::string> cmd;
-    std::optional<std::string> evt;
+    std::optional<std::string>  cmd;
+    std::optional<std::string>  evt;
     std::optional<RpcErrorData> data;
 };
 
-enum class RpcClientError : uint8_t {
-    IoFailure = 1,
-    TimedOut,
-    PeerClosed,
-    InvalidFrame,
-    InvalidJson,
-    RpcRejected,
-    Stopped
-};
+enum class RpcClientError : uint8_t { IoFailure = 1, TimedOut, PeerClosed, InvalidFrame, InvalidJson, RpcRejected, Stopped };
 
-enum class ConnectFailure : uint8_t {
-    ClientUnavailable = 1,
-    RpcRejected,
-    Stopped
-};
+enum class ConnectFailure : uint8_t { ClientUnavailable = 1, RpcRejected, Stopped };
 
-enum class WorkerSignal : uint8_t {
-    Continue,
-    Stop
-};
+enum class WorkerSignal : uint8_t { Continue, Stop };
 
-enum class FrameAction : uint8_t {
-    Continue,
-    Ready,
-    Rejected,
-    Closed
-};
+enum class FrameAction : uint8_t { Continue, Ready, Rejected, Closed };
 
-enum class DrainAction : uint8_t {
-    Continue,
-    Ready,
-    Rejected,
-    Closed
-};
+enum class DrainAction : uint8_t { Continue, Ready, Rejected, Closed };
 
 struct FrameExtraction {
     std::optional<RpcFrame> frame;
@@ -133,7 +108,7 @@ struct FrameExtraction {
 };
 
 struct FrameDrain {
-    DrainAction action = DrainAction::Continue;
+    DrainAction action        = DrainAction::Continue;
     size_t      consumedBytes = 0;
 };
 
@@ -143,8 +118,8 @@ struct ActivityUpdate {
 };
 
 [[nodiscard]] auto ReadU32LittleEndian(const std::span<const uint8_t, 4> bytes) noexcept -> uint32_t {
-    return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8U) |
-           (static_cast<uint32_t>(bytes[2]) << 16U) | (static_cast<uint32_t>(bytes[3]) << 24U);
+    return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8U) | (static_cast<uint32_t>(bytes[2]) << 16U) |
+           (static_cast<uint32_t>(bytes[3]) << 24U);
 }
 
 void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t value) noexcept {
@@ -152,14 +127,6 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
     bytes[1] = static_cast<uint8_t>((value >> 8U) & 0xFFU);
     bytes[2] = static_cast<uint8_t>((value >> 16U) & 0xFFU);
     bytes[3] = static_cast<uint8_t>((value >> 24U) & 0xFFU);
-}
-
-[[nodiscard]] auto CurrentProcessId() noexcept -> uint64_t {
-#if defined(_WIN32)
-    return static_cast<uint64_t>(GetCurrentProcessId());
-#else
-    return static_cast<uint64_t>(::getpid());
-#endif
 }
 
 [[nodiscard]] auto NonEmptyText(const std::string_view value) -> std::optional<std::string> {
@@ -170,29 +137,20 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
 }
 
 [[nodiscard]] auto BuildHandshakePayload(const std::string_view applicationId) -> std::string {
-    return ReflectJSON::SerializeJSON(HandshakePayload {
-        .v = 1,
-        .client_id = std::string(applicationId)
-    });
+    return ReflectJSON::SerializeJSON(HandshakePayload {.v = 1, .client_id = std::string(applicationId)});
 }
 
 [[nodiscard]] auto BuildActivityPayload(const ActivityUpdate& update, const uint64_t nonce) -> std::string {
     const std::string nonceText = std::to_string(nonce);
     if (!update.activity) {
-        return ReflectJSON::SerializeJSON(ClearActivityPayload {
-            .cmd = "SET_ACTIVITY",
-            .args = {.pid = CurrentProcessId(), .activity = std::nullopt},
-            .nonce = nonceText
-        });
+        return ReflectJSON::SerializeJSON(
+            ClearActivityPayload {.cmd = "SET_ACTIVITY", .args = {.pid = static_cast<uint64_t>(ZHLN::GetPID()), .activity = std::nullopt}, .nonce = nonceText}
+        );
     }
 
     const RichPresence& source = *update.activity;
-    RpcActivity activity {
-        .type = 0,
-        .details = NonEmptyText(source.details),
-        .state = NonEmptyText(source.state),
-        .timestamps = std::nullopt,
-        .assets = std::nullopt
+    RpcActivity         activity {
+        .type = 0, .details = NonEmptyText(source.details), .state = NonEmptyText(source.state), .timestamps = std::nullopt, .assets = std::nullopt
     };
     if (source.startTimestamp) {
         activity.timestamps = RpcTimestamps {.start = *source.startTimestamp};
@@ -200,20 +158,15 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
 
     RpcAssets assets {
         .large_image = source.largeImage ? NonEmptyText(*source.largeImage) : std::nullopt,
-        .large_text = source.largeText ? NonEmptyText(*source.largeText) : std::nullopt
+        .large_text  = source.largeText ? NonEmptyText(*source.largeText) : std::nullopt
     };
     if (assets.large_image || assets.large_text) {
         activity.assets = std::move(assets);
     }
 
     return ReflectJSON::SerializeJSON(
-        SetActivityPayload {
-            .cmd = "SET_ACTIVITY",
-            .args = {.pid = CurrentProcessId(), .activity = std::move(activity)},
-            .nonce = nonceText
-        },
-        0,
-        {.omitEmpty = true}
+        SetActivityPayload {.cmd = "SET_ACTIVITY", .args = {.pid = static_cast<uint64_t>(ZHLN::GetPID()), .activity = std::move(activity)}, .nonce = nonceText},
+        0, {.omitEmpty = true}
     );
 }
 
@@ -225,67 +178,17 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
     return std::move(*parsed);
 }
 
-[[nodiscard]] auto DiscoverEndpoints() -> std::vector<std::string> {
-    std::vector<std::string> endpoints;
-#if defined(_WIN32)
-    constexpr std::string_view PipePrefix = "\\\\?\\pipe\\discord-ipc-";
-    endpoints.reserve(10);
-    for (uint32_t index = 0; index < 10; ++index) {
-        std::string endpoint(PipePrefix);
-        endpoint.append(std::to_string(index));
-        endpoints.push_back(std::move(endpoint));
-    }
-#else
-    constexpr std::array<std::string_view, 4> EnvironmentVariables {
-        "XDG_RUNTIME_DIR",
-        "TMPDIR",
-        "TMP",
-        "TEMP"
-    };
-
-    const auto addDirectory = [&endpoints](const std::string_view directory) {
-        if (directory.empty()) {
-            return;
-        }
-        std::string base(directory);
-        if (base.back() != '/') {
-            base.push_back('/');
-        }
-        for (uint32_t index = 0; index < 10; ++index) {
-            std::string endpoint(base);
-            endpoint.append("discord-ipc-");
-            endpoint.append(std::to_string(index));
-            if (std::find(endpoints.begin(), endpoints.end(), endpoint) == endpoints.end()) {
-                endpoints.push_back(std::move(endpoint));
-            }
-        }
-    };
-
-    for (const std::string_view variable : EnvironmentVariables) {
-        const std::string variableName(variable);
-        if (const char* value = std::getenv(variableName.c_str()); value != nullptr && value[0] != '\0') {
-            addDirectory(value);
-        }
-    }
-    addDirectory("/tmp");
-#endif
-    return endpoints;
-}
-
-[[nodiscard]] auto WriteAll(
-    Net::LocalStream& stream,
-    const std::span<const uint8_t> bytes,
-    const std::chrono::milliseconds timeout
-) noexcept -> std::expected<void, RpcClientError> {
+[[nodiscard]] auto WriteAll(Net::LocalStream& stream, const std::span<const uint8_t> bytes, const std::chrono::milliseconds timeout) noexcept
+    -> std::expected<void, RpcClientError> {
     const auto deadline = Clock::now() + std::max(timeout, std::chrono::milliseconds::zero());
-    size_t     offset = 0;
+    size_t     offset   = 0;
     while (offset < bytes.size()) {
         const auto now = Clock::now();
         if (now >= deadline) {
             return std::unexpected(RpcClientError::TimedOut);
         }
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
-        auto       result = stream.Send(bytes.subspan(offset), remaining);
+        auto       result    = stream.Send(bytes.subspan(offset), remaining);
         if (!result) {
             return std::unexpected(RpcClientError::IoFailure);
         }
@@ -304,9 +207,9 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
 }
 
 [[nodiscard]] auto SendFrame(
-    Net::LocalStream& stream,
-    const RpcOpcode opcode,
-    const std::string_view payload,
+    Net::LocalStream&               stream,
+    const RpcOpcode                 opcode,
+    const std::string_view          payload,
     const std::chrono::milliseconds timeout = std::chrono::seconds(2)
 ) noexcept -> std::expected<void, RpcClientError> {
     auto frame = EncodeRpcFrame(opcode, payload);
@@ -316,14 +219,13 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
     return WriteAll(stream, *frame, timeout);
 }
 
-[[nodiscard]] auto PopFrame(const std::span<const uint8_t> buffer) noexcept
-    -> std::expected<FrameExtraction, RpcProtocolError> {
+[[nodiscard]] auto PopFrame(const std::span<const uint8_t> buffer) noexcept -> std::expected<FrameExtraction, RpcProtocolError> {
     if (buffer.size() < 8) {
         return FrameExtraction {};
     }
 
-    const auto opcodeBytes = std::span<const uint8_t, 4> {buffer.data(), 4};
-    const auto lengthBytes = std::span<const uint8_t, 4> {buffer.data() + 4, 4};
+    const auto     opcodeBytes = std::span<const uint8_t, 4> {buffer.data(), 4};
+    const auto     lengthBytes = std::span<const uint8_t, 4> {buffer.data() + 4, 4};
     const uint32_t opcodeValue = ReadU32LittleEndian(opcodeBytes);
     const uint32_t payloadSize = ReadU32LittleEndian(lengthBytes);
     if (payloadSize > MaxRpcPayloadSize) {
@@ -340,14 +242,10 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
     if (opcodeValue != static_cast<uint32_t>(decoded->opcode)) {
         return std::unexpected(RpcProtocolError::InvalidFrame);
     }
-    return FrameExtraction {
-        .frame = std::move(*decoded),
-        .consumedBytes = static_cast<size_t>(payloadSize) + 8
-    };
+    return FrameExtraction {.frame = std::move(*decoded), .consumedBytes = static_cast<size_t>(payloadSize) + 8};
 }
 
-[[nodiscard]] auto ProcessFrame(Net::LocalStream& stream, const RpcFrame& frame) noexcept
-    -> std::expected<FrameAction, RpcClientError> {
+[[nodiscard]] auto ProcessFrame(Net::LocalStream& stream, const RpcFrame& frame) noexcept -> std::expected<FrameAction, RpcClientError> {
     switch (frame.opcode) {
         case RpcOpcode::Ping: {
             auto pong = SendFrame(stream, RpcOpcode::Pong, frame.payload);
@@ -379,10 +277,7 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
     return std::unexpected(RpcClientError::InvalidFrame);
 }
 
-[[nodiscard]] auto DrainFrames(
-    Net::LocalStream& stream,
-    const std::span<const uint8_t> buffer
-) noexcept -> std::expected<FrameDrain, RpcClientError> {
+[[nodiscard]] auto DrainFrames(Net::LocalStream& stream, const std::span<const uint8_t> buffer) noexcept -> std::expected<FrameDrain, RpcClientError> {
     FrameDrain drained;
     while (drained.consumedBytes < buffer.size()) {
         auto extraction = PopFrame(buffer.subspan(drained.consumedBytes));
@@ -415,15 +310,14 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
     return drained;
 }
 
-[[nodiscard]] auto WaitForReady(Net::LocalStream& stream, const std::atomic<WorkerSignal>& workerSignal) noexcept
-    -> std::expected<void, RpcClientError> {
-    const auto deadline = Clock::now() + std::chrono::seconds(5);
+[[nodiscard]] auto WaitForReady(Net::LocalStream& stream, const std::atomic<WorkerSignal>& workerSignal) noexcept -> std::expected<void, RpcClientError> {
+    const auto                deadline = Clock::now() + std::chrono::seconds(5);
     std::array<uint8_t, 4096> scratch {};
     std::vector<uint8_t>      receiveBuffer;
 
     while (workerSignal.load(std::memory_order::acquire) == WorkerSignal::Continue && Clock::now() < deadline) {
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now());
-        auto       received = stream.Receive(scratch, std::min(IoTimeout, remaining));
+        auto       received  = stream.Receive(scratch, std::min(IoTimeout, remaining));
         if (!received) {
             return std::unexpected(RpcClientError::IoFailure);
         }
@@ -434,19 +328,12 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
             continue;
         }
 
-        receiveBuffer.insert(
-            receiveBuffer.end(),
-            scratch.begin(),
-            scratch.begin() + static_cast<std::ptrdiff_t>(received->bytes)
-        );
+        receiveBuffer.insert(receiveBuffer.end(), scratch.begin(), scratch.begin() + static_cast<std::ptrdiff_t>(received->bytes));
         auto drained = DrainFrames(stream, receiveBuffer);
         if (!drained) {
             return std::unexpected(drained.error());
         }
-        receiveBuffer.erase(
-            receiveBuffer.begin(),
-            receiveBuffer.begin() + static_cast<std::ptrdiff_t>(drained->consumedBytes)
-        );
+        receiveBuffer.erase(receiveBuffer.begin(), receiveBuffer.begin() + static_cast<std::ptrdiff_t>(drained->consumedBytes));
         if (drained->action == DrainAction::Ready) {
             return {};
         }
@@ -463,22 +350,26 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
     return std::unexpected(RpcClientError::TimedOut);
 }
 
-[[nodiscard]] auto ConnectToDiscord(
-    const std::string_view applicationId,
-    const std::atomic<WorkerSignal>& workerSignal
-) noexcept -> std::expected<Net::LocalStream, ConnectFailure> {
+[[nodiscard]] auto ConnectToDiscord(const std::string_view applicationId, const std::atomic<WorkerSignal>& workerSignal) noexcept
+    -> std::expected<Net::LocalStream, ConnectFailure> {
+    // Clean, declarative endpoint discovery:
+    const auto candidateEndpoints =
+        Net::EnumerateLocalEndpoints({.serviceName = "discord-ipc", .scope = Net::IpcScope::UserSession, .maxInstances = 10, .indexed = true});
+
     ConnectFailure latestFailure = ConnectFailure::ClientUnavailable;
-    for (const std::string& endpoint : DiscoverEndpoints()) {
+
+    for (const std::string& endpoint: candidateEndpoints) {
         if (workerSignal.load(std::memory_order::acquire) == WorkerSignal::Stop) {
             return std::unexpected(ConnectFailure::Stopped);
         }
+
         auto stream = Net::ConnectLocalStream(endpoint, std::chrono::milliseconds(250));
         if (!stream) {
             continue;
         }
 
         const auto handshakePayload = BuildHandshakePayload(applicationId);
-        auto sent = SendFrame(*stream, RpcOpcode::Handshake, handshakePayload);
+        auto       sent             = SendFrame(*stream, RpcOpcode::Handshake, handshakePayload);
         if (!sent) {
             continue;
         }
@@ -498,10 +389,7 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
     return std::unexpected(latestFailure);
 }
 
-[[nodiscard]] auto BuildUpdate(
-    std::optional<RichPresence> activity,
-    const uint64_t revision
-) -> ActivityUpdate {
+[[nodiscard]] auto BuildUpdate(std::optional<RichPresence> activity, const uint64_t revision) -> ActivityUpdate {
     return ActivityUpdate {.activity = std::move(activity), .revision = revision};
 }
 
@@ -511,7 +399,7 @@ auto ValidateApplicationId(const std::string_view applicationId) noexcept -> std
     if (applicationId.empty()) {
         return std::unexpected(PresenceError::InvalidApplicationId);
     }
-    for (const char digit : applicationId) {
+    for (const char digit: applicationId) {
         if (digit < '0' || digit > '9') {
             return std::unexpected(PresenceError::InvalidApplicationId);
         }
@@ -519,8 +407,7 @@ auto ValidateApplicationId(const std::string_view applicationId) noexcept -> std
     return {};
 }
 
-auto EncodeRpcFrame(const RpcOpcode opcode, const std::string_view payload) noexcept
-    -> std::expected<std::vector<uint8_t>, RpcProtocolError> {
+auto EncodeRpcFrame(const RpcOpcode opcode, const std::string_view payload) noexcept -> std::expected<std::vector<uint8_t>, RpcProtocolError> {
     if (payload.size() > MaxRpcPayloadSize || payload.size() > std::numeric_limits<uint32_t>::max()) {
         return std::unexpected(RpcProtocolError::PayloadTooLarge);
     }
@@ -569,10 +456,7 @@ auto DecodeRpcFrame(const std::span<const uint8_t> bytes) noexcept -> std::expec
             return std::unexpected(RpcProtocolError::UnsupportedOpcode);
     }
 
-    return RpcFrame {
-        .opcode = opcode,
-        .payload = std::string(reinterpret_cast<const char*>(bytes.data() + 8), payloadSize)
-    };
+    return RpcFrame {.opcode = opcode, .payload = std::string(reinterpret_cast<const char*>(bytes.data() + 8), payloadSize)};
 }
 
 class DiscordPresenceClient::Impl {
@@ -600,7 +484,7 @@ class DiscordPresenceClient::Impl {
         state.store(PresenceState::Connecting, std::memory_order::release);
         lifecycle = Lifecycle::Running;
         const TaskSystem::Task task {.func = &RunTask, .arg = this};
-        auto scheduled = TaskSystem::DispatchBackground(task, &workerCompletion);
+        auto                   scheduled = TaskSystem::DispatchBackground(task, &workerCompletion);
         if (!scheduled) {
             lifecycle = Lifecycle::Stopped;
             workerSignal.store(WorkerSignal::Stop, std::memory_order::release);
@@ -647,10 +531,7 @@ class DiscordPresenceClient::Impl {
     }
 
   private:
-    enum class Lifecycle : uint8_t {
-        Stopped,
-        Running
-    };
+    enum class Lifecycle : uint8_t { Stopped, Running };
 
     static void RunTask(void* context) noexcept {
         auto& client = *static_cast<Impl*>(context);
@@ -659,9 +540,7 @@ class DiscordPresenceClient::Impl {
 
     void WaitToRetry(const std::chrono::seconds delay) noexcept {
         std::unique_lock waitLock(retryMutex);
-        retryCondition.wait_for(waitLock, delay, [this] {
-            return workerSignal.load(std::memory_order::acquire) == WorkerSignal::Stop;
-        });
+        retryCondition.wait_for(waitLock, delay, [this] { return workerSignal.load(std::memory_order::acquire) == WorkerSignal::Stop; });
     }
 
     [[nodiscard]] auto CurrentUpdate() -> std::optional<ActivityUpdate> {
@@ -670,16 +549,16 @@ class DiscordPresenceClient::Impl {
     }
 
     [[nodiscard]] auto RunSession(Net::LocalStream& stream) noexcept -> std::expected<void, RpcClientError> {
-        uint64_t lastSentRevision = std::numeric_limits<uint64_t>::max();
-        uint64_t nonce = 1;
-        std::vector<uint8_t> receiveBuffer;
+        uint64_t                  lastSentRevision = std::numeric_limits<uint64_t>::max();
+        uint64_t                  nonce            = 1;
+        std::vector<uint8_t>      receiveBuffer;
         std::array<uint8_t, 4096> scratch {};
 
         while (workerSignal.load(std::memory_order::acquire) == WorkerSignal::Continue) {
             auto pendingUpdate = CurrentUpdate();
             if (pendingUpdate && pendingUpdate->revision != lastSentRevision) {
                 const std::string payload = BuildActivityPayload(*pendingUpdate, nonce++);
-                auto sent = SendFrame(stream, RpcOpcode::Frame, payload);
+                auto              sent    = SendFrame(stream, RpcOpcode::Frame, payload);
                 if (!sent) {
                     return std::unexpected(sent.error());
                 }
@@ -697,19 +576,12 @@ class DiscordPresenceClient::Impl {
                 continue;
             }
 
-            receiveBuffer.insert(
-                receiveBuffer.end(),
-                scratch.begin(),
-                scratch.begin() + static_cast<std::ptrdiff_t>(received->bytes)
-            );
+            receiveBuffer.insert(receiveBuffer.end(), scratch.begin(), scratch.begin() + static_cast<std::ptrdiff_t>(received->bytes));
             auto drained = DrainFrames(stream, receiveBuffer);
             if (!drained) {
                 return std::unexpected(drained.error());
             }
-            receiveBuffer.erase(
-                receiveBuffer.begin(),
-                receiveBuffer.begin() + static_cast<std::ptrdiff_t>(drained->consumedBytes)
-            );
+            receiveBuffer.erase(receiveBuffer.begin(), receiveBuffer.begin() + static_cast<std::ptrdiff_t>(drained->consumedBytes));
             if (drained->action == DrainAction::Rejected) {
                 return std::unexpected(RpcClientError::RpcRejected);
             }
@@ -735,20 +607,16 @@ class DiscordPresenceClient::Impl {
                     break;
                 }
                 const auto failure = connection.error();
-                state.store(
-                    failure == ConnectFailure::RpcRejected ? PresenceState::RpcRejected : PresenceState::Disconnected,
-                    std::memory_order::release
-                );
+                state.store(failure == ConnectFailure::RpcRejected ? PresenceState::RpcRejected : PresenceState::Disconnected, std::memory_order::release);
                 WaitToRetry(failure == ConnectFailure::RpcRejected ? MaximumRetryDelay : retryDelay);
                 retryDelay = std::min(retryDelay * 2, MaximumRetryDelay);
                 continue;
             }
 
             state.store(PresenceState::Connected, std::memory_order::release);
-            retryDelay = InitialRetryDelay;
+            retryDelay   = InitialRetryDelay;
             auto session = RunSession(*connection);
-            if (!session && session.error() == RpcClientError::Stopped &&
-                workerSignal.load(std::memory_order::acquire) == WorkerSignal::Stop) {
+            if (!session && session.error() == RpcClientError::Stopped && workerSignal.load(std::memory_order::acquire) == WorkerSignal::Stop) {
                 break;
             }
             if (!session && session.error() == RpcClientError::RpcRejected) {
@@ -763,17 +631,17 @@ class DiscordPresenceClient::Impl {
         state.store(PresenceState::Stopped, std::memory_order::release);
     }
 
-    std::string                  applicationId;
-    mutable std::mutex           lifecycleMutex;
-    std::mutex                   mutex;
-    std::mutex                   retryMutex;
-    std::condition_variable      retryCondition;
+    std::string                   applicationId;
+    mutable std::mutex            lifecycleMutex;
+    std::mutex                    mutex;
+    std::mutex                    retryMutex;
+    std::condition_variable       retryCondition;
     std::optional<ActivityUpdate> desiredUpdate;
-    uint64_t                     revision = 0;
+    uint64_t                      revision = 0;
     std::atomic<WorkerSignal>     workerSignal {WorkerSignal::Continue};
-    std::atomic<PresenceState>   state {PresenceState::Stopped};
-    Lifecycle                    lifecycle = Lifecycle::Stopped;
-    TaskSystem::Counter          workerCompletion {};
+    std::atomic<PresenceState>    state {PresenceState::Stopped};
+    Lifecycle                     lifecycle = Lifecycle::Stopped;
+    TaskSystem::Counter           workerCompletion {};
 };
 
 DiscordPresenceClient::DiscordPresenceClient(std::string applicationId): _impl(std::make_unique<Impl>(std::move(applicationId))) {
