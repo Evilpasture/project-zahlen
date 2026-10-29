@@ -163,8 +163,17 @@ without inverting the DAG. `Zahlen/gui/FontLoader.hpp` (`BakedFontLoader`) and
 2. **The module provides the value.** Gameplay and extension modules implement
    stateless systems or data-driven loaders against Core's reflected ECS
    components.
-3. **The host connects them.** `app/main.cpp` (the composition root) links the
-   chosen modules and installs them before the first scene loads.
+3. **The host connects them.** `app/Application.cpp` supplies the reusable
+   `zahlen_application` preset and outer loop for ordinary C++ games;
+   `app/main.cpp` is a small `App().Run(...)` game. Host-specific choices live
+   in dedicated executables: `tools/editor/main.cpp` owns the paused world
+   editor, `tools/benchmark/main.cpp` owns a headless logic workload, and
+   `tools/scene/main.cpp` owns document boot, fallback, Discord and the Lua
+   graphics-file watcher. They install their modules before the first scene.
+   Core exposes only the neutral `<Zahlen/App.hpp>` declarations and never
+   names optional layers. `EngineRunConfig` contains launch settings only;
+   App's lifecycle callbacks live on `Application`, while the low-level
+   `Engine::Run` accepts an explicit `EventPoller` for hosts that need one.
 
 ### Targets and dependency order
 
@@ -189,6 +198,9 @@ and optional third-party dependencies stay local to the owning target.
 | `zahlen_project_light_lua` | `gameplay/ProjectLight/LuaBindings/` | DataModel ↔ LuaJIT adapter; the only target where the two layers meet |
 | `zahlen_alife`, `zahlen_interaction`, `zahlen_fallback_scene` | `gameplay/` | Domain-specific simulation, interaction rules, and fallback game scene |
 | `zahlen_datamodel`, `zahlen_project_light_client` | `gameplay/ProjectLight/` | ProjectLight's stable-ID object graph and optional native client |
+| `zahlen_application` | `app/` | Game loop and optional-module wiring; the `zahlen` executable links this target |
+| `zahlen_scene_documents` | `tools/scene/` | TOML/Lua scene import shared only by tools |
+| `zahlen_world_editor`, `zahlen_benchmark_app`, `zahlen_scene_host` | `tools/{editor,benchmark,scene}/` | Separate world-editor, headless-benchmark and scene/file-watcher hosts |
 
 `ZHLN_BUILD_EXTRAS` remains the existing CMake option for compatibility; it now
 gates the optional `plugins/`, `extensions/`, and `gameplay/` build layers.
@@ -242,10 +254,12 @@ A few examples illustrate the intended seam:
   components at startup, scene load, hot-reload, or console `patch`. The
   Lua-independent property inspector lives in `extensions/Scripting/`.
 
-The composition root lives in `app/`, not `src/`. It may link optional targets
-and choose what to install; Core remains usable without those targets and does
-not register or call into an optional implementation unless a Core-owned seam
-is explicitly provided.
+The ordinary-game composition root lives in `app/Application.cpp`, above
+`src/`, with optional extension `#ifdef`s confined to that wiring closet.
+`app/main.cpp` links the preset and contains only game code. Tool-specific
+composition roots live under `tools/`, each with its own executable target.
+Core remains usable without optional targets and does not register or call
+into an optional implementation unless a Core-owned seam is provided.
 
 ---
 
@@ -633,10 +647,14 @@ the same way `SceneTOML.hpp` walks `Scene::Scene`.
 
 ### Optional layer: the native editor
 
-The native world editor (Hierarchy + Inspector) is `extensions/editor/`
-(`#include <editor/GUIEditor.hpp>`), built as `zahlen_editor` and linked only
-by `app/main.cpp` under `ZHLN_HAS_EDITOR`. `--editor` without the editor target fails
-the process (`EXIT_FAILURE`) rather than falling through to the game loop.
+The native world editor (Hierarchy + Inspector) implementation is
+`extensions/editor/` (`zahlen_editor`, a library). Its dedicated executable
+is `zahlen_world_editor` (output `zahlen-editor`) at `tools/editor/main.cpp`;
+it links FreeCam and scene serialization without imposing those tool concerns
+on `app/main.cpp` or the game binary. The scene host (`zahlen-scene-host`)
+and headless benchmark (`zahlen-benchmark`) are separate executables, too.
+Legacy `zahlen --editor` / `zahlen --benchmark` flags fail with a hint rather
+than silently entering a different mode.
 
 The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 (`app/UIEditor.cpp`), built only when optional layers are enabled (the document it edits,

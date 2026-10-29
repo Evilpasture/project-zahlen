@@ -339,14 +339,12 @@ void PrintEngineHelp(
 
 auto HandleCommandLine(
     std::span<char* const>          args,
-    std::span<const CommandHandler> appHandlers
+    std::span<const CommandHandler> appHandlers,
+    CommandLineOptions             defaults
 ) -> std::expected<CommandLineOptions, ErrorCode> {
-    CommandLineOptions options {
-        .args           = args,
-        .validationMode = ValidationMode::On,
-        .launchEditor   = false,
-        .appHandlers    = appHandlers,
-    };
+    CommandLineOptions options = defaults;
+    options.args        = args;
+    options.appHandlers = appHandlers;
 
     if (const char* envVal = std::getenv("ZHLN_VALIDATION")) {
         const std::string_view val(envVal);

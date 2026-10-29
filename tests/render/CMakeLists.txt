@@ -197,6 +197,17 @@ endif()
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_SAMPLE_ASSETS_DIR="${_zhln_sample_assets_default}")
 unset(_zhln_sample_assets_default)
 
+# App/Engine::Run own their TaskSystem::Scope. Do not wrap this standalone
+# frontend test in the Headless::SessionScope used by the other GPU groups.
+zahlen_add_gpu_test_group(GPU_Application 120
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+    TestApplication.cpp
+)
+target_link_libraries(GPU_Application PRIVATE zahlen_application)
+if(TARGET zahlen_character_controller)
+    target_compile_definitions(GPU_Application PRIVATE ZHLN_TEST_APP_HAS_CHARACTER=1)
+endif()
+
 zahlen_add_gpu_test_group(GPU_Interface 180
     RunInterfaceTests.cpp
     TestViewmodel.cpp

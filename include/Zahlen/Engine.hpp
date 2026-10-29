@@ -61,15 +61,16 @@ struct UIInput;
 class ArticulationSystem;
 class Engine;
 
+// Launch settings only. The application owns its callbacks and composition;
+// neither belongs in the configuration used to create an engine.
 struct EngineRunConfig {
-    std::string_view             appName        = "Zahlen Engine";
-    bool                         vsync          = true;
-    bool                         fullscreen     = false;
-    ValidationMode               validationMode = ValidationMode::On;
-    bool                         headless       = false;
-    uint32_t                     fpsLimit       = 0;
-    GameplayDriver               driver         = GameplayDriver::Cpp;
-    std::function<void(Engine&)> onFrameEvents  = nullptr;
+    std::string_view appName        = "Zahlen Engine";
+    bool             vsync          = true;
+    bool             fullscreen     = false;
+    ValidationMode   validationMode = ValidationMode::On;
+    bool             headless       = false;
+    uint32_t         fpsLimit       = 0;
+    GameplayDriver   driver         = GameplayDriver::Cpp;
 };
 
 class ZHLN_API Engine {
@@ -266,10 +267,16 @@ class ZHLN_API Engine {
     // the first scene. It names the modules the engine runs with; the engine
     // cannot name them itself (ARCHITECTURE.md 1.2).
     using ModuleInstaller = void (*)(Engine&);
+    using EventPoller     = void (*)(Engine&);
     using RunConfig       = EngineRunConfig;
 
-    static auto Run(const RunConfig& runConfig = {}, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr)
-        -> std::expected<void, ErrorCode>;
+    // Translation of launch settings for programs that own their frame loop.
+    [[nodiscard]] static auto MakeConfig(const RunConfig& runConfig) -> EngineConfig;
+
+    // Low-level legacy runner. The optional event poller is an explicit frame
+    // seam (not a lifecycle hook smuggled through RunConfig).
+    static auto Run(const RunConfig& runConfig = {}, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr,
+                    EventPoller pollEvents = nullptr) -> std::expected<void, ErrorCode>;
 
   private:
     // Build the service bundles and the two typed graphs on first use.

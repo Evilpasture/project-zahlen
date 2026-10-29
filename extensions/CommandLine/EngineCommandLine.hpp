@@ -72,10 +72,13 @@ struct EngineError {
 };
 
 // Engine handlers win on key collisions: an application handler sharing an
-// engine key is unreachable.
+// engine key is unreachable. Defaults are applied first, then the environment,
+// then CLI flags. Hosts with nonstandard launch settings can pass their own
+// defaults without losing them when no matching flag was supplied.
 [[nodiscard]] auto HandleCommandLine(
     std::span<char* const>          args,
-    std::span<const CommandHandler> appHandlers = {}
+    std::span<const CommandHandler> appHandlers = {},
+    CommandLineOptions             defaults    = {}
 ) -> std::expected<CommandLineOptions, ErrorCode>;
 
 } // namespace ZHLN

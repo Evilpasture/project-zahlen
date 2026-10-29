@@ -81,144 +81,70 @@ MyGame/
     └── main.cpp               # Game launcher entry point
 ```
 
-### 3. Game CMakeLists.txt Boilerplate
-Create a `CMakeLists.txt` in your game's root directory. Include the engine submodule and invoke its exported asset pipeline helper (`zahlen_configure_game_assets`):
+### 3. Game CMakeLists.txt
+A game only needs to link the application preset; the engine, CLI, crash
+handling and available default gameplay extensions are its transitive dependencies.
 
 ```cmake
 cmake_minimum_required(VERSION 3.28)
-
+project(MyGame LANGUAGES C CXX ASM)
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Enable C, CXX, and ASM (Required for Engine Fibers, Thread.S & mimalloc)
-project(TestGame VERSION 0.1.0 LANGUAGES C CXX ASM)
-
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-# Add Engine Submodule
 add_subdirectory(extern/zahlen)
-
-# Game C++26 Modules Target (gameplay/*.cppm)
-file(GLOB_RECURSE GAMEPLAY_MODULE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gameplay/*.cppm")
-
-if(GAMEPLAY_MODULE_SOURCES)
-    add_library(gameplay_modules STATIC)
-    target_sources(gameplay_modules PUBLIC FILE_SET CXX_MODULES FILES ${GAMEPLAY_MODULE_SOURCES})
-    set_target_properties(gameplay_modules PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_SCAN_FOR_MODULES ON)
-
-    target_include_directories(gameplay_modules PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/gameplay
-        ${zahlen_SOURCE_DIR}/include
-        ${zahlen_SOURCE_DIR}/src
-        ${zahlen_SOURCE_DIR}/extern/JoltPhysics
-    )
-    target_compile_definitions(gameplay_modules PRIVATE JPH_DOUBLE_PRECISION JPH_SHARED_LIBRARY)
-    target_link_libraries(gameplay_modules PUBLIC zahlen_engine zahlen_ecs zahlen_audio Jolt)
-
-    if(COMPILER_HAS_REFLECTION OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
-        target_compile_options(gameplay_modules PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-    endif()
-endif()
-
-# Dynamic Gameplay Library (gameplay/*.cpp for Live Hot-Reloading)
-file(GLOB GAMEPLAY_CPP_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gameplay/*.cpp")
-
-if(GAMEPLAY_CPP_SOURCES)
-    add_library(gameplay SHARED ${GAMEPLAY_CPP_SOURCES})
-    set_target_properties(gameplay PROPERTIES CXX_SCAN_FOR_MODULES ON BUILD_RPATH "$ORIGIN;$ORIGIN/extern/zahlen/extern/JoltPhysics/Build")
-    target_include_directories(gameplay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/gameplay ${zahlen_SOURCE_DIR}/include ${zahlen_SOURCE_DIR}/src ${zahlen_SOURCE_DIR}/extern/JoltPhysics)
-    target_compile_definitions(gameplay PRIVATE JPH_DOUBLE_PRECISION JPH_SHARED_LIBRARY)
-    target_link_libraries(gameplay PRIVATE zahlen_engine Jolt)
-    if(TARGET gameplay_modules)
-        target_link_libraries(gameplay PRIVATE gameplay_modules)
-    endif()
-
-    if(COMPILER_HAS_REFLECTION OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
-        target_compile_options(gameplay PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-    endif()
-
-    add_custom_command(TARGET gameplay POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:gameplay> $<TARGET_FILE_DIR:${PROJECT_NAME}>/
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/scripts"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:gameplay> "${CMAKE_CURRENT_SOURCE_DIR}/scripts/"
-        COMMENT "Copying gameplay dynamic library for live hot-reloading..."
-    )
-endif()
-
-# Configure Game Ninja Asset Cooking Pipeline (zcook)
-zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
-
-# Game Executable Target
-add_executable(${PROJECT_NAME} src/main.cpp)
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/gameplay PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/extern>)
-target_link_libraries(${PROJECT_NAME} PRIVATE zahlen_engine imgui Jolt)
-
-if(TARGET gameplay)
-    add_dependencies(${PROJECT_NAME} gameplay)
-endif()
-
-if(TARGET gameplay_modules)
-    target_link_libraries(${PROJECT_NAME} PRIVATE gameplay_modules)
-endif()
-
-target_compile_definitions(${PROJECT_NAME} PRIVATE JPH_DOUBLE_PRECISION)
-
-if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti)
-endif()
-
-if(COMPILER_HAS_REFLECTION OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
-    target_compile_options(${PROJECT_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-endif()
+add_executable(my_game src/main.cpp)
+target_link_libraries(my_game PRIVATE zahlen_application)
+target_compile_definitions(my_game PRIVATE JPH_DOUBLE_PRECISION)
+zahlen_enable_reflection(my_game)
+zahlen_add_runtime_dlls(my_game) # Windows: stage engine/Jolt DLLs beside the game
 ```
 
-### 4. Game Entry Point Boilerplate (`src/main.cpp`)
-In your game's source folder, create `src/main.cpp` or anything you want. The engine provides a high-level, framework-like `ZHLN::Engine::Run` method that manages process initialization, engine setup, the synchronized 12-step frame loop, and command-line flags (such as `--editor` or `--fps-limit`):
+The engine requires C++26 static reflection (see Build Requirements). For an
+opt-in core-only build, set `ZHLN_BUILD_EXTRAS=OFF` before `add_subdirectory`;
+`zahlen_application` still exists, just without optional modules. Project-specific
+asset cooking and hot-reload targets can be added separately when needed.
+
+### 4. Game Entry Point (`src/main.cpp`)
+Link the reusable application layer (`target_link_libraries(my_game PRIVATE zahlen_application)`) instead of composing engine services, optional modules, crash handling and the main loop in each game. For example:
 
 ```cpp
-#include <CommandLine/EngineCommandLine.hpp>
-#include <Signal/CrashHandler.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Log.hpp>
-#include <span>
+#include <Zahlen/App.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 
 int main(int argc, char* argv[]) {
-    static ZHLN::CrashState crashState;
-    ZHLN::SetupSignalHandler(crashState);
-
-    return ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
-        .transform_error([](ZHLN::ErrorCode code) -> int {
-            ZHLN::Log("CommandLine Error: {}", ZHLN::Error(code).Message());
-            return EXIT_FAILURE;
+    return ZHLN::App()
+        .OnStart([](ZHLN::Engine& engine) {
+            // Persistent entities are created ONCE, after the default scene exists.
+            (void) ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3(1.0f, 1.0f, 1.0f));
         })
-        .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<int, int> {
-            if (options.helpRequested || options.versionRequested || options.printGraphRequested) {
-                return 0;
-            }
-
-            ZHLN::SetLogLevel(options.logLevel);
-            const auto pollCrashes = [](ZHLN::Engine& eng) { ZHLN::CheckForCrashes(crashState, &eng); };
-            const auto ran = ZHLN::Engine::Run(ZHLN::Engine::RunConfig {
-                .vsync          = options.vsync,
-                .fullscreen     = options.fullscreen,
-                .validationMode = options.validationMode,
-                .headless       = options.headless,
-                .fpsLimit       = options.fpsLimit,
-                .driver         = options.driver,
-                .onFrameEvents  = pollCrashes,
-            });
-            return ran ? std::expected<int, int> {0} : std::unexpected(EXIT_FAILURE);
-        })
-        .or_else([](int errorCode) -> std::expected<int, int> { return errorCode; })
-        .value();
+        .Run(argc, argv, [](ZHLN::Engine& engine, float dt) {
+            // Input has been pumped; this runs once each frame before engine.Tick(dt).
+            // Put input/gameplay updates here, not a new CreateBox every frame.
+            (void) engine;
+            (void) dt;
+        });
 }
 ```
 
-### 5. Active Gameplay Entry Point
-Your gameplay logic must implement the `NativeGameplayUpdate` hook, which is dynamically loaded from the compiled shared library and can be live-reloaded during runtime. Magic happens here!
+`App().Run([](ZHLN::Engine& engine) { /* per-frame code */ })` also works when you don't need command-line flags. The `(Engine&, float dt)` form gets the exact delta passed to `Tick`; callback games do not also load/watch the native `scripts/gameplay` module. With `argc, argv`, standard engine flags such as `--headless`, `--vsync` and `--fps-limit` work; `--help`, `--version` and `--print-graph` exit before engine creation. The ordinary `zahlen` binary (`app/main.cpp`) uses this API and has no editor, benchmark, or scene-host mode.
+
+`App` owns the outer frame loop: it initializes Platform/TaskSystem, creates an Engine, installs the available baked default font and CharacterController, target camera, Interaction, Terrain, Animation/IK, FreeCam and RagdollAuthoring, builds the scene, polls events, calls your game logic, then `Engine::Tick(dt)` and tears down in order. It does **not** install the missing-native-module fallback (which would replace a callback-driven game's scene). A `ZHLN_BUILD_EXTRAS=OFF` build uses just Core. Override the preset with `.WithDefaultModules(false)`, add project modules with `.Install([](ZHLN::Engine& engine) { /* install */ })` before the first scene, use `.OnUI(...)` for UI, and pass `ZHLN::EngineRunConfig{...}` to `App(config)` for **launch settings only**. `.OnStart(...)`, `.Install(...)`, and `.OnUI(...)` are application methods, not config delegates. `Engine::Run` remains available for bespoke hosts and native hot-reload setups; its optional fourth `EventPoller` argument is an explicit low-level frame seam.
+
+### Standalone tools (with `ZHLN_BUILD_EXTRAS=ON`)
+
+| Executable | Entrypoint | Purpose |
+| :--- | :--- | :--- |
+| `zahlen` | `app/main.cpp` | Ordinary game using `ZHLN::App()`; built even with extras OFF |
+| `zahlen-editor` | `tools/editor/main.cpp` | World editor with its own paused-simulation loop; `--scene <file.toml|file.lua>` imports a document, Ctrl+S saves `scene.toml` |
+| `zahlen-benchmark` | `tools/benchmark/main.cpp` | Headless logic workload; tune with `ZHLN_BENCH_ENTITIES` and `ZHLN_BENCH_TICKS` |
+| `zahlen-scene-host` | `tools/scene/main.cpp` | Scene/document and file-watcher integration; `--scene` and `--graphics-config` (Lua when available), optional Discord presence/fallback |
+| `zahlen_ui_editor` | `app/UIEditor.cpp` | Separate UI-tree editor (unchanged) |
+
+The world editor and scene host share document import in `tools/scene/SceneDocument.cpp`. Only the scene host installs the Lua graphics file watcher; it installs the native-module fallback when no scene document was requested, so a loaded document is not overwritten by that fallback. The benchmark does not initialize a window or engine. For interactive benchmark panels, use the existing `zahlen_benchmark_viewer` library in a custom host; the ordinary game has no F3/F4 benchmark overlay. Legacy `zahlen --editor` / `zahlen --benchmark` flags are rejected with a pointer to the tool binaries.
+
+### 5. Optional Native Hot-Reloaded Gameplay
+If you use the low-level native-module driver instead of `App().Run(callback)`, implement `NativeGameplayUpdate` in a shared library so it can be reloaded at runtime:
 
 Create `gameplay/gameplay.cpp` or whatever the hell you want:
 

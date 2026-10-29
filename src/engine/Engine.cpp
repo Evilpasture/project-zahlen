@@ -55,6 +55,11 @@ enum class EngineInitError : uint8_t {
     EngineAllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}) = 1,
 };
 
+enum class EngineRunError : uint8_t {
+    SceneInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine default scene initialization failed"> {}) = 1,
+    GameplayFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine gameplay frame failed"> {}) = 2,
+};
+
 struct EngineImpl {
     std::unique_ptr<Kernel> kernel;
     std::unique_ptr<World>  world;
@@ -112,11 +117,11 @@ struct EngineImpl {
 };
 
 auto Engine::UpdateNativeGameplay(float dt) -> GameplayStatus {
-    return _impl->nativeScriptModule->Update(this, dt);
+    return _impl->nativeScriptModule != nullptr ? _impl->nativeScriptModule->Update(this, dt) : GameplayStatus::OK;
 }
 
 auto Engine::IsNativeGameplayLoaded() const noexcept -> bool {
-    return _impl->nativeScriptModule->IsLoaded();
+    return _impl->nativeScriptModule != nullptr && _impl->nativeScriptModule->IsLoaded();
 }
 
 auto Engine::FallbackSceneEnabled() const noexcept -> bool {
@@ -324,7 +329,9 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         &_impl->kernel->GetPlatformHost()
     );
 
-    _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
+    if (cfg.enableNativeGameplay) {
+        _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
+    }
 
     return {};
 }
@@ -797,17 +804,10 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     return ctx.status;
 }
 
-auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstaller installModules)
-    -> std::expected<void, ErrorCode> {
-    Platform::Init();
-    // Construct before the engine so its destructor (and any cleanup tasks)
-    // finishes before the worker threads and fibers are retired.
-    TaskSystem::Scope tasks;
-
-    uint32_t w = runConfig.fullscreen ? 0 : 1280;
-    uint32_t h = runConfig.fullscreen ? 0 : 720;
-
-    EngineConfig config {
+auto Engine::MakeConfig(const RunConfig& runConfig) -> EngineConfig {
+    const uint32_t w = runConfig.fullscreen ? 0 : 1280;
+    const uint32_t h = runConfig.fullscreen ? 0 : 720;
+    return EngineConfig {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
         .render =
             {
@@ -820,6 +820,15 @@ auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstal
                 .headless       = runConfig.headless,
             },
     };
+}
+
+auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstaller installModules, EventPoller pollEvents)
+    -> std::expected<void, ErrorCode> {
+    Platform::Init();
+    // Construct before the engine so its destructor (and any cleanup tasks)
+    // finishes before the worker threads and fibers are retired.
+    TaskSystem::Scope tasks;
+    EngineConfig config = MakeConfig(runConfig);
 
     auto engine_res = Engine::Create(config);
     if (!engine_res) {
@@ -835,22 +844,25 @@ auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstal
     if (installModules != nullptr) {
         installModules(*engine);
     }
-
-    engine->InitializeDefaultScene();
+    if (!engine->InitializeDefaultScene()) {
+        return std::unexpected(EngineRunError::SceneInitializationFailed);
+    }
 
     if (uiCallback) {
         engine->SetUICallback(std::move(uiCallback));
     }
-
     const double targetFrameTime = runConfig.fpsLimit > 0 ? 1.0 / static_cast<double>(runConfig.fpsLimit) : 0.0;
     Clock        runClock({.maxDeltaTime = 0.1f});
 
     while (engine->IsRunning()) {
         const auto frameStart = Clock::SteadyClock::now();
-        if (runConfig.onFrameEvents) {
-            runConfig.onFrameEvents(*engine);
+        if (pollEvents != nullptr) {
+            pollEvents(*engine);
         }
         engine->ProcessEvents();
+        if (!engine->IsRunning()) {
+            break;
+        }
 
         const float rawDt = runClock.Tick();
 
@@ -867,9 +879,11 @@ auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstal
         const std::optional<float> pacedDt       = engine->GetRenderContext().GetPacedDeltaTime();
         const bool                 displayPaced  = pacedDt.has_value() &&
                                   (runConfig.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
-        float tickDt = displayPaced ? *pacedDt : rawDt;
-
-        GameplayStatus status = engine->Tick(tickDt, runConfig.driver);
+        const float tickDt = displayPaced ? *pacedDt : rawDt;
+        const GameplayStatus status = engine->Tick(tickDt, runConfig.driver);
+        if (status == GameplayStatus::Error) {
+            return std::unexpected(EngineRunError::GameplayFailed);
+        }
         if (status == GameplayStatus::RequestQuit) {
             engine->GetPlatformHost().Close();
             break;

@@ -411,17 +411,14 @@ add_subdirectory(extensions/Signal)
 add_subdirectory(extensions/CommandLine)
 
 add_executable(zahlen app/main.cpp)
-target_link_libraries(zahlen PRIVATE zahlen_engine zahlen_engine_cli zahlen_signal Jolt)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
 # The engine's DLL is written next to it; Jolt's is not, and PE has no rpath to
 # find it with. This is the binary a person runs, so the DLLs go beside it.
 zahlen_add_runtime_dlls(zahlen)
 
-target_include_directories(zahlen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
-set_target_properties(zahlen PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED
-                                                        ON)
+set_target_properties(zahlen PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON
+                                                        CXX_EXTENSIONS OFF)
 zahlen_set_bin_output(zahlen)
 
 if(ZHLN_BUILD_EXTRAS)
@@ -541,34 +538,9 @@ if(ZHLN_BUILD_EXTRAS)
     zahlen_ragdoll_authoring
   )
 
-    if(TARGET zahlen_lua)
-        target_link_libraries(zahlen PRIVATE zahlen_lua)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_LUA=1)
-    endif()
-
-    if(TARGET zahlen_discord_engine)
-        target_link_libraries(zahlen PRIVATE zahlen_discord_engine)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_DISCORD=1)
-    endif()
-
-    # The ragdoll authoring module used to arrive as a link dependency of the
-    # scripting runtime, which is what made SetupRagdoll a scripting-layer
-    # command. It is now a module the application installs, so it is the
-    # application that links it -- the same shape every other gameplay module
-    # has below.
-    if(TARGET zahlen_ragdoll_authoring)
-        target_link_libraries(zahlen PRIVATE zahlen_ragdoll_authoring)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_RAGDOLL_AUTHORING=1)
-    endif()
-
-    if(TARGET zahlen_editor)
-        target_link_libraries(zahlen PRIVATE zahlen_editor)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_EDITOR=1)
-    endif()
-
+    # The UI-document editor remains its own existing executable. The game
+    # does not inherit scene, Discord, editor, benchmark, or fallback targets.
     if(TARGET zahlen_serialization)
-        target_link_libraries(zahlen PRIVATE zahlen_serialization)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCENE_TOML=1)
         target_link_libraries(zahlen_ui_editor PRIVATE zahlen_serialization)
         target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_UI_TOML=1)
         if(TARGET zahlen_ui_schema)
@@ -576,52 +548,7 @@ if(ZHLN_BUILD_EXTRAS)
         endif()
     endif()
 
-    if(TARGET zahlen_character_controller)
-        target_link_libraries(zahlen PRIVATE zahlen_character_controller)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
-    endif()
-    if(TARGET zahlen_camera)
-        target_link_libraries(zahlen PRIVATE zahlen_camera)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CAMERA=1)
-    endif()
-    if(TARGET zahlen_freecam)
-        target_link_libraries(zahlen PRIVATE zahlen_freecam)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FREECAM=1)
-    endif()
-    if(TARGET zahlen_interaction)
-        target_link_libraries(zahlen PRIVATE zahlen_interaction)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_INTERACTION=1)
-    endif()
-    if(TARGET zahlen_terrain)
-        target_link_libraries(zahlen PRIVATE zahlen_terrain)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_TERRAIN=1)
-    endif()
-    if(TARGET zahlen_animation)
-        target_link_libraries(zahlen PRIVATE zahlen_animation)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_ANIMATION=1)
-    endif()
-    if(TARGET zahlen_fallback_scene)
-        target_link_libraries(zahlen PRIVATE zahlen_fallback_scene)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FALLBACK_SCENE=1)
-    endif()
-
-    # The logic benchmark. The viewer is what the app names -- it links the
-    # headless half itself -- and both halves of the extension reach the
-    # application through this one target: `zahlen --benchmark` runs the
-    # LogicBenchmark, and F3 hosts the viewer's panel in the app's window. The
-    # headless target is named too, because a --benchmark build must not depend
-    # on the viewer's CMakeLists having run first.
-    if(TARGET zahlen_benchmark)
-        target_link_libraries(zahlen PRIVATE zahlen_benchmark)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_BENCHMARK=1)
-        if(TARGET zahlen_benchmark_viewer)
-            target_link_libraries(zahlen PRIVATE zahlen_benchmark_viewer)
-        endif()
-    endif()
-
     if(TARGET zahlen_fonts)
-        target_link_libraries(zahlen PRIVATE zahlen_fonts)
-        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FONTS=1)
         target_link_libraries(zahlen_ui_editor PRIVATE zahlen_fonts)
         target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_FONTS=1)
     endif()
@@ -653,6 +580,27 @@ if(ZHLN_BUILD_EXTRAS)
         if(USE_SANITIZERS)
             zahlen_install_sanitizer_runtime(zahlen_project_light_app)
         endif()
+    endif()
+endif()
+
+# Reusable high-level game frontend. Its implementation (and optional-module
+# links) live above Core, so games can link one target without composing the
+# engine themselves. Available even in a core-only build.
+add_subdirectory(app)
+target_link_libraries(zahlen PRIVATE zahlen_application)
+
+# Tool-specific dependencies stay on tool targets. The core-only build still
+# produces a callable-driven game; extras add standalone editor, scene host and
+# windowless benchmark executables instead of bloating app/main.cpp.
+if(ZHLN_BUILD_EXTRAS)
+    if(TARGET zahlen_serialization)
+        add_subdirectory(tools/scene)
+    endif()
+    if(TARGET zahlen_editor AND TARGET zahlen_freecam AND TARGET zahlen_scene_documents)
+        add_subdirectory(tools/editor)
+    endif()
+    if(TARGET zahlen_benchmark)
+        add_subdirectory(tools/benchmark)
     endif()
 endif()
 

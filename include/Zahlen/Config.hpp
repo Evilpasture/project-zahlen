@@ -192,6 +192,8 @@ struct EngineConfig {
     PhysicsConfig physics;
     RenderConfig  render;
     bool          enableFallbackScene = true;
+    // A callback-driven app need not load/watch scripts/gameplay as well.
+    bool          enableNativeGameplay = true;
 };
 
 }

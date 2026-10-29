@@ -168,6 +168,16 @@ endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
 
+# The reusable application frontend's CLI branches are CPU-only; --help and
+# unsupported host modes must exit without creating a GPU device.
+zahlen_add_extras_group(Extras_Application
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+    TestApplication.cpp
+)
+target_link_libraries(Extras_Application PRIVATE zahlen_application)
+zahlen_register_extras_test(Extras_Application)
+zahlen_add_extras_build_alias(Extras_Application TestApplication)
+
 # --- Grouped Non-Module Extras Binaries (6 links instead of 20) ---
 
 # 1. Extras_Socket: TCP/UDP, local IPC, and Discord RPC/service integration.

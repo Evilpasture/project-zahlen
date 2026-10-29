@@ -9,8 +9,8 @@
 #
 #   TOML.hpp       reflection-driven TOML read and write
 #   SceneTOML.hpp  Jolt vector bindings; what makes a core ZHLN::Scene::Scene a
-#                  document. This is the header the composition root's Ctrl+S
-#                  path serialises through (app/main.cpp, ZHLN_HAS_SCENE_TOML).
+#                  document. The world editor's Ctrl+S path uses it directly
+#                  (tools/editor/main.cpp); tools/scene/SceneDocument.cpp reads it.
 #   UITOML.hpp     the same for GUI::UINode (app/UIEditor.cpp, ZHLN_HAS_UI_TOML).
 #
 # No third-party dependency: the parser is charconv and a hand-rolled reader.

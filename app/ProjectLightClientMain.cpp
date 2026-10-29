@@ -113,9 +113,8 @@ auto main(int argc, char* argv[]) -> int {
         .headless       = options->headless,
         .fpsLimit       = options->fpsLimit,
         .driver         = options->driver,
-        .onFrameEvents  = pollCrashes,
     };
-    auto run = ZHLN::Engine::Run(runConfig, nullptr, &InstallProjectLightExtensions);
+    auto run = ZHLN::Engine::Run(runConfig, nullptr, &InstallProjectLightExtensions, pollCrashes);
     if (!run) {
         std::println(stderr, "Fatal project-light client error: {}", run.error().ToError().Message());
         return EXIT_FAILURE;

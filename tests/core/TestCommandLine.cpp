@@ -4,6 +4,7 @@
 #include "TestsFramework.hpp"
 #include <CommandLine/CommandLine.hpp>
 #include <CommandLine/EngineCommandLine.hpp>
+#include <Zahlen/Engine.hpp>
 #include <array>
 #include <charconv>
 #include <expected>
@@ -78,6 +79,49 @@ struct CommandLineTestSuite {
             auto                 retiredRes  = ZHLN::HandleCommandLine(retiredArgv);
             ZHLN::Test::ExpectFalse(retiredRes.has_value());
 
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> launch_defaults_survive_unrelated_cli_options() {
+            char        program[] = "game";
+            char* const plain[]   = {program};
+            const ZHLN::CommandLineOptions defaults {.vsync = false, .fpsLimit = 72};
+            const auto plainResult = ZHLN::HandleCommandLine(plain, {}, defaults);
+            ZHLN::Test::ExpectTrue(plainResult.has_value());
+            if (plainResult) {
+                ZHLN::Test::ExpectFalse(plainResult->vsync);
+                ZHLN::Test::ExpectEq(plainResult->fpsLimit, 72u);
+            }
+
+            char        vsync[] = "--vsync=on";
+            char        cap[]   = "--fps-limit=0";
+            char* const flags[] = {program, vsync, cap};
+            const auto overridden = ZHLN::HandleCommandLine(flags, {}, defaults);
+            ZHLN::Test::ExpectTrue(overridden.has_value());
+            if (overridden) {
+                ZHLN::Test::ExpectTrue(overridden->vsync);
+                ZHLN::Test::ExpectEq(overridden->fpsLimit, 0u);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> launch_settings_translate_without_starting_engine() {
+            const ZHLN::EngineRunConfig launch {
+                .appName        = "ConfigOnly",
+                .vsync          = false,
+                .fullscreen     = true,
+                .validationMode = ZHLN::ValidationMode::Off,
+                .headless       = true,
+                .fpsLimit       = 144,
+            };
+            const auto config = ZHLN::Engine::MakeConfig(launch);
+            ZHLN::Test::ExpectEq(config.render.width, 0u);
+            ZHLN::Test::ExpectEq(config.render.height, 0u);
+            ZHLN::Test::ExpectFalse(config.render.vsync);
+            ZHLN::Test::ExpectTrue(config.render.fullscreen);
+            ZHLN::Test::ExpectTrue(config.render.headless);
+            ZHLN::Test::ExpectEq(config.render.validationMode, ZHLN::ValidationMode::Off);
+            ZHLN::Test::ExpectTrue(config.enableNativeGameplay);
             return {};
         }
 
