@@ -3,6 +3,7 @@
 
 // The default executable is a statically linked C++ game, not a DLL host.
 // App owns platform setup, modules, input polling, frame pacing and teardown.
+#include <CommandLine/CommandLine.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
@@ -17,14 +18,23 @@
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <charconv>
+#include <cstdint>
+#include <expected>
+#include <string_view>
 
 namespace {
 
 struct SandboxGame {
-    ZHLN::Entity lamp    = ZHLN::Entity::Null();
-    float        elapsed = 0.0f;
+    ZHLN::Entity lamp       = ZHLN::Entity::Null();
+    float        elapsed    = 0.0f;
+    uint32_t     spawnCubes = 5;
+    uint32_t     seed       = 0;
 
     void Start(ZHLN::Engine& engine) {
+        if (auto cli = engine.Service<ZHLN::CommandLineOptions>()) {
+            ZHLN::Log("[Sandbox] {} CLI arguments; headless={}", cli->args.size(), cli->headless);
+        }
         auto& reg = engine.GetRegistry();
         if (auto camera = reg.GetSingleton<ZHLN::Components::CameraComponent>()) {
             camera->camera.position = JPH::Vec3(0.0f, 3.0f, 11.0f);
@@ -44,13 +54,23 @@ struct SandboxGame {
         // both the generated GPU meshes and their Jolt bodies.
         ZHLN::PrefabFactory::CreatePlane(engine, 30.0f, JPH::Vec4(0.25f, 0.29f, 0.34f, 1.0f), {.createPhysics = true, .isStaticPhysics = true});
 
-        for (int i = 0; i < 5; ++i) {
+        // --cubes controls the initial physics population. --seed optionally
+        // jitters the grid with a fixed integer LCG (the default stays aligned).
+        uint32_t random = seed;
+        const auto jitter = [&random]() -> float {
+            random = random * 1664525u + 1013904223u;
+            return (static_cast<float>(random >> 24) / 255.0f - 0.5f) * 0.6f;
+        };
+        for (uint32_t i = 0; i < spawnCubes; ++i) {
+            const float x      = (static_cast<float>(i % 8) - 2.0f) * 1.65f + (seed ? jitter() : 0.0f);
+            const float z      = static_cast<float>(i / 8) * 1.65f + (seed ? jitter() : 0.0f);
+            const float stripe = static_cast<float>(i % 5);
             ZHLN::PrefabFactory::CreateBox(
                 engine, JPH::Vec3::sReplicate(0.55f),
-                {.position        = JPH::RVec3(static_cast<double>(i - 2) * 1.65, 2.5 + i * 0.35, 0.0),
+                {.position        = JPH::RVec3(x, 2.5f + stripe * 0.35f, z),
                  .createPhysics   = true,
                  .isStaticPhysics = false,
-                 .color           = JPH::Vec4(0.35f + i * 0.10f, 0.6f, 0.9f - i * 0.10f, 1.0f)}
+                 .color           = JPH::Vec4(0.35f + stripe * 0.10f, 0.6f, 0.9f - stripe * 0.10f, 1.0f)}
             );
         }
 
@@ -139,7 +159,39 @@ struct SandboxGame {
 
 int main(int argc, char* argv[]) {
     SandboxGame game;
-    return ZHLN::App().OnStart([&](ZHLN::Engine& engine) { game.Start(engine); }).Run(argc, argv, [&](ZHLN::Engine& engine, float dt) {
-        game.Tick(engine, dt);
-    });
+    const auto parseNumber = [](std::string_view value) -> std::expected<uint32_t, ZHLN::ErrorCode> {
+        if (value.empty()) {
+            return std::unexpected(ZHLN::CommandLineError::MissingValue);
+        }
+        uint32_t count = 0;
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), count);
+        if (error != std::errc {} || end != value.data() + value.size()) {
+            return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+        }
+        return count;
+    };
+
+    return ZHLN::App()
+        .AddCliOption(
+            "--cubes", "<count>", "Initial physics boxes (0-64)",
+            [&](ZHLN::CommandLineOptions&, std::string_view value) -> std::expected<void, ZHLN::ErrorCode> {
+                auto count = parseNumber(value);
+                if (!count) return std::unexpected(count.error());
+                if (*count > 64) return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+                game.spawnCubes = *count;
+                return {};
+            },
+            "-c"
+        )
+        .AddCliOption(
+            "--seed", "<integer>", "Jitter the initial box grid reproducibly (default: 0)",
+            [&](ZHLN::CommandLineOptions&, std::string_view value) -> std::expected<void, ZHLN::ErrorCode> {
+                auto seed = parseNumber(value);
+                if (!seed) return std::unexpected(seed.error());
+                game.seed = *seed;
+                return {};
+            }
+        )
+        .OnStart([&](ZHLN::Engine& engine) { game.Start(engine); })
+        .Run(argc, argv, [&](ZHLN::Engine& engine, float dt) { game.Tick(engine, dt); });
 }

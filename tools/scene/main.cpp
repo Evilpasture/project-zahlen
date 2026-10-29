@@ -212,10 +212,6 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
     if (parsed->helpRequested || parsed->versionRequested || parsed->printGraphRequested) return EXIT_SUCCESS;
-    if (parsed->benchmark || parsed->launchEditor) {
-        ZHLN::LogError("[SceneHost] use zahlen-benchmark or zahlen-editor for those tools");
-        return EXIT_FAILURE;
-    }
     ZHLN::SetLogLevel(parsed->logLevel);
 #if !defined(ZHLN_SCENE_HOST_HAS_LUA)
     if (s_HostLaunchConfig.graphicsConfigPath != "config/graphics.lua") {

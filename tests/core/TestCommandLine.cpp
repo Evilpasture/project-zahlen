@@ -8,6 +8,7 @@
 #include <array>
 #include <charconv>
 #include <expected>
+#include <initializer_list>
 #include <span>
 #include <string>
 #include <string_view>
@@ -38,8 +39,8 @@ struct CommandLineTestSuite {
             ZHLN::Test::ExpectTrue(ok.has_value());
             ZHLN::Test::ExpectTrue(seenCustom);
 
-            // Engine-host flags (--editor, --vsync, --renderdoc) must NOT exist on standalone tools.
-            char        bad1[]    = "--editor";
+            // Engine-host flags (--vsync, --renderdoc) must NOT exist on standalone tools.
+            char        bad1[]    = "--vsync=off";
             char* const argvBad[] = {arg0, bad1};
             const auto  rejected  = ZHLN::ParseCli(argvBad, flags, ZHLN::CliParseConfig {.printHelpOnError = false});
             ZHLN::Test::ExpectFalse(rejected.has_value());
@@ -49,7 +50,7 @@ struct CommandLineTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> engine_flags_and_removed_driver_option() {
+        std::expected<void, ZHLN::ErrorCode> engine_flags_and_removed_mode_options() {
             // Mock: ./zahlen --vsync=off --fps-limit=144 --validation=gpu
             std::array<char*, 4> argv = {
                 (char*) "zahlen", (char*) "--vsync=off", (char*) "--fps-limit=144", (char*) "--validation=gpu"
@@ -65,12 +66,14 @@ struct CommandLineTestSuite {
                 ZHLN::Test::ExpectEq(opts.validationMode, ZHLN::ValidationMode::GPU);
             }
 
-            // With no selectable gameplay backend, the driver flag is unknown.
-            std::array<char*, 2> removedArgv = {(char*) "zahlen", (char*) "--driver=native"};
-            auto                 removedRes  = ZHLN::HandleCommandLine(removedArgv);
-            ZHLN::Test::ExpectFalse(removedRes.has_value());
-            if (!removedRes) {
-                ZHLN::Test::ExpectEq(removedRes.error(), ZHLN::CommandLineError::UnknownArgument);
+            // Tool modes and gameplay-driver aliases are not engine flags.
+            for (const char* removed: {"--editor", "--benchmark", "--driver=native"}) {
+                std::array<char*, 2> removedArgv = {(char*) "zahlen", const_cast<char*>(removed)};
+                auto                 removedRes  = ZHLN::HandleCommandLine(removedArgv);
+                ZHLN::Test::ExpectFalse(removedRes.has_value());
+                if (!removedRes) {
+                    ZHLN::Test::ExpectEq(removedRes.error(), ZHLN::CommandLineError::UnknownArgument);
+                }
             }
 
             return {};
@@ -166,6 +169,15 @@ struct CommandLineTestSuite {
             ZHLN::Test::ExpectTrue(result.has_value());
             if (result) {
                 ZHLN::Test::ExpectFalse(result->vsync);
+                ZHLN::Test::ExpectEq(result->appHandlers.size(), appHandlers.size());
+            }
+            // --help uses the same registered handlers for its Application Options section.
+            std::array<char*, 2> helpArgv = {(char*) "zahlen", (char*) "--help"};
+            const auto           help     = ZHLN::HandleCommandLine(helpArgv, appHandlers);
+            ZHLN::Test::ExpectTrue(help.has_value());
+            if (help) {
+                ZHLN::Test::ExpectTrue(help->helpRequested);
+                ZHLN::Test::ExpectEq(help->appHandlers.size(), appHandlers.size());
             }
             ZHLN::Test::ExpectTrue(scenario == "level.json");
             ZHLN::Test::ExpectTrue(ambientScale == 2.5f);

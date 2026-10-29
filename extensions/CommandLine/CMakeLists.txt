@@ -59,7 +59,7 @@ if(TARGET zahlen_warnings)
     target_link_libraries(zahlen_command_line PRIVATE zahlen_warnings)
 endif()
 
-# Engine-host CLI preset (--editor, --vsync, --validation, --renderdoc,
+# Engine-host CLI preset (--vsync, --validation, --renderdoc,
 # --print-graph, ...). Built alongside zahlen_command_line whenever
 # zahlen_engine is part of the build.
 if(TARGET zahlen_engine)

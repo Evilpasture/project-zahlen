@@ -487,8 +487,8 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
     if (parsed->helpRequested || parsed->versionRequested || parsed->printGraphRequested) return EXIT_SUCCESS;
-    if (parsed->benchmark || parsed->headless) {
-        ZHLN::LogError("[WorldEditor] use zahlen_benchmark for benchmarks; this editor requires a window");
+    if (parsed->headless) {
+        ZHLN::LogError("[WorldEditor] this editor requires a window");
         return EXIT_FAILURE;
     }
     ZHLN::SetLogLevel(parsed->logLevel);

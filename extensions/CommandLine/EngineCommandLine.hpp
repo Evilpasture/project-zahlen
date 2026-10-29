@@ -44,14 +44,12 @@ struct CommandHandler {
 struct CommandLineOptions {
     std::span<char* const> args;
     ValidationMode         validationMode  = ValidationMode::On;
-    bool                   launchEditor    = false;
     bool                   vsync           = true;
     bool                   fullscreen      = false;
     bool                   headless        = false;
     LogLevel               logLevel        = LogLevel::Moderate;
     uint32_t               fpsLimit        = 0;
     bool                   enableRenderDoc = false;
-    bool                   benchmark       = false;
 
     bool helpRequested       = false;
     bool versionRequested    = false;

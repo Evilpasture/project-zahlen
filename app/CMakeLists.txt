@@ -11,9 +11,11 @@ set_target_properties(zahlen_application PROPERTIES
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON
 )
+# App.hpp exposes CommandHandler/CommandLineOptions, so its CLI include root
+# must reach ordinary games through the application target's public interface.
 target_link_libraries(zahlen_application
-    PUBLIC zahlen_engine
-    PRIVATE zahlen_engine_cli zahlen_signal zahlen_warnings
+    PUBLIC zahlen_engine zahlen_engine_cli
+    PRIVATE zahlen_signal zahlen_warnings
 )
 target_include_directories(zahlen_application PRIVATE
     ${PROJECT_SOURCE_DIR}/src

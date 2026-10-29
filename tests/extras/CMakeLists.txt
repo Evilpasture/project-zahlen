@@ -168,8 +168,9 @@ endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
 
-# The reusable application frontend's CLI branches are CPU-only; --help and
-# unsupported host modes must exit without creating a GPU device.
+# The reusable application's CLI early exits are CPU-only: registered
+# options, --help, invalid C arguments and removed host-mode flags must not
+# create a GPU device.
 zahlen_add_extras_group(Extras_Application
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestApplication.cpp

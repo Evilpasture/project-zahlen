@@ -9,13 +9,21 @@
 #include <Zahlen/GameModule.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/SystemGraph.hpp>
 #include <algorithm>
 #include <cstdlib>
+#include <expected>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <vector>
 
 namespace ZHLN::Test {
+
+// Both the simulation and render graphs can resolve application CLI options
+// through their existing extension-service slots (without an Engine field).
+static_assert(ECS::ResolvableFrom<SystemContext, ECS::Res<CommandLineOptions>>);
+static_assert(ECS::ResolvableFrom<ECS::Carrier<RenderServices>, ECS::Res<CommandLineOptions>>);
 
 void test_app_composes_before_scene_and_runs_gameplay_after_events() {
     std::vector<std::string_view> calls;
@@ -29,6 +37,7 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
     auto application = App(config);
     application.Install([&](Engine& engine) {
         calls.push_back("install");
+        Expect(!engine.Service<CommandLineOptions>()); // no-CLI Run stays service-free
         Expect(!engine.GetRegistry().GetSingleton<Components::CameraComponent>());
         const auto installed = engine.InstallModule(Module {.name = "AppTestModule"});
         Expect(installed.has_value());
@@ -68,6 +77,59 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
     Expect(code == EXIT_SUCCESS);
     Expect(updates == 1);
     Expect(calls == std::vector<std::string_view> {"install", "start", "update"});
+}
+
+void test_app_cli_options_service_is_available_before_install_and_scene_start() {
+    EngineRunConfig config {
+        .appName        = "ApplicationCliTest",
+        .validationMode = ValidationMode::Off,
+        .headless       = true,
+    };
+    bool             actionRan = false;
+    bool             installed = false;
+    bool             started   = false;
+    bool             updated   = false;
+    std::string_view region;
+
+    auto app = App(config);
+    app.AddCliOption(
+        "--region", "<name>", "Initial region",
+        [&](CommandLineOptions&, std::string_view value) -> std::expected<void, ErrorCode> {
+            region    = value;
+            actionRan = true;
+            return {};
+        }
+    );
+    app.Install([&](Engine& engine) {
+        auto parsed = engine.Service<CommandLineOptions>();
+        Expect(parsed.has_value());
+        if (parsed) {
+            Expect(parsed->appHandlers.size() == 1);
+            Expect(parsed->args.size() == 3);
+            Expect(!parsed->vsync);
+        }
+        Expect(actionRan);
+        Expect(region == "atrium");
+        installed = true;
+    });
+    app.OnStart([&](Engine& engine) {
+        Expect(installed);
+        Expect(engine.Service<CommandLineOptions>().has_value());
+        started = true;
+    });
+
+    char program[] = "test-application";
+    char option[]  = "--region=atrium";
+    char vsync[]   = "--vsync=off";
+    char* args[]   = {program, option, vsync};
+    const int code = app.Run(std::span<char* const>(args), [&](Engine& engine) {
+        Expect(started);
+        Expect(engine.Service<CommandLineOptions>().has_value());
+        updated = true;
+        engine.GetPlatformHost().Close();
+    });
+    Expect(code == EXIT_SUCCESS);
+    Expect(installed && started && updated);
 }
 
 } // namespace ZHLN::Test

@@ -15,7 +15,7 @@ This document provides a technical overview of Project Zahlen's architecture, ma
 
 ## 1.1 Strict ECS Mandate & Architectural Constraints
 
-To preserve the engine's data-oriented design (DOD), cache locality, zero-allocation memory guarantees, and C++26 hot-reloadability, **ALL state in Zahlen MUST reside in ECS Components, and ALL logic MUST reside in ECS Systems.**
+To preserve the engine's data-oriented design (DOD), cache locality, zero-allocation memory guarantees, and C++26 reflection-based tooling, **ALL state in Zahlen MUST reside in ECS Components, and ALL logic MUST reside in ECS Systems.**
 
 ### The Core Law
 > **There are no "Manager" or "Simulation" classes for gameplay or visual effects in Zahlen.**
@@ -107,10 +107,12 @@ void   Update(Engine& engine, float dt);
 
 ## 1.2 Core and Optional-Layer Boundaries
 
-`src/`, `include/`, and the existing top-level `modules/` directory form the
-**Core Engine**. The `modules/` directory is reserved for the engine's C++
-module interfaces; it is not a catch-all for additional subsystems. Optional
-code is organized by architectural role instead:
+`src/`, most of `include/`, and the existing top-level `modules/` directory
+form the **Core Engine**. The public header `include/Zahlen/App.hpp` is the one
+exception: although physically under `include/`, it is the application facade
+owned by `zahlen_application`, not by `zahlen_engine`. The `modules/` directory
+is reserved for the engine's C++ module interfaces; it is not a catch-all for
+additional subsystems. Optional code is organized by architectural role instead:
 
 | Root | Owns | Examples |
 | :--- | :--- | :--- |
@@ -124,15 +126,20 @@ ProjectLight-specific MessagePack/zlib protocol types live with that client,
 not in the reusable Zahlen wire-protocol extension.
 
 > **Rule: dependencies point outward from Core.** Plugins, extensions, and
-> gameplay may consume Core; code under `src/`, `include/`, or `modules/` must
-> never include, import, or link an optional-layer target.
+> gameplay may consume Core; code under `src/`, `include/` (except the
+> application facade), or `modules/` must never include, import, or link an
+> optional-layer target. Core may not include `<Zahlen/App.hpp>`.
 
 `configure/check_core_layer_boundary.py` enforces the source/header half of this
 rule during CMake configuration. It scans module imports and resolves headers
 against the optional layers' public include roots, so both a spelled path and a
-short include such as `#include <json/JSON.hpp>` are caught. CMake links remain
-explicit: the composition roots in `app/`, samples, tests, and host tools may
-select the targets they use, while Core targets must not depend on them.
+short include such as `#include <json/JSON.hpp>` are caught. Its only exception
+allows `include/Zahlen/App.hpp` to name the public
+`<CommandLine/EngineCommandLine.hpp>` contract supplied by `zahlen_application`;
+`zahlen_application` publicly links `zahlen_engine_cli`. No Core header or source
+is granted that dependency. CMake links remain explicit: the composition roots
+in `app/`, samples, tests, and host tools may select the targets they use, while
+Core targets must not depend on them.
 
 `configure/check_layer_dag.py` enforces the edge *between* the optional layers
 that has to point one way: nothing under `plugins/` or `extensions/` may include
@@ -170,8 +177,9 @@ without inverting the DAG. `Zahlen/gui/FontLoader.hpp` (`BakedFontLoader`) and
    editor, `tools/benchmark/main.cpp` owns a headless logic workload, and
    `tools/scene/main.cpp` owns document boot, fallback, Discord and the Lua
    graphics-file watcher. They install their modules before the first scene.
-   Core exposes only the neutral `<Zahlen/App.hpp>` declarations and never
-   names optional layers. `EngineRunConfig` contains launch settings only;
+   Core exposes neutral Engine and module contracts and never names optional
+   layers; the host-facing `<Zahlen/App.hpp>` belongs to `zahlen_application`
+   and consumes its CLI preset. `EngineRunConfig` contains launch settings only;
    App's lifecycle callbacks live on `Application`, while the low-level
    `Engine::Run` accepts an explicit `EventPoller` for hosts that need one.
 
@@ -198,7 +206,7 @@ and optional third-party dependencies stay local to the owning target.
 | `zahlen_project_light_lua` | `gameplay/ProjectLight/LuaBindings/` | DataModel ↔ LuaJIT adapter; the only target where the two layers meet |
 | `zahlen_alife`, `zahlen_interaction`, `zahlen_fallback_scene` | `gameplay/` | Domain-specific simulation, interaction rules, and fallback game scene |
 | `zahlen_datamodel`, `zahlen_project_light_client` | `gameplay/ProjectLight/` | ProjectLight's stable-ID object graph and optional native client |
-| `zahlen_application` | `app/` | Game loop and optional-module wiring; the `zahlen` executable links this target |
+| `zahlen_application` | `app/` | Game loop, registered CLI and optional-module wiring; publicly links `zahlen_engine_cli` for the `App.hpp` facade |
 | `zahlen_scene_documents` | `tools/scene/` | TOML/Lua scene import shared only by tools |
 | `zahlen_world_editor`, `zahlen_benchmark_app`, `zahlen_scene_host` | `tools/{editor,benchmark,scene}/` | Separate world-editor, headless-benchmark and scene/file-watcher hosts |
 
@@ -400,6 +408,7 @@ Tick: UI / state-file watches → PlayerIntent → Physics
 
 1. **Input & OS Events**: `Application` pumps OS/window events and updates raw mouse/keyboard states before calling the compiled C++ game callback.
 2. **Compiled gameplay**: `App().Run(callback)` owns the per-frame game update; `App().Install(...)` composes systems and frame steps before the first scene. `Engine::Run` is available for tools with their own composition and event poller.
+   `Application::Run(std::span<char* const> args, callback)` parses engine flags and registered `.AddCliOption(...)` / `.WithCliOptions(...)` handlers together; the `Run(argc, argv, callback)` adapter checks the C arguments first. App handlers appear under **Application Options** in `--help`. After a successful parse (and before default modules, installers and scene initialization), the application emplaces a copy of `CommandLineOptions` in `Engine::Services()`. Installers and `OnStart` use `Engine::Service<CommandLineOptions>()`; simulation and render graph systems may resolve `ECS::Res<CommandLineOptions>` through `ExtensionServices`. CLI args and handler metadata are borrowed for the synchronous `Run` lifetime. Bare `Run()` / `Run(callback)` skip parsing and do not publish a CLI service.
 3. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
 4. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching modules are installed, Interaction and Terrain nodes contributed through the `Module` the application installed; `BuildSystemGraphs` walks `Engine::GetInstalledModules()` and asks each one for its systems). `VisualInterpolationSystem` reads PhysicsWorld pose history and writes interpolated transforms; static bodies are skipped.
 5. **Render Graph Execution**: `CullingSystem` performs frustum culling, `LightingSystem` gathers lights, and `RenderSystem` records Vulkan commands and presents. `Engine::Tick` reports `FrameStatus::Error` if device-lost recovery fails.
@@ -650,8 +659,9 @@ is `zahlen_world_editor` (output `zahlen-editor`) at `tools/editor/main.cpp`;
 it links FreeCam and scene serialization without imposing those tool concerns
 on `app/main.cpp` or the game binary. The scene host (`zahlen-scene-host`)
 and headless benchmark (`zahlen-benchmark`) are separate executables, too.
-Legacy `zahlen --editor` / `zahlen --benchmark` flags fail with a hint rather
-than silently entering a different mode.
+`zahlen --editor` and `zahlen --benchmark` are unknown game flags, not host
+modes; run `zahlen-editor` or `zahlen-benchmark` directly. Tool-specific flags
+(such as `ztest --benchmark`) remain independent.
 
 The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 (`app/UIEditor.cpp`), built only when optional layers are enabled (the document it edits,

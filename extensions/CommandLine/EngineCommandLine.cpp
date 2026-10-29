@@ -63,16 +63,6 @@ void PrintEngineHelp(
 
 const std::array kEngineHandlers = {
     CommandHandler {
-        .key         = "--editor",
-        .shortKey    = "",
-        .placeholder = "",
-        .description = "Launch the interactive world editor",
-        .action      = [](CommandLineOptions& opt, std::string_view) -> std::expected<void, ErrorCode> {
-            opt.launchEditor = true;
-            return {};
-        },
-    },
-    CommandHandler {
         .key         = "--version",
         .shortKey    = "",
         .placeholder = "",
@@ -219,16 +209,6 @@ const std::array kEngineHandlers = {
                 std::println(stderr, "Error: Invalid value '{}' for --renderdoc.", v);
                 return std::unexpected(CommandLineError::InvalidValue);
             }
-            return {};
-        },
-    },
-    CommandHandler {
-        .key         = "--benchmark",
-        .shortKey    = "",
-        .placeholder = "",
-        .description = "Execute the automated performance benchmark suite",
-        .action      = [](CommandLineOptions& opt, std::string_view) -> std::expected<void, ErrorCode> {
-            opt.benchmark = true;
             return {};
         },
     },

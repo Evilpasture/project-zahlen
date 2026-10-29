@@ -8,7 +8,10 @@ The repository's source layers are deliberately distinct:
   * gameplay/   domain-specific systems and ProjectLight integration.
 
 All three may consume Core. None may become a dependency of src/, include/, or
-modules/. This configure-time check catches both imported C++ modules and
+modules/, except the application facade include/Zahlen/App.hpp: that header
+belongs to zahlen_application, not zahlen_engine, and may include precisely the
+CommandLine/EngineCommandLine.hpp contract it publishes. Core may not include
+App.hpp itself. This configure-time check catches imported C++ modules and
 headers, including headers included through their public short include roots.
 CMake target links are kept explicit in the root composition layer and should
 not be added to targets that build Core sources.
@@ -22,6 +25,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE_ROOTS = (ROOT / "src", ROOT / "include", ROOT / "modules")
+# Physical header location is not ownership: App.hpp belongs to zahlen_application.
+APP_FACADE = Path("include/Zahlen/App.hpp")
+APP_CLI_CONTRACT = "CommandLine/EngineCommandLine.hpp"
 LAYER_ROOTS = (ROOT / "plugins", ROOT / "extensions", ROOT / "gameplay")
 LAYER_INCLUDE_ROOTS = (
     ROOT / "plugins",
@@ -126,9 +132,19 @@ def main() -> int:
 
             for match in include_pattern.finditer(text):
                 include = normalize(match.group(2))
+                # Neither the public spelling nor a same-directory/relative
+                # include may pull the application facade back into Core.
+                facade_spelling = include in {"Zahlen/App.hpp", "App.hpp", APP_FACADE.as_posix()}
+                facade_relative = (Path(include).name == "App.hpp" and
+                                   (path.parent / match.group(2)).resolve() == ROOT / APP_FACADE)
+                if relative_path != APP_FACADE and (facade_spelling or facade_relative):
+                    violations.append(f"{relative_path} includes the application facade from Core")
+                    continue
                 candidates = (headers.get(include) or headers.get(Path(include).name)) if include else None
                 if not candidates:
                     continue
+                if relative_path == APP_FACADE and include == APP_CLI_CONTRACT:
+                    continue  # Allow only this application's public CLI contract.
                 if not resolves_in_core(include, path):
                     spelled = candidates[0].relative_to(ROOT).as_posix()
                     violations.append(

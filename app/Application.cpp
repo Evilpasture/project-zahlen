@@ -81,15 +81,7 @@ void InstallApplicationDefaults(Engine& engine) {
 #endif
 }
 
-auto Application::RunFromCLI(EngineRunConfig config, int argc, char* argv[], const Update& update) const -> int {
-    if (argc < 0 || (argc > 0 && argv == nullptr)) {
-        LogError("[Application] invalid argv passed to Run");
-        return EXIT_FAILURE;
-    }
-    std::span<char* const> args;
-    if (argc > 0) {
-        args = std::span<char* const>(argv, static_cast<size_t>(argc));
-    }
+auto Application::RunFromCLI(EngineRunConfig config, std::span<char* const> args, const Update& update) const -> int {
     const CommandLineOptions defaults {
         .validationMode = config.validationMode,
         .vsync          = config.vsync,
@@ -97,7 +89,7 @@ auto Application::RunFromCLI(EngineRunConfig config, int argc, char* argv[], con
         .headless       = config.headless,
         .fpsLimit       = config.fpsLimit,
     };
-    auto parsed = HandleCommandLine(args, {}, defaults);
+    auto parsed = HandleCommandLine(args, _cliHandlers, defaults);
     if (!parsed) {
         LogError("[Application] command line: {}", parsed.error());
         return EXIT_FAILURE;
@@ -105,21 +97,16 @@ auto Application::RunFromCLI(EngineRunConfig config, int argc, char* argv[], con
     if (parsed->helpRequested || parsed->versionRequested || parsed->printGraphRequested) {
         return EXIT_SUCCESS;
     }
-    if (parsed->launchEditor || parsed->benchmark) {
-        LogError("[Application] use zahlen_editor or zahlen_benchmark instead of game mode flags");
-        return EXIT_FAILURE;
-    }
-
     SetLogLevel(parsed->logLevel);
     config.vsync          = parsed->vsync;
     config.fullscreen     = parsed->fullscreen;
     config.validationMode = parsed->validationMode;
     config.headless       = parsed->headless;
     config.fpsLimit       = parsed->fpsLimit;
-    return RunConfigured(config, update);
+    return RunConfigured(config, update, &*parsed);
 }
 
-auto Application::RunConfigured(const EngineRunConfig& config, const Update& update) const -> int {
+auto Application::RunConfigured(const EngineRunConfig& config, const Update& update, const CommandLineOptions* options) const -> int {
     // App owns both process-level crash reporting and the lifetime of the
     // platform, task workers, and engine. Never nest Engine::Run here.
     static CrashState crashState;
@@ -134,6 +121,12 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
     }
     auto engine = std::move(*created);
     engine->GetPlatformHost().Focus();
+
+    // The copy owns the parsed flags; its spans borrow args and _cliHandlers.
+    // Both outlive this Engine because RunConfigured completes synchronously.
+    if (options != nullptr) {
+        engine->EmplaceService<CommandLineOptions>(*options);
+    }
 
     if (_defaultModules) {
         InstallApplicationDefaults(*engine);

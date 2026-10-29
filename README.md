@@ -127,9 +127,34 @@ int main(int argc, char* argv[]) {
 }
 ```
 
-`App().Run([](ZHLN::Engine& engine) { /* per-frame code */ })` also works when you don't need command-line flags. The `(Engine&, float dt)` form gets the exact delta passed to `Tick`. `App().Run()` without a callback is for games composed entirely from ECS systems and installed modules. With `argc, argv`, standard engine flags such as `--headless`, `--vsync` and `--fps-limit` work; `--help`, `--version` and `--print-graph` exit before engine creation.
+`App().Run([](ZHLN::Engine& engine) { /* per-frame code */ })` also works when you don't need command-line flags. The `(Engine&, float dt)` form gets the exact delta passed to `Tick`. `App().Run()` without a callback is for games composed entirely from ECS systems and installed modules. The CLI path takes `std::span<char* const>` (with or without a gameplay callback); the `Run(argc, argv, ...)` overloads shown above validate C-style arguments and adapt them to that span. Standard engine flags such as `--headless`, `--vsync` and `--fps-limit` work; `--help`, `--version` and `--print-graph` exit before engine creation.
 
-The default `zahlen` binary (`app/main.cpp`) is a compiled C++ sandbox: it spawns a physics ground and falling boxes, lights them with a sun and moving point light, fires impulse-driven cubes with **F**, and plays a short procedural sound. **R** resets the view; **Esc** quits. When extras are built, FreeCam provides WASD movement, right-mouse look and Shift sprint. The sandbox needs no scene-document parser or optional-extension `#ifdef`s; the optional CharacterController module is installed by `App` but this fly-camera demo does not spawn a character. Move larger projects into their own `GameSession` and ECS systems rather than growing `main.cpp` indefinitely.
+Games can register their own flags before running, without pre-filtering argv:
+
+```cpp
+// Inside main(int argc, char* argv[]):
+std::string level = "courtyard";
+auto app = ZHLN::App();
+app.AddCliOption(
+    "--level", "<name>", "Initial level",
+    [&](ZHLN::CommandLineOptions&, std::string_view name) -> std::expected<void, ZHLN::ErrorCode> {
+        if (name.empty()) return std::unexpected(ZHLN::CommandLineError::MissingValue);
+        level.assign(name);
+        return {};
+    },
+    "-l"
+);
+app.Install([&](ZHLN::Engine& engine) {
+    // Parsed flags are already available to module installers and OnStart.
+    auto cli = engine.Service<ZHLN::CommandLineOptions>();
+    if (cli) { /* use cli->headless, cli->args, and level here */ }
+});
+return app.Run(argc, argv); // --level=courtyard and -l courtyard both work
+```
+
+`.AddCliOption(ZHLN::CommandHandler{...})` and `.WithCliOptions(std::span<const ZHLN::CommandHandler>)` are also available. Registered flags appear under **Application Options** in `--help`; actions run during parsing, and errors stop before engine creation. Handlers own neither their `string_view` metadata nor captured state, and `CommandLineOptions::args` / `appHandlers` borrow argv and the application's handlers: keep those alive through synchronous `Run`. The parsed options are copied into the Engine's extension services before default modules, installers and initial-scene setup, so gameplay systems may request `ZHLN::ECS::Res<ZHLN::CommandLineOptions>` as well. No-CLI `Run()` / `Run(callback)` do not create that service.
+
+The default `zahlen` binary (`app/main.cpp`) is a compiled C++ sandbox: it spawns a physics ground and falling boxes, lights them with a sun and moving point light, fires impulse-driven cubes with **F**, and plays a short procedural sound. `--cubes=<0..64>` (`-c`) selects the initial box count and `--seed=<integer>` reproducibly jitters their positions; both appear in `zahlen --help`. **R** resets the view; **Esc** quits. When extras are built, FreeCam provides WASD movement, right-mouse look and Shift sprint. The sandbox needs no scene-document parser or optional-extension `#ifdef`s; the optional CharacterController module is installed by `App` but this fly-camera demo does not spawn a character. Move larger projects into their own `GameSession` and ECS systems rather than growing `main.cpp` indefinitely.
 
 `App` owns the outer frame loop: it initializes Platform/TaskSystem, creates an Engine, installs the available baked default font and CharacterController, target camera, Interaction, Terrain, Animation/IK, FreeCam and RagdollAuthoring, builds the scene, polls events, calls your game logic, then `Engine::Tick(dt)` and tears down in order. It does **not** install the scene-host diagnostic fallback (which would replace a compiled game's scene). A `ZHLN_BUILD_EXTRAS=OFF` build uses just Core. Override the preset with `.WithDefaultModules(false)`, add project modules with `.Install([](ZHLN::Engine& engine) { /* install */ })` before the first scene, use `.OnUI(...)` for UI, and pass `ZHLN::EngineRunConfig{...}` to `App(config)` for launch settings. `.OnStart(...)`, `.Install(...)`, and `.OnUI(...)` are application methods, not config delegates. `Engine::Run` remains available for bespoke hosts; its fourth `EventPoller` argument is an explicit low-level frame seam.
 
@@ -143,7 +168,7 @@ The default `zahlen` binary (`app/main.cpp`) is a compiled C++ sandbox: it spawn
 | `zahlen-scene-host` | `tools/scene/main.cpp` | Scene/document and file-watcher integration; `--scene` and `--graphics-config` (Lua when available), optional Discord presence and a diagnostic scene when no document is selected |
 | `zahlen_ui_editor` | `app/UIEditor.cpp` | Separate UI-tree editor (unchanged) |
 
-The world editor and scene host share document import in `tools/scene/SceneDocument.cpp`. Only the scene host installs the Lua graphics file watcher; it installs a diagnostic fallback when no scene document was requested, so a loaded document is not overwritten by it. The benchmark does not initialize a window or engine. For interactive benchmark panels, use the existing `zahlen_benchmark_viewer` library in a custom host; the ordinary game has no F3/F4 benchmark overlay. Legacy `zahlen --editor` / `zahlen --benchmark` flags are rejected with a pointer to the tool binaries.
+The world editor and scene host share document import in `tools/scene/SceneDocument.cpp`. Only the scene host installs the Lua graphics file watcher; it installs a diagnostic fallback when no scene document was requested, so a loaded document is not overwritten by it. The benchmark does not initialize a window or engine. For interactive benchmark panels, use the existing `zahlen_benchmark_viewer` library in a custom host; the ordinary game has no F3/F4 benchmark overlay. `zahlen --editor` and `zahlen --benchmark` are not engine flags: the game rejects them as unknown arguments. Launch `zahlen-editor` or `zahlen-benchmark` directly. (The independent `ztest --benchmark` test-runner flag is unaffected.)
 
 ## Hardware expectations
 
