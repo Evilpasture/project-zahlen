@@ -7,7 +7,7 @@
 //
 // Engine-host command-line preset built on <CommandLine/CommandLine.hpp>.
 // Provides windowing, validation, framerate, RenderDoc, frame-graph dump, and
-// gameplay-driver flags for interactive/headless engine applications (`app/`
+// interactive/headless engine flags for applications (`app/`
 // and `samples/`), keeping standalone CLI tools free of renderer/editor flags.
 
 #include <CommandLine/CommandLine.hpp>
@@ -15,7 +15,6 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/LogLevel.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/FramePlan.hpp>
 
 #include <cstdint>
 #include <cstdlib>
@@ -53,8 +52,6 @@ struct CommandLineOptions {
     uint32_t               fpsLimit        = 0;
     bool                   enableRenderDoc = false;
     bool                   benchmark       = false;
-
-    GameplayDriver driver = GameplayDriver::Cpp;
 
     bool helpRequested       = false;
     bool versionRequested    = false;

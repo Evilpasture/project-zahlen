@@ -151,8 +151,8 @@ struct PBRTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 15; ++frame) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-                ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+                const auto status = engine->Tick(dt);
+                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
             }
 
             // 6. Capture and compare the two halves relatively. The old gate
@@ -302,8 +302,8 @@ struct PBRTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 12; ++frame) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-                ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+                const auto status = engine->Tick(dt);
+                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
             }
 
             const std::string ppmPath = "headless_pbr_roughness.ppm";
@@ -782,7 +782,7 @@ struct PBRTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 5; ++frame) {
                 engine->ProcessEvents();
-                engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                engine->Tick(dt);
             }
 
             const std::string ppmPath = "headless_pbr_fullbright.ppm";

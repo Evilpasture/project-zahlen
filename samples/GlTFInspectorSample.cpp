@@ -83,10 +83,9 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
-        const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-        if (status == ZHLN::GameplayStatus::RequestQuit) {
-            engine->GetPlatformHost().Close();
-            break;
+        const auto status = engine->Tick(dt);
+        if (status == ZHLN::FrameStatus::Error) {
+            return EXIT_FAILURE;
         }
     }
     return EXIT_SUCCESS;

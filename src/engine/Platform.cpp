@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Platform.hpp"
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Window.hpp>
 #include <chrono>
 #include <thread>
@@ -17,7 +16,6 @@
 #pragma comment(lib, "Shcore.lib")
 #endif
 #else
-#include <dlfcn.h>
 #include <unistd.h>
 #endif
 
@@ -100,55 +98,6 @@ float GetDisplayScale(Window& window) {
 
 void Sleep(uint32_t milliseconds) {
     std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
-}
-
-void* LoadSharedLibrary(const char* path) noexcept {
-#if defined(_WIN32)
-    void* handle = static_cast<void*>(LoadLibraryA(path));
-    if (!handle) {
-        ZHLN::Log("[Platform] LoadLibraryA failed for '{}'. Error code: {}", path, GetLastError());
-    }
-    return handle;
-#else
-    void* handle = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
-    if (!handle) {
-        const char* err = dlerror();
-        ZHLN::Log("[Platform] dlopen failed for '{}': {}", path, err ? err : "unknown error");
-    }
-    return handle;
-#endif
-}
-
-void* GetSymbolAddress(void* handle, const char* symbol) noexcept {
-    if (handle == nullptr || symbol == nullptr) {
-        return nullptr;
-    }
-#if defined(_WIN32)
-    void* addr = reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(handle), symbol));
-    if (!addr) {
-        ZHLN::Log("[Platform] GetProcAddress failed for symbol '{}'. Error code: {}", symbol, GetLastError());
-    }
-    return addr;
-#else
-    dlerror();
-    void*       addr = dlsym(handle, symbol);
-    const char* err  = dlerror();
-    if (err != nullptr) {
-        ZHLN::Log("[Platform] dlsym failed for symbol '{}': {}", symbol, err);
-    }
-    return addr;
-#endif
-}
-
-void UnloadSharedLibrary(void* handle) noexcept {
-    if (handle == nullptr) {
-        return;
-    }
-#if defined(_WIN32)
-    FreeLibrary(static_cast<HMODULE>(handle));
-#else
-    dlclose(handle);
-#endif
 }
 
 }

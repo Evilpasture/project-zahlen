@@ -2022,12 +2022,10 @@ auto main(int argc, char* argv[]) -> int {
             reg.Patch<ZHLN::ProceduralLookAtComponent>(g_player, [&aim](auto& lookAt) -> auto { lookAt.targetWorldPos = aim; });
         }
 
-        const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-        UpdatePlayerRigAmbientCube(*engine);
-        if (status == ZHLN::GameplayStatus::RequestQuit) {
-            engine->GetPlatformHost().Close();
-            break;
+        if (engine->Tick(dt) == ZHLN::FrameStatus::Error) {
+            return EXIT_FAILURE;
         }
+        UpdatePlayerRigAmbientCube(*engine);
 
         // Crosshair pick. After Tick, so the camera pose the ray uses is the
         // one this frame just rendered with -- a frame step in Phase::UI would

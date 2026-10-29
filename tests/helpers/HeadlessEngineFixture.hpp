@@ -60,14 +60,14 @@ struct EngineOptions {
     bool             enableMeshShading     = true;
 };
 
-// Creates a headless engine with validation enabled and the fallback scene
-// suppressed, then seeds the default scene.
+// Creates a headless engine with validation enabled and seeds the default
+// scene. The optional scene-host diagnostic module is not installed here.
 //
 // Prefer AcquireEngine below unless the test genuinely needs a cold device.
 //
 // Returns an empty owner on failure; callers assert rather than dereference.
-// EngineConfig::enableFallbackScene is false so the engine cannot inject its
-// own sun, floor and camera into a scene the test is trying to measure.
+// Keep fallback disabled even if a future fixture installs a host module;
+// tests own the scene they measure.
 [[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> std::unique_ptr<ZHLN::Engine> {
     const ZHLN::EngineConfig cfg {
         .physics = {
@@ -405,8 +405,8 @@ inline void DisableTAA(ZHLN::Engine& engine) {
 inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt) {
     for (uint32_t i = 0; i < frames; ++i) {
         engine.ProcessEvents();
-        const auto status = engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
-        ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+        const auto status = engine.Tick(dt);
+        ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
     }
 }
 

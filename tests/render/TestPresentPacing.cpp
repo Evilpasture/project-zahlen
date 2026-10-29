@@ -83,7 +83,7 @@ struct PresentPacingSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 5; ++frame) {
                 engine->ProcessEvents();
-                if (!ZHLN::Test::ExpectEq(engine->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK)) {
+                if (!ZHLN::Test::ExpectEq(engine->Tick(dt), ZHLN::FrameStatus::OK)) {
                     return std::unexpected(PresentPacingTestError::TickFailed);
                 }
             }
@@ -117,7 +117,7 @@ struct PresentPacingSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 95; ++frame) {
                 engine->ProcessEvents();
-                if (!ZHLN::Test::ExpectEq(engine->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK)) {
+                if (!ZHLN::Test::ExpectEq(engine->Tick(dt), ZHLN::FrameStatus::OK)) {
                     return std::unexpected(PresentPacingTestError::TickFailed);
                 }
             }
@@ -139,7 +139,7 @@ struct PresentPacingSuite {
             for (uint32_t frame = 0; frame < 3; ++frame) {
                 engine->ProcessEvents();
                 engine->PollLateInput();
-                if (!ZHLN::Test::ExpectEq(engine->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK)) {
+                if (!ZHLN::Test::ExpectEq(engine->Tick(dt), ZHLN::FrameStatus::OK)) {
                     return std::unexpected(PresentPacingTestError::LateLatchFailed);
                 }
                 engine->PollLateInput();

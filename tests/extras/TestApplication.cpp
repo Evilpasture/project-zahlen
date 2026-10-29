@@ -27,6 +27,10 @@ concept LaunchOnly = !requires(T value) { value.onFrameEvents; } &&
                      !requires(T value) { value.onUpdate; };
 static_assert(std::is_trivially_copyable_v<EngineRunConfig>);
 static_assert(LaunchOnly<EngineRunConfig>);
+template <typename T>
+concept HasNativeGameplayToggle = requires(T config) { config.enableNativeGameplay; };
+static_assert(!HasNativeGameplayToggle<EngineRunConfig>);
+static_assert(!HasNativeGameplayToggle<EngineConfig>);
 } // namespace
 
 void test_app_help_exits_without_running_gameplay() {
@@ -56,12 +60,6 @@ void test_app_rejects_invalid_args_before_engine_creation() {
     char* args[]   = {program, unknown};
     Expect(App().Run(2, args)) == EXIT_FAILURE;
     Expect(App().Run(-1, args)) == EXIT_FAILURE;
-}
-
-void test_app_rejects_compiled_and_legacy_gameplay_together_before_engine_creation() {
-    bool ran = false;
-    Expect(App(EngineRunConfig {.enableNativeGameplay = true}).Run([&](Engine&) { ran = true; }) == EXIT_FAILURE);
-    Expect(!ran);
 }
 
 } // namespace ZHLN::Test

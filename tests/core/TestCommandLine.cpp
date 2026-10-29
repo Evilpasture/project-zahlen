@@ -49,10 +49,10 @@ struct CommandLineTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> flag_parsing_and_modes() {
-            // Mock: ./zahlen --vsync=off --fps-limit=144 --validation=gpu --driver=cpp
-            std::array<char*, 5> argv = {
-                (char*) "zahlen", (char*) "--vsync=off", (char*) "--fps-limit=144", (char*) "--validation=gpu", (char*) "--driver=cpp"
+        std::expected<void, ZHLN::ErrorCode> engine_flags_and_removed_driver_option() {
+            // Mock: ./zahlen --vsync=off --fps-limit=144 --validation=gpu
+            std::array<char*, 4> argv = {
+                (char*) "zahlen", (char*) "--vsync=off", (char*) "--fps-limit=144", (char*) "--validation=gpu"
             };
 
             auto result = ZHLN::HandleCommandLine(argv);
@@ -63,21 +63,15 @@ struct CommandLineTestSuite {
                 ZHLN::Test::ExpectFalse(opts.vsync);
                 ZHLN::Test::ExpectEq(opts.fpsLimit, 144u);
                 ZHLN::Test::ExpectEq(opts.validationMode, ZHLN::ValidationMode::GPU);
-                ZHLN::Test::ExpectEq(opts.driver, ZHLN::GameplayDriver::Cpp);
             }
 
-            // Native aliases map to GameplayDriver::Cpp; retired scripted/fennel
-            // drivers are rejected cleanly as InvalidValue.
-            std::array<char*, 2> nativeArgv = {(char*) "zahlen", (char*) "--driver=native"};
-            auto                 nativeRes  = ZHLN::HandleCommandLine(nativeArgv);
-            ZHLN::Test::ExpectTrue(nativeRes.has_value());
-            if (nativeRes) {
-                ZHLN::Test::ExpectEq(nativeRes->driver, ZHLN::GameplayDriver::Cpp);
+            // With no selectable gameplay backend, the driver flag is unknown.
+            std::array<char*, 2> removedArgv = {(char*) "zahlen", (char*) "--driver=native"};
+            auto                 removedRes  = ZHLN::HandleCommandLine(removedArgv);
+            ZHLN::Test::ExpectFalse(removedRes.has_value());
+            if (!removedRes) {
+                ZHLN::Test::ExpectEq(removedRes.error(), ZHLN::CommandLineError::UnknownArgument);
             }
-
-            std::array<char*, 2> retiredArgv = {(char*) "zahlen", (char*) "--driver=scripted"};
-            auto                 retiredRes  = ZHLN::HandleCommandLine(retiredArgv);
-            ZHLN::Test::ExpectFalse(retiredRes.has_value());
 
             return {};
         }
@@ -121,9 +115,7 @@ struct CommandLineTestSuite {
             ZHLN::Test::ExpectTrue(config.render.fullscreen);
             ZHLN::Test::ExpectTrue(config.render.headless);
             ZHLN::Test::ExpectEq(config.render.validationMode, ZHLN::ValidationMode::Off);
-            ZHLN::Test::ExpectFalse(config.enableNativeGameplay);
-            const ZHLN::EngineRunConfig legacy {.enableNativeGameplay = true};
-            ZHLN::Test::ExpectTrue(ZHLN::Engine::MakeConfig(legacy).enableNativeGameplay);
+            ZHLN::Test::ExpectTrue(config.enableFallbackScene);
             return {};
         }
 

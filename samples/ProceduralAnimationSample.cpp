@@ -839,10 +839,9 @@ auto main(int argc, char* argv[]) -> int {
         });
 
         // 3. Synchronized Engine Tick (uses Clock's scaled DeltaTime)
-        const auto status = engine->Tick(clock.DeltaTime(), ZHLN::GameplayDriver::Cpp);
-        if (status == ZHLN::GameplayStatus::RequestQuit) {
-            engine->GetPlatformHost().Close();
-            break;
+        const auto status = engine->Tick(clock.DeltaTime());
+        if (status == ZHLN::FrameStatus::Error) {
+            return EXIT_FAILURE;
         }
 
         // 4. Render diagnostic hull/skeleton only in third person; first person

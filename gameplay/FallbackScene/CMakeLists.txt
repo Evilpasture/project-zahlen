@@ -1,13 +1,12 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# gameplay/FallbackScene -- the compiled-in fail-safe scene (zahlen_fallback_scene).
+# gameplay/FallbackScene -- the scene host's compiled-in diagnostic scene (zahlen_fallback_scene).
 #
-# Optional no-document diagnostic scene and popup UI. A missing native DLL
-# only counts as a failure when the scene host explicitly opts into legacy
-# dynamic gameplay; neither the game nor Core installs this module by default. Core keeps what this
-# composes -- Scene::Instantiate, the frame-scheduler extension seam, the
-# enableFallbackScene config flag and the teardown-hook list -- and a host
+# Optional no-document scene and popup UI; neither the game nor Core installs
+# this module by default. Core keeps what this composes -- Scene::Instantiate,
+# the frame-scheduler extension seam, the enableFallbackScene config flag and
+# the teardown-hook list -- and a host
 # that wants no fallback simply never calls Install.
 #
 # Public headers are reached as <FallbackScene/...>.

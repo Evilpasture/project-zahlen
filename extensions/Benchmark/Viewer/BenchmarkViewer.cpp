@@ -1062,7 +1062,6 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
     // to parse, not the tool's -- see the header.
     const ZHLN::Engine::RunConfig runConfig {
         .appName = "Zahlen Benchmark Viewer",
-        .driver  = ZHLN::GameplayDriver::Cpp,
     };
 
     BenchmarkViewer* self = this;

@@ -1614,10 +1614,9 @@ auto main(int argc, char* argv[]) -> int {
         UpdateShadowExtent(*engine, state.orbit.distance, state.orbit.maxDistance, state.subject.radius);
         ApplyOrbit(*engine, state.orbit, state.subject);
 
-        const auto status = engine->Tick(state.dt, ZHLN::GameplayDriver::Cpp);
-        if (status == ZHLN::GameplayStatus::RequestQuit) {
-            engine->GetPlatformHost().Close();
-            break;
+        const auto status = engine->Tick(state.dt);
+        if (status == ZHLN::FrameStatus::Error) {
+            return EXIT_FAILURE;
         }
 
         if (state.frameBudget != 0 && engine->GetCurrentFrame() >= state.frameBudget) {

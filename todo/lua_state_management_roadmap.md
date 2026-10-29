@@ -2,9 +2,9 @@
 
 ## Overview & Diagnosis
 
-Right now, `extensions/Scripting/Lua/` (~6,034 lines across C++, C ABI shims, FFI layout generators, and Fennel core libraries, plus 3,417 lines of vendored `fennel.lua`) is architected as a **second imperative game engine** inside an engine where C++26 already wins at imperative logic:
+Before the completed Lua-state refactor, `extensions/Scripting/Lua/` (~6,034 lines across C++, C ABI shims, FFI layout generators, and Fennel core libraries, plus 3,417 lines of vendored `fennel.lua`) was architected as a **second imperative game engine** inside an engine where C++26 already wins at imperative logic:
 
-- `SystemWiring::Gameplay` dispatches `ScriptRunner::CallUpdate(&engine, dt)` **every frame** (`GameplayDriver::Scripted` / `Hybrid`).
+- The former imperative script runner dispatched `ScriptRunner::CallUpdate(&engine, dt)` every frame; this path has since been removed.
 - `extensions/Scripting/Lua/Scripting.cpp` (`1,332` lines) + `ScriptingABI.*` (`468` lines) + `GenFFICdef.cpp` / `check_ffi_layout.py` (`751` lines) + `scripts/core/*.fnl` (`1,753` lines) maintain a shadow Lua-side ECS (`ecs.fnl`), a shadow Lua-side system scheduler (`scheduler.fnl`), structural shadow-locked `ffi.cast` raw pointers into ECS pools, and imperative verbs (`Raycast`, `SetCharacterVelocity`, `AddImpulseAt`, `PlayOneShot3D`).
 - `include/Zahlen/ScriptCommandRegistry.hpp` and `include/Zahlen/IScriptRuntime.hpp` exist in Core solely to feed that imperative jump table.
 - Meanwhile, **zero gameplay `.lua` or `.fnl` scripts exist in the repository** (`boot.lua` / `boot.fnl` are absent), because writing systems in C++26 with P2996 reflection, `Module::Describe()`, and hazard-checked `SystemGraph` is strictly safer, faster, and cleaner.
@@ -158,7 +158,7 @@ template <typename T>
 - [x] Simplified Core (`include/Zahlen/`, `src/engine/`, `modules/zahlen.cppm`):
   - Removed `include/Zahlen/ScriptCommandRegistry.hpp` and `src/engine/ScriptCommandRegistry.cpp`.
   - Removed `include/Zahlen/IScriptRuntime.hpp`, `include/Zahlen/Scripting.hpp`, `modules/zahlen-scripting.cppm`, and `src/engine/ScriptRunner.cpp`.
-  - Removed per-frame `ScriptRunner::CallUpdate` branches from `src/engine/SystemWiring.cpp` (renaming `"ScriptAndShaderReload"` -> `"StateAndShaderReload"`) and `bootScriptWatches` from `src/engine/Engine.cpp`, collapsing `GameplayDriver` to native C++ execution (`CommandLineTestSuite`: `3/3` passed).
+  - Removed per-frame `ScriptRunner::CallUpdate` branches from `src/engine/SystemWiring.cpp` (renaming `"ScriptAndShaderReload"` -> `"StateAndShaderReload"`) and `bootScriptWatches` from `src/engine/Engine.cpp`, leaving C++ gameplay in the application executable (`CommandLineTestSuite`: `3/3` passed).
 - [x] Cleaned up build & repo references across `CMakeLists.txt`, `cmake/ThirdParty.cmake`, `Dockerfile`, `README.md`, `include/ARCHITECTURE.md`, `gameplay/FallbackScene/`, `tools/snapshot.py`, `tools/ecsc/src/codegen.rs`, `configure/error_ordinal_allowlist.json`, and `configure/check_layer_dag.py`.
 
 ### Phase 4: Wire State-Only Lua Domains

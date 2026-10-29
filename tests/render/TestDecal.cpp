@@ -203,8 +203,8 @@ struct DecalTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 10; ++frame) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-                ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+                const auto status = engine->Tick(dt);
+                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
             }
 
             // 6. Frame capture & pixel validation
@@ -298,8 +298,8 @@ struct DecalTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 5; ++frame) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-                ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+                const auto status = engine->Tick(dt);
+                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
             }
 
             return {};

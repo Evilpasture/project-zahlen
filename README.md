@@ -51,7 +51,7 @@ validation limits, configuration, and the lifetime of returned paths.
 
 The optional source tree is split by role: `plugins/` contains asset formats and codecs, `extensions/` contains reusable engine subsystems plus network/platform I/O, and `gameplay/` contains domain-specific systems and project integrations. The existing top-level `modules/` remains reserved for Core C++ module interfaces.
 
-For a detailed breakdown of the engine's architecture, frame loop execution order, deferred render graph topology, and scripting IPC protocol, see [include/ARCHITECTURE.md](include/ARCHITECTURE.md).
+For a detailed breakdown of the engine's architecture, frame loop execution order and deferred render graph topology, see [include/ARCHITECTURE.md](include/ARCHITECTURE.md).
 
 ## Integrating as a Submodule
 
@@ -103,7 +103,7 @@ zahlen_add_runtime_dlls(my_game) # Windows: stage engine/Jolt DLLs beside the ga
 The engine requires C++26 static reflection (see Build Requirements). For an
 opt-in core-only build, set `ZHLN_BUILD_EXTRAS=OFF` before `add_subdirectory`;
 `zahlen_application` still exists, just without optional modules. Project-specific
-asset cooking and hot-reload targets can be added separately when needed.
+asset cooking and data/profile iteration targets can be added separately when needed.
 
 ### 4. Game Entry Point (`src/main.cpp`)
 Link the reusable application layer (`target_link_libraries(my_game PRIVATE zahlen_application)`) instead of composing engine services, optional modules, crash handling and the main loop in each game. For example:
@@ -127,9 +127,9 @@ int main(int argc, char* argv[]) {
 }
 ```
 
-`App().Run([](ZHLN::Engine& engine) { /* per-frame code */ })` also works when you don't need command-line flags. The `(Engine&, float dt)` form gets the exact delta passed to `Tick`. Both `App().Run(callback)` **and** `App().Run()` without a callback leave the legacy `scripts/gameplay` loader off by default. With `argc, argv`, standard engine flags such as `--headless`, `--vsync` and `--fps-limit` work; `--help`, `--version` and `--print-graph` exit before engine creation.
+`App().Run([](ZHLN::Engine& engine) { /* per-frame code */ })` also works when you don't need command-line flags. The `(Engine&, float dt)` form gets the exact delta passed to `Tick`. `App().Run()` without a callback is for games composed entirely from ECS systems and installed modules. With `argc, argv`, standard engine flags such as `--headless`, `--vsync` and `--fps-limit` work; `--help`, `--version` and `--print-graph` exit before engine creation.
 
-The default `zahlen` binary (`app/main.cpp`) is a compiled C++ sandbox: it spawns a physics ground and falling boxes, lights them with a sun and moving point light, fires impulse-driven cubes with **F**, and plays a short procedural sound. **R** resets the view; **Esc** quits. When extras are built, FreeCam provides WASD movement, right-mouse look and Shift sprint. The sandbox uses no DLL, scene-document parser, or optional-extension `#ifdef`s; the optional CharacterController module is installed by `App` but this fly-camera demo does not spawn a character. Move larger projects into their own `GameSession` and ECS systems rather than growing `main.cpp` indefinitely.
+The default `zahlen` binary (`app/main.cpp`) is a compiled C++ sandbox: it spawns a physics ground and falling boxes, lights them with a sun and moving point light, fires impulse-driven cubes with **F**, and plays a short procedural sound. **R** resets the view; **Esc** quits. When extras are built, FreeCam provides WASD movement, right-mouse look and Shift sprint. The sandbox needs no scene-document parser or optional-extension `#ifdef`s; the optional CharacterController module is installed by `App` but this fly-camera demo does not spawn a character. Move larger projects into their own `GameSession` and ECS systems rather than growing `main.cpp` indefinitely.
 
 `App` owns the outer frame loop: it initializes Platform/TaskSystem, creates an Engine, installs the available baked default font and CharacterController, target camera, Interaction, Terrain, Animation/IK, FreeCam and RagdollAuthoring, builds the scene, polls events, calls your game logic, then `Engine::Tick(dt)` and tears down in order. It does **not** install the scene-host diagnostic fallback (which would replace a compiled game's scene). A `ZHLN_BUILD_EXTRAS=OFF` build uses just Core. Override the preset with `.WithDefaultModules(false)`, add project modules with `.Install([](ZHLN::Engine& engine) { /* install */ })` before the first scene, use `.OnUI(...)` for UI, and pass `ZHLN::EngineRunConfig{...}` to `App(config)` for launch settings. `.OnStart(...)`, `.Install(...)`, and `.OnUI(...)` are application methods, not config delegates. `Engine::Run` remains available for bespoke hosts; its fourth `EventPoller` argument is an explicit low-level frame seam.
 
@@ -140,39 +140,10 @@ The default `zahlen` binary (`app/main.cpp`) is a compiled C++ sandbox: it spawn
 | `zahlen` | `app/main.cpp` | Ordinary game using `ZHLN::App()`; built even with extras OFF |
 | `zahlen-editor` | `tools/editor/main.cpp` | World editor with its own paused-simulation loop; `--scene <file.toml|file.lua>` imports a document, Ctrl+S saves `scene.toml` |
 | `zahlen-benchmark` | `tools/benchmark/main.cpp` | Headless logic workload; tune with `ZHLN_BENCH_ENTITIES` and `ZHLN_BENCH_TICKS` |
-| `zahlen-scene-host` | `tools/scene/main.cpp` | Scene/document and file-watcher integration; `--scene` and `--graphics-config` (Lua when available), optional Discord/fallback; `--legacy-gameplay-dll` explicitly tests deprecated hot reload |
+| `zahlen-scene-host` | `tools/scene/main.cpp` | Scene/document and file-watcher integration; `--scene` and `--graphics-config` (Lua when available), optional Discord presence and a diagnostic scene when no document is selected |
 | `zahlen_ui_editor` | `app/UIEditor.cpp` | Separate UI-tree editor (unchanged) |
 
-The world editor and scene host share document import in `tools/scene/SceneDocument.cpp`. Only the scene host installs the Lua graphics file watcher; it installs a diagnostic fallback when no scene document was requested, so a loaded document is not overwritten by it. The fallback reports a missing DLL only after an explicit legacy opt-in. The benchmark does not initialize a window or engine. For interactive benchmark panels, use the existing `zahlen_benchmark_viewer` library in a custom host; the ordinary game has no F3/F4 benchmark overlay. Legacy `zahlen --editor` / `zahlen --benchmark` flags are rejected with a pointer to the tool binaries.
-
-### 5. Deprecated DLL gameplay (explicit compatibility mode)
-
-The old `GAMEPLAY_API` / `NativeGameplayUpdate` shared-library hook is **legacy**.
-Ordinary games compile their source into the executable and call `App().Run(...)`;
-they neither load nor watch `scripts/gameplay.dll` (`libgameplay.so` / `.dylib`).
-`Engine::Create`, `Engine::Run`, and `App().Run()` without a callback also default
-to **no** DLL loader. The retained `EngineConfig::enableNativeGameplay` and
-`EngineRunConfig::enableNativeGameplay` booleans opt in explicitly, for
-experiments or migration only:
-
-```cpp
-// Compatibility-only host: do not also pass a compiled gameplay callback.
-return ZHLN::App(ZHLN::EngineRunConfig {.enableNativeGameplay = true})
-    .Run(argc, argv);
-```
-
-The scene diagnostic tool has a separate `zahlen-scene-host --legacy-gameplay-dll`
-flag (mutually exclusive with `--scene`). `App` rejects an opt-in DLL and a
-compiled `Run(callback)` in the same process. `--driver=native` remains an alias
-for the C++ frame driver; it does **not** enable the DLL loader.
-
-Cross-library allocation, vtable and reflected-type identity are not a stable
-hot-reload ABI. The compatibility adapter remains in `src/engine/NativeScriptModule.hpp`
-but is deprecated; prefer recompiling the game or iterating on TOML/Lua scene
-documents in `zahlen-scene-host` and its Lua graphics-profile watcher. Document
-loading is distinct from hot-reloading C++ gameplay code. See the isolated
-[legacy DLL compatibility guide](docs/legacy-gameplay-dll.md) only if you need
-to migrate an existing dynamic module.
+The world editor and scene host share document import in `tools/scene/SceneDocument.cpp`. Only the scene host installs the Lua graphics file watcher; it installs a diagnostic fallback when no scene document was requested, so a loaded document is not overwritten by it. The benchmark does not initialize a window or engine. For interactive benchmark panels, use the existing `zahlen_benchmark_viewer` library in a custom host; the ordinary game has no F3/F4 benchmark overlay. Legacy `zahlen --editor` / `zahlen --benchmark` flags are rejected with a pointer to the tool binaries.
 
 ## Hardware expectations
 

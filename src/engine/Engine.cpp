@@ -5,7 +5,6 @@
 #include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
 #include "Hierarchy.hpp"
-#include "NativeScriptModule.hpp"
 #include "Platform.hpp"
 #include "SystemWiring.hpp"
 #include "SceneCleanupSystem.hpp"
@@ -57,15 +56,12 @@ enum class EngineInitError : uint8_t {
 
 enum class EngineRunError : uint8_t {
     SceneInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine default scene initialization failed"> {}) = 1,
-    GameplayFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine gameplay frame failed"> {}) = 2,
+    FrameFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine frame failed"> {}) = 2,
 };
 
 struct EngineImpl {
     std::unique_ptr<Kernel> kernel;
     std::unique_ptr<World>  world;
-
-    std::unique_ptr<NativeScriptModule> nativeScriptModule;
-    GameplayDriver                      activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback uiCallback = nullptr;
     UIDrawData                              pendingUIData {};
@@ -115,18 +111,6 @@ struct EngineImpl {
     uint64_t     frameCounter = 0;
     EngineConfig config;
 };
-
-auto Engine::UpdateNativeGameplay(float dt) -> GameplayStatus {
-    return _impl->nativeScriptModule != nullptr ? _impl->nativeScriptModule->Update(this, dt) : GameplayStatus::OK;
-}
-
-auto Engine::IsNativeGameplayEnabled() const noexcept -> bool {
-    return _impl->config.enableNativeGameplay;
-}
-
-auto Engine::IsNativeGameplayLoaded() const noexcept -> bool {
-    return _impl->nativeScriptModule != nullptr && _impl->nativeScriptModule->IsLoaded();
-}
 
 auto Engine::FallbackSceneEnabled() const noexcept -> bool {
     return _impl->config.enableFallbackScene;
@@ -333,10 +317,6 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         &_impl->kernel->GetPlatformHost()
     );
 
-    if (cfg.enableNativeGameplay) {
-        _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
-    }
-
     return {};
 }
 
@@ -359,7 +339,6 @@ Engine::~Engine() {
     _impl->renderGraph.reset();
     _impl->extensions.Clear();
     _impl->world.reset();
-    _impl->nativeScriptModule.reset();
     _impl->kernel.reset();
 }
 
@@ -790,11 +769,10 @@ auto Engine::InitializeDefaultScene() -> bool {
     return ZHLN::InitializeDefaultScene(*this);
 }
 
-auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
-    _impl->activeGameplayDriver = driver;
+auto Engine::Tick(float dt) -> FrameStatus {
     _impl->world->GetInput().StepHaptics(dt);
 
-    FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
+    FrameContext ctx;
 
     // The plan is whatever the composition produced: core's own steps, plus one
     // set of steps per module the application installed. The engine executes it
@@ -823,7 +801,6 @@ auto Engine::MakeConfig(const RunConfig& runConfig) -> EngineConfig {
                 .validationMode = runConfig.validationMode,
                 .headless       = runConfig.headless,
             },
-        .enableNativeGameplay = runConfig.enableNativeGameplay,
     };
 }
 
@@ -885,13 +862,8 @@ auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstal
         const bool                 displayPaced  = pacedDt.has_value() &&
                                   (runConfig.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
         const float tickDt = displayPaced ? *pacedDt : rawDt;
-        const GameplayStatus status = engine->Tick(tickDt, runConfig.driver);
-        if (status == GameplayStatus::Error) {
-            return std::unexpected(EngineRunError::GameplayFailed);
-        }
-        if (status == GameplayStatus::RequestQuit) {
-            engine->GetPlatformHost().Close();
-            break;
+        if (engine->Tick(tickDt) == FrameStatus::Error) {
+            return std::unexpected(EngineRunError::FrameFailed);
         }
 
         if (runConfig.fpsLimit > 0 && !displayPaced) {

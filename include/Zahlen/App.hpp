@@ -45,8 +45,7 @@ class Application {
         return *this;
     }
 
-    // System-driven apps need no per-frame callable. The deprecated DLL loader
-    // is OFF unless the caller explicitly sets config.enableNativeGameplay.
+    // System-driven apps need no per-frame callable.
     auto Run() const -> int { return RunConfigured(_config, {}); }
     auto Run(int argc, char* argv[]) const -> int { return RunFromCLI(_config, argc, argv, {}); }
 

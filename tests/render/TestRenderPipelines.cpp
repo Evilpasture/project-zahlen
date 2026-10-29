@@ -48,9 +48,8 @@ struct RenderPipelinesTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> full_pipeline_multi_frame_simulation() {
             // Same contract as every other GPU test: this suite owns the scene.
-            // Leaving the fallback preset on engages RTR + a second ground/box/UI
-            // on the first Tick (no libgameplay.so), which device-lost the GPU
-            // and rebuilt the whole renderer inside the 15s test alarm.
+            // It installs no diagnostic fallback module and builds only the
+            // ground and box that this test needs.
 
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 16 * 1024 * 1024},
@@ -105,8 +104,8 @@ struct RenderPipelinesTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 engine->ProcessEvents();
-                const ZHLN::GameplayStatus status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-                ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+                const ZHLN::FrameStatus status = engine->Tick(dt);
+                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
             }
 
             auto& rc       = engine->GetRenderContext();
@@ -125,7 +124,7 @@ struct RenderPipelinesTestSuite {
                 const ZHLN::MaterialID boxMaterial = boxMesh->materialAsset;
                 const auto validationErrors = ZHLN::Test::ValidationErrorCount();
                 engine->ProcessEvents();
-                ZHLN::Test::ExpectEq(engine->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK);
+                ZHLN::Test::ExpectEq(engine->Tick(dt), ZHLN::FrameStatus::OK);
                 rc.UnregisterGPUMaterial(boxMaterial);
                 ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(boxMaterial).has_value());
 
@@ -636,7 +635,7 @@ struct RenderPipelinesTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 first->ProcessEvents();
-                ZHLN::Test::ExpectEq(first->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK);
+                ZHLN::Test::ExpectEq(first->Tick(dt), ZHLN::FrameStatus::OK);
             }
             reportFall(*first, falling, "engine A box");
             if (const auto transform = first->GetRegistry().Get<ZHLN::Components::TransformComponent>(falling);
@@ -661,7 +660,7 @@ struct RenderPipelinesTestSuite {
             );
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 second->ProcessEvents();
-                ZHLN::Test::ExpectEq(second->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK);
+                ZHLN::Test::ExpectEq(second->Tick(dt), ZHLN::FrameStatus::OK);
             }
             reportFall(*second, fallingB, "engine B box");
             if (const auto transform = second->GetRegistry().Get<ZHLN::Components::TransformComponent>(fallingB);

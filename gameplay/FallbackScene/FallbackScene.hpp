@@ -5,8 +5,7 @@
 //
 // The compiled-in diagnostic scene for a tool host with no scene document.
 // Moved out of core: the scene content (emblem, ground, orbit light), the popup
-// and explicit-legacy-module failure reporting are application policy, not
-// engine substrate. Core keeps the pieces
+// are application policy, not engine substrate. Core keeps the pieces
 // this composes -- the Scene::Instantiate path, the frame/graph extension
 // seams, the enableFallbackScene config flag and the teardown-hook list --
 // and a host that wants none of it simply never calls Install.
@@ -14,8 +13,6 @@
 
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GameModule.hpp>
-#include <cstdint>
-#include <string_view>
 
 namespace ZHLN {
 
@@ -27,25 +24,19 @@ struct Scene;
 
 namespace FallbackScene {
 
-enum class FallbackReason : uint8_t { None = 0, MissingNativeModule, NoSceneConfigured };
-
-// Compiled-in fail-safe scene. Hosts that do not want it set
-// `EngineConfig::enableFallbackScene` false at Create rather than talking to
-// this type.
+// Compiled-in diagnostic scene for the scene host's no-document mode.
+// Hosts that do not want it simply do not install this module.
 class DefaultPreset {
   public:
-    static void BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage = "");
+    static void BuildFallbackScene(Engine& engine);
 
     // The fallback scene as a scene description -- the same data
     // BuildFallbackScene instantiates. Exposed so it can be inspected and
     // checked without a device.
     //
-    // It is a compiled-in ZHLN::Scene::Scene, not a baked-in document: this is
-    // the engine's fail-safe, it runs precisely when nothing else could be
-    // loaded, and making it depend on a text parser would mean the one scene
-    // that has to work is the one with the most machinery between it and the
-    // screen. Building it in C++ also means a mistake in it fails the build
-    // rather than surfacing on the day everything else has already gone wrong.
+    // It is a compiled-in ZHLN::Scene::Scene, not a baked-in document: the
+    // scene host displays it when no document was requested. It does not
+    // require a text parser just to show this diagnostic scene.
     [[nodiscard]] static auto FallbackScene() noexcept -> const Scene::Scene&;
     static void               Update(Engine& engine, float dt);
     [[nodiscard]] static bool IsActive() noexcept;
@@ -66,8 +57,6 @@ class DefaultPreset {
   private:
     static inline bool           s_IsActive       = false;
     static inline const Engine*  s_Owner          = nullptr;
-    static inline FallbackReason s_Reason         = FallbackReason::None;
-    static inline char           s_DetailMsg[256] = "";
 
     // 3D Scene Entities
     static inline Entity s_CubeEntity = Entity::Null();
@@ -85,8 +74,7 @@ class DefaultPreset {
 };
 
 // Composition-root entry point: installs the module Describe() returns, whose
-// step list places "DefaultPreset" at its original position (after
-// GameplayModule, before the simulation graph) and whose teardown hook releases
+// step list places "DefaultPreset" before the simulation graph and whose teardown hook releases
 // the preset's parked entity handles. Without Install the frame never engages
 // fallback detection and a boot failure leaves the empty default scene on
 // screen.

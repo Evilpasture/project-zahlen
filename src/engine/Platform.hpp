@@ -22,8 +22,4 @@ float GetDisplayScale(Window& window);
 
 void Sleep(uint32_t milliseconds);
 
-[[nodiscard]] void* LoadSharedLibrary(const char* path) noexcept;
-[[nodiscard]] void* GetSymbolAddress(void* handle, const char* symbol) noexcept;
-void                UnloadSharedLibrary(void* handle) noexcept;
-
 }

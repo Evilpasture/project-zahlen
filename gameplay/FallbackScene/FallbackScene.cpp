@@ -20,7 +20,6 @@
 #include <Zahlen/gui/GUI.hpp>
 
 #include <cmath>
-#include <cstring>
 #include <format>
 #include <utility>
 
@@ -38,13 +37,10 @@ namespace {
 // not match the component's -- and both are fixed in Zahlen/Scene.hpp instead
 // of worked around here.
 //
-// Nothing is loaded from disk: the fallback runs precisely when the game's
-// assets did not, so the description is compiled into the binary. It used to be
-// a baked-in TOML document parsed at runtime, which put the reflection-driven
-// document parser on the one code path that exists because everything else
-// failed to load. Same data, no parser: the plugins/toml layer can still read
-// and write this exact description (see tests/extras/TestTOML.cpp), it just is
-// not what the engine boots from.
+// Nothing is loaded from disk: this scene belongs to the scene host when no
+// document was requested, so the description is compiled into that tool. The
+// plugins/toml layer can still read and write this description (see
+// tests/extras/TestTOML.cpp); booting it does not require a parser.
 //
 // Only the fields that differ from the struct defaults in Zahlen/Scene.hpp are
 // set, so the two stay in step by construction -- exactly what a scene document
@@ -131,8 +127,6 @@ auto DefaultPreset::IsActive() noexcept -> bool {
 void DefaultPreset::ClearFallback() noexcept {
     s_IsActive     = false;
     s_Owner        = nullptr;
-    s_Reason       = FallbackReason::None;
-    s_DetailMsg[0] = '\0';
     s_CubeEntity   = Entity::Null();
     s_PointLight   = Entity::Null();
     s_UIPopupBox   = Entity::Null();
@@ -144,21 +138,16 @@ void DefaultPreset::ClearFallback() noexcept {
     s_FallbackGui.reset();
 }
 
-void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage) {
+void DefaultPreset::BuildFallbackScene(Engine& engine) {
     if (s_IsActive) {
         return;
     }
 
     s_IsActive     = true;
     s_Owner        = &engine;
-    s_Reason       = reason;
     s_PopupVisible = true;
 
-    size_t copyLen = std::min(detailMessage.size(), sizeof(s_DetailMsg) - 1);
-    std::memcpy(s_DetailMsg, detailMessage.data(), copyLen);
-    s_DetailMsg[copyLen] = '\0';
-
-    Log("[DefaultPreset] Engaging Fallback Scene. Reason: {}", detailMessage);
+    Log("[DefaultPreset] No scene document selected; showing diagnostic scene.");
 
     auto& reg = engine.GetRegistry();
 
@@ -276,10 +265,6 @@ void DefaultPreset::Update(Engine& engine, float dt) {
                 { 0.35f, 0.88f, 1.0f, 1.0f });
 
         // Alert toast box
-        std::string reasonTitle =
-            (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] LEGACY GAMEPLAY LIBRARY NOT FOUND" :
-                                                                "[INFO] NO SCENE CONFIGURED";
-
         ui.BeginBox("FallbackAlertBox", GUI::BoxConfig {
             .width        = { .grow = 1.0f },
             .height       = {},
@@ -289,8 +274,9 @@ void DefaultPreset::Update(Engine& engine, float dt) {
             .gap          = 6.0f,
             .direction    = GUI::Direction::Column
         });
-        ui.Text(reasonTitle, 16.0f, { 1.0f, 0.85f, 0.3f, 1.0f });
-        ui.Text(s_DetailMsg, 14.0f, { 0.92f, 0.88f, 0.78f, 1.0f });
+        ui.Text("[INFO] NO SCENE CONFIGURED", 16.0f, { 1.0f, 0.85f, 0.3f, 1.0f });
+        ui.Text("No scene document selected; try zahlen for the compiled C++ sandbox or pass --scene.",
+                14.0f, { 0.92f, 0.88f, 0.78f, 1.0f });
         ui.EndBox();
 
         // System environment info box
@@ -344,21 +330,14 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
 namespace {
 
-// The standalone scene host installs this when no document was requested.
-// Missing legacy DLLs are only an error if somebody explicitly opted in.
-void FallbackStep(Engine& engine, float dt, FrameContext& ctx) {
+// The standalone scene host installs this only when no document was requested.
+void FallbackStep(Engine& engine, float dt, FrameContext&) {
     if (!engine.FallbackSceneEnabled()) {
         return;
     }
 
-    if (!DefaultPreset::IsActive() && ctx.driver == GameplayDriver::Cpp && !engine.IsNativeGameplayLoaded()) {
-        const bool legacyRequested = engine.IsNativeGameplayEnabled();
-        DefaultPreset::BuildFallbackScene(
-            engine,
-            legacyRequested ? FallbackReason::MissingNativeModule : FallbackReason::NoSceneConfigured,
-            legacyRequested ? "Opted-in scripts/gameplay dynamic library was not found."
-                            : "No scene document selected; try zahlen for the compiled C++ sandbox or pass --scene."
-        );
+    if (!DefaultPreset::IsActive()) {
+        DefaultPreset::BuildFallbackScene(engine);
     }
 
     if (DefaultPreset::IsActive()) {
@@ -366,19 +345,16 @@ void FallbackStep(Engine& engine, float dt, FrameContext& ctx) {
     }
 }
 
-// Declared, and placed after "GameplayModule": the fallback decides whether
-// anything is going to run this frame, so it has to see the outcome of the
-// gameplay step and land before the simulation graph consumes the scene it
-// builds. It used to be inserted by a callback and re-inserted on every
-// schedule rebuild, with no way for anyone outside this file to see where it
-// went.
+// Build the diagnostic scene before the simulation graph reads it. The
+// placement is declared as a module step so a missing core anchor is reported
+// instead of silently moving the fallback elsewhere in the frame.
 constexpr ModuleStep kFrameSteps[] = {
     {
         .phase     = FramePhase::Fallback,
         .name      = "DefaultPreset",
         .run       = &FallbackStep,
-        .placement = StepPlacement::After,
-        .anchor    = "GameplayModule",
+        .placement = StepPlacement::Before,
+        .anchor    = "UpdateGraph",
     },
 };
 

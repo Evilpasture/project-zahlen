@@ -70,10 +70,6 @@ struct EngineRunConfig {
     ValidationMode   validationMode = ValidationMode::On;
     bool             headless       = false;
     uint32_t         fpsLimit       = 0;
-    GameplayDriver   driver         = GameplayDriver::Cpp;
-    // Deprecated compatibility: explicitly opt in to scripts/gameplay.{dll,so,dylib}.
-    // Ordinary statically linked games leave this off, including App().Run().
-    bool             enableNativeGameplay = false;
 };
 
 class ZHLN_API Engine {
@@ -174,6 +170,7 @@ class ZHLN_API Engine {
     auto               GetCurrentAlpha() -> float&;
     auto GetPhysicsAccumulator() -> float&;
 
+    // Host-owned, per-engine state (also used by the glTF inspector).
     [[nodiscard]] auto GetGameState() const -> void*;
     void               SetGameState(void* state);
     [[nodiscard]] auto GetCurrentFrame() const noexcept -> uint64_t;
@@ -251,13 +248,7 @@ class ZHLN_API Engine {
 
     auto InitializeDefaultScene() -> bool;
 
-    auto Tick(float dt, GameplayDriver driver = GameplayDriver::Cpp) -> GameplayStatus;
-
-    auto UpdateNativeGameplay(float dt) -> GameplayStatus;
-
-    // Legacy opt-in loader state. Disabled unless explicitly requested at launch.
-    [[nodiscard]] auto IsNativeGameplayEnabled() const noexcept -> bool;
-    [[nodiscard]] auto IsNativeGameplayLoaded() const noexcept -> bool;
+    auto Tick(float dt) -> FrameStatus;
 
     [[nodiscard]] auto FallbackSceneEnabled() const noexcept -> bool;
 
@@ -280,7 +271,6 @@ class ZHLN_API Engine {
 
     // Low-level runner for custom hosts. The optional event poller is an
     // explicit frame seam (not a lifecycle hook smuggled through RunConfig).
-    // Its deprecated DLL mode is off unless RunConfig opts in explicitly.
     static auto Run(const RunConfig& runConfig = {}, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr,
                     EventPoller pollEvents = nullptr) -> std::expected<void, ErrorCode>;
 

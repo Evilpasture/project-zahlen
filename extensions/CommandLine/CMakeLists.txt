@@ -60,7 +60,7 @@ if(TARGET zahlen_warnings)
 endif()
 
 # Engine-host CLI preset (--editor, --vsync, --validation, --renderdoc,
-# --print-graph, --driver, ...). Built alongside zahlen_command_line whenever
+# --print-graph, ...). Built alongside zahlen_command_line whenever
 # zahlen_engine is part of the build.
 if(TARGET zahlen_engine)
     add_library(zahlen_engine_cli STATIC

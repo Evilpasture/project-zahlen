@@ -112,7 +112,6 @@ auto main(int argc, char* argv[]) -> int {
         .validationMode = options->validationMode,
         .headless       = options->headless,
         .fpsLimit       = options->fpsLimit,
-        .driver         = options->driver,
     };
     auto run = ZHLN::Engine::Run(runConfig, nullptr, &InstallProjectLightExtensions, pollCrashes);
     if (!run) {

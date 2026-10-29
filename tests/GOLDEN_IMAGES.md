@@ -94,7 +94,7 @@ so the assertion stays a silhouette mismatch rather than an absolute colour.
 
 ### D. Scene setup / API smoke — keep
 
-Entity and component liveness, `GameplayStatus::OK` per tick, validation-layer
+Entity and component liveness, `FrameStatus::OK` per tick, validation-layer
 count deltas. No pixels involved.
 
 ---

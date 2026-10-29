@@ -124,8 +124,8 @@ struct UITestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 5; ++frame) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-                ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+                const auto status = engine->Tick(dt);
+                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
             }
 
             // The frame comes back in memory; the .ppm is only a diagnostic
@@ -222,7 +222,7 @@ struct UITestSuite {
             // Frame 1: Initial layout establishment (mouse at 0, 0, unpressed)
             setInput(0.0f, 0.0f, false);
             engine->ProcessEvents();
-            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            engine->Tick(dt);
 
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectFalse(wasClickedB);
@@ -232,7 +232,7 @@ struct UITestSuite {
             // Frame 2: Mouse hovers over ButtonA (approx x: 50, y: 35), unpressed
             setInput(50.0f, 35.0f, false);
             engine->ProcessEvents();
-            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            engine->Tick(dt);
 
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
@@ -246,7 +246,7 @@ struct UITestSuite {
             // Frame 3: Mouse pressed down this frame over ButtonA
             setInput(50.0f, 35.0f, true);
             engine->ProcessEvents();
-            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            engine->Tick(dt);
 
             ZHLN::Test::ExpectTrue(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
@@ -258,7 +258,7 @@ struct UITestSuite {
             // Frame 4: Button is held down across next frame (single-fire guarantee: should NOT click again)
             setInput(50.0f, 35.0f, true);
             engine->ProcessEvents();
-            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            engine->Tick(dt);
 
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
@@ -269,7 +269,7 @@ struct UITestSuite {
             // Frame 5: Mouse released over ButtonA
             setInput(50.0f, 35.0f, false);
             engine->ProcessEvents();
-            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            engine->Tick(dt);
 
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
@@ -280,12 +280,12 @@ struct UITestSuite {
             // Drag-into-click prevention test
             setInput(500.0f, 400.0f, true);
             engine->ProcessEvents();
-            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            engine->Tick(dt);
 
             // Move mouse over ButtonB while still held down from previous frame
             setInput(50.0f, 85.0f, true);
             engine->ProcessEvents();
-            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            engine->Tick(dt);
 
             ZHLN::Test::ExpectFalse(wasClickedB); // Drag-into-hover must NOT trigger click
             ZHLN::Test::ExpectEq(clickCountB, 0u);
@@ -293,11 +293,11 @@ struct UITestSuite {
             // Frame 7: Release mouse over ButtonB, then press again to verify ButtonB clicks cleanly
             setInput(50.0f, 85.0f, false);
             engine->ProcessEvents();
-            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            engine->Tick(dt);
 
             setInput(50.0f, 85.0f, true);
             engine->ProcessEvents();
-            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            engine->Tick(dt);
 
             ZHLN::Test::ExpectTrue(wasClickedB);
             ZHLN::Test::ExpectEq(clickCountA, 1u);

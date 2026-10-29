@@ -140,8 +140,8 @@ struct HiZTestSuite {
             // Execute 15 frames of rendering to warm up history and Hi-Z pyramids
             for (uint32_t frame = 0; frame < 15; ++frame) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-                ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+                const auto status = engine->Tick(dt);
+                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
             }
 
             // Verify culling and draw lists are active and non-empty
@@ -201,8 +201,8 @@ struct HiZTestSuite {
             // Warm up Hi-Z depth map across 20 frames so occlusion history stabilizes
             for (uint32_t frame = 0; frame < 20; ++frame) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-                ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+                const auto status = engine->Tick(dt);
+                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
             }
 
             const auto& visible = engine->GetVisibleEntities();
@@ -232,7 +232,7 @@ struct HiZTestSuite {
             // Render initial 5 frames at 1280x720
             for (uint32_t i = 0; i < 5; ++i) {
                 engine->ProcessEvents();
-                engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                engine->Tick(dt);
             }
 
             // Dynamically resize viewport to 800x600 (Triggers RecreateTargets and rebuilds Hi-Z mips)
@@ -245,8 +245,8 @@ struct HiZTestSuite {
             // Tick subsequent 10 frames at the new resolution
             for (uint32_t i = 0; i < 10; ++i) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-                ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+                const auto status = engine->Tick(dt);
+                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
             }
 
             // The resize actually took. Headless there is no compositor to ask

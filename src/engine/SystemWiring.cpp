@@ -59,14 +59,6 @@ void Physics(Engine& engine, float dt, FrameContext&) {
     PhysicsSystem::Update(engine, dt, engine.GetPhysicsAccumulator());
 }
 
-void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
-    if (!engine.IsNativeGameplayEnabled()) {
-        return; // compiled App gameplay already ran before Tick
-    }
-    ZHLN::ScopedTimer profTimer("Legacy DLL Gameplay Update");
-    ctx.status = engine.UpdateNativeGameplay(dt);
-}
-
 void UpdateGraph(Engine& engine, float dt, FrameContext&) {
     // Before Execute, and on this thread: the scratch arenas are per-worker and
     // this is the last point at which no worker holds a pointer into one.
@@ -108,10 +100,9 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
         if (render_res.error().Is(FrameResult::DeviceLost)) {
             if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
                 ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
-                ctx.status = GameplayStatus::Error;
+                ctx.status = FrameStatus::Error;
                 engine.GetPlatformHost().Close();
             }
-            ctx.deviceLost = true;
         }
     }
 }
@@ -148,7 +139,6 @@ void BuildCoreFramePlan(Engine& engine) {
     require(plan.Append(Phase::UI, "HostUICallback", Steps::HostUICallback));
     require(plan.Append(Phase::HotReload, "StateAndShaderReload", Steps::HotReload));
     require(plan.Append(Phase::Physics, "PhysicsSystem", Steps::Physics));
-    require(plan.Append(Phase::Gameplay, "GameplayModule", Steps::Gameplay));
     require(plan.Append(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph));
     require(plan.Append(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback));
     require(plan.Append(Phase::Simulation, "SceneCleanup", Steps::CleanupScene));

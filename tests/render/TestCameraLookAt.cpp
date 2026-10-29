@@ -126,8 +126,8 @@ struct CameraLookAtTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 8; ++frame) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-                ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+                const auto status = engine->Tick(dt);
+                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
             }
 
             // In memory: the .ppm mirror is written for inspection only, so a

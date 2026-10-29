@@ -98,7 +98,6 @@ void   Update(Engine& engine, float dt);
 
 | Requirement | Why OOP Fails | Why ECS Succeeds |
 | :--- | :--- | :--- |
-| **Hot-Reloading** | Reloading `.so`/`.dll` modules invalidates class vtables and member offsets, crashing active class instances. | Components reside in C++ host memory. Hot-reloaded code modules simply re-attach to existing Component arrays seamlessly. |
 | **Cache Locality** | Heap-allocated objects (`new MyClass()`) scatter data across RAM pages, causing CPU L1/L2 cache misses. | `SparseSet` arrays store components contiguously in RAM, allowing SIMD vectorization and prefetching. |
 | **Parallel Execution** | Mutable class methods introduce thread races when accessed concurrently by multiple workers. | `SystemGraph` derives component Read/Write hazards from each system's `Query<const T, U&>` signature (or explicit `Registry&` for structural writers) and orders fiber tasks accordingly. |
 | **State Save/Load** | Private class members cannot be serialized without custom, error-prone boilerplate. | Reflection (`std::meta`) automatically serializes all Component POD structs to disk or network instantly. |
@@ -389,22 +388,21 @@ Two consequences are worth stating, because they are what the design buys:
   is built once. Rebuilding it per scene was how a replayed module step could
   accumulate a second copy.
 
-An ordinary game is statically compiled into its executable. The application
-runs gameplay **before** the engine's frame plan; the plan's old DLL slot is a
-no-op unless the legacy loader was explicitly enabled:
+An ordinary game's C++ source is compiled into its executable. `Application`
+runs its callback **before** the engine's frame plan. System-driven games may
+omit the callback and install their own ECS systems instead:
 
 ```
 App: ProcessEvents → Run(Engine&, dt) callback → Engine::Tick(dt)
-Tick: Input / HotReload → PlayerIntent → Physics → [opt-in legacy DLL]
+Tick: UI / state-file watches → PlayerIntent → Physics
       → ECS systems (including interpolation / audio) → Camera → Render / Present
 ```
 
 1. **Input & OS Events**: `Application` pumps OS/window events and updates raw mouse/keyboard states before calling the compiled C++ game callback.
-2. **Compiled gameplay**: `App().Run(callback)` owns the per-frame game update. `EngineRunConfig::enableNativeGameplay` defaults to false; `Engine::Create` and `Engine::Run` do not load `scripts/gameplay` or watch its DLL unless the caller opts in. `App` rejects combining both game entry points.
+2. **Compiled gameplay**: `App().Run(callback)` owns the per-frame game update; `App().Install(...)` composes systems and frame steps before the first scene. `Engine::Run` is available for tools with their own composition and event poller.
 3. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
-4. **Legacy DLL slot**: The frame plan retains `GameplayModule` as an anchor for backward compatibility, but only calls `NativeGameplayUpdate` if `enableNativeGameplay` was explicitly set. `--driver=native` is an alias for the C++ driver, **not** an opt-in to the DLL.
-5. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching modules are installed, Interaction and Terrain nodes contributed through the `Module` the application installed; `BuildSystemGraphs` walks `Engine::GetInstalledModules()` and asks each one for its systems). `VisualInterpolationSystem` reads PhysicsWorld pose history and writes interpolated transforms; static bodies are skipped.
-6. **Render Graph Execution**: `CullingSystem` performs frustum culling, `LightingSystem` gathers lights, and `RenderSystem` records Vulkan commands and presents.
+4. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching modules are installed, Interaction and Terrain nodes contributed through the `Module` the application installed; `BuildSystemGraphs` walks `Engine::GetInstalledModules()` and asks each one for its systems). `VisualInterpolationSystem` reads PhysicsWorld pose history and writes interpolated transforms; static bodies are skipped.
+5. **Render Graph Execution**: `CullingSystem` performs frustum culling, `LightingSystem` gathers lights, and `RenderSystem` records Vulkan commands and presents. `Engine::Tick` reports `FrameStatus::Error` if device-lost recovery fails.
 
 ### 3.1 Signature-driven ECS systems
 

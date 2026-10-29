@@ -279,21 +279,6 @@ const std::array kEngineHandlers = {
             return {};
         },
     },
-    CommandHandler {
-        .key         = "--driver",
-        .shortKey    = "-d",
-        .placeholder = "<driver>",
-        .description = "Select the gameplay loop driver (cpp)",
-        .action      = [](CommandLineOptions& opt, std::string_view v) -> std::expected<void, ErrorCode> {
-            if (v == "cpp" || v == "c++" || v == "native") {
-                opt.driver = GameplayDriver::Cpp;
-            } else {
-                std::println(stderr, "Error: Invalid driver '{}'. Valid options: cpp.", v);
-                return std::unexpected(CommandLineError::InvalidValue);
-            }
-            return {};
-        },
-    },
 };
 
 auto EngineHandlers() noexcept -> std::span<const CommandHandler> {

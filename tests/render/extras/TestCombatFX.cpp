@@ -155,14 +155,14 @@ struct CombatFXTestSuite {
             for (int i = 0; i < 15; ++i) {
                 engine->ProcessEvents();
                 combatFX.Update(*engine, dt);
-                engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                engine->Tick(dt);
             }
 
             // 2. Simulate another 0.35s (21 frames, total 0.60s > 0.50s) -> Tracer must reach end and terminate
             for (int i = 0; i < 21; ++i) {
                 engine->ProcessEvents();
                 combatFX.Update(*engine, dt);
-                engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                engine->Tick(dt);
             }
 
             // Zero-distance edge case check: Spawning a 0-distance tracer must not crash or divide by zero
@@ -198,14 +198,14 @@ struct CombatFXTestSuite {
             for (int i = 0; i < 6; ++i) {
                 engine->ProcessEvents();
                 combatFX.Update(*engine, dt);
-                engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                engine->Tick(dt);
             }
 
             // 4. Simulate past full expiration (> 0.50s / 30 frames)
             for (int i = 0; i < 30; ++i) {
                 engine->ProcessEvents();
                 combatFX.Update(*engine, dt);
-                engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                engine->Tick(dt);
             }
 
             // 5. Verify system can be cleared cleanly and reused without dangling references

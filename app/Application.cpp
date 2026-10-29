@@ -96,7 +96,6 @@ auto Application::RunFromCLI(EngineRunConfig config, int argc, char* argv[], con
         .fullscreen     = config.fullscreen,
         .headless       = config.headless,
         .fpsLimit       = config.fpsLimit,
-        .driver         = config.driver,
     };
     auto parsed = HandleCommandLine(args, {}, defaults);
     if (!parsed) {
@@ -117,15 +116,10 @@ auto Application::RunFromCLI(EngineRunConfig config, int argc, char* argv[], con
     config.validationMode = parsed->validationMode;
     config.headless       = parsed->headless;
     config.fpsLimit       = parsed->fpsLimit;
-    config.driver         = parsed->driver;
     return RunConfigured(config, update);
 }
 
 auto Application::RunConfigured(const EngineRunConfig& config, const Update& update) const -> int {
-    if (config.enableNativeGameplay && update) {
-        LogError("[Application] legacy DLL gameplay and a compiled Run callback cannot run together");
-        return EXIT_FAILURE;
-    }
     // App owns both process-level crash reporting and the lifetime of the
     // platform, task workers, and engine. Never nest Engine::Run here.
     static CrashState crashState;
@@ -133,7 +127,6 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
     Platform::Init();
     TaskSystem::Scope tasks; // Engine must be destroyed before its workers.
 
-    // MakeConfig propagates the explicit (normally false) legacy opt-in.
     auto created = Engine::Create(Engine::MakeConfig(config));
     if (!created) {
         LogError("[Application] engine creation failed: {}", created.error());
@@ -188,14 +181,9 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
                 break;
             }
         }
-        const GameplayStatus status = engine->Tick(dt, config.driver);
-        if (status == GameplayStatus::Error) {
-            LogError("[Application] gameplay frame failed");
+        if (engine->Tick(dt) == FrameStatus::Error) {
+            LogError("[Application] engine frame failed");
             return EXIT_FAILURE;
-        }
-        if (status == GameplayStatus::RequestQuit) {
-            engine->GetPlatformHost().Close();
-            break;
         }
 
         if (config.fpsLimit > 0 && !displayPaced) {

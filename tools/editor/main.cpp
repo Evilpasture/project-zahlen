@@ -430,27 +430,17 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             }
         }
         if (s_EditorState.simulationRunning) {
-            ZHLN::GameplayStatus status = engine.Tick(frameTime, options.driver);
-            if (status == ZHLN::GameplayStatus::Error) {
-                ZHLN::LogError("[WorldEditor] gameplay frame failed");
+            if (engine.Tick(frameTime) == ZHLN::FrameStatus::Error) {
+                ZHLN::LogError("[WorldEditor] engine frame failed");
                 return EXIT_FAILURE;
-            }
-            if (status == ZHLN::GameplayStatus::RequestQuit) {
-                engine.GetPlatformHost().Close();
-                break;
             }
         } else {
             if (!transformActive) {
                 ZHLN::FreeCam::Apply(engine, frameTime);
             }
-            ZHLN::GameplayStatus status = engine.Tick(0.0f, options.driver);
-            if (status == ZHLN::GameplayStatus::Error) {
-                ZHLN::LogError("[WorldEditor] gameplay frame failed");
+            if (engine.Tick(0.0f) == ZHLN::FrameStatus::Error) {
+                ZHLN::LogError("[WorldEditor] engine frame failed");
                 return EXIT_FAILURE;
-            }
-            if (status == ZHLN::GameplayStatus::RequestQuit) {
-                engine.GetPlatformHost().Close();
-                break;
             }
         }
 
@@ -515,11 +505,9 @@ auto main(int argc, char* argv[]) -> int {
         .validationMode = parsed->validationMode,
         .headless       = false,
         .fpsLimit       = parsed->fpsLimit,
-        .driver         = parsed->driver,
     };
     ZHLN::EngineConfig config = ZHLN::Engine::MakeConfig(launch);
-    config.enableFallbackScene  = false;
-    config.enableNativeGameplay = false;
+    config.enableFallbackScene = false;
     auto created = ZHLN::Engine::Create(config);
     if (!created) {
         ZHLN::LogError("[WorldEditor] engine creation failed: {}", created.error());

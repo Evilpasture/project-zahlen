@@ -51,9 +51,8 @@ namespace ZHLN {
 
 class Engine;
 
-enum class GameplayDriver : uint8_t { Cpp };
-
-enum class GameplayStatus : int8_t { OK = 0, RequestQuit = 1, RequestReload = 2, Error = -1 };
+// Execution result for the engine frame (including device-lost recovery).
+enum class FrameStatus : int8_t { OK = 0, Error = -1 };
 
 enum class FramePhase : uint8_t {
     Input,
@@ -61,7 +60,6 @@ enum class FramePhase : uint8_t {
     HotReload,
     PlayerIntent,
     Physics,
-    Gameplay,
     Simulation,
     Camera,
     Visibility,
@@ -70,11 +68,8 @@ enum class FramePhase : uint8_t {
     History,
 };
 
-
 struct FrameContext {
-    GameplayDriver driver     = GameplayDriver::Cpp;
-    GameplayStatus status     = GameplayStatus::OK;
-    bool           deviceLost = false;
+    FrameStatus status = FrameStatus::OK;
 };
 
 using FrameStepFn = void (*)(Engine&, float, FrameContext&);

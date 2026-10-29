@@ -252,11 +252,11 @@ struct RTRPBRReflectionTestSuite {
         constexpr float dt = 1.0f / 60.0f;
         for (uint32_t i = 0; i < frames; ++i) {
             engine.ProcessEvents();
-            const auto status = engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
+            const auto status = engine.Tick(dt);
             if (ZHLN::Test::DeviceLostCount() != lostBefore) {
                 return false;
             }
-            ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+            ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
         }
         return true;
     }

@@ -101,16 +101,16 @@ struct ExplosionTestSuite {
             // particle buffers are the renderer's now, so what this can hold onto
             // is the effect's state, not a handle the component no longer owns.
             const size_t fireCount = active->fireball.size();
-            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            engine->Tick(dt);
             ZHLN::ExplosionSystem::Update(*engine, dt);
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::ExplosionComponent>(expRoot)->fireball.size(), fireCount);
-            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            engine->Tick(dt);
 
             // Advance past StandardFireball's 2.5s lifetime.
             for (int i = 0; i < 180; ++i) {
                 engine->ProcessEvents();
                 ZHLN::ExplosionSystem::Update(*engine, dt);
-                engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                engine->Tick(dt);
             }
 
             // Invariant: Root entity and all particles must be destroyed cleanly
@@ -156,7 +156,7 @@ struct ExplosionTestSuite {
             for (int i = 0; i < 60; ++i) {
                 engine->ProcessEvents();
                 ZHLN::ExplosionSystem::Update(*engine, dt);
-                engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                engine->Tick(dt);
 
                 const auto craters = reg.GetEntitiesWith<ZHLN::CraterDecalComponent>();
                 if (!craters.empty()) {
@@ -173,7 +173,7 @@ struct ExplosionTestSuite {
             for (int i = 0; i < 180; ++i) {
                 engine->ProcessEvents();
                 ZHLN::ExplosionSystem::Update(*engine, dt);
-                engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                engine->Tick(dt);
             }
 
             // Invariant 3: Explosion root & physical debris destroyed
@@ -219,7 +219,7 @@ struct ExplosionTestSuite {
             for (int i = 0; i < 120; ++i) {
                 engine->ProcessEvents();
                 ZHLN::ExplosionSystem::Update(*engine, dt);
-                engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                engine->Tick(dt);
             }
 
             // Invariant 1: Scale shrunk dynamically during fade
@@ -233,7 +233,7 @@ struct ExplosionTestSuite {
             for (int i = 0; i < 150; ++i) {
                 engine->ProcessEvents();
                 ZHLN::ExplosionSystem::Update(*engine, dt);
-                engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                engine->Tick(dt);
             }
 
             // Invariant 2: Crater entity is destroyed via ECB playback

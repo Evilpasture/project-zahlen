@@ -128,8 +128,8 @@ struct RenderAnimatedMeshTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-                if (status != ZHLN::GameplayStatus::OK) {
+                const auto status = engine->Tick(dt);
+                if (status != ZHLN::FrameStatus::OK) {
                     return std::unexpected(AnimatedMeshTestError::SimulationTickFailed);
                 }
             }
@@ -152,7 +152,7 @@ struct RenderAnimatedMeshTestSuite {
                 return std::unexpected(AnimatedMeshTestError::NoSkeletalMeshSpawned);
             }
             engine->ProcessEvents();
-            if (engine->Tick(dt, ZHLN::GameplayDriver::Cpp) != ZHLN::GameplayStatus::OK) {
+            if (engine->Tick(dt) != ZHLN::FrameStatus::OK) {
                 return std::unexpected(AnimatedMeshTestError::SimulationTickFailed);
             }
             for (const auto& [entity, buffer]: skinnedScratch) {
