@@ -3,6 +3,7 @@
 
 #include "ConsoleDebugger.hpp"
 #include "SymbolResolver.hpp"
+
 #include <Console/Console.hpp>
 #include <Scripting/ScriptBinder.hpp>
 #include <Scripting/ScriptECSBridge.hpp>
@@ -10,58 +11,122 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+
+#if defined(ZHLN_CONSOLE_HAS_LUA)
+#include <lua/ReflectLua.hpp>
+#include <lua/SceneLua.hpp>
+#endif
+
 #include <charconv>
+#include <cstdint>
+#include <expected>
 #include <format>
+#include <optional>
 #include <sstream>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace ZHLN {
 
 namespace {
 
-auto Tokenize(std::string_view str) -> std::vector<std::string> {
-    std::vector<std::string> tokens;
-    std::string              token;
-    bool                     inQuotes = false;
-
-    for (char c: str) {
-        if (c == '"') {
-            inQuotes = !inQuotes;
-        } else if (std::isspace(static_cast<unsigned char>(c)) && !inQuotes) {
-            if (!token.empty()) {
-                tokens.push_back(std::move(token));
-                token.clear();
-            }
-        } else {
-            token += c;
+    auto TrimAscii(std::string_view sv) noexcept -> std::string_view {
+        while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.front()))) {
+            sv.remove_prefix(1);
         }
+        while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.back()))) {
+            sv.remove_suffix(1);
+        }
+        return sv;
     }
-    if (!token.empty()) {
-        tokens.push_back(std::move(token));
-    }
-    return tokens;
-}
 
-auto ParseEntity(std::string_view sv) -> std::optional<Entity> {
-    uint64_t raw   = 0;
-    auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), raw);
-    if (ec == std::errc()) {
-        return Entity::Unpack(raw);
-    }
-    return std::nullopt;
-}
+    auto Tokenize(std::string_view str) -> std::vector<std::string> {
+        std::vector<std::string> tokens;
+        std::string              token;
+        bool                     inQuotes = false;
 
-auto ParseAddress(std::string_view sv) -> std::optional<uintptr_t> {
-    if (sv.starts_with("0x") || sv.starts_with("0X")) {
-        sv.remove_prefix(2);
+        for (char c: str) {
+            if (c == '"') {
+                inQuotes = !inQuotes;
+            } else if (std::isspace(static_cast<unsigned char>(c)) && !inQuotes) {
+                if (!token.empty()) {
+                    tokens.push_back(std::move(token));
+                    token.clear();
+                }
+            } else {
+                token += c;
+            }
+        }
+        if (!token.empty()) {
+            tokens.push_back(std::move(token));
+        }
+        return tokens;
     }
-    uintptr_t addr = 0;
-    auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), addr, 16);
-    if (ec == std::errc()) {
-        return addr;
+
+    // Extracts the raw tail after the Nth whitespace-delimited token so Lua table
+    // expressions preserve spaces, quotes, and arithmetic verbatim.
+    auto SliceAfterTokens(std::string_view line, size_t tokenCount) noexcept -> std::string_view {
+        size_t pos      = 0;
+        bool   inQuotes = false;
+        for (size_t t = 0; t < tokenCount; ++t) {
+            while (pos < line.size() && std::isspace(static_cast<unsigned char>(line[pos]))) {
+                ++pos;
+            }
+            while (pos < line.size()) {
+                const char c = line[pos];
+                if (c == '"') {
+                    inQuotes = !inQuotes;
+                } else if (std::isspace(static_cast<unsigned char>(c)) && !inQuotes) {
+                    break;
+                }
+                ++pos;
+            }
+        }
+        return TrimAscii(line.substr(pos));
     }
-    return std::nullopt;
-}
+
+    auto ParseEntity(std::string_view sv) -> std::optional<Entity> {
+        uint64_t raw   = 0;
+        auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), raw);
+        if (ec == std::errc()) {
+            return Entity::Unpack(raw);
+        }
+        return std::nullopt;
+    }
+
+    auto ParseAddress(std::string_view sv) -> std::optional<uintptr_t> {
+        if (sv.starts_with("0x") || sv.starts_with("0X")) {
+            sv.remove_prefix(2);
+        }
+        uintptr_t addr = 0;
+        auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), addr, 16);
+        if (ec == std::errc()) {
+            return addr;
+        }
+        return std::nullopt;
+    }
+
+#if defined(ZHLN_CONSOLE_HAS_LUA)
+    using ComponentPatchFn = std::expected<void, ErrorCode> (*)(void* rawComp, std::string_view luaChunk);
+
+    template <typename CompT>
+    auto PatchTypedComponent(void* rawComp, std::string_view luaChunk) -> std::expected<void, ErrorCode> {
+        return ReflectLua::ApplyPatchString(*static_cast<CompT*>(rawComp), luaChunk, "console_patch");
+    }
+
+    auto ComponentPatchTable() -> const std::unordered_map<std::string_view, ComponentPatchFn>& {
+        static const auto kTable = []() {
+            std::unordered_map<std::string_view, ComponentPatchFn> map;
+            Reflect::ForEachNestedType<Components>([&]<typename Comp>() {
+                map.emplace(Reflect::TypeName<Comp>(), &PatchTypedComponent<Comp>);
+            });
+            return map;
+        }();
+        return kTable;
+    }
+#endif
 
 } // namespace
 
@@ -76,21 +141,21 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
     }
 
     std::string_view cmd = tokens[0];
-    ScriptECSBridge    bridge(reg);
+    ScriptECSBridge  bridge(reg);
 
     // ========================================================================
     // 1. HELP
     // ========================================================================
     if (cmd == "help" || cmd == "?") {
         console.Log("=== Zahlen Debugger Commands ===", {.r = 0.3f, .g = 0.85f, .b = 1.0f, .a = 1.0f});
-        console.Log("  types                     - List all registered C++ reflection types");
-        console.Log("  type <TypeName>           - Dump fields, offsets, and methods for a C++ type");
-        console.Log("  entity <id>               - Inspect all active components on an entity");
-        console.Log("  get <id> <Comp>.<field>   - Read a component field value");
-        console.Log("  set <id> <Comp>.<field> <v>- Modify a component field value");
-        console.Log("  call <id> <Comp>.<method> - Invoke a C++ method with optional arguments");
-        console.Log("  sym <address>             - Resolve raw hex pointer to demangled C++ symbol");
-        console.Log("  find <Name>               - Find entity with NameComponent");
+        console.Log("  types                         - List all registered C++ reflection types");
+        console.Log("  type <TypeName>               - Dump fields and memory layout for a C++ type");
+        console.Log("  entity <id>                   - Inspect all active components on an entity");
+        console.Log("  get <id> <Comp>.<field>       - Read a component field value");
+        console.Log("  set <id> <Comp>.<field> <v>   - Modify a single component field value");
+        console.Log("  patch <id> <Comp> { k = v }   - Transactionally patch a component via Lua table");
+        console.Log("  sym <address>                 - Resolve raw hex pointer to demangled C++ symbol");
+        console.Log("  find <Name>                   - Find entity with NameComponent");
         return;
     }
 
@@ -102,9 +167,7 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
         console.Log(std::format("Registered Reflected Types ({}) :", classes.size()), {.r = 0.3f, .g = 0.85f, .b = 1.0f, .a = 1.0f});
         for (const auto& [name, info]: classes) {
             console.Log(
-                std::format(
-                    "  {} (size: {}B, align: {}B, props: {}, methods: {})", name, info.size, info.alignment, info.properties.size(), info.methods.size()
-                )
+                std::format("  {} (size: {}B, align: {}B, props: {})", name, info.size, info.alignment, info.properties.size())
             );
         }
         return;
@@ -131,13 +194,6 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
         console.Log("  Properties:");
         for (const auto& [propName, prop]: info.properties) {
             console.Log(std::format("    .{} {}", propName, prop.get_element_at ? "[Array/Range]" : ""));
-        }
-
-        console.Log("  Methods:");
-        for (const auto& [methodName, overloads]: info.methods) {
-            for (const auto& method: overloads) {
-                console.Log(std::format("    :{} (arity: {})", methodName, method.arity));
-            }
         }
         return;
     }
@@ -199,7 +255,6 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
             return;
         }
 
-        // Print value depending on variant
         if (const auto* d = std::get_if<double>(&*val)) {
             console.Log(std::format("{} = {}", target, *d));
         } else if (const auto* b = std::get_if<bool>(&*val)) {
@@ -239,15 +294,14 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
         std::string_view propName = target.substr(dotPos + 1);
         std::string_view rawVal   = tokens[3];
 
-        // Infer value type
         ScriptVal valToSet;
         if (rawVal == "true") {
             valToSet = true;
         } else if (rawVal == "false") {
             valToSet = false;
         } else {
-            double d     = 0.0;
-            auto [p, ec] = std::from_chars(rawVal.data(), rawVal.data() + rawVal.size(), d);
+            double       d  = 0.0;
+            auto [p, ec]    = std::from_chars(rawVal.data(), rawVal.data() + rawVal.size(), d);
             if (ec == std::errc()) {
                 valToSet = d;
             } else {
@@ -265,7 +319,60 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
     }
 
     // ========================================================================
-    // 7. SYM <address> (Binary Symbol Demangler)
+    // 7. PATCH <id> <Component> { field = expr, ... }
+    // ========================================================================
+    if (cmd == "patch") {
+#if defined(ZHLN_CONSOLE_HAS_LUA)
+        const std::string_view luaExpr = SliceAfterTokens(commandLine, 3);
+        if (tokens.size() < 4 || luaExpr.empty()) {
+            console.Log("Usage: patch <id> <Component> { field = expr, ... }", {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
+            return;
+        }
+        auto ent = ParseEntity(tokens[1]);
+        if (!ent || !reg.IsAlive(*ent)) {
+            console.Log("Entity not found.", {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
+            return;
+        }
+
+        const std::string_view compName = tokens[2];
+        const uint32_t         familyID = ECS::Registry::GetFamilyIDFromName(compName);
+        if (familyID == 0xFFFFFFFF) {
+            console.Log(std::format("Component '{}' is not registered.", compName), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
+            return;
+        }
+        void* compPtr = reg.GetRawByFamily(*ent, familyID);
+        if (compPtr == nullptr) {
+            console.Log(std::format("Entity {} does not own '{}'.", ent->Pack(), compName), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
+            return;
+        }
+
+        const auto& patchers = ComponentPatchTable();
+        const auto  patchIt  = patchers.find(compName);
+        if (patchIt == patchers.end()) {
+            console.Log(std::format("Component '{}' does not support Lua patching.", compName), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
+            return;
+        }
+
+        std::string chunk;
+        if (luaExpr.starts_with('{')) {
+            chunk = std::format("return {}", luaExpr);
+        } else {
+            chunk.assign(luaExpr);
+        }
+
+        if (auto res = patchIt->second(compPtr, chunk); !res) {
+            console.Log(std::format("Failed to patch {}: {}", compName, res.error()), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
+        } else {
+            console.Log(std::format("Patched {} on entity {}", compName, ent->Pack()), {.r = 0.3f, .g = 1.0f, .b = 0.3f, .a = 1.0f});
+        }
+#else
+        console.Log("Lua patching is disabled in this build.", {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
+#endif
+        return;
+    }
+
+    // ========================================================================
+    // 8. SYM <address> (Binary Symbol Demangler)
     // ========================================================================
     if (cmd == "sym" || cmd == "addr") {
         if (tokens.size() < 2) {
@@ -291,7 +398,7 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
     }
 
     // ========================================================================
-    // 8. FIND <name>
+    // 9. FIND <name>
     // ========================================================================
     if (cmd == "find") {
         if (tokens.size() < 2) {

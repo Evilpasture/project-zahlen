@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "FrameContext.hpp"
-#include "TargetManager.hpp"
-#include "graph/RenderGraph.hpp"
+#include "RenderTargetTags.hpp"
+#include "graph/RenderPassDecl.hpp"
+
+namespace ZHLN {
+struct RenderFrameContext;
+} // namespace ZHLN
 
 namespace ZHLN::Passes {
 
@@ -14,11 +17,10 @@ struct RtgiCompositePass:
         Vk::ComputeRead<Res_SceneColor>,
         Vk::ComputeRead<Res_Depth>,
         Vk::ComputeRead<Res_NormRough>,
-        Vk::ComputeRead<Res_Anisotropy>,
-        Vk::ComputeRead<Res_Clearcoat>,
-        Vk::ComputeRead<Res_Sheen>,
         Vk::ComputeRead<Res_Lighting>,
-        Vk::ComputeRead<Res_RtgiHalf>,
+        Vk::ComputeRead<Res_LightingAo>,
+        Vk::ComputeRead<Res_RcgiProbes>,
+        Vk::ComputeRead<Res_RcgiCascadeA>,
         Vk::ComputeWrite<Res_LightingGI>> {
     RenderFrameContext& frame;
 

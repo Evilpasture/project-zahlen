@@ -10,6 +10,9 @@
 #include <span>
 #include <Zahlen/Log.hpp>
 #include "HeapBindings.hpp"
+#include "HeapMappingBuilder.hpp"
+#include "PushDataLayout.hpp" // SpirvLayoutError
+#include "SpirvLayout.hpp"    // WorkgroupSize, LocalSizeOf
 
 namespace ZHLN::Vk {
 
@@ -36,18 +39,76 @@ struct ComputeDispatchDesc {
     uint32_t                heapIndex       = 0;
 };
 
+// Compile-time-workgroup dispatch: the threadgroup size is a non-type template
+// parameter, so a zero dimension cannot compile and the group counts reduce to
+// strength-reduced shifts. A dynamic zero extent (minimized window, empty
+// particle buffer, 0-sized tile) is a valid recorded no-op -- no assertion, no
+// [[assume(false)]], no division by zero (VUID-vkCmdDispatch-groupCountX-00386).
+template <uint32_t LocalX, uint32_t LocalY, uint32_t LocalZ, typename PushT = std::monostate>
+inline void RecordComputeDispatch(
+    VkCommandBuffer cmd,
+    VkPipeline      pipeline,
+    uint32_t        threadsX,
+    uint32_t        threadsY,
+    uint32_t        threadsZ,
+    uint32_t        heapIndexOffset = 0,
+    uint32_t        heapIndex       = 0,
+    const PushT*    pushData        = nullptr
+) noexcept {
+    static_assert(LocalX > 0 && LocalY > 0 && LocalZ > 0, "Threadgroup dimensions must be non-zero.");
+
+    // 1. Guard against null command buffers or unbuilt pipelines
+    if (cmd == VK_NULL_HANDLE || pipeline == VK_NULL_HANDLE) [[unlikely]] {
+        return;
+    }
+
+    // 2. Spec compliance (VUID-vkCmdDispatch-groupCountX-00386): if any thread
+    // count is 0, skip dispatch entirely.
+    if (threadsX == 0 || threadsY == 0 || threadsZ == 0) [[unlikely]] {
+        return;
+    }
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+
+    if constexpr (!std::is_same_v<PushT, std::monostate>) {
+        if (pushData != nullptr) {
+            PushData(cmd, 0, *pushData);
+        }
+    }
+
+    if (heapIndexOffset > 0) {
+        PushHeapIndex(cmd, heapIndexOffset, heapIndex);
+    }
+
+    // Compiler strength-reduces (x + 7) / 8 to ((x + 7) >> 3) at compile time.
+    constexpr auto CalcGroups = [](uint32_t threads, uint32_t local) constexpr {
+        return (threads + local - 1) / local;
+    };
+
+    vkCmdDispatch(cmd, CalcGroups(threadsX, LocalX), CalcGroups(threadsY, LocalY), CalcGroups(threadsZ, LocalZ));
+}
+
+// Legacy runtime-local-size path (fixed-domain and unmigrated passes): the
+// same no-assert, no-UB treatment. ZHLN::Assert is [[assume(false)]] in ship
+// builds, so a null handle or an empty extent is a recorded no-op instead.
 template <typename PushT = std::monostate>
 inline void RecordComputeDispatch(const ComputeDispatchDesc& desc, const PushT* pushData = nullptr) noexcept {
-    ZHLN::Assert(desc.cmd != VK_NULL_HANDLE);
-    ZHLN::Assert(HasPositiveExtent(desc.threadGroupSize));
-    ZHLN::Assert(desc.threadCountX > 0 && desc.threadCountY > 0 && desc.threadCountZ > 0);
+    if (desc.cmd == VK_NULL_HANDLE || desc.pipeline == VK_NULL_HANDLE) [[unlikely]] {
+        return;
+    }
+    if (desc.threadCountX == 0 || desc.threadCountY == 0 || desc.threadCountZ == 0) [[unlikely]] {
+        return;
+    }
+    if (desc.threadGroupSize[0] == 0 || desc.threadGroupSize[1] == 0 || desc.threadGroupSize[2] == 0) [[unlikely]] {
+        return;
+    }
     if (desc.bind) {
-        ZHLN::Assert(desc.pipeline != VK_NULL_HANDLE);
         vkCmdBindPipeline(desc.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, desc.pipeline);
     }
     if constexpr (!std::is_same_v<PushT, std::monostate>) {
-        ZHLN::Assert(pushData != nullptr);
-        PushData(desc.cmd, 0, *pushData);
+        if (pushData != nullptr) {
+            PushData(desc.cmd, 0, *pushData);
+        }
     }
     if (desc.heapIndexOffset > 0) {
         PushHeapIndex(desc.cmd, desc.heapIndexOffset, desc.heapIndex);
@@ -94,9 +155,17 @@ struct ComputePass {
         } else {
             fixedDispatchSize = reflectedFixed.value_or(std::array<uint32_t, 3> {});
         }
-        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(threadGroupSize));
+        if (!TemplatedDetail::HasPositiveExtent(threadGroupSize)) {
+            threadGroupSize = {};
+            fixedDispatchSize = {};
+            return false;
+        }
         if constexpr (Domain == ComputeDomain::Fixed) {
-            ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
+            if (!TemplatedDetail::HasPositiveExtent(fixedDispatchSize)) {
+                threadGroupSize = {};
+                fixedDispatchSize = {};
+                return false;
+            }
         }
         return true;
     }
@@ -163,15 +232,16 @@ struct ComputePass {
     }
 
     void Bind(VkCommandBuffer cmd) const noexcept {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
-        ZHLN::Assert(Valid());
+        if (cmd == VK_NULL_HANDLE || !Valid()) [[unlikely]] {
+            return;
+        }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
     }
 
     void BindVariant(VkCommandBuffer cmd, uint32_t variantIdx) const noexcept {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
-        ZHLN::Assert(variantIdx < pipelines.size());
-        ZHLN::Assert(pipelines[variantIdx].Valid());
+        if (cmd == VK_NULL_HANDLE || variantIdx >= pipelines.size() || !pipelines[variantIdx].Valid()) [[unlikely]] {
+            return;
+        }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines[variantIdx].Get());
     }
 
@@ -190,7 +260,6 @@ struct ComputePass {
     [[nodiscard]] auto MakeFixedDispatchDesc(VkCommandBuffer cmd) const noexcept -> TemplatedDetail::ComputeDispatchDesc
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
         return MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2]);
     }
 
@@ -201,8 +270,10 @@ struct ComputePass {
     }
 
     static void DispatchGroups(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) noexcept {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
-        ZHLN::Assert(groupCountX > 0 && groupCountY > 0 && groupCountZ > 0);
+        // A zero group count is a recorded no-op (VUID-vkCmdDispatch-groupCountX-00386).
+        if (cmd == VK_NULL_HANDLE || groupCountX == 0 || groupCountY == 0 || groupCountZ == 0) [[unlikely]] {
+            return;
+        }
         vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
     }
 
@@ -221,8 +292,9 @@ struct ComputePass {
             Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
             "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
         );
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapIndexPushOffset == 0);
+        if (!Valid() || heapIndexPushOffset != 0) [[unlikely]] {
+            return;
+        }
         auto desc = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
         desc.bind = true;
         TemplatedDetail::RecordComputeDispatch(desc, &pushData);
@@ -231,8 +303,9 @@ struct ComputePass {
     void DispatchHeapThreads(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapIndexPushOffset == 0);
+        if (!Valid() || heapIndexPushOffset != 0) [[unlikely]] {
+            return;
+        }
         auto desc = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
         desc.bind = true;
         TemplatedDetail::RecordComputeDispatch(desc);
@@ -254,8 +327,9 @@ struct ComputePass {
             Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
             "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
         );
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapIndexPushOffset > 0);
+        if (!Valid() || heapIndexPushOffset == 0) [[unlikely]] {
+            return;
+        }
         auto desc            = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
         desc.bind            = true;
         desc.heapIndexOffset = heapIndexPushOffset;
@@ -268,8 +342,9 @@ struct ComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapIndexPushOffset > 0);
+        if (!Valid() || heapIndexPushOffset == 0) [[unlikely]] {
+            return;
+        }
         auto desc            = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
         desc.bind            = true;
         desc.heapIndexOffset = heapIndexPushOffset;
@@ -286,8 +361,9 @@ struct ComputePass {
     void DispatchHeap(VkCommandBuffer cmd) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapIndexPushOffset == 0);
+        if (!Valid() || heapIndexPushOffset != 0) [[unlikely]] {
+            return;
+        }
         auto desc = MakeFixedDispatchDesc(cmd);
         desc.bind = true;
         TemplatedDetail::RecordComputeDispatch(desc);
@@ -302,8 +378,9 @@ struct ComputePass {
             Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
             "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
         );
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapIndexPushOffset == 0);
+        if (!Valid() || heapIndexPushOffset != 0) [[unlikely]] {
+            return;
+        }
         auto desc = MakeFixedDispatchDesc(cmd);
         desc.bind = true;
         TemplatedDetail::RecordComputeDispatch(desc, &pushData);
@@ -312,8 +389,9 @@ struct ComputePass {
     void DispatchHeapIndexed(VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapIndexPushOffset > 0);
+        if (!Valid() || heapIndexPushOffset == 0) [[unlikely]] {
+            return;
+        }
         auto desc            = MakeFixedDispatchDesc(cmd);
         desc.bind            = true;
         desc.heapIndexOffset = heapIndexPushOffset;
@@ -330,8 +408,9 @@ struct ComputePass {
             Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
             "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
         );
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapIndexPushOffset > 0);
+        if (!Valid() || heapIndexPushOffset == 0) [[unlikely]] {
+            return;
+        }
         auto desc            = MakeFixedDispatchDesc(cmd);
         desc.bind            = true;
         desc.heapIndexOffset = heapIndexPushOffset;
@@ -342,6 +421,70 @@ struct ComputePass {
 
 using DynamicComputePass = ComputePass<ComputeDomain::Dynamic>;
 using FixedComputePass   = ComputePass<ComputeDomain::Fixed>;
+
+// A compute pipeline whose threadgroup size is a compile-time constant: the
+// shader module is the template parameter, `kLocalSize` is what the module's
+// own bytes declare (Vk::LocalSizeOf), and the dispatch math cannot divide by
+// zero or assert on an empty extent -- both are impossible by construction.
+// Mirrors the compile-time guarantees of GraphicsPipeline for compute.
+template <ShaderProgram Module, typename PushConstants = void>
+class TypedComputePass {
+  public:
+    static constexpr auto kLocalSize = LocalSizeOf<Module>;
+
+    [[nodiscard]] auto Init(
+        VkDevice                                             device,
+        const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
+        uint32_t                                             indexPushOffset = 0,
+        PipelineBinaryStore*                                   binaries        = nullptr
+    ) noexcept -> std::expected<void, ErrorCode> {
+        _heapIndexPushOffset = indexPushOffset;
+
+        const auto shader  = CreateShaderDesc<Module>();
+        auto       p_res   = ComputePipelineBuilder().Shader(shader).HeapMappings(mapping).Binaries(binaries).Build(device);
+        if (!p_res) {
+            return std::unexpected(p_res.error());
+        }
+        _pipeline = std::move(*p_res);
+        return {};
+    }
+
+    // Dispatch without push constants
+    void DispatchThreads(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z, uint32_t heapIndex = 0) const noexcept
+        requires std::is_void_v<PushConstants>
+    {
+        TemplatedDetail::RecordComputeDispatch<kLocalSize.x, kLocalSize.y, kLocalSize.z>(
+            cmd, _pipeline.Get(), x, y, z, _heapIndexPushOffset, heapIndex
+        );
+    }
+
+    // Dispatch with statically verified push constants
+    void DispatchThreads(
+        VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z, const PushConstants& push, uint32_t heapIndex = 0
+    ) const noexcept
+        requires(!std::is_void_v<PushConstants>)
+    {
+        static_assert(
+            PushConstantLayoutMatchesAll<PushConstants, Module>(),
+            "Push constant struct does not match the compute shader's push block reflection!"
+        );
+
+        TemplatedDetail::RecordComputeDispatch<kLocalSize.x, kLocalSize.y, kLocalSize.z>(
+            cmd, _pipeline.Get(), x, y, z, _heapIndexPushOffset, heapIndex, &push
+        );
+    }
+
+    [[nodiscard]] auto Valid() const noexcept -> bool {
+        return _pipeline.Valid();
+    }
+    [[nodiscard]] auto Get() const noexcept -> VkPipeline {
+        return _pipeline.Get();
+    }
+
+  private:
+    Pipeline _pipeline;
+    uint32_t _heapIndexPushOffset = 0;
+};
 
 template <typename LayoutT, ComputeDomain Domain = ComputeDomain::Fixed>
 struct DoubleBufferedComputePass {
@@ -380,15 +523,19 @@ struct DoubleBufferedComputePass {
             return std::unexpected(built.error());
         }
 
-        auto p_res = ComputePipelineBuilder().Shader(shader).HeapMappings(heapBindings.GetInfo()).Binaries(binaries).Build(device);
+        HeapMappingArena mappingArena {heap};
+        auto p_res = ComputePipelineBuilder().Shader(shader).HeapMappings(mappingArena.Map(heapBindings.mappings)).Binaries(binaries).Build(device);
         if (!p_res) {
             return std::unexpected(p_res.error());
         }
         pipeline = std::move(*p_res);
-        ZHLN::Assert(pipeline.Valid());
-        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(threadGroupSize));
+        if (!pipeline.Valid() || !TemplatedDetail::HasPositiveExtent(threadGroupSize)) [[unlikely]] {
+            return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
+        }
         if constexpr (Domain == ComputeDomain::Fixed) {
-            ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
+            if (!TemplatedDetail::HasPositiveExtent(fixedDispatchSize)) [[unlikely]] {
+                return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
+            }
         }
         return {};
     }
@@ -408,8 +555,9 @@ struct DoubleBufferedComputePass {
 
     [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, HeapBlockBase blockBase)
         const noexcept -> TemplatedDetail::ComputeDispatchDesc {
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapBindings.indexPushOffset > 0);
+        if (!Valid() || heapBindings.indexPushOffset == 0) [[unlikely]] {
+            return {};
+        }
         return {
             .cmd             = cmd,
             .threadGroupSize = threadGroupSize,
@@ -452,7 +600,6 @@ struct DoubleBufferedComputePass {
     void DispatchHeap(VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
         TemplatedDetail::RecordComputeDispatch(
             MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], blockBase)
         );
@@ -466,7 +613,6 @@ struct DoubleBufferedComputePass {
             Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
             "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
         );
-        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
         TemplatedDetail::RecordComputeDispatch(
             MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], blockBase), &pushData
         );
@@ -478,6 +624,76 @@ using DynamicDoubleBufferedComputePass = DoubleBufferedComputePass<LayoutT, Comp
 
 template <typename LayoutT>
 using FixedDoubleBufferedComputePass = DoubleBufferedComputePass<LayoutT, ComputeDomain::Fixed>;
+
+namespace TemplatedDetail {
+
+// A pass resource answers "what do I dispatch, and through which heap rows" in
+// one value. Two shapes satisfy that: the BoundComputePass bundle below, and the
+// double-buffered passes, which already carry a heapBindings member. These two
+// readers let every executor -- the graph ComputePass, ComputeChain, and any
+// bespoke recorder -- treat both shapes identically.
+template <typename ResourceT>
+[[nodiscard]] constexpr auto PassOf(ResourceT& resource) noexcept -> auto& {
+    if constexpr (requires { resource.pass; }) {
+        return resource.pass;
+    } else {
+        return resource;
+    }
+}
+
+template <typename ResourceT>
+[[nodiscard]] constexpr auto BindingsOf(ResourceT& resource) noexcept -> auto& {
+    if constexpr (requires { resource.bindings; }) {
+        return resource.bindings;
+    } else {
+        return resource.heapBindings;
+    }
+}
+
+} // namespace TemplatedDetail
+
+// A compute pipeline and the heap bindings it dispatches through, held as one
+// value.
+//
+// DynamicComputePass and TypedComputePass deliberately do not own their heap
+// bindings, which left every resource that owned both exposing them as two
+// parallel fields: the owner stored the pass and the bindings separately, and
+// each dispatch site had to ask for the pass, then ask again for the bindings
+// that belong to it. Bundling them makes that one question with one answer, and
+// it is the shape DoubleBufferedComputePass already had.
+template <typename PassT>
+struct BoundComputePass {
+    PassT            pass;
+    HeapPassBindings bindings;
+
+    [[nodiscard]] auto Pass() noexcept -> PassT& {
+        return pass;
+    }
+    [[nodiscard]] auto Pass() const noexcept -> const PassT& {
+        return pass;
+    }
+    [[nodiscard]] auto Bindings() noexcept -> HeapPassBindings& {
+        return bindings;
+    }
+    [[nodiscard]] auto Bindings() const noexcept -> const HeapPassBindings& {
+        return bindings;
+    }
+
+    [[nodiscard]] auto Valid() const noexcept -> bool {
+        return pass.Valid();
+    }
+    explicit operator bool() const noexcept {
+        return Valid();
+    }
+
+    // Writes this pass's own heap rows and dispatches it: the caller names the
+    // set and the slots and never touches the pipeline or the bindings.
+    template <typename Declared, typename PushT, typename... Slots>
+    void DispatchIndexed(VkCommandBuffer cmd, HeapManager& heap, uint32_t x, uint32_t y, uint32_t z, const PushT& push, const Slots&... slots) noexcept {
+        const HeapBlockBase blockBase = heap.template WriteHeapParameters<Declared>(bindings, slots...);
+        Declared::DispatchHeapIndexed(pass, cmd, blockBase, x, y, z, push);
+    }
+};
 
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
 [[nodiscard]] inline auto CreateHeapComputePass(VkDevice device, const ShaderDesc& shader, PipelineBinaryStore* binaries = nullptr) noexcept
@@ -521,14 +737,13 @@ class ComputeChain {
     constexpr ComputeChain(HeapManager& heap, VkCommandBuffer cmd) noexcept: _heap(heap), _cmd(cmd) {
     }
 
-    template <typename Declared, typename PushT, typename... Slots>
-    [[gnu::always_inline]] void
-        Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, const Slots&... slots) noexcept {
+    template <typename Declared, typename ResourceT, typename PushT, typename... Slots>
+    [[gnu::always_inline]] void Step(ResourceT& resource, VkExtent3D extent, const PushT& push, const Slots&... slots) noexcept {
         if (_step++ > 0) {
-            MemoryBarrier(_cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
+            MemoryBarrier::ComputeWriteToRead().Record(_cmd);
         }
-        const HeapBlockBase blockBase = _heap.template WriteHeapParameters<Declared>(bindings, slots...);
-        Declared::DispatchHeapIndexed(pass, _cmd, blockBase, extent.width, extent.height, 1, push);
+        const HeapBlockBase blockBase = _heap.template WriteHeapParameters<Declared>(TemplatedDetail::BindingsOf(resource), slots...);
+        Declared::DispatchHeapIndexed(TemplatedDetail::PassOf(resource), _cmd, blockBase, extent.width, extent.height, 1, push);
     }
 
     [[nodiscard]] constexpr auto StepCount() const noexcept -> uint32_t {

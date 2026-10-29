@@ -34,59 +34,30 @@
 #include <cmath>
 #include <cstdint>
 #include <expected>
-#include <filesystem>
-#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
 enum class ViewportSubregionError : uint8_t {
-    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the viewport subregion test.">{}) = 1,
-    NoCameraFound ZHLN_ANNOTATION(ZHLN::Description<"No camera entity was created for the viewport subregion scenario.">{}),
-    CaptureFailed ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CaptureScreenshotPPM failed for one of the two band captures.">{}),
-    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"A captured band frame could not be parsed back.">{}),
-    SubjectMissing ZHLN_ANNOTATION(ZHLN::Description<"The red subject did not render inside a band.">{}),
-    SceneLeaked ZHLN_ANNOTATION(ZHLN::Description<"Scene pixels rasterized outside the requested viewport band.">{}),
-    AspectWrong ZHLN_ANNOTATION(ZHLN::Description<"The subject's pixel size changed with band width: the projection aspect does not follow the viewport.">{}),
-    NotCentered ZHLN_ANNOTATION(ZHLN::Description<"The subject is not centred in its band.">{}),
+    EngineInitFailed  ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the viewport subregion test."> {}) = 1,
+    NoCameraFound     ZHLN_ANNOTATION(ZHLN::Description<"No camera entity was created for the viewport subregion scenario."> {}),
+    CaptureFailed     ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CaptureFrame failed for one of the two band captures."> {}),
+    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"A captured band frame came back with an unusable pixel buffer."> {}),
+    SubjectMissing    ZHLN_ANNOTATION(ZHLN::Description<"The red subject did not render inside a band."> {}),
+    SceneLeaked       ZHLN_ANNOTATION(ZHLN::Description<"Scene pixels rasterized outside the requested viewport band."> {}),
+    AspectWrong ZHLN_ANNOTATION(ZHLN::Description<"The subject's pixel size changed with band width: the projection aspect does not follow the viewport."> {}),
+    NotCentered ZHLN_ANNOTATION(ZHLN::Description<"The subject is not centred in its band."> {}),
 };
 
 namespace {
 
-struct PpmImage {
-    int                  width  = 0;
-    int                  height = 0;
-    std::vector<uint8_t> pixels;
-};
+using RgbImage = ZHLN::Test::Image::RgbImage;
 
-[[nodiscard]] auto LoadPPM(std::string_view path) -> std::expected<PpmImage, ZHLN::ErrorCode> {
-    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
-    if (!ppm.is_open()) {
-        return std::unexpected(ViewportSubregionError::RenderOutputBlank);
-    }
-
-    PpmImage    image;
-    std::string header;
-    int         maxColor = 0;
-    ppm >> header >> image.width >> image.height >> maxColor;
-    ppm.get();
-    if (header != "P6" || image.width <= 0 || image.height <= 0) {
-        return std::unexpected(ViewportSubregionError::RenderOutputBlank);
-    }
-
-    image.pixels.resize(static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 3u);
-    ppm.read(reinterpret_cast<char*>(image.pixels.data()), static_cast<std::streamsize>(image.pixels.size()));
-    if (ppm.gcount() != static_cast<std::streamsize>(image.pixels.size())) {
-        return std::unexpected(ViewportSubregionError::RenderOutputBlank);
-    }
-    return image;
-}
-
-[[nodiscard]] auto IsRed(const PpmImage& img, int x, int y) -> bool {
+[[nodiscard]] auto IsRed(const RgbImage& img, int x, int y) -> bool {
     const size_t  i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
-    const uint8_t r = img.pixels[i + 0];
-    const uint8_t g = img.pixels[i + 1];
-    const uint8_t b = img.pixels[i + 2];
+    const uint8_t r = img.rgb[i + 0];
+    const uint8_t g = img.rgb[i + 1];
+    const uint8_t b = img.rgb[i + 2];
     return r > 160 && g < 60 && b < 60;
 }
 
@@ -108,7 +79,7 @@ struct BBox {
 };
 
 // Bbox of the red subject restricted to the band's columns.
-[[nodiscard]] auto RedBBoxIn(const PpmImage& img, const Band& band) -> BBox {
+[[nodiscard]] auto RedBBoxIn(const RgbImage& img, const Band& band) -> BBox {
     BBox bb;
     for (int y = 0; y < img.height; ++y) {
         for (int x = int(band.x); x < int(band.x + band.w); ++x) {
@@ -130,7 +101,7 @@ struct BBox {
 
 // Red pixels anywhere outside the band's columns: a fixed-function viewport
 // violation.
-[[nodiscard]] auto RedOutside(const PpmImage& img, const Band& band) -> int {
+[[nodiscard]] auto RedOutside(const RgbImage& img, const Band& band) -> int {
     int leaked = 0;
     for (int y = 0; y < img.height; ++y) {
         for (int x = 0; x < img.width; ++x) {
@@ -169,6 +140,8 @@ void DisableJitterVignetteAndTargetDrive(ZHLN::ECS::Registry& reg) {
 }
 
 } // namespace
+
+namespace {
 
 struct ViewportSubregionTestSuite {
     ViewportSubregionTestSuite() {
@@ -234,13 +207,19 @@ struct ViewportSubregionTestSuite {
             const Band     bandA {320, 320};
             const Band     bandB {160, 640};
 
-            auto renderBand = [&](const Band& band, std::string_view ppmPath) -> std::expected<PpmImage, ZHLN::ErrorCode> {
+            auto renderBand = [&](const Band& band, std::string_view ppmPath) -> std::expected<RgbImage, ZHLN::ErrorCode> {
                 rc.SetViewport(ZHLN::RenderContext::ViewportRect {.x = band.x, .y = 0, .width = band.w, .height = H});
                 ZHLN::Test::Headless::TickFrames(*engine, 3);
-                if (!rc.CaptureScreenshotPPM(ppmPath)) {
+                const auto captured = rc.CaptureFrame();
+                if (!captured) {
                     return std::unexpected(ViewportSubregionError::CaptureFailed);
                 }
-                return LoadPPM(ppmPath);
+                const RgbImage image = ZHLN::Test::Headless::ToRgbImage(*captured);
+                if (!image.Valid()) {
+                    return std::unexpected(ViewportSubregionError::RenderOutputBlank);
+                }
+                (void) ZHLN::Test::Image::WritePPM(ppmPath, image);
+                return image;
             };
 
             auto aRes = renderBand(bandA, "viewport_band_a.ppm");
@@ -251,8 +230,8 @@ struct ViewportSubregionTestSuite {
             if (!bRes) {
                 return std::unexpected(bRes.error());
             }
-            const PpmImage& a = *aRes;
-            const PpmImage& b = *bRes;
+            const RgbImage& a = *aRes;
+            const RgbImage& b = *bRes;
 
             const int leakedA = RedOutside(a, bandA);
             const int leakedB = RedOutside(b, bandB);
@@ -291,8 +270,4 @@ struct ViewportSubregionTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunViewportSubregionSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ViewportSubregionTestSuite>();
-}
+} // namespace

@@ -54,7 +54,3 @@ static_assert(!std::is_copy_constructible_v<ZHLN::defer<void (*)()>>);
 static_assert(std::is_move_constructible_v<ZHLN::defer<void (*)()>>);
 
 } // namespace
-
-auto RunDeferSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<DeferTestSuite>();
-}

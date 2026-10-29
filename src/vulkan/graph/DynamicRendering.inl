@@ -5,128 +5,6 @@
 
 namespace ZHLN::Vk {
 
-template <VkImageLayout Layout>
-struct LayoutTraits {
-  private:
-    struct LayoutSyncInfo {
-        VkPipelineStageFlags2 stage;
-        VkAccessFlags2        access;
-        std::string_view      name;
-    };
-    static constexpr LayoutSyncInfo GetSyncInfo(bool isSource) {
-        switch (Layout) {
-            case VK_IMAGE_LAYOUT_UNDEFINED:
-                return {.stage = VK_PIPELINE_STAGE_2_NONE, .access = 0, .name = "UNDEFINED"};
-
-            case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-                return {
-                    .stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    .access = isSource ? VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT :
-                                         (VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT),
-                    .name   = "COLOR_ATTACHMENT_OPTIMAL"
-                };
-
-            case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
-                return {
-                    .stage  = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                    .access = isSource ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT :
-                                         (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT),
-                    .name   = "DEPTH_ATTACHMENT_OPTIMAL"
-                };
-
-            case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
-                return {
-                    .stage  = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                    .access = isSource ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT :
-                                         (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT),
-                    .name   = "DEPTH_STENCIL_ATTACHMENT_OPTIMAL"
-                };
-
-            case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
-                return {
-                    .stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    .access = VK_ACCESS_2_SHADER_READ_BIT,
-                    .name   = "SHADER_READ_ONLY_OPTIMAL"
-                };
-
-            case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-                return {.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, .access = 0, .name = "PRESENT_SRC_KHR"};
-
-            case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-                return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_WRITE_BIT, .name = "TRANSFER_DST_OPTIMAL"};
-
-            case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-                return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_READ_BIT, .name = "TRANSFER_SRC_OPTIMAL"};
-
-            case VK_IMAGE_LAYOUT_GENERAL:
-
-                return {.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, .access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT, .name = "GENERAL"};
-
-            default:
-                return {
-                    .stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                    .access = isSource ? VK_ACCESS_2_MEMORY_WRITE_BIT : VK_ACCESS_2_MEMORY_READ_BIT,
-                    .name   = "UNKNOWN_OR_CUSTOM_LAYOUT"
-                };
-        }
-    }
-
-  public:
-    static constexpr auto             kInfo = GetSyncInfo(false);
-    static constexpr std::string_view kName = kInfo.name;
-
-    static constexpr VkPipelineStageFlags2 kStage = []() constexpr {
-        if constexpr (Layout == VK_IMAGE_LAYOUT_UNDEFINED) {
-            return VK_PIPELINE_STAGE_2_NONE;
-        } else if constexpr (Layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-            return VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-        } else if constexpr (Layout == VK_IMAGE_LAYOUT_GENERAL) {
-            return VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        } else {
-            return kInfo.stage;
-        }
-    }();
-
-    static constexpr VkAccessFlags2 kAccess = kInfo.access;
-};
-
-template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-constexpr auto MakeLayoutBarrierDesc(VkImage image, VkImageAspectFlags aspect, uint32_t baseMip, uint32_t mipCount) noexcept -> ImageBarrierDesc {
-    using Src = LayoutTraits<OldLayout>;
-    using Dst = LayoutTraits<NewLayout>;
-    return {
-        .image      = image,
-        .src_access = Src::kAccess,
-        .dst_access = Dst::kAccess,
-        .src_layout = OldLayout,
-        .dst_layout = NewLayout,
-        .src_stage  = Src::kStage,
-        .dst_stage  = Dst::kStage,
-        .aspect     = aspect,
-        .base_mip   = baseMip,
-        .mip_count  = mipCount
-    };
-}
-
-template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-inline void TransitionLayout(
-    const VkCommandBuffer    cmd,
-    const VkImage            image,
-    const VkImageAspectFlags aspect,
-    const uint32_t           baseMip,
-    const uint32_t           mipCount
-) noexcept {
-    ImageBarrier(cmd, MakeLayoutBarrierDesc<OldLayout, NewLayout>(image, aspect, baseMip, mipCount));
-}
-
-template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-inline void TransitionLayout(VkCommandBuffer cmd, VkImage image, const VkImageSubresourceRange& range) noexcept {
-    VkImageMemoryBarrier2 barrier =
-        MakeImageBarrier(MakeLayoutBarrierDesc<OldLayout, NewLayout>(image, range.aspectMask, range.baseMipLevel, range.levelCount));
-    barrier.subresourceRange = range;
-    PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
-}
-
 template <ColorClearTarget T>
 constexpr auto GetVkImage(const T& target) noexcept -> VkImage {
     if constexpr (std::same_as<std::remove_cvref_t<T>, VkImage>) {
@@ -164,9 +42,9 @@ inline void ClearColorAndTransition(VkCommandBuffer cmd, const Target& target, c
         return;
 
     const VkClearColorValue clear = ToVkClearColor(color);
-    TransitionLayout<InitialLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image, range);
+    ImageBarrier::Transition<InitialLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(image, range).Record(cmd);
     vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
-    TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, FinalLayout>(cmd, image, range);
+    ImageBarrier::Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, FinalLayout>(image, range).Record(cmd);
 }
 
 template <VkImageLayout InitialLayout, VkImageLayout FinalLayout, ClearColorSource Color, ColorClearTarget... Targets>
@@ -265,9 +143,8 @@ inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFl
         static_assert(sizeof(T) == 0, "IssueBarrier requires an image slice or an owning image resource");
     }
 
-    const VkImageAspectFlags aspect = aspectOverride != VK_IMAGE_ASPECT_NONE ? aspectOverride : slice.aspect;
-    TransitionLayout<in_layout, out_layout>(cmd, slice.image, aspect);
-    slice.aspect = aspect;
+    slice.aspect = aspectOverride != VK_IMAGE_ASPECT_NONE ? aspectOverride : slice.aspect;
+    slice.template Transition<in_layout, out_layout>(cmd);
     return TypedImage<out_layout> {slice};
 }
 
@@ -275,8 +152,11 @@ template <VkImageLayout NewLayout, VkImageLayout OldLayout, VkFormat Format>
 inline auto
     Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, VkImageAspectFlags overrideAspect) noexcept -> TypedImage<NewLayout, Format> {
     const VkImageAspectFlags aspect = overrideAspect != VK_IMAGE_ASPECT_NONE ? overrideAspect : img.Aspect();
-    TransitionLayout<OldLayout, NewLayout>(cmd, img.Handle(), aspect);
-    return img.template WithLayout<NewLayout>(aspect);
+    auto                     next   = img.template WithLayout<NewLayout>(aspect);
+    if constexpr (OldLayout != NewLayout) {
+        next.slice.template Transition<OldLayout, NewLayout>(cmd);
+    }
+    return next;
 }
 
 template <VkImageLayout TargetLayout, VkImageLayout OldLayout, VkFormat Format>
@@ -384,18 +264,40 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
+template <VkImageLayout Layout, VkFormat Format>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
+    const TypedImage<Layout, Format>& img,
+    ColorOp                           op
+) && noexcept -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type> {
+    return std::move(*this).AddColor(img, op.loadOp, op.storeOp, op.clearColor);
+}
+
+template <size_t ColorCount, bool HasDepth, typename Formats>
+template <typename... TypedImages>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
+    const std::tuple<TypedImages...>& imageTuple,
+    ColorOp                           op
+) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type> {
+    return std::move(*this).AddColorGroup(imageTuple, op.loadOp, op.storeOp, op.clearColor);
+}
+
+template <size_t ColorCount, bool HasDepth, typename Formats>
+template <VkImageLayout Layout, VkFormat Format>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
+    const TypedImage<Layout, Format>& img,
+    DepthOp                           op
+) && noexcept -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type> {
+    return std::move(*this).AddDepth(img, op.loadOp, op.storeOp, op.clearVal);
+}
+
+template <size_t ColorCount, bool HasDepth, typename Formats>
 constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::Flags(VkRenderingFlags flags) && noexcept -> DynamicPass<ColorCount, HasDepth, Formats>&& {
     _flags = flags;
     return std::move(*this);
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
-constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetSecondaryInheritance(
-    const VkBindHeapInfoEXT*         samplerHeap,
-    const VkBindHeapInfoEXT*         resourceHeap,
-    std::span<const uint32_t>        pushOffsets,
-    std::span<const VkDeviceAddress> pushAddresses
-) const noexcept -> SecondaryInheritance {
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetInheritance() const noexcept -> RenderingInheritance {
     std::span<const VkFormat> colors;
     VkFormat                  depth = VK_FORMAT_UNDEFINED;
     if constexpr (std::same_as<Formats, RuntimeAttachmentFormats>) {
@@ -413,7 +315,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetSecondaryInheritan
     }
 
     const VkFormat stencil = (HasDepth && _hasStencil) ? StencilFormatForDepth(depth) : VK_FORMAT_UNDEFINED;
-    return SecondaryInheritance {colors, depth, stencil, _viewMask, samplerHeap, resourceHeap, pushOffsets, pushAddresses, EffectiveViewport()};
+    return RenderingInheritance {colors, depth, stencil, _viewMask, EffectiveViewport()};
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
@@ -447,14 +349,7 @@ void DynamicPass<ColorCount, HasDepth, Formats>::Execute(VkCommandBuffer cmd, Fu
 
     vkCmdBeginRendering(cmd, &rendering_info);
 
-    const VkViewport viewport = EffectiveViewport();
-    const VkRect2D   scissor  = {
-           .offset = {.x = static_cast<int32_t>(viewport.x), .y = static_cast<int32_t>(viewport.y)},
-           .extent = {.width = static_cast<uint32_t>(viewport.width), .height = static_cast<uint32_t>(viewport.height)}
-    };
-
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    ApplyViewportAndScissor(cmd, EffectiveViewport());
 
     std::forward<Func>(func)();
 
@@ -476,33 +371,11 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetDepthPtr() const n
     }
 }
 
-template <size_t MaxStackBarriers>
 inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes) noexcept {
-    std::array<VkImageMemoryBarrier2, MaxStackBarriers> stack_barriers;
-
     for (const auto& pass: passes) {
-        const auto transition_count = static_cast<uint32_t>(pass.transitions.size());
-
-        if (transition_count > 0) {
-            VkImageMemoryBarrier2* p_barriers     = stack_barriers.data();
-            VkImageMemoryBarrier2* heap_allocated = nullptr;
-
-            if (transition_count > MaxStackBarriers) [[unlikely]] {
-                heap_allocated = new (std::nothrow) VkImageMemoryBarrier2[transition_count];
-                p_barriers     = heap_allocated;
-            }
-
-            for (uint32_t i = 0; i < transition_count; ++i) {
-                p_barriers[i] = MakeImageBarrier(pass.transitions[i].barrier);
-            }
-
-            PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2>(p_barriers, transition_count));
-
-            if (heap_allocated) [[unlikely]] {
-                delete[] heap_allocated;
-            }
+        if (!pass.transitions.empty()) {
+            ImageBarrier::Record(cmd, pass.transitions);
         }
-
         if (pass.record) {
             pass.record(cmd, pass.pUserData);
         }

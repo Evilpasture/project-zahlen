@@ -1,13 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_push_constants;
 import sampling;
-
-public struct BRDFLUTPush {
-    public uint width;
-    public uint height;
-    public uint sampleCount;
-};
 
 [vk::push_constant]
 BRDFLUTPush pc;

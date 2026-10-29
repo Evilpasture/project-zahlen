@@ -29,6 +29,8 @@ enum class PresentPacingTestError : uint8_t {
     LateLatchFailed         ZHLN_ANNOTATION(ZHLN::Description<"Engine::PollLateInput did not survive a headless frame."> {}),
 };
 
+namespace {
+
 struct PresentPacingSuite {
     PresentPacingSuite() {
         ZHLN::Test::Headless::BeginSession();
@@ -147,6 +149,4 @@ struct PresentPacingSuite {
     };
 };
 
-auto RunPresentPacingSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<PresentPacingSuite>();
-}
+} // namespace

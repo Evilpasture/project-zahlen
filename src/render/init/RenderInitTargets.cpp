@@ -14,7 +14,7 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
     auto* history = impl.accumulationHistory.begin();
     Vk::Debug::SetImageName(ctx, history[0].image.Handle(), "AccumHistory0");
     Vk::Debug::SetImageName(ctx, history[1].image.Handle(), "AccumHistory1");
-    Vk::Debug::SetImageName(ctx, impl.presenter.depthTarget.image.Handle(), "DepthTarget");
+    Vk::Debug::SetImageName(ctx, impl.primaryDepthTarget.image.Handle(), "DepthTarget");
     Vk::Debug::SetImageName(ctx, impl.targets.ShadowMapPrev().image.Handle(), "ShadowMapPrev");
     Vk::Debug::SetImageName(ctx, impl.iblPayload.brdfLutImage.Handle(), "IBL.BrdfLut");
     Vk::Debug::SetImageName(ctx, impl.iblPayload.prefilteredImage.Handle(), "IBL.PrefilteredCube");
@@ -34,6 +34,20 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         return std::unexpected(Vk::PresentationError::SwapchainCreationFailed);
     }
 
+    const VkExtent2D targetExt = presenter.Extent();
+    if (presentationTarget.IsTTY() && targetExt.width > 0 && targetExt.height > 0) {
+        presentationTarget.SetFramebufferExtent(targetExt.width, targetExt.height);
+    }
+
+    auto depthTarget = Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+        allocator, ctx.Device(), targetExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
+    );
+    if (!depthTarget) {
+        return std::unexpected(depthTarget.error());
+    }
+    primaryDepthTarget.Destroy(allocator);
+    primaryDepthTarget = std::move(*depthTarget);
+
     const VkExtent3D voxelExt = fog.VoxelDispatchExtent();
     if (voxelExt.width == 0 || voxelExt.height == 0 || voxelExt.depth == 0) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -49,16 +63,17 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
     };
 
     for (auto& history: accumulationHistory) {
-        auto result = assign(history, CreateColorTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(allocator, ctx.Device(), ext, Vk::ImageUsage::TransferDst));
+        auto result = assign(history, Vk::RenderTarget<Res_AccumCurrent>::Create(
+            allocator, ctx.Device(), targetExt, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferDst}
+        ));
         if (!result) {
             return result;
         }
     }
 
-    if (auto targets_res = targets.Recreate(ext, voxelExt); !targets_res) {
+    if (auto targets_res = targets.Recreate(targetExt, voxelExt); !targets_res) {
         return targets_res;
     }
-    rtHistoryValid = false;
 
     if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
         targets.RecordInitialLayouts(cmd);
@@ -66,15 +81,11 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         Vk::ClearColorAndTransition(cmd, Color4 {}, accumulationHistory.Current(), accumulationHistory.Previous());
 
         if (decalDepthSlot.Valid()) {
-            heapManager.WriteImage(decalDepthSlot, presenter.depthTarget.image.ViewInfo(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            heapManager.BindImage(decalDepthSlot, primaryDepthTarget.image.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
-            cmd, presenter.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-        );
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            cmd, presenter.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-        );
+        primaryDepthTarget.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(cmd);
+        primaryDepthTarget.Transition<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
     }); !immediate) [[unlikely]] {
         return std::unexpected(immediate.error());
     }

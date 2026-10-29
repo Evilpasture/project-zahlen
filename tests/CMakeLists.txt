@@ -5,22 +5,12 @@
 # from src/ (systems, render/Vulkan guts, cooker headers, ...). Configure-time
 # enforcement lives in configure/check_tests_public_api.py.
 #
-# Layout: one binary per directory group instead of one per suite. Every
-# Test*.cpp in a group keeps its suite definition private to its own
-# translation unit and exports a stats-returning function; the group's
-# Run*Tests.cpp aggregates them through ZHLN::Test::Runner::RunDeferred.
-# Grouping 24 suites into 8 links is what pays for itself under ASan/UBSan or
-# LTO, where each extra link of zahlen_engine + Jolt + reflection meta-types is
-# the expensive part. The cost is process isolation: a crash or timeout in one
-# suite takes the rest of its group with it.
-
-# CPU_* groups stay core-only. The offline AssetCooking codec has its own
-# suite, built with zcook regardless of ZHLN_BUILD_EXTRAS. Other extras tests
-# (JSON, TOML, the glTF importer, perf baselines) live in tests/extras and only
-# build when optional gameplay extras are enabled.
-
-# 1. Enable CTest testing framework
-enable_testing()
+# Layout: explicit file list (no file(GLOB), preserving exact Ninja incremental
+# rebuilds) compiled into an internal CPU worker binary (`ztest_cpu`). Each TU
+# is wrapped via `zahlen_wrap_ztest_sources(...)` so `test_*` functions inside
+# `namespace ZHLN::Test` and primary-TU suite structs self-register with zero
+# boilerplate, and `ztest` collects and shards execution per source file across
+# `-j N` worker processes.
 
 # Public include roots for the optional outer layers. Kept as a list because
 # plugin formats, engine extensions, network I/O, and gameplay each have their
@@ -33,134 +23,25 @@ set(ZHLN_OPTIONAL_INCLUDE_ROOTS
     ${PROJECT_SOURCE_DIR}/gameplay/ProjectLight
 )
 
-# Shared per-target setup for a CPU test group. Sources are listed by the caller,
-# the way zahlen_add_gpu_test_group in tests/render/CMakeLists.txt already lists
-# its own -- see the note at the call sites below for what that costs.
-function(zahlen_add_cpu_test_group TARGET_NAME)
-    # Both the Test*.cpp suites and the group's Run*Tests.cpp entry point. A file
-    # that defines main() must not be added to any other group.
-    set(GROUP_SOURCES ${ARGN})
-
-    if(NOT GROUP_SOURCES)
-        message(FATAL_ERROR "CPU test group ${TARGET_NAME}: no sources listed")
-    endif()
-
-    add_executable(${TARGET_NAME} ${GROUP_SOURCES})
-
-    set_target_properties(${TARGET_NAME} PROPERTIES
-        CXX_STANDARD 26
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-    )
-
-    target_link_libraries(${TARGET_NAME} PRIVATE
-        zahlen_engine
-    )
-    # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
-    #
-    # extern/stb is here for the same reason it is in tests/render: the noise
-    # metric suite decodes the shipped LDR_RGBA_0 tile with stb_image so the
-    # discriminator is measured against the real asset rather than a synthetic
-    # stand-in.
-    #
-    # Only the header is wanted. STB_IMAGE_IMPLEMENTATION already lives in
-    # src/engine/stbi_impl.c, which is part of ENGINE_SOURCES, so the decode
-    # functions arrive through the zahlen_engine link below: no visibility
-    # preset is set on that target and no -fvisibility=hidden appears anywhere
-    # in the CMake tree, so its extern symbols are exported by the ELF default.
-    # Do not define STB_IMAGE_IMPLEMENTATION in a test TU.
-    target_include_directories(${TARGET_NAME} PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/tests
-        ${PROJECT_SOURCE_DIR}/extern/stb
-    )
-
-    # Applies the required reflection flags (-freflection / custom libc++) configured in the root
-    zahlen_enable_reflection(${TARGET_NAME})
-
-    # Character locomotion (MovementComponent) moved to extensions/CharacterController.
-    # TestCharacterMovement exercises the controller's integration math, so the
-    # physics group links that domain, publishes the extras include root, and
-    # defines the gate macro that RunPhysicsTests.cpp / TestCharacterMovement.cpp
-    # check. Only when extras are built; the suite is excluded from the source
-    # list otherwise (see ZHLN_PHYSICS_TEST_SOURCES below).
-    if(TARGET_NAME STREQUAL "CPU_Physics" AND TARGET zahlen_character_controller)
-        target_link_libraries(${TARGET_NAME} PRIVATE zahlen_character_controller)
-        target_include_directories(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
-        target_compile_definitions(${TARGET_NAME} PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
-    endif()
-
-    # --- ASAN & UBSAN CONFIGURATION ---
-    if(USE_SANITIZERS)
-        target_compile_options(${TARGET_NAME} PRIVATE
-            -fsanitize=address,undefined
-            -fno-omit-frame-pointer
-        )
-        target_link_options(${TARGET_NAME} PRIVATE
-            -fsanitize=address,undefined
-        )
-        target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
-
-        if(WIN32)
-            get_filename_component(CLANG_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
-            find_file(ASAN_DLL
-                NAMES "clang_rt.asan_dynamic-x86_64.dll"
-                PATHS "${CLANG_BIN_DIR}/../lib/clang/23/lib/windows" "${CLANG_BIN_DIR}/../lib/clang/22/lib/windows"
-            )
-            if(ASAN_DLL)
-                add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ASAN_DLL}" "$<TARGET_FILE_DIR:${TARGET_NAME}>"
-                    COMMENT "Copying ASan Runtime DLL for ${TARGET_NAME}..."
-                )
-            endif()
-        endif()
-    endif()
-
-    # Register the group as a single CTest entry. Per-suite results still print
-    # individually; use `ctest -R CPU_Core` to run one group.
-    add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-    set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast")
-
-    # Shared test options (sanitizers, plus the opt-in Vulkan sandbox pin)
-    # reach CTest even when sanitizers are disabled. The sandbox pin lives in
-    # its own list so the GPU groups can opt out of it: VK_DRIVER_FILES would
-    # otherwise hide the hardware those suites are named after.
-    set(CPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
-    list(APPEND CPU_TEST_ENVIRONMENT ${ZHLN_VULKAN_SANDBOX_ENVIRONMENT})
-    if(CPU_TEST_ENVIRONMENT)
-        set_tests_properties(${TARGET_NAME} PROPERTIES
-            ENVIRONMENT "${CPU_TEST_ENVIRONMENT}"
-        )
-    endif()
-
-    # The group's binary is built into build/tests/, not beside the DLLs it links.
-    # ctest gets the directories on PATH; the copy is what makes the binary itself
-    # runnable when something other than ctest starts it.
-    zahlen_add_runtime_dll_path(${TARGET_NAME})
-    zahlen_add_runtime_dlls(${TARGET_NAME})
-endfunction()
-
-# 2. The CPU test groups.
-#
-# Sources are listed rather than globbed. What that costs: a new Test*.cpp
-# dropped into one of these directories is now silently unbuilt until someone
-# adds it here, where the glob used to pick it up on the next configure. What it
-# buys: the contents of a test binary are readable from this file, a suite can be
-# moved between groups by moving one line, and a file cannot join a group it was
-# never meant to be in -- which matters because these groups share a link, and
-# two groups each holding a file that defines main() is a link error, not a
-# warning. A source named here that does not exist is caught by CMake at generate
-# time, so a typo cannot quietly shrink a group.
-zahlen_add_cpu_test_group(CPU_Core
-    core/RunCoreTests.cpp
+set(ZHLN_CPU_TEST_SOURCES
+    asset_cooking/TestRadiance.cpp
+    assets/TestCooker.cpp
+    assets/TestEnvironmentImage.cpp
+    assets/TestMeshlets.cpp
+    assets/TestPackaging.cpp
+    audio/TestsAudio.cpp
+    core/TestClock.cpp
     core/TestCommandLine.cpp
     core/TestContainers.cpp
     core/TestDefer.cpp
     core/TestEnumFlags.cpp
     core/TestError.cpp
+    core/TestFileSystem.cpp
     core/TestFileSystemWatcher.cpp
     core/TestFontAsset.cpp
+    core/TestGUIContext.cpp
     core/TestGraphicsSettings.cpp
+    core/TestInput.cpp
     core/TestMath.cpp
     core/TestOptional.cpp
     core/TestPlatform.cpp
@@ -168,67 +49,113 @@ zahlen_add_cpu_test_group(CPU_Core
     core/TestReflection.cpp
     core/TestSignal.cpp
     core/TestSoA.cpp
+    core/TestTestFramework.cpp
     core/TestTextEdit.cpp
-)
-
-zahlen_add_cpu_test_group(CPU_Threading
-    threading/RunThreadingTests.cpp
+    ecs/TestECS.cpp
+    ecs/TestEventBus.cpp
+    ecs/TestSystemGraph.cpp
+    physics/TestPhysics.cpp
     threading/TestChannel.cpp
     threading/TestSyncPrim.cpp
     threading/TestTaskSystem.cpp
 )
 
-zahlen_add_cpu_test_group(CPU_ECS
-    ecs/RunECSTests.cpp
-    ecs/TestECS.cpp
-    ecs/TestSystemGraph.cpp
-)
-
-# Character locomotion moved to extensions/CharacterController, so the character
-# movement suite only builds when that domain exists. The suite is the only
-# consumer of the controller here; RunPhysicsTests.cpp gates the registration
-# on the same macro.
-set(ZHLN_PHYSICS_TEST_SOURCES
-    physics/RunPhysicsTests.cpp
-    physics/TestPhysics.cpp
-)
 if(TARGET zahlen_character_controller)
-    list(APPEND ZHLN_PHYSICS_TEST_SOURCES physics/TestCharacterMovement.cpp)
+    list(APPEND ZHLN_CPU_TEST_SOURCES physics/TestCharacterMovement.cpp)
 endif()
-zahlen_add_cpu_test_group(CPU_Physics ${ZHLN_PHYSICS_TEST_SOURCES})
 
-zahlen_add_cpu_test_group(CPU_Assets
-    assets/RunAssetsTests.cpp
-    assets/TestCooker.cpp
-    assets/TestMeshlets.cpp
-    assets/TestEnvironmentImage.cpp
-    assets/TestPackaging.cpp
-)
-# The core asset suites launch zcook as an external program; building just
-# CPU_Assets must still produce that program.
-add_dependencies(CPU_Assets zcook)
-
-# The codec suite exercises the host-side extra without making CPU_Assets or
-# the engine depend on it. Keep it active when other extras are disabled.
-add_subdirectory(asset_cooking)
-
-zahlen_add_cpu_test_group(CPU_Audio
-    audio/RunAudioTests.cpp
-    audio/TestsAudio.cpp
+zahlen_wrap_ztest_sources(ZHLN_CPU_WRAPPED_SOURCES ZHLN_CPU_REL_FILES
+    ${ZHLN_CPU_TEST_SOURCES}
 )
 
-# The extras suites live with the extras toolkit: JSON, TOML, the procedural
-# animation rig, the network codecs, the console debugger, and the perf
-# baselines under tests/extras/profile. They disappear completely when
-# ZHLN_BUILD_EXTRAS is disabled.
+add_executable(ztest_cpu
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestsMain.cpp
+    ${ZHLN_CPU_WRAPPED_SOURCES}
+)
+
+set_target_properties(ztest_cpu PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    ZHLN_ZTEST_SOURCE_FILES "${ZHLN_CPU_REL_FILES}"
+)
+
+target_link_libraries(ztest_cpu PRIVATE
+    zahlen_engine
+    zahlen_engine_cli
+    zahlen_signal
+    zahlen_asset_cooking
+)
+
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
+target_include_directories(ztest_cpu PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+    ${PROJECT_SOURCE_DIR}/plugins
+    ${PROJECT_SOURCE_DIR}/extensions
+    ${PROJECT_SOURCE_DIR}/extern/stb
+)
+
+if(TARGET zahlen_character_controller)
+    target_link_libraries(ztest_cpu PRIVATE zahlen_character_controller)
+    target_include_directories(ztest_cpu PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
+    target_compile_definitions(ztest_cpu PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
+endif()
+
+zahlen_enable_reflection(ztest_cpu)
+add_dependencies(ztest_cpu zcook)
+
+if(USE_SANITIZERS)
+    target_compile_options(ztest_cpu PRIVATE
+        -fsanitize=address,undefined
+        -fno-sanitize=vptr
+        -fno-omit-frame-pointer
+    )
+    target_link_options(ztest_cpu PRIVATE
+        -fsanitize=address,undefined
+        -fno-sanitize=vptr
+    )
+    target_compile_definitions(ztest_cpu PRIVATE __ASAN_ENABLED__)
+
+    if(WIN32)
+        get_filename_component(CLANG_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
+        find_file(ASAN_DLL
+            NAMES "clang_rt.asan_dynamic-x86_64.dll"
+            PATHS "${CLANG_BIN_DIR}/../lib/clang/23/lib/windows" "${CLANG_BIN_DIR}/../lib/clang/22/lib/windows"
+        )
+        if(ASAN_DLL)
+            add_custom_command(TARGET ztest_cpu POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ASAN_DLL}" "$<TARGET_FILE_DIR:ztest_cpu>"
+                COMMENT "Copying ASan Runtime DLL for ztest_cpu..."
+            )
+        endif()
+    endif()
+endif()
+
+set(CPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
+list(APPEND CPU_TEST_ENVIRONMENT ${ZHLN_VULKAN_SANDBOX_ENVIRONMENT})
+
+zahlen_register_ztest_target(ztest_cpu
+    POOL cpu
+    TIMEOUT 120
+    LABELS "CPU;Fast"
+    FILES ${ZHLN_CPU_REL_FILES}
+    ENV ${CPU_TEST_ENVIRONMENT}
+)
+
+zahlen_add_runtime_dlls(ztest_cpu)
+
 if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
     add_subdirectory(extras)
 endif()
 
-# 3. Local GPU Render Test Suite (Off by default for headless CI/CD)
 option(ZHLN_BUILD_GPU_TESTS "Build GPU/Vulkan rendering tests (local hardware required)" OFF)
 
 if(ZHLN_BUILD_GPU_TESTS)
-    message(STATUS "Configuring local GPU render tests in tests/render...")
-    add_subdirectory(render)
+    if(NOT ZHLN_BUILD_RENDER)
+        message(STATUS "Skipping tests/render: ZHLN_BUILD_RENDER=OFF")
+    else()
+        message(STATUS "Configuring local GPU render tests in tests/render...")
+        add_subdirectory(render)
+    endif()
 endif()

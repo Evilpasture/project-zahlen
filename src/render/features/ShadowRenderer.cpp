@@ -53,9 +53,11 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
     return Vk::ShaderStagesView::Create(vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
         .and_then([this, &impl, device](auto&& shaders) -> std::expected<void, ErrorCode> {
+            Vk::HeapMappingArena mappingArena {impl.heapManager};
+            const auto*           sceneMappings = mappingArena.Map(impl.sceneHeapMappings);
             return Vk::PipelineBuilder {}
                 .Shaders(shaders)
-                .HeapMappings(&impl.sceneHeapMappings.info, &impl.sceneHeapMappings.info)
+                .HeapMappings(sceneMappings, sceneMappings)
                 .DepthOnly()
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
                 .ViewMask(kCascadeViewMask)
@@ -81,9 +83,11 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
                 return {};
             }
 
+            Vk::HeapMappingArena mappingArena {impl.heapManager};
+            const auto*           sceneMappings = mappingArena.Map(impl.sceneHeapMappings);
             auto pipeline = Vk::PipelineBuilder {}
                                 .Shaders(*shaders)
-                                .HeapMappings(&impl.sceneHeapMappings.info, &impl.sceneHeapMappings.info)
+                                .HeapMappings(sceneMappings, sceneMappings)
                                 .DepthOnly()
                                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
                                 .ViewMask(kCascadeViewMask)
@@ -104,9 +108,11 @@ auto ShadowRenderer::CompileAtlasPipeline(RenderContext::Impl& impl, VkDevice de
     return Vk::ShaderStagesView::Create(vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
         .and_then([this, &impl, device](auto&& shaders) -> std::expected<void, ErrorCode> {
+            Vk::HeapMappingArena mappingArena {impl.heapManager};
+            const auto*           sceneMappings = mappingArena.Map(impl.sceneHeapMappings);
             return Vk::PipelineBuilder {}
                 .Shaders(shaders)
-                .HeapMappings(&impl.sceneHeapMappings.info, &impl.sceneHeapMappings.info)
+                .HeapMappings(sceneMappings, sceneMappings)
                 .DepthOnly()
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
                 .CullNone()

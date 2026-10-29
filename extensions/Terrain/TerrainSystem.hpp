@@ -14,6 +14,9 @@ namespace ZHLN {
 
 class Engine;
 class RenderContext;
+namespace ECS {
+class EntityCommandBuffer;
+}
 
 namespace Terrain {
 
@@ -30,8 +33,11 @@ class TerrainSystem {
     TerrainSystem(TerrainSystem&&)                 = default;
     TerrainSystem& operator=(TerrainSystem&&)      = default;
 
-    static void Update(ECS::Query<const TerrainComponent, Components::MeshComponent&, Components::OwnedMeshComponent&> query,
-                       ECS::ResMut<RenderContext> render, ECS::Registry& registry);
+    static void Update(
+        ECS::Query<const TerrainComponent, const Components::PendingDestroy, Components::MeshComponent&, Components::OwnedMeshComponent&> query,
+        ECS::ResMut<RenderContext> render,
+        ECS::EntityCommandBuffer&  ecb
+    );
 
     static TerrainHandle      RegisterTerrainData(TerrainData data) noexcept;
     static const TerrainData* GetTerrainData(TerrainHandle handle) noexcept;

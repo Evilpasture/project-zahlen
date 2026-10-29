@@ -71,31 +71,6 @@ auto FindService(Bundle& bundle) noexcept -> T* {
     return found;
 }
 
-#else
-
-namespace TemplatedDetail {
-
-template <typename Bundle>
-consteval auto BundleTypesAreUnique() -> bool {
-    return true;
-}
-
-} // namespace TemplatedDetail
-
-// Without reflection the member list cannot be read, so no bundle can be
-// searched. The stub answers "yes" to every query so that stub-mode builds
-// still compile -- the nullptr FindService returns is never dereferenced there
-// because stub mode is a parse check, not a run.
-template <typename T, typename Bundle>
-consteval auto BundleProvides() -> bool {
-    return true;
-}
-
-template <typename T, typename Bundle>
-auto FindService(Bundle&) noexcept -> T* {
-    return nullptr;
-}
-
 #endif
 
 } // namespace ZHLN::Reflect

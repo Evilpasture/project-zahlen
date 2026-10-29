@@ -63,6 +63,7 @@ tokens (this file, and comments in Scripting headers) cannot fail the check.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -82,12 +83,28 @@ MODULE_ROOTS = (ROOT / "modules", ROOT / "plugins", ROOT / "extensions", ROOT / 
 SOURCE_ROOTS = (ROOT / "modules", ROOT / "plugins", ROOT / "extensions", ROOT / "gameplay", ROOT / "src", ROOT / "include", ROOT / "app", ROOT / "tools", ROOT / "tests")
 CXX_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".cppm", ".ixx", ".inl", ".ipp"}
 MODULE_SUFFIXES = {".cppm", ".ixx"}
+SKIP_DIR_NAMES = {".git", "build", "target", "__pycache__", ".cache", "node_modules"}
 
 namespace_decl = re.compile(r"\bnamespace\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b")
 raw_token = re.compile(r"std::meta::|\^\^|\[:")
 reflect_detail = re.compile(r"\b(?:ZHLN::)?Reflect::detail\b")
 feature_probe = re.compile(r"__cpp_impl_reflection|__has_feature\s*\(\s*reflection\s*\)")
 include_directive = re.compile(r"^[ \t]*#[ \t]*include\b")
+
+_COMMENT_OR_STRING_RE = re.compile(
+    r"//[^\n]*"
+    r"|/\*[\s\S]*?\*/"
+    r'|"(?:\\[\s\S]|[^"\\])*"'
+    r"|'(?:\\[\s\S]|[^'\\])*'"
+)
+_CLEAN_CACHE: dict[Path, str] = {}
+
+
+def _blank_match(match: re.Match[str]) -> str:
+    span = match.group(0)
+    if "\n" not in span:
+        return " " * len(span)
+    return "\n".join(" " * len(part) for part in span.split("\n"))
 
 
 def is_reflection_header(path: Path) -> bool:
@@ -105,48 +122,27 @@ def strip_comments_and_strings(text: str) -> str:
     Braces inside string literals ('{}' is all over the Wire format strings)
     must not confuse the namespace scan.
     """
-    out = list(text)
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c == "/" and i + 1 < n:
-            if text[i + 1] == "/":
-                while i < n and text[i] != "\n":
-                    out[i] = " "
-                    i += 1
-                continue
-            if text[i + 1] == "*":
-                out[i] = out[i + 1] = " "
-                i += 2
-                while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
-                    if text[i] != "\n":
-                        out[i] = " "
-                    i += 1
-                if i + 1 < n:
-                    out[i] = out[i + 1] = " "
-                    i += 2
-                continue
-        if c in "\"'":
-            quote, out[i] = c, " "
-            i += 1
-            while i < n:
-                if text[i] == "\\":
-                    out[i] = " "
-                    i += 1
-                    if i < n:
-                        out[i] = " "
-                        i += 1
-                    continue
-                if text[i] == quote:
-                    out[i] = " "
-                    i += 1
-                    break
-                if text[i] != "\n":
-                    out[i] = " "
-                i += 1
-            continue
-        i += 1
-    return "".join(out)
+    return _COMMENT_OR_STRING_RE.sub(_blank_match, text)
+
+
+def _clean_text(path: Path) -> str:
+    cached = _CLEAN_CACHE.get(path)
+    if cached is None:
+        cached = strip_comments_and_strings(path.read_text(encoding="utf-8", errors="ignore"))
+        _CLEAN_CACHE[path] = cached
+    return cached
+
+
+def _walk_sources(root: Path, suffixes: set[str]):
+    if not root.is_dir():
+        return
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIR_NAMES)
+        base = Path(dirpath)
+        for name in sorted(filenames):
+            candidate = base / name
+            if candidate.suffix.lower() in suffixes and candidate.is_file():
+                yield candidate
 
 
 def line_of(text: str, index: int) -> int:
@@ -175,9 +171,21 @@ def check_includes_in_namespaces(path: Path, clean: str, violations: list[str]) 
     and a brace that opens something other than a namespace (``extern "C"``
     around a C library) is not a namespace, so the rule is unconditional.
     """
+    first_brace = clean.find("{")
+    if first_brace == -1:
+        return 0
+    last_inc = -1
+    for m in include_directive.finditer(clean):
+        last_inc = m.start()
+    # Fast path: no #include at all, or every #include precedes the first '{' in the file.
+    if last_inc < first_brace:
+        return 0
+
+    prefix_end = clean.find("\n", last_inc)
+    scan_slice = clean if prefix_end == -1 else clean[:prefix_end]
     stack: list[str | None] = []
     count = 0
-    for number, line in enumerate(clean.split("\n"), 1):
+    for number, line in enumerate(scan_slice.split("\n"), 1):
         if include_directive.match(line):
             enclosing = next((name for name in reversed(stack) if name is not None), None)
             if enclosing is not None:
@@ -187,11 +195,12 @@ def check_includes_in_namespaces(path: Path, clean: str, violations: list[str]) 
                     f"header's names there; move it to file scope)"
                 )
                 count += 1
-        for brace in re.finditer(r"[{}]", line):
-            if brace.group() == "{":
-                stack.append(namespace_opened_by(line, brace.start()))
-            elif stack:
-                stack.pop()
+        if "{" in line or "}" in line:
+            for brace in re.finditer(r"[{}]", line):
+                if brace.group() == "{":
+                    stack.append(namespace_opened_by(line, brace.start()))
+                elif stack:
+                    stack.pop()
     return count
 
 
@@ -203,8 +212,7 @@ def check_module_details(path: Path, violations: list[str]) -> int:
     be exported by accident. Module-private helpers belong in the module's own
     namespace.
     """
-    text = path.read_text(encoding="utf-8", errors="ignore")
-    clean = strip_comments_and_strings(text)
+    clean = _clean_text(path)
     count = 0
     for ns in namespace_decl.finditer(clean):
         name = ns.group(1)
@@ -220,8 +228,7 @@ def check_module_details(path: Path, violations: list[str]) -> int:
 def check_raw_reflection(path: Path, violations: list[str]) -> int:
     """Rules 2, 3, 4 and 5, for one source file."""
     home = is_reflection_header(path)
-    text = path.read_text(encoding="utf-8", errors="ignore")
-    clean = strip_comments_and_strings(text)
+    clean = _clean_text(path)
     count = 0
     if not home:
         for m in raw_token.finditer(clean):
@@ -255,20 +262,13 @@ def main() -> int:
 
     module_count = 0
     for root in MODULE_ROOTS:
-        if not root.is_dir():
-            continue
-        for path in root.rglob("*"):
-            if path.suffix.lower() in MODULE_SUFFIXES and path.is_file():
-                module_count += 1
-                check_module_details(path, violations)
+        for path in _walk_sources(root, MODULE_SUFFIXES):
+            module_count += 1
+            check_module_details(path, violations)
 
     source_count = 0
     for root in SOURCE_ROOTS:
-        if not root.is_dir():
-            continue
-        for path in root.rglob("*"):
-            if path.suffix.lower() not in CXX_SUFFIXES or not path.is_file():
-                continue
+        for path in _walk_sources(root, CXX_SUFFIXES):
             source_count += 1
             check_raw_reflection(path, violations)
 

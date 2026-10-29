@@ -41,20 +41,26 @@ struct ImageSlice {
         image(img), attachmentView(attachment), extent(ext), format(fmt), aspect(asp) {
     }
 
-    constexpr explicit ImageSlice(const VkImageViewCreateInfo& info, VkExtent3D ext) noexcept:
-        image(info.image), extent(ext), format(info.format), aspect(info.subresourceRange.aspectMask),
-        baseMip(info.subresourceRange.baseMipLevel), mipCount(info.subresourceRange.levelCount),
-        baseLayer(info.subresourceRange.baseArrayLayer), layerCount(info.subresourceRange.layerCount),
-        viewType(info.viewType) {
+    constexpr explicit ImageSlice(const ImageView& view, VkExtent3D ext) noexcept:
+        image(view.Handle()), extent(ext), format(view.Format()), aspect(view.Aspect()) {
+        const VkImageSubresourceRange range = view.SubresourceRange();
+        baseMip                              = range.baseMipLevel;
+        mipCount                             = range.levelCount;
+        baseLayer                            = range.baseArrayLayer;
+        layerCount                           = range.layerCount;
+        viewType                             = view.ViewType();
     }
 
     ImageSlice(
         VkImage img, const AttachmentView& owner, VkExtent3D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_NONE
     ) noexcept:
-        image(img), attachmentView(owner.Get()), extent(ext), format(fmt),
-        aspect(asp != VK_IMAGE_ASPECT_NONE ? asp : owner.AspectFlags()), baseMip(owner.CreateInfo().subresourceRange.baseMipLevel),
-        mipCount(owner.CreateInfo().subresourceRange.levelCount), baseLayer(owner.CreateInfo().subresourceRange.baseArrayLayer),
-        layerCount(owner.CreateInfo().subresourceRange.layerCount), viewType(owner.CreateInfo().viewType) {
+        image(img), attachmentView(owner.Get()), extent(ext), format(fmt), aspect(asp != VK_IMAGE_ASPECT_NONE ? asp : owner.AspectFlags()) {
+        const VkImageSubresourceRange range = owner.View().SubresourceRange();
+        baseMip                              = range.baseMipLevel;
+        mipCount                             = range.levelCount;
+        baseLayer                            = range.baseArrayLayer;
+        layerCount                           = range.layerCount;
+        viewType                             = owner.View().ViewType();
     }
     ImageSlice(
         VkImage img, const AttachmentView& owner, VkExtent2D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_NONE
@@ -62,36 +68,36 @@ struct ImageSlice {
         ImageSlice(img, owner, VkExtent3D {ext.width, ext.height, 1}, fmt, asp) {
     }
 
-    [[nodiscard]] constexpr auto ViewInfo() const noexcept -> VkImageViewCreateInfo {
-        VkImageAspectFlags descriptorAspect = aspect;
-        if ((descriptorAspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) ==
-            (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
-            descriptorAspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-        }
-        return VkImageViewCreateInfo {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .image = image,
-            .viewType = viewType,
-            .format = format,
-            .components =
-                {
-                    .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-                },
-            .subresourceRange =
-                {
-                    .aspectMask = descriptorAspect,
-                    .baseMipLevel = baseMip,
-                    .levelCount = mipCount,
-                    .baseArrayLayer = baseLayer,
-                    .layerCount = layerCount,
-                },
+    [[nodiscard]] constexpr auto View() const noexcept -> ImageView {
+        return ImageView {
+            image,
+            format,
+            aspect,
+            static_cast<uint8_t>(baseMip),
+            mipCount == VK_REMAINING_MIP_LEVELS ? ImageView::kRemainingMips : static_cast<uint8_t>(mipCount),
+            static_cast<uint16_t>(baseLayer),
+            layerCount == VK_REMAINING_ARRAY_LAYERS ? ImageView::kRemainingLayers : static_cast<uint16_t>(layerCount),
+            viewType,
         };
     }
+
+    template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+    void Transition(VkCommandBuffer cmd) const noexcept;
+
+    template <VkImageLayout TargetLayout>
+    void DiscardTo(VkCommandBuffer cmd) const noexcept;
+
+    void Transition(VkCommandBuffer cmd, VkImageLayout oldLayout, VkImageLayout newLayout) const noexcept;
+
+    void Transition(
+        VkCommandBuffer       cmd,
+        VkImageLayout         oldLayout,
+        VkImageLayout         newLayout,
+        VkPipelineStageFlags2 srcStage,
+        VkAccessFlags2        srcAccess,
+        VkPipelineStageFlags2 dstStage,
+        VkAccessFlags2        dstAccess
+    ) const noexcept;
 
     [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage {
         return image;

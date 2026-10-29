@@ -1,19 +1,12 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# extensions/Scripting -- the engine's Lua-independent scripting layer.
+# extensions/Scripting -- Lua-independent reflection property inspection & ECS bridge.
 #
-# Core exposes IScriptRuntime and a ScriptRunner that forwards to it, and
-# knows nothing about binding machinery. This target is the generic half of
-# the scripting extension: the reflection-driven class table (ScriptBinder), the
-# component registry, the value types and the ECS bridge. Nothing here
-# includes a Lua header, so a host that wants the binder can link it without
-# pulling in a Lua runtime.
-#
-# The LuaJIT-backed runtime is configured after gameplay because ProjectLight's
-# Lua bindings (gameplay/ProjectLight/LuaBindings) link the DataModel and the
-# runtime together; they are the only scripting code in this tree that links
-# LuaJIT, and the only place the two layers meet.
+# Provides the reflection-driven property table (`ScriptBinder`), component
+# registry (`ScriptBinderRegistry`), scalar/Jolt value traits (`ScriptValueTypes`),
+# and ECS state inspection/mutation (`ScriptECSBridge`) consumed by `ConsoleDebugger`.
+# Nothing here includes a Lua header or exposes imperative method dispatch.
 
 set(TARGET_NAME zahlen_scripting)
 

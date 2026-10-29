@@ -1,4 +1,6 @@
 
+import gpu_push_constants;
+
 #ifndef SMAA_THRESHOLD
 #define SMAA_THRESHOLD 0.1f
 #endif
@@ -27,12 +29,8 @@ static const float2 SMAA_SEARCHTEX_SIZE         = float2(66.0f, 33.0f);
 static const float2 SMAA_SEARCHTEX_PACKED_SIZE  = float2(64.0f, 16.0f);
 static const float SMAA_CORNER_ROUNDING_NORM    = float(SMAA_CORNER_ROUNDING) / 100.0f;
 
-struct PushConstants {
-    float4 rtMetrics;
-};
-
 [vk::push_constant]
-PushConstants pc;
+SmaaPushConstants pc;
 
 #define SMAA_RT_METRICS pc.rtMetrics
 
@@ -53,7 +51,6 @@ SamplerState pointSampler;
 Texture2D colorTex;
 Texture2D blendTex;
 SamplerState linearSampler;
-SamplerState pointSampler;
 #endif
 
 
@@ -228,7 +225,7 @@ float SearchLength(Texture2D searchTex, SamplerState smp, float2 e, float offset
     return searchTex.SampleLevel(smp, scale * e + bias, 0.0f).r;
 }
 
-float SearchXLeft(Texture2D edgesTex, Texture2D searchTex, SamplerState smp, float2 texcoord, float end, float4 rtMetrics) {
+float SearchXLeft(Texture2D edgesTex, Texture2D searchTex, SamplerState linearSmp, SamplerState pointSmp, float2 texcoord, float end, float4 rtMetrics) {
     float2 e = float2(0.0f, 1.0f);
 
     [unroll]
@@ -236,15 +233,15 @@ float SearchXLeft(Texture2D edgesTex, Texture2D searchTex, SamplerState smp, flo
         if (texcoord.x <= end || e.g <= 0.8281f || e.r != 0.0f) {
             break;
         }
-        e = edgesTex.SampleLevel(smp, texcoord, 0.0f).rg;
+        e = edgesTex.SampleLevel(linearSmp, texcoord, 0.0f).rg;
         texcoord -= float2(2.0f * rtMetrics.x, 0.0f);
     }
 
-    float offset = -(255.0f / 127.0f) * SearchLength(searchTex, smp, e, 0.0f) + 3.25f;
+    float offset = -(255.0f / 127.0f) * SearchLength(searchTex, pointSmp, e, 0.0f) + 3.25f;
     return rtMetrics.x * offset + texcoord.x;
 }
 
-float SearchXRight(Texture2D edgesTex, Texture2D searchTex, SamplerState smp, float2 texcoord, float end, float4 rtMetrics) {
+float SearchXRight(Texture2D edgesTex, Texture2D searchTex, SamplerState linearSmp, SamplerState pointSmp, float2 texcoord, float end, float4 rtMetrics) {
     float2 e = float2(0.0f, 1.0f);
 
     [unroll]
@@ -252,14 +249,14 @@ float SearchXRight(Texture2D edgesTex, Texture2D searchTex, SamplerState smp, fl
         if (texcoord.x >= end || e.g <= 0.8281f || e.r != 0.0f) {
             break;
         }
-        e = edgesTex.SampleLevel(smp, texcoord, 0.0f).rg;
+        e = edgesTex.SampleLevel(linearSmp, texcoord, 0.0f).rg;
         texcoord += float2(2.0f * rtMetrics.x, 0.0f);
     }
-    float offset = -(255.0f / 127.0f) * SearchLength(searchTex, smp, e, 0.5f) + 3.25f;
+    float offset = -(255.0f / 127.0f) * SearchLength(searchTex, pointSmp, e, 0.5f) + 3.25f;
     return -rtMetrics.x * offset + texcoord.x;
 }
 
-float SearchYUp(Texture2D edgesTex, Texture2D searchTex, SamplerState smp, float2 texcoord, float end, float4 rtMetrics) {
+float SearchYUp(Texture2D edgesTex, Texture2D searchTex, SamplerState linearSmp, SamplerState pointSmp, float2 texcoord, float end, float4 rtMetrics) {
     float2 e = float2(1.0f, 0.0f);
 
     [unroll]
@@ -267,14 +264,14 @@ float SearchYUp(Texture2D edgesTex, Texture2D searchTex, SamplerState smp, float
         if (texcoord.y <= end || e.r <= 0.8281f || e.g != 0.0f) {
             break;
         }
-        e = edgesTex.SampleLevel(smp, texcoord, 0.0f).rg;
+        e = edgesTex.SampleLevel(linearSmp, texcoord, 0.0f).rg;
         texcoord -= float2(0.0f, 2.0f * rtMetrics.y);
     }
-    float offset = -(255.0f / 127.0f) * SearchLength(searchTex, smp, e.gr, 0.0f) + 3.25f;
+    float offset = -(255.0f / 127.0f) * SearchLength(searchTex, pointSmp, e.gr, 0.0f) + 3.25f;
     return rtMetrics.y * offset + texcoord.y;
 }
 
-float SearchYDown(Texture2D edgesTex, Texture2D searchTex, SamplerState smp, float2 texcoord, float end, float4 rtMetrics) {
+float SearchYDown(Texture2D edgesTex, Texture2D searchTex, SamplerState linearSmp, SamplerState pointSmp, float2 texcoord, float end, float4 rtMetrics) {
     float2 e = float2(1.0f, 0.0f);
 
     [unroll]
@@ -282,10 +279,10 @@ float SearchYDown(Texture2D edgesTex, Texture2D searchTex, SamplerState smp, flo
         if (texcoord.y >= end || e.r <= 0.8281f || e.g != 0.0f) {
             break;
         }
-        e = edgesTex.SampleLevel(smp, texcoord, 0.0f).rg;
+        e = edgesTex.SampleLevel(linearSmp, texcoord, 0.0f).rg;
         texcoord += float2(0.0f, 2.0f * rtMetrics.y);
     }
-    float offset = -(255.0f / 127.0f) * SearchLength(searchTex, smp, e.gr, 0.5f) + 3.25f;
+    float offset = -(255.0f / 127.0f) * SearchLength(searchTex, pointSmp, e.gr, 0.5f) + 3.25f;
     return -rtMetrics.y * offset + texcoord.y;
 }
 
@@ -330,28 +327,32 @@ void DetectVerticalCornerPattern(Texture2D edgesTex, SamplerState smp, inout flo
 #endif
 }
 
+float SmaaPerceptualLuma(float3 hdrRgb) {
+    float lum = max(dot(max(hdrRgb, float3(0.0f)), float3(0.2126f, 0.7152f, 0.0722f)), 0.0f);
+    return sqrt(lum / (1.0f + lum));
+}
+
 public float2 LumaEdgeDetectionPS(float2 texcoord, float4 offset[3], Texture2D colorTex, SamplerState smp, float4 rtMetrics) {
     float2 threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
 
-    float3 weights = float3(0.2126f, 0.7152f, 0.0722f);
-    float L        = dot(colorTex.SampleLevel(smp, texcoord, 0.0f).rgb, weights);
+    float L = SmaaPerceptualLuma(colorTex.SampleLevel(smp, texcoord, 0.0f).rgb);
 
-    float Lleft = dot(colorTex.SampleLevel(smp, offset[0].xy, 0.0f).rgb, weights);
-    float Ltop  = dot(colorTex.SampleLevel(smp, offset[0].zw, 0.0f).rgb, weights);
+    float Lleft = SmaaPerceptualLuma(colorTex.SampleLevel(smp, offset[0].xy, 0.0f).rgb);
+    float Ltop  = SmaaPerceptualLuma(colorTex.SampleLevel(smp, offset[0].zw, 0.0f).rgb);
 
     float4 delta;
     delta.xy     = abs(L - float2(Lleft, Ltop));
     float2 edges = step(threshold, delta.xy);
 
 
-    float Lright  = dot(colorTex.SampleLevel(smp, offset[1].xy, 0.0f).rgb, weights);
-    float Lbottom = dot(colorTex.SampleLevel(smp, offset[1].zw, 0.0f).rgb, weights);
+    float Lright  = SmaaPerceptualLuma(colorTex.SampleLevel(smp, offset[1].xy, 0.0f).rgb);
+    float Lbottom = SmaaPerceptualLuma(colorTex.SampleLevel(smp, offset[1].zw, 0.0f).rgb);
     delta.zw      = abs(L - float2(Lright, Lbottom));
 
     float2 maxDelta = max(delta.xy, delta.zw);
 
-    float Lleftleft = dot(colorTex.SampleLevel(smp, offset[2].xy, 0.0f).rgb, weights);
-    float Ltoptop   = dot(colorTex.SampleLevel(smp, offset[2].zw, 0.0f).rgb, weights);
+    float Lleftleft = SmaaPerceptualLuma(colorTex.SampleLevel(smp, offset[2].xy, 0.0f).rgb);
+    float Ltoptop   = SmaaPerceptualLuma(colorTex.SampleLevel(smp, offset[2].zw, 0.0f).rgb);
     delta.zw        = abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop));
 
     maxDelta         = max(maxDelta.xy, delta.zw);
@@ -363,7 +364,7 @@ public float2 LumaEdgeDetectionPS(float2 texcoord, float4 offset[3], Texture2D c
 }
 
 public float4 BlendingWeightCalculationPS(float2 texcoord, float2 pixcoord, float4 offset[3], Texture2D edgesTex, Texture2D areaTex, Texture2D searchTex,
-                                          SamplerState smp, float4 subsampleIndices, float4 rtMetrics) {
+                                          SamplerState smp, SamplerState pointSmp, float4 subsampleIndices, float4 rtMetrics) {
     float4 weights = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float2 e       = edgesTex.SampleLevel(smp, texcoord, 0.0f).rg;
 
@@ -379,13 +380,13 @@ public float4 BlendingWeightCalculationPS(float2 texcoord, float2 pixcoord, floa
             float2 d;
 
             float3 coords;
-            coords.x = SearchXLeft(edgesTex, searchTex, smp, offset[0].xy, offset[2].x, rtMetrics);
+            coords.x = SearchXLeft(edgesTex, searchTex, smp, pointSmp, offset[0].xy, offset[2].x, rtMetrics);
             coords.y = offset[1].y;
             d.x      = coords.x;
 
             float e1 = edgesTex.SampleLevel(smp, coords.xy, 0.0f).r;
 
-            coords.z = SearchXRight(edgesTex, searchTex, smp, offset[0].zw, offset[2].y, rtMetrics);
+            coords.z = SearchXRight(edgesTex, searchTex, smp, pointSmp, offset[0].zw, offset[2].y, rtMetrics);
             d.y      = coords.z;
 
             d = abs(round(rtMetrics.zz * d - pixcoord.xx));
@@ -411,13 +412,13 @@ public float4 BlendingWeightCalculationPS(float2 texcoord, float2 pixcoord, floa
         float2 d;
 
         float3 coords;
-        coords.y = SearchYUp(edgesTex, searchTex, smp, offset[1].xy, offset[2].z, rtMetrics);
+        coords.y = SearchYUp(edgesTex, searchTex, smp, pointSmp, offset[1].xy, offset[2].z, rtMetrics);
         coords.x = offset[0].x;
         d.x      = coords.y;
 
         float e1 = edgesTex.SampleLevel(smp, coords.xy, 0.0f).g;
 
-        coords.z = SearchYDown(edgesTex, searchTex, smp, offset[1].zw, offset[2].w, rtMetrics);
+        coords.z = SearchYDown(edgesTex, searchTex, smp, pointSmp, offset[1].zw, offset[2].w, rtMetrics);
         d.y      = coords.z;
 
         d = abs(round(rtMetrics.ww * d - pixcoord.yy));
@@ -511,8 +512,8 @@ WeightVSOutput SmaaWeightVS(uint vertexID: SV_VertexID) {
 
 [shader("fragment")]
 float4 SmaaWeightPS(WeightVSOutput input) : SV_Target0 {
-    return BlendingWeightCalculationPS(input.uv, input.pixcoord, input.offset, edgesTex, areaTex, searchTex, linearSampler, float4(0.0f, 0.0f, 0.0f, 0.0f),
-                                       SMAA_RT_METRICS);
+    return BlendingWeightCalculationPS(input.uv, input.pixcoord, input.offset, edgesTex, areaTex, searchTex, linearSampler, pointSampler,
+                                       float4(0.0f, 0.0f, 0.0f, 0.0f), SMAA_RT_METRICS);
 }
 #endif
 

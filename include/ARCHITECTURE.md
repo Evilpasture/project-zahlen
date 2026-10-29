@@ -152,26 +152,19 @@ accidents, and a rule against them would fail the existing composition.
 
 ### Inverting an edge: how gameplay reaches a generic layer
 
-The scripting layer must be able to run a module's script command without
-knowing the module exists, and a gameplay module must be able to contribute one
-without the scripting layer existing. `Zahlen/ScriptCommandRegistry.hpp` is the
-seam:
+A generic layer must be able to invoke domain-provided policy without knowing the
+domain exists, and a gameplay or plugin module must be able to contribute one
+without inverting the DAG. `Zahlen/gui/FontLoader.hpp` (`BakedFontLoader`) and
+`Zahlen/GameModule.hpp` (`Module`) are the canonical seams:
 
-1. **Core declares the shape.** `ScriptCommand { name, invoke }` and a registry
-   that resolves a name; `Engine::GetScriptCommands()` hands it out. Core names
-   no domain.
-2. **The module provides the value.** `RagdollAuthoring::RegisterScriptCommands`
-   adds `"SetupRagdoll"` and the argument struct it reads, which is its own ABI
-   with the scripts that call it.
-3. **The host connects them.** The module arrives through `Engine::InstallModule`
-   and the registry interns its name through whatever script runtime is
-   installed (`ScriptCommandRegistry::SetInterner`), so the script side caches an
-   id like any built-in command's.
-
-A name no installed module provides is a no-op that yields nothing rather than an
-error -- the same policy `GUI::ActionRegistry` uses for an action id no host
-bound. A host with no script runtime still holds the commands; it simply has no
-ids to give them.
+1. **Core declares the shape.** `Module` declares lifecycle hooks, `ModuleStep`
+   placements, and `GraphSystemsFn` callbacks; `Engine::InstallModule` composes
+   them. Core names no gameplay domain.
+2. **The module provides the value.** Gameplay and extension modules implement
+   stateless systems or data-driven loaders against Core's reflected ECS
+   components.
+3. **The host connects them.** `app/main.cpp` (the composition root) links the
+   chosen modules and installs them before the first scene loads.
 
 ### Targets and dependency order
 
@@ -182,6 +175,7 @@ and optional third-party dependencies stay local to the owning target.
 | Target | Directory | Role |
 | :--- | :--- | :--- |
 | `zahlen_serialization` | `plugins/json/` + `plugins/toml/` | Reflection-driven JSON/TOML documents; JSON owns simdjson |
+| `zahlen_lua` | `plugins/lua/` | Sandboxed reflection-driven Lua state evaluation and transactional patching; owns LuaJIT |
 | `zahlen_gltf` | `plugins/glTF/` | glTF/GLB importer; owns cgltf and uses the serializer |
 | `zahlen_fonts` | `plugins/Fonts/` | Baked-font loader for fontbm pairs and cooked font containers |
 | `zahlen_svg` | `plugins/SVG/` | Optional resvg-backed SVG rasterizer |
@@ -191,7 +185,7 @@ and optional third-party dependencies stay local to the owning target.
 | `zahlen_cdn` | `extensions/net/CDN/` | Base-URL asset `Fetch` (cache, else download) and `Load` (cache, else raw bytes) over the remote-asset cache |
 | `zahlen_animation`, `zahlen_camera`, `zahlen_character_controller`, `zahlen_terrain`, `zahlen_ui_schema`, `zahlen_vfx` | `extensions/` | Reusable animation, camera, controller, terrain, UI, and VFX capabilities |
 | `zahlen_ragdoll_authoring` | `gameplay/RagdollAuthoring/` | Domain-specific humanoid ragdoll authoring |
-| `zahlen_scripting`, `zahlen_scripting_lua`, `zahlen_console`, `zahlen_editor` | `extensions/` | Lua-independent scripting support, optional LuaJIT runtime, console, and editor |
+| `zahlen_scripting`, `zahlen_console`, `zahlen_editor` | `extensions/` | Lua-independent reflection property inspector, developer console, and editor |
 | `zahlen_project_light_lua` | `gameplay/ProjectLight/LuaBindings/` | DataModel ↔ LuaJIT adapter; the only target where the two layers meet |
 | `zahlen_alife`, `zahlen_interaction`, `zahlen_fallback_scene` | `gameplay/` | Domain-specific simulation, interaction rules, and fallback game scene |
 | `zahlen_datamodel`, `zahlen_project_light_client` | `gameplay/ProjectLight/` | ProjectLight's stable-ID object graph and optional native client |
@@ -211,12 +205,10 @@ DataModel exists. `zahlen_serialization` publishes `zahlen_ui_schema` because
 `UITOML.hpp` names the UI schema in its public API. Other dependencies stay
 private where they are implementation details.
 
-The ProjectLight Lua bindings are a gameplay target configured from the root
-(`gameplay/ProjectLight/LuaBindings/`), not from `gameplay/`: the adapter links
-both the DataModel and the Lua runtime, so it can only be configured after both
-exist, and which order directories are configured in is the composition's
-business. `zahlen_scripting_lua` links no gameplay target at all, which is what
-lets a host take the scripting runtime without ProjectLight.
+The ProjectLight Lua bindings live inside `gameplay/ProjectLight/LuaBindings/`:
+the adapter links both `zahlen_datamodel` and `zahlen_lua`, while `zahlen_lua`
+links no gameplay target at all, letting any host or tool take declarative Lua
+state evaluation without ProjectLight.
 
 ### What the boundary buys
 
@@ -243,10 +235,12 @@ A few examples illustrate the intended seam:
   Instance IDs and the object graph; bindings and the native client adapt that
   graph to existing engine APIs without making Core depend on LuaJIT, sockets,
   or the ProjectLight protocol.
-* **Scripting is optional.** Core exposes `IScriptRuntime` and a null-safe
-  `ScriptRunner`. The reusable binder lives in `extensions/Scripting/`, while
-  `extensions/Scripting/Lua/` owns LuaJIT, the C ABI, and Fennel sources. The
-  host composition root installs a runtime when it wants one.
+* **Lua is a state-only plugin, never a per-frame scripting runtime.** Core
+  knows nothing about Lua, FFI, or Fennel; all frame simulation runs in C++26
+  systems. `plugins/lua/` (`ReflectLua`) evaluates bounded, sandboxed Lua
+  chunks (`no ffi/io/os/package/debug`) into C++26 reflected structs and
+  components at startup, scene load, hot-reload, or console `patch`. The
+  Lua-independent property inspector lives in `extensions/Scripting/`.
 
 The composition root lives in `app/`, not `src/`. It may link optional targets
 and choose what to install; Core remains usable without those targets and does
@@ -272,12 +266,12 @@ type it spells through its own includes.
 | `AssetID`, `MaterialID`, `HashAssetID`, `InvalidAssetID`, `InvalidMaterialID` | `Zahlen/Core/AssetID.hpp` | asset-facing headers and the components that hold a reference |
 | `ScissorRect`, `ViewportRect` (with `Extent2D`, `Offset2D`) | `Zahlen/Geometry2D.hpp` | GUI, windowing and renderer alike |
 | `VertexPosition`, `VertexTangentFrame`, `VertexSurface`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Vertex.hpp` | the cooker and both consumers of a vertex |
-| `AudioHandle`, `SynthHandle`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
+| `AudioHandle`, `AudioBus`, `AudioBusId`, `AudioAttenuationModel`, `AudioPlaybackMode`, `AudioReverbPreset`, `AudioAttenuationDesc`, `AudioOcclusionDesc`, `AudioReverbConfig`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
 | `UIBatch`, `UIDrawData` | `Zahlen/gui/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
 | `GlyphMetric`, `FontAtlas` | `Zahlen/gui/Font.hpp` | text layout and the atlas bake |
 | `TextureHandle`, `RenderTextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `FrameTarget` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
-| `Mesh`, `Material`, `DrawFlags`, `CSGOperation`, `CSGModifier` | `Zahlen/Render/Types.hpp` | the renderer |
-| `MeshletDesc`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Meshlet.hpp` | the meshlet cooker, the renderer, and the GPU ABI check |
+| `Mesh`, `MeshletStreams`, `Material`, `DrawFlags`, `CSGOperation`, `CSGModifier` | `Zahlen/Render/Types.hpp` | the renderer |
+| `MeshletDesc`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Meshlet.hpp` | the meshlet cooker and the renderer |
 
 Two consequences are the point of the split. Editing a renderer struct
 recompiles the renderer and its consumers instead of every translation unit that
@@ -360,7 +354,7 @@ constexpr ModuleStep kFrameSteps[] = {
     {.phase = FramePhase::Input,        .name = "CharacterInput",       .run = &CharacterInputStep,
      .placement = StepPlacement::Before, .anchor = "HostUICallback"},
     {.phase = FramePhase::PlayerIntent, .name = "PlayerInputTranslate", .run = &PlayerIntentStep,
-     .placement = StepPlacement::After,  .anchor = "ScriptAndShaderReload"},
+     .placement = StepPlacement::After,  .anchor = "StateAndShaderReload"},
 };
 ```
 
@@ -524,10 +518,10 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 
 ---
 
-## 5. C++ <-> Scripting FFI & Zero-Copy Buffer Protocol
+## 5. Reflection-Driven Lua State Management (`plugins/lua/`)
 
-* **IPC Command Dispatch**: Scripting languages (Fennel/LuaJIT) communicate with the C++ core via `ZHLN_GetCommandID` and `ZHLN_DispatchCommand` using integer jump-table IDs.
-* **Zero-Copy Memory Protocol**: Scripts query native memory layouts through `ZHLN_BufferView`. A `BufferSync` atomic counter (`shadowLock`) locks C++ vector reallocations while raw FFI pointers are held in Lua land.
+* **State-Only Contract**: C++ ECS components (`std::is_trivially_copyable_v`) and reflected structs are the sole source of truth. Lua chunks run only at initialization, scene/asset recipe evaluation, file-watch hot-reload (`config/graphics.lua`), or explicit console `patch` commands — never inside a per-frame `TickUpdate`.
+* **Hermetic Sandbox & Transactional Patching**: `ReflectLua` evaluates plain-text Lua in an isolated VM (never opening `ffi`/`io`/`os`/`package`/`debug`/`jit`, enforcing deterministic instruction and memory budgets), hydrating staging copies first so invalid fields or types roll back without mutating live engine state.
 
 ---
 
@@ -560,26 +554,30 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 ## 8. Immediate-mode GUI (`Zahlen/gui/GUI.hpp`)
 
 ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
-`GUI::Context` is constructed per frame, `BeginFrame` / `EndFrame` push
-boxes, text, buttons, sliders and dropdowns, and `EndFrame` returns the
+persistent `GUI::Context` owns its Clay layout arena and widget interaction
+state directly (`std::unique_ptr<Impl>`), `BeginFrame(const UIInput&)` mints
+an ephemeral move-only `GUI::Frame` capability token that gates boxes, text,
+buttons, sliders and dropdowns, and `std::move(frame).End()` returns the
 frame's `UIDrawData` — spans of `UIBatch` / `VertexPosition` /
-`VertexSurface` the host hands back through
-`RenderContext::RenderUI(UIView, UIDrawData)`. `RenderContext` is not a GUI
-interface and knows nothing about `GUI::Context`; it forwards the payload to
-the renderer-private `UIRenderer`. The UI shader does not import `common` and
-does not bind GlobalSceneRegistry. A host that builds its UI in the UI phase
-(before the frame is open) banks the payload with
-`Engine::SetPendingUIData`, and `RenderSystem` composes it over the finished
-scene in the same frame.
+`VertexSurface` the host hands back through `FrameScope::RenderUI(UIView, UIDrawData)`.
+`RenderContext` is not a GUI interface and knows nothing about `GUI::Context`;
+it forwards the payload to the renderer-private `UIRenderer`. The UI shader
+does not import `common` and does not bind GlobalSceneRegistry. A host that
+builds its UI in the UI phase (before the frame is open) drains per-frame input
+with `Engine::ConsumeUIInput(dt)` and banks the `UIDrawData` view (batches,
+vertices, and mouse/keyboard capture flags) by value with
+`Engine::SubmitUI(std::move(ui).End())`, which `RenderSystem` composes over the
+finished scene in the same frame.
 
 ```cpp
-GUI::Context ui(engine);
-ui.BeginFrame(dt);
+// Persistent GUI::Context owned by the host session:
+gui.SetFontAtlas(engine.GetFontAtlas());
+GUI::Frame ui = gui.BeginFrame(engine.ConsumeUIInput(dt));
 ui.Box("Panel", cfg, [&]() {
     ui.Text("Hello", 16.0f);
     if (ui.Button("Reload")) { ... }
 });
-engine.SetPendingUIData(ui.EndFrame());   // drawn by RenderSystem
+engine.SubmitUI(std::move(ui).End());   // drawn by RenderSystem
 ```
 
 A host that owns the frame outright (the UI-tree editor) calls `RenderUI`
@@ -587,14 +585,15 @@ itself:
 
 ```cpp
 auto& rc = kernel.GetRenderContext();
-rc.BeginFrame();
+auto began = rc.BeginFrame();
+FrameScope gpuFrame = std::move(**began);
 const auto target = kernel.AcquireTarget(window); // the kernel owns the presentation seam
 if (!target) { ... }                              // acquisition error
 if (!*target) { ... }                             // no drawable image this frame
-const auto ui = rc.RenderUI(UIView {.viewport = ..., .target = **target}, ui.EndFrame());
+const auto ui = gpuFrame.RenderUI(UIView {.viewport = ..., .target = **target}, std::move(uiFrame).End());
 if (!ui) { ... }                                  // hard failure (propagate it)
 else if (ui->has_value()) { ... }                 // FrameSkipped: nowhere drawable this frame
-rc.EndFrame();
+std::move(gpuFrame).End();
 ```
 
 `Kernel::AcquireTarget` (delegated by `Engine`; no argument means the session's
@@ -611,9 +610,14 @@ explicitly acquired frame's command stream. Window presenters persist; their
 acquired images, layout and written state live only with the frame. The two
 are not stored together in a table of versioned texture handles.
 
-The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
-(`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
-link: `DespawnEntity` follows `Components::HierarchyComponent` only.
+`Engine` owns the device-scoped SDF `FontAtlas` (`GetFontAtlas` / `EnsureFontAtlas`),
+rebuilding it automatically across GPU device loss and feeding it as a plain
+asset value into `GUI::Context`. Immediate-mode widget emission is gated behind
+the move-only `GUI::Frame` capability token returned by
+`GUI::Context::BeginFrame(const UIInput&)`, so `zahlen_gui` has zero binary or
+header coupling to `Engine`, `ECS::Registry`, or `PlatformHost`. Core never
+walks a private UI parent link: `DespawnEntity` follows
+`Components::HierarchyComponent` only.
 
 A document cannot store a C++ callback or a `float&`, so a layout that will
 later load from TOML is a `GUI::UINode` tree: `kind` / `label` /

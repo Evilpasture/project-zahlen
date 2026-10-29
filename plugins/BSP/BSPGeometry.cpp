@@ -12,6 +12,7 @@
 
 #include "BSPGeometry.hpp"
 
+#include "BSPBakeField.hpp"
 #include "BSPLighting.hpp"
 
 #include <algorithm>
@@ -238,14 +239,16 @@ enum class FaceDisposition : uint8_t { Render, CollisionOnly, Drop };
     return FaceDisposition::Render;
 }
 
-auto FindOrMakePart(ImportedMapData& result, std::string_view name) -> MaterialStreams& {
+auto FindOrMakePart(ImportedMapData& result, std::string_view name, bool skyboxLayer, uint32_t lightmapPage) -> MaterialStreams& {
     for (MaterialStreams& part: result.parts) {
-        if (part.materialName == name) {
+        if (part.materialName == name && part.skyboxLayer == skyboxLayer && part.lightmapPage == lightmapPage) {
             return part;
         }
     }
     result.parts.push_back(MaterialStreams {});
-    result.parts.back().materialName = std::string(name);
+    result.parts.back().materialName  = std::string(name);
+    result.parts.back().skyboxLayer   = skyboxLayer;
+    result.parts.back().lightmapPage  = lightmapPage;
     return result.parts.back();
 }
 
@@ -423,17 +426,44 @@ void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::span<const 
 // the forward texture projection in source space. Bounds are tracked on both
 // the owning part and the whole map as positions are emitted.
 void EmitVertex(
-    MaterialStreams&      part,
-    const ImportOptions&  options,
-    const FaceProjection& projection,
-    JPH::Vec3             sourcePos,
-    JPH::Vec3             sourceNormal,
-    ImportedMapData&      result,
-    bool&                 partBoundsFirst,
-    bool&                 mapBoundsFirst
+    MaterialStreams&          part,
+    const ImportOptions&      options,
+    const FaceProjection&     projection,
+    const BSPMap&             map,
+    const DFace&              face,
+    const VradLightmapAtlas&  lightmaps,
+    const VradLightmapChart*  lightmapChart,
+    JPH::Vec3                 sourcePos,
+    JPH::Vec3                 sourceNormal,
+    ImportedMapData&          result,
+    bool&                     partBoundsFirst,
+    bool&                     mapBoundsFirst
 ) {
     const float u = (sourcePos.Dot(projection.sDir) + projection.sOffset) / projection.width;
     const float v = (sourcePos.Dot(projection.tDir) + projection.tOffset) / projection.height;
+
+    // UV1 is reserved for Source's static-lighting atlas on BSP geometry.
+    // Do this in source coordinates, where texinfo.lightmapVecs and the face's
+    // luxel mins are defined; the engine-space position may have changed axes
+    // and units already. Source samples at luxel centres, hence the half texel.
+    float lightU = 0.0f;
+    float lightV = 0.0f;
+    if (lightmapChart != nullptr && lightmapChart->page < lightmaps.pages.size() && face.texinfo >= 0 &&
+        static_cast<size_t>(face.texinfo) < map.texInfos.size()) {
+        const DTexInfo& lightInfo = map.texInfos[static_cast<size_t>(face.texinfo)];
+        const VradLightmapPage& page = lightmaps.pages[lightmapChart->page];
+        // lightmapVecs are luxels per world unit (Source's lightmapVecsLuxelsPerWorldUnits),
+        // so dot + offset is already a luxel coordinate. Dividing by 16 here
+        // shrinks every face's sample grid and mis-addresses the chart.
+        const float s = sourcePos.GetX() * lightInfo.lightmapVecs[0][0] + sourcePos.GetY() * lightInfo.lightmapVecs[0][1] +
+                        sourcePos.GetZ() * lightInfo.lightmapVecs[0][2] + lightInfo.lightmapVecs[0][3];
+        const float t = sourcePos.GetX() * lightInfo.lightmapVecs[1][0] + sourcePos.GetY() * lightInfo.lightmapVecs[1][1] +
+                        sourcePos.GetZ() * lightInfo.lightmapVecs[1][2] + lightInfo.lightmapVecs[1][3];
+        lightU = (static_cast<float>(lightmapChart->x) + (s - static_cast<float>(face.lightmapTextureMinsInLuxels[0])) + 0.5f) /
+                 static_cast<float>(page.width);
+        lightV = (static_cast<float>(lightmapChart->y) + (t - static_cast<float>(face.lightmapTextureMinsInLuxels[1])) + 0.5f) /
+                 static_cast<float>(page.height);
+    }
 
     const JPH::Vec3 tangent = (projection.sDir.LengthSq() > kEpsilon * kEpsilon) ? projection.sDir.Normalized() : JPH::Vec3::sAxisX();
     const JPH::Vec3 normal  = (sourceNormal.LengthSq() > kEpsilon * kEpsilon) ? sourceNormal.Normalized() : JPH::Vec3::sAxisZ();
@@ -454,7 +484,9 @@ void EmitVertex(
             Math::PackNormal(engineTangent.GetX(), engineTangent.GetY(), engineTangent.GetZ(), handedness),
         }
     );
-    part.surfaces.push_back(VertexSurface {Math::PackUV(u, v), Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f), Math::PackUV(0.0f, 0.0f)});
+    part.surfaces.push_back(
+        VertexSurface {Math::PackUV(u, v), Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f), Math::PackUV(lightU, lightV)}
+    );
 
     UpdateBounds(part.boundsMin, part.boundsMax, partBoundsFirst, enginePos);
     UpdateBounds(result.boundsMin, result.boundsMax, mapBoundsFirst, enginePos);
@@ -508,6 +540,262 @@ auto ConvertDirection(const ImportOptions& options, JPH::Vec3 in) noexcept -> JP
         return in;
     }
     return JPH::Vec3(in.GetX(), in.GetZ(), -in.GetY());
+}
+
+namespace {
+
+// Source AngleMatrix (SDK convention): columns are forward/left/up from
+// pitch=x, yaw=y, roll=z in degrees. Stored row-major for TransformSkybox*.
+void SkyboxRotation(float pitchDeg, float yawDeg, float rollDeg, float out[9]) {
+    const float degToRad = 0.017453292519943295f;
+    const float sp = std::sin(pitchDeg * degToRad), cp = std::cos(pitchDeg * degToRad);
+    const float sy = std::sin(yawDeg * degToRad),   cy = std::cos(yawDeg * degToRad);
+    const float sr = std::sin(rollDeg * degToRad),  cr = std::cos(rollDeg * degToRad);
+    out[0] = cp * cy;
+    out[3] = cp * sy;
+    out[6] = -sp;
+    const float crcy = cr * cy, crsy = cr * sy, srcy = sr * cy, srsy = sr * sy;
+    out[1] = sp * srcy - crsy;
+    out[4] = sp * srsy + crcy;
+    out[7] = sr * cp;
+    out[2] = sp * crcy + srsy;
+    out[5] = sp * crsy - srcy;
+    out[8] = cr * cp;
+}
+
+void ParseVec3(std::string_view text, float out[3]) {
+    out[0] = out[1] = out[2] = 0.0f;
+    if (text.empty()) {
+        return;
+    }
+    const std::string copy(text);
+    std::sscanf(copy.c_str(), "%f %f %f", &out[0], &out[1], &out[2]);
+}
+
+// Centroid of a face's surfedge loop, in source coordinates.
+[[nodiscard]] auto FaceCentroidSource(const BSPMap& map, const DFace& face) noexcept -> std::array<float, 3> {
+    std::array<float, 3> c {0.0f, 0.0f, 0.0f};
+    if (face.firstedge < 0 || face.numedges <= 0) {
+        return c;
+    }
+    const size_t end = std::min(static_cast<size_t>(face.firstedge) + static_cast<size_t>(face.numedges), map.surfEdges.size());
+    size_t       n   = 0;
+    for (size_t i = static_cast<size_t>(face.firstedge); i < end; ++i) {
+        const int32_t se = map.surfEdges[i];
+        const DEdge&  e  = map.edges[static_cast<size_t>(se < 0 ? -se : se)];
+        if (e.v[0] < map.vertices.size()) {
+            const float* v = map.vertices[e.v[0]].point;
+            c[0] += v[0];
+            c[1] += v[1];
+            c[2] += v[2];
+            ++n;
+        }
+    }
+    if (n > 0) {
+        c[0] /= static_cast<float>(n);
+        c[1] /= static_cast<float>(n);
+        c[2] /= static_cast<float>(n);
+    }
+    return c;
+}
+
+} // namespace
+
+namespace {
+// Source's standing view height (VEC_VIEW): the sky_camera maps to the eye.
+constexpr float kSourceViewHeight = 64.0f;
+} // namespace
+
+auto MakeSkyboxTransform(const BSPMap& map, bool importSkybox) noexcept -> SkyboxTransform {
+    SkyboxTransform t;
+
+    for (const BSPEntity& entity: map.entities) {
+        if (entity.Find("classname") != "sky_camera") {
+            continue;
+        }
+        ParseVec3(entity.Find("origin"), t.origin);
+        float angles[3] = {0.0f, 0.0f, 0.0f};
+        {
+            const std::string_view angText = entity.Find("angles");
+            if (!angText.empty()) {
+                const std::string copy(angText);
+                std::sscanf(copy.c_str(), "%f %f %f", &angles[0], &angles[1], &angles[2]);
+            }
+        }
+        SkyboxRotation(angles[0], angles[1], angles[2], t.rot);
+        const std::string_view scaleText = entity.Find("scale");
+        if (!scaleText.empty()) {
+            t.scale = std::strtof(std::string(scaleText).c_str(), nullptr);
+            if (t.scale <= 0.0f) {
+                t.scale = 16.0f;
+            }
+        }
+        t.active  = true;
+        t.enabled = importSkybox;
+        break;
+    }
+    if (!t.active) {
+        return t;
+    }
+
+    // Seed anchor: the player start at eye height. This is only the starting
+    // point -- the placed miniscape is re-centred on the map further down --
+    // but a map with no spawn keeps a sane relative placement instead of
+    // collapsing to the world origin.
+    for (const BSPEntity& entity: map.entities) {
+        const std::string_view cls = entity.Find("classname");
+        if (cls.starts_with("info_player")) {
+            ParseVec3(entity.Find("origin"), t.anchor);
+            // Source composes the 3D skybox around the view origin, not around
+            // the spawn's feet: the sky_camera maps to the player's EYE.
+            // Anchoring at the feet would drop the whole miniscape by 64 units
+            // before the centring pass even runs.
+            t.anchor[2] += kSourceViewHeight;
+            break;
+        }
+    }
+
+    // Membership floor: the skybox is a compact cluster around the sky_camera
+    // separated from the map below by a z gap. Histogram face centroids near
+    // the sky_camera in X/Y and walk down from its z bin to the first empty
+    // bin; content is everything above that gap. Falls back to a fixed
+    // 1024-unit band below the sky_camera when no gap is found.
+    t.zFloor = t.origin[2] - 1024.0f;
+    {
+        constexpr int   kBin = 256;
+        constexpr int   kBins = 48; // +-6144 units around the sky_camera z
+        std::array<int, kBins> hist {};
+        const int baseZ = static_cast<int>(std::floor(t.origin[2] / kBin)) - kBins / 2;
+        for (const DFace& face: map.faces) {
+            const auto c = FaceCentroidSource(map, face);
+            if (std::abs(c[0] - t.origin[0]) > t.xyHalf || std::abs(c[1] - t.origin[1]) > t.xyHalf) {
+                continue;
+            }
+            const int bin = static_cast<int>(std::floor(c[2] / kBin)) - baseZ;
+            if (bin >= 0 && bin < kBins) {
+                ++hist[static_cast<size_t>(bin)];
+            }
+        }
+        const int skyBin = static_cast<int>(std::floor(t.origin[2] / kBin)) - baseZ;
+        for (int bin = skyBin - 1; bin > 0; --bin) {
+            if (hist[static_cast<size_t>(bin)] == 0) {
+                t.zFloor = static_cast<float>((baseZ + bin + 1) * kBin);
+                break;
+            }
+        }
+    }
+
+    // The world's volume: skybox content that lands inside it would
+    // interpenetrate the map in a single depth buffer.
+    if (!map.models.empty()) {
+        for (int k = 0; k < 3; ++k) {
+            t.worldMin[k] = map.models[0].mins[k];
+            t.worldMax[k] = map.models[0].maxs[k];
+        }
+    }
+
+    // Skybox off: the membership above is all a caller needs to drop the
+    // content (see ImportMapGeometry), and the pass below -- which walks every
+    // face's winding to place the miniscape -- is the expensive part of the
+    // import. Do not run it.
+    if (!importSkybox) {
+        return t;
+    }
+
+    // Centre the miniscape on the map, and sink it clear of the level's floor.
+    //
+    // Source composes the miniscape around the sky_camera, and a mapper places
+    // that camera where the backdrop should surround the level. Anchoring the
+    // placement on the player start instead -- the anchor set above -- carries
+    // the spawn's offset from the map's centre straight into the backdrop:
+    // gm_murder_drones' spawn sits 45 m west and 101 m north of its
+    // footprint's centre, which pushed the ring's inner blocks into the play
+    // space and left the whole city visibly off-centre around the level.
+    // Centring the placed bounds on the world's plan-view centre puts the
+    // ring's hollow where the map is: after the shift no backdrop building
+    // face meets the map's footprint, and the skyline surrounds the level
+    // evenly in every direction.
+    //
+    // Height is the one thing the authored offset gets wrong. The miniscape's
+    // ground sits a few units below the sky_camera, so placing the camera at
+    // eye height lands that ground exactly at the level's own floor
+    // (gm_murder_drones: z 129, the spawn's feet) -- a second floor cutting
+    // through the first wherever the map is open. Sinking the whole backdrop
+    // by three view heights puts its ground 4.9 m under the street and moves
+    // the skyline, which stands 130 m tall, by the same 4.9 m.
+    {
+        float placedLo[2] = {1e30f, 1e30f};
+        float placedHi[2] = {-1e30f, -1e30f};
+        for (const DFace& face: map.faces) {
+            const auto  centroid = FaceCentroidSource(map, face);
+            const float c[3] = {centroid[0], centroid[1], centroid[2]};
+            if (!IsSkyboxPoint(t, c)) {
+                continue;
+            }
+            const auto winding = FaceWinding(map, face);
+            if (!winding) {
+                continue;
+            }
+            for (const JPH::Vec3& corner: *winding) {
+                const float p[3] = {corner.GetX(), corner.GetY(), corner.GetZ()};
+                float       placed[3];
+                TransformSkyboxPoint(t, p, placed);
+                for (int k = 0; k < 2; ++k) {
+                    placedLo[k] = std::min(placedLo[k], placed[k]);
+                    placedHi[k] = std::max(placedHi[k], placed[k]);
+                }
+            }
+        }
+        if (placedHi[0] > placedLo[0] && placedHi[1] > placedLo[1]) {
+            t.anchor[0] += (t.worldMin[0] + t.worldMax[0]) * 0.5f - (placedLo[0] + placedHi[0]) * 0.5f;
+            t.anchor[1] += (t.worldMin[1] + t.worldMax[1]) * 0.5f - (placedLo[1] + placedHi[1]) * 0.5f;
+        }
+        t.anchor[2] -= 3.0f * kSourceViewHeight;
+    }
+
+    // What not to do here: fit the height to the geometry. A percentile lift
+    // over placed face centroids put the p20 inside the wall band (8,845
+    // concrete wall faces outvote the 34 floor faces) and lifted this map's
+    // snow terrain to +273 u -- above the 193 u eye line, where the ground
+    // becomes a wall in front of the city. The flat sink above is a
+    // deliberate, readable offset; a fit is not.
+    return t;
+}
+
+auto IsSkyboxPoint(const SkyboxTransform& t, const float p[3]) noexcept -> bool {
+    if (!t.active) {
+        return false;
+    }
+    return std::abs(p[0] - t.origin[0]) <= t.xyHalf && std::abs(p[1] - t.origin[1]) <= t.xyHalf && p[2] >= t.zFloor;
+}
+
+auto IsSkyboxHidden(const SkyboxTransform& t, const float placed[3]) noexcept -> bool {
+    return placed[0] >= t.worldMin[0] - t.hiddenMargin && placed[0] <= t.worldMax[0] + t.hiddenMargin &&
+           placed[1] >= t.worldMin[1] - t.hiddenMargin && placed[1] <= t.worldMax[1] + t.hiddenMargin &&
+           placed[2] >= t.worldMin[2] - t.hiddenMargin && placed[2] <= t.worldMax[2] + t.hiddenMargin;
+}
+
+void TransformSkyboxPoint(const SkyboxTransform& t, const float p[3], float out[3]) noexcept {
+    const float v[3] = {(p[0] - t.origin[0]) * t.scale, (p[1] - t.origin[1]) * t.scale, (p[2] - t.origin[2]) * t.scale};
+    out[0] = t.anchor[0] + t.rot[0] * v[0] + t.rot[1] * v[1] + t.rot[2] * v[2];
+    out[1] = t.anchor[1] + t.rot[3] * v[0] + t.rot[4] * v[1] + t.rot[5] * v[2];
+    out[2] = t.anchor[2] + t.rot[6] * v[0] + t.rot[7] * v[1] + t.rot[8] * v[2];
+}
+
+void TransformSkyboxVector(const SkyboxTransform& t, const float v[3], float out[3]) noexcept {
+    out[0] = t.rot[0] * v[0] + t.rot[1] * v[1] + t.rot[2] * v[2];
+    out[1] = t.rot[3] * v[0] + t.rot[4] * v[1] + t.rot[5] * v[2];
+    out[2] = t.rot[6] * v[0] + t.rot[7] * v[1] + t.rot[8] * v[2];
+}
+
+void SkyboxMapPoint(const SkyboxTransform& t, const float p[3], float out[3]) noexcept {
+    if (t.active && IsSkyboxPoint(t, p)) {
+        TransformSkyboxPoint(t, p, out);
+    } else {
+        out[0] = p[0];
+        out[1] = p[1];
+        out[2] = p[2];
+    }
 }
 
 auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel> {
@@ -568,6 +856,7 @@ auto GatherEmissiveAreaLights(
     }
 
     std::vector<EmissiveSurface> faces;
+    const SkyboxTransform        sky = MakeSkyboxTransform(map, options.importSkybox);
 
     for (size_t modelIdx = 0; modelIdx < map.models.size(); ++modelIdx) {
         if (options.onlyModel >= 0 && static_cast<int32_t>(modelIdx) != options.onlyModel) {
@@ -592,6 +881,15 @@ auto GatherEmissiveAreaLights(
             *winding = DropDuplicateCorners(*winding);
             if (winding->size() < 3) {
                 continue;
+            }
+            if (sky.active) {
+                const JPH::Vec3 c    = WindingCentroid(*winding);
+                const float     src[3] = {c.GetX(), c.GetY(), c.GetZ()};
+                if (IsSkyboxPoint(sky, src)) {
+                    // Background scenery keeps its lamp entities; its panels do
+                    // not compete for the play area's emissive-proxy budget.
+                    continue;
+                }
             }
 
             // Tool textures and compile helpers are not surfaces; only the
@@ -662,6 +960,21 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
     // panel that shares a name.
     std::vector<EmissiveSurface> emissiveFaces;
 
+    // Build the authored VRAD field before stream emission. The stream key
+    // includes the resulting page so no material ever samples a chart from a
+    // different atlas page. Keep the VPL reconstruction mutually exclusive:
+    // one compiled bake must reach the renderer through exactly one path.
+    if (options.useVradLightmaps) {
+        result.lightmaps = BuildVradLightmapAtlas(map, options.lightmapAtlasSize, options.lightmapAtlasGutter);
+        result.stats.lightmapFaces         = result.lightmaps.faceCount;
+        result.stats.lightmapPages         = static_cast<uint32_t>(result.lightmaps.pages.size());
+        result.stats.lightmapRejectedFaces = result.lightmaps.rejectedFaceCount;
+    }
+
+    // 3D skybox content is authored around the sky_camera at 1/scale size and
+    // floats above the map until transformed; see SkyboxTransform.
+    const SkyboxTransform sky = MakeSkyboxTransform(map, options.importSkybox);
+
     for (size_t modelIdx = 0; modelIdx < map.models.size(); ++modelIdx) {
         if (options.onlyModel >= 0 && static_cast<int32_t>(modelIdx) != options.onlyModel) {
             continue;
@@ -688,6 +1001,32 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 continue;
             }
 
+            // Skybox faces move from their compile cluster (around the
+            // sky_camera, above the map) to their rendered world position
+            // before any centroid/area work, so bake clusters, emissive
+            // proxies and bounds all see the placed geometry. That transform
+            // centres the miniscape on the map and sinks it clear of the
+            // floor (MakeSkyboxTransform); nothing is dropped here, and from
+            // this point on the backdrop is ordinary scenery.
+            bool skyFace = false;
+            if (sky.active) {
+                const JPH::Vec3 centroid = WindingCentroid(*winding);
+                const float    src[3] = {centroid.GetX(), centroid.GetY(), centroid.GetZ()};
+                skyFace = IsSkyboxPoint(sky, src);
+                if (skyFace && !sky.enabled) {
+                    ++result.stats.skyboxFacesDropped;
+                    continue;
+                }
+                if (skyFace) {
+                    for (JPH::Vec3& corner: *winding) {
+                        const float p[3] = {corner.GetX(), corner.GetY(), corner.GetZ()};
+                        float       out[3];
+                        TransformSkyboxPoint(sky, p, out);
+                        corner = JPH::Vec3(out[0], out[1], out[2]);
+                    }
+                }
+            }
+
             // Orient the winding so triangle fronts face the face's own front,
             // which is the PLANE normal: vbsp stores every brush face's plane
             // with +N pointing out of the solid while the stored surfedge loop
@@ -711,6 +1050,12 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             if (static_cast<size_t>(face.planenum) < map.planes.size()) {
                 const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
                 faceNormal          = JPH::Vec3(plane.normal[0], plane.normal[1], plane.normal[2]);
+            }
+            if (skyFace) {
+                const float n[3] = {faceNormal.GetX(), faceNormal.GetY(), faceNormal.GetZ()};
+                float       out[3];
+                TransformSkyboxVector(sky, n, out);
+                faceNormal = JPH::Vec3(out[0], out[1], out[2]);
             }
             {
                 JPH::Vec3 windingNormal = JPH::Vec3::sZero();
@@ -738,6 +1083,13 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 ++result.stats.helperFacesDropped;
                 continue;
             }
+            // The skybox miniscape is scenery, not world collision: Source's
+            // two-world split gives it no solid presence in the play space, so
+            // its tool faces never join the collision hull either.
+            if (skyFace && disposition == FaceDisposition::CollisionOnly) {
+                ++result.stats.helperFacesDropped;
+                continue;
+            }
             if (disposition == FaceDisposition::CollisionOnly && !options.buildColliders) {
                 ++result.stats.helperFacesDropped;
                 continue;
@@ -751,7 +1103,16 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
 
             const std::string_view materialName = MaterialNameFor(map, face);
-            MaterialStreams& part = (disposition == FaceDisposition::CollisionOnly) ? result.collisionOnly : FindOrMakePart(result, std::string(materialName));
+            // Phase one keeps the old static skybox placement path intact;
+            // runtime camera-relative skybox transforms arrive in phase three.
+            // Its transformed positions cannot use Source's raw lightmap basis,
+            // so it stays unbound until that dedicated sky pass owns the basis.
+            const VradLightmapChart* lightmapChart =
+                (!skyFace && options.useVradLightmaps) ? result.lightmaps.ChartForFace(faceIndex) : nullptr;
+            const uint32_t lightmapPage = lightmapChart != nullptr ? lightmapChart->page : kInvalidVradLightmapPage;
+            MaterialStreams& part = (disposition == FaceDisposition::CollisionOnly) ?
+                                       result.collisionOnly :
+                                       FindOrMakePart(result, std::string(materialName), skyFace, lightmapPage);
             if (disposition == FaceDisposition::CollisionOnly && part.VertexCount() == 0) {
                 part.materialName = std::string(materialName); // informational only; the importer does not key off it
             }
@@ -761,7 +1122,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             // geometry; the importer adapter refines strength and tint from the
             // .vmt / .vtf and drops the candidates that clear no threshold
             // (BSPLighting::ProbeEmissiveMaterial).
-            if (options.gatherEmissiveSurfaces && disposition == FaceDisposition::Render && IsEmissiveMaterialName(materialName)) {
+            if (options.gatherEmissiveSurfaces && disposition == FaceDisposition::Render && IsEmissiveMaterialName(materialName) && !skyFace) {
                 const double areaInches = WindingArea(*winding);
                 if (areaInches > 0.0) {
                     const float areaMetres      = static_cast<float>(areaInches) * options.unitScale * options.unitScale;
@@ -821,11 +1182,23 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
                 const JPH::Vec3 dispStartPos(dispInfo.startPosition[0], dispInfo.startPosition[1], dispInfo.startPosition[2]);
                 // Rotate the base quad so corner 0 is the displacement's start
-                // position, keeping winding order.
+                // position, keeping winding order. Skybox windings were already
+                // moved into placed space above (scaled by sky.scale around the
+                // sky_camera), so the start position must ride the same
+                // transform before the match: comparing placed corners against
+                // the source-space start position picked the wrong corner and
+                // warped the whole grid into a self-intersecting sheet.
+                JPH::Vec3 matchStartPos = dispStartPos;
+                if (skyFace) {
+                    const float s[3] = {dispStartPos.GetX(), dispStartPos.GetY(), dispStartPos.GetZ()};
+                    float       out[3];
+                    TransformSkyboxPoint(sky, s, out);
+                    matchStartPos = JPH::Vec3(out[0], out[1], out[2]);
+                }
                 size_t startIndex = 0;
                 float  bestDistSq = 1e30f;
                 for (size_t c = 0; c < 4; ++c) {
-                    const float distSq = ((*winding)[c] - dispStartPos).LengthSq();
+                    const float distSq = ((*winding)[c] - matchStartPos).LengthSq();
                     if (distSq < bestDistSq) {
                         bestDistSq = distSq;
                         startIndex = c;
@@ -855,7 +1228,20 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
                         const DDispVert& dispVert = map.dispVerts[vertBase + static_cast<size_t>(j) * side + i];
                         const JPH::Vec3  dispVec(dispVert.vec[0], dispVert.vec[1], dispVert.vec[2]);
-                        grid[static_cast<size_t>(j) * side + i] = base + dispVec * dispVert.dist;
+                        JPH::Vec3        offset = dispVec * dispVert.dist;
+                        if (skyFace) {
+                            // The base quad already carries sky.scale (the
+                            // miniscape is magnified into place), but the
+                            // authored relief is source units: without the same
+                            // scale -- and the sky_camera's rotation -- the
+                            // displacement collapses to 1/scale against its own
+                            // base and shear-warps across the transformed quad.
+                            const float d[3] = {offset.GetX(), offset.GetY(), offset.GetZ()};
+                            float       out[3];
+                            TransformSkyboxVector(sky, d, out);
+                            offset = JPH::Vec3(out[0], out[1], out[2]) * sky.scale;
+                        }
+                        grid[static_cast<size_t>(j) * side + i] = base + offset;
                     }
                 }
 
@@ -882,7 +1268,8 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                         } else if (vertexNormal.Dot(faceNormal) < 0.0f) {
                             vertexNormal = -vertexNormal;
                         }
-                        EmitVertex(part, options, *projection, grid[static_cast<size_t>(j) * side + i], vertexNormal, result, partBoundsFirst, globalBoundsFirst);
+                        EmitVertex(part, options, *projection, map, face, result.lightmaps, lightmapChart,
+                                   grid[static_cast<size_t>(j) * side + i], vertexNormal, result, partBoundsFirst, globalBoundsFirst);
                     }
                 }
 
@@ -907,7 +1294,8 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             } else {
                 // Fan triangulation: Source faces are convex planar polygons.
                 for (const auto& corner: *winding) {
-                    EmitVertex(part, options, *projection, corner, faceNormal, result, partBoundsFirst, globalBoundsFirst);
+                    EmitVertex(part, options, *projection, map, face, result.lightmaps, lightmapChart, corner, faceNormal, result, partBoundsFirst,
+                               globalBoundsFirst);
                 }
                 for (size_t i = 1; i + 1 < winding->size(); ++i) {
                     part.indices.push_back(baseVertex);
@@ -923,7 +1311,21 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
             // Remember every undisplaced render face for the post-pass that
             // detects single-sheet walls (see TwinRecord).
-            if (disposition == FaceDisposition::Render && !displaced) {
+            //
+            // Background-layer faces are excluded. The audit exists because a
+            // mapper can build a room out of walls whose only face points AWAY
+            // from it, and Source then draws them from the leaffaces of the
+            // room they bound. A miniscape has no room and no leaffaces: it is
+            // a backdrop, drawn behind the world and never entered. Running the
+            // audit on it was expensive in a much worse way than that -- the
+            // verdict is stored per PART (material x layer), so one single-sheet
+            // strip inside the skybox flipped the entire material group
+            // double-sided. On gm_murder_drones 992 of the skybox's 4295 faces
+            // qualify, which double-sided all seven of its materials: the whole
+            // miniscape -- ground planes, hull walls, the thin street strips --
+            // drew from both sides, which is what puts pale slabs and ribbons
+            // across the backdrop.
+            if (disposition == FaceDisposition::Render && !displaced && !skyFace) {
                 TwinRecord rec;
                 rec.partIndex   = static_cast<size_t>(&part - result.parts.data());
                 rec.ownN[0]     = faceNormal.GetX();
@@ -1024,6 +1426,23 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
         diagnostics.totalEmissiveIntensity = 0.0f;
         for (size_t i = before; i < result.lights.size(); ++i) {
             diagnostics.totalEmissiveIntensity += result.lights[i].intensity;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Explicit legacy fallback only: fit LUMP_LIGHTING into the old ambient
+    // + VPL carriers (BSPBakeField.hpp). Native atlas import is mutually
+    // exclusive and is the default path above.
+    // ------------------------------------------------------------------
+    if (options.ingestVradBake && !options.useVradLightmaps && options.gatherLights && !map.lighting.empty()) {
+        const BakeField field = BuildBakeField(map, options, options.bakeVplBudget, options.bakeVplWeight);
+        if (field.hasBake) {
+            result.ambient      = field.ambient;
+            result.stats.bakeLuxels = field.sampleCount;
+            for (const BspPointLight& vpl: field.vpls) {
+                result.lights.push_back(vpl);
+            }
+            result.stats.bakeVpls = static_cast<uint32_t>(field.vpls.size());
         }
     }
 

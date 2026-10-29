@@ -24,6 +24,8 @@ enum class LightningTestError : uint32_t {
     SubEntityMemoryLeak ZHLN_ANNOTATION(ZHLN::Description<"Point-light flash entities were leaked after strike expiration.">{}),
 };
 
+namespace {
+
 struct LightningTestSuite {
     LightningTestSuite() {
         ZHLN::Fiber::InitMainThread();
@@ -50,7 +52,6 @@ struct LightningTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true,
-                    .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };
@@ -164,7 +165,6 @@ struct LightningTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true,
-                    .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };
@@ -230,7 +230,6 @@ struct LightningTestSuite {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
                 .render  = {.appName = "Lightning Component Resource Test", .width = 320, .height = 240, .vsync = false,
                             .fullscreen = false, .validationMode = ZHLN::ValidationMode::On, .headless = true,
-                            .diagnostics = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };
@@ -316,6 +315,4 @@ struct LightningTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<LightningTestSuite>();
-}
+} // namespace

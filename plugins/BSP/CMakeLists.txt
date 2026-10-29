@@ -20,12 +20,14 @@
 set(TARGET_NAME zahlen_bsp)
 
 set(ZHLN_BSP_SOURCES
+    BSPBakeField.cpp
     BSPGeometry.cpp
     BSPImporter.cpp
     BSPInteraction.cpp
     BSPLighting.cpp
     BSPRead.cpp
     BSPScene.cpp
+    BSPVradLightmap.cpp
     SourceVFS.cpp
     StudioModelImporter.cpp
     StudioModelLoader.cpp

@@ -116,6 +116,8 @@ inline void BuildFixture(const cgltf_data& data, ZHLN::ModelPrefab& outPrefab) {
 } // namespace RigFixture
 } // namespace
 
+namespace {
+
 struct ProceduralAnimationTestSuite {
     ProceduralAnimationTestSuite() {
         ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
@@ -1403,6 +1405,4 @@ struct ProceduralAnimationTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<ProceduralAnimationTestSuite>();
-}
+} // namespace

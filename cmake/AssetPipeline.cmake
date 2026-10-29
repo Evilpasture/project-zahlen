@@ -30,6 +30,8 @@ add_executable(zcook
     tools/zcook/FontBake.cpp
 )
 target_link_libraries(zcook PRIVATE zahlen_engine zahlen_filesystem zahlen_threading zahlen_asset_cooking)
+zahlen_set_bin_output(zcook)
+zahlen_add_runtime_dlls(zcook)
 target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/cgltf
     ${CMAKE_SOURCE_DIR}/extern/stb
@@ -72,7 +74,6 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             DEPENDS zcook
                     "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
-                    "${zahlen_SOURCE_DIR}/tools/run_blender.py"
             COMMENT "Scanning asset folders and generating assets.ninja..."
         )
     else()
@@ -86,16 +87,15 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             DEPENDS zcook
                     "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
-                    "${zahlen_SOURCE_DIR}/tools/run_blender.py"
             COMMENT "Scanning asset folders and generating assets.ninja..."
         )
     endif()
 
-    # 3. Use symlink for base.pak
+    # 3. Stage base.pak under ${CMAKE_BINARY_DIR}/data/ so both bin/* and samples/* find it cleanly
     if(WIN32)
-        set(PAK_LINK_CMD ${CMAKE_COMMAND} -E copy "${ZHLN_SHARED_ASSET_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak")
+        set(PAK_LINK_CMD ${CMAKE_COMMAND} -E copy "${ZHLN_SHARED_ASSET_DIR}/data/base.pak" "${CMAKE_BINARY_DIR}/data/base.pak")
     else()
-        set(PAK_LINK_CMD ${CMAKE_COMMAND} -E create_symlink "${ZHLN_SHARED_ASSET_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak")
+        set(PAK_LINK_CMD ${CMAKE_COMMAND} -E create_symlink "${ZHLN_SHARED_ASSET_DIR}/data/base.pak" "${CMAKE_BINARY_DIR}/data/base.pak")
     endif()
 
     # The target around the cooking step. The nested ninja it starts is what
@@ -105,11 +105,11 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
     # here rather than being carried in a variable, because the escapes that make
     # it one argument do not survive a list.
     set(COOK_ASSETS_PREFIX
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/data"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${ZHLN_SHARED_ASSET_DIR}/build_assets"
     )
     if(ZHLN_TOOL_ENV_COMMAND)
-        add_custom_target(cook_assets ALL
+        add_custom_target(cook_assets
             ${COOK_ASSETS_PREFIX}
             # Run ninja inside the shared directory with persistent .ninja_log
             COMMAND ${ZHLN_TOOL_ENV_COMMAND} "${ZHLN_TOOL_ENV_ARGUMENT}"
@@ -118,10 +118,9 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
             DEPENDS "${ZHLN_SHARED_ASSET_DIR}/assets.ninja" zcook
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             COMMENT "Cooking assets in parallel using Ninja..."
-            USES_TERMINAL
         )
     else()
-        add_custom_target(cook_assets ALL
+        add_custom_target(cook_assets
             ${COOK_ASSETS_PREFIX}
             # Run ninja inside the shared directory with persistent .ninja_log
             COMMAND ninja -C "${ZHLN_SHARED_ASSET_DIR}" -f "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
@@ -129,7 +128,6 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
             DEPENDS "${ZHLN_SHARED_ASSET_DIR}/assets.ninja" zcook
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             COMMENT "Cooking assets in parallel using Ninja..."
-            USES_TERMINAL
         )
     endif()
     add_dependencies(zahlen cook_assets)

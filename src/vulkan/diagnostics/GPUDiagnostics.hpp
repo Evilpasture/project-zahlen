@@ -3,220 +3,86 @@
 
 #pragma once
 
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
+#endif
+
+#include "../core/Context.hpp"
 #include "GPUAddressTracker.hpp"
-#include <concepts>
 #include <cstdint>
-#include <functional>
-#include <memory>
+#include <cstring>
 #include <span>
 #include <string>
 #include <string_view>
-#include <type_traits>
-#include <utility>
-#include <variant>
 
 namespace ZHLN::Vk {
 
-enum class GPUVendor : uint16_t { Unknown = 0, NVIDIA = 0x10DE, AMD = 0x1002, Intel = 0x8086, ARM = 0x13B5, Qualcomm = 0x5143 };
-
 struct DiagnosticConfig {
-    bool enableMarkers     = true;
-    bool enableShaderDebug = true;
-    bool enableCrashDumps  = true;
+    bool        enableMarkers    = true;
+    bool        enableCrashDumps = true;
     std::string crashDumpPath;
 };
 
-template <typename T>
-concept GPUCrashTrackerBackend = requires(const T ct, T t, VkCommandBuffer cmd, std::string_view name, std::span<const uint32_t> spv) {
-    { ct.WriteCheckpoint(cmd, name) } -> std::same_as<void>;
-    { ct.RegisterShader(spv, name) } -> std::same_as<void>;
-    { ct.OnDeviceLost() } -> std::same_as<void>;
-    { t.Shutdown() } -> std::same_as<void>;
-};
-
-struct GPUCrashTrackerCallbacks {
-    std::function<void(VkCommandBuffer, std::string_view)>           writeCheckpoint;
-    std::function<void(std::span<const uint32_t>, std::string_view)> registerShader;
-    std::function<void()>                                            onDeviceLost;
-    std::function<void()>                                            shutdown;
-
-    [[nodiscard]] bool Empty() const noexcept {
-        return !writeCheckpoint && !registerShader && !onDeviceLost && !shutdown;
-    }
-};
-
-template <GPUCrashTrackerBackend Backend>
-[[nodiscard]] GPUCrashTrackerCallbacks MakeGPUCrashTrackerCallbacks(std::shared_ptr<Backend> backend) {
-    if (!backend) {
-        return {};
-    }
-
-    return {
-        .writeCheckpoint = [backend](VkCommandBuffer cmd, std::string_view name) { backend->WriteCheckpoint(cmd, name); },
-        .registerShader  = [backend](std::span<const uint32_t> spirv, std::string_view name) { backend->RegisterShader(spirv, name); },
-        .onDeviceLost    = [backend] { backend->OnDeviceLost(); },
-        .shutdown        = [backend] { backend->Shutdown(); },
-    };
-}
-
-template <typename Backend>
-    requires GPUCrashTrackerBackend<std::remove_cvref_t<Backend>>
-[[nodiscard]] GPUCrashTrackerCallbacks MakeGPUCrashTrackerCallbacks(Backend&& backend) {
-    using BackendT = std::remove_cvref_t<Backend>;
-    return MakeGPUCrashTrackerCallbacks(std::make_shared<BackendT>(std::forward<Backend>(backend)));
-}
-
-[[nodiscard]] GPUCrashTrackerCallbacks CreateConfiguredGPUCrashTracker(GPUVendor vendor, VkDevice device, VkPhysicalDevice physical, DiagnosticConfig config);
-
-struct CallbackCrashTracker {
-    explicit CallbackCrashTracker(GPUCrashTrackerCallbacks hooks): callbacks(std::move(hooks)) {
-    }
-
-    void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const {
-        if (callbacks.writeCheckpoint) {
-            callbacks.writeCheckpoint(cmd, name);
-        }
-    }
-    void RegisterShader(std::span<const uint32_t> spirv, std::string_view entryPoint) const {
-        if (callbacks.registerShader) {
-            callbacks.registerShader(spirv, entryPoint);
-        }
-    }
-    void OnDeviceLost() const {
-        if (callbacks.onDeviceLost) {
-            callbacks.onDeviceLost();
-        }
-    }
-    void Shutdown() const {
-        if (callbacks.shutdown) {
-            callbacks.shutdown();
-        }
-    }
-
-    GPUCrashTrackerCallbacks callbacks;
-};
-static_assert(GPUCrashTrackerBackend<CallbackCrashTracker>);
-
-struct DebugUtilsTracker {
-    DebugUtilsTracker(VkDevice device, DiagnosticConfig config);
-
-    void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const;
-    void RegisterShader(std::span<const uint32_t> spirv, std::string_view entryPoint) const;
-    void OnDeviceLost() const;
-    void Shutdown();
-
-    DiagnosticConfig config;
-    VkDevice         device = VK_NULL_HANDLE;
-};
-static_assert(GPUCrashTrackerBackend<DebugUtilsTracker>);
-
-struct DeviceFaultTracker {
-    DeviceFaultTracker() = default;
-    explicit DeviceFaultTracker(VkDevice inDevice, GPUAddressTracker* inAddressTracker, std::string inCrashDumpPath = {}) noexcept
-        : device(inDevice), addressTracker(inAddressTracker), crashDumpPath(std::move(inCrashDumpPath)) {
-    }
-
-    void WriteCheckpoint(VkCommandBuffer , std::string_view ) const noexcept {
-    }
-    void RegisterShader(std::span<const uint32_t> , std::string_view ) const noexcept {
-    }
-    void OnDeviceLost() const noexcept;
-    void Shutdown() noexcept {
-        device = VK_NULL_HANDLE;
-        addressTracker = nullptr;
-    }
-
-    VkDevice           device = VK_NULL_HANDLE;
-    GPUAddressTracker* addressTracker = nullptr;
-    std::string        crashDumpPath;
-};
-static_assert(GPUCrashTrackerBackend<DeviceFaultTracker>);
-
 class GPUDiagnostics {
   public:
-    GPUDiagnostics() = default;
+    GPUDiagnostics() noexcept = default;
     ~GPUDiagnostics() noexcept {
         Shutdown();
     }
 
+    // Owns `_addressTracker` at a stable address for `VK_EXT_device_address_binding_report`
+    // messenger callbacks; must not move once created.
     GPUDiagnostics(const GPUDiagnostics&)                    = delete;
     auto operator=(const GPUDiagnostics&) -> GPUDiagnostics& = delete;
     GPUDiagnostics(GPUDiagnostics&&)                         = delete;
     auto operator=(GPUDiagnostics&&) -> GPUDiagnostics&      = delete;
 
-    void Create(GPUVendor vendor, VkDevice device, VkPhysicalDevice physical, GPUAddressTracker* addressTracker, DiagnosticConfig config = {}) {
-        Shutdown();
+    void Create(Context& ctx, DiagnosticConfig config = {}) noexcept;
+    void Shutdown() noexcept;
 
-        _config       = config;
-        _faultTracker = DeviceFaultTracker(device, addressTracker, config.crashDumpPath);
-
-        auto configured = CreateConfiguredGPUCrashTracker(vendor, device, physical, config);
-        if (!configured.Empty()) {
-            _tracker.emplace<CallbackCrashTracker>(std::move(configured));
-        } else {
-            _tracker.emplace<DebugUtilsTracker>(device, config);
-        }
+    [[nodiscard]] auto AddressTracker() noexcept -> GPUAddressTracker& {
+        return _addressTracker;
+    }
+    [[nodiscard]] auto AddressTracker() const noexcept -> const GPUAddressTracker& {
+        return _addressTracker;
     }
 
-    template <GPUCrashTrackerBackend TrackerT>
-    void SetTracker(TrackerT&& tracker) noexcept {
-        _tracker.emplace<std::decay_t<TrackerT>>(std::forward<TrackerT>(tracker));
-    }
-
+    // --- HOT PATH: Zero virtual/variant overhead ---
     [[gnu::always_inline]]
     void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const noexcept {
-        std::visit([&](const auto& backend) noexcept { backend.WriteCheckpoint(cmd, name); }, _tracker);
-    }
-
-    [[gnu::always_inline]]
-    void RegisterShader(std::span<const uint32_t> spirv, std::string_view entryPoint) const noexcept {
-        std::visit([&](const auto& backend) noexcept { backend.RegisterShader(spirv, entryPoint); }, _tracker);
-    }
-
-    [[gnu::always_inline]]
-    void RegisterShader(const ShaderDesc& desc, std::string_view fallbackEntry = "main") const noexcept {
-        if (desc.code != nullptr && desc.size > 0) {
-            RegisterShader(std::span<const uint32_t>(desc.code, desc.size / sizeof(uint32_t)), desc.entry_point ? desc.entry_point : fallbackEntry);
+        if (!_markersActive || cmd == VK_NULL_HANDLE || name.empty()) [[likely]] {
+            return;
         }
+        WriteCheckpointSlow(cmd, name);
     }
 
-    [[gnu::always_inline]]
-    void OnDeviceLost() const noexcept {
-        if (_config.enableCrashDumps) {
-            _faultTracker.OnDeviceLost();
-        }
-        std::visit([](const auto& backend) noexcept { backend.OnDeviceLost(); }, _tracker);
-    }
-
-    [[gnu::always_inline]]
-    void Shutdown() noexcept {
-        std::visit([](auto& backend) noexcept { backend.Shutdown(); }, _tracker);
-        _tracker.emplace<NullTracker>();
-        _faultTracker.Shutdown();
-        _config = {};
-    }
+    // --- COLD PATH: Invoked only on VK_ERROR_DEVICE_LOST ---
+    void OnDeviceLost() const noexcept;
 
     [[nodiscard]] bool IsActive() const noexcept {
-        return !std::holds_alternative<NullTracker>(_tracker);
+        return _device != VK_NULL_HANDLE;
+    }
+    [[nodiscard]] const DiagnosticConfig& Config() const noexcept {
+        return _config;
     }
 
   private:
-    struct NullTracker {
-        void WriteCheckpoint(VkCommandBuffer , std::string_view ) const noexcept {
-        }
-        void RegisterShader(std::span<const uint32_t> , std::string_view ) const noexcept {
-        }
-        void OnDeviceLost() const noexcept {
-        }
-        void Shutdown() noexcept {
-        }
-    };
-    static_assert(GPUCrashTrackerBackend<NullTracker>);
+    static auto VKAPI_CALL AddressBindingCallback(
+        VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
+        VkDebugUtilsMessageTypeFlagsEXT             type,
+        const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
+        void*                                       userData
+    ) noexcept -> VkBool32;
 
-    using TrackerVariant = std::variant<NullTracker, CallbackCrashTracker, DebugUtilsTracker>;
-    TrackerVariant     _tracker;
-    DiagnosticConfig   _config {};
-    DeviceFaultTracker _faultTracker;
+    void WriteCheckpointSlow(VkCommandBuffer cmd, std::string_view name) const noexcept;
+
+    Context*                 _ctx                     = nullptr;
+    VkInstance               _instance                = VK_NULL_HANDLE;
+    VkDevice                 _device                  = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT _addressBindingMessenger = VK_NULL_HANDLE;
+    GPUAddressTracker        _addressTracker {};
+    DiagnosticConfig         _config {};
+    bool                     _markersActive = false;
 };
 
-}
+} // namespace ZHLN::Vk

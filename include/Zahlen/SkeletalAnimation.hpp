@@ -9,6 +9,21 @@
 
 namespace ZHLN {
 
+struct AnimationHandle {
+    uint32_t                  id        = InvalidID;
+    static constexpr uint32_t InvalidID = ~0u;
+
+    [[nodiscard]] static constexpr auto Null() noexcept -> AnimationHandle {
+        return {};
+    }
+
+    [[nodiscard]] constexpr auto IsValid() const noexcept -> bool {
+        return id != InvalidID;
+    }
+
+    constexpr auto operator==(const AnimationHandle&) const noexcept -> bool = default;
+};
+
 enum class AnimationPathType : uint8_t { Translation, Rotation, Scale, Weights };
 
 enum class InterpolationType : uint8_t { Linear, Step, CubicSpline };

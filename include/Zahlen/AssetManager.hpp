@@ -60,10 +60,11 @@ struct CookedTextureHeader {
     uint32_t dataSize;
 };
 
-// Version 7 payload: positions[vertexCount], tangentFrames[vertexCount],
+// Version 8 payload: positions[vertexCount], tangentFrames[vertexCount],
 // surfaces[vertexCount], optional skins[vertexCount], indices[indexCount],
-// then the three meshlet streams (v7 reorders the meshlet record: coneCutoff
-// ahead of coneAxis). All vertices use independent SoA buffers.
+// then the three logical meshlet streams (MeshletDesc[meshletCount],
+// meshletVertices[meshletVertexCount], meshletTriangles[meshletTriByteCount]).
+// All vertices use independent SoA buffers.
 struct CookedMeshHeader {
     uint32_t magic;
     uint32_t version;
@@ -93,29 +94,6 @@ struct CookedAnimTrack {
     uint32_t valueOffset;
 };
 
-struct CookedFontHeader {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t atlasWidth;
-    uint32_t atlasHeight;
-    uint32_t glyphCount;
-    uint32_t firstCodepoint;
-    float    fontSize;
-    float    baseline;
-    float    lineHeight;
-    uint32_t flags;
-    uint32_t pixelDataSize;
-};
-
-inline constexpr uint32_t CookedFontMagic   = 0x30544E46;
-inline constexpr uint32_t CookedFontVersion = 1;
-inline constexpr uint32_t CookedFontFlagSDF = 1u << 0;
-
-struct CookedFontGlyph {
-    float x0, y0, x1, y1;
-    float xoff, yoff, xadvance;
-};
-
 #pragma pack(pop)
 
 using AssetLoadRequest = FS::LoadRequest;
@@ -130,6 +108,7 @@ class AssetManager {
 
     bool MountPak(std::string_view pakFilePath);
     bool MountDirectory(std::string_view directory);
+    bool UnmountDirectory(std::string_view directory);
 
     void LoadAsync(RestrictSpan<AssetLoadRequest> requests, TaskSystem::Counter* counter);
     bool LoadSync(AssetLoadRequest& request);
@@ -140,8 +119,10 @@ class AssetManager {
     }
 
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool { return _vfs.Exists(assetID); }
+    [[nodiscard]] auto Exists(std::string_view virtualPath) const noexcept -> bool { return _vfs.Exists(virtualPath); }
 
     [[nodiscard]] auto GetCachedPrefab(uint64_t hash) -> ZHLN::Optional<ModelPrefab&>;
+    [[nodiscard]] auto GetCachedPrefab(uint64_t hash) const noexcept -> ZHLN::Optional<const ModelPrefab&>;
     // Bind the uploading renderer via UseRenderContext before caching a prefab
     // whose parts contain GPU meshes (Kernel already does this for Engine users).
     void CachePrefab(uint64_t hash, ModelPrefab* prefab);

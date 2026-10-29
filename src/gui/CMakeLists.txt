@@ -33,20 +33,11 @@ target_include_directories(zahlen_gui SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/clay
     ${PROJECT_SOURCE_DIR}/extern/stb
     ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
-    ${PROJECT_SOURCE_DIR}/extern/volk
 )
 
-target_include_directories(zahlen_gui PRIVATE "${CMAKE_BINARY_DIR}/generated_shaders")
-add_dependencies(zahlen_gui zahlen_gpu_types)
-
+# Jolt is PUBLIC for the JPH::Vec4 types in GUI.hpp; zero ECS/Engine/Window/Render link coupling.
 target_link_libraries(zahlen_gui PUBLIC
-    zahlen_ecs
-    zahlen_vulkan
     Jolt
-)
-
-target_link_libraries(zahlen_gui PRIVATE
-    zahlen_threading
 )
 
 target_compile_definitions(zahlen_gui PRIVATE

@@ -10,7 +10,9 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Meshlet.hpp>
 #include <Zahlen/ParticleEmitterDesc.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Render/FrameData.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Render/FrameScope.hpp>
@@ -37,10 +39,6 @@
 namespace ZHLN {
 
 struct Camera;
-namespace FS {
-class FileSystemWatcher;
-}
-using FileSystemWatcher = FS::FileSystemWatcher;
 class PipelineStatsCapture;
 class PresentationTarget;
 
@@ -81,7 +79,11 @@ class ZHLN_API RenderContext {
     auto operator=(const RenderContext&) -> RenderContext& = delete;
 
     [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, ErrorCode>
-        Create(PresentationTarget& target, const RenderConfig& cfg, ZHLN::Optional<FileSystemWatcher&> fileSystemWatcher = std::nullopt) noexcept;
+        Create(PresentationTarget& target, const RenderConfig& cfg) noexcept;
+
+    // Host-pushed notification that a shader source file changed on disk; the
+    // renderer never watches or depends on the filesystem subsystem directly.
+    void NotifyShaderChanged(std::string_view changedPath);
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
@@ -145,13 +147,16 @@ class ZHLN_API RenderContext {
         );
     }
 
+    [[nodiscard]] auto CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferHandle;
+    [[nodiscard]] auto UploadMeshlets(const MeshletBuildResult& built) -> MeshletStreams;
+
     void DestroyBuffer(BufferHandle handle);
     [[nodiscard]] auto UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept -> std::expected<void, ErrorCode>;
 
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
     [[nodiscard]] auto UpdateBuffer(BufferHandle handle, std::span<T, SpanExtent> elements) noexcept -> std::expected<void, ErrorCode> {
-        return UpdateBuffer(handle, std::as_bytes(elements));
+        return UpdateBuffer(handle, std::span<const std::byte> {std::as_bytes(elements)});
     }
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
 
@@ -172,8 +177,14 @@ class ZHLN_API RenderContext {
     [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode>;
     // A name gives repeat uploads a stable identity and deduplicates identical pixels.
     [[nodiscard]] auto
-        CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode>;
+        CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true, bool generateMips = true) -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode>;
+    // Linear RGBA16F upload for authored radiance fields such as Source VRAD.
+    // Mip generation is opt-in because most initial imported lightmaps use
+    // exact luxel filtering with atlas gutters at mip zero.
+    [[nodiscard]] auto CreateTextureHDR(
+        std::string_view name, std::span<const std::byte> rgba16f, Extent2D extent, bool generateMips = false
+    ) -> std::expected<TextureHandle, ErrorCode>;
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
     [[nodiscard]] auto CreateTexture(std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode> {
@@ -199,10 +210,6 @@ class ZHLN_API RenderContext {
     // Morph deltas are tightly packed float4s; the count is derived from the span.
     uint32_t AllocateMorphDeltas(std::span<const float> deltas);
 
-    [[nodiscard]] uint32_t GetValidationErrorCount() const noexcept;
-
-    [[nodiscard]] uint32_t GetDeviceLostCount() const noexcept;
-
     void WriteCheckpoint(std::string_view name) noexcept;
 
     [[nodiscard]] PipelineStatsCapture CapturePipelineStats() noexcept;
@@ -214,9 +221,14 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] auto
         BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] TextureHandle CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true);
+    [[nodiscard]] TextureHandle CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true, bool generateMips = true);
 
-    [[nodiscard]] std::expected<void, ErrorCode> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
+    // A captured frame: the pixels of the last completed frame, in memory, plus
+    // the statistics a caller would otherwise compute by parsing the file it
+    // asked to be written. The renderer writes nothing and names no format --
+    // encoding is the caller's (<netpbm/PpmEncoder.hpp> if it wants a PPM or a
+    // PAM) and so is the file itself.
+    [[nodiscard]] std::expected<CapturedFrame, ErrorCode> CaptureFrame() noexcept;
 
     [[nodiscard]] std::expected<void, ErrorCode> SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept;
 
@@ -242,7 +254,7 @@ class ZHLN_API RenderContext {
     void ApplySimulationData(const SceneData& scene) noexcept;
     void ApplyDrawData(const SceneData& scene) noexcept;
     [[nodiscard]] auto                            RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped>;
-    [[nodiscard]] auto                            RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped>;
+    [[nodiscard]] auto                            RenderUI(const UIView& view, UIDrawData uiData) noexcept -> FrameOutcome<FrameSkipped>;
     [[nodiscard]] FrameOutcome<PresentSuboptimal> EndFrame() noexcept;
     void                                          AbortFrame() noexcept;
     void DrawDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material) noexcept;

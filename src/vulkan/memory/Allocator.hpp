@@ -10,6 +10,8 @@
 #include <Zahlen/Threading/Mutex.hpp>
 #include <span>
 
+#include "ImageView.hpp"
+
 struct VmaAllocator_T;
 struct VmaAllocation_T;
 using VmaAllocator  = struct VmaAllocator_T*;
@@ -88,6 +90,9 @@ class Allocator {
 
     void DestroyBuffer(Buffer& buffer) const noexcept;
     void DestroyImage(Image& image) const noexcept;
+    void DetachAddressTracker() noexcept {
+        _addressTracker = nullptr;
+    }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _handle != nullptr;
@@ -346,24 +351,20 @@ class Image {
 
     [[nodiscard]] static auto Create(Allocator& allocator, const ImageConfig& config) noexcept -> std::expected<Image, ErrorCode>;
 
-    [[nodiscard]] constexpr auto ViewInfo(
+    [[nodiscard]] constexpr auto View(
         VkImageAspectFlags aspect = VK_IMAGE_ASPECT_NONE,
         uint32_t           baseMip = 0,
         uint32_t           mipCount = VK_REMAINING_MIP_LEVELS,
         uint32_t           baseLayer = 0,
         uint32_t           layerCount = VK_REMAINING_ARRAY_LAYERS,
         VkImageViewType    viewType = VK_IMAGE_VIEW_TYPE_MAX_ENUM
-    ) const noexcept -> VkImageViewCreateInfo {
+    ) const noexcept -> ImageView {
         const uint32_t mipsAvailable   = baseMip < _config.mipLevels ? _config.mipLevels - baseMip : 0;
         const uint32_t layersAvailable = baseLayer < _config.arrayLayers ? _config.arrayLayers - baseLayer : 0;
         const uint32_t levels          = mipCount == VK_REMAINING_MIP_LEVELS ? mipsAvailable : (mipCount < mipsAvailable ? mipCount : mipsAvailable);
         const uint32_t layers          = layerCount == VK_REMAINING_ARRAY_LAYERS ? layersAvailable : (layerCount < layersAvailable ? layerCount : layersAvailable);
 
-        VkImageAspectFlags effectiveAspect = aspect != VK_IMAGE_ASPECT_NONE ? aspect : GetFormatAspect(_config.format);
-        if ((effectiveAspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) ==
-            (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
-            effectiveAspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-        }
+        const VkImageAspectFlags effectiveAspect = aspect != VK_IMAGE_ASPECT_NONE ? aspect : GetFormatAspect(_config.format);
 
         if (viewType == VK_IMAGE_VIEW_TYPE_MAX_ENUM) {
             if (_config.dimension == ImageDimension::Texture3D) {
@@ -379,28 +380,15 @@ class Image {
             }
         }
 
-        return VkImageViewCreateInfo {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .image = _handle,
-            .viewType = viewType,
-            .format = _config.format,
-            .components =
-                {
-                    .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-                },
-            .subresourceRange =
-                {
-                    .aspectMask = effectiveAspect,
-                    .baseMipLevel = baseMip,
-                    .levelCount = levels,
-                    .baseArrayLayer = baseLayer,
-                    .layerCount = layers,
-                },
+        return ImageView {
+            _handle,
+            _config.format,
+            effectiveAspect,
+            static_cast<uint8_t>(baseMip),
+            static_cast<uint8_t>(levels),
+            static_cast<uint16_t>(baseLayer),
+            static_cast<uint16_t>(layers),
+            viewType,
         };
     }
 
@@ -479,15 +467,88 @@ inline void CopyBuffer(VkCommandBuffer cmd, BufferSlice src, BufferSlice dst) {
     }
 }
 
-inline void BufferBarrier(
-    VkCommandBuffer cmd,
-    const Buffer&   buffer,
-    BarrierStage    srcStage,
-    BarrierAccess   srcAccess,
-    BarrierStage    dstStage,
-    BarrierAccess   dstAccess
-) noexcept {
-    BufferBarrier(cmd, buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess);
+inline BufferBarrier::BufferBarrier(
+    const Buffer&         buffer,
+    VkPipelineStageFlags2 srcStage,
+    VkAccessFlags2        srcAccess,
+    VkPipelineStageFlags2 dstStage,
+    VkAccessFlags2        dstAccess,
+    VkDeviceSize          offset,
+    VkDeviceSize          size,
+    uint32_t              srcQueueFamily,
+    uint32_t              dstQueueFamily
+) noexcept:
+    BufferBarrier(buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess, offset, size, srcQueueFamily, dstQueueFamily) {
+}
+
+inline BufferBarrier::BufferBarrier(
+    const Buffer& buffer,
+    BarrierStage  srcStage,
+    BarrierAccess srcAccess,
+    BarrierStage  dstStage,
+    BarrierAccess dstAccess,
+    VkDeviceSize  offset,
+    VkDeviceSize  size,
+    uint32_t      srcQueueFamily,
+    uint32_t      dstQueueFamily
+) noexcept:
+    BufferBarrier(buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess, offset, size, srcQueueFamily, dstQueueFamily) {
+}
+
+inline auto BufferBarrier::TransferToCompute(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return TransferToCompute(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::ComputeToTransfer(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return ComputeToTransfer(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::IndirectToTransfer(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return IndirectToTransfer(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::ComputeToIndirect(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return ComputeToIndirect(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::ComputeWriteToRead(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return ComputeWriteToRead(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::CopyWriteToWrite(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return CopyWriteToWrite(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::TransferToIndirect(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return TransferToIndirect(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::TransferToVertex(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
+    return TransferToVertex(buffer.Handle(), offset, size);
+}
+
+inline auto BufferBarrier::QueueRelease(
+    const Buffer&         buffer,
+    VkPipelineStageFlags2 srcStage,
+    VkAccessFlags2        srcAccess,
+    uint32_t              srcQueueFamily,
+    uint32_t              dstQueueFamily,
+    VkDeviceSize          offset,
+    VkDeviceSize          size
+) noexcept -> BufferBarrier {
+    return QueueRelease(buffer.Handle(), srcStage, srcAccess, srcQueueFamily, dstQueueFamily, offset, size);
+}
+
+inline auto BufferBarrier::QueueAcquire(
+    const Buffer&         buffer,
+    VkPipelineStageFlags2 dstStage,
+    VkAccessFlags2        dstAccess,
+    uint32_t              srcQueueFamily,
+    uint32_t              dstQueueFamily,
+    VkDeviceSize          offset,
+    VkDeviceSize          size
+) noexcept -> BufferBarrier {
+    return QueueAcquire(buffer.Handle(), dstStage, dstAccess, srcQueueFamily, dstQueueFamily, offset, size);
 }
 
 class StagingRingBuffer {
@@ -524,6 +585,9 @@ class StagingRingBuffer {
     }
     [[nodiscard]] auto GetCurrentValue() const noexcept -> uint64_t {
         return _timelineValue;
+    }
+    [[nodiscard]] auto Capacity() const noexcept -> VkDeviceSize {
+        return _capacity;
     }
     [[nodiscard]] auto GetQueueFamily() const noexcept -> uint32_t {
         return _queueFamily;

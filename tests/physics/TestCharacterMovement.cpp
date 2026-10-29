@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/CommonFixtures.hpp"
 
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -152,31 +153,12 @@ struct CPUPipelineHarness {
 };
 
 // ============================================================================
-// Test Suite
+// Character Movement Tests (zero-boilerplate namespace collection)
 // ============================================================================
 
-struct CharacterMovementTestSuite {
-    CharacterMovementTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+namespace ZHLN::Test {
+namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
-        JPH::RegisterDefaultAllocator();
-        if (JPH::Factory::sInstance == nullptr) {
-            JPH::Factory::sInstance = new JPH::Factory();
-            JPH::RegisterTypes();
-        }
-    }
-
-    ~CharacterMovementTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
-        JPH::UnregisterTypes();
-        if (JPH::Factory::sInstance != nullptr) {
-            delete JPH::Factory::sInstance;
-            JPH::Factory::sInstance = nullptr;
-        }
-    }
-
-    struct Tests {
         // 1. Settle & Resting Stability
         auto test_01_flat_ground_settling_and_stability() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
@@ -710,12 +692,6 @@ struct CharacterMovementTestSuite {
             }
             return {};
         }
-    };
-};
 
-// Exported for the physics group binary (RunPhysicsTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunCharacterMovementSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<CharacterMovementTestSuite>();
-}
-
+} // namespace
+} // namespace ZHLN::Test

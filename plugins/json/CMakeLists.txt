@@ -16,13 +16,12 @@
 # cmake/ThirdParty.cmake; this directory only consumes the simdjson::simdjson
 # target it provides.
 
-# simdjson is vendored at extern/simdjson and provisioned by cmake/ThirdParty.cmake
-# like every other extern/ entry, so there is no discovery here and none needed:
-# a bare Windows toolchain configures this extra with no pkg-config and no
-# system package. The guard only catches a forgotten submodule init.
+# simdjson is provisioned by cmake/ThirdParty.cmake (system package when
+# ZHLN_HAS_SIMDJSON is true, otherwise vendored extern/simdjson); this directory
+# only consumes the simdjson::simdjson target it provides.
 if(NOT TARGET simdjson::simdjson)
     message(FATAL_ERROR
-        "simdjson is not provisioned; run 'git submodule update --init extern/simdjson'.")
+        "simdjson is not provisioned; install system simdjson or run 'git submodule update --init extern/simdjson'.")
 endif()
 
 set(ZHLN_JSON_SOURCES

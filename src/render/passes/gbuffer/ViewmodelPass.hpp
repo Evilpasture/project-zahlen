@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "FrameContext.hpp"
-#include "graph/RenderGraph.hpp"
+#include "RenderTargetTags.hpp"
+#include "graph/RenderPassDecl.hpp"
+
+namespace ZHLN {
+struct RenderFrameContext;
+} // namespace ZHLN
 
 namespace ZHLN::Passes {
 
@@ -13,10 +17,7 @@ struct ViewmodelPass:
         Vk::ColorWrite<Res_SceneColor>,
         Vk::ColorWrite<Res_Velocity>,
         Vk::ColorWrite<Res_NormRough>,
-        Vk::ColorWrite<Res_Emissive>,
-        Vk::ColorWrite<Res_Clearcoat>,
-        Vk::ColorWrite<Res_Anisotropy>,
-        Vk::ColorWrite<Res_Sheen>,
+        Vk::ColorWrite<Res_BakedMask>,
         Vk::DepthStencilWrite<Res_Depth>> {
     RenderFrameContext& frame;
 

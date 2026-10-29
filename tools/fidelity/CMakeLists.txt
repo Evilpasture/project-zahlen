@@ -33,8 +33,9 @@ set_target_properties(fidelity PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
-    CXX_SCAN_FOR_MODULES ON
 )
+zahlen_set_bin_output(fidelity)
+zahlen_add_runtime_dlls(fidelity)
 
 target_link_libraries(fidelity PRIVATE
     zahlen_engine

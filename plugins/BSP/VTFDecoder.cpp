@@ -4,6 +4,7 @@
 #include "VTFDecoder.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace ZHLN::BSP {
@@ -299,7 +300,28 @@ auto DecodeVTF(std::span<const std::byte> vtfBytes) -> std::expected<DecodedImag
             return std::unexpected(VTFError::UnsupportedFormat);
     }
 
+    img.sourceFormat = format;
     return img;
+}
+
+void ConvertSourceNormalInPlace(DecodedImage& image) noexcept {
+    // Only the BC3-based bumpmaps carry DXT5nm data; every other format stores
+    // ordinary RGB normals (see the header).
+    if (image.sourceFormat != VTFImageFormat::DXT5 && image.sourceFormat != VTFImageFormat::DXT3) {
+        return;
+    }
+
+    const size_t totalPixels = static_cast<size_t>(image.width) * image.height;
+    auto*        pixels      = reinterpret_cast<uint8_t*>(image.rgba8.data());
+    for (size_t i = 0; i < totalPixels; ++i) {
+        const float x = (static_cast<float>(pixels[i * 4 + 3]) / 255.0f) * 2.0f - 1.0f; // X lives in alpha
+        const float y = (static_cast<float>(pixels[i * 4 + 1]) / 255.0f) * 2.0f - 1.0f; // Y lives in green
+        const float z = std::sqrt(std::max(0.0f, 1.0f - (x * x) - (y * y)));
+        pixels[i * 4 + 0] = static_cast<uint8_t>(std::clamp((x * 0.5f) + 0.5f, 0.0f, 1.0f) * 255.0f);
+        pixels[i * 4 + 1] = static_cast<uint8_t>(std::clamp((y * 0.5f) + 0.5f, 0.0f, 1.0f) * 255.0f);
+        pixels[i * 4 + 2] = static_cast<uint8_t>(std::clamp((z * 0.5f) + 0.5f, 0.0f, 1.0f) * 255.0f);
+        pixels[i * 4 + 3] = 255;
+    }
 }
 
 } // namespace ZHLN::BSP

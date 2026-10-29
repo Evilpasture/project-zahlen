@@ -182,6 +182,8 @@ struct PaneMeasurement {
 
 } // namespace
 
+namespace {
+
 struct TransparentMaterialsTestSuite {
     TransparentMaterialsTestSuite() {
         ZHLN::Test::Headless::BeginSession();
@@ -354,6 +356,4 @@ struct TransparentMaterialsTestSuite {
     };
 };
 
-auto RunTransparentMaterialsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<TransparentMaterialsTestSuite>();
-}
+} // namespace

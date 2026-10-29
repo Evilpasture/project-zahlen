@@ -24,6 +24,8 @@ enum class ExplosionTestError : uint32_t {
     EntityLeakDetected ZHLN_ANNOTATION(ZHLN::Description<"Explosion root or debris entities remained alive after duration expired.">{}),
 };
 
+namespace {
+
 struct ExplosionTestSuite {
     ExplosionTestSuite() {
         ZHLN::Fiber::InitMainThread();
@@ -46,7 +48,6 @@ struct ExplosionTestSuite {
                 .fullscreen     = false,
                 .validationMode = ZHLN::ValidationMode::On,
                 .headless       = true,
-                .diagnostics    = &ZHLN::Test::g_renderDiagnostics
             },
             .enableFallbackScene = false,
         };
@@ -244,6 +245,4 @@ struct ExplosionTestSuite {
     };
 };
 
-auto main() -> int {
-    return ZHLN::Test::Runner::Run<ExplosionTestSuite>();
-}
+} // namespace

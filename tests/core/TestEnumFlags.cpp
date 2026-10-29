@@ -54,6 +54,8 @@ enum class FlagTestError : uint8_t {
     Failed = 1
 };
 
+namespace {
+
 struct EnumFlagsTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> compound_operators_mutate_in_place() {
@@ -79,8 +81,4 @@ struct EnumFlagsTestSuite {
     };
 };
 
-// Exported for the core group binary (RunCoreTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunEnumFlagsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<EnumFlagsTestSuite>();
-}
+} // namespace

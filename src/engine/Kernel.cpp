@@ -99,8 +99,34 @@ struct Kernel::Impl {
     // caller did not provide bytes; persistPipelineBinaries records that the
     // kernel took on writing the updated cache back at shutdown.
     std::vector<uint8_t> pipelineBinaryData;
+    FS::FileWatchHandle  shaderDirectoryWatch    = 0;
     bool                 persistPipelineBinaries = false;
-    bool                 glfwAcquired         = false;
+    bool                 glfwAcquired            = false;
+
+    void BeginShaderObservation() {
+        if constexpr (isDev) {
+            if (fileSystemWatcher != nullptr && renderContext != nullptr && shaderDirectoryWatch == 0) {
+                shaderDirectoryWatch = fileSystemWatcher->WatchDirectory(
+                    "resources/shaders",
+                    [this](const FS::FileWatchEvent& event) {
+                        if (renderContext != nullptr) {
+                            renderContext->NotifyShaderChanged(event.path.lexically_normal().generic_string());
+                        }
+                    },
+                    true, ".slang", FS::FileSystemWatcher::kDefaultDebounceMs
+                );
+            }
+        }
+    }
+
+    void StopShaderObservation() noexcept {
+        if constexpr (isDev) {
+            if (fileSystemWatcher != nullptr && shaderDirectoryWatch != 0) {
+                static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
+                shaderDirectoryWatch = 0;
+            }
+        }
+    }
 };
 
 auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode> {
@@ -149,13 +175,14 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
 
     InitRenderDocAPI();
 
-    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig, *_impl->fileSystemWatcher);
+    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig);
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
+    _impl->BeginShaderObservation();
 
-    _impl->audioContext = std::make_unique<AudioContext>();
+    _impl->audioContext = std::make_unique<AudioContext>(AudioConfig {.headless = cfg.headless});
     _impl->assetManager = std::make_unique<AssetManager>();
     _impl->assetManager->UseRenderContext(*_impl->renderContext);
 
@@ -184,6 +211,7 @@ Kernel::~Kernel() {
     if (_impl->persistPipelineBinaries && _impl->renderContext != nullptr) {
         StorePipelineBinaryBytes(FS::Paths::PipelineCacheFile(), _impl->renderContext->GetPipelineBinaryData());
     }
+    _impl->StopShaderObservation();
     _impl->renderContext.reset();
     _impl->audioContext.reset();
     _impl->fileSystemWatcher.reset();
@@ -292,13 +320,15 @@ auto Kernel::GetRenderConfig() const noexcept -> const RenderConfig& {
 
 auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     _impl->assetManager->InvalidateGPUMeshes();
+    _impl->StopShaderObservation();
     _impl->renderContext.reset();
 
-    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig, *_impl->fileSystemWatcher);
+    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig);
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
+    _impl->BeginShaderObservation();
     _impl->assetManager->UseRenderContext(*_impl->renderContext);
     return {};
 }

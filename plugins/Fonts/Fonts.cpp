@@ -199,7 +199,7 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
         return std::unexpected(FontBMError::UnsupportedFormat);
     }
 
-    auto docExp = ReflectJSON::TryParse<Json::Document>(text, ReflectJSON::Options{.omitEmpty = true});
+    auto docExp = ReflectJSON::Parse<Json::Document>(text, ReflectJSON::Options{.omitEmpty = true});
     if (!docExp.has_value()) {
         return std::unexpected(FontBMError::Malformed);
     }

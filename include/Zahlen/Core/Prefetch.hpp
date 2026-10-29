@@ -6,8 +6,6 @@
 
 #if defined(_MSC_VER)
 #include <intrin.h>
-#elif defined(__x86_64__) || defined(__i386__)
-#include <xmmintrin.h>
 #endif
 
 namespace ZHLN {

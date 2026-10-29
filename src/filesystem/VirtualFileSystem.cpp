@@ -1,180 +1,272 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include <Zahlen/FileSystem/VFS.hpp>
-#include <Zahlen/FileSystem/MappedFile.hpp>
+#include <Zahlen/Sync.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Core/Hash.hpp>
-#include <Zahlen/Core/String.hpp>
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <new>
+#include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
+#if defined(__has_include)
 #if __has_include(<zstd.h>)
 #include <zstd.h>
 #define ZHLN_HAS_ZSTD 1
 #else
 #define ZHLN_HAS_ZSTD 0
 #endif
+#else
+#define ZHLN_HAS_ZSTD 0
+#endif
 
 namespace ZHLN::FS {
 
-struct PakArchive {
-    String256 path;
-    MappedFile mapped;
-};
+namespace {
 
-VirtualFileSystem::~VirtualFileSystem() {
-    for (size_t i = 0; i < _archiveCount; ++i) {
-        if (_archives[i] != nullptr) {
-            CloseMappedFile(_archives[i]->mapped);
-            delete _archives[i];
-        }
+// Normalizes `\` -> `/`, collapses `.` and repeated `/`, and strictly rejects
+// empty paths, absolute/drive-rooted paths, and `..` parent traversal segments.
+[[nodiscard]] auto SanitizeVirtualPath(std::string_view rawPath) -> std::optional<std::string> {
+    if (rawPath.empty()) {
+        return std::nullopt;
     }
-    delete[] _archives;
+
+    if (rawPath.front() == '/' || rawPath.front() == '\\') {
+        return std::nullopt;
+    }
+    if (rawPath.size() >= 2 && rawPath[1] == ':') {
+        return std::nullopt;
+    }
+
+    std::string normalized;
+    normalized.reserve(rawPath.size());
+
+    size_t pos = 0;
+    while (pos < rawPath.size()) {
+        while (pos < rawPath.size() && (rawPath[pos] == '/' || rawPath[pos] == '\\')) {
+            ++pos;
+        }
+        if (pos >= rawPath.size()) {
+            break;
+        }
+
+        size_t end = pos;
+        while (end < rawPath.size() && rawPath[end] != '/' && rawPath[end] != '\\') {
+            if (rawPath[end] == '\0') {
+                return std::nullopt;
+            }
+            ++end;
+        }
+
+        const std::string_view segment = rawPath.substr(pos, end - pos);
+        pos                            = end;
+
+        if (segment == ".") {
+            continue;
+        }
+        if (segment == "..") {
+            return std::nullopt;
+        }
+
+        if (!normalized.empty()) {
+            normalized.push_back('/');
+        }
+        normalized.append(segment);
+    }
+
+    if (normalized.empty()) {
+        return std::nullopt;
+    }
+    return normalized;
 }
 
-bool VirtualFileSystem::MountDirectory(std::string_view directory) {
-    if (directory.empty()) {
+[[nodiscard]] auto CanonicalizeMountDirectory(std::string_view directoryPath) -> std::optional<std::filesystem::path> {
+    if (directoryPath.empty()) {
+        return std::nullopt;
+    }
+
+    std::error_code             ec;
+    const std::filesystem::path raw(directoryPath);
+    if (!std::filesystem::exists(raw, ec) || ec || !std::filesystem::is_directory(raw, ec) || ec) {
+        return std::nullopt;
+    }
+
+    std::filesystem::path canon = std::filesystem::weakly_canonical(raw, ec);
+    if (ec || canon.empty()) {
+        return std::nullopt;
+    }
+    return canon;
+}
+
+[[nodiscard]] auto IsPathWithinRoot(const std::filesystem::path& candidate, const std::filesystem::path& canonRoot) -> bool {
+    std::error_code             ec;
+    const std::filesystem::path canonCandidate = std::filesystem::weakly_canonical(candidate, ec);
+    if (ec || canonCandidate.empty()) {
         return false;
     }
-    return Lock(_mountDirMutex, [&]() -> bool {
-        if (_mountDirCount >= kMaxMountDirs) {
-            return false;
+    const std::filesystem::path rel = std::filesystem::relative(canonCandidate, canonRoot, ec);
+    if (ec || rel.empty()) {
+        return false;
+    }
+    const std::string relStr = rel.generic_string();
+    return relStr != ".." && !relStr.starts_with("../");
+}
+
+} // namespace
+
+VirtualFileSystem::VirtualFileSystem()  = default;
+VirtualFileSystem::~VirtualFileSystem() = default;
+
+void VirtualFileSystem::IndexDirectoryTreeLocked(const std::filesystem::path& mountRoot) const {
+    std::error_code ec;
+    const auto      options = std::filesystem::directory_options::skip_permission_denied;
+    for (std::filesystem::recursive_directory_iterator it(mountRoot, options, ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code entryEc;
+        if (!it->is_regular_file(entryEc) || entryEc) {
+            continue;
         }
-        _mountDirs[_mountDirCount++] = std::string(directory);
+        const std::filesystem::path rel = std::filesystem::relative(it->path(), mountRoot, entryEc);
+        if (entryEc) {
+            continue;
+        }
+        if (const auto sanitized = SanitizeVirtualPath(rel.generic_string())) {
+            _directoryIndex.Insert(Hash64(*sanitized), *sanitized);
+        }
+    }
+}
+
+void VirtualFileSystem::RebuildDirectoryIndexLocked() const {
+    _directoryIndex.Clear();
+    for (const std::filesystem::path& mountRoot: _mountDirs) {
+        IndexDirectoryTreeLocked(mountRoot);
+    }
+}
+
+auto VirtualFileSystem::MountDirectory(std::string_view directoryPath) -> bool {
+    const auto canonDir = CanonicalizeMountDirectory(directoryPath);
+    if (!canonDir) {
+        return false;
+    }
+
+    return Lock(_mountDirMutex, [&]() -> bool {
+        auto existing = std::ranges::find(_mountDirs, *canonDir);
+        if (existing != _mountDirs.end()) {
+            _mountDirs.erase(existing);
+        }
+        _mountDirs.push_back(*canonDir);
+        IndexDirectoryTreeLocked(*canonDir);
         return true;
     });
 }
 
-bool VirtualFileSystem::MountPak(std::string_view pakFilePath) {
+auto VirtualFileSystem::UnmountDirectory(std::string_view directoryPath) -> bool {
+    if (directoryPath.empty()) {
+        return false;
+    }
+
+    std::error_code       ec;
+    std::filesystem::path target = std::filesystem::weakly_canonical(std::filesystem::path(directoryPath), ec);
+    if (ec || target.empty()) {
+        target = std::filesystem::path(directoryPath).lexically_normal();
+    }
+
+    return Lock(_mountDirMutex, [&]() -> bool {
+        const auto it = std::ranges::find(_mountDirs, target);
+        if (it == _mountDirs.end()) {
+            return false;
+        }
+        _mountDirs.erase(it);
+        RebuildDirectoryIndexLocked();
+        return true;
+    });
+}
+
+auto VirtualFileSystem::MountedDirectoryCount() const noexcept -> size_t {
+    return Lock(_mountDirMutex, [&]() -> size_t { return _mountDirs.size(); });
+}
+
+auto VirtualFileSystem::MountPak(std::string_view pakFilePath) -> bool {
     if (pakFilePath.empty()) {
         return false;
     }
 
-    auto* archive = new (std::nothrow) PakArchive();
-    if (archive == nullptr) {
-        return false;
-    }
-    archive->path.assign(pakFilePath);
-    archive->mapped = OpenMappedFile(archive->path.c_str());
-
-    if (archive->mapped.data == nullptr) {
-        delete archive;
-        return false;
-    }
-
-    if (archive->mapped.size < sizeof(PakHeader)) {
-        CloseMappedFile(archive->mapped);
-        delete archive;
+    MappedFile mapped = MappedFile::Open(pakFilePath, MapAccess::ReadOnly);
+    if (!mapped.IsValid() || mapped.Size() < sizeof(PakHeader)) {
         return false;
     }
 
     PakHeader header {};
-    std::memcpy(&header, archive->mapped.data, sizeof(PakHeader));
-
+    std::memcpy(&header, mapped.Data(), sizeof(PakHeader));
     if (std::memcmp(header.magic, "ZPAK", 4) != 0) {
-        CloseMappedFile(archive->mapped);
-        delete archive;
         return false;
     }
-
     if (header.version != kPakFormatVersion) {
-        CloseMappedFile(archive->mapped);
-        delete archive;
         return false;
     }
     if (header.entryCount > 1'000'000) {
-        CloseMappedFile(archive->mapped);
-        delete archive;
         return false;
     }
-    if (header.tocOffset < sizeof(PakHeader) || header.tocOffset > archive->mapped.size) {
-        CloseMappedFile(archive->mapped);
-        delete archive;
-        return false;
-    }
-    const size_t tocBytes = static_cast<size_t>(header.entryCount) * sizeof(PakEntry);
-    if (header.tocOffset + tocBytes > archive->mapped.size) {
-        CloseMappedFile(archive->mapped);
-        delete archive;
+    if (header.tocOffset < sizeof(PakHeader) || header.tocOffset > mapped.Size()) {
         return false;
     }
 
-    const auto* baseData = static_cast<const char*>(archive->mapped.data);
+    const uint64_t tocBytes = static_cast<uint64_t>(header.entryCount) * sizeof(PakEntry);
+    const uint64_t tocEnd   = header.tocOffset + tocBytes;
+    if (tocEnd > mapped.Size() || tocEnd < header.tocOffset) {
+        return false;
+    }
 
+    const std::byte* tocBase = mapped.Data() + header.tocOffset;
     for (uint32_t i = 0; i < header.entryCount; ++i) {
         PakEntry tmp {};
-        std::memcpy(&tmp, baseData + header.tocOffset + (i * sizeof(PakEntry)), sizeof(PakEntry));
-        if (tmp.offset + tmp.compressedSize > archive->mapped.size) {
-            CloseMappedFile(archive->mapped);
-            delete archive;
+        std::memcpy(&tmp, tocBase + (static_cast<size_t>(i) * sizeof(PakEntry)), sizeof(PakEntry));
+        const uint64_t payloadEnd = tmp.offset + tmp.compressedSize;
+        if (payloadEnd > mapped.Size() || payloadEnd < tmp.offset) {
             return false;
         }
         if (tmp.offset < sizeof(PakHeader) || tmp.offset > header.tocOffset) {
-            CloseMappedFile(archive->mapped);
-            delete archive;
             return false;
         }
         if (tmp.uncompressedSize > (100ULL << 20)) {
-            CloseMappedFile(archive->mapped);
-            delete archive;
             return false;
         }
     }
 
-    bool ok = Lock(_catalogMutex, [&]() -> bool {
-        if (_archiveCount >= _archiveCapacity) {
-            size_t newCap = _archiveCapacity == 0 ? 4 : _archiveCapacity * 2;
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wduplicated-branches"
-#endif
-            auto** newArrs = new (std::nothrow) PakArchive*[newCap];
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-            if (newArrs == nullptr) {
-                return false;
-            }
-            if (_archives != nullptr) {
-                std::memcpy(static_cast<void*>(newArrs), static_cast<void*>(_archives), _archiveCount * sizeof(PakArchive*));
-                delete[] _archives;
-            }
-            _archives        = newArrs;
-            _archiveCapacity = newCap;
-        }
-        _archives[_archiveCount++] = archive;
+    auto archive        = std::make_unique<PakArchive>();
+    archive->version    = header.version;
+    archive->entryCount = header.entryCount;
+    archive->mapped     = std::move(mapped);
 
-        for (uint32_t i = 0; i < header.entryCount; ++i) {
+    const std::byte* dirBase = archive->mapped.Data() + header.tocOffset;
+
+    Lock(_catalogMutex, [&] {
+        PakArchive* rawArchive = archive.get();
+        for (uint32_t i = 0; i < rawArchive->entryCount; ++i) {
             PakEntry entry {};
-            std::memcpy(&entry, baseData + header.tocOffset + (i * sizeof(PakEntry)), sizeof(PakEntry));
-            _catalog.Insert(entry.pathHash, CatalogEntry {.entry = entry, .archive = archive});
+            std::memcpy(&entry, dirBase + (static_cast<size_t>(i) * sizeof(PakEntry)), sizeof(PakEntry));
+            const uint64_t pathHash = entry.pathHash;
+            _catalog.Insert(pathHash, CatalogEntry {.entry = entry, .archive = rawArchive});
         }
-        return true;
+        _archives.push_back(std::move(archive));
     });
-
-    if (!ok) {
-        CloseMappedFile(archive->mapped);
-        delete archive;
-        return false;
-    }
 
     return true;
 }
 
 void VirtualFileSystem::LoadAsync(RestrictSpan<LoadRequest> requests, ::ZHLN::TaskSystem::Counter* counter) {
-    if (requests.size() == 0) {
+    if (requests.empty()) {
         return;
     }
 
     std::vector<::ZHLN::TaskSystem::Task> tasks;
     tasks.reserve(requests.size());
 
-    for (auto& request : requests) {
+    for (auto& request: requests) {
         auto* jobPayload = new std::pair<VirtualFileSystem*, LoadRequest*>(this, &request);
 
         tasks.push_back(
@@ -190,14 +282,83 @@ void VirtualFileSystem::LoadAsync(RestrictSpan<LoadRequest> requests, ::ZHLN::Ta
     ::ZHLN::TaskSystem::Dispatch(tasks, counter);
 }
 
-bool VirtualFileSystem::LoadSync(LoadRequest& request) {
+auto VirtualFileSystem::LoadSync(LoadRequest& request) -> bool {
     ExecuteLoad(&request);
     return request.success;
 }
 
-bool VirtualFileSystem::TryLoadFromDirectories(LoadRequest* req) const {
-    (void)req;
-    return false;
+auto VirtualFileSystem::LoadFromDirectories(LoadRequest& req) const -> bool {
+    std::filesystem::path resolvedFile;
+
+    const bool foundPath = Lock(_mountDirMutex, [&]() -> bool {
+        if (_mountDirs.empty()) {
+            return false;
+        }
+
+        auto tryResolve = [&](std::string_view relPath) -> bool {
+            for (size_t rev = _mountDirs.size(); rev > 0; --rev) {
+                const std::filesystem::path& root      = _mountDirs[rev - 1];
+                const std::filesystem::path  candidate = root / std::filesystem::path(relPath);
+                std::error_code              ec;
+                if (std::filesystem::is_regular_file(candidate, ec) && !ec && IsPathWithinRoot(candidate, root)) {
+                    resolvedFile = candidate;
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        if (const auto indexed = _directoryIndex.Find(req.assetID)) {
+            if (tryResolve(*indexed)) {
+                return true;
+            }
+        }
+
+        // A loose file may have been created inside a mounted directory after
+        // `MountDirectory()` ran; re-index once on miss before falling back to `.pak`.
+        RebuildDirectoryIndexLocked();
+        if (const auto indexed = _directoryIndex.Find(req.assetID)) {
+            return tryResolve(*indexed);
+        }
+        return false;
+    });
+
+    if (!foundPath) {
+        req.success = false;
+        return false;
+    }
+
+    std::error_code ec;
+    const auto      rawSize = std::filesystem::file_size(resolvedFile, ec);
+    if (ec) {
+        req.success = false;
+        return false;
+    }
+
+    const auto byteSize = static_cast<size_t>(rawSize);
+    const auto allocSz  = std::max<size_t>(byteSize, 1);
+    void*      buffer   = ::operator new[](allocSz, std::align_val_t {16});
+
+    if (byteSize > 0) {
+        std::ifstream file(resolvedFile, std::ios::binary);
+        if (!file) {
+            ::operator delete[](buffer, std::align_val_t {16});
+            req.success = false;
+            return false;
+        }
+        file.read(static_cast<char*>(buffer), static_cast<std::streamsize>(byteSize));
+        if (!file || static_cast<size_t>(file.gcount()) != byteSize) {
+            ::operator delete[](buffer, std::align_val_t {16});
+            req.success = false;
+            return false;
+        }
+    }
+
+    req.outData    = buffer;
+    req.outSize    = byteSize;
+    req.isZeroCopy = false;
+    req.success    = true;
+    return true;
 }
 
 void VirtualFileSystem::ExecuteLoad(LoadRequest* req) {
@@ -205,46 +366,53 @@ void VirtualFileSystem::ExecuteLoad(LoadRequest* req) {
         return;
     }
 
+    req->outData    = nullptr;
+    req->outSize    = 0;
+    req->isZeroCopy = false;
+    req->success    = false;
+
+    if (LoadFromDirectories(*req)) {
+        return;
+    }
+
     PakEntry    entry {};
     PakArchive* archive = nullptr;
 
-    {
-        Lock(_catalogMutex, [&] {
-            const auto catEntry = _catalog.Find(req->assetID);
-            if (!catEntry) {
-                return;
-            }
+    Lock(_catalogMutex, [&] {
+        if (const auto catEntry = _catalog.Find(req->assetID)) {
             entry   = catEntry->entry;
             archive = catEntry->archive;
-        });
-    }
+        }
+    });
 
-    if (archive == nullptr || archive->mapped.data == nullptr) {
+    if (archive == nullptr || !archive->mapped.IsValid()) {
         req->success = false;
         return;
     }
 
-    if (entry.offset + entry.compressedSize > archive->mapped.size) {
+    const uint64_t endOffset = entry.offset + entry.compressedSize;
+    if (entry.offset > archive->mapped.Size() || endOffset > archive->mapped.Size() || endOffset < entry.offset) {
         req->success = false;
         return;
     }
 
-    req->outSize     = entry.uncompressedSize;
-    char* payloadRaw = static_cast<char*>(archive->mapped.data) + entry.offset;
+    req->outSize            = static_cast<size_t>(entry.uncompressedSize);
+    const char* payloadRaw  = archive->mapped.Chars().data() + entry.offset;
 
     if (entry.compression == 0) {
-        req->outData    = payloadRaw;
+        req->outData    = const_cast<char*>(payloadRaw);
         req->isZeroCopy = true;
         req->success    = true;
         return;
     }
 
-    req->outData    = ::operator new[](entry.uncompressedSize, std::align_val_t {16});
-    req->isZeroCopy = false;
+    const size_t allocSz = std::max<size_t>(req->outSize, 1);
+    req->outData         = ::operator new[](allocSz, std::align_val_t {16});
+    req->isZeroCopy      = false;
 
     if (entry.compression == 2) {
 #if ZHLN_HAS_ZSTD
-        size_t result = ZSTD_decompress(req->outData, entry.uncompressedSize, payloadRaw, entry.compressedSize);
+        const size_t result = ZSTD_decompress(req->outData, entry.uncompressedSize, payloadRaw, entry.compressedSize);
         if (ZSTD_isError(result)) {
             FreeMemory(*req);
             req->success = false;
@@ -255,7 +423,7 @@ void VirtualFileSystem::ExecuteLoad(LoadRequest* req) {
         req->success = false;
         return;
 #endif
-    } else if (entry.compression == 1) {
+    } else {
         FreeMemory(*req);
         req->success = false;
         return;
@@ -268,60 +436,142 @@ void VirtualFileSystem::FreeMemory(LoadRequest& req) {
     if (!req.isZeroCopy && (req.outData != nullptr)) {
         ::operator delete[](req.outData, std::align_val_t {16});
     }
-    req.outData = nullptr;
+    req.outData    = nullptr;
+    req.outSize    = 0;
+    req.isZeroCopy = false;
 }
 
 auto VirtualFileSystem::Exists(uint64_t assetID) const noexcept -> bool {
-    bool inPak = Lock(_catalogMutex, [&]() -> bool {
-        return _catalog.Find(assetID).has_value();
+    const bool inDirs = Lock(_mountDirMutex, [&]() -> bool {
+        if (_mountDirs.empty()) {
+            return false;
+        }
+
+        auto existsAtRelPath = [&](std::string_view relPath) -> bool {
+            for (size_t rev = _mountDirs.size(); rev > 0; --rev) {
+                const std::filesystem::path& root      = _mountDirs[rev - 1];
+                const std::filesystem::path  candidate = root / std::filesystem::path(relPath);
+                std::error_code              ec;
+                if (std::filesystem::is_regular_file(candidate, ec) && !ec && IsPathWithinRoot(candidate, root)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        if (const auto indexed = _directoryIndex.Find(assetID)) {
+            if (existsAtRelPath(*indexed)) {
+                return true;
+            }
+        }
+
+        RebuildDirectoryIndexLocked();
+        if (const auto indexed = _directoryIndex.Find(assetID)) {
+            return existsAtRelPath(*indexed);
+        }
+        return false;
     });
-    return inPak;
+    if (inDirs) {
+        return true;
+    }
+
+    return Lock(_catalogMutex, [&]() -> bool { return _catalog.Find(assetID).has_value(); });
+}
+
+auto VirtualFileSystem::Exists(std::string_view virtualPath) const noexcept -> bool {
+    const auto sanitized = SanitizeVirtualPath(virtualPath);
+    if (!sanitized) {
+        return false;
+    }
+
+    const bool inDirs = Lock(_mountDirMutex, [&]() -> bool {
+        for (size_t rev = _mountDirs.size(); rev > 0; --rev) {
+            const std::filesystem::path& root      = _mountDirs[rev - 1];
+            const std::filesystem::path  candidate = root / std::filesystem::path(*sanitized);
+            std::error_code              ec;
+            if (std::filesystem::is_regular_file(candidate, ec) && !ec && IsPathWithinRoot(candidate, root)) {
+                _directoryIndex.Insert(Hash64(*sanitized), *sanitized);
+                return true;
+            }
+        }
+        return false;
+    });
+    if (inDirs) {
+        return true;
+    }
+
+    const uint64_t id = Hash64(*sanitized);
+    return Lock(_catalogMutex, [&]() -> bool { return _catalog.Find(id).has_value(); });
 }
 
 auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, size_t outCapacity) const -> size_t {
-    auto tryDirs = Lock(_mountDirMutex, [&]() -> size_t {
-        for (size_t i = 0; i < _mountDirCount; ++i) {
-            std::filesystem::path full = std::filesystem::path(_mountDirs[i]) / virtualPath;
-            std::error_code ec;
-            auto sz = std::filesystem::file_size(full, ec);
-            if (ec) {
-                continue;
-            }
-            if (outData == nullptr) {
-                return static_cast<size_t>(sz);
-            }
-            if (sz > outCapacity) {
-                return 0;
-            }
-            std::ifstream f(full, std::ios::binary);
-            if (!f) {
-                continue;
-            }
-            f.read(static_cast<char*>(outData), static_cast<std::streamsize>(sz));
-            if (!f) {
-                return 0;
-            }
-            return static_cast<size_t>(sz);
-        }
+    const auto sanitized = SanitizeVirtualPath(virtualPath);
+    if (!sanitized) {
         return 0;
-    });
-    if (tryDirs != 0) {
-        return tryDirs;
     }
 
-    uint64_t id = Hash64(virtualPath);
-    PakArchive* archive = nullptr;
-    PakEntry entry {};
+    bool   matchedMountedFile = false;
+    size_t mountedResult      = 0;
+
+    Lock(_mountDirMutex, [&] {
+        for (size_t rev = _mountDirs.size(); rev > 0; --rev) {
+            const std::filesystem::path& root = _mountDirs[rev - 1];
+            const std::filesystem::path  full = root / std::filesystem::path(*sanitized);
+            std::error_code              ec;
+            if (!std::filesystem::is_regular_file(full, ec) || ec || !IsPathWithinRoot(full, root)) {
+                continue;
+            }
+
+            _directoryIndex.Insert(Hash64(*sanitized), *sanitized);
+            matchedMountedFile = true;
+
+            const auto sz = std::filesystem::file_size(full, ec);
+            if (ec || sz == 0) {
+                mountedResult = 0;
+                return;
+            }
+            if (outData == nullptr) {
+                mountedResult = static_cast<size_t>(sz);
+                return;
+            }
+            if (sz > outCapacity) {
+                mountedResult = 0;
+                return;
+            }
+
+            std::ifstream file(full, std::ios::binary);
+            if (!file) {
+                mountedResult = 0;
+                return;
+            }
+            file.read(static_cast<char*>(outData), static_cast<std::streamsize>(sz));
+            if (!file || static_cast<size_t>(file.gcount()) != static_cast<size_t>(sz)) {
+                mountedResult = 0;
+                return;
+            }
+            mountedResult = static_cast<size_t>(sz);
+            return;
+        }
+    });
+
+    if (matchedMountedFile) {
+        return mountedResult;
+    }
+
+    const uint64_t id      = Hash64(*sanitized);
+    PakArchive*    archive = nullptr;
+    PakEntry       entry {};
     Lock(_catalogMutex, [&] {
         if (const auto catEntry = _catalog.Find(id)) {
-            entry = catEntry->entry;
+            entry   = catEntry->entry;
             archive = catEntry->archive;
         }
     });
-    if (archive == nullptr || archive->mapped.data == nullptr) {
+    if (archive == nullptr || !archive->mapped.IsValid()) {
         return 0;
     }
-    if (entry.offset + entry.compressedSize > archive->mapped.size) {
+    const uint64_t endOffset = entry.offset + entry.compressedSize;
+    if (entry.offset > archive->mapped.Size() || endOffset > archive->mapped.Size() || endOffset < entry.offset) {
         return 0;
     }
     if (outData == nullptr) {
@@ -331,13 +581,13 @@ auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, si
         return 0;
     }
     if (entry.compression == 0) {
-        std::memcpy(outData, static_cast<char*>(archive->mapped.data) + entry.offset, entry.uncompressedSize);
+        std::memcpy(outData, archive->mapped.Data() + entry.offset, static_cast<size_t>(entry.uncompressedSize));
         return static_cast<size_t>(entry.uncompressedSize);
     }
     if (entry.compression == 2) {
 #if ZHLN_HAS_ZSTD
-        char*  payloadRaw = static_cast<char*>(archive->mapped.data) + entry.offset;
-        size_t res        = ZSTD_decompress(outData, outCapacity, payloadRaw, entry.compressedSize);
+        const char*  payloadRaw = archive->mapped.Chars().data() + entry.offset;
+        const size_t res        = ZSTD_decompress(outData, outCapacity, payloadRaw, entry.compressedSize);
         if (ZSTD_isError(res)) {
             return 0;
         }
@@ -349,4 +599,4 @@ auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, si
     return 0;
 }
 
-}
+} // namespace ZHLN::FS

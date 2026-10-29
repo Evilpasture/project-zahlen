@@ -75,6 +75,17 @@ constexpr int   kAoSamples = 24;
     return JPH::Vec3(a * kRadiansToDegrees, b * kRadiansToDegrees, c * kRadiansToDegrees);
 }
 
+// The sky_camera's own rotation as a quaternion (SkyboxTransform::rot is its
+// row-major AngleMatrix), so entity orientations can compose with it the way
+// Source parents skybox props to the sky_camera.
+[[nodiscard]] auto SkyboxRotationQuat(const SkyboxTransform& t) -> JPH::Quat {
+    const JPH::Mat44 basis(
+        JPH::Vec4(t.rot[0], t.rot[3], t.rot[6], 0.0f), JPH::Vec4(t.rot[1], t.rot[4], t.rot[7], 0.0f), JPH::Vec4(t.rot[2], t.rot[5], t.rot[8], 0.0f),
+        JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f)
+    );
+    return basis.GetQuaternion();
+}
+
 } // namespace
 
 auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const ImportOptions& options) -> JPH::Vec3 {
@@ -121,6 +132,24 @@ auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const Impo
     }
     return EngineTripletFromQuat(qEngine);
 }
+// Attaches the leaf ambient cube at a Source-space position to a prop entity.
+// The cube decodes raw (c * 2^e), like the lightmap lump, and is scaled by
+// propAmbientCubeScale, which carries the same kSourceLuxelToEngineRadiance
+// normalization the atlas gets -- a prop and the wall behind it therefore stay
+// on one radiance scale. See ImportOptions::propAmbientCubeScale.
+static void ApplyAmbientCube(const BSPMap& map, const ImportOptions& options, std::array<float, 3> sourcePos, Scene::SceneEntity& entity) {
+    std::array<std::array<float, 3>, 6> cube {};
+    if (!SampleLeafAmbientCube(map, sourcePos, cube)) {
+        return;
+    }
+    for (size_t f = 0; f < 6; ++f) {
+        entity.ambientCube[f] = {
+            cube[f][0] * options.propAmbientCubeScale, cube[f][1] * options.propAmbientCubeScale, cube[f][2] * options.propAmbientCubeScale, 1.0f
+        };
+    }
+    entity.hasAmbientCube = true;
+}
+
 auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const ImportOptions& options) -> Scene::Scene {
     Scene::Scene scene;
     scene.name = std::string(virtualPath);
@@ -142,8 +171,11 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
     // The sun's direction comes from the map's light_environment, and it has to
     // be known before the entity loop reaches it (the loop builds the sun
     // SceneLight in place). EnvironmentSunDirection falls back to a 45-degree
-    // elevation when the map carries no light_environment at all.
-    const JPH::Vec3 sunDirection = EnvironmentSunDirection(map);
+    // elevation when the map carries no light_environment at all. It returns a
+    // Source (Z-up) vector, so it has to take the same ConvertDirection hop the
+    // spot branch gives its beam; unconverted, the engine's Y-up sun pointed
+    // sideways and its shadows were cast into the ground.
+    const JPH::Vec3 sunDirection = ConvertDirection(options, EnvironmentSunDirection(map));
     uint32_t        sceneLightSuppressed = 0;
 
     // The sky gradient is the light_environment's ambient term, converted the
@@ -183,6 +215,14 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         scene.environment.skyGround  = {sky.x * 0.35f, sky.y * 0.35f, sky.z * 0.35f};
     }
 
+    // Display calibration: VRAD radiance, entity brightness and the ambient
+    // ladder share one scale, and measured against the Source reference this
+    // engine's tonemap chain lands that scale kIngestLevelGain under Source's
+    // display (same scene, same bands). The ambient rides the same gain the
+    // light chokepoints do (kSourceBrightnessToEngine), through the renderer's
+    // own ambientExposure axis.
+    scene.environment.ambientExposure = kAmbientExposure * kIngestLevelGain;
+
     if (options.ambientOcclusion) {
         scene.environment.giMode    = 3;
         scene.environment.aoRadius  = kAoRadius;
@@ -195,6 +235,11 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
     // where the entity transform sits.
     const std::vector<InteractiveSubmodel> interactiveSubmodels = CollectInteractiveSubmodels(map, options);
 
+    // 3D skybox content (background scenery + its fixture lights) is compiled
+    // around the sky_camera above the map; the transform places it around the
+    // play boundaries the way Source renders the sky.
+    const SkyboxTransform skybox = MakeSkyboxTransform(map, options.importSkybox);
+
     for (const BSPEntity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
         if (className.empty()) {
@@ -203,7 +248,26 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
         const auto      originArr = entity.FindVector("origin").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
         const auto      anglesArr = entity.FindVector("angles").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
-        const JPH::Vec3 origin(originArr[0], originArr[1], originArr[2]);
+        // Skybox entities (fixture lights, props, beams) travel with the
+        // background scenery. Distances scale by skybox.scale, so lights carry
+        // scale^2 intensity (E = I/d^2 keeps the authored pool brightness) and
+        // their derived ranges scale with the content.
+        const bool      skyEntity = skybox.active && IsSkyboxPoint(skybox, originArr.data());
+        // Skybox off: its entities leave with its geometry, instead of spawning
+        // at raw compile coordinates a kilometre above the map.
+        if (skyEntity && !skybox.enabled) {
+            continue;
+        }
+        float           skyScale  = 1.0f;
+        float           placed[3] = {originArr[0], originArr[1], originArr[2]};
+        JPH::Vec3       origin(originArr[0], originArr[1], originArr[2]);
+        if (skyEntity) {
+            // Geometry and props ride the transform and composite as the
+            // background layer; only buried LIGHTS stay filtered below.
+            TransformSkyboxPoint(skybox, originArr.data(), placed);
+            origin   = JPH::Vec3(placed[0], placed[1], placed[2]);
+            skyScale = skybox.scale;
+        }
         JPH::Vec3       angles(anglesArr[0], anglesArr[1], anglesArr[2]);
 
         // ---- lights ------------------------------------------------------
@@ -213,6 +277,14 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         // the .bsp does not carry.
         const LightEntityKind lightKind = ClassifyLightEntity(className);
         if (lightKind != LightEntityKind::NotALight) {
+            // Buried skybox fixtures stay filtered: Source lights only its own
+            // skybox world with them, and without per-light layers a light
+            // parked inside the world volume would shine out of the terrain
+            // into the play space. Every skybox light outside the volume rides
+            // the transform onto its scenery as before.
+            if (skyEntity && IsSkyboxHidden(skybox, placed)) {
+                continue;
+            }
             const SourceLightValue value = ParseSourceLightValue(entity);
             const SourceAttenuation atten = ParseSourceAttenuation(entity);
 
@@ -230,14 +302,33 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
             Scene::SceneLight light;
             light.name = entity.Find("targetname").empty() ? std::string(className) : std::string(entity.Find("targetname"));
+            // VRAD compiled every light entity in this map into the lightmaps
+            // that describe its surfaces, so each one is a *baked* light: it
+            // still runs live for props, entities and skybox scenery, but the
+            // deferred pass withholds its diffuse on the pixels whose lightmap
+            // already owns it (see SceneLight::baked / Res_BakedMask). Without
+            // this the whole map is lit twice -- once by the bake, once by the
+            // live light -- which is exactly what a mapper sees as "the
+            // lightmap does nothing". Its specular stays live: no lightmap
+            // stores a lobe, so the bake cannot replace the highlight.
+            light.baked = Scene::kBakeOwnsDiffuse;
 
-            // Sun, not a point at infinity: the engine's directional light is
-            // placed at the sky and shoots along -direction, so a Source sun
-            // direction is stored negated. The light_environment entity's
-            // origin is a mapper hint, not the light's position.
+            // Sun, not a point at infinity: LightComponent::direction is the
+            // toward-the-sun vector -- RenderSystem places the shadow camera at
+            // shadowCenter + direction * FarOffset and shading takes NdotL
+            // against it directly. AngleDirection already returns that vector
+            // for light_environment (Source's sun angles point AT the sun: this
+            // map's pitch -62 is a sun 62 degrees above the horizon, and
+            // -sin(-62deg) > 0), while the same formula on light_spot is the
+            // beam's travel direction, which the Spot branch below stores
+            // as-is. Negating the sun vector here aimed the directional light
+            // into the ground: NdotL_sun evaluated to zero on every up-facing
+            // surface and both the world and the 3D-skybox composite rendered
+            // their unlit ambient only. The light_environment entity's origin
+            // is a mapper hint, not the light's position.
             if (lightKind == LightEntityKind::Sun) {
                 light.type     = "Sun";
-                light.direction = {-sunDirection.GetX(), -sunDirection.GetY(), -sunDirection.GetZ()};
+                light.direction = {sunDirection.GetX(), sunDirection.GetY(), sunDirection.GetZ()};
                 light.position = {0.0f, 0.0f, 0.0f};
                 // Calibration: Source's stock 200-brightness sun maps onto the
                 // engine's LightingSystem default of 180, and the exposure the
@@ -258,7 +349,10 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
             light.position                 = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
             light.color                    = {value.rgba[0] / 255.0f, value.rgba[1] / 255.0f, value.rgba[2] / 255.0f};
-            light.intensity                = value.rgba[3] * kSourceBrightnessToEngine;
+            // Skybox fixtures: distances scale by skybox.scale, so intensity
+            // carries scale^2 to keep the authored pool brightness on the
+            // placed scenery (E = I/d^2).
+            light.intensity                = value.rgba[3] * kSourceBrightnessToEngine * skyScale * skyScale;
 
             const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
             light.rotation               = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
@@ -273,6 +367,12 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 const float yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
                 const float cp    = std::cos(pitch);
                 direction         = JPH::Vec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+                if (skyEntity) {
+                    const float d[3] = {direction.GetX(), direction.GetY(), direction.GetZ()};
+                    float       out[3];
+                    TransformSkyboxVector(skybox, d, out);
+                    direction = JPH::Vec3(out[0], out[1], out[2]);
+                }
                 const JPH::Vec3 engineDirection = ConvertDirection(options, direction);
                 light.direction                 = {engineDirection.GetX(), engineDirection.GetY(), engineDirection.GetZ()};
 
@@ -294,8 +394,11 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // concrete. The radius follows the same distance: it is the
             // renderer's specular/probe footprint, and a 5 cm point light
             // inside a 3 m lamp shade is what makes the highlight a dot.
-            const float engineIntensity = light.intensity;
-            light.range                 = AttenuationRangeMetres(atten, engineIntensity, options.unitScale);
+            // Derive the cutoff from the authored (mini-scale) intensity so the
+            // clamp bounds the authored pool, then let skybox content scale the
+            // distance with its scenery.
+            const float engineIntensity = value.rgba[3] * kSourceBrightnessToEngine;
+            light.range                 = AttenuationRangeMetres(atten, engineIntensity, options.unitScale) * skyScale;
             light.radius                = std::max(light.range * 0.05f, 0.05f);
 
             scene.lights.push_back(std::move(light));
@@ -364,6 +467,23 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 }
 
                 if ((isDoor || isButton) && subRecord != nullptr) {
+                    // Doors and buttons are brush submodels, not props, so they never
+                    // reached the prop path that samples ambient cubes. Sample at the
+                    // submodel's authored centre (its bounds plus the brush origin).
+                    if (modelIndex >= 0 && static_cast<size_t>(modelIndex) < map.models.size()) {
+                        const DModel& dm = map.models[static_cast<size_t>(modelIndex)];
+                        std::array<float, 3> brushOrigin {0.0f, 0.0f, 0.0f};
+                        if (const auto originKey = entity.FindVector("origin")) {
+                            brushOrigin = {(*originKey)[0], (*originKey)[1], (*originKey)[2]};
+                        }
+                        const std::array<float, 3> centre = {
+                            brushOrigin[0] + 0.5f * (dm.mins[0] + dm.maxs[0]),
+                            brushOrigin[1] + 0.5f * (dm.mins[1] + dm.maxs[1]),
+                            brushOrigin[2] + 0.5f * (dm.mins[2] + dm.maxs[2]),
+                        };
+                        ApplyAmbientCube(map, options, centre, interactive);
+                    }
+
                     interactive.shape  = Scene::ShapeKind::Prefab;
                     interactive.source = std::string(virtualPath) + "#model_" + std::to_string(modelIndex);
 
@@ -439,6 +559,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
                 const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
                 interactive.transform.position = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+                ApplyAmbientCube(map, options, {origin.GetX(), origin.GetY(), origin.GetZ()}, interactive);
             } else {
                 interactive.shape              = Scene::ShapeKind::Box;
                 const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
@@ -483,6 +604,22 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
             prop.transform.rotation      = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
 
+            if (!skyEntity) {
+                ApplyAmbientCube(map, options, {origin.GetX(), origin.GetY(), origin.GetZ()}, prop);
+            }
+
+            if (skyEntity) {
+                // Background scenery: Source's skybox world is non-solid and
+                // composites behind the map, so no physics and the same layer
+                // the skybox faces use. The prop's own rotation composes with
+                // the sky_camera's.
+                prop.drawFlags    = DrawFlags::Background;
+                prop.body         = Scene::BodyKind::None;
+                prop.startsAsleep = false;
+                const JPH::Vec3 composed = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(JPH::Vec3 {prop.transform.rotation}));
+                prop.transform.rotation  = {composed.GetX(), composed.GetY(), composed.GetZ()};
+            }
+
             scene.entities.push_back(std::move(prop));
             continue;
         }
@@ -498,19 +635,38 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             continue;
         }
 
+        // Static props authored inside the skybox cluster ride the transform
+        // with the rest of the miniscape (they used to spawn at raw compile
+        // coordinates, floating above the map) and composite as background
+        // layer scenery: no physics, Source's skybox world is non-solid.
+        const bool skyProp = skybox.active && IsSkyboxPoint(skybox, sp.origin.data());
+        if (skyProp && !skybox.enabled) {
+            continue; // skybox off: its props leave with its geometry
+        }
+        JPH::Vec3  propOrigin(sp.origin[0], sp.origin[1], sp.origin[2]);
+        if (skyProp) {
+            float placed[3];
+            TransformSkyboxPoint(skybox, sp.origin.data(), placed);
+            propOrigin = JPH::Vec3(placed[0], placed[1], placed[2]);
+        }
+
         Scene::SceneEntity propEntity;
         propEntity.name   = "prop_static_" + std::to_string(propIdx);
         propEntity.shape  = Scene::ShapeKind::Prefab;
         propEntity.source = sp.modelName;
-        propEntity.body   = (options.buildColliders && sp.solid != 0) ? Scene::BodyKind::Static : Scene::BodyKind::None;
+        propEntity.body   = (options.buildColliders && sp.solid != 0 && !skyProp) ? Scene::BodyKind::Static : Scene::BodyKind::None;
 
-        const JPH::Vec3 spOrigin(sp.origin[0], sp.origin[1], sp.origin[2]);
-        const JPH::Vec3 enginePos = ConvertPosition(options, spOrigin);
+        const JPH::Vec3 enginePos = ConvertPosition(options, propOrigin);
         propEntity.transform.position = {enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()};
 
         const JPH::Vec3 sourceAngles(sp.angles[0], sp.angles[1], sp.angles[2]);
         const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(sourceAngles, options);
         propEntity.transform.rotation = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
+        if (skyProp) {
+            propEntity.drawFlags = DrawFlags::Background;
+            const JPH::Vec3 composed = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(JPH::Vec3 {propEntity.transform.rotation}));
+            propEntity.transform.rotation = {composed.GetX(), composed.GetY(), composed.GetZ()};
+        }
 
         const float s = (sp.uniformScale > 0.0f) ? sp.uniformScale : 1.0f;
         propEntity.transform.scale = {s, s, s};
@@ -521,6 +677,13 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             sp.diffuseModulation[2] / 255.0f,
             sp.diffuseModulation[3] / 255.0f
         };
+
+        if (!skyProp) {
+            // Static props sample at lightingOrigin like the engine; fall back to
+            // the origin when the map leaves it at zero.
+            const bool hasLightingOrigin = sp.lightingOrigin[0] != 0.0f || sp.lightingOrigin[1] != 0.0f || sp.lightingOrigin[2] != 0.0f;
+            ApplyAmbientCube(map, options, hasLightingOrigin ? sp.lightingOrigin : sp.origin, propEntity);
+        }
 
         scene.entities.push_back(std::move(propEntity));
     }
@@ -566,6 +729,14 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // Pinned, so LightingSystem ranks these ahead of every entity light
             // and the renderer's scene-light budget cannot discard them.
             light.pinned           = true;
+            // Emissive surfaces were radiosity sources in the same compile their
+            // glow is baked with, so these proxies are baked lights as well --
+            // and unlike an authored light entity, they own neither term on a
+            // lightmapped pixel: the proxy is a reconstruction of a surface
+            // VRAD already integrated, standing centimetres off the panel it
+            // describes, and its punctual specular is a lobe Source's lamp
+            // faces never had. See SceneLight::baked.
+            light.baked            = Scene::kBakeOwnsAll;
             scene.lights.push_back(std::move(light));
         }
     }

@@ -22,8 +22,7 @@ inline FrameSync<N>::FrameSync(FrameSync&& other) noexcept:
     _timelineValues(std::exchange(other._timelineValues, {})),
     _computeValuesSubmitted(std::exchange(other._computeValuesSubmitted, {})),
     _graphicsTimelineValues(std::exchange(other._graphicsTimelineValues, {})),
-    _graphicsValuesSubmitted(std::exchange(other._graphicsValuesSubmitted, {})),
-    _submitted(std::exchange(other._submitted, {})) {}
+    _graphicsValuesSubmitted(std::exchange(other._graphicsValuesSubmitted, {})) {}
 
 template <uint32_t N>
     requires(N > 0)
@@ -36,7 +35,6 @@ inline auto FrameSync<N>::operator=(FrameSync&& other) noexcept -> FrameSync& {
         _computeValuesSubmitted = std::exchange(other._computeValuesSubmitted, {});
         _graphicsTimelineValues = std::exchange(other._graphicsTimelineValues, {});
         _graphicsValuesSubmitted = std::exchange(other._graphicsValuesSubmitted, {});
-        _submitted              = std::exchange(other._submitted, {});
     }
     return *this;
 }
@@ -66,7 +64,6 @@ inline auto FrameSync<N>::Create(const VkDevice device) noexcept -> FrameSync {
 
     for (FrameSyncSlot& frame: sync._frames) {
         if (vkCreateSemaphore(device, &binarySemaphoreInfo, nullptr, &frame.imageAvailable) != VK_SUCCESS ||
-            vkCreateSemaphore(device, &binarySemaphoreInfo, nullptr, &frame.renderFinished) != VK_SUCCESS ||
             vkCreateSemaphore(device, &timelineSemaphoreInfo, nullptr, &frame.computeTimeline) != VK_SUCCESS ||
             vkCreateSemaphore(device, &timelineSemaphoreInfo, nullptr, &frame.graphicsTimeline) != VK_SUCCESS) {
             sync.Reset();
@@ -84,9 +81,6 @@ inline void FrameSync<N>::Reset() noexcept {
             if (frame.imageAvailable != VK_NULL_HANDLE) {
                 vkDestroySemaphore(_device, frame.imageAvailable, nullptr);
             }
-            if (frame.renderFinished != VK_NULL_HANDLE) {
-                vkDestroySemaphore(_device, frame.renderFinished, nullptr);
-            }
             if (frame.computeTimeline != VK_NULL_HANDLE) {
                 vkDestroySemaphore(_device, frame.computeTimeline, nullptr);
             }
@@ -101,7 +95,6 @@ inline void FrameSync<N>::Reset() noexcept {
     _computeValuesSubmitted = {};
     _graphicsTimelineValues = {};
     _graphicsValuesSubmitted = {};
-    _submitted = {};
 }
 
 }

@@ -25,7 +25,15 @@
 #include <windows.h>
 #endif
 
+#ifndef ZHLN_GIT_COMMIT_HASH
+#define ZHLN_GIT_COMMIT_HASH "unknown"
+#endif
+
 namespace ZHLN {
+
+auto GetGitCommitHash() noexcept -> std::string_view {
+    return ZHLN_GIT_COMMIT_HASH;
+}
 
 static RENDERDOC_API_1_5_0* s_RDocAPI = nullptr;
 

@@ -2,14 +2,52 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/CommandLine.hpp>
+#include <CommandLine/CommandLine.hpp>
+#include <CommandLine/EngineCommandLine.hpp>
 #include <array>
 #include <charconv>
 #include <expected>
+#include <span>
 #include <string>
+#include <string_view>
+
+namespace {
 
 struct CommandLineTestSuite {
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> standalone_cli_isolates_tool_flags() {
+            bool seenCustom = false;
+            const std::array flags = {
+                ZHLN::CliFlag {
+                    .key         = "--custom",
+                    .shortKey    = "-c",
+                    .description = "Custom standalone flag",
+                    .action      = [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
+                        seenCustom = true;
+                        return {};
+                    },
+                },
+            };
+
+            char        arg0[]  = "tool";
+            char        arg1[]  = "-c";
+            char* const argv1[] = {arg0, arg1};
+
+            const auto ok = ZHLN::ParseCli(argv1, flags, ZHLN::CliParseConfig {.printHelpOnError = false});
+            ZHLN::Test::ExpectTrue(ok.has_value());
+            ZHLN::Test::ExpectTrue(seenCustom);
+
+            // Engine-host flags (--editor, --vsync, --renderdoc) must NOT exist on standalone tools.
+            char        bad1[]    = "--editor";
+            char* const argvBad[] = {arg0, bad1};
+            const auto  rejected  = ZHLN::ParseCli(argvBad, flags, ZHLN::CliParseConfig {.printHelpOnError = false});
+            ZHLN::Test::ExpectFalse(rejected.has_value());
+            if (!rejected) {
+                ZHLN::Test::ExpectEq(rejected.error(), ZHLN::CommandLineError::UnknownArgument);
+            }
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> flag_parsing_and_modes() {
             // Mock: ./zahlen --vsync=off --fps-limit=144 --validation=gpu --driver=cpp
             std::array<char*, 5> argv = {
@@ -27,21 +65,18 @@ struct CommandLineTestSuite {
                 ZHLN::Test::ExpectEq(opts.driver, ZHLN::GameplayDriver::Cpp);
             }
 
-            // The canonical scripted value and the scripting extra's aliases
-            // (fennel, lua) all map to the same driver.
-            std::array<char*, 2> scriptedArgv = {(char*) "zahlen", (char*) "--driver=scripted"};
-            auto                 scriptedRes  = ZHLN::HandleCommandLine(scriptedArgv);
-            ZHLN::Test::ExpectTrue(scriptedRes.has_value());
-            if (scriptedRes) {
-                ZHLN::Test::ExpectEq(scriptedRes->driver, ZHLN::GameplayDriver::Scripted);
+            // Native aliases map to GameplayDriver::Cpp; retired scripted/fennel
+            // drivers are rejected cleanly as InvalidValue.
+            std::array<char*, 2> nativeArgv = {(char*) "zahlen", (char*) "--driver=native"};
+            auto                 nativeRes  = ZHLN::HandleCommandLine(nativeArgv);
+            ZHLN::Test::ExpectTrue(nativeRes.has_value());
+            if (nativeRes) {
+                ZHLN::Test::ExpectEq(nativeRes->driver, ZHLN::GameplayDriver::Cpp);
             }
 
-            std::array<char*, 2> fennelArgv = {(char*) "zahlen", (char*) "--driver=fennel"};
-            auto                 fennelRes  = ZHLN::HandleCommandLine(fennelArgv);
-            ZHLN::Test::ExpectTrue(fennelRes.has_value());
-            if (fennelRes) {
-                ZHLN::Test::ExpectEq(fennelRes->driver, ZHLN::GameplayDriver::Scripted);
-            }
+            std::array<char*, 2> retiredArgv = {(char*) "zahlen", (char*) "--driver=scripted"};
+            auto                 retiredRes  = ZHLN::HandleCommandLine(retiredArgv);
+            ZHLN::Test::ExpectFalse(retiredRes.has_value());
 
             return {};
         }
@@ -125,9 +160,4 @@ struct CommandLineTestSuite {
     };
 };
 
-// Exported for the core group binary (RunCoreTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunCommandLineSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<CommandLineTestSuite>();
-}
-
+} // namespace

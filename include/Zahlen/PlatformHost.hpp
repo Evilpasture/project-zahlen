@@ -54,6 +54,13 @@ class ZHLN_API PlatformHost {
 
     [[nodiscard]] auto HasNativeSurface() const noexcept -> bool;
 
+    void               SetCursorMode(CursorMode mode) noexcept;
+    [[nodiscard]] auto GetCursorMode() const noexcept -> CursorMode;
+    [[nodiscard]] auto UsesCustomCursor() const noexcept -> bool;
+
+    void               CaptureMouse(bool captured) noexcept;
+    [[nodiscard]] auto IsMouseCaptured() const noexcept -> bool;
+
 
     void               Focus() noexcept;
     [[nodiscard]] auto IsFocused() const noexcept -> bool;
@@ -65,6 +72,8 @@ class ZHLN_API PlatformHost {
     void               SetClipboardText(std::string_view text);
 
     void SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept;
+
+    auto SetGamepadRumble(uint8_t slot, const GamepadRumble& rumble) noexcept -> bool;
 
     [[nodiscard]] auto AsWindow() noexcept -> ZHLN::Optional<Window&>;
     [[nodiscard]] auto AsWindow() const noexcept -> ZHLN::Optional<const Window&>;

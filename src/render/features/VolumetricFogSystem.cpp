@@ -65,27 +65,27 @@ auto VolumetricFogSystem::InitializeNoise(RenderContext::Impl& impl) -> std::exp
         )
         .transform([this, &impl](Vk::TextureResource tex) -> void {
             DestroyNoise(impl.allocator);
-            _noiseInfo = tex.viewInfo;
+            _noiseView = tex.view;
             _noiseImage = std::move(tex.image);
         });
 }
 
 void VolumetricFogSystem::DestroyNoise(Vk::Allocator& allocator) noexcept {
-    _noiseInfo = {};
+    _noiseView = {};
     allocator.DestroyImage(_noiseImage);
 }
 
 void VolumetricFogSystem::InitSamplers(RenderContext::Impl& impl) noexcept {
     Vk::InitHeapPassSamplers<Shaders::VolumetricTemporal>(
-        impl.heapManager, _temporal.heapBindings, Vk::SamplerSlot<"linearSampler">(impl.defaultSamplerConfig)
+        impl.heapManager, _temporal.heapBindings, Vk::SamplerSlot<"linearSampler">(impl.defaultSampler)
     );
 
-    const Vk::SamplerConfig repeatConfig = Vk::SamplerConfig::LinearRepeat().WithLodRange(0.0F, 0.0F);
+    const Vk::Sampler repeatSampler = Vk::Sampler::LinearRepeat().WithoutMips();
     Vk::InitHeapPassSamplers<Shaders::VolumetricFogInject>(
-        impl.heapManager, _fogInject.heapBindings, Vk::SamplerSlot<"noiseSampler">(repeatConfig)
+        impl.heapManager, _fogInject.heapBindings, Vk::SamplerSlot<"noiseSampler">(repeatSampler)
     );
     Vk::InitHeapPassSamplers<Shaders::VolumetricLightInject>(
-        impl.heapManager, _lightInject.heapBindings, Vk::SamplerSlot<"shadowSampler">(impl.shadowSamplerConfig)
+        impl.heapManager, _lightInject.heapBindings, Vk::SamplerSlot<"shadowSampler">(impl.shadowSampler)
     );
 }
 
@@ -110,7 +110,7 @@ auto VolumetricFogSystem::Temporal() noexcept -> Vk::FixedDoubleBufferedComputeP
 }
 
 auto VolumetricFogSystem::NoiseWrite() const noexcept -> Vk::ImageWrite {
-    return Vk::ImageWrite {_noiseInfo};
+    return Vk::ImageWrite {_noiseView};
 }
 
 auto VolumetricFogSystem::VoxelDispatchExtent() const noexcept -> VkExtent3D {

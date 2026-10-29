@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Zahlen/Camera.hpp"
+#include <optional>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Buffer.h>
 // clang-format off
@@ -251,8 +252,10 @@ class ZHLN_API PhysicsContext {
     void RemoveRagdoll(Physics::RagdollHandle handle) noexcept;
     void DriveRagdollPose(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose) noexcept;
     void AddRagdollImpulse(Physics::RagdollHandle handle, uint32_t jointIndex, JPH::Vec3Arg impulse) noexcept;
-    [[nodiscard]] bool TryGetBodyPosition(Physics::BodyHandle handle, JPH::RVec3& outPosition) const noexcept;
-    [[nodiscard]] bool TryGetBodyState(Physics::BodyHandle handle, Physics::BodyStateSnapshot& outState) const noexcept;
+    // Generation-safe lookups: the optional ties the result to its proof of
+    // validity; a stale handle simply has no value to hand back.
+    [[nodiscard]] auto BodyPosition(Physics::BodyHandle handle) const noexcept -> std::optional<JPH::RVec3>;
+    [[nodiscard]] auto BodyState(Physics::BodyHandle handle) const noexcept -> std::optional<Physics::BodyStateSnapshot>;
     void FillBodyStates(std::span<const Physics::BodyHandle> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept;
     [[nodiscard]] bool GetRagdollPose(Physics::RagdollHandle handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;
 

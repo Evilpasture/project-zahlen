@@ -3,7 +3,6 @@
 
 // gameplay/FallbackScene/FallbackScene.cpp
 #include "FallbackScene.hpp"
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/PrefabFactory.hpp>
@@ -16,17 +15,13 @@
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scene.hpp>
-#include <Zahlen/Scripting.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <filesystem>
 #include <format>
-#include <ranges>
 #include <utility>
 
 namespace ZHLN::FallbackScene {
@@ -115,6 +110,12 @@ constexpr size_t kPointLightIndex = 1;
 
 } // namespace
 
+namespace {
+
+std::unique_ptr<GUI::Context> s_FallbackGui;
+
+} // namespace
+
 auto DefaultPreset::FallbackScene() noexcept -> const Scene::Scene& {
     // Built on first use: a description holds strings and vectors, so it cannot
     // be a constexpr object, and there is no reason to pay for it in a process
@@ -140,6 +141,7 @@ void DefaultPreset::ClearFallback() noexcept {
     s_BtnQuit      = Entity::Null();
     s_AccumTime    = 0.0f;
     s_PopupVisible = true;
+    s_FallbackGui.reset();
 }
 
 void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage) {
@@ -158,7 +160,6 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
 
     Log("[DefaultPreset] Engaging Fallback Scene. Reason: {}", detailMessage);
 
-    auto& rc  = engine.GetRenderContext();
     auto& reg = engine.GetRegistry();
 
     // ========================================================================
@@ -171,17 +172,8 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
         reg.Create(Components::GlobalSettingsTagComponent {});
     }
 
-    TextureHandle fontHandle = TextureHandle::Invalid;
-    if (auto settings = reg.GetSingleton<GUI::UISettingsComponent>()) {
-        fontHandle = settings->fontAtlas.texture;
-        if (fontHandle == TextureHandle::Invalid) {
-            fontHandle = PrefabFactory::CreateFontAtlasTexture(
-                rc, reg, engine.GetAssetManager(), GUI::kDefaultFontAssetID
-            );
-            settings->fontAtlas.texture = fontHandle;
-            settings->defaultFontAtlas  = fontHandle;
-        }
-    }
+    engine.EnsureFontAtlas();
+    s_FallbackGui = std::make_unique<GUI::Context>(engine.GetFontAtlas());
 
     // ========================================================================
     // 1. 3D SCENE SETUP
@@ -252,8 +244,11 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
     // 2. IMMEDIATE-MODE CLAY 2D UI EVALUATION
     if (s_PopupVisible) {
-        GUI::Context ui(engine);
-        ui.BeginFrame(dt);
+        if (!s_FallbackGui) {
+            s_FallbackGui = std::make_unique<GUI::Context>();
+        }
+        s_FallbackGui->SetFontAtlas(engine.GetFontAtlas());
+        GUI::Frame ui = s_FallbackGui->BeginFrame(engine.ConsumeUIInput(dt));
 
         // Full-screen centering container
         ui.BeginBox("FallbackCenterScreen", GUI::BoxConfig {
@@ -281,11 +276,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
                 { 0.35f, 0.88f, 1.0f, 1.0f });
 
         // Alert toast box
-        // No filename in the boot-script title: which script is missing is the
-        // runtime's business, and the detail line below already carries the path
-        // that was actually looked for.
         std::string reasonTitle =
-            (s_Reason == FallbackReason::MissingBootScript)   ? "[WARNING] MISSING BOOT SCRIPT" :
             (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] MISSING NATIVE MODULE ('libgameplay.so')" :
                                                                 "[WARNING] NO GAMEPLAY MODULE DETECTED";
 
@@ -321,14 +312,8 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         // Button row
         ui.BeginRow(12.0f);
 
-        if (ui.Button("Reload Boot", GUI::Sizing { .grow = 1.0f })) {
-            const auto bootPaths = engine.GetScriptRunner().BootScriptPaths();
-            if (bootPaths.empty()) {
-                Log("[DefaultPreset] No scripting runtime installed; nothing to reload.");
-            } else {
-                Log("[DefaultPreset] Reloading '{}' via Native UI...", bootPaths.front());
-                engine.GetScriptRunner().ReloadFile(bootPaths.front());
-            }
+        if (ui.Button("Dismiss Notice", GUI::Sizing { .grow = 1.0f })) {
+            s_PopupVisible = false;
         }
 
         if (ui.Button(s_AnimateScene ? "Pause Motion" : "Resume Motion", GUI::Sizing { .grow = 1.0f })) {
@@ -346,7 +331,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
         // Bank the geometry: the renderer composes it over the scene once
         // the frame it belongs to is open (RenderSystem's HUD overlay pass).
-        engine.SetPendingUIData(ui.EndFrame());
+        engine.SubmitUI(std::move(ui).End());
 
         // The s_UIPopupBox / s_BtnXxx fields are kept for API compatibility
         // but Clay has no UI entities; leave them as null.
@@ -359,42 +344,16 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
 namespace {
 
-// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
-// Lifted from core's SystemWiring frame steps; the module declares it at its
-// original position -- after GameplayModule, before the simulation graph --
-// through the step list Describe() returns.
+// Auto-detect missing native gameplay modules and engage the Fallback Preset.
 void FallbackStep(Engine& engine, float dt, FrameContext& ctx) {
     if (!engine.FallbackSceneEnabled()) {
         return;
     }
 
-    if (!DefaultPreset::IsActive()) {
-        // The runtime declares its own boot entry points; core only asks whether
-        // any of them exist, so no scripting language is named here.
-        //
-        // An empty list means no runtime is installed, which is not a reason to
-        // stand down: the scripted driver still has nothing to run, and the
-        // fallback scene is the only thing that puts anything on screen. Without
-        // it a plain `zahlen` with no flags renders an empty world -- the camera
-        // and system graphs from InitializeDefaultScene have no geometry.
-        const auto bootPaths       = engine.GetScriptRunner().BootScriptPaths();
-        const bool scriptingDriver = ctx.driver == GameplayDriver::Scripted || ctx.driver == GameplayDriver::Hybrid;
-        const bool hasBootScript   = std::ranges::any_of(bootPaths, [](const std::string_view p) { return std::filesystem::exists(std::filesystem::path(p)); });
-        if (scriptingDriver && !hasBootScript) {
-            if (bootPaths.empty()) {
-                DefaultPreset::BuildFallbackScene(
-                    engine, FallbackReason::MissingBootScript, "No scripting runtime is installed, so no boot script could run."
-                );
-            } else {
-                DefaultPreset::BuildFallbackScene(
-                    engine, FallbackReason::MissingBootScript, std::format("Script '{}' was not found in working directory.", bootPaths.front())
-                );
-            }
-        } else if (ctx.driver == GameplayDriver::Cpp && !engine.IsNativeGameplayLoaded()) {
-            DefaultPreset::BuildFallbackScene(
-                engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
-            );
-        }
+    if (!DefaultPreset::IsActive() && ctx.driver == GameplayDriver::Cpp && !engine.IsNativeGameplayLoaded()) {
+        DefaultPreset::BuildFallbackScene(
+            engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
+        );
     }
 
     if (DefaultPreset::IsActive()) {

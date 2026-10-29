@@ -68,7 +68,6 @@ void ReleasePhysics(Engine& engine, bool all) {
 void ReleaseOwnedResources(Engine& engine, bool all) {
     ReleasePhysics(engine, all);
     ReleaseSelected<Components::AudioSourceComponent>(engine, all);
-    ReleaseSelected<Components::LoopSynthComponent>(engine, all);
     ReleaseSelected<Components::OwnedMeshComponent>(engine, all);
     ReleaseSelected<Components::SkeletalMeshComponent>(engine, all);
     engine.RunSceneCleanupPasses(all);

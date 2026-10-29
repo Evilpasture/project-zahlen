@@ -888,19 +888,3 @@ struct CDNTestSuite {
 };
 
 } // namespace
-
-// The extras test binaries are one suite per process (see
-// tests/extras/CMakeLists.txt), so this owns its own entry point.
-int main() {
-    ZHLN::TaskSystem::Scope taskScope;
-    // The loopback server is 127.0.0.1: a proxy in the environment would send
-    // the transfer somewhere else and report a failure about the machine.
-    for (const char* name: {"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"}) {
-#if defined(_WIN32)
-        _putenv_s(name, "");
-#else
-        unsetenv(name);
-#endif
-    }
-    return ZHLN::Test::Runner::Run<CDNTestSuite>();
-}

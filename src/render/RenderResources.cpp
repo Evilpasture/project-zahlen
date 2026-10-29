@@ -8,12 +8,13 @@
 #include "Zahlen/Geometry2D.hpp"
 #include "Zahlen/GraphicsSettings.hpp"
 #include "Zahlen/Render/Handles.hpp"
-#include "Zahlen/Render/PresentTiming.hpp"
 #include "Zahlen/Render/Types.hpp"
 #include "Zahlen/Vertex.hpp"
 #include "passes/forward/ForwardPass.hpp"
 #include "passes/gbuffer/GBufferBasePass.hpp"
+#include <PipelineFormats.hpp>
 #include <ShaderBindings.hpp>
+#include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
@@ -96,12 +97,8 @@ void RenderContext::UnregisterGPUMaterial(MaterialID id) noexcept {
     }
 }
 
-auto RenderContext::Impl::EnsureEmitterStorage(
-    EmitterStorageMap& emitters,
-    const uint64_t     emitterId,
-    const uint32_t     maxParticles,
-    const size_t       particleStride
-) -> BufferHandle {
+auto RenderContext::Impl::EnsureEmitterStorage(EmitterStorageMap& emitters, const uint64_t emitterId, const uint32_t maxParticles, const size_t particleStride)
+    -> BufferHandle {
     if (maxParticles == 0) {
         if (auto storage = emitters.Find(emitterId)) {
             if (storage->buffer != BufferHandle::Invalid) {
@@ -131,15 +128,15 @@ auto RenderContext::Impl::EnsureEmitterStorage(
     }
 
     const size_t allocationSize = static_cast<size_t>(maxParticles) * particleStride;
-    auto         created        = geometry.CreateBuffer(
-        {.allocationSize = allocationSize}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
-    );
+    auto         created        = geometry.CreateBuffer({.allocationSize = allocationSize}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
     if (!created || *created == BufferHandle::Invalid) {
         if (!storage->allocationWarningLogged) {
             if (!created) {
                 ZHLN::LogWarning("[Render] Could not allocate particle storage for emitter {} ({} particles): {}", emitterId, maxParticles, created.error());
             } else {
-                ZHLN::LogWarning("[Render] Could not allocate particle storage for emitter {} ({} particles): geometry buffer pool is full.", emitterId, maxParticles);
+                ZHLN::LogWarning(
+                    "[Render] Could not allocate particle storage for emitter {} ({} particles): geometry buffer pool is full.", emitterId, maxParticles
+                );
             }
             storage->allocationWarningLogged = true;
         }
@@ -149,8 +146,8 @@ auto RenderContext::Impl::EnsureEmitterStorage(
     if (storage->buffer != BufferHandle::Invalid) {
         geometry.Destroy(storage->buffer);
     }
-    storage->buffer = *created;
-    storage->capacity = maxParticles;
+    storage->buffer                  = *created;
+    storage->capacity                = maxParticles;
     storage->allocationWarningLogged = false;
     return storage->buffer;
 }
@@ -189,11 +186,13 @@ void RenderContext::Impl::ClearEmitterBuffers() noexcept {
     destroy(particleEmitters);
     destroy(meshParticleEmitters);
     for (auto& slot: billboardSlots) {
-        if (slot.buffer != BufferHandle::Invalid) {
-            geometry.Destroy(slot.buffer);
+        for (uint32_t f = 0; f < Vk::kFramesInFlight; ++f) {
+            if (slot.buffers[f] != BufferHandle::Invalid) {
+                geometry.Destroy(slot.buffers[f]);
+            }
+            slot.buffers[f]    = BufferHandle::Invalid;
+            slot.capacities[f] = 0;
         }
-        slot.buffer = BufferHandle::Invalid;
-        slot.capacity = 0;
     }
 }
 
@@ -205,20 +204,20 @@ auto RenderContext::CreateBuffer(const BufferDesc& desc) -> BufferHandle {
 
     Vk::BufferUsage vkUsage = Vk::BufferUsage::None;
     switch (desc.usage) {
-    case BufferUsage::Vertex:
-        vkUsage = Vk::BufferUsage::Vertex;
-        break;
-    case BufferUsage::Index:
-        vkUsage = Vk::BufferUsage::Index;
-        break;
-    case BufferUsage::Storage:
-        vkUsage = desc.data.empty() ? (Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex) : Vk::BufferUsage::Storage;
-        break;
-    case BufferUsage::Uniform:
-        vkUsage = Vk::BufferUsage::Uniform;
-        break;
-    case BufferUsage::SkinScratch:
-        break;
+        case BufferUsage::Vertex:
+            vkUsage = Vk::BufferUsage::Vertex;
+            break;
+        case BufferUsage::Index:
+            vkUsage = Vk::BufferUsage::Index;
+            break;
+        case BufferUsage::Storage:
+            vkUsage = desc.data.empty() ? (Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex) : Vk::BufferUsage::Storage;
+            break;
+        case BufferUsage::Uniform:
+            vkUsage = Vk::BufferUsage::Uniform;
+            break;
+        case BufferUsage::SkinScratch:
+            break;
     }
 
     GeometryManager::BufferSource source {
@@ -229,12 +228,46 @@ auto RenderContext::CreateBuffer(const BufferDesc& desc) -> BufferHandle {
     return _impl->geometry.CreateBuffer(source, vkUsage).value_or(BufferHandle::Invalid);
 }
 
+auto RenderContext::CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferHandle {
+    if (meshlets.empty()) {
+        return BufferHandle::Invalid;
+    }
+    std::vector<GPUMeshlet> packed(meshlets.size());
+    for (size_t i = 0; i < meshlets.size(); ++i) {
+        packed[i] = GpuPack::PackMeshlet(meshlets[i]);
+    }
+    return CreateBuffer<BufferUsage::Storage>(std::span<const GPUMeshlet> {packed});
+}
+
+auto RenderContext::UploadMeshlets(const MeshletBuildResult& built) -> MeshletStreams {
+    if (built.Empty() || built.vertices.empty() || built.triangles.empty()) {
+        return {};
+    }
+
+    const BufferHandle meshlets  = CreateMeshletBuffer(built.meshlets);
+    const BufferHandle vertices  = CreateBuffer<BufferUsage::Storage>(std::span {built.vertices});
+    const BufferHandle triangles = CreateBuffer<BufferUsage::Storage>(std::span {built.triangles});
+    if (meshlets == BufferHandle::Invalid || vertices == BufferHandle::Invalid || triangles == BufferHandle::Invalid) {
+        DestroyBuffer(meshlets);
+        DestroyBuffer(vertices);
+        DestroyBuffer(triangles);
+        return {};
+    }
+
+    return MeshletStreams {
+        .meshlets  = meshlets,
+        .vertices  = vertices,
+        .triangles = triangles,
+        .count     = static_cast<uint32_t>(built.meshlets.size()),
+    };
+}
+
 void RenderContext::SubmitParticleEmitter(
-    const uint64_t                emitterId,
-    const uint32_t                maxParticles,
-    const ParticleEmitterDesc&    desc,
-    const TextureHandle           texture,
-    const bool                    additive
+    const uint64_t             emitterId,
+    const uint32_t             maxParticles,
+    const ParticleEmitterDesc& desc,
+    const TextureHandle        texture,
+    const bool                 additive
 ) {
     const BufferHandle gpuBuffer = _impl->EnsureEmitterStorage(_impl->particleEmitters, emitterId, maxParticles, sizeof(Particle));
     if (gpuBuffer == BufferHandle::Invalid) {
@@ -248,11 +281,11 @@ void RenderContext::SubmitParticleEmitter(
 }
 
 void RenderContext::SubmitMeshParticleEmitter(
-    const uint64_t                emitterId,
-    const uint32_t                maxParticles,
+    const uint64_t                 emitterId,
+    const uint32_t                 maxParticles,
     const MeshParticleEmitterDesc& desc,
-    const AssetID                 mesh,
-    const MaterialID              mat
+    const AssetID                  mesh,
+    const MaterialID               mat
 ) {
     const BufferHandle gpuBuffer = _impl->EnsureEmitterStorage(_impl->meshParticleEmitters, emitterId, maxParticles, sizeof(Particle3D));
     if (gpuBuffer == BufferHandle::Invalid) {
@@ -306,26 +339,30 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
             group = &_impl->billboardSlots.back();
         }
 
-        if (group->capacity < count) {
-            if (group->buffer != BufferHandle::Invalid) {
-                DestroyBuffer(group->buffer);
+        const uint32_t frameSlot = Vk::FrameSlot(_impl->presenter.frameIndex);
+        BufferHandle&  slotBuf   = group->buffers[frameSlot];
+        uint32_t&      slotCap   = group->capacities[frameSlot];
+
+        if (slotCap < count) {
+            if (slotBuf != BufferHandle::Invalid) {
+                DestroyBuffer(slotBuf);
             }
-            const auto created = _impl->geometry.CreateBuffer(
-                {.allocationSize = static_cast<size_t>(count) * sizeof(Particle)}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
+            const auto created = _impl->geometry.CreateUninitializedBuffer(
+                static_cast<size_t>(count) * sizeof(Particle), Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex, count
             );
-            group->buffer   = created.value_or(BufferHandle::Invalid);
-            group->capacity = group->buffer != BufferHandle::Invalid ? count : 0;
+            slotBuf = created.value_or(BufferHandle::Invalid);
+            slotCap = slotBuf != BufferHandle::Invalid ? count : 0;
         }
-        if (group->buffer == BufferHandle::Invalid) {
+        if (slotBuf == BufferHandle::Invalid) {
             continue;
         }
 
-        if (auto updated = UpdateBuffer(group->buffer, std::as_bytes(std::span {_impl->billboardStaging})); !updated) [[unlikely]] {
+        if (auto updated = UpdateBuffer(slotBuf, std::as_bytes(std::span {_impl->billboardStaging})); !updated) [[unlikely]] {
             ZHLN::Log("Particle buffer update failed.");
             continue;
         }
         _impl->queues.ParticleEmitters().push_back(
-            {.gpuBuffer    = group->buffer,
+            {.gpuBuffer    = slotBuf,
              .maxParticles = count,
              .params       = {.textureIndex = textureIndex, .alignment = static_cast<Slang::ParticleAlignment>(alignment), .blendMode = blendMode},
              .simulate     = false}
@@ -342,6 +379,7 @@ void RenderContext::ClearGPUCaches() noexcept {
         }
     }
 
+    _impl->geometry.DiscardPendingUpdates();
     _impl->geometry.ClearMeshes();
 
     _impl->pipelines.RetireAll();
@@ -356,14 +394,6 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->textureManager.RetireAll();
 
     _impl->deletionQueue.Drain();
-}
-
-uint32_t RenderContext::GetValidationErrorCount() const noexcept {
-    return _impl->ctx.Instance().ValidationErrorCount();
-}
-
-uint32_t RenderContext::GetDeviceLostCount() const noexcept {
-    return _impl->ctx.Instance().DeviceLostCount();
 }
 
 void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
@@ -490,17 +520,30 @@ auto RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte>
     return _impl->geometry.Update(handle, bytes.data(), bytes.size());
 }
 
-static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::color_formats == ActiveGBuffer::array);
+static_assert(ActiveGBuffer::count == 4, "The compact deferred path owns SceneColor, Velocity, NormRough and the BakedMask ownership field only.");
+static_assert(ActiveGBuffer::array[3] == VK_FORMAT_R8_UINT, "The baked-light ownership field is one R8 lane of bits, not a weight.");
 static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_count == 1);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_formats[0] == VK_FORMAT_R16G16B16A16_SFLOAT);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
-    const bool transmission = !desc.unlit && desc.transmissionFactor > 0.0f;
-    const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission;
-    const bool alphaBlend   = forward && !desc.additiveBlend;
-    const bool depthWrite   = transmission;
+    const bool transmission  = !desc.unlit && desc.transmissionFactor > 0.0f;
+    const bool hasClearcoat  = !desc.unlit && (desc.clearcoatFactor > 1.0f / 255.0f || desc.clearcoatMap != TextureHandle::Invalid ||
+                                               desc.clearcoatRoughnessMap != TextureHandle::Invalid || desc.clearcoatNormalMap != TextureHandle::Invalid);
+    const bool hasAnisotropy = !desc.unlit && (desc.anisotropyStrength > 1.0f / 255.0f || desc.anisotropyMap != TextureHandle::Invalid);
+    const bool hasSheen      = !desc.unlit &&
+                               (desc.sheenColorFactor.x > 1.0f / 255.0f || desc.sheenColorFactor.y > 1.0f / 255.0f || desc.sheenColorFactor.z > 1.0f / 255.0f ||
+                                desc.sheenColorMap != TextureHandle::Invalid || desc.sheenRoughnessMap != TextureHandle::Invalid);
+    // These paths previously serialized their data through the discarded
+    // attachments. Keep their full material evaluation in ForwardPass instead.
+    // Emission is deliberately not a forward-only feature: lit emitters retain
+    // the deferred normal/AO/velocity path and get their radiance composited
+    // additively into LightingGI before the reflection pass.
+    const bool forwardOnly = desc.unlit || hasClearcoat || hasAnisotropy || hasSheen || desc.specularEnabled;
+    const bool forward     = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission || forwardOnly;
+    const bool alphaBlend  = !desc.additiveBlend && (desc.alphaBlend || desc.alphaMode == 2 || transmission);
+    const bool depthWrite  = transmission || (forwardOnly && !alphaBlend && !desc.additiveBlend);
 
     Vk::MaterialFlags flags = Vk::MaterialFlags::None;
     if (desc.doubleSided) {
@@ -511,12 +554,12 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     } else if (alphaBlend) {
         flags |= Vk::MaterialFlags::TranslucentBlend;
     }
-    if (depthWrite && (alphaBlend || desc.additiveBlend)) {
+    if (depthWrite) {
         flags |= Vk::MaterialFlags::DepthWrite;
     }
 
     std::expected<Material, ErrorCode> mat_res =
-        (alphaBlend || desc.additiveBlend) ?
+        forward ?
             _impl->pipelines.CreateMaterial<
                 MaterialPipelineFamily::Forward, Vk::GraphicsShaderModules<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS>,
                 Vk::GraphicsShaderModules<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshForward, Shaders::Modules::ForwardPS>, Passes::ForwardPass>(
@@ -531,78 +574,70 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     auto basicMat = *mat_res;
 
     return Material {
-        .pipeline                 = basicMat.pipeline,
-        .prePassPipeline          = basicMat.prePassPipeline,
-        .albedoMap                = desc.albedoMap,
-        .normalMap                = desc.normalMap,
-        .pbrMap                   = desc.pbrMap,
-        .emissiveMap              = desc.emissiveMap,
-        .baseColorFactor          = desc.baseColor,
-        .emissiveFactor           = desc.emissive,
-        .metallicFactor           = desc.metallic,
-        .roughnessFactor          = desc.roughness,
-        .alphaCutoff              = desc.alphaCutoff,
-        .alphaMode                = transmission ? desc.alphaMode : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat.alphaMode),
-        .doubleSided              = desc.doubleSided,
-        .unlit                    = desc.unlit,
-        .transmissionFactor       = desc.transmissionFactor,
-        .transmissionMap          = desc.transmissionMap,
-        .iridescenceFactor        = desc.iridescenceFactor,
-        .filmThicknessNm          = desc.filmThicknessNm,
-        .filmThicknessMinNm       = desc.filmThicknessMinNm,
-        .volumeThicknessM         = desc.volumeThicknessM,
-        .ior                      = desc.ior,
-        .normalScale              = desc.normalScale,
-        .filmThicknessMap         = desc.filmThicknessMap,
-        .iridescenceMap           = desc.iridescenceMap,
-        .volumeThicknessMap       = desc.volumeThicknessMap,
-        .clearcoatFactor          = desc.clearcoatFactor,
-        .clearcoatRoughnessFactor = desc.clearcoatRoughnessFactor,
-        .clearcoatNormalScale     = desc.clearcoatNormalScale,
-        .clearcoatMap             = desc.clearcoatMap,
-        .clearcoatRoughnessMap    = desc.clearcoatRoughnessMap,
-        .clearcoatNormalMap       = desc.clearcoatNormalMap,
-        .anisotropyStrength       = desc.anisotropyStrength,
-        .anisotropyRotation       = desc.anisotropyRotation,
-        .anisotropyMap            = desc.anisotropyMap,
-        .sheenColorFactor         = desc.sheenColorFactor,
-        .sheenRoughnessFactor     = desc.sheenRoughnessFactor,
-        .sheenColorMap            = desc.sheenColorMap,
-        .sheenRoughnessMap        = desc.sheenRoughnessMap,
-        .occlusionMap             = desc.occlusionMap,
-        .occlusionStrength        = desc.occlusionStrength,
-        .specularEnabled          = desc.specularEnabled,
-        .specularFactor           = desc.specularFactor,
-        .specularColorFactor      = desc.specularColorFactor,
-        .specularMap              = desc.specularMap,
-        .specularTexMode          = desc.specularTexMode,
-        .textureSamplers          = desc.textureSamplers,
-        .textureTransforms        = desc.textureTransforms,
+        .pipeline                       = basicMat.pipeline,
+        .prePassPipeline                = basicMat.prePassPipeline,
+        .albedoMap                      = desc.albedoMap,
+        .normalMap                      = desc.normalMap,
+        .pbrMap                         = desc.pbrMap,
+        .emissiveMap                    = desc.emissiveMap,
+        .bakedIrradianceMap             = desc.bakedIrradianceMap,
+        .bakedIrradianceScale           = std::max(desc.bakedIrradianceScale, 0.0f),
+        .baseColorFactor                = desc.baseColor,
+        .emissiveFactor                 = desc.emissive,
+        .metallicFactor                 = desc.metallic,
+        .roughnessFactor                = desc.roughness,
+        .alphaCutoff                    = desc.alphaCutoff,
+        .alphaMode                      = transmission ? desc.alphaMode : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat.alphaMode),
+        .doubleSided                    = desc.doubleSided,
+        .unlit                          = desc.unlit,
+        .transmissionFactor             = desc.transmissionFactor,
+        .transmissionMap                = desc.transmissionMap,
+        .iridescenceFactor              = desc.iridescenceFactor,
+        .filmThicknessNm                = desc.filmThicknessNm,
+        .filmThicknessMinNm             = desc.filmThicknessMinNm,
+        .volumeThicknessM               = desc.volumeThicknessM,
+        .ior                            = desc.ior,
+        .normalScale                    = desc.normalScale,
+        .filmThicknessMap               = desc.filmThicknessMap,
+        .iridescenceMap                 = desc.iridescenceMap,
+        .volumeThicknessMap             = desc.volumeThicknessMap,
+        .clearcoatFactor                = desc.clearcoatFactor,
+        .clearcoatRoughnessFactor       = desc.clearcoatRoughnessFactor,
+        .clearcoatNormalScale           = desc.clearcoatNormalScale,
+        .clearcoatMap                   = desc.clearcoatMap,
+        .clearcoatRoughnessMap          = desc.clearcoatRoughnessMap,
+        .clearcoatNormalMap             = desc.clearcoatNormalMap,
+        .anisotropyStrength             = desc.anisotropyStrength,
+        .anisotropyRotation             = desc.anisotropyRotation,
+        .anisotropyMap                  = desc.anisotropyMap,
+        .sheenColorFactor               = desc.sheenColorFactor,
+        .sheenRoughnessFactor           = desc.sheenRoughnessFactor,
+        .sheenColorMap                  = desc.sheenColorMap,
+        .sheenRoughnessMap              = desc.sheenRoughnessMap,
+        .occlusionMap                   = desc.occlusionMap,
+        .occlusionStrength              = desc.occlusionStrength,
+        .specularEnabled                = desc.specularEnabled,
+        .environmentReflectionEnabled   = desc.environmentReflectionEnabled,
+        .environmentReflectionAlphaMask = desc.environmentReflectionAlphaMask,
+        .environmentReflectionFactor    = desc.environmentReflectionFactor,
+        .specularFactor                 = desc.specularFactor,
+        .specularColorFactor            = desc.specularColorFactor,
+        .specularMap                    = desc.specularMap,
+        .specularTexMode                = desc.specularTexMode,
+        .textureSamplers                = desc.textureSamplers,
+        .textureTransforms              = desc.textureTransforms,
     };
 }
 
-void RenderDiagnostics::BeginShaderObservation() {
+void RenderDiagnostics::NotifyShaderChanged(std::string_view changedPath) {
     if constexpr (isDev) {
-        if (fileSystemWatcher && shaderDirectoryWatch == 0) {
-            shaderDirectoryWatch = fileSystemWatcher->WatchDirectory(
-                "resources/shaders", [this](const FS::FileWatchEvent& event) { HandleShaderFileEvent(event); }, true, ".slang",
-                FS::FileSystemWatcher::kDefaultDebounceMs
-            );
-        }
+        shaderReloads.Dispatch(changedPath, [this] { vkDeviceWaitIdle(ctx.Device()); });
     }
 }
 
-void RenderDiagnostics::HandleShaderFileEvent(const FS::FileWatchEvent& event) {
+void RenderContext::NotifyShaderChanged(std::string_view changedPath) {
     if constexpr (isDev) {
-        shaderReloads.Dispatch(event.path.lexically_normal().generic_string(), [this] { vkDeviceWaitIdle(ctx.Device()); });
-    }
-}
-
-void RenderDiagnostics::StopShaderObservation() noexcept {
-    if constexpr (isDev) {
-        if (fileSystemWatcher && shaderDirectoryWatch != 0) {
-            static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
-        }
+        _impl->diagnostics.NotifyShaderChanged(changedPath);
     }
 }
 
@@ -614,13 +649,22 @@ auto RenderContext::CreateTexture(std::span<const std::byte> rgba, Extent2D exte
     return _impl->textureManager.UploadUnnamed(rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB));
 }
 
-auto RenderContext::CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB)
+auto RenderContext::CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB, bool generateMips)
     -> std::expected<TextureHandle, ErrorCode> {
     const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 4 || rgba.size() != static_cast<size_t>(pixels) * 4) {
         return std::unexpected(TextureDataError::InvalidPixels);
     }
-    return _impl->textureManager.Upload(name, rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB));
+    return _impl->textureManager.Upload(name, rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB), generateMips);
+}
+
+auto RenderContext::CreateTextureHDR(std::string_view name, std::span<const std::byte> rgba16f, Extent2D extent, bool generateMips)
+    -> std::expected<TextureHandle, ErrorCode> {
+    const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
+    if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 8 || rgba16f.size() != static_cast<size_t>(pixels) * 8u) {
+        return std::unexpected(TextureDataError::InvalidPixels);
+    }
+    return _impl->textureManager.Upload(name, rgba16f.data(), extent.width, extent.height, VK_FORMAT_R16G16B16A16_SFLOAT, generateMips);
 }
 
 auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode> {
@@ -665,39 +709,42 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
         return std::unexpected(imageRes.error());
     }
 
-    Vk::Image image = std::move(*imageRes);
-    defer     _([&] { allocator.DestroyImage(image); });
-    auto      staging = stagingRingBuffer.Allocate(bytes);
+    Vk::Image           image = std::move(*imageRes);
+    defer               _([&] { allocator.DestroyImage(image); });
+    const Vk::ImageView view    = image.View();
+    auto                staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {
         return std::unexpected(Vk::StagingError::MemoryMappingFailed);
     }
     std::memcpy(staging.mappedData, Resource::blue_noise_rgba.data(), bytes);
 
-    if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image.Handle());
+    if (auto immediate = Vk::ExecuteImmediate(
+            ctx, graphicsCmdRing, stagingRingBuffer,
+            [&](VkCommandBuffer cmd) {
+                view.DiscardTo<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd);
 
-        const VkBufferImageCopy2 region = {
-            .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-            .pNext             = nullptr,
-            .bufferOffset      = staging.slice.offset,
-            .bufferRowLength   = 0,
-            .bufferImageHeight = 0,
-            .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
-            .imageOffset       = {},
-            .imageExtent       = {w, h, 1},
-        };
-        Vk::CopyBufferToImage(cmd, staging.slice.buffer, image.Handle(), region);
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
-    }); !immediate) [[unlikely]] {
+                const VkBufferImageCopy2 region = {
+                    .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+                    .pNext             = nullptr,
+                    .bufferOffset      = staging.slice.offset,
+                    .bufferRowLength   = 0,
+                    .bufferImageHeight = 0,
+                    .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+                    .imageOffset       = {},
+                    .imageExtent       = {w, h, 1},
+                };
+                Vk::CopyBufferToImage(cmd, staging.slice.buffer, image.Handle(), region);
+                view.Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+            }
+        );
+        !immediate) [[unlikely]] {
         return std::unexpected(immediate.error());
     }
 
-    const VkImageViewCreateInfo viewInfo = image.ViewInfo();
-
     Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
 
-    blueNoiseSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithLodRange(0.0F, 0.0F);
-    auto blueNoiseIdx      = textureManager.Adopt(std::move(image), viewInfo);
+    blueNoiseSampler  = Vk::Sampler::NearestRepeat().WithoutMips();
+    auto blueNoiseIdx = textureManager.Adopt(std::move(image), view);
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());
     }
@@ -708,8 +755,12 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 }
 
 auto RebuildSkinnedBLAS(
-    VkCommandBuffer cmd, Vk::Context& ctx, Vk::Allocator& allocator, Vk::DeletionQueue& deletionQueue, const DrawCommand& drawCmd,
-    NativeMesh& scratchMesh
+    VkCommandBuffer    cmd,
+    Vk::Context&       ctx,
+    Vk::Allocator&     allocator,
+    Vk::DeletionQueue& deletionQueue,
+    const DrawCommand& drawCmd,
+    NativeMesh&        scratchMesh
 ) -> std::expected<Vk::DeviceAddress<>, ErrorCode> {
     if (!ctx.RayTracingSupported()) {
         return std::unexpected(RenderFeatureError::FeatureNotSupported);
@@ -718,18 +769,10 @@ auto RebuildSkinnedBLAS(
         return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
     }
 
-    Vk::BlasGeometryDesc geom = {
-        .vertex_data   = scratchMesh.vboAddress.Get(),
-        .vertex_stride = sizeof(VertexPosition),
-        .max_vertex    = scratchMesh.vertexCount - 1,
-        .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
-        .index_data    = drawCmd.instanceData.iboAddress,
-        .index_type    = (drawCmd.instanceData.iboAddress != 0) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR
-    };
+    const auto geometry = Vk::GeometryView::Triangles<VertexPosition>(scratchMesh.vboAddress, scratchMesh.vertexCount)
+                              .MaybeIndexed(drawCmd.instanceData.iboAddress, drawCmd.instanceData.indexCount);
 
-    const uint32_t primitiveCount = (drawCmd.instanceData.iboAddress != 0) ? drawCmd.instanceData.indexCount / 3 : scratchMesh.vertexCount / 3;
-
-    const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(ctx.Device(), geom, primitiveCount);
+    const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(ctx.Device(), geometry);
 
     const bool creatingBlas = !scratchMesh.blas;
     if (creatingBlas) {
@@ -741,7 +784,7 @@ auto RebuildSkinnedBLAS(
             return std::unexpected(blasBufOpt.error());
         }
         scratchMesh.blasBuffer = std::move(*blasBufOpt);
-        auto blas               = Vk::CreateAccelerationStructure(
+        auto blas              = Vk::CreateAccelerationStructure(
             ctx.Device(), scratchMesh.blasBuffer.Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel
         );
         if (!blas) {
@@ -767,14 +810,12 @@ auto RebuildSkinnedBLAS(
         return std::unexpected(scratchBufOpt.error());
     }
     Vk::Buffer scratchBuf = std::move(*scratchBufOpt);
-    Vk::BuildBLAS(cmd, geom, scratchMesh.blas.Get(), Vk::BufferSlice {scratchBuf, ctx.BufferAddress(scratchBuf.Handle())}, primitiveCount);
+    Vk::BuildBLAS(cmd, geometry, scratchMesh.blas.Get(), Vk::BufferSlice {scratchBuf, ctx.BufferAddress(scratchBuf.Handle())});
     deletionQueue.Enqueue(std::move(scratchBuf));
     return scratchMesh.blasAddress;
 }
 
-void RenderContext::DrawDebugTriangles(
-    std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material
-) noexcept {
+void RenderContext::DrawDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material) noexcept {
     if (positions.size() != surfaces.size()) {
         ZHLN::Assert(false, "debug vertex positions and surfaces must have the same count");
         return;
@@ -818,7 +859,7 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const JPH::Ma
     if (matrices.empty()) {
         return;
     }
-    auto& buffer = _impl->frames.jointBuffers[_impl->presenter.frameIndex];
+    auto& buffer = _impl->frames.CurrentJointBuffer();
     if (offset > buffer.Size() / sizeof(JPH::Mat44) || matrices.size() > buffer.Size() / sizeof(JPH::Mat44) - offset) {
         ZHLN::Assert(false, "joint palette exceeds the current frame's buffer");
         return;
@@ -912,16 +953,10 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     }
     auto* indexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
 
-    const Vk::BlasGeometryDesc geom {
-        .vertex_data   = posMesh->vboAddress.Get(),
-        .vertex_stride = sizeof(VertexPosition),
-        .max_vertex    = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
-        .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
-        .index_data    = indexMesh != nullptr ? indexMesh->vboAddress.Get() : 0,
-        .index_type    = indexMesh != nullptr ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR,
-    };
-    const uint32_t                       primitiveCount = indexMesh != nullptr ? mesh.indexCount / 3 : mesh.vertexCount / 3;
-    const Vk::AccelerationStructureSizes sizes          = Vk::GetBLASSizes(impl.ctx.Device(), geom, primitiveCount);
+    const auto geometry = Vk::GeometryView::Triangles<VertexPosition>(posMesh->vboAddress, mesh.vertexCount)
+                              .MaybeIndexed((indexMesh != nullptr) ? indexMesh->vboAddress : nullptr, mesh.indexCount);
+
+    const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(impl.ctx.Device(), geometry);
 
     auto bufferRes = Vk::Buffer::Create(
         impl.allocator, sizes.acceleration_structure_size, Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress,
@@ -945,8 +980,12 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     }
     defer _([&] { impl.allocator.DestroyBuffer(*scratchRes); });
 
-    Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl.ctx.Device(), impl.ctx.PhysicalInfo().graphicsFamily);
-    auto                                     allocated = tempPool.Allocate(1);
+    auto tempPoolRes = Vk::CommandPool<Vk::QueueType::Graphics>::Create(impl.ctx.Device(), impl.ctx.PhysicalInfo().graphicsFamily);
+    if (!tempPoolRes) [[unlikely]] {
+        return std::unexpected(tempPoolRes.error());
+    }
+    auto tempPool  = std::move(*tempPoolRes);
+    auto allocated = tempPool.Allocate(1);
     if (!allocated) {
         return std::unexpected(allocated.error());
     }
@@ -955,11 +994,9 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         return std::unexpected(recording.error());
     }
     auto* const cmd = recording->Handle();
-    Vk::MemoryBarrier(
-        cmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,
-        Vk::BarrierAccess::AccelerationStructureRead
-    );
-    Vk::BuildBLAS(cmd, geom, blas.Get(), Vk::BufferSlice {*scratchRes, impl.ctx.BufferAddress(scratchRes->Handle())}, primitiveCount);
+    impl.geometry.RecordPendingUpdates(cmd);
+    Vk::MemoryBarrier::TransferToAccelerationStructureBuild().Record(cmd);
+    Vk::BuildBLAS(cmd, geometry, blas.Get(), Vk::BufferSlice {*scratchRes, impl.ctx.BufferAddress(scratchRes->Handle())});
     auto executable = std::move(*recording).End();
     if (!executable) {
         return std::unexpected(executable.error());
@@ -987,13 +1024,14 @@ auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint3
     return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
 }
 
-auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB) -> TextureHandle {
+auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB, bool generateMips)
+    -> TextureHandle {
     const uint64_t expectedPixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (expectedPixels == 0 || expectedPixels != pixels.size()) {
         ZHLN::Log("[RenderContext] Procedural texture '{}' has an invalid extent or texel count.", name);
         return TextureHandle::Invalid;
     }
-    const auto uploaded = CreateTexture(name, std::as_bytes(pixels), extent, isSRGB);
+    const auto uploaded = CreateTexture(name, std::as_bytes(pixels), extent, isSRGB, generateMips);
     if (!uploaded) {
         ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
         return TextureHandle::Invalid;
@@ -1001,20 +1039,22 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D exte
     return *uploaded;
 }
 
-enum class ScreenshotError : uint8_t {
-    FileOpenFailed         ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing"> {}) = 1,
-    DestinationNotRecorded ZHLN_ANNOTATION(ZHLN::Description<"No completed frame was drawn into the headless presentation target"> {}),
+enum class FrameCaptureError : uint8_t {
+    DestinationNotRecorded ZHLN_ANNOTATION(ZHLN::Description<"No completed frame was drawn into the presentation target"> {}) = 1,
 };
 
-auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, ErrorCode> {
+auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, ErrorCode> {
     auto* const impl = _impl.get();
 
+    // -------------------------------------------------------------------------
+    // Path A: the presentation target, when there is one to read back
+    // -------------------------------------------------------------------------
     if (!impl->presenter.swapchain.Valid()) {
         const auto dest = impl->destinations.Find(impl->presentationTarget);
         if (impl->frameOpen || !dest || !dest->acquired || !dest->acquired->drawn) {
-            ZHLN::LogWarning("[Test Capture] No completed headless frame was drawn; capture refused.");
-            return std::unexpected(ScreenshotError::DestinationNotRecorded);
+            return std::unexpected(FrameCaptureError::DestinationNotRecorded);
         }
+
         const auto&   frameImage   = *dest->acquired;
         VkImage       source       = frameImage.image.Handle();
         VkExtent2D    extent       = frameImage.image.Extent2D();
@@ -1029,37 +1069,36 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         auto  stagingBuffer = std::move(*stagingRes);
         defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
-        if (auto immediate = Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-            const VkImageMemoryBarrier2 toTransfer = Vk::MakeImageBarrier({
-                .image      = source,
-                .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT,
-                .src_layout = sourceLayout,
-                .dst_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-                .base_mip   = 0,
-                .mip_count  = VK_REMAINING_MIP_LEVELS,
-            });
-            Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toTransfer, 1});
+        if (auto immediate = Vk::ExecuteImmediate(
+                impl->ctx, impl->graphicsCmdRing,
+                [&](VkCommandBuffer cmd) -> void {
+                    frameImage.image.Transition(
+                        cmd,
+                        sourceLayout,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                        VK_ACCESS_2_TRANSFER_READ_BIT
+                    );
 
-            Vk::CopyImageToBuffer(cmd, source, stagingBuffer.Handle(), extent);
+                    Vk::CopyImageToBuffer(cmd, source, stagingBuffer.Handle(), extent);
 
-            const VkImageMemoryBarrier2 toFrame = Vk::MakeImageBarrier({
-                .image      = source,
-                .src_access = VK_ACCESS_2_TRANSFER_READ_BIT,
-                .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                .src_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                .dst_stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-                .base_mip   = 0,
-                .mip_count  = VK_REMAINING_MIP_LEVELS,
-            });
-            Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toFrame, 1});
-        }); !immediate) [[unlikely]] {
+                    frameImage.image.Transition(
+                        cmd,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                        VK_ACCESS_2_TRANSFER_READ_BIT,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
+                    );
+                }
+            );
+            !immediate) [[unlikely]] {
+            if (Vk::IsDeviceLost(immediate.error())) {
+                impl->deviceLost.store(true, std::memory_order::relaxed);
+            }
             return std::unexpected(immediate.error());
         }
 
@@ -1068,71 +1107,36 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             return std::unexpected(mapped.error());
         }
 
-        std::ofstream ofs(std::string(outputPath), std::ios::binary);
-        if (!ofs.is_open()) {
-            return std::unexpected(ScreenshotError::FileOpenFailed);
-        }
+        const auto* const rgba   = mapped->As<const uint8_t>();
+        const size_t      pixels = static_cast<size_t>(extent.width) * extent.height;
 
-        const bool writeAlpha = outputPath.ends_with(".pam") || outputPath.ends_with(".PAM");
-        if (writeAlpha) {
-            ofs << "P7\nWIDTH " << extent.width << "\nHEIGHT " << extent.height << "\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n";
-        } else {
-            ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
-        }
+        CapturedFrame result {
+            .extent = {extent.width, extent.height},
+            .format = PixelFormat::Rgba8,
+            .pixels = std::vector<uint8_t>(rgba, rgba + imageBytes),
+        };
 
-        const auto*             rgba        = mapped->As<const uint8_t>();
-        const size_t            pixels      = static_cast<size_t>(extent.width) * extent.height;
-        uint64_t                lumaSum     = 0;
-        uint64_t                lit         = 0;
-        uint64_t                transparent = 0;
-        std::array<uint64_t, 3> channelSum {};
-        std::array<uint64_t, 3> aboveFloor {};
-        std::array<uint8_t, 3>  channelMax {};
+        uint64_t lumaSum = 0;
         for (size_t i = 0; i < pixels; ++i) {
-            const uint8_t r = rgba[i * 4 + 0];
-            const uint8_t g = rgba[i * 4 + 1];
-            const uint8_t b = rgba[i * 4 + 2];
-            if (rgba[i * 4 + 3] == 0) {
-                ++transparent;
-            }
-            if (!writeAlpha) {
-                ofs.put(static_cast<char>(r));
-                ofs.put(static_cast<char>(g));
-                ofs.put(static_cast<char>(b));
-            }
-
-            const std::array<uint8_t, 3> channels {r, g, b};
-            for (size_t c = 0; c < channels.size(); ++c) {
-                channelSum[c] += channels[c];
-                channelMax[c] = std::max(channelMax[c], channels[c]);
-                aboveFloor[c] += channels[c] >= 45u ? 1u : 0u;
+            const uint8_t r = rgba[(i * 4) + 0];
+            const uint8_t g = rgba[(i * 4) + 1];
+            const uint8_t b = rgba[(i * 4) + 2];
+            if (rgba[(i * 4) + 3] == 0) {
+                ++result.metrics.transparentPixels;
             }
 
             const uint32_t luma = (2126u * static_cast<uint32_t>(r) + 7152u * static_cast<uint32_t>(g) + 722u * static_cast<uint32_t>(b)) / 10000u;
             lumaSum += luma;
-            lit += luma > 8u ? 1u : 0u;
+            result.metrics.litPixels += luma > 8u ? 1u : 0u;
         }
-        if (writeAlpha) {
-            ofs.write(reinterpret_cast<const char*>(rgba), static_cast<std::streamsize>(pixels * 4u));
-            ZHLN::LogDebug("[Test Capture] {} of {} pixels have alpha 0 (omit-background).", transparent, pixels);
-        }
-        ofs.close();
-
-        const double meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
-        const auto   meanOf   = [pixels](uint64_t sum) -> double { return pixels == 0 ? 0.0 : static_cast<double>(sum) / static_cast<double>(pixels); };
-
-        ZHLN::LogDebug(
-            "[Test Capture] Rendered frame written to: {} ({}x{} from image 0x{:016X}: mean luma {:.2f}, {} of {} pixels above black; mean RGB "
-            "({:.2f},{:.2f},{:.2f}); "
-            "max RGB ({},{},{}); channel pixels >=45: {}/{}/{})",
-            outputPath, extent.width, extent.height, reinterpret_cast<uint64_t>(source), meanLuma, lit, pixels, meanOf(channelSum[0]), meanOf(channelSum[1]),
-            meanOf(channelSum[2]), channelMax[0], channelMax[1], channelMax[2], aboveFloor[0], aboveFloor[1], aboveFloor[2]
-        );
-        return {};
+        result.metrics.meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
+        return result;
     }
 
-    const auto extent = impl->graphResources.hdrSceneColor.extent;
-
+    // -------------------------------------------------------------------------
+    // Path B: the HDR scene color, tone-mapped for display
+    // -------------------------------------------------------------------------
+    const auto   extent     = impl->graphResources.hdrSceneColor.extent;
     const size_t imageBytes = static_cast<size_t>(extent.width) * extent.height * sizeof(uint16_t) * 4;
 
     auto stagingRes = Vk::Buffer::Create(impl->allocator, imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
@@ -1142,13 +1146,19 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     auto  stagingBuffer = std::move(*stagingRes);
     defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
-    if (auto immediate = Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-        auto* const targetImg = impl->graphResources.hdrSceneColor.image.Handle();
-
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, targetImg);
-        Vk::CopyImageToBuffer(cmd, targetImg, stagingBuffer.Handle(), extent);
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, targetImg);
-    }); !immediate) [[unlikely]] {
+    if (auto immediate = Vk::ExecuteImmediate(
+            impl->ctx, impl->graphicsCmdRing,
+            [&](VkCommandBuffer cmd) -> void {
+                const auto& hdrTarget = impl->graphResources.hdrSceneColor;
+                hdrTarget.Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd);
+                Vk::CopyImageToBuffer(cmd, hdrTarget.image.Handle(), stagingBuffer.Handle(), extent);
+                hdrTarget.Transition<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+            }
+        );
+        !immediate) [[unlikely]] {
+        if (Vk::IsDeviceLost(immediate.error())) {
+            impl->deviceLost.store(true, std::memory_order::relaxed);
+        }
         return std::unexpected(immediate.error());
     }
 
@@ -1156,69 +1166,64 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     if (!mapped) {
         return std::unexpected(mapped.error());
     }
-    const auto* const halfFloats = mapped->As<const uint16_t>();
 
-    std::ofstream ofs(std::string(outputPath), std::ios::binary);
-    if (!ofs.is_open()) {
-        return std::unexpected(ScreenshotError::FileOpenFailed);
-    }
+    const auto* const halfFloats   = mapped->As<const uint16_t>();
+    const bool        isFullBright = impl->currentUniforms.fullBright != 0;
+    const size_t      pixels       = static_cast<size_t>(extent.width) * extent.height;
 
-    ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
-
-    auto HalfToFloat = [](uint16_t h) noexcept -> float {
-        uint32_t sign     = (h >> 15) & 0x00000001;
-        uint32_t exponent = (h >> 10) & 0x0000001f;
-        uint32_t mantissa = h & 0x000003ff;
-
-        if (exponent == 0) {
-            if (mantissa == 0) {
-                return sign ? -0.0f : 0.0f;
-            }
-            return (sign ? -1.0f : 1.0f) * std::ldexp(static_cast<float>(mantissa), -24);
-        }
-        if (exponent == 31) {
-            return sign ? -INFINITY : INFINITY;
-        }
-        return (sign ? -1.0f : 1.0f) * std::ldexp(static_cast<float>(mantissa | 0x0400), static_cast<int>(exponent) - 15 - 10);
+    CapturedFrame result {
+        .extent = {extent.width, extent.height},
+        .format = PixelFormat::Rgb8,
+        .pixels = std::vector<uint8_t>(pixels * 3),
     };
 
-    auto ACESFilm = [](float x) noexcept -> float {
-        float a = 2.51f;
-        float b = 0.03f;
-        float c = 2.43f;
-        float d = 0.59f;
-        float e = 0.14f;
-        return std::clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f);
+    // The display transform belongs to the renderer, not to the encoder: whether
+    // the tone curve applies is a renderer uniform. What the caller receives is
+    // already display-referred, so every consumer sees the same image. The curve
+    // itself lives in CapturedFrame.hpp so a caller re-encoding a raw frame
+    // cannot land on a different one.
+    // NaN (a half-float readback can hold one) has no ordering, so it is
+    // answered before the clamp rather than cast through it.
+    const auto quantize = [](float v) noexcept -> uint8_t {
+        if (!(v > 0.0f)) {
+            return 0;
+        }
+        return static_cast<uint8_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f);
     };
 
-    bool isFullBright = (impl->currentUniforms.fullBright != 0);
-
-    ZHLN::Array<uint8_t> rgb(static_cast<size_t>(extent.width) * extent.height * 3);
-    for (size_t i = 0; i < static_cast<size_t>(extent.width) * extent.height; ++i) {
-        float r = HalfToFloat(halfFloats[i * 4 + 0]);
-        float g = HalfToFloat(halfFloats[i * 4 + 1]);
-        float b = HalfToFloat(halfFloats[i * 4 + 2]);
+    uint64_t lumaSum = 0;
+    for (size_t i = 0; i < pixels; ++i) {
+        float r = Math::HalfToFloat(halfFloats[(i * 4) + 0]);
+        float g = Math::HalfToFloat(halfFloats[(i * 4) + 1]);
+        float b = Math::HalfToFloat(halfFloats[(i * 4) + 2]);
 
         if (!isFullBright) {
-            r = ACESFilm(r * 0.015f);
-            g = ACESFilm(g * 0.015f);
-            b = ACESFilm(b * 0.015f);
+            r = Math::AcesFilm(r * kCaptureExposure);
+            g = Math::AcesFilm(g * kCaptureExposure);
+            b = Math::AcesFilm(b * kCaptureExposure);
         }
 
-        rgb[i * 3 + 0] = static_cast<uint8_t>(std::clamp(r, 0.0f, 1.0f) * 255.0f);
-        rgb[i * 3 + 1] = static_cast<uint8_t>(std::clamp(g, 0.0f, 1.0f) * 255.0f);
-        rgb[i * 3 + 2] = static_cast<uint8_t>(std::clamp(b, 0.0f, 1.0f) * 255.0f);
+        const uint8_t red   = quantize(r);
+        const uint8_t green = quantize(g);
+        const uint8_t blue  = quantize(b);
+
+        result.pixels[(i * 3) + 0] = red;
+        result.pixels[(i * 3) + 1] = green;
+        result.pixels[(i * 3) + 2] = blue;
+
+        const uint32_t luma = (2126u * static_cast<uint32_t>(red) + 7152u * static_cast<uint32_t>(green) + 722u * static_cast<uint32_t>(blue)) / 10000u;
+        lumaSum += luma;
+        result.metrics.litPixels += luma > 8u ? 1u : 0u;
     }
-
-    ofs.write(reinterpret_cast<const char*>(rgb.data()), rgb.size());
-    ofs.close();
-
-    ZHLN::LogDebug("[Test Capture] Rendered frame written to: {}", outputPath);
-    return {};
+    result.metrics.meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
+    return result;
 }
 
 void RenderContext::ProvokeDeviceLost() {
     if (auto provoked = _impl->ProvokeDeviceLostInternal(); !provoked) [[unlikely]] {
+        if (Vk::IsDeviceLost(provoked.error())) {
+            _impl->deviceLost.store(true, std::memory_order::relaxed);
+        }
         ZHLN::Log("Failed to submit the device-loss dispatch.");
     }
 }

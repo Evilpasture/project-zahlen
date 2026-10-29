@@ -2,17 +2,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "FrameContext.hpp"
-#include "TargetManager.hpp"
-#include "graph/RenderGraph.hpp"
+#include "RenderTargetTags.hpp"
+#include "graph/RenderPassDecl.hpp"
+
+namespace ZHLN {
+struct RenderFrameContext;
+} // namespace ZHLN
 
 namespace ZHLN::Passes {
 
 struct BloomPass:
     Vk::RenderPass<
         "BloomKawase",
-        Vk::ComputeReadGeneral<Res_HdrSceneColor>,
-        Vk::ComputeRead<Res_Emissive>,
+        Vk::ComputeRead<Res_HdrSceneColor>,
         Vk::ComputeWrite<Res_BloomThresh>,
         Vk::ComputeWrite<Res_BloomDown1>,
         Vk::ComputeWrite<Res_BloomDown2>,

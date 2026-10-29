@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/culling/ClusterCullingPass.hpp"
+#include "FrameContext.hpp"
+#include "passes/culling/CullingResources.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {
@@ -11,10 +13,7 @@ void ClusterCullingPass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto& counterBuffer = frame.frames.globalCounterBuffers[fIdx];
 
     Vk::FillBuffer(cmd, counterBuffer);
-    Vk::BufferBarrier(
-        cmd, counterBuffer, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::Compute,
-        Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite
-    );
+    Vk::BufferBarrier::TransferToCompute(counterBuffer).Record(cmd);
 
     const auto block = frame.heapManager.WriteHeapParameters<Shaders::ClusterCulling>(
         cull.clusterCullingHeapBindings, Vk::Slot<"in_Bounds">(frame.clusterBoundsBuffer), Vk::Slot<"out_Grid">(frame.frames.clusterGridBuffers[fIdx]),

@@ -260,8 +260,11 @@ auto SourceVFS::ResolveMaterial(std::string_view materialName) const -> std::opt
         return std::nullopt;
     }
 
-    std::string cleanName(materialName);
-    if (cleanName.starts_with("materials/") || cleanName.starts_with("materials\\")) {
+    std::string cleanName = NormalizePath(materialName);
+    if (cleanName.empty()) {
+        return std::nullopt;
+    }
+    if (cleanName.starts_with("materials/")) {
         cleanName = cleanName.substr(10);
     }
 
@@ -301,8 +304,11 @@ auto SourceVFS::ResolveTexture(std::string_view textureName) const -> std::optio
         return std::nullopt;
     }
 
-    std::string cleanName(textureName);
-    if (cleanName.starts_with("materials/") || cleanName.starts_with("materials\\")) {
+    std::string cleanName = NormalizePath(textureName);
+    if (cleanName.empty()) {
+        return std::nullopt;
+    }
+    if (cleanName.starts_with("materials/")) {
         cleanName = cleanName.substr(10);
     }
     if (cleanName.ends_with(".vtf") || cleanName.ends_with(".png") || cleanName.ends_with(".jpg")) {
@@ -330,14 +336,14 @@ auto SourceVFS::ResolveModel(std::string_view modelName) const -> std::optional<
         return std::nullopt;
     }
 
-    std::string cleanName(modelName);
-    while (!cleanName.empty() && (cleanName.front() == '/' || cleanName.front() == '\\')) {
-        cleanName.erase(cleanName.begin());
+    std::string cleanName = NormalizePath(modelName);
+    if (cleanName.empty()) {
+        return std::nullopt;
     }
 
     // Candidate 1: models/<name>.mdl
     std::string candidate = cleanName;
-    if (!candidate.starts_with("models/") && !candidate.starts_with("models\\")) {
+    if (!candidate.starts_with("models/")) {
         candidate = "models/" + candidate;
     }
     if (!candidate.ends_with(".mdl")) {

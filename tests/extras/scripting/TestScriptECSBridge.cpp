@@ -31,6 +31,8 @@ struct BridgeManifest {
     using Comp2 = SubTransform;
 };
 
+namespace {
+
 struct ScriptECSBridgeTestSuite {
     ScriptECSBridgeTestSuite() {
         ZHLN::ScriptBinder::Get().classes.clear();
@@ -89,23 +91,13 @@ struct ScriptECSBridgeTestSuite {
             ZHLN::Test::ExpectTrue(elemInt.has_value());
             ZHLN::Test::ExpectEq(*elemInt, 102);
 
-            // 6. Direct Method Call via Bridge
-            std::array<ZHLN::ScriptVal, 1> methodArgs = {ZHLN::ToScriptVal(3)};
-            auto                           methodRes  = bridge.CallMethod(e, "PlayerDataComponent", "LevelUp", methodArgs);
-            ZHLN::Test::ExpectTrue(methodRes.has_value());
-            auto newLevel = ZHLN::FromScriptVal<int32_t>(*methodRes);
-            ZHLN::Test::ExpectTrue(newLevel.has_value());
-            ZHLN::Test::ExpectEq(*newLevel, 13);
-            ZHLN::Test::ExpectEq(comp->level, 13);
+            auto setElemRes = bridge.SetPropertyElementAt(e, "PlayerDataComponent", "inventory", 1, ZHLN::ToScriptVal(999));
+            ZHLN::Test::ExpectTrue(setElemRes.has_value());
+            ZHLN::Test::ExpectEq(comp->inventory[1], 999);
 
             return {};
         }
     };
 };
 
-// Exported for the ecs group binary (RunEcsTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunScriptECSBridgeSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ScriptECSBridgeTestSuite>();
-}
-
+} // namespace

@@ -21,12 +21,6 @@
 #include <utility>
 #include <vector>
 
-namespace ZHLN {
-std::string GetPoorMansStacktrace() {
-    return "test_stacktrace";
-}
-} // namespace ZHLN
-
 namespace {
 
 using ZHLN::Test::BinaryWriter;
@@ -484,10 +478,22 @@ struct BSPStaticPropsTestSuite {
             fileBytes.append_object(hdrFace2);
             const size_t hdrFaceLen = sizeof(ZHLN::BSP::DFace) * 2;
 
+            // The HDR face stream addresses LUMP_LIGHTING_HDR, not LDR. Keep
+            // distinct sentinel luxels so this parser test proves the pair is
+            // selected coherently before native atlas packing sees it.
+            const size_t ldrLightingOffset = fileBytes.size();
+            fileBytes.append_object(ZHLN::BSP::ColorRGBExp32 {.r = 1, .g = 2, .b = 3, .exponent = 0});
+            const size_t hdrLightingOffset = fileBytes.size();
+            fileBytes.append_object(ZHLN::BSP::ColorRGBExp32 {.r = 9, .g = 8, .b = 7, .exponent = 1});
+
             header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::Faces)].fileofs = static_cast<int32_t>(stdFaceOffset);
             header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::Faces)].filelen = static_cast<int32_t>(stdFaceLen);
             header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::FacesHDR)].fileofs = static_cast<int32_t>(hdrFaceOffset);
             header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::FacesHDR)].filelen = static_cast<int32_t>(hdrFaceLen);
+            header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::Lighting)].fileofs = static_cast<int32_t>(ldrLightingOffset);
+            header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::Lighting)].filelen = static_cast<int32_t>(sizeof(ZHLN::BSP::ColorRGBExp32));
+            header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::LightingHDR)].fileofs = static_cast<int32_t>(hdrLightingOffset);
+            header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::LightingHDR)].filelen = static_cast<int32_t>(sizeof(ZHLN::BSP::ColorRGBExp32));
 
             std::memcpy(fileBytes.data(), &header, sizeof(header));
 
@@ -496,6 +502,9 @@ struct BSPStaticPropsTestSuite {
             ZHLN::Test::ExpectEq(mapExp->faces.size(), size_t {2});
             ZHLN::Test::ExpectEq(mapExp->faces[0].texinfo, int16_t {20});
             ZHLN::Test::ExpectEq(mapExp->faces[1].texinfo, int16_t {30});
+            ZHLN::Test::ExpectTrue(mapExp->lightingIsHdr);
+            ZHLN::Test::ExpectEq(mapExp->lighting.size(), size_t {1});
+            ZHLN::Test::ExpectEq(mapExp->lighting[0].r, uint8_t {9});
 
             // Test fallback when FacesHDR is empty
             header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::FacesHDR)].filelen = 0;
@@ -505,6 +514,9 @@ struct BSPStaticPropsTestSuite {
             ZHLN::Test::ExpectTrue(fallbackMapExp.has_value());
             ZHLN::Test::ExpectEq(fallbackMapExp->faces.size(), size_t {1});
             ZHLN::Test::ExpectEq(fallbackMapExp->faces[0].texinfo, int16_t {10});
+            ZHLN::Test::ExpectTrue(!fallbackMapExp->lightingIsHdr);
+            ZHLN::Test::ExpectEq(fallbackMapExp->lighting.size(), size_t {1});
+            ZHLN::Test::ExpectEq(fallbackMapExp->lighting[0].r, uint8_t {1});
 
             return {};
         }
@@ -512,39 +524,3 @@ struct BSPStaticPropsTestSuite {
 };
 
 } // namespace
-
-int main() {
-    BSPStaticPropsTestSuite::Tests suite;
-    int                            passed = 0;
-    int                            failed = 0;
-
-    auto runTest = [&](std::string_view testName, auto testFunc) {
-        ZHLN::Println("\033[32m[ RUN      ]\033[0m {}", testName);
-        auto res = testFunc();
-        if (res.has_value()) {
-            ZHLN::Println("\033[32m[       OK ]\033[0m {}", testName);
-            passed++;
-        } else {
-            ZHLN::Println("\033[31m[  FAILED  ]\033[0m {}", testName);
-            failed++;
-        }
-    };
-
-    ZHLN::Println("\033[36m==================================================\033[0m");
-    ZHLN::Println("\033[36mRunning Test Suite: BSPStaticPropsTestSuite\033[0m");
-    ZHLN::Println("\033[36m==================================================\033[0m");
-
-    runTest("game_lump_directory_parsing", [&] { return suite.game_lump_directory_parsing(); });
-    runTest("static_prop_v4_parsing", [&] { return suite.static_prop_v4_parsing(); });
-    runTest("static_prop_v8_diffuse_modulation", [&] { return suite.static_prop_v8_diffuse_modulation(); });
-    runTest("static_prop_v11_uniform_scale", [&] { return suite.static_prop_v11_uniform_scale(); });
-    runTest("static_prop_scene_entity_conversion", [&] { return suite.static_prop_scene_entity_conversion(); });
-    runTest("vfs_model_resolution", [&] { return suite.vfs_model_resolution(); });
-    runTest("hdr_faces_lump_priority", [&] { return suite.hdr_faces_lump_priority(); });
-
-    ZHLN::Println("--------------------------------------------------");
-    ZHLN::Println("Summary for BSPStaticPropsTestSuite: {} Passed, {} Failed", passed, failed);
-    ZHLN::Println("==================================================");
-
-    return failed == 0 ? 0 : 1;
-}

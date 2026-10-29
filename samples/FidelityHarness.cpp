@@ -33,10 +33,11 @@
 // error. See scripts/run_fidelity.sh for the driver that feeds it the Khronos
 // scenario set and compares the frames against the reference goldens.
 
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Geometry2D.hpp>
@@ -53,15 +54,18 @@
 // The optional layer targets this harness consumes. They remain independent of
 // Core. samples/CMakeLists.txt skips the sample when a required target is absent,
 // so these includes do not need target guards.
+#include <Animation/AnimationSystem.hpp>
 #include <AssetCooking/RadianceDecoder.hpp>
 #include <glTF/GLTFImporter.hpp>
 #include <json/JSONSchema.hpp>
+#include <netpbm/PpmEncoder.hpp>
 
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Vec3.h>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -77,6 +81,14 @@
 #include <vector>
 
 namespace {
+
+std::atomic<uint32_t> g_validationErrors {0};
+
+void OnFidelityLog(ZHLN::LogSeverity severity, std::string_view message) noexcept {
+    if (severity == ZHLN::LogSeverity::Error && message.starts_with("[Vulkan]")) {
+        g_validationErrors.fetch_add(1, std::memory_order::relaxed);
+    }
+}
 
 // The Khronos generator captures (and compares) every golden at
 // DEVICE_PIXEL_RATIO = 2 of the scenario dimensions -- see the
@@ -153,7 +165,7 @@ std::string GetString(const ZHLN::ReflectJSON::ValueReader& reader, std::string_
     return std::string(field->GetString().value_or(""));
 }
 
-// A raw ValueReader walk rather than ReflectJSON::TryParse<FidelityScenario>:
+// A raw ValueReader walk rather than ReflectJSON::Parse<FidelityScenario>:
 // the reflected parser treats a missing key as an error by default, and the
 // suite's scenario files are not guaranteed to carry every key this harness
 // knows. Reading each field with a default accepts all of them.
@@ -224,6 +236,18 @@ auto ReadFileBytes(std::string_view path) -> std::optional<std::vector<uint8_t>>
         return std::nullopt;
     }
     return bytes;
+}
+
+// The capture's encoder produces bytes; the harness is the layer that owns a
+// path, so the file I/O lives here rather than in the renderer.
+[[nodiscard]] bool WriteBytes(std::string_view path, std::span<const uint8_t> bytes) {
+    std::ofstream file {std::string(path), std::ios::binary};
+    if (!file) {
+        ZHLN::Log("[Fidelity] Cannot open '{}' for writing.", path);
+        return false;
+    }
+    file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    return file.good();
 }
 
 // Imports bytes and spawns the parts. Returns the number of spawned entities,
@@ -364,6 +388,14 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     // IBL and nothing else.
     gfx.rayTracing.enableReflections = false;
     gfx.rayTracing.enableShadows     = false;
+    // Diffuse GI off as well. ApplyPreset(High) above turned it ON, and
+    // nothing below turns it back off. Left on, RcgiCascadePass and
+    // RtgiCompositePass add multi-cascade indirect bounce on top of the
+    // deferred lighting, making a conformance capture depend on the engine's
+    // live GI instead of on the scenario's environment -- which is exactly
+    // what "giMode = 0 ... leaving diffuse SH of the sunless panorama ...
+    // No screen-space bounce light is added" forbids.
+    gfx.rayTracing.enableDiffuseGI   = false;
 
     // Environment: the baked SH + prefiltered probe are scaled by
     // ambientExposure in the shading; conformance wants 1:1.
@@ -693,7 +725,7 @@ auto main(int argc, char* argv[]) -> int {
 
     // Crash diagnostics keep their state in a caller-owned struct; static
     // storage duration is required because its address is copied into the
-    // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
+    // signal handler slots. See <Signal/CrashHandler.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
@@ -708,6 +740,8 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
     const FidelityScenario scenario = *parsed;
+
+    ZHLN::SetLogObserver(&OnFidelityLog);
 
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
@@ -730,6 +764,7 @@ auto main(int argc, char* argv[]) -> int {
         engine->GetPlatformHost().Focus();
     }
 
+    ZHLN::Animation::Install(*engine);
     engine->InitializeDefaultScene();
 
     ZHLN::Log(
@@ -834,9 +869,10 @@ auto main(int argc, char* argv[]) -> int {
     // resource publishes settle before the capture — the same settle pattern
     // the render tests use (tests/render/TestPBR.cpp renders 15 before
     // capturing), kept to a handful for suite throughput.
-    ZHLN::Clock clock;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     for (int frame = 0; frame < 8 && engine->IsRunning(); ++frame) {
-        const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        const float dt = clock.Tick();
+        ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
         // The camera is authored once; a re-apply keeps it pinned through the
         // settle ticks in case a system resets the view on the first frames.
@@ -853,17 +889,30 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("[Fidelity] Render host stopped before capture.");
         return EXIT_FAILURE;
     }
-    if (const uint32_t errors = engine->GetRenderContext().GetValidationErrorCount(); errors != 0) {
+    if (const uint32_t errors = g_validationErrors.load(std::memory_order::relaxed); errors != 0) {
         ZHLN::Log("[Fidelity] {} Vulkan validation errors; refusing to publish an invalid capture.", errors);
         return EXIT_FAILURE;
     }
 
-    const auto capture = engine->GetRenderContext().CaptureScreenshotPPM(config.outputPath);
+    const auto capture = engine->GetRenderContext().CaptureFrame();
     if (!capture) {
         ZHLN::Log("[Fidelity] Capture failed: {}", capture.error());
         return EXIT_FAILURE;
     }
 
-    ZHLN::Log("[Fidelity] Wrote {}.", config.outputPath);
+    // Alpha is the caller's choice, not the renderer's: a `.pam` output asks
+    // for the RGBA form so omit-background pixels survive to the comparison;
+    // anything else stays opaque P6.
+    const bool                 outputKeepsAlpha = std::string_view(config.outputPath).ends_with(".pam");
+    const std::vector<uint8_t> encoded          = ZHLN::Netpbm::EncodePPM(*capture, outputKeepsAlpha);
+    if (encoded.empty()) {
+        ZHLN::Log("[Fidelity] Capture produced no encodable pixels.");
+        return EXIT_FAILURE;
+    }
+    if (!WriteBytes(config.outputPath, encoded)) {
+        return EXIT_FAILURE;
+    }
+
+    ZHLN::Log("[Fidelity] Wrote {} ({}x{}, {} bytes).", config.outputPath, capture->extent.width, capture->extent.height, encoded.size());
     return EXIT_SUCCESS;
 }

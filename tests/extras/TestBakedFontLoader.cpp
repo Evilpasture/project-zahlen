@@ -54,6 +54,8 @@ auto BuildFixturePage() -> std::vector<uint8_t> {
 
 } // namespace
 
+namespace {
+
 struct BakedFontLoaderTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> parses_fontbm_json_descriptor() {
@@ -157,6 +159,4 @@ struct BakedFontLoaderTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<BakedFontLoaderTestSuite>();
-}
+} // namespace

@@ -34,7 +34,17 @@ set(ZHLN_ZSHADER_SOURCES
 # second kind (see NamesEnumerators()).
 zahlen_transpile_sources(ZHLN_ZSHADER_SOURCES ${ZHLN_ZSHADER_SOURCES})
 
-add_executable(zshader ${ZHLN_ZSHADER_SOURCES})
+set(ZHLN_ZSHADER_IMAGE_COOK_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ImageCook.cpp")
+set_source_files_properties("${ZHLN_ZSHADER_IMAGE_COOK_SOURCE}" PROPERTIES
+    SKIP_PRECOMPILE_HEADERS ON
+    COMPILE_DEFINITIONS "STBI_ONLY_PNG;STBI_NO_STDIO;STBI_NO_LINEAR;STBI_NO_HDR"
+)
+
+add_executable(zshader
+    ${ZHLN_ZSHADER_SOURCES}
+    "${ZHLN_ZSHADER_IMAGE_COOK_SOURCE}"
+)
+zahlen_set_bin_output(zshader)
 
 # libslang comes from cmake/ShaderCompilation.cmake, which is the file that
 # adds this directory: a config package (Vulkan SDK, Slang release) or the
@@ -62,6 +72,7 @@ target_link_libraries(zshader PRIVATE
 # (cmake/HostToolRuntime.cmake), and a plain set would drop it.
 target_include_directories(zshader SYSTEM PRIVATE
     ${ZHLN_SLANG_INCLUDE_DIR}
+    "${CMAKE_SOURCE_DIR}/extern/stb"
 )
 set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
 if(TARGET slang-glslang)
@@ -110,16 +121,5 @@ target_precompile_headers(zshader PRIVATE
 # __cpp_impl_reflection -- come from the root CMakeLists' zahlen_enable_reflection
 # list, where every target that includes a reflection header is named. That
 # function does not exist yet while this directory is configured (ShaderCompilation
-# is included above it), so the call sits in that list, next to zcook's.
-#
-# A build without -freflection compiles the stand-ins instead, and Core.hpp's
-# static_assert is the reminder that a target using them has to say so. The
-# transpiled copies above are what makes them harmless here -- the three
-# EnumToString calls, including the one NamesEnumerators() asks its question
-# with, are switches by then -- so the tool opts out of the assert the way the
-# header asks host-only tooling to. A build that reaches the tool with neither
-# is caught at startup instead: NamesEnumerators() refuses to write a catalog
-# whose every descriptor type is the sentinel.
-if(NOT COMPILER_HAS_REFLECTION)
-    target_compile_definitions(zshader PRIVATE $<$<COMPILE_LANGUAGE:CXX>:ZHLN_ALLOW_REFLECTION_STUBS=1>)
-endif()
+# is included above it), so the call sits in that list, next to zcook's. There is
+# no stub fallback anymore: the reflection headers require -freflection outright.

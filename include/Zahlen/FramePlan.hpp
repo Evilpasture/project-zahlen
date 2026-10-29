@@ -37,7 +37,8 @@
 // replayed on a schedule rebuild, and no way for a module to add a step that the
 // application did not ask for.
 
-#include <Zahlen/CommandLine.hpp>
+#include <Zahlen/Common.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -49,6 +50,10 @@
 namespace ZHLN {
 
 class Engine;
+
+enum class GameplayDriver : uint8_t { Cpp };
+
+enum class GameplayStatus : int8_t { OK = 0, RequestQuit = 1, RequestReload = 2, Error = -1 };
 
 enum class FramePhase : uint8_t {
     Input,

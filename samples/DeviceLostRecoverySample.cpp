@@ -25,12 +25,13 @@
 //   ./build/samples/DeviceLostRecoverySample --headless
 //   ZHLN_PROVOKE_DEVICE_LOST_FRAME=60 ./build/samples/DeviceLostRecoverySample --headless
 
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
+#include <Signal/SignalManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/Core/SignalManager.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
@@ -168,14 +169,11 @@ auto main(int argc, char* argv[]) -> int {
 
     // Crash diagnostics keep their state in a caller-owned struct; static
     // storage duration is required because its address is copied into the
-    // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
+    // signal handler slots. See <Signal/CrashHandler.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     InstallProvokeSignal();
     ZHLN::TaskSystem::Scope taskScope;
-    std::atomic<uint32_t> validationErrors {0};
-    std::atomic<uint32_t> deviceLost {0};
-    ZHLN::DiagnosticsSink diagnostics {.validation = &validationErrors, .deviceLost = &deviceLost};
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
          .render  = {
@@ -184,7 +182,6 @@ auto main(int argc, char* argv[]) -> int {
               .fullscreen     = options.fullscreen,
               .validationMode = options.validationMode,
               .headless       = options.headless,
-              .diagnostics    = &diagnostics,
           },
           .enableFallbackScene = false}
     );
@@ -215,10 +212,7 @@ auto main(int argc, char* argv[]) -> int {
     uint32_t recoveries = 0;
     engine->AddDeviceLostCallback([&](ZHLN::Engine& recovered) -> void {
         ++recoveries;
-        ZHLN::Log(
-            "[Sample] Device-lost callback #{} (DeviceLostCount={}, subscribers={}). Re-uploading arena.", recoveries,
-            recovered.GetRenderContext().GetDeviceLostCount(), recovered.DeviceLostCallbackCount()
-        );
+        ZHLN::Log("[Sample] Device-lost callback #{} (subscribers={}). Re-uploading arena.", recoveries, recovered.DeviceLostCallbackCount());
         arena = BuildArena(recovered, arena);
     });
 
@@ -232,12 +226,13 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("[DeviceLostRecoverySample] Will ProvokeDeviceLost on frame {}.", autoProvokeFrame);
     }
 
-    ZHLN::Clock clock;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     bool        f9WasDown    = false;
     bool        autoProvoked = false;
 
     while (engine->IsRunning()) {
-        const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        const float dt = clock.Tick();
+        ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
         auto& registry = engine->GetRegistry();
@@ -269,10 +264,7 @@ auto main(int argc, char* argv[]) -> int {
                     break;
                 }
             } else {
-                ZHLN::Log(
-                    "[Sample] Provoking GPU abort via OpAbortKHR (frame {}, DeviceLostCount={}).",
-                    engine->GetCurrentFrame(), engine->GetRenderContext().GetDeviceLostCount()
-                );
+                ZHLN::Log("[Sample] Provoking GPU abort via OpAbortKHR (frame {}).", engine->GetCurrentFrame());
                 engine->ProvokeDeviceLost();
             }
             autoProvoked = autoProvoked || autoNow;

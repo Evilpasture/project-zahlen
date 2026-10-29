@@ -27,11 +27,14 @@ enum class ContextError : uint8_t {
     NoSuitableDeviceFound ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found"> {}),
 };
 
+class GPUAddressTracker;
+
 struct DevicePresentSupport {
-    bool fifoLatestReady       = false;
-    bool presentTiming         = false;
-    bool presentAtAbsoluteTime = false;
-    bool presentId2            = false;
+    bool swapchainMutableFormat = false;
+    bool fifoLatestReady        = false;
+    bool presentTiming          = false;
+    bool presentAtAbsoluteTime  = false;
+    bool presentId2             = false;
 };
 
 class Context {
@@ -101,6 +104,12 @@ class Context {
     [[nodiscard]] auto DeviceAddressBindingReportEnabled() const noexcept -> bool {
         return _addressBindingReportEnabled;
     }
+    [[nodiscard]] auto AddressTracker() const noexcept -> GPUAddressTracker* {
+        return _addressTracker;
+    }
+    void SetAddressTracker(GPUAddressTracker* tracker) noexcept {
+        _addressTracker = tracker;
+    }
     [[nodiscard]] auto PresentSupport() const noexcept -> const DevicePresentSupport& {
         return _present;
     }
@@ -134,6 +143,7 @@ class Context {
     LogicalDevice              _device;
     DevicePresentSupport       _present {};
     EnabledFeatureSet          _enabledFeatures;
+    GPUAddressTracker*         _addressTracker              = nullptr;
     bool                       _addressBindingReportEnabled = false;
 };
 

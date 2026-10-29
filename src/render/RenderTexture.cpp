@@ -30,8 +30,8 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
     }
     auto attachmentView = std::move(*viewRes);
 
-    const VkImageViewCreateInfo descriptorInfo = image.ViewInfo();
-    auto texture = textureManager.AdoptTexture(std::move(image), descriptorInfo, width, height);
+    const Vk::ImageView descriptorView = image.View();
+    auto texture = textureManager.AdoptTexture(std::move(image), descriptorView, width, height);
     if (!texture) {
         return std::unexpected(texture.error());
     }

@@ -3,20 +3,20 @@
 
 #pragma once
 
-#include <atomic>
-#include <cstdint>
+#include <Zahlen/Common.h>
+#include <cstddef>
+#include <span>
+#include <string_view>
 
-namespace ZHLN {
+namespace ZHLN::Diagnostics {
 
-// Explicit diagnostics sink: the caller owns the counters, the renderer
-// writes to them. Passed through RenderConfig; never ambient state.
-struct DiagnosticsSink {
-    std::atomic<uint32_t>* validation = nullptr;
-    std::atomic<uint32_t>* deviceLost = nullptr;
+// Signal-free low-level diagnostic hooks exposed for caller-owned crash/signal
+// frontends (e.g. extensions/Signal). None of these touch OS signal tables or
+// hold ambient crash state inside Core.
+ZHLN_API void InitializeSymbolResolver() noexcept;
+ZHLN_API auto CaptureStackTrace(std::span<char> out, int maxFrames = 128) noexcept -> size_t;
+ZHLN_API void DumpFaultRegion(const void* faultAddress) noexcept;
+ZHLN_API void WriteDiagnosticError(std::string_view msg) noexcept;
+ZHLN_API void EmergencyRestoreTerminal() noexcept;
 
-    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
-        return validation != nullptr && deviceLost != nullptr;
-    }
-};
-
-} // namespace ZHLN
+} // namespace ZHLN::Diagnostics

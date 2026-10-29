@@ -3,30 +3,22 @@
 
 #pragma once
 
-#include "CommandLine.hpp"
 #include "Config.hpp"
-#include <Zahlen/Core/CrashState.hpp>
+#include <Zahlen/Core/LogLevel.hpp>
 #include <Zahlen/Core/Print.hpp>
-#include <Zahlen/Core/Reflection/Utilities.hpp>
+#include <Zahlen/Core/Reflection/EnumFormat.hpp>
 #include <cstdint>
 #include <cstdio>
 #include <format>
 #include <source_location>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace ZHLN {
 
 extern void ASSERTION_FAILED_AT_COMPILE_TIME();
-
-class Engine;
-
-void SetupSignalHandler(CrashState& state);
-
-void CheckForCrashes(CrashState& state, Engine* engine);
 
 auto GetCustomLogFile(FILE* overrideFile = nullptr) -> FILE*;
 auto GetPoorMansStacktrace() -> std::string;
@@ -38,8 +30,13 @@ enum class LogChannel : uint8_t { StdErr, StdOut, File };
 // Warning yellow and Error red; Info keeps the historical plain layout.
 enum class LogSeverity : uint8_t { Debug, Info, Warning, Error };
 
+using LogObserver = void (*)(LogSeverity severity, std::string_view message) noexcept;
+
 void SetLogLevel(LogLevel level) noexcept;
 auto GetLogLevel() noexcept -> LogLevel;
+
+ZHLN_API void SetLogObserver(LogObserver observer) noexcept;
+ZHLN_API auto GetLogObserver() noexcept -> LogObserver;
 
 // Test-quiet log capture. While capturing, InternalWriteLog records every
 // formatted line into a bounded buffer; when suppressOutput is set the lines
@@ -70,6 +67,10 @@ void              InternalWriteLog(uint8_t channel, uint8_t severity, const char
 template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate, LogSeverity Severity = LogSeverity::Info, typename... Args>
 void Log(LogContext ctx, Args&&... args) {
     if (static_cast<uint8_t>(GetLogLevel()) < static_cast<uint8_t>(Level)) {
+        if (const LogObserver observer = GetLogObserver(); observer != nullptr) {
+            std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
+            observer(Severity, formatted);
+        }
         return;
     }
     std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
@@ -145,92 +146,9 @@ inline void Assert(bool condition, std::source_location loc = std::source_locati
     }
 }
 
-struct DumpOptions {
-    size_t bytes_per_line = 16;
-    bool   show_ascii     = true;
-    bool   show_interpret = true;
-};
-
-namespace Color {
-inline constexpr char Reset[]  = "\033[0m";
-inline constexpr char Gray[]   = "\033[90m";
-inline constexpr char Cyan[]   = "\033[36m";
-inline constexpr char Yellow[] = "\033[33m";
-inline constexpr char Green[]  = "\033[32m";
-inline constexpr char Red[]    = "\033[31m";
-}
-
 void LogManual(std::string_view file, int line, std::string_view message, const char* color = "");
-
-auto TraceStructCallback(const char* fmt, ...) -> int;
-void TraceStructHeader(std::string_view name, std::string_view label, const char* file, uint32_t line);
-void TraceStructFooter();
-
-template <typename T>
-inline void TraceStructInternal(const T& obj, std::string_view name, LogContext ctx) {
-    TraceStructHeader(name, ctx.fmt, ctx.loc.file_name(), ctx.loc.line());
-
-    auto dumpObject = [](const auto& val) -> auto {
-        using Decayed = std::remove_cvref_t<decltype(val)>;
-        if constexpr (Reflect::FieldCount<Decayed>() > 0) {
-            Reflect::ForEachFieldWithName(val, [](std::string_view fieldName, const auto& fieldVal) -> auto {
-                std::string debugVal = Reflect::ToDebugString(fieldVal);
-                Println(stderr, "│   {}: {}", fieldName, debugVal);
-            });
-        } else {
-            std::string debugVal = Reflect::ToDebugString(val);
-            Println(stderr, "│   {}", debugVal);
-        }
-    };
-
-    if constexpr (std::is_pointer_v<T>) {
-        if (obj != nullptr) {
-            dumpObject(*obj);
-        } else {
-            Println(stderr, "│   (null pointer)");
-        }
-    } else if constexpr (requires { obj.get(); }) {
-        if (obj.get() != nullptr) {
-            dumpObject(*obj.get());
-        } else {
-            Println(stderr, "│   (null pointer)");
-        }
-    } else {
-        dumpObject(obj);
-    }
-
-    TraceStructFooter();
-}
-
-void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext ctx, DumpOptions opts = {});
-
-template <typename T>
-void SmartDumpInternal(const T& var, std::string_view name, LogContext ctx) {
-    if constexpr (requires {
-                      var.data();
-                      var.size();
-                  }) {
-        MemoryDump(var.data(), var.size() * sizeof(var[0]), name, ctx);
-    } else {
-        MemoryDump(&var, sizeof(var), name, ctx);
-    }
-}
-
-template <typename T>
-void Dump(const T& var, std::string_view label = {}, std::source_location loc = std::source_location::current()) {
-    std::string_view name = label.empty() ? Reflect::TypeName<T>() : label;
-    LogContext       ctx(name, loc);
-    SmartDumpInternal(var, name, ctx);
-}
-
-template <typename T>
-void Trace(const T& var, std::string_view label = {}, std::source_location loc = std::source_location::current()) {
-    std::string_view name = label.empty() ? Reflect::TypeName<T>() : label;
-    LogContext       ctx(name, loc);
-    TraceStructInternal(var, name, ctx);
-}
 
 auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void;
 auto JoltAssertBridge(const char* inExpression, const char* inMessage, const char* inFile, uint32_t inLine) noexcept -> bool;
 
-}
+} // namespace ZHLN

@@ -13,6 +13,8 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/Carrier.hpp>
+#include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ecs/ExtensionServices.hpp>
 #include <Zahlen/ecs/SystemAccess.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
 #include <Zahlen/ecs/SystemSignature.hpp>
@@ -41,6 +43,7 @@ struct SystemCall {
     void*                                 local     = nullptr;
     const TemplatedDetail::LocalSlotDesc* slots     = nullptr;
     size_t                                slotCount = 0;
+    EntityCommandBuffer*                  ecb       = nullptr;
 };
 
 // Parameters are deliberately matched by *exact* type. In particular a plain
@@ -90,6 +93,15 @@ struct ParameterResolver<const Registry&> {
 };
 
 template <>
+struct ParameterResolver<EntityCommandBuffer&> {
+    template <typename CarrierType>
+    static auto Resolve(CarrierType& carrier) noexcept -> EntityCommandBuffer& {
+        ZHLN::Assert(carrier.ecb != nullptr, "EntityCommandBuffer& in a system whose node allocated no command buffer");
+        return *carrier.ecb;
+    }
+};
+
+template <>
 struct ParameterResolver<FrameDt> {
     template <typename CarrierType>
     static auto Resolve(CarrierType& carrier) noexcept -> FrameDt {
@@ -116,18 +128,76 @@ struct ParameterResolver<FrameIndex> {
 template <typename T>
 struct ParameterResolver<Res<T>> {
     template <typename CarrierType>
-        requires(Reflect::BundleProvides<T, typename CarrierType::Services>())
+        requires(Reflect::BundleProvides<T, typename CarrierType::Services>() ||
+                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
     static auto Resolve(CarrierType& carrier) noexcept -> Res<T> {
-        return {Reflect::FindService<T>(carrier.services)};
+        if constexpr (Reflect::BundleProvides<T, typename CarrierType::Services>()) {
+            return {Reflect::FindService<T>(carrier.services)};
+        } else {
+            const auto* extensions = Reflect::FindService<ExtensionServices>(carrier.services);
+            ZHLN::Assert(extensions != nullptr, "ExtensionServices missing from service bundle");
+            auto found = extensions->template Get<T>();
+            ZHLN::Assert(found.has_value(), "System requested Res<T> for an extension service that was not installed");
+            return {std::addressof(*found)};
+        }
     }
 };
 
 template <typename T>
 struct ParameterResolver<ResMut<T>> {
     template <typename CarrierType>
-        requires(Reflect::BundleProvides<T, typename CarrierType::Services>())
+        requires(Reflect::BundleProvides<T, typename CarrierType::Services>() ||
+                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
     static auto Resolve(CarrierType& carrier) noexcept -> ResMut<T> {
-        return {Reflect::FindService<T>(carrier.services)};
+        if constexpr (Reflect::BundleProvides<T, typename CarrierType::Services>()) {
+            return {Reflect::FindService<T>(carrier.services)};
+        } else {
+            auto* extensions = Reflect::FindService<ExtensionServices>(carrier.services);
+            ZHLN::Assert(extensions != nullptr, "ExtensionServices missing from service bundle");
+            auto found = extensions->template Get<T>();
+            ZHLN::Assert(found.has_value(), "System requested ResMut<T> for an extension service that was not installed");
+            return {std::addressof(*found)};
+        }
+    }
+};
+
+template <typename T>
+struct ParameterResolver<EventReader<T>> {
+    template <typename CarrierType>
+        requires(Reflect::BundleProvides<EventBus, typename CarrierType::Services>() ||
+                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
+    static auto Resolve(CarrierType& carrier) noexcept -> EventReader<T> {
+        if constexpr (Reflect::BundleProvides<EventBus, typename CarrierType::Services>()) {
+            const EventBus* bus = Reflect::FindService<EventBus>(carrier.services);
+            ZHLN::Assert(bus != nullptr, "EventBus missing from service bundle");
+            return bus->template Reader<T>();
+        } else {
+            const auto* extensions = Reflect::FindService<ExtensionServices>(carrier.services);
+            ZHLN::Assert(extensions != nullptr, "ExtensionServices missing from service bundle");
+            auto found = extensions->template Get<EventBus>();
+            ZHLN::Assert(found.has_value(), "System requested EventReader<T> without an EventBus in services or ExtensionServices");
+            return found->template Reader<T>();
+        }
+    }
+};
+
+template <typename T>
+struct ParameterResolver<EventWriter<T>> {
+    template <typename CarrierType>
+        requires(Reflect::BundleProvides<EventBus, typename CarrierType::Services>() ||
+                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
+    static auto Resolve(CarrierType& carrier) -> EventWriter<T> {
+        if constexpr (Reflect::BundleProvides<EventBus, typename CarrierType::Services>()) {
+            EventBus* bus = Reflect::FindService<EventBus>(carrier.services);
+            ZHLN::Assert(bus != nullptr, "EventBus missing from service bundle");
+            return bus->template Writer<T>();
+        } else {
+            auto* extensions = Reflect::FindService<ExtensionServices>(carrier.services);
+            ZHLN::Assert(extensions != nullptr, "ExtensionServices missing from service bundle");
+            auto found = extensions->template Get<EventBus>();
+            ZHLN::Assert(found.has_value(), "System requested EventWriter<T> without an EventBus in services or ExtensionServices");
+            return found->template Writer<T>();
+        }
     }
 };
 
@@ -161,11 +231,19 @@ struct ParameterResolver<Local<T>> {
 template <TemplatedDetail::OptionalResourceParam Param>
 struct ParameterResolver<Param> {
     using Value = typename Param::value_type;
+    using Clean = std::remove_const_t<Value>;
 
     template <typename CarrierType>
     static auto Resolve(CarrierType& carrier) noexcept -> Param {
-        if constexpr (Reflect::BundleProvides<std::remove_const_t<Value>, typename CarrierType::Services>()) {
-            return *Reflect::FindService<std::remove_const_t<Value>>(carrier.services);
+        if constexpr (Reflect::BundleProvides<Clean, typename CarrierType::Services>()) {
+            return *Reflect::FindService<Clean>(carrier.services);
+        } else if constexpr (Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>()) {
+            auto* extensions = Reflect::FindService<ExtensionServices>(carrier.services);
+            if constexpr (std::is_const_v<Value>) {
+                return std::as_const(*extensions).template Get<Clean>();
+            } else {
+                return extensions->template Get<Clean>();
+            }
         } else {
             return std::nullopt;
         }
@@ -379,6 +457,48 @@ consteval auto LocalParametersShadowNoService() -> bool {
     return clean;
 }
 
+template <typename Inspector, std::size_t I, std::size_t J>
+consteval auto EventPairConflictsInSameSignature() -> bool {
+    using ParamI = std::remove_cvref_t<typename Inspector::template ParameterType<I>>;
+    using ParamJ = std::remove_cvref_t<typename Inspector::template ParameterType<J>>;
+    if constexpr (EventParamTraits<ParamI>::value && EventParamTraits<ParamJ>::value) {
+        if constexpr (std::is_same_v<typename EventParamTraits<ParamI>::Event, typename EventParamTraits<ParamJ>::Event>) {
+            return EventParamTraits<ParamI>::mode == Access::Write || EventParamTraits<ParamJ>::mode == Access::Write;
+        }
+    }
+    return false;
+}
+
+template <auto SystemFn, std::size_t I>
+consteval auto EventRowIsDisjoint() -> bool {
+    using Inspector = Reflect::CallableInspector<SystemFn>;
+    bool clean      = true;
+    [&]<std::size_t... Js>(std::index_sequence<Js...>) {
+        ((clean = clean && !(Js > I && EventPairConflictsInSameSignature<Inspector, I, Js>())), ...);
+    }(std::make_index_sequence<Inspector::ParameterCount()> {});
+    return clean;
+}
+
+template <auto SystemFn>
+consteval auto EventParametersAreDisjoint() -> bool {
+    using Inspector = Reflect::CallableInspector<SystemFn>;
+    bool clean      = true;
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        ((clean = clean && EventRowIsDisjoint<SystemFn, Is>()), ...);
+    }(std::make_index_sequence<Inspector::ParameterCount()> {});
+    return clean;
+}
+
+template <auto SystemFn>
+consteval auto SignatureUsesCommandBuffer() -> bool {
+    using Inspector = Reflect::CallableInspector<SystemFn>;
+    bool uses       = false;
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        ((uses = uses || std::is_same_v<typename Inspector::template ParameterType<Is>, EntityCommandBuffer&>), ...);
+    }(std::make_index_sequence<Inspector::ParameterCount()> {});
+    return uses;
+}
+
 } // namespace TemplatedDetail
 
 // A system parameter is admissible when the graph's carrier can resolve it. The
@@ -421,10 +541,16 @@ consteval void AdmitParameters() {
         "and shared at the same time. Keep the Local<T> for scratch the system owns, or the service for state the domain shares."
     );
     static_assert(
+        TemplatedDetail::EventParametersAreDisjoint<SystemFn>(),
+        "This system names conflicting EventWriter<T> / EventReader<T> parameters for the same event type T in one signature. "
+        "Split producer and consumer into separate systems or take a single EventWriter<T>."
+    );
+    static_assert(
         EveryParameterResolvable<CarrierT, SystemFn>(std::make_index_sequence<Reflect::CallableInspector<SystemFn>::ParameterCount()> {}),
         "A system parameter cannot be resolved by this graph. Either add the service it asks for to the graph's service bundle, "
-        "or ask for something every graph resolves: Query<...>, Registry&, FrameDt/FrameAlpha/FrameIndex, Local<T> for the node's own "
-        "state, Res<T>/ResMut<T>/Optional<T&> for a service the bundle provides, SoAScratch<T, N> or LinearArena&."
+        "or ask for something every graph resolves: Query<...>, EntityCommandBuffer&, Registry&, FrameDt/FrameAlpha/FrameIndex, Local<T> "
+        "for the node's own state, EventReader<T>/EventWriter<T> (with EventBus in services), Res<T>/ResMut<T>/Optional<T&> for a service "
+        "the bundle provides, SoAScratch<T, N> or LinearArena&."
     );
 }
 
@@ -442,7 +568,8 @@ struct SystemInfo {
     // function that resolves a Local<T> without one stops at the resolver.
     TemplatedDetail::LocalLayout local;
 
-    bool enabled = true;
+    bool usesCommandBuffer = false;
+    bool enabled           = true;
 };
 
 // The state one node owns: the bytes its signature asked for, plus the operations
@@ -547,18 +674,22 @@ class ZHLN_API SystemGraphCore {
 
     [[nodiscard]] static auto HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept -> bool;
 
+  protected:
+    void BindCommandRegistry(Registry& registry, EntityCommandBuffer::DestroyFn destroy = nullptr) noexcept;
+
   private:
     // An aggregate on purpose: every construction site spells out the fields it
     // sets. The state it owns makes it move-only, and the implicit moves do the
     // right thing because LocalBlock's do.
     struct Node {
-        SystemInfo            info;
-        std::vector<uint32_t> dependents;
-        uint32_t              initialDependencyCount = 0;
+        SystemInfo                           info;
+        std::vector<uint32_t>                dependents;
+        uint32_t                             initialDependencyCount = 0;
 
         // This node's own state (Local<T>), allocated from the layout in `info`
         // when the node is added and destroyed with the node.
-        LocalBlock local;
+        LocalBlock                           local;
+        std::unique_ptr<EntityCommandBuffer> ecb;
     };
 
     struct ExecutionContext;
@@ -567,12 +698,15 @@ class ZHLN_API SystemGraphCore {
     static void TaskThunk(void* arg);
     void        DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx);
 
-    // Allocate this node's Local<T> storage from the layout its signature
-    // produced. Every path that adds a node goes through here.
-    static void AdoptLocal(Node& node);
+    // Allocate this node's Local<T> storage and optional private command buffer
+    // from the layout its signature produced. Every path that adds a node goes
+    // through here.
+    void AdoptLocal(Node& node);
 
-    std::vector<Node>     _nodes;
-    std::vector<uint32_t> _entryNodes;
+    Registry*                      _commandRegistry = nullptr;
+    EntityCommandBuffer::DestroyFn _commandDestroy  = nullptr;
+    std::vector<Node>              _nodes;
+    std::vector<uint32_t>          _entryNodes;
 };
 
 // A graph that provides `Services`. The services are the graph's, not the
@@ -585,12 +719,15 @@ class SystemGraph: public SystemGraphCore {
 
     // A bundle with no members needs no engine services: such a graph (the tests'
     // NoServices graphs, for instance) is built from the registry alone.
-    explicit SystemGraph(ECS::Registry& registry) noexcept
+    explicit SystemGraph(ECS::Registry& registry, EntityCommandBuffer::DestroyFn destroy = nullptr) noexcept
         requires(std::is_empty_v<Services>)
         : _registry(registry), _services(EmptyServices()) {
+        BindCommandRegistry(_registry, destroy);
     }
 
-    SystemGraph(ECS::Registry& registry, Services& services) noexcept: _registry(registry), _services(services) {
+    SystemGraph(ECS::Registry& registry, Services& services, EntityCommandBuffer::DestroyFn destroy = nullptr) noexcept
+        : _registry(registry), _services(services) {
+        BindCommandRegistry(_registry, destroy);
         static_assert(
             Reflect::TemplatedDetail::BundleTypesAreUnique<Services>(),
             "Two members of this graph's service bundle have the same type, so by-type resolution would silently pick one of "
@@ -648,7 +785,8 @@ class SystemGraph: public SystemGraphCore {
         // The signature's own description of the state it keeps between frames;
         // the node allocates the block from it. A system with no Local<T> gets an
         // empty layout and no allocation.
-        info.local = TemplatedDetail::MakeLocalLayout<SystemFn>();
+        info.local             = TemplatedDetail::MakeLocalLayout<SystemFn>();
+        info.usesCommandBuffer = TemplatedDetail::SignatureUsesCommandBuffer<SystemFn>();
         return info;
     }
 
@@ -664,6 +802,7 @@ class SystemGraph: public SystemGraphCore {
         const auto* call    = static_cast<const SystemCall*>(arg);
         CarrierType carrier = *static_cast<const CarrierType*>(call->carrier);
         carrier.local       = TemplatedDetail::LocalStateView {.block = call->local, .slots = call->slots, .count = call->slotCount};
+        carrier.ecb         = call->ecb;
         SystemSignature<SystemFn>::template Invoke<ParameterResolver, CarrierType>(carrier);
     }
 

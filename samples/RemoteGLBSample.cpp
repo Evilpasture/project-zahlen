@@ -85,14 +85,17 @@
 // G hide/show the floor, H hide/show the subject, S toggle screen-space
 // reflections, R re-download, C re-crawl the model list.
 
+#include <Animation/AnimationSystem.hpp>
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/FramePlan.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -1069,6 +1072,7 @@ struct SampleState {
     std::vector<GLBEntry> displayEntries {};
     int                   dropdownSelected = 0;
     bool                  catalogSeeded    = false;
+    ZHLN::GUI::Context    gui {};
 
     bool     rayTraced   = false;
     bool     reported    = false; // this download's outcome has been logged and imported
@@ -1399,8 +1403,8 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
 }
 
 void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
-    ZHLN::GUI::Context ui(engine);
-    ui.BeginFrame(state.dt);
+    state.gui.SetFontAtlas(engine.GetFontAtlas());
+    ZHLN::GUI::Frame ui = state.gui.BeginFrame(engine.ConsumeUIInput(state.dt));
 
     const ZHLN::RenderInfo info    = engine.GetRenderContext().GetInfo();
     const std::string      subject = state.subject.loaded ?
@@ -1457,7 +1461,7 @@ void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
         }
     );
 
-    engine.SetPendingUIData(ui.EndFrame());
+    engine.SubmitUI(std::move(ui).End());
 }
 
 } // namespace
@@ -1476,7 +1480,7 @@ auto main(int argc, char* argv[]) -> int {
 
     // Crash diagnostics keep their state in a caller-owned struct; static storage
     // duration is required because its address is copied into the signal handler
-    // slots. See <Zahlen/Core/CrashState.hpp>.
+    // slots. See <Signal/CrashHandler.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
@@ -1515,6 +1519,7 @@ auto main(int argc, char* argv[]) -> int {
     // subscribes its own device-lost rebuild. Once, next to the first import (see
     // GLTF::InstallDeviceLostHandler).
     ZHLN::GLTF::InstallDeviceLostHandler(*engine);
+    ZHLN::Animation::Install(*engine);
 
     engine->InitializeDefaultScene();
 
@@ -1561,7 +1566,7 @@ auto main(int argc, char* argv[]) -> int {
     FrameSubject(state.orbit, state.subject);
     ApplyOrbit(*engine, state.orbit, state.subject);
 
-    ZHLN::Clock clock;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     const uint32_t timeoutSeconds = EnvironmentU32("ZHLN_REMOTE_GLB_TIMEOUT", kFetchTimeout);
 
     // The download side of the sample, in two locals: the cache directory
@@ -1591,15 +1596,16 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[RemoteGLB] Asset: {}", state.assetUrl);
     ZHLN::Log("[RemoteGLB] Cache: {}", (diskCache.Root() / resolvedAsset.cacheFileName).string());
     state.activeRequest = fetcher.Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, EnvironmentFlag("ZHLN_REMOTE_GLB_REFRESH"));
-    state.fetchStartedAt = clock.GetTotalTime();
+    state.fetchStartedAt = clock.WallTimeSinceStart();
 
     engine->SetUICallback([&state](ZHLN::Engine& eng) -> void { DrawHUD(eng, state); });
 
     while (engine->IsRunning()) {
-        state.dt  = std::min(clock.GetDeltaTime(), 0.05f);
-        state.now = clock.GetTotalTime();
+        state.dt  = clock.Tick();
+        state.now = clock.WallTimeSinceStart();
         state.fps = (state.fps * 0.90f) + ((state.dt > 0.0f ? 1.0f / state.dt : 0.0f) * 0.10f);
 
+        ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
         HandleInput(*engine, state);
         PollFetch(*engine, state);

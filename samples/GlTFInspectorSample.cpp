@@ -9,9 +9,12 @@
 //
 // Drop a .glb / .gltf file onto the window to load and orbit it.
 
+#include <Animation/AnimationSystem.hpp>
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/FramePlan.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -24,6 +27,7 @@
 import ZHLN.glTF;
 
 #include <algorithm>
+#include <span>
 
 auto main(int argc, char* argv[]) -> int {
     auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)));
@@ -40,7 +44,7 @@ auto main(int argc, char* argv[]) -> int {
 
     // Crash diagnostics keep their state in a caller-owned struct; static
     // storage duration is required because its address is copied into the
-    // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
+    // signal handler slots. See <Signal/CrashHandler.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
@@ -58,6 +62,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     engine->GetPlatformHost().Focus();
+    ZHLN::Animation::Install(*engine);
 
 #if defined(ZHLN_HAS_FONTS)
     // The composition root's default bake (see app/main.cpp): the vendored
@@ -72,9 +77,10 @@ auto main(int argc, char* argv[]) -> int {
     // the orbit camera. The inspector owns the frame loop from here on.
     ZHLN::glTF::Initialize(*engine);
 
-    ZHLN::Clock clock;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     while (engine->IsRunning()) {
-        const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        const float dt = clock.Tick();
+        ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
         const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);

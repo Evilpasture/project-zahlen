@@ -9,7 +9,7 @@ This project's renderer proudly has zero:
 - `VkDescriptorSetLayout`: Killed by descriptor heaps.
 - `VkDescriptorPool`: Killed by descriptor heaps.
 - `VkDescriptorSet`: Killed by descriptor heaps.
-- `VkSampler`: Avoided by using descriptor heaps.
+- `VkSampler` handles: Avoided by using descriptor heaps; the create info goes straight to `vkWriteSamplerDescriptorsEXT`.
 - `VkPipelineLayout`: Killed by descriptor heaps.
 - `VkShaderModule`: Deprecated in Vulkan 1.4 and killed by VK_KHR_maintenance5.
 - `VkPipelineCache`: Killed by pipeline binaries.
@@ -66,7 +66,7 @@ git submodule update --init --recursive
 ```
 
 ### 2. Recommended Directory Structure
-To utilize the automated Fennel compiler and Ninja asset cooking pipelines, structure your game repository as follows:
+To utilize the Ninja asset cooking pipeline and declarative state files, structure your game repository as follows:
 
 ```text
 MyGame/
@@ -74,7 +74,7 @@ MyGame/
 ├── extern/
 │   └── zahlen/                # Engine submodule
 ├── gameplay/                  # Game C++ source files (.cpp, .cppm)
-├── scripts/                   # Game Fennel / Lua scripts (.fnl, .lua, boot.lua)
+├── config/                    # Declarative Lua / TOML configuration (graphics.lua)
 ├── resources/
 │   └── assets/                # Raw game assets (.blend, .png, .wav, etc.)
 └── src/
@@ -82,7 +82,7 @@ MyGame/
 ```
 
 ### 3. Game CMakeLists.txt Boilerplate
-Create a `CMakeLists.txt` in your game's root directory. Include the engine submodule and invoke its exported helper functions (`zahlen_compile_fennel` and `zahlen_configure_game_assets`):
+Create a `CMakeLists.txt` in your game's root directory. Include the engine submodule and invoke its exported asset pipeline helper (`zahlen_configure_game_assets`):
 
 ```cmake
 cmake_minimum_required(VERSION 3.28)
@@ -146,36 +146,6 @@ if(GAMEPLAY_CPP_SOURCES)
     )
 endif()
 
-# Dynamically discover and compile ANY .fnl files in scripts/ (handles 0, 1, or many files automatically)
-file(GLOB_RECURSE FENNEL_GAME_SCRIPTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.fnl")
-
-if(FENNEL_GAME_SCRIPTS)
-    zahlen_compile_fennel(${PROJECT_NAME} COMPILED_GAME_LUA ${FENNEL_GAME_SCRIPTS})
-    add_custom_target(compile_game_fennel ALL DEPENDS ${COMPILED_GAME_LUA})
-else()
-    add_custom_target(compile_game_fennel ALL)
-endif()
-
-file(GLOB_RECURSE STATIC_GAME_SCRIPTS LIST_DIRECTORIES false "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.lua" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.sh" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.txt")
-list(FILTER STATIC_GAME_SCRIPTS EXCLUDE REGEX ".*/scripts/core/.*")
-
-set(GAME_SCRIPT_SYMLINKS "")
-foreach(STATIC_SRC IN LISTS STATIC_GAME_SCRIPTS)
-    file(RELATIVE_PATH REL_FILE "${CMAKE_CURRENT_SOURCE_DIR}/scripts" "${STATIC_SRC}")
-    get_filename_component(REL_DIR "${REL_FILE}" DIRECTORY)
-    set(OUT_FILE "${CMAKE_BINARY_DIR}/scripts/${REL_FILE}")
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/scripts/${REL_DIR}")
-    if(WIN32)
-        add_custom_command(OUTPUT "${OUT_FILE}" COMMAND ${CMAKE_COMMAND} -E copy "${STATIC_SRC}" "${OUT_FILE}" DEPENDS "${STATIC_SRC}" VERBATIM)
-    else()
-        add_custom_command(OUTPUT "${OUT_FILE}" COMMAND ${CMAKE_COMMAND} -E create_symlink "${STATIC_SRC}" "${OUT_FILE}" DEPENDS "${STATIC_SRC}" VERBATIM)
-    endif()
-    list(APPEND GAME_SCRIPT_SYMLINKS "${OUT_FILE}")
-endforeach()
-
-add_custom_target(sync_game_static_scripts DEPENDS ${GAME_SCRIPT_SYMLINKS})
-add_dependencies(compile_game_fennel sync_game_static_scripts)
-
 # Configure Game Ninja Asset Cooking Pipeline (zcook)
 zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -193,7 +163,6 @@ if(TARGET gameplay_modules)
 endif()
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE JPH_DOUBLE_PRECISION)
-add_dependencies(${PROJECT_NAME} compile_game_fennel)
 
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive-)
@@ -210,32 +179,38 @@ endif()
 In your game's source folder, create `src/main.cpp` or anything you want. The engine provides a high-level, framework-like `ZHLN::Engine::Run` method that manages process initialization, engine setup, the synchronized 12-step frame loop, and command-line flags (such as `--editor` or `--fps-limit`):
 
 ```cpp
-#include <Zahlen/CommandLine.hpp>
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <span>
 
 int main(int argc, char* argv[]) {
+    static ZHLN::CrashState crashState;
+    ZHLN::SetupSignalHandler(crashState);
+
     return ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
         .transform_error([](ZHLN::ErrorCode code) -> int {
-            // ErrorCode carries the category and the value; promote to Error
-            // where somebody actually reads the text.
             ZHLN::Log("CommandLine Error: {}", ZHLN::Error(code).Message());
             return EXIT_FAILURE;
         })
         .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<int, int> {
             if (options.helpRequested || options.versionRequested || options.printGraphRequested) {
-                return 0; // Clean exit for CLI queries
+                return 0;
             }
 
             ZHLN::SetLogLevel(options.logLevel);
-
-            // ZHLN::Engine::Run automatically manages:
-            // 1. Engine creation & window setup
-            // 2. Branching to WorldEditor if --editor is passed
-            // 3. Loading & hot-reloading libgameplay.so / gameplay.dll via NativeScriptModule
-            // 4. Executing the 12-step synchronized frame pipeline
-            return ZHLN::Engine::Run(options);
+            const auto pollCrashes = [](ZHLN::Engine& eng) { ZHLN::CheckForCrashes(crashState, &eng); };
+            const auto ran = ZHLN::Engine::Run(ZHLN::Engine::RunConfig {
+                .vsync          = options.vsync,
+                .fullscreen     = options.fullscreen,
+                .validationMode = options.validationMode,
+                .headless       = options.headless,
+                .fpsLimit       = options.fpsLimit,
+                .driver         = options.driver,
+                .onFrameEvents  = pollCrashes,
+            });
+            return ran ? std::expected<int, int> {0} : std::unexpected(EXIT_FAILURE);
         })
         .or_else([](int errorCode) -> std::expected<int, int> { return errorCode; })
         .value();
@@ -248,8 +223,8 @@ Your gameplay logic must implement the `NativeGameplayUpdate` hook, which is dyn
 Create `gameplay/gameplay.cpp` or whatever the hell you want:
 
 ```cpp
-#include <Zahlen/CommandLine.hpp> // GameplayStatus
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/FramePlan.hpp> // GameplayStatus
 
 #if defined(_WIN32)
 #define GAMEPLAY_API extern "C" __declspec(dllexport)

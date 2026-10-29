@@ -1,11 +1,6 @@
 
 
-struct MLAAPushConstants {
-    float rcpFrameX;
-    float rcpFrameY;
-    float threshold;
-    uint maxSearchSteps;
-};
+import gpu_push_constants;
 
 [vk::push_constant]
 MLAAPushConstants pc;

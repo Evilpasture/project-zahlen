@@ -44,58 +44,68 @@ set(ZHLN_HTTP_ORIGIN "")
 set(ZHLN_HTTP_VERSION "")
 set(ZHLN_HTTP_STATIC FALSE)
 
-find_package(CURL QUIET)
+find_path(
+    _ZHLN_PROBE_CURL_H
+    NAMES curl/curl.h
+    HINTS "${CURL_ROOT}" ENV CURL_ROOT /opt/homebrew/opt/curl /usr/local/opt/curl
+    PATH_SUFFIXES include
+    QUIET)
+if(_ZHLN_PROBE_CURL_H)
+    find_package(CURL QUIET)
 
-if(CURL_FOUND AND TARGET CURL::libcurl)
-    set(ZHLN_HTTP_TARGET CURL::libcurl)
-    set(ZHLN_HTTP_ORIGIN "find_package(CURL)")
-    if(CURL_VERSION_STRING)
-        set(ZHLN_HTTP_VERSION "${CURL_VERSION_STRING}")
+    if(CURL_FOUND AND TARGET CURL::libcurl)
+        set(ZHLN_HTTP_TARGET CURL::libcurl)
+        set(ZHLN_HTTP_ORIGIN "find_package(CURL)")
+        if(CURL_VERSION_STRING)
+            set(ZHLN_HTTP_VERSION "${CURL_VERSION_STRING}")
+        endif()
     endif()
-endif()
 
-if(NOT ZHLN_HTTP_TARGET)
-    find_package(PkgConfig QUIET)
-    if(PKG_CONFIG_FOUND)
-        # QUIET, not REQUIRED: pkg-config is only the first discovery step
-        # here; a missing entry falls through to find_package(CURL) instead
-        # of failing.
-        pkg_check_modules(ZHLN_LIBCURL QUIET IMPORTED_TARGET libcurl)
-        if(ZHLN_LIBCURL_FOUND AND TARGET PkgConfig::ZHLN_LIBCURL)
-            set(ZHLN_HTTP_TARGET PkgConfig::ZHLN_LIBCURL)
-            set(ZHLN_HTTP_ORIGIN "pkg-config libcurl")
-            if(ZHLN_LIBCURL_VERSION)
-                set(ZHLN_HTTP_VERSION "${ZHLN_LIBCURL_VERSION}")
+    if(NOT ZHLN_HTTP_TARGET)
+        find_package(PkgConfig QUIET)
+        if(PKG_CONFIG_FOUND)
+            # QUIET, not REQUIRED: pkg-config is only the first discovery step
+            # here; a missing entry falls through to find_package(CURL) instead
+            # of failing.
+            pkg_check_modules(ZHLN_LIBCURL QUIET IMPORTED_TARGET libcurl)
+            if(ZHLN_LIBCURL_FOUND AND TARGET PkgConfig::ZHLN_LIBCURL)
+                set(ZHLN_HTTP_TARGET PkgConfig::ZHLN_LIBCURL)
+                set(ZHLN_HTTP_ORIGIN "pkg-config libcurl")
+                if(ZHLN_LIBCURL_VERSION)
+                    set(ZHLN_HTTP_VERSION "${ZHLN_LIBCURL_VERSION}")
+                endif()
             endif()
         endif()
     endif()
-endif()
 
-# Neither name is initialised here, and that is deliberate: find_path and
-# find_library write CACHE entries, and a normal variable of the same name set
-# beforehand would shadow the result -- the classic way a library that was found
-# reads back as empty.
-if(NOT ZHLN_HTTP_TARGET)
-    find_path(ZHLN_HTTP_BARE_INCLUDE_DIR
-        NAMES curl/curl.h
-        HINTS "${CURL_ROOT}" ENV CURL_ROOT
-        PATH_SUFFIXES include
-    )
-    find_library(ZHLN_HTTP_BARE_LIBRARY
-        NAMES curl libcurl libcurl_imp
-        HINTS "${CURL_ROOT}" ENV CURL_ROOT
-        PATH_SUFFIXES lib lib64
-    )
-
-    if(ZHLN_HTTP_BARE_INCLUDE_DIR AND ZHLN_HTTP_BARE_LIBRARY)
-        add_library(ZHLN::curl INTERFACE IMPORTED)
-        set_target_properties(ZHLN::curl PROPERTIES
-            INTERFACE_LINK_LIBRARIES "${ZHLN_HTTP_BARE_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ZHLN_HTTP_BARE_INCLUDE_DIR}"
+    # Neither name is initialised here, and that is deliberate: find_path and
+    # find_library write CACHE entries, and a normal variable of the same name set
+    # beforehand would shadow the result -- the classic way a library that was found
+    # reads back as empty.
+    if(NOT ZHLN_HTTP_TARGET)
+        find_path(ZHLN_HTTP_BARE_INCLUDE_DIR
+            NAMES curl/curl.h
+            HINTS "${CURL_ROOT}" ENV CURL_ROOT
+            PATH_SUFFIXES include
         )
-        set(ZHLN_HTTP_TARGET ZHLN::curl)
-        set(ZHLN_HTTP_ORIGIN "${ZHLN_HTTP_BARE_LIBRARY}")
+        find_library(ZHLN_HTTP_BARE_LIBRARY
+            NAMES curl libcurl libcurl_imp
+            HINTS "${CURL_ROOT}" ENV CURL_ROOT
+            PATH_SUFFIXES lib lib64
+        )
+
+        if(ZHLN_HTTP_BARE_INCLUDE_DIR AND ZHLN_HTTP_BARE_LIBRARY)
+            add_library(ZHLN::curl INTERFACE IMPORTED)
+            set_target_properties(ZHLN::curl PROPERTIES
+                INTERFACE_LINK_LIBRARIES "${ZHLN_HTTP_BARE_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${ZHLN_HTTP_BARE_INCLUDE_DIR}"
+            )
+            set(ZHLN_HTTP_TARGET ZHLN::curl)
+            set(ZHLN_HTTP_ORIGIN "${ZHLN_HTTP_BARE_LIBRARY}")
+        endif()
     endif()
+else()
+    unset(_ZHLN_PROBE_CURL_H CACHE)
 endif()
 
 if(NOT ZHLN_HTTP_TARGET)
@@ -188,6 +198,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 # archive.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
+    zahlen_socket
 )
 
 # libcurl stays PRIVATE, the way resvg does in plugins/SVG and simdjson does in
@@ -237,17 +248,6 @@ endif()
 target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions/net
 )
-
-# HTTPServer.cpp is winsock, and winsock is a library. PRIVATE, the way libcurl
-# is above: the sockets are compiled into this archive, so a consumer that
-# includes HTTPServer.hpp needs no winsock header of its own -- and CMake still
-# carries ws2_32 through to that consumer's link line as a link-only dependency,
-# which is where this archive's undefined WSAStartup and friends get resolved.
-if(ZHLN_HAVE_WINSOCK)
-    target_link_libraries(${TARGET_NAME} PRIVATE
-        ws2_32
-    )
-endif()
 
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})

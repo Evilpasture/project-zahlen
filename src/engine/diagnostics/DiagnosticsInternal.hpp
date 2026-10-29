@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
+#include <Zahlen/Core/Diagnostics.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -20,10 +20,4 @@ inline void WriteErr(std::string_view msg) noexcept {
 
 auto SafeRead(std::span<const std::byte> src, std::span<std::byte> dest) noexcept -> bool;
 
-void DumpFaultRegion(const void* faultAddress) noexcept;
-
-auto CaptureStackTrace(std::span<char> out, int maxFrames) noexcept -> size_t;
-
-void InitializeSymbolResolver() noexcept;
-
-}
+} // namespace ZHLN::Diagnostics

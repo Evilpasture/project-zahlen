@@ -34,7 +34,6 @@
 // honoured.
 
 #include <Zahlen/FramePlan.hpp>
-#include <Zahlen/ScriptCommandRegistry.hpp>
 #include <Zahlen/SystemContext.hpp>
 #include <span>
 #include <string_view>
@@ -83,10 +82,6 @@ struct Module {
 
     // Runs when the engine is torn down, for the module's process-global state.
     TeardownHook teardown = nullptr;
-
-    // The module's script-facing verbs, contributed by name. Null when the
-    // module has none, or when its host has no script runtime to serve.
-    ScriptCommandRegistrar registerScriptCommands = nullptr;
 };
 
 } // namespace ZHLN

@@ -13,9 +13,7 @@ namespace ZHLN::Passes {
 
 namespace {
 
-struct ShadowTilePush {
-    JPH::Mat44 viewProj;
-};
+using ShadowTilePush = Slang::ShadowTilePush;
 static_assert(GpuAbi::ScenePassPayload<ShadowTilePush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 constexpr uint32_t kCascadeSlot    = 0;
@@ -28,11 +26,9 @@ constexpr uint32_t kFirstAtlasSlot = 1;
 } // namespace
 
 void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
-    PassContext    passCtx(cmd, frame, frame.InheritsHeaps());
-    auto&          ctx        = passCtx.ctx;
-    const uint32_t frameIndex = ctx.presenter.frameIndex;
-
-    passCtx.EnsureHeapState();
+    Vk::CommandEncoder encoder(cmd);
+    auto&              ctx        = frame;
+    const uint32_t     frameIndex = ctx.presenter.frameIndex;
 
     std::array<Frustum, TargetManager::kCascades> cascadeFrustums {};
     for (uint32_t c = 0; c < TargetManager::kCascades; ++c) {
@@ -120,7 +116,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
 
         Vk::DynamicPass(shadowMapArrayImage.Extent())
             .ViewMask(ShadowRenderer::kCascadeViewMask)
-            .AddDepth(shadowMapArrayImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, ShadowRenderer::kShadowClearDepth)
+            .ClearDepth(shadowMapArrayImage, ShadowRenderer::kShadowClearDepth)
             .Execute(cmd, [&]() {
                 const bool useMeshShadows = useMeshShadowPath && csmDrawCount > 0;
 
@@ -132,7 +128,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         }
                         const auto& shadowDraw = ctx.queues.Draws()[instanceIdx];
                         if (shadowDraw.instanceData.meshletCount == 0) {
-                            passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
+                            encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
                                 {.pipeline      = ctx.shadows.CascadePipeline(),
                                  .vertexCount   = indirectCmdsBase[IndirectOffsetForSlot(kCascadeSlot) + d].vertexCount,
                                  .instanceCount = 1,
@@ -143,7 +139,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                             continue;
                         }
 
-                        passCtx.encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
+                        encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
                             {.pipeline    = ctx.shadows.CascadeMeshPipeline(),
                              .groupCountX = TaskGroupCount(shadowDraw.instanceData.meshletCount),
                              .groupCountY = 1,
@@ -152,7 +148,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         );
                     }
                 } else if (csmDrawCount > 0) {
-                    passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
+                    encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
                         {.pipeline       = ctx.shadows.CascadePipeline(),
                          .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                          .offset         = Vk::DrawIndirectState::OffsetForIndex(IndirectOffsetForSlot(kCascadeSlot)),
@@ -162,7 +158,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                 }
 
                 if (hasMeshParticles) {
-                    Draw3DParticleShadows(passCtx, particles);
+                    Draw3DParticleShadows(ctx, encoder, particles);
                 }
             });
     }
@@ -178,7 +174,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         const auto tiles = ctx.shadowAtlas.Tiles();
 
         Vk::DynamicPass(atlasImage.Extent())
-            .AddDepth(atlasImage, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, ShadowRenderer::kShadowClearDepth)
+            .LoadDepth(atlasImage)
             .Execute(cmd, [&]() {
                 for (uint32_t p = 0; p < placements.size(); ++p) {
                     const auto& placement = placements[p];
@@ -210,17 +206,15 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                             continue;
                         }
 
-                        passCtx.encoder.SetViewport(
+                        encoder.SetViewport(
                             VkViewport {
                                 static_cast<float>(rect.x), static_cast<float>(rect.y), static_cast<float>(rect.size), static_cast<float>(rect.size), 0.0f, 1.0f
                             }
                         );
-                        passCtx.encoder.SetScissor(
-                            VkRect2D {.offset = {static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y)}, .extent = {rect.size, rect.size}}
-                        );
+                        encoder.SetScissor(VkRect2D {.offset = {static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y)}, .extent = {rect.size, rect.size}});
 
                         const ShadowTilePush push {tile.viewProj};
-                        passCtx.encoder.DrawIndirect<Shaders::Modules::ShadowAtlasVS>(
+                        encoder.DrawIndirect<Shaders::Modules::ShadowAtlasVS>(
                             {.pipeline       = ctx.shadows.AtlasPipeline(),
                              .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                              .offset         = Vk::DrawIndirectState::OffsetForIndex(IndirectOffsetForSlot(kFirstAtlasSlot + p)),

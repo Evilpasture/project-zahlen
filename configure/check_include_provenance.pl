@@ -88,11 +88,18 @@ my %FIRST_PARTY = (
     VertexSurface      => ['include/Zahlen/Vertex.hpp'],
     VertexSkin         => ['include/Zahlen/Vertex.hpp'],
     # Audio
-    AudioHandle      => ['include/Zahlen/Audio/AudioTypes.hpp'],
-    SynthHandle      => ['include/Zahlen/Audio/AudioTypes.hpp'],
-    AudioWaveformType => ['include/Zahlen/Audio/AudioTypes.hpp'],
-    AudioFilterType  => ['include/Zahlen/Audio/AudioTypes.hpp'],
-    AudioNoiseType   => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioHandle           => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioBus              => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioBusId            => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioAttenuationModel => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioPlaybackMode     => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioReverbPreset     => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioAttenuationDesc  => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioOcclusionDesc    => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioReverbConfig     => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioWaveformType     => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioFilterType       => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioNoiseType        => ['include/Zahlen/Audio/AudioTypes.hpp'],
     # GUI
     UIBatch          => ['include/Zahlen/gui/UIData.hpp'],
     UIDrawData       => ['include/Zahlen/gui/UIData.hpp'],
@@ -107,6 +114,7 @@ my %FIRST_PARTY = (
     RenderTextureHandle => ['include/Zahlen/Render/Handles.hpp'],
     FrameTarget      => ['include/Zahlen/Render/Handles.hpp'],
     Mesh             => ['include/Zahlen/Render/Types.hpp'],
+    MeshletStreams   => ['include/Zahlen/Render/Types.hpp'],
     Material         => ['include/Zahlen/Render/Types.hpp'],
     DrawFlags        => ['include/Zahlen/Render/Types.hpp'],
     CSGOperation     => ['include/Zahlen/Render/Types.hpp'],
@@ -119,7 +127,6 @@ my %FIRST_PARTY = (
     kMeshletConeWeight => ['include/Zahlen/Meshlet.hpp'],
     kMeshletsPerTaskGroup => ['include/Zahlen/Meshlet.hpp'],
     kMeshShaderGroupSize => ['include/Zahlen/Meshlet.hpp'],
-    kMeshletPackedBytes => ['include/Zahlen/Meshlet.hpp'],
     # Reached by accident before the sweep: the ECS spells LightType, the
     # renderer spells GraphicsSettings, and neither included its own header.
     LightType        => ['include/Zahlen/Render/GpuEnums.hpp'],
@@ -138,6 +145,25 @@ my %FIRST_PARTY = (
     Hash64           => ['include/Zahlen/Core/Hash.hpp'],
     Hash32           => ['include/Zahlen/Core/Hash.hpp'],
     HashCombine      => ['include/Zahlen/Core/Hash.hpp'],
+    LogLevel         => ['include/Zahlen/Core/LogLevel.hpp'],
+    GameplayDriver   => ['include/Zahlen/FramePlan.hpp'],
+    GameplayStatus   => ['include/Zahlen/FramePlan.hpp'],
+    ParseCli           => ['extensions/CommandLine/CommandLine.hpp'],
+    CommandLineOptions => ['extensions/CommandLine/EngineCommandLine.hpp'],
+    HandleCommandLine  => ['extensions/CommandLine/EngineCommandLine.hpp'],
+    SignalManager      => ['extensions/Signal/SignalManager.hpp'],
+    CrashState         => ['extensions/Signal/CrashHandler.hpp'],
+    SetupSignalHandler => ['extensions/Signal/CrashHandler.hpp'],
+    CheckForCrashes    => ['extensions/Signal/CrashHandler.hpp'],
+    DumpOptions        => ['include/Zahlen/Core/Trace.hpp'],
+    MemoryDump         => ['include/Zahlen/Core/Trace.hpp'],
+    'ZHLN::Trace'      => ['include/Zahlen/Core/Trace.hpp'],
+    'ZHLN::Dump'       => ['include/Zahlen/Core/Trace.hpp'],
+    # Reached by accident when PostProcessFeature -- the only header including
+    # pipeline/ComputePass.hpp -- stopped being the renderer's compute-pass bag.
+    DynamicComputePass => ['src/vulkan/pipeline/ComputePass.hpp'],
+    FixedComputePass   => ['src/vulkan/pipeline/ComputePass.hpp'],
+    BoundComputePass   => ['src/vulkan/pipeline/ComputePass.hpp'],
 );
 
 my %THIRD_PARTY = (
@@ -171,7 +197,7 @@ my @SKIP_PREFIXES = ('src/vulkan/');
 # be found by looking for the names that exist, so a leftover
 # `#include "Types.hpp"` resolves nowhere and is indistinguishable from an
 # external header by spelling alone.
-my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp');
+my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp', 'NativeSurfaceInternal.hpp');
 
 # Every tracked name in one alternation, so a file is scanned once for all of
 # them rather than once per symbol. Longest first: with word boundaries a
@@ -395,9 +421,10 @@ for my $rel (keys %tree_files) {
 # Where a quoted include of $including may legitimately look: beside the
 # including file, then up through the directories that own it, then the public
 # tree and src/ itself, then the documented cross-subsystem seams -- each one
-# a PRIVATE include path in CMake (src/render reaches src/window and src/vulkan
-# for the presentation seam and the RHI, src/window reaches src/engine for the
-# TTY backend, the engine keeps its systems in a second include directory).
+# a PRIVATE include path in CMake (src/render reaches src/presentation and
+# src/vulkan for the presentation seam and the RHI, src/window reaches
+# src/presentation and src/engine for the presentation seam and TTY backend,
+# the engine keeps its systems in a second include directory).
 # Searching every root in the repository would resolve
 # `#include "Types.hpp"` against an unrelated subsystem's private header of
 # the same name, which is how a broken include hides.
@@ -419,9 +446,10 @@ sub quoted_roots {
     for my $seam (
         ['src/engine/',        "$ROOT/src/engine/system"],
         ['src/engine/system/', "$ROOT/src/engine"],
-        ['src/render/',        "$ROOT/src/window"],
+        ['src/render/',        "$ROOT/src/presentation"],
         ['src/render/',        "$ROOT/src/vulkan"],
         ['src/render/',        "$ROOT/src/render/init"],
+        ['src/window/',        "$ROOT/src/presentation"],
         ['src/window/',        "$ROOT/src/engine"],
     ) {
         my ($prefix, $extra) = @$seam;

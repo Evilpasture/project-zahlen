@@ -2,20 +2,22 @@
 # Usage: cmake -D SRC=<source> -D DST=<destination> -P CreateSymlinks.cmake
 
 function(create_symlink_safe SRC DST)
-    # Aggressively remove any existing path (symlink or directory) first
-    # using system rm, not CMake's file() command which is unreliable with symlinks
-    execute_process(
-        COMMAND rm -rf "${DST}"
-        ERROR_QUIET
-        OUTPUT_QUIET
-        RESULT_VARIABLE RM_RESULT
-    )
-    
-    # Small delay to ensure filesystem is consistent
-    execute_process(COMMAND sleep 0.1 ERROR_QUIET OUTPUT_QUIET)
-    
-    # Now create the symlink - if this fails, it's a real error
-    if(NOT EXISTS "${DST}")
+    if(IS_SYMLINK "${DST}")
+        file(READ_SYMLINK "${DST}" _current_target)
+        if("${_current_target}" STREQUAL "${SRC}")
+            return()
+        endif()
+    endif()
+
+    if(EXISTS "${DST}" OR IS_SYMLINK "${DST}")
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" -E rm -rf "${DST}"
+            ERROR_QUIET
+            OUTPUT_QUIET
+        )
+    endif()
+
+    if(NOT EXISTS "${DST}" AND NOT IS_SYMLINK "${DST}")
         file(CREATE_LINK "${SRC}" "${DST}" SYMBOLIC)
         if(EXISTS "${DST}" OR IS_SYMLINK "${DST}")
             message(STATUS "Created symlink: ${DST} -> ${SRC}")

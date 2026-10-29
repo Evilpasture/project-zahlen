@@ -4,7 +4,9 @@
 #include "TransformSystem.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <algorithm>
 #include <bit>
 #include <cstddef>
@@ -20,18 +22,18 @@ using ScratchStorage = TransformSystem::ScratchStorage;
 // A transformless hierarchy node contributes an identity local transform, so
 // it can be skipped while looking for the closest ancestor with a Transform.
 // The hop bound also makes malformed transformless cycles harmless.
-[[nodiscard]] auto FindNearestTransformAncestor(ECS::Registry& registry, Entity entity, size_t maxHierarchyHops) noexcept -> Entity {
-    const auto hierarchy = registry.Get<Components::HierarchyComponent>(entity);
+[[nodiscard]] auto FindNearestTransformAncestor(const TransformQuery& query, Entity entity, size_t maxHierarchyHops) noexcept -> Entity {
+    const auto hierarchy = query.Get<Components::HierarchyComponent>(entity);
     Entity     parent    = hierarchy ? hierarchy->parent : Entity::Null();
 
     for (size_t hop = 0; parent != Entity::Null() && hop <= maxHierarchyHops; ++hop) {
-        if (!registry.IsAlive(parent)) {
+        if (!query.IsAlive(parent)) {
             return Entity::Null();
         }
-        if (registry.Get<Components::TransformComponent>(parent)) {
+        if (query.Get<Components::TransformComponent>(parent)) {
             return parent;
         }
-        const auto parentHierarchy = registry.Get<Components::HierarchyComponent>(parent);
+        const auto parentHierarchy = query.Get<Components::HierarchyComponent>(parent);
         if (!parentHierarchy) {
             return Entity::Null();
         }
@@ -129,10 +131,10 @@ void TransformSystem::BuildChildren(ScratchStorage& scratch) {
     }
 }
 
-void TransformSystem::Update(TransformQuery query, ECS::Registry& registry, ECS::Local<ScratchStorage> scratch) {
+void TransformSystem::Update(TransformQuery query, ECS::EntityCommandBuffer& ecb, ECS::Local<ScratchStorage> scratch) {
     auto&      state             = *scratch;
     const auto entities          = query.Entities<Components::TransformComponent>();
-    const auto hierarchyEntities = registry.GetEntitiesWith<Components::HierarchyComponent>();
+    const auto hierarchyEntities = query.Entities<Components::HierarchyComponent>();
 
     if (++state.epoch == 0) {
         for (auto& snapshot: state.snapshots) {
@@ -174,7 +176,7 @@ void TransformSystem::Update(TransformQuery query, ECS::Registry& registry, ECS:
 
     const size_t maxHierarchyHops = hierarchyEntities.size() + 1;
     for (auto& node: state.nodes) {
-        node.parent = FindNearestTransformAncestor(registry, node.entity, maxHierarchyHops);
+        node.parent = FindNearestTransformAncestor(query, node.entity, maxHierarchyHops);
         if (node.parent != Entity::Null() && node.parent.index < state.nodeIndices.size()) {
             const ScratchStorage::NodeIndex parentSlot = state.nodeIndices[node.parent.index];
             if (parentSlot.generation == node.parent.generation && parentSlot.node != ScratchStorage::NoNode) {
@@ -186,7 +188,7 @@ void TransformSystem::Update(TransformQuery query, ECS::Registry& registry, ECS:
             }
         }
 
-        const auto transform = registry.Get<Components::TransformComponent>(node.entity);
+        const auto transform = query.Get<Components::TransformComponent>(node.entity);
         if (!transform) {
             continue;
         }
@@ -195,7 +197,7 @@ void TransformSystem::Update(TransformQuery query, ECS::Registry& registry, ECS:
         const bool                wasActive = snapshot.initialized && snapshot.active && snapshot.generation == node.entity.generation;
         const bool                isNew     = !wasActive;
         const auto                localBits = LocalTransformBits(*transform);
-        const auto                world     = registry.Get<Components::WorldTransformComponent>(node.entity);
+        const auto                world     = query.Get<Components::WorldTransformComponent>(node.entity);
         const bool                hasWorld  = static_cast<bool>(world);
         const bool inputDirty      = isNew || snapshot.localBits != localBits || snapshot.parent != node.parent || snapshot.hasWorldTransform != hasWorld ||
                                      !hasWorld;
@@ -253,34 +255,41 @@ void TransformSystem::Update(TransformQuery query, ECS::Registry& registry, ECS:
         while (!state.traversalStack.empty()) {
             const uint32_t index = state.traversalStack.back();
             state.traversalStack.pop_back();
-            const auto& node = state.nodes[index];
+            auto& node = state.nodes[index];
 
-            const auto transform = registry.Get<Components::TransformComponent>(node.entity);
+            const auto transform = query.Get<Components::TransformComponent>(node.entity);
             if (!transform) {
                 continue;
             }
 
             JPH::Mat44 parentWorld = JPH::Mat44::sIdentity();
             if (node.parentIndex != ScratchStorage::NoNode) {
-                const Entity parentEntity = state.nodes[node.parentIndex].entity;
-                if (const auto parentWorldTransform = registry.Get<Components::WorldTransformComponent>(parentEntity)) {
+                const auto& parentNode = state.nodes[node.parentIndex];
+                if (parentNode.hasResolvedWorld) {
+                    parentWorld = parentNode.resolvedWorld;
+                } else if (const auto parentWorldTransform = query.Get<Components::WorldTransformComponent>(parentNode.entity)) {
                     parentWorld = parentWorldTransform->world;
                 }
             }
 
             const JPH::Mat44 computedWorld = parentWorld * transform->GetLocalMatrix();
             auto&            snapshot      = state.snapshots[node.entity.index];
-            if (auto worldTransform = registry.Get<Components::WorldTransformComponent>(node.entity)) {
+            if (auto worldTransform = query.Get<Components::WorldTransformComponent>(node.entity)) {
                 if (!node.preserveWorld && !Math::SameMatrix(worldTransform->world, computedWorld)) {
                     worldTransform->world = computedWorld;
                 }
-                snapshot.worldBits = WorldMatrixBits(worldTransform->world);
+                node.resolvedWorld    = worldTransform->world;
+                node.hasResolvedWorld = true;
+                snapshot.worldBits    = WorldMatrixBits(worldTransform->world);
             } else {
-                auto& insertedWorldTransform    = registry.Add<Components::WorldTransformComponent>(node.entity);
+                Components::WorldTransformComponent insertedWorldTransform {};
                 insertedWorldTransform.world    = computedWorld;
                 insertedWorldTransform.previous = computedWorld;
-                snapshot.hasWorldTransform      = true;
-                snapshot.worldBits              = WorldMatrixBits(computedWorld);
+                ecb.AddComponent(node.entity, insertedWorldTransform);
+                node.resolvedWorld         = computedWorld;
+                node.hasResolvedWorld      = true;
+                snapshot.hasWorldTransform = true;
+                snapshot.worldBits         = WorldMatrixBits(computedWorld);
             }
 
             const uint32_t childBegin = state.childOffsets[index];
@@ -301,11 +310,14 @@ void TransformSystem::UpdateTransformHistory(ECS::Registry& registry) noexcept {
     // Compare against the last rendered matrix here rather than relying on every
     // writer to set a transient component flag. Static transforms incur reads
     // but no redundant previous-matrix writes.
-    for (size_t i = 0; i < entities.size(); ++i) {
-        if (!Math::SameMatrix(worldTransforms[i].world, worldTransforms[i].previous)) {
-            worldTransforms[i].previous = worldTransforms[i].world;
+    constexpr uint32_t kHistoryChunkSize = 512;
+    TaskSystem::ParallelFor(static_cast<uint32_t>(entities.size()), kHistoryChunkSize, [&](uint32_t start, uint32_t end, uint32_t) {
+        for (uint32_t i = start; i < end; ++i) {
+            if (!Math::SameMatrix(worldTransforms[i].world, worldTransforms[i].previous)) {
+                worldTransforms[i].previous = worldTransforms[i].world;
+            }
         }
-    }
+    });
 }
 
 } // namespace ZHLN

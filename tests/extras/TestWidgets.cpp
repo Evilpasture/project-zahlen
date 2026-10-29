@@ -13,7 +13,6 @@
 // over the panel it belongs to.
 
 #include "TestsFramework.hpp"
-#include <Zahlen/ecs/ECS.hpp>
 #include <Widget/Widget.hpp>
 #include <algorithm>
 #include <array>
@@ -30,6 +29,8 @@ enum class WidgetTestError : uint8_t {
     BarStripFailed      ZHLN_ANNOTATION(ZHLN::Description<"A bar strip's scale or bar height did not follow the style it was drawn with."> {}),
     HoverCardFailed     ZHLN_ANNOTATION(ZHLN::Description<"The hover card was not stateful, or was placed over the panel it belongs to."> {}),
 };
+
+namespace {
 
 struct WidgetTestSuite {
     struct Tests {
@@ -293,13 +294,12 @@ struct WidgetTestSuite {
 
             // And through a real Context, drawn the way the panel draws it: the
             // offsets above and the rect the renderer ends up with have to agree.
-            ZHLN::ECS::Registry registry;
-            ZHLN::GUI::Context  ui(registry, viewport);
+            ZHLN::GUI::Context ui;
             for (const float panelX: {400.0f, 0.0f}) { // room beside the panel, then none
                 const bool roomBeside = (panelX - kCardWidth - style.anchorGap) >= style.windowMargin;
 
-                const auto drawPanel = [&](bool withCard) -> void {
-                    ui.Box(
+                const auto drawPanel = [&](ZHLN::GUI::Frame& frame, bool withCard) -> void {
+                    frame.Box(
                         "widget-panel",
                         ZHLN::GUI::BoxConfig {
                             .width = {.fixed = 200.0f}, .height = {.fit = true}, .padding = 8.0f, .offsetX = panelX, .offsetY = 20.0f
@@ -308,10 +308,10 @@ struct WidgetTestSuite {
                             // The element the card belongs to, and the card as the
                             // panel's last child -- out of the layout flow, which
                             // is what keeps it off the panel's own rows.
-                            ui.BeginBox("widget-row", ZHLN::GUI::BoxConfig {.width = {.fixed = 120.0f}, .height = {.fixed = 16.0f}});
-                            ui.EndBox();
+                            frame.BeginBox("widget-row", ZHLN::GUI::BoxConfig {.width = {.fixed = 120.0f}, .height = {.fixed = 16.0f}});
+                            frame.EndBox();
                             if (withCard) {
-                                Widget::DrawHoverCard(ui, hover, viewport, style, "widget-panel");
+                                Widget::DrawHoverCard(frame, hover, viewport, style, "widget-panel");
                             }
                         }
                     );
@@ -319,28 +319,30 @@ struct WidgetTestSuite {
 
                 // Frame 1: the panel and the row, so that the frame after has
                 // their rectangles -- which is what a card is anchored to.
-                ui.BeginFrame(0.016f);
-                drawPanel(false);
-                [[maybe_unused]] const ZHLN::UIDrawData panelFrame = ui.EndFrame();
+                {
+                    ZHLN::GUI::Frame frame = ui.BeginFrame(ZHLN::GUI::UIInput {.viewport = viewport, .dt = 0.016f});
+                    drawPanel(frame, false);
+                    [[maybe_unused]] const ZHLN::UIDrawData panelFrame = std::move(frame).End();
+                }
 
                 // Frame 2: the same layout, with the card.
                 Widget::ResetHover(hover);
                 Widget::SetHover(hover, "widget-row");
                 Widget::AddHoverLine(hover, "1234567890");
-                ui.BeginFrame(0.016f);
-                drawPanel(true);
-                // The card is a box like any other: if it did not reach the draw
-                // list, there is nothing on screen to place.
-                if (!ZHLN::Test::ExpectTrue(!ui.EndFrame().Empty())) {
-                    return std::unexpected(WidgetTestError::HoverCardFailed);
+                {
+                    ZHLN::GUI::Frame frame = ui.BeginFrame(ZHLN::GUI::UIInput {.viewport = viewport, .dt = 0.016f});
+                    drawPanel(frame, true);
+                    // The card is a box like any other: if it did not reach the draw
+                    // list, there is nothing on screen to place.
+                    if (!ZHLN::Test::ExpectTrue(!std::move(frame).End().Empty())) {
+                        return std::unexpected(WidgetTestError::HoverCardFailed);
+                    }
                 }
 
-                // Frame 3: read what frame 2 laid out.
-                ui.BeginFrame(0.016f);
+                // Read what frame 2 laid out directly from the persistent Context.
                 const auto card  = ui.GetLastFrameRect("widget-hover-card");
                 const auto panel = ui.GetLastFrameRect("widget-panel");
                 const auto row   = ui.GetLastFrameRect("widget-row");
-                [[maybe_unused]] const ZHLN::UIDrawData readFrame = ui.EndFrame();
 
                 if (!(ZHLN::Test::ExpectTrue(card.has_value()) && ZHLN::Test::ExpectTrue(panel.has_value()) && ZHLN::Test::ExpectTrue(row.has_value()))) {
                     return std::unexpected(WidgetTestError::HoverCardFailed);
@@ -373,6 +375,4 @@ struct WidgetTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<WidgetTestSuite>();
-}
+} // namespace

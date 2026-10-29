@@ -105,6 +105,8 @@ struct Echo {
 
 } // namespace
 
+namespace {
+
 struct HTTPTestSuite {
     enum class HTTPTestError : uint8_t {
         ServerUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The suite's loopback server did not come up, so there was nothing to fetch."> {}) = 1,
@@ -664,21 +666,4 @@ struct HTTPTestSuite {
     };
 };
 
-// The extras test binaries are one suite per process (see
-// tests/extras/CMakeLists.txt), so this owns its own entry point.
-int main() {
-    // libcurl honours http_proxy and friends by default, and this suite's server
-    // is on 127.0.0.1: a proxy in the environment would send every request here
-    // somewhere else, and the suite would report failures that are about the
-    // machine it ran on rather than about the client. Cleared for this process,
-    // before anything is fetched. Setting a Windows variable to "" removes it,
-    // which is what unsetenv does elsewhere.
-    for (const char* name: {"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"}) {
-#if defined(_WIN32)
-        _putenv_s(name, "");
-#else
-        unsetenv(name);
-#endif
-    }
-    return ZHLN::Test::Runner::Run<HTTPTestSuite>();
-}
+} // namespace

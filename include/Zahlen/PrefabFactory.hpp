@@ -44,9 +44,9 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color =
 auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> TextureHandle;
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, std::string_view path) -> TextureHandle;
+auto CreateFontAtlas(RenderContext& ctx) -> FontAtlas;
+auto CreateFontAtlas(RenderContext& ctx, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> FontAtlas;
+auto CreateFontAtlas(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) -> FontAtlas;
 
 auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool;
 
@@ -80,6 +80,11 @@ struct SpawnParams {
     uint32_t physicsMask     = 0xFFFFFFFF;
 
     bool emissiveVirtualLights = false;
+
+    // OR'd into every part's MeshComponent flags on spawn: lets a scene
+    // description route a whole prefab into a draw layer (e.g. the BSP
+    // skybox's props into DrawFlags::Background) without forking the asset.
+    DrawFlags drawFlags = DrawFlags::None;
 
     float     roughness = 0.5f;
     float     metallic  = 0.0f;

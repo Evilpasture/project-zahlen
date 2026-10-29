@@ -148,6 +148,12 @@ auto EnumeratePhysicalDevices(const VkInstance instance) noexcept -> std::vector
     }
 }
 
+} // namespace
+
+auto DefaultDeviceScore(const PhysicalDeviceInfo& info) noexcept -> int32_t {
+    return DefaultScore(info);
+}
+
 auto InspectPhysicalDevice(const VkPhysicalDevice physical, const VkSurfaceKHR surface) noexcept -> PhysicalDeviceInfo {
     PhysicalDeviceInfo info {.handle = physical};
 
@@ -177,8 +183,6 @@ auto InspectPhysicalDevice(const VkPhysicalDevice physical, const VkSurfaceKHR s
         .hasCompute     = queue_families[3] != UINT32_MAX,
     };
 }
-
-} // namespace
 
 auto SelectPhysicalDevice(const VkInstance instance, const VkSurfaceKHR surface, const DeviceScoreFunction score, const void* const userdata) noexcept
     -> std::optional<PhysicalDeviceInfo> {

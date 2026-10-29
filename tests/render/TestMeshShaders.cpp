@@ -35,8 +35,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
-#include <filesystem>
-#include <fstream>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -64,36 +62,7 @@ enum class MeshShaderTestError : uint8_t {
 
 namespace {
 
-struct Image {
-    int                  width  = 0;
-    int                  height = 0;
-    std::vector<uint8_t> rgb;
-
-    [[nodiscard]] bool Valid() const noexcept {
-        return width > 0 && height > 0 && rgb.size() == static_cast<size_t>(width) * static_cast<size_t>(height) * 3u;
-    }
-};
-
-[[nodiscard]] Image LoadPPM(std::string_view path) {
-    Image         img;
-    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
-    if (!ppm.is_open()) {
-        return img;
-    }
-
-    std::string header;
-    int         maxColor = 0;
-    ppm >> header >> img.width >> img.height >> maxColor;
-    ppm.get();
-
-    if (img.width <= 0 || img.height <= 0) {
-        return {};
-    }
-
-    img.rgb.resize(static_cast<size_t>(img.width) * static_cast<size_t>(img.height) * 3u);
-    ppm.read(reinterpret_cast<char*>(img.rgb.data()), static_cast<std::streamsize>(img.rgb.size()));
-    return img;
-}
+using Image = ZHLN::Test::Image::RgbImage;
 
 // Pixels that differ from the top-left pixel: a cheap "is anything actually
 // drawn here" probe, so two identically-blank frames cannot pass as a match.
@@ -194,18 +163,12 @@ void WriteDiffImage(std::string_view path, const Image& a, const Image& b) {
     if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
         return;
     }
-    std::ofstream out(std::filesystem::path(path), std::ios::binary);
-    if (!out.is_open()) {
-        return;
-    }
-    out << "P6\n" << a.width << " " << a.height << "\n255\n";
-
-    std::vector<uint8_t> amplified(a.rgb.size());
+    Image amplified = a;
     for (size_t i = 0; i < a.rgb.size(); ++i) {
-        const int d  = std::abs(static_cast<int>(a.rgb[i]) - static_cast<int>(b.rgb[i]));
-        amplified[i] = static_cast<uint8_t>(std::min(255, d * 4));
+        const int d      = std::abs(static_cast<int>(a.rgb[i]) - static_cast<int>(b.rgb[i]));
+        amplified.rgb[i] = static_cast<uint8_t>(std::min(255, d * 4));
     }
-    out.write(reinterpret_cast<const char*>(amplified.data()), static_cast<std::streamsize>(amplified.size()));
+    (void) ZHLN::Test::Image::WritePPM(path, amplified);
 }
 
 } // namespace
@@ -213,6 +176,8 @@ void WriteDiffImage(std::string_view path, const Image& a, const Image& b) {
 // ============================================================================
 // Test Suite
 // ============================================================================
+
+namespace {
 
 struct MeshShaderTestSuite {
     MeshShaderTestSuite() {
@@ -256,7 +221,7 @@ struct MeshShaderTestSuite {
         // This is the exact code path both zcook and the runtime glTF importer
         // use, so a regression here corrupts every cooked asset.
         std::expected<void, ZHLN::ErrorCode> meshlet_partitioning_invariants() {
-            static_assert(ZHLN::kMeshletPackedBytes == 64u, "meshlet wire stride: fetchMeshlet and the cooked format agree on 64");
+            static_assert(sizeof(ZHLN::MeshletDesc) == 60u, "cooked .zmesh MeshletDesc record stride");
             static_assert(ZHLN::kMeshletMaxTriangles % 4 == 0, "meshoptimizer requires max_triangles to be a multiple of 4");
             static_assert(ZHLN::kMeshletMaxVertices <= 255, "micro indices are 8 bit");
 
@@ -283,9 +248,7 @@ struct MeshShaderTestSuite {
                 // 3 micro indices padded up to the 4-byte word the mesh shader loads.
                 ZHLN::Test::ExpectEq(built.triangles.size(), static_cast<size_t>(4));
                 ZHLN::Test::ExpectGt(built.meshlets[0].sphereRadius, 0.0f);
-                // The GPU ABI is frozen: the shaders index these streams by hand.
-                // The packed wire stride carries the pin the struct's assert used to.
-                ZHLN::Test::ExpectEq(ZHLN::PackMeshlets(built.meshlets).size(), built.meshlets.size() * ZHLN::kMeshletPackedBytes);
+                ZHLN::Test::ExpectEq(ZHLN::BuildMeshlets(pos), built);
             }
 
             // --- c) A real surface: nothing lost, nothing out of bounds ---
@@ -545,15 +508,11 @@ struct MeshShaderTestSuite {
 
             constexpr float dt = 1.0f / 60.0f;
             auto            capture = [&](ZHLN::Engine& engine, std::string_view path) -> Image {
-                auto& rc = engine.GetRenderContext();
                 for (uint32_t frame = 0; frame < 6; ++frame) {
                     engine.ProcessEvents();
                     engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
                 }
-                if (!rc.CaptureScreenshotPPM(path)) {
-                    return {};
-                }
-                return LoadPPM(path);
+                return ZHLN::Test::Headless::Capture(engine, path);
             };
 
             // Mesh shading is create-time, so the two paths cannot share one
@@ -565,7 +524,7 @@ struct MeshShaderTestSuite {
             // Any VUID raised from here on is attributable to the frames this
             // test renders. A suite that prints validation errors and still
             // reports PASS is not verifying anything.
-            const uint32_t validationBefore = vertexEngine->GetRenderContext().GetValidationErrorCount();
+            const uint32_t validationBefore = ZHLN::Test::ValidationErrorCount();
 
             if (auto setupResult = setupScene(*vertexEngine); !setupResult) {
                 return std::unexpected(setupResult.error());
@@ -584,7 +543,7 @@ struct MeshShaderTestSuite {
             const Image meshImage = capture(*meshEngine, "headless_meshshader_mesh.ppm");
             ZHLN::Test::ExpectTrue(meshEngine->GetRenderContext().GetInfo().meshShadingActive);
 
-            const uint32_t validationRaised = meshEngine->GetRenderContext().GetValidationErrorCount() - validationBefore;
+            const uint32_t validationRaised = ZHLN::Test::ValidationErrorCount() - validationBefore;
 
             if (!(ZHLN::Test::ExpectTrue(meshImage.Valid()) && ZHLN::Test::ExpectTrue(vertexA.Valid()) && ZHLN::Test::ExpectTrue(vertexB.Valid()))) {
                 return std::unexpected(MeshShaderTestError::RenderOutputBlank);
@@ -773,13 +732,11 @@ struct MeshShaderTestSuite {
 
             constexpr float dt = 1.0f / 60.0f;
             auto capture = [&](ZHLN::Engine& engine, std::string_view path) -> Image {
-                auto& rc = engine.GetRenderContext();
                 for (uint32_t f = 0; f < 6; ++f) {
                     engine.ProcessEvents();
                     engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
                 }
-                if (!rc.CaptureScreenshotPPM(path)) return {};
-                return LoadPPM(path);
+                return ZHLN::Test::Headless::Capture(engine, path);
             };
 
             // Both captures for one path are taken before the other path is
@@ -948,12 +905,7 @@ struct MeshShaderTestSuite {
                 return ZHLN::Test::ExpectTrue(mesh.has_value() && mesh->meshletCount > 0);
             };
 
-            auto capture = [](ZHLN::Engine& engine, const char* path) -> Image {
-                if (!engine.GetRenderContext().CaptureScreenshotPPM(path)) {
-                    return {};
-                }
-                return LoadPPM(path);
-            };
+            auto capture = [](ZHLN::Engine& engine, const char* path) -> Image { return ZHLN::Test::Headless::Capture(engine, path); };
 
             if (!setupBackplane(*vertexEngine)) {
                 return std::unexpected(MeshShaderTestError::DoubleSidedSetupFailed);
@@ -1006,9 +958,4 @@ struct MeshShaderTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunMeshShaderSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<MeshShaderTestSuite>();
-}
-
+} // namespace

@@ -3,6 +3,7 @@
 
 #include "passes/forward/ForwardPass.hpp"
 #include "passes/SceneDraw.hpp"
+#include "passes/forward/ForwardResources.hpp"
 #include <GeneratedGpuTypes.hpp>
 #include <ShaderBindings.hpp>
 #include <cstddef>
@@ -11,37 +12,26 @@ namespace ZHLN::Passes {
 
 namespace {
 
-struct ParticleRenderPushConstants {
-    VkDeviceAddress          particleBufferAddr;
-    Slang::ParticleAlignment alignment;
-    uint32_t                 textureIndex;
-};
+using ParticleRenderPushConstants = Slang::ParticleRenderPushConstants;
 static_assert(GpuAbi::ScenePassPayload<ParticleRenderPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
-struct LinePushConstants {
-    JPH::Mat44      viewProj;
-    VkDeviceAddress vertexBufferAddress;
-};
-static_assert(sizeof(LinePushConstants) == 80);
-static_assert(offsetof(LinePushConstants, vertexBufferAddress) == 64);
+using LinePushConstants = Slang::LinePushConstants;
 
 } // namespace
 
 void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
     auto& ctx = frame;
 
-    ctx.BindHeapsAndPushFrame(cmd);
-
-    PassContext passCtx(cmd, frame);
+    Vk::CommandEncoder encoder(cmd);
     const auto  sceneVp = frame.EffectiveViewport();
 
     const auto litColor = Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(frame.graphResources.hdrSceneColor);
-    const auto depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.presenter.depthTarget);
+    const auto depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.ActiveDepthTarget());
 
     Vk::DynamicPass(litColor.Extent())
         .Viewport(sceneVp)
-        .AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .LoadColor(litColor)
+        .LoadDepth(depth)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < ctx.queues.Draws().size(); ++i) {
                 const auto& drawCmd = ctx.queues.Draws()[i];
@@ -52,7 +42,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
+                SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
 
             if (forward.particles.Valid() && !ctx.queues.ParticleEmitters().empty()) {
@@ -68,7 +58,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
                         .textureIndex       = emitter.params.textureIndex
                     };
 
-                    passCtx.encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
+                    encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
                         {.pipeline = forward.particles.Get(), .vertexCount = 6, .instanceCount = emitter.maxParticles, .firstVertex = 0, .firstInstance = 0}, pc
                     );
                 }
@@ -77,7 +67,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
             if (forward.line.Valid() && ctx.activeLineVertexCount > 0) {
                 const LinePushConstants pc = {.viewProj = ctx.current_view_proj, .vertexBufferAddress = ctx.frames.lineVboAddresses[ctx.presenter.frameIndex]};
 
-                passCtx.encoder.DrawInstanced<Shaders::Modules::DebugLineVS, Shaders::Modules::DebugLinePS>(
+                encoder.DrawInstanced<Shaders::Modules::DebugLineVS, Shaders::Modules::DebugLinePS>(
                     {.pipeline = forward.line.Get(), .vertexCount = ctx.activeLineVertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = 0}, pc
                 );
             }

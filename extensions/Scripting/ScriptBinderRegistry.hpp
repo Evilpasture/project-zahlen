@@ -33,7 +33,6 @@
 
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
-#include <Zahlen/gui/GUI.hpp>
 
 #include <cstddef>
 
@@ -42,9 +41,7 @@ namespace ZHLN {
 // Register every component type core declares. Returns how many were added.
 //
 // Safe to call more than once; Register overwrites the entry for a type rather
-// than duplicating it. Core's ZHLN::Components plus the font-atlas singleton
-// GUI::UISettingsComponent are walked so a script reaches a type by the same
-// name regardless of which header declared it.
+// than duplicating it.
 inline auto RegisterCoreScriptTypes() -> std::size_t {
     auto&       binder = ScriptBinder::Get();
     std::size_t count  = 0;
@@ -53,8 +50,6 @@ inline auto RegisterCoreScriptTypes() -> std::size_t {
         binder.Register<Component>();
         ++count;
     });
-    binder.Register<GUI::UISettingsComponent>();
-    ++count;
 
     return count;
 }

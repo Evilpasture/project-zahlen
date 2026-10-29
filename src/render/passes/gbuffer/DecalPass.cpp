@@ -2,19 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/gbuffer/DecalPass.hpp"
-#include "RenderInternal.hpp"
+#include "FrameContext.hpp"
+#include "passes/gbuffer/DecalResources.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {
 
-struct DecalPushConstants {
-    JPH::Mat44 worldMatrix;
-    JPH::Mat44 clipToLocal;
-    uint32_t   albedoIndex;
-    uint32_t   normalIndex;
-    float      roughness;
-    float      metallic;
-};
+using DecalPushConstants = Slang::DecalPushConstants;
 static_assert(GpuAbi::ScenePassPayload<DecalPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
@@ -23,10 +17,8 @@ void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
         return;
     }
 
-    frame.BindHeapsAndPushFrame(cmd);
-
-    PassContext passCtx(cmd, frame);
-    passCtx.encoder.BindPipeline(decals.pass.Get());
+    Vk::CommandEncoder encoder(cmd);
+    encoder.BindPipeline(decals.pass.Get());
 
     const auto invViewProj = frame.unjittered_view_proj.Inversed();
 
@@ -40,8 +32,8 @@ void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
             .metallic    = decalCmd.metallic
         };
 
-        passCtx.encoder.BindPipeline(decals.pass.Get());
-        passCtx.encoder.DrawHeap<Shaders::Modules::DecalVS, Shaders::Modules::DecalPS>(36, 1, decalPC);
+        encoder.BindPipeline(decals.pass.Get());
+        encoder.DrawHeap<Shaders::Modules::DecalVS, Shaders::Modules::DecalPS>(36, 1, decalPC);
     }
 }
 

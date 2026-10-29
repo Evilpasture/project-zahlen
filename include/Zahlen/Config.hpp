@@ -3,9 +3,7 @@
 
 #pragma once
 #include <Zahlen/Common.h>
-#include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Core/Diagnostics.hpp>
 #include <bit>
 #include <cstdint>
 #include <span>
@@ -26,28 +24,8 @@
 
 #define ZHLN_VERSION_STR ZHLN_STR(ZHLN_VERSION_MAJOR) "." ZHLN_STR(ZHLN_VERSION_MINOR) "." ZHLN_STR(ZHLN_VERSION_PATCH)
 
-#ifndef ZHLN_GIT_COMMIT_HASH
-#define ZHLN_GIT_COMMIT_HASH "unknown"
-#endif
-
-#ifndef ZHLN_COMPILER_FLAGS
-#define ZHLN_COMPILER_FLAGS "unknown"
-#endif
-
-#ifndef ZHLN_META_BUILDER
-#define ZHLN_META_BUILDER "unknown"
-#endif
-
-#ifndef ZHLN_BUILD_TOOL
-#define ZHLN_BUILD_TOOL "unknown"
-#endif
-
 #ifndef ZHLN_TARGET_TRIPLE
 #define ZHLN_TARGET_TRIPLE "unknown"
-#endif
-
-#ifndef ZHLN_LINKER_NAME
-#define ZHLN_LINKER_NAME "unknown"
 #endif
 
 namespace ZHLN {
@@ -208,17 +186,12 @@ struct RenderConfig {
     // teardown.
     std::span<const uint8_t> initialPipelineBinaryData;
     std::string crashDumpPath;
-    // Explicit diagnostics sink: the caller owns the counters, the renderer
-    // writes to them. The sink and counters must outlive RenderContext,
-    // including teardown callbacks. Nullptr keeps the instance-local counters.
-    DiagnosticsSink* diagnostics = nullptr;
 };
 
 struct EngineConfig {
     PhysicsConfig physics;
     RenderConfig  render;
-    bool enableFallbackScene = true;
-    CrashState* crashState = nullptr;
+    bool          enableFallbackScene = true;
 };
 
 }

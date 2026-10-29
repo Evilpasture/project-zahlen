@@ -55,9 +55,43 @@ push-constant fallback path.
 
 Within a command buffer, heap/push-data commands and legacy
 descriptor-set/push-constant commands **invalidate each other**. The renderer
-now records only heap/push-data commands; every pass calls
-`RenderContext::Impl::BindHeapsAndPushFrame(cmd)` at the start of its segment
-(bind both heaps + push the per-frame device-address block).
+now records only heap/push-data commands.
+
+### Heap state is command-stream state, bound once per stream
+
+The heap bindings and the per-frame device-address block are **state of the
+command stream**, so they are established once, where the stream begins
+recording, and never from pass code:
+
+| Stream                           | Begins at                                                                          |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| a window's graphics stream       | `RenderFrameContext::BeginStream`, in `RenderContext::Impl::AcquireTarget`           |
+| the async-compute stream         | `RenderFrameContext::BeginStream`, in `Pipelines::ComputeSimPipeline::Submit`        |
+| fork / parallel-draw secondaries | `Vk::SecondaryPassContext::Begin` (`HeapInheritance` link + per-frame address push, per slot) |
+
+Nothing in the stream re-establishes it: `HeapManager` writes into one pair of
+device-addressable heap buffers that are created once and never grow or move, so
+the bound ranges stay valid for the life of the command buffer. Pass payloads
+cannot clobber the address block either -- `GpuAbi::kScenePushLayout` guarantees
+the address window begins after the pass-payload prefix
+(`kScenePassPayloadBytes`), and every push is written at its own offset
+(`vkCmdPushDataEXT`), never as one whole-block write.
+
+The type system carries the rule, so nothing has to remember it. A stream is
+begun by `RenderFrameContext::BeginStream`, which returns a
+`Vk::StreamCommandRecorder`: a recorder that cannot exist without the heap state,
+because the factory that produces it takes the establishing step as an argument
+and runs it before handing the recorder back. `BindHeapsAndPushFrame` is private
+to the frame context on top of that -- `BeginStream` is the one thing that can
+call it -- so "this stream began without its heap state" is not a state the code
+can be written in, rather than a rule someone has to check.
+
+The reason it moved out of the passes is worth keeping in view: a pass that
+binds heaps for itself only works because of what happens to run before it on the
+same buffer, which is exactly the property that stops holding the day the pass is
+reordered, moved to the front of the frame, or forked onto another queue. A pass
+is handed a frame and a `Vk::CommandEncoder` and nothing else, so the coupling
+has no way back in.
 
 ---
 
@@ -80,16 +114,44 @@ sampler heap buffer: static only (scene registry + one slot per pass sampler bin
   `AlignUp(max(bufferDescriptorSize, imageDescriptorSize), max(bufferDescriptorAlignment, imageDescriptorAlignment))`
   so every slot fits every resource type and all spec alignment VUIDs hold.
 * The three dynamic groups are one bump allocator per lifecycle
-  (`HeapLifecycle::Frame` / `Immediate`), rewound by `HeapManager::BeginFrame`
-  and `BeginImmediate`. A write allocates its pass's whole block from the
-  partition of the frame being recorded, which is why a pass no longer declares
-  how many blocks per frame it needs: `BeginImmediate` is honest because the
-  out-of-frame bakes run through `ExecuteImmediate`, which waits on the fence
-  before the partition is reused.
-* `globalTextures[]` is one offset-addressed region: the reservation returns its
-  base, the set-0 mapping points at that base, and a static allocation added
-  before the reservation moves the array instead of landing inside it. The
-  hand-counted `SkipStatic*` cursors this replaced are gone.
+  (`HeapLifecycle::Frame` / `Immediate`), rewound by transactions rather than by
+  a state flag the caller has to remember to tick: `HeapManager::BeginFrameScope`
+  opens the frame partition (the renderer's frame context holds the token) and
+  `HeapManager::CreateImmediateScope` opens a bump transaction over the immediate
+  partition. A write allocates its pass's whole block from the partition of the
+  frame being recorded, which is why a pass no longer declares how many blocks
+  per frame it needs. Immediate scopes nest LIFO and each restores the cursor it
+  found on exit, so two live scopes hand out disjoint slots instead of resetting
+  each other's cursor to zero; the out-of-frame bakes stay honest because
+  `ExecuteImmediate` waits on the fence before a scope's range is reused.
+* `globalTextures[]` is one offset-addressed region: `ReserveImageRange` returns
+  its typed base handle, the set-0 mapping points at that base, and a static
+  allocation added before the reservation moves the array instead of landing
+  inside it. The hand-counted `SkipStatic*` cursors this replaced are gone.
+
+### Registration, reservation, binding
+
+`HeapManager` hands out typed capabilities, never slot indices and never raw
+byte offsets:
+
+| Operation | API | Use |
+| --------- | --- | --- |
+| Register | `RegisterSampler`, `RegisterSamplerArray`, `RegisterImage`, `RegisterStorageImage`, `RegisterStorageBuffer`, `RegisterUniformBuffer`, `RegisterAccelerationStructure` | Slot assignment and descriptor write in one call: a handle that comes back is already written. |
+| Reserve  | `ReserveSampler`, `ReserveImage`, `ReserveSamplerRange`, `ReserveImageRange` | Only when the payload cannot exist yet (a mapping baked into a pipeline precedes the image it addresses). Returns a typed handle, and it is expected to be bound. |
+| Bind     | `BindSampler`, `BindImage`, `BindStorageImage`, `BindStorageBuffer`, `BindUniformBuffer`, `BindAccelerationStructure` | Attach or refresh the payload of an existing handle. |
+
+Mapping tables are semantic, not Vulkan. `ApplySamplerMapping`,
+`ApplySamplerArrayMapping`, `ApplySampledImageMapping`,
+`ApplyBindlessTextureArrayMapping` and `ApplyPushIndexMapping` (plus the
+allocation-carrying `ApplyNewSamplerMapping` / `ApplyPairedSamplerMapping` that
+`BuildHeapPassBindings` uses) append 32-byte `DescriptorMapping` rows naming a
+heap *slot* and a push-constant offset — never a byte offset, never a
+`VkDescriptorSetAndBindingMappingEXT`. `HeapManager::Materialize` is the only
+place the 96-byte driver struct is produced, and it computes `ResourceOffset()`,
+`SamplerOffset()`, `ResourceStride()` and `SamplerStride()` itself, so those
+stay private to `HeapManager`. If padding, stride rules or the partition layout
+change, nothing outside the heap changes — and nothing persistent holds a driver
+struct or a pointer into one.
 * `globalTextures[]` slots are recycled rather than only ever appended to:
   `ReleaseBindlessTexture` parks a released slot (its descriptor keeps pointing
   at the parked image while frames that may still read it are in flight),
@@ -123,24 +185,23 @@ Set-0 bindings map as follows (baked by `BuildSceneHeapMappings`):
 | 7       | prefilteredMap  | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
 | 8       | brdfLUT         | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
 | 9       | clampSampler    | `HEAP_WITH_CONSTANT_OFFSET` → static sampler slot |
-| 10      | texTransLighting| `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
-| 11      | globalTextures[]| `HEAP_WITH_CONSTANT_OFFSET`, `heapArrayStride = resource stride` |
-| 12      | texDdgiIrradiance | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
-| 13      | texDdgiDistance   | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
+| 10      | texTransLighting   | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
+| 11      | materialSamplers[] | `HEAP_WITH_CONSTANT_OFFSET` → static 9-sampler wrap table |
+| 12      | globalTextures[]   | `HEAP_WITH_CONSTANT_OFFSET`, `heapArrayStride = resource stride` |
 
 ### Push-data layout
 
 `resources/shaders/descriptor_heap_layout.slang` is the layout authority. Its
 `DescriptorHeapPushData` type places the largest ordinary per-pass block first,
-then the six frame addresses and the descriptor index. slangc compiles that
-type into the `gpu_abi` SPIR-V blob, and `src/render/GpuAbi.hpp` reads the field
-offsets out of that bytecode at compile time (`Vk::SpirvTypes`, see
-`src/vulkan/pipeline/SpirvLayout.hpp`) -- deriving `GpuAbi::kScenePushLayout`,
-so an edit to the struct lands in the engine automatically instead of needing
-a hand-kept copy. Both mapping creation and `vkCmdPushDataEXT` then use the
-derived offsets, including any padding selected by slangc's SPIR-V layout
-rules; `src/vulkan` supplies only the generic container (`Vk::HeapPushDataLayout`)
-and writes what it is handed. `src/vulkan` never sees the `.slang` source, and
+then the six frame addresses and the descriptor index. `tools/zshader` compiles
+that type in-process and reflects its field offsets into the generated header as
+`Slang::kScenePushLayout`, which `src/render/GpuAbi.cpp` exports as
+`GpuAbi::kScenePushLayout` -- so an edit to the struct lands in the engine on
+the next build instead of needing a hand-kept copy, and nothing re-reads the
+module's SPIR-V to derive it. Both mapping creation and `vkCmdPushDataEXT` then
+use the derived offsets, including any padding selected by the shader
+compiler's layout rules; `src/vulkan` supplies only the generic container
+(`Vk::HeapPushDataLayout`) and writes what it is handed. `src/vulkan` never sees the `.slang` source, and
 the scene's blob prefix -- `GpuAbi::kScenePassPayloadBytes` and the
 `ScenePassPayload` bound on every pass payload -- is policy the render layer
 asserts about itself, never a constant the RHI carries.
@@ -179,7 +240,13 @@ the old bindless set array.
   descriptor-heap mode, and the implementation chains those mappings into each
   `VkPipelineShaderStageCreateInfo` while adding
   `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` via
-  `VkPipelineCreateFlags2CreateInfoKHR`.
+  `VkPipelineCreateFlags2CreateInfoKHR`. The structs are materialized per build
+  by a build-scoped `HeapMappingArena` (`HeapMappingBuilder.hpp`) out of the
+  pass's `HeapMappingTable`; `arena.Map(a, b)` composes two tables straight into
+  the arena's own inline buffer, which is how a pass brings the shared Set-1
+  scene block along without a third table. The buffer holds 32 mappings — every
+  set the renderer builds is smaller, and Set 0 + Set 1 together are around 19 —
+  so a pipeline build allocates nothing; a wider set spills to one heap block.
 * Every pipeline create info uses `layout = VK_NULL_HANDLE`
   (`VUID-VkGraphicsPipelineCreateInfo-flags-11311`); no pipeline-layout handle
   is accepted or stored by the backend.

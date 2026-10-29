@@ -167,6 +167,6 @@ sleeps. Run both normal and `ZHLN_DEV_MODE` builds to cover the default policy.
 With the project's normal toolchain and optional HTTP/CDN targets enabled:
 
 ```sh
-cmake --build build --target TestRemoteAsset TestCDN
-ctest --test-dir build -R '^(TestRemoteAsset|TestCDN)$' --output-on-failure
+cmake --build build --target ztest TestRemoteAsset TestCDN
+./build/bin/ztest -k "RemoteAssetTestSuite or CDNTestSuite"
 ```

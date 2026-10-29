@@ -8,20 +8,6 @@ __exported import math.transform;
 __exported import uniforms;
 __exported import vertex_format;
 
-// Res_Anisotropy is R8G8B8A8_UNORM. Reserve the top code (255) in its
-// strength channel for KHR_materials_unlit, and quantize lit strengths into
-// 0..254. That lets opaque unlit materials stay in the G-buffer (and in the
-// opaque scene sampled by transmission) without mistaking strength=1 for unlit.
-public float EncodeGBufferAnisotropy(float strength) {
-    return saturate(strength) * (254.0f / 255.0f);
-}
-public float DecodeGBufferAnisotropy(float encodedStrength) {
-    return saturate(encodedStrength * (255.0f / 254.0f));
-}
-public bool IsGBufferUnlit(float encodedStrength) {
-    return encodedStrength > (254.5f / 255.0f);
-}
-
 public static const float3 HemisphereSamples[8] = { float3(0.35517f, -0.06385f, 0.93261f), float3(-0.19134f, 0.37512f, 0.90695f),
                                                     float3(0.52841f, 0.50284f, 0.68412f),  float3(-0.67215f, -0.32111f, 0.66723f),
                                                     float3(0.11211f, -0.78121f, 0.61432f), float3(-0.73211f, 0.42152f, 0.53512f),
@@ -59,6 +45,8 @@ public float3 UnpackNormalOctahedron(float2 oct) {
 }
 
 public float3 ReconstructWorldPos(float2 uv, float depth, float4x4 invViewProj) {
+    // One world, one depth range (the band is retired): plain NDC
+    // reconstruction, where 1.0 still means no layer rasterized the pixel.
     float4 clipSpacePos  = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, depth, 1.0f);
     float4 worldSpacePos = mul(invViewProj, clipSpacePos);
     float w = worldSpacePos.w;
@@ -87,18 +75,20 @@ public float SoftClamp(float x, float limit) {
 #define PCF_SAMPLES 16
 
 public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray<float> shadowMap, SamplerState linearSampler, uint cascadeIndex,
-                         bool halved = false) {
-    float blockerSum  = 0.0f;
-    int numBlockers   = 0;
-    float blockerBias = 0.0005f;
+                         float shadowResolution, float2 dzDuv, float blockerBias, bool halved = false) {
+    float blockerSum = 0.0f;
+    int   numBlockers = 0;
 
     const int stride = halved ? 2 : 1;
 
     for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; i += stride) {
         float2 offset        = PoissonDisk[i] * searchRadius;
-        float shadowMapDepth = shadowMap.SampleLevel(linearSampler, float3(uv + offset, cascadeIndex), 0);
+        float2 tapUV         = uv + offset;
+        float2 snappedTapUV  = (floor(tapUV * shadowResolution) + 0.5f) / shadowResolution;
+        float  zPlaneAtTap   = zReceiver + clamp(dot(dzDuv, snappedTapUV - uv), -0.02f, 0.02f);
+        float  shadowMapDepth = shadowMap.SampleLevel(linearSampler, float3(tapUV, cascadeIndex), 0);
 
-        if (shadowMapDepth < (zReceiver - blockerBias)) {
+        if (shadowMapDepth < (zPlaneAtTap - blockerBias)) {
             blockerSum += shadowMapDepth;
             numBlockers++;
         }
@@ -110,7 +100,8 @@ public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture
 }
 
 public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos, Texture2DArray<float> shadowMap, SamplerComparisonState shadowSampler,
-                                 SamplerState linearSampler, float shadowResolution, uint cascadeIndex, float worldDepthPerNdc, bool reduced = false) {
+                                 SamplerState linearSampler, float shadowResolution, uint cascadeIndex, float worldDepthPerNdc, float texelSizeWorld,
+                                 float2 dzDuv, float sunSize, bool reduced = false) {
     float3 projCoords = shadowPos.xyz / shadowPos.w;
 
     if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 || projCoords.z < 0.0 || projCoords.z > 1.0) {
@@ -120,19 +111,21 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
     float zReceiver = projCoords.z;
     float texelSize = 1.0 / shadowResolution;
 
-    float resolutionScale = 2048.0 / shadowResolution;
-    float bias            = max(0.0015f * (1.0 - dot(N, L)), 0.0005f) * resolutionScale;
-    zReceiver -= bias;
+    float texelDepthNdc = texelSizeWorld / max(worldDepthPerNdc, 1e-4f);
+    float constBias     = max(1.5f * texelDepthNdc, 0.00015f);
+    float blockerBias   = max(2.25f * texelDepthNdc, 0.00025f);
 
     float searchRadius    = 4.0 * texelSize;
-    float avgBlockerDepth = FindBlocker(projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler, cascadeIndex, reduced);
+    float avgBlockerDepth = FindBlocker(
+        projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler, cascadeIndex, shadowResolution, dzDuv, blockerBias, reduced);
 
     if (avgBlockerDepth == -1.0f)
         return 1.0f;
 
-    float worldDepthDiff = (zReceiver - avgBlockerDepth) * worldDepthPerNdc;
-    float penumbraWidth  = worldDepthDiff * 0.5f;
-    float filterRadius   = clamp(penumbraWidth, 2.5f, 16.0f) * texelSize;
+    float worldDepthDiff = max(0.0f, (zReceiver - avgBlockerDepth) * worldDepthPerNdc);
+    float penumbraWorld  = worldDepthDiff * max(sunSize, 0.004f);
+    float penumbraTexels = penumbraWorld / max(texelSizeWorld, 1e-4f);
+    float filterRadius   = clamp(penumbraTexels, 1.25f, 12.0f) * texelSize;
 
     float shadow = 0.0f;
     float angle  = GetShadowDither(screenPos) * 2.0 * 3.14159265;
@@ -143,49 +136,15 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
     const int pcfCount  = reduced ? (PCF_SAMPLES / 2) : PCF_SAMPLES;
 
     for (int i = 0; i < PCF_SAMPLES; i += pcfStride) {
-        float2 offset = float2(PoissonDisk[i].x * c - PoissonDisk[i].y * s, PoissonDisk[i].x * s + PoissonDisk[i].y * c) * filterRadius;
-        shadow += shadowMap.SampleCmpLevelZero(shadowSampler, float3(projCoords.xy + offset, cascadeIndex), zReceiver);
+        float2 offset      = float2(PoissonDisk[i].x * c - PoissonDisk[i].y * s, PoissonDisk[i].x * s + PoissonDisk[i].y * c) * filterRadius;
+        float2 tapUV       = projCoords.xy + offset;
+        float2 snappedTap  = (floor(tapUV * shadowResolution) + 0.5f) / shadowResolution;
+        float  zCompareTap = zReceiver + clamp(dot(dzDuv, snappedTap - projCoords.xy), -0.02f, 0.02f) - constBias;
+        shadow += shadowMap.SampleCmpLevelZero(shadowSampler, float3(tapUV, cascadeIndex), zCompareTap);
     }
 
     return shadow / (float) pcfCount;
 }
-
-#ifndef DISABLE_RTR
-public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float2 screenPos, uint frameIndex, RaytracingAccelerationStructure tlas,
-                                      Texture2D<float4> blueNoiseTex, SamplerState blueNoiseSampler, float sunSize = 0.001f, uint samples = 1u) {
-    float3 up        = abs(L.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
-    float3 right     = normalize(cross(up, L));
-    float3 bitangent = cross(L, right);
-
-    uint2 pixelPos  = uint2(screenPos);
-    uint  frameIdx  = WrapFrameIndex(frameIndex);
-    float spread    = max(sunSize, 0.00001f);
-    uint  spp       = max(samples, 1u);
-
-    float visibility = 0.0f;
-    for (uint i = 0u; i < spp; ++i) {
-        float4 u    = SampleBlueNoiseAt(blueNoiseTex, blueNoiseSampler, pixelPos, frameIdx, i);
-
-        float2 disk = VogelDisk(i, spp, u.x * 6.2831853f) * spread;
-
-        RayDesc ray;
-        ray.Origin    = worldPos + N * 0.04f;
-        ray.Direction = normalize(L + right * disk.x + bitangent * disk.y);
-        ray.TMin      = 0.01f;
-        ray.TMax      = 300.0f;
-
-        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-        q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
-        while (q.Proceed()) {
-        }
-
-        visibility += (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) ? 1.0f : 0.0f;
-    }
-
-    return visibility / float(spp);
-}
-
-#endif
 
 // KHR_materials_sheen: Charlie's cylindrical-fiber distribution with the
 // cheaper Ashikhmin/Premoze visibility. The prefiltered environment is GGX,
@@ -347,59 +306,6 @@ public float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness
 // ((1.5 - 1) / (1.5 + 1))^2, the dielectric reflectance of the default IOR
 // that every non-extended material is shaded with.
 public static const float kDielectricF0 = 0.04f;
-
-// The opaque G-buffer has no free lane for the extension, and Res_Clearcoat is
-// empty for every material that does not declare KHR_materials_clearcoat.
-// Those four lanes therefore carry the specular response of a material that
-// does declare KHR_materials_specular, written by the material pass:
-//
-//   rgb = saturate(f0 / kDielectricF0)
-//         A multiple of the 0.04 baseline, not an absolute reflectance: the
-//         bits then resolve 0.4% of the baseline, where 0.04 stored raw would
-//         quantize to ten steps and band across a smooth highlight. The
-//         ceiling is the baseline itself, so a response stronger than the
-//         default -- an authored IOR past 1.5, a specularFactor above 1 -- is
-//         clamped to the baseline in the opaque path. The forward path reads
-//         the instance rather than the lane and carries it exactly.
-//   z   = kSpecularPayloadBase + kSpecularPayloadSpan * saturate(f90)
-//         One lane carries both the marker and f90. The band starts at 0.5,
-//         and the payload leaves alpha cleared, so the coat test a reader
-//         already performs (a > 1/255) skips these lanes the same way it
-//         skips a coatless material. The band's lower half is the marker, so
-//         the quantized f90 resolves 1/128 rather than 1/255, and a factor
-//         above 1 saturates at the top of the band.
-//   a   = 0: "no clearcoat", which is what every other reader of this target
-//         must keep seeing.
-//
-// A material pass that declares no response leaves the lanes cleared, which is
-// not inside the band, and shading falls back to the plain IOR baseline.
-//
-// Both tests are exact rather than heuristic: the only other writers of these
-// lanes (basic.slang's material pass and the shared material model) either
-// zero all four or write a coat whose alpha is above 1/255, so a lane is
-// cleared, a coat, or this payload -- never something in between.
-public static const float kSpecularPayloadBase = 0.5f;
-public static const float kSpecularPayloadSpan = 0.5f;
-
-public struct SpecularResponse {
-    public float3 scale;       // multiplies the 0.04 dielectric baseline
-    public float  f90;         // Schlick grazing reflectance; 1.0 without the extension
-    public bool   hasResponse; // false: shade with the plain IOR baseline
-};
-
-public SpecularResponse DecodeSpecularResponse(float4 clearcoatRaw) {
-    SpecularResponse response = {float3(1.0f), 1.0f, false};
-    if (clearcoatRaw.a > 1.0f / 255.0f) {
-        return response; // A clearcoat layer owns these lanes.
-    }
-    if (clearcoatRaw.z < kSpecularPayloadBase) {
-        return response;
-    }
-    response.scale       = clearcoatRaw.rgb;
-    response.f90         = (clearcoatRaw.z - kSpecularPayloadBase) / kSpecularPayloadSpan;
-    response.hasResponse = true;
-    return response;
-}
 
 // The extension's dielectric Fresnel: F0 is the (possibly tinted, possibly
 // textured) dielectric reflectance and f90 its grazing value. Schlick's weight
@@ -663,6 +569,8 @@ public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, floa
             continue;
         }
 
+        // NDC depth of the ray sample. The buffer is unbanded now, so the two
+        // sides of the comparison below are in the same space.
         float rayDepth = ndc_z_start + ndc_z_step * (float(i) + dither);
 
         float3 currentWS = ReconstructWorldPos(currentUV, rayDepth, invViewProj);

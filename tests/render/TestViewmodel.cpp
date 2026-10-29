@@ -17,7 +17,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -30,6 +29,8 @@ enum class ViewmodelTestError : uint8_t {
     ViewmodelNotRendered ZHLN_ANNOTATION(ZHLN::Description<"Automated pixel analysis detected zero viewmodel pixels on screen.">{}),
     ViewmodelOccludedByWorld ZHLN_ANNOTATION(ZHLN::Description<"Viewmodel was erroneously occluded by world geometry in front of it.">{}),
 };
+
+namespace {
 
 struct ViewmodelTestSuite {
     ViewmodelTestSuite() {
@@ -155,7 +156,6 @@ struct ViewmodelTestSuite {
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
 
             // Set Fullbright to test raw G-buffer viewmodel color resolution without lighting variance
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -208,25 +208,13 @@ struct ViewmodelTestSuite {
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
-            // 5. Screenshot capture and pixel histogram analysis
-            const std::string ppmPath    = "headless_viewmodel_output.ppm";
-            const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
-            if (!captureRes) {
+            // 5. Frame capture and pixel histogram analysis, in memory.
+            const std::string ppmPath = "headless_viewmodel_output.ppm";
+            const auto        frame   = ZHLN::Test::Headless::Capture(*engine, ppmPath);
+            if (!frame.Valid()) {
                 return std::unexpected(ViewmodelTestError::RenderOutputBlank);
             }
-
-            std::ifstream ppm(ppmPath, std::ios::binary);
-            if (!ppm.is_open()) {
-                return std::unexpected(ViewmodelTestError::RenderOutputBlank);
-            }
-
-            std::string header;
-            int         width = 0, height = 0, maxColor = 0;
-            ppm >> header >> width >> height >> maxColor;
-            ppm.get(); // consume newline
-
-            std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
-            ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+            const std::vector<uint8_t>& pixels = frame.rgb;
 
             uint32_t cyanViewmodelPixels = 0;
             uint32_t totalLitPixels      = 0;
@@ -262,9 +250,4 @@ struct ViewmodelTestSuite {
     };
 };
 
-// Exported for the GPU_Interface group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunViewmodelSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ViewmodelTestSuite>();
-}
-
+} // namespace

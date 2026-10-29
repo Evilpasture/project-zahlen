@@ -24,6 +24,43 @@ struct SystemGraphCore::ExecutionContext {
     std::span<NodePayload>            payloads;
 };
 
+namespace {
+
+struct SmallIndexList {
+    static constexpr size_t             kInlineCapacity = 32;
+    std::array<uint32_t, kInlineCapacity> inlineItems {};
+    std::vector<uint32_t>               heapItems;
+    size_t                              inlineCount = 0;
+
+    void Push(uint32_t idx) {
+        if (!heapItems.empty()) {
+            heapItems.push_back(idx);
+            return;
+        }
+        if (inlineCount < kInlineCapacity) {
+            inlineItems[inlineCount++] = idx;
+            return;
+        }
+        heapItems.reserve(kInlineCapacity * 2);
+        heapItems.insert(heapItems.end(), inlineItems.begin(), inlineItems.end());
+        heapItems.push_back(idx);
+    }
+
+    [[nodiscard]] auto View() const noexcept -> std::span<const uint32_t> {
+        if (!heapItems.empty()) {
+            return heapItems;
+        }
+        return std::span<const uint32_t>(inlineItems.data(), inlineCount);
+    }
+};
+
+} // namespace
+
+void SystemGraphCore::BindCommandRegistry(Registry& registry, EntityCommandBuffer::DestroyFn destroy) noexcept {
+    _commandRegistry = &registry;
+    _commandDestroy  = destroy;
+}
+
 void SystemGraphCore::AddSystem(SystemInfo info) {
     _nodes.push_back({.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
     AdoptLocal(_nodes.back());
@@ -34,6 +71,9 @@ void SystemGraphCore::AddSystem(SystemInfo info) {
 // destroy. A node whose system names no Local<T> allocates nothing.
 void SystemGraphCore::AdoptLocal(Node& node) {
     node.local.Adopt(node.info.local);
+    if (node.info.usesCommandBuffer && _commandRegistry != nullptr) {
+        node.ecb = std::make_unique<EntityCommandBuffer>(*_commandRegistry, _commandDestroy);
+    }
 }
 
 bool SystemGraphCore::AddSystemBefore(SystemInfo info, std::string_view beforeSystem) {
@@ -135,30 +175,77 @@ void SystemGraphCore::Execute(void* carrier) {
         ctx.payloads[i] = {.ctx = &ctx, .nodeIdx = i};
     }
 
-    constexpr size_t kStackTaskLimit = 32;
-    const size_t     entryCount      = _entryNodes.size();
+    const auto isNodeRunnable = [&](uint32_t idx) noexcept -> bool {
+        const Node& node = _nodes[idx];
+        return node.info.enabled && node.info.update_func != nullptr;
+    };
 
-    std::array<TaskSystem::Task, kStackTaskLimit> stackTasks {};
-    std::vector<TaskSystem::Task>                 heapTasks;
-    std::span<TaskSystem::Task>                   tasksSpan;
+    // Propagate immediately through disabled or declarative-anchor nodes (such as
+    // DeclareExternalWrites) without allocating or scheduling fibers for them.
+    SmallIndexList runnable;
+    SmallIndexList inertQueue;
 
-    if (entryCount <= kStackTaskLimit) {
-        tasksSpan = std::span<TaskSystem::Task>(stackTasks.data(), entryCount);
-    } else {
-        heapTasks.resize(entryCount);
-        tasksSpan = std::span<TaskSystem::Task>(heapTasks.data(), entryCount);
+    for (const uint32_t entryIdx: _entryNodes) {
+        if (isNodeRunnable(entryIdx)) {
+            runnable.Push(entryIdx);
+        } else {
+            inertQueue.Push(entryIdx);
+        }
     }
 
-    for (size_t i = 0; i < entryCount; ++i) {
-        ctx.completionCounter.value.fetch_add(1, std::memory_order::relaxed);
-        tasksSpan[i] = {.func = TaskThunk, .arg = &ctx.payloads[_entryNodes[i]]};
+    for (size_t cursor = 0; cursor < inertQueue.View().size(); ++cursor) {
+        const uint32_t inertIdx = inertQueue.View()[cursor];
+        for (const uint32_t depIdx: _nodes[inertIdx].dependents) {
+            if (ctx.dependencyCounts[depIdx].fetch_sub(1, std::memory_order::acq_rel) == 1) {
+                if (isNodeRunnable(depIdx)) {
+                    runnable.Push(depIdx);
+                } else {
+                    inertQueue.Push(depIdx);
+                }
+            }
+        }
     }
 
-    if (entryCount > 0) {
-        TaskSystem::Dispatch(tasksSpan, nullptr);
+    const std::span<const uint32_t> readyNodes = runnable.View();
+    const size_t                    readyCount = readyNodes.size();
+
+    if (readyCount > 0) {
+        ctx.completionCounter.value.store(static_cast<uint32_t>(readyCount), std::memory_order::relaxed);
+
+        if (readyCount > 1) {
+            constexpr size_t kStackTaskLimit = 32;
+            const size_t     forkCount       = readyCount - 1;
+
+            std::array<TaskSystem::Task, kStackTaskLimit> stackTasks {};
+            std::vector<TaskSystem::Task>                 heapTasks;
+            std::span<TaskSystem::Task>                   tasksSpan;
+
+            if (forkCount <= kStackTaskLimit) {
+                tasksSpan = std::span<TaskSystem::Task>(stackTasks.data(), forkCount);
+            } else {
+                heapTasks.resize(forkCount);
+                tasksSpan = std::span<TaskSystem::Task>(heapTasks.data(), forkCount);
+            }
+
+            for (size_t i = 0; i < forkCount; ++i) {
+                tasksSpan[i] = {.func = TaskThunk, .arg = &ctx.payloads[readyNodes[i + 1]]};
+            }
+
+            TaskSystem::Dispatch(tasksSpan, nullptr);
+        }
+
+        // Run the first ready branch inline on the calling thread while worker
+        // fibers steal the remaining sibling branches.
+        DispatchNode(ctx, readyNodes[0]);
+
+        TaskSystem::Wait(&ctx.completionCounter);
     }
 
-    TaskSystem::Wait(&ctx.completionCounter);
+    for (auto& node: _nodes) {
+        if (node.info.enabled && node.ecb != nullptr && !node.ecb->Empty()) {
+            node.ecb->Playback();
+        }
+    }
 }
 
 void SystemGraphCore::TaskThunk(void* arg) {
@@ -167,49 +254,93 @@ void SystemGraphCore::TaskThunk(void* arg) {
 }
 
 void SystemGraphCore::DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx) {
-    const Node& node = _nodes[nodeIdx];
+    const auto isNodeRunnable = [&](uint32_t idx) noexcept -> bool {
+        const Node& candidate = _nodes[idx];
+        return candidate.info.enabled && candidate.info.update_func != nullptr;
+    };
 
-    if (node.info.enabled && node.info.update_func != nullptr && ctx.carrier != nullptr) {
-        // Built here, on this dispatcher's own stack: the carrier is shared by
-        // every node, the state is not.
-        SystemCall call {
-            .carrier   = ctx.carrier,
-            .local     = node.local.Pointer(),
-            .slots     = node.local.Slots(),
-            .slotCount = node.local.SlotCount(),
-        };
-        node.info.update_func(&call);
-    }
+    for (;;) {
+        const Node& node = _nodes[nodeIdx];
 
-    const size_t depCount = node.dependents.size();
-    if (depCount > 0) {
-        constexpr size_t kStackTaskLimit = 32;
-
-        std::array<TaskSystem::Task, kStackTaskLimit> stackTasks {};
-        std::vector<TaskSystem::Task>                 heapTasks;
-        TaskSystem::Task*                             taskBuffer = nullptr;
-
-        if (depCount <= kStackTaskLimit) {
-            taskBuffer = stackTasks.data();
-        } else {
-            heapTasks.resize(depCount);
-            taskBuffer = heapTasks.data();
+        if (node.info.enabled && node.info.update_func != nullptr && ctx.carrier != nullptr) {
+            // Built here, on this dispatcher's own stack: the carrier is shared by
+            // every node, the state is not.
+            SystemCall call {
+                .carrier   = ctx.carrier,
+                .local     = node.local.Pointer(),
+                .slots     = node.local.Slots(),
+                .slotCount = node.local.SlotCount(),
+                .ecb       = node.ecb.get(),
+            };
+            node.info.update_func(&call);
         }
 
-        size_t nextCount = 0;
-        for (uint32_t depIdx: node.dependents) {
-            if (ctx.dependencyCounts[depIdx].fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                ctx.completionCounter.value.fetch_add(1, std::memory_order::relaxed);
-                taskBuffer[nextCount++] = {.func = TaskThunk, .arg = &ctx.payloads[depIdx]};
+        if (node.dependents.empty()) {
+            ctx.completionCounter.value.fetch_sub(1, std::memory_order::release);
+            return;
+        }
+
+        SmallIndexList runnable;
+        SmallIndexList inertQueue;
+
+        for (const uint32_t depIdx: node.dependents) {
+            if (ctx.dependencyCounts[depIdx].fetch_sub(1, std::memory_order::acq_rel) == 1) {
+                if (isNodeRunnable(depIdx)) {
+                    runnable.Push(depIdx);
+                } else {
+                    inertQueue.Push(depIdx);
+                }
             }
         }
 
-        if (nextCount > 0) {
-            TaskSystem::Dispatch(std::span<const TaskSystem::Task>(taskBuffer, nextCount), nullptr);
+        for (size_t cursor = 0; cursor < inertQueue.View().size(); ++cursor) {
+            const uint32_t inertIdx = inertQueue.View()[cursor];
+            for (const uint32_t depIdx: _nodes[inertIdx].dependents) {
+                if (ctx.dependencyCounts[depIdx].fetch_sub(1, std::memory_order::acq_rel) == 1) {
+                    if (isNodeRunnable(depIdx)) {
+                        runnable.Push(depIdx);
+                    } else {
+                        inertQueue.Push(depIdx);
+                    }
+                }
+            }
         }
-    }
 
-    ctx.completionCounter.value.fetch_sub(1, std::memory_order::release);
+        const std::span<const uint32_t> unlocked  = runnable.View();
+        const size_t                    nextCount = unlocked.size();
+
+        if (nextCount == 0) {
+            ctx.completionCounter.value.fetch_sub(1, std::memory_order::release);
+            return;
+        }
+
+        if (nextCount > 1) {
+            constexpr size_t kStackTaskLimit = 32;
+            const size_t     forkCount       = nextCount - 1;
+
+            std::array<TaskSystem::Task, kStackTaskLimit> stackTasks {};
+            std::vector<TaskSystem::Task>                 heapTasks;
+            TaskSystem::Task*                             taskBuffer = nullptr;
+
+            if (forkCount <= kStackTaskLimit) {
+                taskBuffer = stackTasks.data();
+            } else {
+                heapTasks.resize(forkCount);
+                taskBuffer = heapTasks.data();
+            }
+
+            ctx.completionCounter.value.fetch_add(static_cast<uint32_t>(forkCount), std::memory_order::relaxed);
+            for (size_t i = 0; i < forkCount; ++i) {
+                taskBuffer[i] = {.func = TaskThunk, .arg = &ctx.payloads[unlocked[i + 1]]};
+            }
+
+            TaskSystem::Dispatch(std::span<const TaskSystem::Task>(taskBuffer, forkCount), nullptr);
+        }
+
+        // Tail-continue into unlocked[0] on the current fiber/thread, transferring
+        // this node's completionCounter token without an extra fiber hop.
+        nodeIdx = unlocked[0];
+    }
 }
 
 void SystemGraphCore::SetSystemEnabled(std::string_view name, bool enabled) noexcept {

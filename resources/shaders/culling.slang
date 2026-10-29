@@ -63,6 +63,8 @@ bool ProjectAABB(float3 center, float radius, out float4 outUvBounds, out float 
         }
 
         float3 ndc = clipPos.xyz / clipPos.w;
+        // HiZ holds plain NDC depth: the band is retired, so background
+        // geometry projects and occludes exactly like the map.
         float2 uv  = ndc.xy * 0.5f + 0.5f;
 
         minUV = min(minUV, uv);

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -25,6 +24,10 @@ bool AssetManager::MountDirectory(std::string_view directory) {
     return _vfs.MountDirectory(directory);
 }
 
+bool AssetManager::UnmountDirectory(std::string_view directory) {
+    return _vfs.UnmountDirectory(directory);
+}
+
 void AssetManager::LoadAsync(RestrictSpan<AssetLoadRequest> requests, TaskSystem::Counter* counter) {
     _vfs.LoadAsync(requests, counter);
 }
@@ -39,6 +42,13 @@ void AssetManager::FreeMemory(AssetLoadRequest& req) {
 
 auto AssetManager::GetCachedPrefab(uint64_t hash) -> ZHLN::Optional<ModelPrefab&> {
     return _prefabCache.Find(hash);
+}
+
+auto AssetManager::GetCachedPrefab(uint64_t hash) const noexcept -> ZHLN::Optional<const ModelPrefab&> {
+    if (auto found = _prefabCache.Find(hash)) {
+        return std::cref(*found);
+    }
+    return std::nullopt;
 }
 
 void AssetManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
@@ -83,7 +93,7 @@ void AssetManager::InvalidateGPUMeshes() noexcept {
     // handles to the replacement renderer even if it reuses the same slots.
     _prefabCache.ForEach([](ModelPrefab& prefab) {
         for (auto& part: prefab.parts) {
-            part.mesh = {};
+            part.mesh                            = {};
             part.defaultMaterial.pipeline        = PipelineHandle::Invalid;
             part.defaultMaterial.prePassPipeline = PipelineHandle::Invalid;
         }
@@ -122,25 +132,29 @@ uint32_t AssetManager::GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t m
 }
 
 auto AssetManager::CacheEnvironmentImage(std::string_view key, EnvironmentImage image) -> bool {
-    if (key.empty() || image.width == 0 || image.height == 0 ||
-        static_cast<size_t>(image.width) > std::numeric_limits<size_t>::max() / 4u / image.height ||
+    if (key.empty() || image.width == 0 || image.height == 0 || static_cast<size_t>(image.width) > std::numeric_limits<size_t>::max() / 4u / image.height ||
         image.rgba.size() != static_cast<size_t>(image.width) * image.height * 4u ||
-        (!image.lightingRgba.empty() && image.lightingRgba.size() != image.rgba.size()) ||
-        (image.sun.has_value() && image.lightingRgba.empty())) {
+        (!image.lightingRgba.empty() && image.lightingRgba.size() != image.rgba.size()) || (image.sun.has_value() && image.lightingRgba.empty())) {
         return false;
     }
     if (image.sun) {
         float directionLength = 0.0f;
         for (int c = 0; c < 3; ++c) {
-            const float dir = image.sun->direction[c];
+            const float dir      = image.sun->direction[c];
             const float strength = image.sun->irradiance[c];
-            if (!std::isfinite(dir) || !std::isfinite(strength) || strength < 0.0f) return false;
+            if (!std::isfinite(dir) || !std::isfinite(strength) || strength < 0.0f) {
+                return false;
+            }
             directionLength += dir * dir;
         }
-        if (!std::isfinite(directionLength) || std::abs(directionLength - 1.0f) > 0.01f) return false;
+        if (!std::isfinite(directionLength) || std::abs(directionLength - 1.0f) > 0.01f) {
+            return false;
+        }
         for (const auto& coeff: image.sun->diffuseSH) {
             for (float channel: coeff) {
-                if (!std::isfinite(channel)) return false;
+                if (!std::isfinite(channel)) {
+                    return false;
+                }
             }
         }
     }
@@ -166,4 +180,4 @@ auto AssetManager::FindEnvironmentImage(std::string_view key) const noexcept -> 
     };
 }
 
-}
+} // namespace ZHLN

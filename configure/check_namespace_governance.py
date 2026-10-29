@@ -77,6 +77,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -112,54 +113,28 @@ CXX_SUFFIXES = {
 }
 TRANSLATION_UNIT_SUFFIXES = {".c", ".cc", ".cpp", ".cxx"}
 MODULE_UNIT_SUFFIXES = {".cppm", ".ixx"}
+SKIP_DIR_NAMES = {".git", "build", "target", "__pycache__", ".cache", "node_modules"}
+
+_COMMENT_OR_STRING_RE = re.compile(
+    r"//[^\n]*"
+    r"|/\*[\s\S]*?\*/"
+    r'|"(?:\\[\s\S]|[^"\\])*"'
+    r"|'(?:\\[\s\S]|[^'\\])*'"
+)
+
+
+def _blank_match(match: re.Match[str]) -> str:
+    span = match.group(0)
+    if "\n" not in span:
+        return " " * len(span)
+    return "\n".join(" " * len(part) for part in span.split("\n"))
 
 
 # Vendored from configure/check_macro_governance.py: comments and string literals
 # mention namespaces (this file does) and must not count as declarations or uses.
 def strip_comments_and_strings(text: str) -> str:
     """Replace comments and string/char literals with spaces, newlines kept."""
-    out = list(text)
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c == "/" and i + 1 < n:
-            if text[i + 1] == "/":
-                while i < n and text[i] != "\n":
-                    out[i] = " "
-                    i += 1
-                continue
-            if text[i + 1] == "*":
-                out[i] = out[i + 1] = " "
-                i += 2
-                while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
-                    if text[i] != "\n":
-                        out[i] = " "
-                    i += 1
-                if i + 1 < n:
-                    out[i] = out[i + 1] = " "
-                    i += 2
-                continue
-        if c in "\"'":
-            quote, out[i] = c, " "
-            i += 1
-            while i < n:
-                if text[i] == "\\":
-                    out[i] = " "
-                    i += 1
-                    if i < n:
-                        out[i] = " "
-                        i += 1
-                    continue
-                if text[i] == quote:
-                    out[i] = " "
-                    i += 1
-                    break
-                if text[i] != "\n":
-                    out[i] = " "
-                i += 1
-            continue
-        i += 1
-    return "".join(out)
+    return _COMMENT_OR_STRING_RE.sub(_blank_match, text)
 
 
 def iter_sources(paths=None):
@@ -172,9 +147,16 @@ def iter_sources(paths=None):
     for root in SOURCE_ROOTS:
         if not root.is_dir():
             continue
-        for path in sorted(root.rglob("*")):
-            if path.suffix.lower() in CXX_SUFFIXES and path.is_file():
-                yield path.resolve()
+        found: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIR_NAMES)
+            base = Path(dirpath)
+            for name in sorted(filenames):
+                candidate = base / name
+                if candidate.suffix.lower() in CXX_SUFFIXES and candidate.is_file():
+                    found.append(candidate.resolve())
+        found.sort()
+        yield from found
 
 
 def is_vendored(path: Path) -> bool:
@@ -442,13 +424,17 @@ def collect(paths, spellings, templated_spelling):
     )
     reference = re.compile(r"\b((?:%s))::([A-Za-z_]\w*)" % word)
 
+    trigger_tokens = tuple(spellings) + (templated_spelling,)
     found, references, scanned = [], [], 0
     for path in iter_sources(paths):
         if is_vendored(path):
             continue
         scanned += 1
+        raw = path.read_text(errors="ignore")
+        if not any(tok in raw for tok in trigger_tokens):
+            continue
         relative = path.relative_to(ROOT).as_posix()
-        text = strip_comments_and_strings(path.read_text(errors="ignore"))
+        text = strip_comments_and_strings(raw)
         refusal = detail_refusal(relative)
         lines = text.split("\n")
         for index, line in enumerate(lines):

@@ -34,12 +34,12 @@ void Release(Engine& engine, Components::RagdollComponent& component) {
     Release(engine.GetPhysicsContext(), component);
 }
 
-void Release(Engine& engine, Components::AudioSourceComponent& component) {
-    engine.GetAudioContext().StopVoice(std::exchange(component.voiceHandle, AudioHandle::Invalid), component.fadeOut);
+void Release(AudioContext& audio, Components::AudioSourceComponent& component) {
+    audio.StopVoice(std::exchange(component.voiceHandle, AudioHandle::Invalid), component.fadeOut);
 }
 
-void Release(Engine& engine, Components::LoopSynthComponent& component) {
-    engine.GetAudioContext().StopLoopSynth(std::exchange(component.synthHandle, SynthHandle::Invalid), component.fadeOut);
+void Release(Engine& engine, Components::AudioSourceComponent& component) {
+    Release(engine.GetAudioContext(), component);
 }
 
 void Release(Engine& engine, Components::OwnedMeshComponent& component) {

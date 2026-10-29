@@ -4,15 +4,17 @@
 #include "ArticulationSystem.hpp"
 #include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
+#include "Hierarchy.hpp"
 #include "NativeScriptModule.hpp"
 #include "Platform.hpp"
 #include "SystemWiring.hpp"
 #include "SceneCleanupSystem.hpp"
-#include "diagnostics/CrashObservers.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
+#include <Zahlen/Clock.hpp>
 #include <Zahlen/Core/Arena.hpp>
-#include <Zahlen/CommandLine.hpp>
+#include <Zahlen/Core/Diagnostics.hpp>
+#include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/AssetManager.hpp>
@@ -20,18 +22,20 @@
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/FramePlan.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/InputContext.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Scripting.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/World.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ecs/EventBus.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/FontLoader.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
@@ -55,10 +59,8 @@ struct EngineImpl {
     std::unique_ptr<Kernel> kernel;
     std::unique_ptr<World>  world;
 
-    std::unique_ptr<ScriptRunner>       scriptRunner;
     std::unique_ptr<NativeScriptModule> nativeScriptModule;
-    std::vector<FS::FileWatchHandle> bootScriptWatches;
-    GameplayDriver               activeGameplayDriver = GameplayDriver::Cpp;
+    GameplayDriver                      activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback uiCallback = nullptr;
     UIDrawData                              pendingUIData {};
@@ -71,12 +73,9 @@ struct EngineImpl {
     std::vector<Module> modules;
     FramePlan           framePlan;
     bool                framePlanBuilt = false;
-    ScriptCommandRegistry scriptCommands;
 
     Engine::PhysicsSubstepHooks                  physicsSubstepHooks;
-    // Engine-owned, handed out by reference: the list outlives every graph
-    // rebuild, which is what makes a late install work.
-    PosePostProcessorPipeline                    posePostProcessors;
+    ECS::ExtensionServices                       extensions;
     std::vector<Engine::TeardownHook>            teardownHooks;
     std::vector<Engine::SceneCleanupPass>        sceneCleanupPasses;
 
@@ -102,7 +101,10 @@ struct EngineImpl {
     std::unique_ptr<SimGraph>       updateGraph;
     std::unique_ptr<RenderGraph>    renderGraph;
 
-    std::optional<FontAtlas> fontAtlas;
+    FontAtlas             fontAtlas         = GUI::BuildFontAtlas(GUI::GetDefaultBakedFont(), TextureHandle::Invalid);
+    bool                  fontAtlasUploaded = false;
+    std::vector<KeyCode>  uiPressedKeys;
+    std::vector<uint32_t> uiCharacterStream;
 
     void*        gameState    = nullptr;
     uint64_t     frameCounter = 0;
@@ -121,59 +123,54 @@ auto Engine::FallbackSceneEnabled() const noexcept -> bool {
     return _impl->config.enableFallbackScene;
 }
 
-void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
-    if (_impl->fontAtlas.has_value()) {
-        if (auto uiSettings = reg.GetSingleton<GUI::UISettingsComponent>()) {
-            uiSettings->fontAtlas        = *_impl->fontAtlas;
-            uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
-        }
-    } else {
-        PrefabFactory::PrimeDefaultBakedFont(GetAssetManager());
-        PrefabFactory::CreateFontAtlasTexture(
-            GetRenderContext(), reg, GetAssetManager(), GUI::kDefaultFontAssetID
-        );
-        if (const auto uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
-            uiSettings && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
-            _impl->fontAtlas = uiSettings->fontAtlas;
-        }
+void Engine::EnsureFontAtlas() {
+    if (_impl->fontAtlasUploaded) {
+        return;
     }
+    PrefabFactory::PrimeDefaultBakedFont(GetAssetManager());
+    const FontAtlas uploaded = PrefabFactory::CreateFontAtlas(GetRenderContext(), GetAssetManager(), GUI::kDefaultFontAssetID);
+    if (uploaded.glyphCount > 0) {
+        _impl->fontAtlas = uploaded;
+    }
+    _impl->fontAtlasUploaded = true;
 }
 
-namespace {
+void Engine::TraceDiagnostics() const noexcept {
+    const auto writeSection = [](std::string_view title) noexcept {
+        auto header = ZHLN::Format("\n{}--- {} STATE ---{}\n", Color::Cyan, title, Color::Reset);
+        Diagnostics::WriteDiagnosticError(header.string_view());
+    };
 
+    writeSection("ENGINE");
+    ZHLN::Trace(*this);
 
-void DumpEngineState(void* context, const SignalEvent& ) noexcept {
-    ZHLN::Trace(*static_cast<Engine*>(context));
-}
+    if (_impl == nullptr || _impl->world == nullptr) {
+        return;
+    }
 
-void DumpCameraState(void* context, const SignalEvent& ) noexcept {
-    // A crash dump is best-effort and must not assert: resolve the camera the
-    // way the frame does, but tolerate a world that has no camera entity.
-    auto&      world   = *static_cast<World*>(context);
+    writeSection("CAMERA DEEP");
+    auto&      world   = *_impl->world;
     const auto camComp = world.GetRegistry().GetSingleton<Components::CameraComponent>();
 
     if (camComp) {
         const Camera& cam     = camComp->camera;
         auto          cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
         auto          cam_dir = ZHLN::Format("  Direction: Yaw: {}, Pitch: {}\n", cam.yaw, cam.pitch);
-        Diagnostics::WriteCrashOutput(cam_pos);
-        Diagnostics::WriteCrashOutput(cam_dir);
+        Diagnostics::WriteDiagnosticError(cam_pos.string_view());
+        Diagnostics::WriteDiagnosticError(cam_dir.string_view());
     } else {
-        Diagnostics::WriteCrashOutput("  (no main camera entity)\n");
+        Diagnostics::WriteDiagnosticError("  (no main camera entity)\n");
     }
 
-    // The planes are derived, not stored: the culling pass keeps its own scratch,
-    // so the dump derives the same planes the pass culled against -- from the
-    // view-projection it used, frozen or not.
-    Frustum      f {};
-    const auto   stats   = world.GetRegistry().GetSingleton<Components::CullingStatsComponent>();
-    const bool   frozen  = stats && stats->stats.FreezeFrustum;
+    Frustum    f {};
+    const auto stats  = world.GetRegistry().GetSingleton<Components::CullingStatsComponent>();
+    const bool frozen = stats && stats->stats.FreezeFrustum;
     if (camComp) {
         f.Update(frozen ? camComp->frozenViewProj : camComp->unjitteredViewProj);
     }
-    auto  frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n", Color::Cyan, Color::Reset);
-    Diagnostics::WriteCrashOutput(frust_hdr);
-    const char* names[] = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
+    auto        frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n", Color::Cyan, Color::Reset);
+    const char* names[]   = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
+    Diagnostics::WriteDiagnosticError(frust_hdr.string_view());
 
     for (int i = 0; i < 6; ++i) {
         const int block     = i / 4;
@@ -181,22 +178,13 @@ void DumpCameraState(void* context, const SignalEvent& ) noexcept {
         auto      plane_str = ZHLN::Format(
             "  Plane {}: [{}x {}y {}z] offset: {}\n", names[i], f.mX[block].mF32[lane], f.mY[block].mF32[lane], f.mZ[block].mF32[lane], f.mW[block].mF32[lane]
         );
-        Diagnostics::WriteCrashOutput(plane_str);
+        Diagnostics::WriteDiagnosticError(plane_str.string_view());
     }
 
     ZHLN::Dump(f);
-}
 
-void DumpPhysicsState(void* context, const SignalEvent& ) noexcept {
-    static_cast<PhysicsContext*>(context)->TraceDiagnostics();
-}
-
-void RegisterCrashObservers(CrashState& state, Engine& engine, World& world) {
-    Diagnostics::RegisterCrashObserver(state, "ENGINE", DumpEngineState, &engine);
-    Diagnostics::RegisterCrashObserver(state, "CAMERA DEEP", DumpCameraState, &world);
-    Diagnostics::RegisterCrashObserver(state, "PHYSICS", DumpPhysicsState, &world.GetPhysics());
-}
-
+    writeSection("PHYSICS");
+    world.GetPhysics().TraceDiagnostics();
 }
 
 Engine::Engine(): _impl(nullptr) {
@@ -218,6 +206,8 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
         return std::unexpected(rebuilt.error());
     }
     PrefabFactory::RebuildVulkanResources(_impl->kernel->GetRenderContext(), _impl->world->GetRegistry());
+    _impl->fontAtlasUploaded = false;
+    EnsureFontAtlas();
 
     for (const auto& callback: _impl->deviceLostCallbacks) {
         if (callback) {
@@ -242,10 +232,8 @@ auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<En
 auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode> {
     ZHLN::Fiber::InitMainThread();
 
-    _impl               = std::make_unique<EngineImpl>();
-    _impl->config       = cfg;
-    _impl->scriptRunner = std::make_unique<ScriptRunner>();
-    _impl->scriptRunner->SetRuntimeChanged([this] { RegisterBootScriptWatches(); });
+    _impl         = std::make_unique<EngineImpl>();
+    _impl->config = cfg;
 
     auto world_res = World::Create(cfg.physics, true);
     if (!world_res) {
@@ -254,24 +242,38 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     _impl->world = std::move(world_res.value());
 
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
-        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
+        auto* world = static_cast<World*>(userdata);
+        auto* reg   = &world->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->SetKey(static_cast<uint8_t>(key), pressed);
         if (pressed) {
             state->QueueKeyPress(key);
         }
+        world->GetInput().InjectKey(key, pressed);
     };
 
     auto onMouseMove = [](void* userdata, float x, float y) -> void {
-        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
+        auto* world = static_cast<World*>(userdata);
+        auto* reg   = &world->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyLocalMotion(x, y);
+        world->GetInput().InjectMouseMove(x, y);
+    };
+
+    auto onMouseRelative = [](void* userdata, float x, float y, float dx, float dy) -> void {
+        auto* world = static_cast<World*>(userdata);
+        auto* reg   = &world->GetRegistry();
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
+        state->ApplyRelativeMotion(x, y, dx, dy);
+        world->GetInput().InjectMouseRelative(x, y, dx, dy);
     };
 
     auto onMouseScroll = [](void* userdata, float delta) -> void {
-        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
+        auto* world = static_cast<World*>(userdata);
+        auto* reg   = &world->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyWheel(delta);
+        world->GetInput().InjectMouseScroll(delta);
     };
 
     auto onResize = [](void* userdata, Extent2D extent) -> void {
@@ -281,14 +283,32 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     };
 
     auto onChar = [](void* userdata, unsigned int codepoint) -> void {
-        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
+        auto* world = static_cast<World*>(userdata);
+        auto* reg   = &world->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->QueueChar(codepoint);
+        world->GetInput().InjectChar(codepoint);
+    };
+
+    auto onGamepadConnection = [](void* userdata, uint8_t slot, bool connected, std::string_view name) -> void {
+        static_cast<World*>(userdata)->GetInput().InjectGamepadConnection(slot, connected, name);
+    };
+
+    auto onGamepadState = [](void* userdata, uint8_t slot, const GamepadRawSample& sample) -> void {
+        static_cast<World*>(userdata)->GetInput().InjectGamepadSample(slot, sample);
     };
 
     World*              worldPtr = _impl->world.get();
     WindowInputReceiver receiver = {
-        .userdata = worldPtr, .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
+        .userdata            = worldPtr,
+        .onKey               = onKey,
+        .onMouseMove         = onMouseMove,
+        .onMouseRelative     = onMouseRelative,
+        .onMouseScroll       = onMouseScroll,
+        .onResize            = onResize,
+        .onChar              = onChar,
+        .onGamepadConnection = onGamepadConnection,
+        .onGamepadState      = onGamepadState,
     };
 
     auto kernel_res = Kernel::Create(cfg.render, receiver);
@@ -297,47 +317,21 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     }
     _impl->kernel = std::move(kernel_res.value());
 
+    _impl->world->GetInput().SetRumbleSink(
+        [](void* userdata, uint8_t slot, const GamepadRumble& rumble) noexcept {
+            static_cast<PlatformHost*>(userdata)->SetGamepadRumble(slot, rumble);
+        },
+        &_impl->kernel->GetPlatformHost()
+    );
+
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
-    if (_impl->config.crashState != nullptr) {
-        RegisterCrashObservers(*_impl->config.crashState, *this, *_impl->world);
-    }
-
     return {};
-}
-
-void Engine::RegisterBootScriptWatches() {
-    if (_impl == nullptr || _impl->kernel == nullptr) {
-        return;
-    }
-
-    for (const FS::FileWatchHandle handle: _impl->bootScriptWatches) {
-        static_cast<void>(_impl->kernel->GetFileSystemWatcher().Unwatch(handle));
-    }
-    _impl->bootScriptWatches.clear();
-
-    if (_impl->scriptRunner == nullptr) {
-        return;
-    }
-
-    const auto reloadBootScript = [this](const FS::FileWatchEvent& event) {
-        if (_impl->activeGameplayDriver == GameplayDriver::Cpp || event.action == FS::FileWatchAction::Deleted) {
-            return;
-        }
-        _impl->scriptRunner->ReloadFile(event.path.string());
-    };
-    for (const std::string_view path: _impl->scriptRunner->BootScriptPaths()) {
-        _impl->bootScriptWatches.push_back(_impl->kernel->GetFileSystemWatcher().WatchFile(std::filesystem::path(path), reloadBootScript));
-    }
 }
 
 Engine::~Engine() {
     if (_impl == nullptr) {
         return;
-    }
-
-    if (_impl->config.crashState != nullptr) {
-        Diagnostics::ClearCrashObservers(*_impl->config.crashState);
     }
 
     if (_impl->kernel != nullptr && _impl->world != nullptr) {
@@ -350,8 +344,10 @@ Engine::~Engine() {
         ClearScene();
     }
 
+    _impl->updateGraph.reset();
+    _impl->renderGraph.reset();
+    _impl->extensions.Clear();
     _impl->world.reset();
-    _impl->bootScriptWatches.clear();
     _impl->nativeScriptModule.reset();
     _impl->kernel.reset();
 }
@@ -361,27 +357,30 @@ auto Engine::IsRunning() const -> bool {
 }
 
 void Engine::ProcessEvents() {
-    if (_impl->config.crashState != nullptr) {
-        ZHLN::CheckForCrashes(*_impl->config.crashState, this);
-    }
-
     auto& reg        = _impl->world->GetRegistry();
+    auto& input      = _impl->world->GetInput();
     auto  inputState = reg.GetSingleton<Components::InputStateComponent>();
+
+    input.BeginFrame();
     if (inputState) {
-        inputState->ResetDeltas();
+        inputState->BeginFrame();
     }
 
     _impl->kernel->ProcessEvents();
 
-    const auto& host = _impl->kernel->GetPlatformHost();
-    if (inputState && !host.AsWindow() && host.HasNativeSurface()) {
-        inputState->wantCaptureKeyboard = false;
-        inputState->wantCaptureMouse    = false;
+    if (inputState) {
+        input.SyncCaptureFlags(inputState->wantCaptureKeyboard, inputState->wantCaptureMouse);
     }
+    input.RefreshActionsForCurrentFrame(&_impl->world->GetEventBus());
 }
 
 void Engine::PollLateInput() {
     _impl->kernel->ProcessEvents();
+    auto& input = _impl->world->GetInput();
+    if (auto inputState = _impl->world->GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+        input.SyncCaptureFlags(inputState->wantCaptureKeyboard, inputState->wantCaptureMouse);
+    }
+    input.RefreshActionsForCurrentFrame(&_impl->world->GetEventBus());
 }
 
 auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
@@ -448,27 +447,30 @@ void Engine::EnsureSystemGraphs() {
 
     _impl->simServices = std::make_unique<SimServices>(
         SimServices {
-            .physics               = _impl->world->GetPhysics(),
-            .audio                 = _impl->kernel->GetAudioContext(),
-            .assets                = _impl->kernel->GetAssetManager(),
-            .articulation          = _impl->world->GetArticulationSystem(),
-            .posePostProcessors    = _impl->posePostProcessors,
-            .poseUploads           = _impl->poseUploads,
+            .physics      = _impl->world->GetPhysics(),
+            .audio        = _impl->kernel->GetAudioContext(),
+            .assets       = _impl->kernel->GetAssetManager(),
+            .input        = _impl->world->GetInput(),
+            .articulation = _impl->world->GetArticulationSystem(),
+            .events       = _impl->world->GetEventBus(),
+            .extensions   = _impl->extensions,
+            .poseUploads  = _impl->poseUploads,
         }
     );
 
     _impl->renderServices = std::make_unique<RenderServices>(
         RenderServices {
-            .render  = render,
-            .scene   = _impl->sceneData,
-            .assets  = _impl->kernel->GetAssetManager(),
-            .visible = VisibleEntities {_impl->world->GetVisibleEntities()},
-            .shadow  = VisibleShadowEntities {_impl->world->GetVisibleShadowEntities()},
+            .render     = render,
+            .scene      = _impl->sceneData,
+            .assets     = _impl->kernel->GetAssetManager(),
+            .extensions = _impl->extensions,
+            .visible    = VisibleEntities {_impl->world->GetVisibleEntities()},
+            .shadow     = VisibleShadowEntities {_impl->world->GetVisibleShadowEntities()},
         }
     );
 
-    _impl->updateGraph = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices);
-    _impl->renderGraph = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices);
+    _impl->updateGraph = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices, &MarkPendingDestroy);
+    _impl->renderGraph = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices, &MarkPendingDestroy);
 }
 
 auto Engine::GetPoseUploads() -> PoseUploadQueue& {
@@ -509,8 +511,11 @@ auto Engine::GetAssetManager() -> AssetManager& {
 auto Engine::GetAudioContext() -> AudioContext& {
     return _impl->kernel->GetAudioContext();
 }
-auto Engine::GetScriptRunner() -> ScriptRunner& {
-    return *_impl->scriptRunner;
+auto Engine::GetInput() noexcept -> InputContext& {
+    return _impl->world->GetInput();
+}
+auto Engine::GetInput() const noexcept -> const InputContext& {
+    return _impl->world->GetInput();
 }
 auto Engine::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
     return _impl->kernel->GetFileSystemWatcher();
@@ -535,6 +540,12 @@ auto Engine::GetRenderGraph() -> RenderGraph& {
 auto Engine::GetMainECB() -> ECS::EntityCommandBuffer& {
     return _impl->world->GetMainECB();
 }
+auto Engine::GetEventBus() noexcept -> ECS::EventBus& {
+    return _impl->world->GetEventBus();
+}
+auto Engine::GetEventBus() const noexcept -> const ECS::EventBus& {
+    return _impl->world->GetEventBus();
+}
 
 void Engine::ProcessPendingDestroy() {
     SceneCleanupSystem::ProcessPending(*this);
@@ -542,6 +553,7 @@ void Engine::ProcessPendingDestroy() {
 
 void Engine::ClearScene() {
     SceneCleanupSystem::ClearAll(*this);
+    _impl->world->GetEventBus().ClearEvents();
 }
 
 auto Engine::AddSceneCleanupPass(SceneCleanupPass pass) -> bool {
@@ -585,12 +597,89 @@ void Engine::SetUICallback(UICallback callback) {
     _impl->uiCallback = std::move(callback);
 }
 
-void Engine::SetPendingUIData(const UIDrawData& uiData) noexcept {
+void Engine::SetPendingUIData(UIDrawData uiData) noexcept {
     _impl->pendingUIData = uiData;
 }
 
 auto Engine::GetPendingUIData() const noexcept -> UIDrawData {
     return _impl->pendingUIData;
+}
+
+void Engine::SetFontAtlas(const FontAtlas& fontAtlas) noexcept {
+    _impl->fontAtlas         = fontAtlas;
+    _impl->fontAtlasUploaded = true;
+}
+
+auto Engine::GetFontAtlas() -> const FontAtlas& {
+    EnsureFontAtlas();
+    return _impl->fontAtlas;
+}
+
+auto Engine::GetFontAtlas() const noexcept -> const FontAtlas& {
+    return _impl->fontAtlas;
+}
+
+auto Engine::ConsumeUIInput(float dt) noexcept -> GUI::UIInput {
+    _impl->uiPressedKeys.clear();
+    _impl->uiCharacterStream.clear();
+
+    GUI::UIInput out {
+        .viewport = GetPlatformHost().GetSize(),
+        .dt       = dt,
+        .clipboard =
+            {
+                .userdata = &GetPlatformHost(),
+                .set      = [](void* ud, std::string_view text) -> void { static_cast<PlatformHost*>(ud)->SetClipboardText(text); },
+                .get      = [](void* ud) -> std::string { return static_cast<PlatformHost*>(ud)->GetClipboardText(); },
+            },
+    };
+
+    if (auto input = GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+        out.mouseX      = input->mouseX;
+        out.mouseY      = input->mouseY;
+        out.mouseScroll = input->mouseWheel;
+        out.mouseDown[0] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+        out.mouseDown[1] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::RButton));
+        out.mouseDown[2] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::MButton));
+
+        KeyModifiers mods = KeyModifiers::None;
+        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LShift)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RShift))) {
+            mods |= KeyModifiers::Shift;
+        }
+        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LControl)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RControl))) {
+            mods |= KeyModifiers::Ctrl;
+        }
+        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LAlt)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RAlt))) {
+            mods |= KeyModifiers::Alt;
+        }
+        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LSuper)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RSuper))) {
+            mods |= KeyModifiers::Super;
+        }
+        out.modifiers = mods;
+
+        for (size_t i = 0; i < input->queuedInputCount; ++i) {
+            const auto& queued = input->queuedInput[i];
+            if (queued.isChar) {
+                _impl->uiCharacterStream.push_back(queued.value);
+            } else {
+                _impl->uiPressedKeys.push_back(static_cast<KeyCode>(queued.value));
+            }
+        }
+        input->ClearQueuedInput();
+    }
+
+    out.pressedKeys     = _impl->uiPressedKeys;
+    out.characterStream = _impl->uiCharacterStream;
+    return out;
+}
+
+void Engine::SubmitUI(UIDrawData uiData) noexcept {
+    SetPendingUIData(uiData);
+    if (auto inputState = _impl->world->GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+        inputState->wantCaptureKeyboard = uiData.wantsCaptureKeyboard;
+        inputState->wantCaptureMouse    = uiData.wantsCaptureMouse;
+    }
+    _impl->world->GetInput().SyncCaptureFlags(uiData.wantsCaptureKeyboard, uiData.wantsCaptureMouse);
 }
 
 void Engine::AddDeviceLostCallback(DeviceLostCallback callback) {
@@ -604,6 +693,11 @@ auto Engine::DeviceLostCallbackCount() const noexcept -> size_t {
 }
 
 auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePlanError> {
+    if (!module.name.empty() &&
+        std::ranges::any_of(_impl->modules, [&](const Module& existing) { return existing.name == module.name; })) {
+        return {};
+    }
+
     // The plan first, and on a plan that core has already seeded: a module's
     // steps are placed against names core owns, and placing them can fail. Doing
     // it before anything else is applied is what makes the failure clean -- a
@@ -622,11 +716,11 @@ auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePla
     if (module.teardown != nullptr) {
         AddTeardownHook(module.teardown);
     }
-    if (module.registerScriptCommands != nullptr) {
-        module.registerScriptCommands(_impl->scriptCommands);
-    }
 
     _impl->modules.push_back(module);
+    if (module.addGraphSystems != nullptr && _impl->updateGraph != nullptr) {
+        BuildSystemGraphs(*this);
+    }
     return {};
 }
 
@@ -641,14 +735,6 @@ auto Engine::GetFramePlan() -> FramePlan& {
 
 auto Engine::GetFramePlan() const noexcept -> const FramePlan& {
     return _impl->framePlan;
-}
-
-auto Engine::GetScriptCommands() noexcept -> ScriptCommandRegistry& {
-    return _impl->scriptCommands;
-}
-
-auto Engine::GetScriptCommands() const noexcept -> const ScriptCommandRegistry& {
-    return _impl->scriptCommands;
 }
 
 void Engine::EnsureFramePlan() {
@@ -667,8 +753,12 @@ auto Engine::GetPhysicsSubstepHooks() const noexcept -> const PhysicsSubstepHook
     return _impl->physicsSubstepHooks;
 }
 
-auto Engine::GetPosePostProcessors() -> PosePostProcessorPipeline& {
-    return _impl->posePostProcessors;
+auto Engine::Services() noexcept -> ECS::ExtensionServices& {
+    return _impl->extensions;
+}
+
+auto Engine::Services() const noexcept -> const ECS::ExtensionServices& {
+    return _impl->extensions;
 }
 
 void Engine::AddTeardownHook(TeardownHook hook) {
@@ -691,6 +781,7 @@ auto Engine::InitializeDefaultScene() -> bool {
 
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     _impl->activeGameplayDriver = driver;
+    _impl->world->GetInput().StepHaptics(dt);
 
     FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 
@@ -706,30 +797,28 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     return ctx.status;
 }
 
-auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback, ModuleInstaller installModules)
+auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstaller installModules)
     -> std::expected<void, ErrorCode> {
     Platform::Init();
-    ZHLN::SetupSignalHandler(crashState);
     // Construct before the engine so its destructor (and any cleanup tasks)
     // finishes before the worker threads and fibers are retired.
     TaskSystem::Scope tasks;
 
-    uint32_t w = options.fullscreen ? 0 : 1280;
-    uint32_t h = options.fullscreen ? 0 : 720;
+    uint32_t w = runConfig.fullscreen ? 0 : 1280;
+    uint32_t h = runConfig.fullscreen ? 0 : 720;
 
     EngineConfig config {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
         .render =
             {
-                .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+                .appName        = String64(runConfig.appName),
                 .width          = w,
                 .height         = h,
-                .vsync          = options.vsync,
-                .fullscreen     = options.fullscreen,
-                .validationMode = options.validationMode,
-                .headless       = options.headless,
+                .vsync          = runConfig.vsync,
+                .fullscreen     = runConfig.fullscreen,
+                .validationMode = runConfig.validationMode,
+                .headless       = runConfig.headless,
             },
-        .crashState = &crashState,
     };
 
     auto engine_res = Engine::Create(config);
@@ -753,17 +842,17 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
         engine->SetUICallback(std::move(uiCallback));
     }
 
-    const double targetFrameTime = options.fpsLimit > 0 ? 1.0 / static_cast<double>(options.fpsLimit) : 0.0;
-    auto         frameStart      = std::chrono::high_resolution_clock::now();
+    const double targetFrameTime = runConfig.fpsLimit > 0 ? 1.0 / static_cast<double>(runConfig.fpsLimit) : 0.0;
+    Clock        runClock({.maxDeltaTime = 0.1f});
 
     while (engine->IsRunning()) {
+        const auto frameStart = Clock::SteadyClock::now();
+        if (runConfig.onFrameEvents) {
+            runConfig.onFrameEvents(*engine);
+        }
         engine->ProcessEvents();
 
-        auto   frameEnd = std::chrono::high_resolution_clock::now();
-        double elapsed  = std::chrono::duration<double>(frameEnd - frameStart).count();
-        frameStart      = std::chrono::high_resolution_clock::now();
-
-        float rawDt = std::min(static_cast<float>(elapsed), 0.1f);
+        const float rawDt = runClock.Tick();
 
         {
             auto& r = engine->GetRegistry();
@@ -774,27 +863,27 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
             }
         }
 
-        constexpr double           kFpsCapSlack = 1.05;
-        const std::optional<float> pacedDt      = engine->GetRenderContext().GetPacedDeltaTime();
-        const bool                 displayPaced = pacedDt.has_value() &&
-                                 (options.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
+        constexpr double           kFpsCapSlack  = 1.05;
+        const std::optional<float> pacedDt       = engine->GetRenderContext().GetPacedDeltaTime();
+        const bool                 displayPaced  = pacedDt.has_value() &&
+                                  (runConfig.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
         float tickDt = displayPaced ? *pacedDt : rawDt;
 
-        GameplayStatus status = engine->Tick(tickDt, options.driver);
+        GameplayStatus status = engine->Tick(tickDt, runConfig.driver);
         if (status == GameplayStatus::RequestQuit) {
             engine->GetPlatformHost().Close();
             break;
         }
 
-        if (options.fpsLimit > 0 && !displayPaced) {
-            auto   now          = std::chrono::high_resolution_clock::now();
+        if (runConfig.fpsLimit > 0 && !displayPaced) {
+            auto   now          = Clock::SteadyClock::now();
             double frameElapsed = std::chrono::duration<double>(now - frameStart).count();
             if (frameElapsed < targetFrameTime) {
                 double sleepTime = targetFrameTime - frameElapsed;
                 if (sleepTime > 0.002) {
                     std::this_thread::sleep_for(std::chrono::microseconds(static_cast<int64_t>((sleepTime - 0.001) * 1e6)));
                 }
-                while (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - frameStart).count() < targetFrameTime) {
+                while (std::chrono::duration<double>(Clock::SteadyClock::now() - frameStart).count() < targetFrameTime) {
                     CPURelax();
                 }
             }

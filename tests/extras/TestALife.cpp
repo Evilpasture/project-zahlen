@@ -19,6 +19,8 @@ enum class ALifeTestError : uint8_t {
     SpatialGridQueryFailed ZHLN_ANNOTATION(ZHLN::Description<"SpatialGrid spatial query missed expected entity.">{})
 };
 
+namespace {
+
 struct ALifeTestSuite {
     struct Tests {
         // --- 1. GOAP Action Planner ---
@@ -191,6 +193,4 @@ struct ALifeTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<ALifeTestSuite>();
-}
+} // namespace

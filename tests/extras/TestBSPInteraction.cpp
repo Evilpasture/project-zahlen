@@ -24,9 +24,6 @@
 #include <vector>
 
 namespace ZHLN {
-std::string GetPoorMansStacktrace() {
-    return "test_stacktrace";
-}
 namespace SceneResources {
 void Release(PhysicsContext&, Components::PhysicsComponent&) {
 }
@@ -173,6 +170,8 @@ auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
 
 } // namespace
 
+namespace {
+
 struct BSPInteractionTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> describe_scene_converts_interactive_entities() {
@@ -186,12 +185,12 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectEq(scene.entities[0].name, std::string {"worldspawn"});
             ZHLN::Test::ExpectTrue(scene.entities[0].body == ZHLN::Scene::BodyKind::Static);
 
-            // 2. func_door (door_main)
+            // 2. func_door (door_main): authored submodel prefab
             const auto& door = scene.entities[1];
             ZHLN::Test::ExpectEq(door.name, std::string {"door_main"});
             ZHLN::Test::ExpectTrue(door.body == ZHLN::Scene::BodyKind::Kinematic);
-            ZHLN::Test::ExpectTrue(door.shape == ZHLN::Scene::ShapeKind::Box);
-            ZHLN::Test::ExpectEq(door.source, std::string {"*1"});
+            ZHLN::Test::ExpectTrue(door.shape == ZHLN::Scene::ShapeKind::Prefab);
+            ZHLN::Test::ExpectEq(door.source, std::string {"maps/test.bsp#model_1"});
             ZHLN::Test::ExpectGt(door.halfExtents.x, 0.0f);
             ZHLN::Test::ExpectGt(door.halfExtents.y, 0.0f);
             ZHLN::Test::ExpectGt(door.halfExtents.z, 0.0f);
@@ -203,18 +202,18 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectTrue(rotDoor.shape == ZHLN::Scene::ShapeKind::Prefab);
             ZHLN::Test::ExpectEq(rotDoor.source, std::string {"models/props/door01.glb"});
 
-            // 4. func_button (btn_entry)
+            // 4. func_button (btn_entry): authored submodel prefab
             const auto& button = scene.entities[3];
             ZHLN::Test::ExpectEq(button.name, std::string {"btn_entry"});
             ZHLN::Test::ExpectTrue(button.body == ZHLN::Scene::BodyKind::Kinematic);
-            ZHLN::Test::ExpectTrue(button.shape == ZHLN::Scene::ShapeKind::Box);
-            ZHLN::Test::ExpectEq(button.source, std::string {"*2"});
+            ZHLN::Test::ExpectTrue(button.shape == ZHLN::Scene::ShapeKind::Prefab);
+            ZHLN::Test::ExpectEq(button.source, std::string {"maps/test.bsp#model_2"});
 
-            // 5. trigger_multiple (trig_entrance)
+            // 5. trigger_multiple (trig_entrance): logic-only volume (no rendered geometry)
             const auto& trig = scene.entities[4];
             ZHLN::Test::ExpectEq(trig.name, std::string {"trig_entrance"});
             ZHLN::Test::ExpectTrue(trig.body == ZHLN::Scene::BodyKind::None);
-            ZHLN::Test::ExpectTrue(trig.shape == ZHLN::Scene::ShapeKind::Box);
+            ZHLN::Test::ExpectTrue(trig.shape == ZHLN::Scene::ShapeKind::Empty);
             ZHLN::Test::ExpectEq(trig.source, std::string {"*3"});
 
             // 6. trigger_once (trig_secret)
@@ -781,39 +780,4 @@ struct BSPInteractionTestSuite {
     };
 };
 
-int main() {
-    BSPInteractionTestSuite::Tests suite;
-    int                            passed = 0;
-    int                            failed = 0;
-
-    auto runTest = [&](std::string_view testName, auto testFunc) {
-        ZHLN::Println("\033[32m[ RUN      ]\033[0m {}", testName);
-        auto res = testFunc();
-        if (res.has_value()) {
-            ZHLN::Println("\033[32m[       OK ]\033[0m {}", testName);
-            passed++;
-        } else {
-            ZHLN::Println("\033[31m[  FAILED  ]\033[0m {}", testName);
-            failed++;
-        }
-    };
-
-    ZHLN::Println("\033[36m==================================================\033[0m");
-    ZHLN::Println("\033[36mRunning Test Suite: BSPInteractionTestSuite\033[0m");
-    ZHLN::Println("\033[36m==================================================\033[0m");
-
-    runTest("describe_scene_converts_interactive_entities", [&] { return suite.describe_scene_converts_interactive_entities(); });
-    runTest("initialize_bsp_entities_attaches_components", [&] { return suite.initialize_bsp_entities_attaches_components(); });
-    runTest("sliding_door_transform_is_not_the_map_origin", [&] { return suite.sliding_door_transform_is_not_the_map_origin(); });
-    runTest("door_movement_system_state_machine", [&] { return suite.door_movement_system_state_machine(); });
-    runTest("rotating_door_slerp_movement", [&] { return suite.rotating_door_slerp_movement(); });
-    runTest("source_entity_io_wiring", [&] { return suite.source_entity_io_wiring(); });
-    runTest("proximity_trigger_volume_detection", [&] { return suite.proximity_trigger_volume_detection(); });
-    runTest("player_use_interaction_and_locking", [&] { return suite.player_use_interaction_and_locking(); });
-
-    ZHLN::Println("--------------------------------------------------");
-    ZHLN::Println("Summary for BSPInteractionTestSuite: {} Passed, {} Failed", passed, failed);
-    ZHLN::Println("==================================================");
-
-    return failed == 0 ? 0 : 1;
-}
+} // namespace

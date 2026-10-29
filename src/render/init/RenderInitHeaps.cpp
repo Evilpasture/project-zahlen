@@ -56,11 +56,19 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            globalSamplerConfig =
-                Vk::SamplerConfig::LinearRepeat().WithAnisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy).WithLodRange(0.0F, 0.0F);
-            clampSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
+            // Mip chains are generated on upload (Upload2DDesc::generateMips),
+            // and the LOD range must let the sampler use them: clamping to
+            // LOD 0 forced every minified texel through mip 0 at full
+            // anisotropy -- the worst-case fetch pattern for the gbuffer, and
+            // shimmer at distance instead of filtered textures. The Blender
+            // Cycles reference renders the fidelity goldens come from mip-map
+            // properly, so the clamp was a deviation from them as well.
+            globalSampler = Vk::Sampler::LinearRepeat()
+                                .WithAnisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
+                                .WithLodRange(0.0F, VK_LOD_CLAMP_NONE);
+            clampSampler  = Vk::Sampler::LinearClampToEdge();
 
-            return InitSceneHeaps(globalSamplerConfig, clampSamplerConfig);
+            return InitSceneHeaps(globalSampler, clampSampler);
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return InitBakeHeapBindings(); })
         .and_then([&]() -> std::expected<void, ErrorCode> { return InitSkeletalAnimationResources(); })
@@ -89,13 +97,13 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
         });
 }
 
-auto RenderContext::Impl::InitSceneHeaps(const Vk::SamplerConfig& globalSamplerValue, const Vk::SamplerConfig& clampSamplerValue) noexcept
+auto RenderContext::Impl::InitSceneHeaps(Vk::Sampler globalSamplerValue, Vk::Sampler clampSamplerValue) noexcept
     -> std::expected<void, ErrorCode> {
-    globalSamplerConfig = globalSamplerValue;
-    clampSamplerConfig  = clampSamplerValue;
-    auto init_res       = heapManager.Init(
+    globalSampler = globalSamplerValue;
+    clampSampler  = clampSamplerValue;
+    auto init_res = heapManager.Init(
         ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots, kSceneStaticSamplerSlots + kPassStaticSamplerSlots, kFrameTransientResourceSlots,
-        kImmediateTransientResourceSlots
+        kImmediateTransientResourceSlots, Vk::HeapConfig {.enableCapacityWarnings = isDev}
     );
     if (!init_res) {
         return std::unexpected(init_res.error());
@@ -105,25 +113,42 @@ auto RenderContext::Impl::InitSceneHeaps(const Vk::SamplerConfig& globalSamplerV
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    auto globalSlot = heapManager.AllocateStaticSampler();
-    auto clampSlot  = heapManager.AllocateStaticSampler();
-    auto pointSlot  = heapManager.AllocateStaticSampler();
+    // Registration is one step: a handle that comes back is already written.
+    auto globalSlot = heapManager.RegisterSampler(globalSampler);
+    auto clampSlot  = heapManager.RegisterSampler(clampSampler);
+    // The point sampler is chosen by the post-process feature after this point, so
+    // its handle is reserved and bound there.
+    auto pointSlot = heapManager.ReserveSampler();
     if (!globalSlot || !clampSlot || !pointSlot) {
         return std::unexpected(Vk::DescriptorHeapError::SamplerSlotsExhausted);
     }
     globalSamplerSlot = *globalSlot;
     clampSamplerSlot  = *clampSlot;
     pointSamplerSlot  = *pointSlot;
-    auto materialBase = heapManager.ReserveOffsetAddressedSamplerRegion(kMaterialSamplerVariantCount);
+
+    constexpr std::array modes = {
+        Vk::SamplerAddressMode::Repeat,
+        Vk::SamplerAddressMode::ClampToEdge,
+        Vk::SamplerAddressMode::MirroredRepeat,
+    };
+    static_assert(kMaterialSamplerVariantCount == modes.size() * modes.size());
+    auto materialBase = heapManager.RegisterSamplerArray(kMaterialSamplerVariantCount, [&](uint32_t variant) {
+        const uint32_t s = variant / static_cast<uint32_t>(modes.size());
+        const uint32_t t = variant % static_cast<uint32_t>(modes.size());
+        return globalSampler.WithLodRange(0.0F, VK_LOD_CLAMP_NONE).WithAddressModes(modes[s], modes[t], modes[0]);
+    });
     if (!materialBase) {
         return std::unexpected(materialBase.error());
     }
-    materialSamplerBaseSlot = {*materialBase};
+    materialSamplerBaseSlot = *materialBase;
 
-    auto iblSlot   = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
-    auto brdfSlot  = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
-    auto transSlot = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
-    auto depthSlot = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
+    // The IBL and lighting images do not exist yet: their mappings are baked into
+    // pipelines first, so the handles are reserved here and bound when the images
+    // are created.
+    auto iblSlot   = heapManager.ReserveImage();
+    auto brdfSlot  = heapManager.ReserveImage();
+    auto transSlot = heapManager.ReserveImage();
+    auto depthSlot = heapManager.ReserveImage();
     if (!iblSlot || !brdfSlot || !transSlot || !depthSlot) {
         return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
     }
@@ -136,50 +161,42 @@ auto RenderContext::Impl::InitSceneHeaps(const Vk::SamplerConfig& globalSamplerV
         return std::unexpected(reserved.error());
     }
 
-    heapManager.WriteSampler(globalSamplerSlot, globalSamplerConfig);
-    heapManager.WriteSampler(clampSamplerSlot, clampSamplerConfig);
-
-    constexpr std::array modes = {
-        Vk::SamplerAddressMode::Repeat,
-        Vk::SamplerAddressMode::ClampToEdge,
-        Vk::SamplerAddressMode::MirroredRepeat,
-    };
-    static_assert(kMaterialSamplerVariantCount == modes.size() * modes.size());
-    for (uint32_t s = 0; s < modes.size(); ++s) {
-        for (uint32_t t = 0; t < modes.size(); ++t) {
-            const auto config = globalSamplerConfig.WithLodRange(0.0F, VK_LOD_CLAMP_NONE).WithAddressModes(modes[s], modes[t], modes[0]);
-            heapManager.WriteSampler({*materialBase + s * 3u + t}, config);
-        }
-    }
-
     BuildSceneHeapMappings();
 
     return {};
 }
 
 void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
-    sceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
-                            .Sampler(0, 0, globalSamplerSlot)
-                            .UniformBufferAddress(0, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
-                            .StorageBufferAddress(0, 2, GpuAbi::kScenePushLayout.frameAddressOffsets[1])
-                            .StorageBufferAddress(0, 3, GpuAbi::kScenePushLayout.frameAddressOffsets[2])
-                            .StorageBufferAddress(0, 4, GpuAbi::kScenePushLayout.frameAddressOffsets[3])
-                            .StorageBufferAddress(0, 5, GpuAbi::kScenePushLayout.frameAddressOffsets[4])
-                            .StorageBufferAddress(0, 6, GpuAbi::kScenePushLayout.frameAddressOffsets[5])
-                            .SampledImage(0, 7, iblPrefilteredSlot)
-                            .SampledImage(0, 8, iblBrdfLutSlot)
-                            .Sampler(0, 9, clampSamplerSlot)
-                            .SampledImage(0, 10, transLightingSlot)
-                            .SamplerArray(0, 11, materialSamplerBaseSlot)
-                            .BindlessTextureArray(0, 12, textureManager.BindlessBaseSlot())
-                            .Build();
+    // One GlobalSceneRegistry layout, two descriptor sets: the scene block is
+    // addressable at Set 0 (its own heap passes) and Set 1 (shared into other
+    // passes' pMappings at pipeline build). Both mappings are complete;
+    // extras for undeclared variables are legal, missing ones are not
+    // (VUID-VkGraphicsPipelineCreateInfo-flags-11312).
+    const auto buildSceneBlock = [this](uint32_t set) {
+        auto builder = Vk::HeapMappingBuilder(heapManager);
+        std::move(builder).Sampler(set, 0, globalSamplerSlot);
+        // The six frame addresses: binding numbers and push offsets come from
+        // the generated metadata (the Slang field <-> binding association),
+        // not a positional six-element convention.
+        for (const auto& entry : Slang::kFrameAddressMeta) {
+            if (entry.uniformBuffer) {
+                std::move(builder).UniformBufferAddress(set, entry.binding, entry.offset);
+            } else {
+                std::move(builder).StorageBufferAddress(set, entry.binding, entry.offset);
+            }
+        }
+        return std::move(builder)
+            .SampledImage(set, 7, iblPrefilteredSlot)
+            .SampledImage(set, 8, iblBrdfLutSlot)
+            .Sampler(set, 9, clampSamplerSlot)
+            .SampledImage(set, 10, transLightingSlot)
+            .SamplerArray(set, 11, materialSamplerBaseSlot)
+            .BindlessTextureArray(set, 12, textureManager.BindlessBaseHandle())
+            .Build();
+    };
 
-    decalSceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
-                                 .Sampler(1, 0, globalSamplerSlot)
-                                 .UniformBufferAddress(1, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
-                                 .SamplerArray(1, 11, materialSamplerBaseSlot)
-                                 .BindlessTextureArray(1, 12, textureManager.BindlessBaseSlot())
-                                 .Build();
+    sceneHeapMappings     = buildSceneBlock(0);
+    sceneSet1HeapMappings = buildSceneBlock(1);
 }
 
 void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
@@ -189,16 +206,16 @@ void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
 }
 
 void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
-    if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredInfo.image != VK_NULL_HANDLE) {
-        heapManager.WriteImage(iblPrefilteredSlot, iblPayload.prefilteredInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredView.Handle() != VK_NULL_HANDLE) {
+        heapManager.BindImage(iblPrefilteredSlot, iblPayload.prefilteredView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
-    if (bindlessLayout.HasBinding(0, 8) && iblPayload.brdfLutInfo.image != VK_NULL_HANDLE) {
-        heapManager.WriteImage(iblBrdfLutSlot, iblPayload.brdfLutInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (bindlessLayout.HasBinding(0, 8) && iblPayload.brdfLutView.Handle() != VK_NULL_HANDLE) {
+        heapManager.BindImage(iblBrdfLutSlot, iblPayload.brdfLutView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 }
 
-void RenderContext::Impl::WritePointSamplerToHeap(const Vk::SamplerConfig& config) noexcept {
-    heapManager.WriteSampler(pointSamplerSlot, config);
+void RenderContext::Impl::WritePointSamplerToHeap(Vk::Sampler pointSamplerValue) noexcept {
+    heapManager.BindSampler(pointSamplerSlot, pointSamplerValue);
 }
 
 void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
@@ -206,38 +223,41 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
         return;
     }
 
-    heapManager.WriteImage(transLightingSlot, graphResources.transLightingTarget.image.ViewInfo(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    heapManager.BindImage(transLightingSlot, graphResources.transLightingTarget.image.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
-    const Vk::SamplerConfig defaultConfig = defaultSamplerConfig;
-    const Vk::SamplerConfig pointConfig   = pointSamplerConfig;
-    const Vk::SamplerConfig shadowConfig  = shadowSamplerConfig;
-    const Vk::SamplerConfig clampConfig   = clampSamplerConfig;
-    const Vk::SamplerConfig skyConfig     = Vk::SamplerConfig::LinearRepeat().WithAddressModes(
+    // An equirectangular lookup wraps around the horizon and clamps at the poles.
+    const Vk::Sampler skySampler = Vk::Sampler::LinearRepeat().WithAddressModes(
         Vk::SamplerAddressMode::Repeat, Vk::SamplerAddressMode::ClampToEdge, Vk::SamplerAddressMode::ClampToEdge
     );
-    const Vk::SamplerConfig blueNoiseConfig = blueNoiseSamplerConfig;
 
-    Vk::InitHeapPassSamplers<Shaders::Hiz>(heapManager, culling.hizHeapBindings, Vk::UnreadSampler<"pointSampler">(pointConfig));
-    Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, culling.cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointConfig));
+    Vk::InitHeapPassSamplers<Shaders::Hiz>(heapManager, culling.hizHeapBindings, Vk::UnreadSampler<"pointSampler">(pointSampler));
+    Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, culling.cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointSampler));
     Vk::InitHeapPassSamplers<Shaders::Lighting>(
-        heapManager, post.lighting.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"shadowSampler">(shadowConfig),
-        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"pointSampler">(pointConfig)
+        heapManager, post.lighting.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler), Vk::SamplerSlot<"shadowSampler">(shadowSampler),
+        Vk::SamplerSlot<"clampSampler">(clampSampler), Vk::SamplerSlot<"pointSampler">(pointSampler)
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
-        heapManager, reflectionPipeline.pass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
-        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+        heapManager, reflectionPipeline.pass.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler), Vk::SamplerSlot<"pointSampler">(pointSampler),
+        Vk::SamplerSlot<"clampSampler">(clampSampler), Vk::SamplerSlot<"skySampler">(skySampler)
     );
-    Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, antiAliasing.taa.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, antiAliasing.fxaa.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::Mlaa>(heapManager, antiAliasing.mlaa.heapBindings, Vk::SamplerSlot<"sPoint">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::SmaaEdge>(heapManager, antiAliasing.smaaEdge.heapBindings, Vk::SamplerSlot<"pointSampler">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(heapManager, antiAliasing.smaaWeight.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, antiAliasing.smaaBlend.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, post.blit.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, antiAliasing.taa.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, antiAliasing.fxaa.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::Mlaa>(heapManager, antiAliasing.mlaa.heapBindings, Vk::SamplerSlot<"sPoint">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::SmaaEdge>(heapManager, antiAliasing.smaaEdge.heapBindings, Vk::SamplerSlot<"pointSampler">(pointSampler));
+    Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(
+        heapManager, antiAliasing.smaaWeight.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultSampler), Vk::SamplerSlot<"pointSampler">(pointSampler)
+    );
+    Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, antiAliasing.smaaBlend.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, post.blit.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler));
 
-    postProcess.InitSamplers(*this);
+    // Lighting and post-process samplers are registered here with every other
+    // pass's, reading each bundle's bindings directly.
+    Vk::InitHeapPassSamplers<Shaders::Gtao>(heapManager, lighting.gtao.Bindings(), Vk::SamplerSlot<"pointSampler">(pointSampler));
+    Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(heapManager, post.bloomThreshold.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::BloomDown>(heapManager, post.bloomDown.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler));
+    Vk::InitHeapPassSamplers<Shaders::BloomUp>(heapManager, post.bloomUp.Bindings(), Vk::SamplerSlot<"smp">(defaultSampler));
     fog.InitSamplers(*this);
 }
 
@@ -249,7 +269,7 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
         allocator.DestroyBuffer(morphDeltasBuffer);
     });
     JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
-    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
+    for (uint32_t i = 0; i < FrameResources::kJointBufferRingSize; ++i) {
         auto jb_res = Vk::Buffer::Create(
             allocator, sizeof(JPH::Mat44) * 8192, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
         );
@@ -345,13 +365,13 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     submittedStaging = std::make_unique<Vk::SubmittedStagingWork>(std::move(*work));
     submitted        = true;
 
-    const VkImageViewCreateInfo matInfo = matImg->ViewInfo();
-    const VkImageViewCreateInfo ampInfo = ampImg->ViewInfo();
+    const Vk::ImageView matView = matImg->View();
+    const Vk::ImageView ampView = ampImg->View();
 
     ltcMatImage = std::move(*matImg);
     ltcAmpImage = std::move(*ampImg);
-    post.ltcMat = matInfo;
-    post.ltcAmp = ampInfo;
+    post.ltcMat = matView;
+    post.ltcAmp = ampView;
     ApplyImageDebugNames(*this);
     return {};
 }
@@ -378,7 +398,7 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
         !built) {
         return std::unexpected(built.error());
     }
-    const Vk::SamplerConfig equirectSampler = Vk::SamplerConfig::LinearRepeat().WithAddressModes(
+    const Vk::Sampler equirectSampler = Vk::Sampler::LinearRepeat().WithAddressModes(
         Vk::SamplerAddressMode::Repeat, Vk::SamplerAddressMode::ClampToEdge, Vk::SamplerAddressMode::ClampToEdge
     );
     Vk::InitHeapPassSamplers<Shaders::IblBake>(heapManager, iblBakeHeapBindings, Vk::SamplerSlot<"radianceSampler">(equirectSampler));
@@ -400,7 +420,7 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
 
     const uint64_t hash = hasPixels ? desc.contentHash != 0 ? desc.contentHash : HashEnvironmentPixels(desc) : 0;
     const int      mode = hasPixels ? !desc.renderSkybox ? 2 : (desc.lightingRgba.empty() ? 1 : 3) : 0;
-    if (impl->iblPayload.contentHash == hash && (mode != 3 || impl->iblPayload.visualSkyInfo.image != VK_NULL_HANDLE)) {
+    if (impl->iblPayload.contentHash == hash && (mode != 3 || impl->iblPayload.visualSkyView.Handle() != VK_NULL_HANDLE)) {
         impl->iblPayload.environmentMode = mode;
         return {};
     }

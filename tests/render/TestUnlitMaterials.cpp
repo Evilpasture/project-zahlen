@@ -152,33 +152,20 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
         indices.push_back(index);
     }
 
-    ZHLN::Mesh mesh {
-        .posBuffer          = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {positions}),
-        .tangentFrameBuffer = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {frames}),
-        .surfaceBuffer      = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {surfaces}),
-        .skinBuffer         = ZHLN::BufferHandle::Invalid,
-        .indexBuffer        = rc.CreateBuffer<ZHLN::BufferUsage::Index>(std::span {indices}),
-        .vertexCount        = static_cast<uint32_t>(positions.size()),
-        .indexCount         = static_cast<uint32_t>(indices.size()),
+    const ZHLN::MeshletStreams ml = rc.UploadMeshlets(ZHLN::BuildMeshlets(std::span {indices}, std::span {positions}));
+    ZHLN::Mesh                 mesh {
+        .posBuffer           = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {positions}),
+        .tangentFrameBuffer  = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {frames}),
+        .surfaceBuffer       = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {surfaces}),
+        .skinBuffer          = ZHLN::BufferHandle::Invalid,
+        .indexBuffer         = rc.CreateBuffer<ZHLN::BufferUsage::Index>(std::span {indices}),
+        .vertexCount         = static_cast<uint32_t>(positions.size()),
+        .indexCount          = static_cast<uint32_t>(indices.size()),
+        .meshletBuffer       = ml.meshlets,
+        .meshletVertexBuffer = ml.vertices,
+        .meshletTriBuffer    = ml.triangles,
+        .meshletCount        = ml.count,
     };
-    if (const ZHLN::MeshletBuildResult built = ZHLN::BuildMeshlets(std::span {indices}, std::span {positions}); !built.Empty()) {
-        const auto packedMeshlets = ZHLN::PackMeshlets(built.meshlets);
-        mesh.meshletBuffer       = rc.CreateBuffer(ZHLN::BufferDesc {.usage = ZHLN::BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = ZHLN::kMeshletPackedBytes});
-        mesh.meshletVertexBuffer = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(std::span {built.vertices});
-        mesh.meshletTriBuffer    = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(std::span {built.triangles});
-        if (mesh.meshletBuffer == ZHLN::BufferHandle::Invalid || mesh.meshletVertexBuffer == ZHLN::BufferHandle::Invalid ||
-            mesh.meshletTriBuffer == ZHLN::BufferHandle::Invalid) {
-            rc.DestroyBuffer(mesh.meshletBuffer);
-            rc.DestroyBuffer(mesh.meshletVertexBuffer);
-            rc.DestroyBuffer(mesh.meshletTriBuffer);
-            mesh.meshletBuffer       = ZHLN::BufferHandle::Invalid;
-            mesh.meshletVertexBuffer = ZHLN::BufferHandle::Invalid;
-            mesh.meshletTriBuffer    = ZHLN::BufferHandle::Invalid;
-            mesh.meshletCount        = 0;
-        } else {
-            mesh.meshletCount = static_cast<uint32_t>(built.meshlets.size());
-        }
-    }
     if (auto built = rc.BuildMeshBLAS(mesh); !built) {
         if (!built.error().Is(ZHLN::RenderFeatureError::FeatureNotSupported)) {
             ZHLN::LogWarning("UploadChamferedMesh: Failed to build mesh BLAS: {}", built.error());
@@ -238,6 +225,8 @@ constexpr std::array<NormalizedRect, 3> kBlueFaces {{
 constexpr NormalizedRect kLitControl {.x0 = 0.49, .y0 = 0.77, .x1 = 0.51, .y1 = 0.79};
 
 } // namespace
+
+namespace {
 
 struct UnlitMaterialsTestSuite {
     UnlitMaterialsTestSuite() { ZHLN::Test::Headless::BeginSession(); }
@@ -375,6 +364,4 @@ struct UnlitMaterialsTestSuite {
     };
 };
 
-auto RunUnlitMaterialsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<UnlitMaterialsTestSuite>();
-}
+} // namespace

@@ -15,46 +15,6 @@ constexpr auto operator|(BarrierAccess a, BarrierAccess b) noexcept -> BarrierAc
     return static_cast<BarrierAccess>(static_cast<std::underlying_type_t<BarrierAccess>>(a) | static_cast<std::underlying_type_t<BarrierAccess>>(b));
 }
 
-inline void PipelineBarrier(
-    VkCommandBuffer                         cmd,
-    std::span<const VkBufferMemoryBarrier2> buffers,
-    std::span<const VkImageMemoryBarrier2>  images,
-    std::span<const VkMemoryBarrier2>       memory
-) noexcept {
-    if (buffers.empty() && images.empty() && memory.empty()) {
-        return;
-    }
-    const VkDependencyInfo dep_info = {
-        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .memoryBarrierCount       = static_cast<uint32_t>(memory.size()),
-        .pMemoryBarriers          = memory.data(),
-        .bufferMemoryBarrierCount = static_cast<uint32_t>(buffers.size()),
-        .pBufferMemoryBarriers    = buffers.data(),
-        .imageMemoryBarrierCount  = static_cast<uint32_t>(images.size()),
-        .pImageMemoryBarriers     = images.data(),
-    };
-    vkCmdPipelineBarrier2(cmd, &dep_info);
-}
-
-inline void MemoryBarrier(VkCommandBuffer cmd, const MemoryBarrierDesc& desc) noexcept {
-    const VkMemoryBarrier2 barrier = MakeMemoryBarrier(desc);
-    PipelineBarrier(cmd, {}, {}, std::span<const VkMemoryBarrier2>(&barrier, 1));
-}
-
-inline void ImageBarrier(VkCommandBuffer cmd, const ImageBarrierDesc& desc) noexcept {
-    const VkImageMemoryBarrier2 barrier = MakeImageBarrier(desc);
-    PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
-}
-
-inline void MemoryBarrier(VkCommandBuffer cmd, BarrierStage srcStage, BarrierAccess srcAccess, BarrierStage dstStage, BarrierAccess dstAccess) noexcept {
-    MemoryBarrier(
-        cmd, {.src_stage  = static_cast<VkPipelineStageFlags2>(srcStage),
-              .src_access = static_cast<VkAccessFlags2>(srcAccess),
-              .dst_stage  = static_cast<VkPipelineStageFlags2>(dstStage),
-              .dst_access = static_cast<VkAccessFlags2>(dstAccess)}
-    );
-}
-
 template <QueueType QType>
 CommandBuffer<QType>::operator VkCommandBuffer() const noexcept {
     return handle;

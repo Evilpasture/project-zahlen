@@ -98,18 +98,18 @@ class ZHLN_STATIC_API BenchmarkViewer {
     void UpdateAndRenderUI(Engine& engine, float dt);
 
     // The benchmark panel inside a frame the host owns, for a host with a HUD
-    // of its own: call it between its own GUI::Context::BeginFrame and
-    // EndFrame, and let it be one of the frame's authors.
-    void DrawPanel(GUI::Context& ui, Engine& engine);
+    // of its own: call it on the active GUI::Frame token between BeginFrame and
+    // std::move(frame).End(), and let it be one of the frame's authors.
+    void DrawPanel(GUI::Frame& ui, Engine& engine);
 
     // The same, for the telemetry panel: FPS and frame-time lows for the host's
     // own frames, then every GPU stage and CPU scope the engine's profiler
     // holds, on the right-hand side of the window.
-    void DrawTelemetryPanel(GUI::Context& ui, Engine& engine);
+    void DrawTelemetryPanel(GUI::Frame& ui, Engine& engine);
 
     // Both panels, in one call, for a host that shows either -- what the sample
     // uses. Whichever is hidden is skipped; the frame is still the host's.
-    void DrawPanels(GUI::Context& ui, Engine& engine);
+    void DrawPanels(GUI::Frame& ui, Engine& engine);
 
     // One frame's bookkeeping and no drawing: samples the frame interval, reads
     // the engine's profiler, and advances the benchmark while its panel is up.

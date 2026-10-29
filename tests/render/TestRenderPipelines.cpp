@@ -32,6 +32,8 @@
 #include <string>
 #include <vector>
 
+namespace {
+
 struct RenderPipelinesTestSuite {
     RenderPipelinesTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -60,7 +62,6 @@ struct RenderPipelinesTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true,
-                    .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };
@@ -108,9 +109,12 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
-            auto& rc = engine->GetRenderContext();
-            auto captureRes = rc.CaptureScreenshotPPM("test_render_output.ppm");
-            ZHLN::Test::ExpectTrue(captureRes.has_value());
+            auto& rc       = engine->GetRenderContext();
+            auto  captured = rc.CaptureFrame();
+            ZHLN::Test::ExpectTrue(captured.has_value());
+            if (captured) {
+                (void) ZHLN::Test::Image::WritePPM("test_render_output.ppm", ZHLN::Test::Headless::ToRgbImage(*captured));
+            }
             ZHLN::Test::ExpectGe(engine->GetCurrentFrame(), 60u);
             ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty());
 
@@ -119,7 +123,7 @@ struct RenderPipelinesTestSuite {
             const auto boxMesh = reg.Get<ZHLN::Components::MeshComponent>(box);
             if (ZHLN::Test::ExpectTrue(boxMesh.has_value() && rc.GetGPUMaterial(boxMesh->materialAsset).has_value())) {
                 const ZHLN::MaterialID boxMaterial = boxMesh->materialAsset;
-                const auto validationErrors = engine->GetRenderContext().GetValidationErrorCount();
+                const auto validationErrors = ZHLN::Test::ValidationErrorCount();
                 engine->ProcessEvents();
                 ZHLN::Test::ExpectEq(engine->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK);
                 rc.UnregisterGPUMaterial(boxMaterial);
@@ -137,7 +141,7 @@ struct RenderPipelinesTestSuite {
                     return std::unexpected(recreated.error());
                 }
                 ZHLN::Test::ExpectNe(recreated->pipeline, loose->pipeline);
-                ZHLN::Test::ExpectEq(engine->GetRenderContext().GetValidationErrorCount(), validationErrors);
+                ZHLN::Test::ExpectEq(ZHLN::Test::ValidationErrorCount(), validationErrors);
             }
 
             return {};
@@ -162,7 +166,6 @@ struct RenderPipelinesTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true,
-                    .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };
@@ -179,12 +182,12 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectTrue(!engine->GetRegistry().GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
 
             // Before the first presented frame, the headless image is still
-            // UNDEFINED. A screenshot must fail without submitting an invalid
+            // UNDEFINED. A capture must fail without submitting an invalid
             // COLOR_ATTACHMENT -> TRANSFER_SRC readback barrier.
-            const auto errorsBefore = engine->GetRenderContext().GetValidationErrorCount();
-            const auto emptyCapture = engine->GetRenderContext().CaptureScreenshotPPM("test_no_completed_frame.ppm");
+            const auto errorsBefore = ZHLN::Test::ValidationErrorCount();
+            const auto emptyCapture = engine->GetRenderContext().CaptureFrame();
             ZHLN::Test::ExpectFalse(emptyCapture.has_value());
-            ZHLN::Test::ExpectEq(engine->GetRenderContext().GetValidationErrorCount(), errorsBefore);
+            ZHLN::Test::ExpectEq(ZHLN::Test::ValidationErrorCount(), errorsBefore);
             return {};
         }
 
@@ -480,8 +483,7 @@ struct RenderPipelinesTestSuite {
         //
         // The font atlas is the same shape of bug without the race: a fresh
         // 1024x1024 bindless texture per reset, none of them released. It is
-        // device state now, built once and copied into each new scene's
-        // UISettingsComponent.
+        // device state now, built once on Engine and preserved across scene resets.
         std::expected<void, ZHLN::ErrorCode> scene_reset_rebuilds_engine_state_instead_of_accumulating_it() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("LocalGPUSceneResetTest", 320, 240);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -493,19 +495,17 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectGt(updateSystems, 0);
             ZHLN::Test::ExpectGt(renderSystems, 0);
 
-            const auto firstUI = engine->GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
-            if (!ZHLN::Test::ExpectTrue(firstUI.has_value())) {
-                return {};
-            }
-            const ZHLN::TextureHandle atlas = firstUI->defaultFontAtlas;
+            const ZHLN::FontAtlas& firstFont = engine->GetFontAtlas();
+            const ZHLN::TextureHandle atlas  = firstFont.texture;
+            ZHLN::Test::ExpectTrue(atlas != ZHLN::TextureHandle::Invalid);
             // 'A' is never an empty box in any baked font, so a zero-area
             // entry means the metrics were not carried over. The lookup goes
             // through the atlas's own glyph range -- the bake declares its
             // codepoint span, and the engine no longer assumes ASCII 32..127.
-            const ZHLN::GlyphMetric glyphA = firstUI->fontAtlas.GlyphFor('A');
+            const ZHLN::GlyphMetric glyphA = firstFont.GlyphFor('A');
             ZHLN::Test::ExpectGt(glyphA.x1, glyphA.x0);
-            ZHLN::Test::ExpectGt(firstUI->fontAtlas.glyphCount, 0u);
-            ZHLN::Test::ExpectGt(firstUI->fontAtlas.fontSize, 0.0f);
+            ZHLN::Test::ExpectGt(firstFont.glyphCount, 0u);
+            ZHLN::Test::ExpectGt(firstFont.fontSize, 0.0f);
 
             for (uint32_t pass = 0; pass < 3; ++pass) {
                 ZHLN::Test::Headless::ResetScene(*engine);
@@ -513,15 +513,10 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectEq(engine->GetUpdateGraph().GetSystemCount(), updateSystems);
                 ZHLN::Test::ExpectEq(engine->GetRenderGraph().GetSystemCount(), renderSystems);
 
-                const auto ui = engine->GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
-                if (ZHLN::Test::ExpectTrue(ui.has_value())) {
-                    // Same atlas, and the glyph table came with it: the new
-                    // scene is seeded from the engine's copy rather than
-                    // rebuilt or left blank.
-                    ZHLN::Test::ExpectTrue(ui->defaultFontAtlas == atlas);
-                    ZHLN::Test::ExpectTrue(ui->fontAtlas.texture == atlas);
-                    ZHLN::Test::ExpectTrue(ui->fontAtlas.GlyphFor('A').x1 == glyphA.x1);
-                }
+                const ZHLN::FontAtlas& font = engine->GetFontAtlas();
+                // Same device-scoped atlas across resets rather than rebuilt or left blank.
+                ZHLN::Test::ExpectTrue(font.texture == atlas);
+                ZHLN::Test::ExpectTrue(font.GlyphFor('A').x1 == glyphA.x1);
 
                 // And the rebuilt frame still runs.
                 ZHLN::Test::Headless::TickFrames(*engine, 2);
@@ -565,7 +560,6 @@ struct RenderPipelinesTestSuite {
                         .fullscreen     = false,
                         .validationMode = ZHLN::ValidationMode::On,
                         .headless       = true,
-                        .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                     },
                     .enableFallbackScene = false,
                 };
@@ -681,9 +675,4 @@ struct RenderPipelinesTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunRenderPipelinesSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<RenderPipelinesTestSuite>();
-}
-
+} // namespace

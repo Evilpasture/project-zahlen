@@ -4,12 +4,15 @@
 #pragma once
 
 #include "GpuLayout.hpp"
+#include <Zahlen/Meshlet.hpp>
 #include <Zahlen/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/FrameData.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <cstdint>
 
 namespace ZHLN::GpuPack {
+
+[[nodiscard]] auto PackMeshlet(const MeshletDesc& desc) noexcept -> GPUMeshlet;
 
 [[nodiscard]] auto PackParticleEmitter(const ParticleEmitterDesc& desc, uint32_t textureIndex, uint32_t blendMode) noexcept
     -> ParticleEmitterParams;

@@ -5,11 +5,13 @@
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/ConditionalVariable.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/SharedMutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <bit>
 #include <cassert>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdlib>
 #include <mutex>
 #include <new>
@@ -465,6 +467,277 @@ void ConditionalVariable::NotifyAll() noexcept {
         } else {
             ZHLN::TaskSystem::WakeUp(waiter->fiber);
         }
+    }
+}
+
+namespace {
+
+[[nodiscard]] auto WriterParkingAddress(const SharedMutex* mutex) noexcept -> const void* {
+    return mutex;
+}
+
+[[nodiscard]] auto ReaderParkingAddress(const SharedMutex* mutex) noexcept -> const void* {
+    return reinterpret_cast<const std::byte*>(mutex) + 1;
+}
+
+void WakeWaiter(Waiter* waiter) noexcept {
+    waiter->signaled.store(true, std::memory_order::release);
+    if (waiter->fiber == nullptr) {
+        waiter->cond.notify_one();
+    } else {
+        ZHLN::TaskSystem::WakeUp(waiter->fiber);
+    }
+}
+
+} // namespace
+
+void SharedMutex::LockSlow() noexcept {
+    const void* writerAddr   = WriterParkingAddress(this);
+    Bucket*     writerBucket = &s_parkingLot[HashAddress<BUCKET_COUNT>(writerAddr)];
+    size_t      backoffLimit = 1;
+
+    for (int i = 0; i < MAX_SPIN_COUNT; ++i) {
+        uint32_t state = _state.load(std::memory_order::relaxed);
+        if ((state & WRITER_ACTIVE) == 0 && (state >> READER_SHIFT) == 0) {
+            const uint32_t desired = (state & WRITER_PARKED) != 0 ? (state | WRITER_ACTIVE | WRITER_PENDING)
+                                                                  : ((state | WRITER_ACTIVE) & ~WRITER_PENDING);
+            if (_state.compare_exchange_weak(state, desired, std::memory_order::acquire, std::memory_order::relaxed)) {
+                return;
+            }
+        } else if ((state & WRITER_PENDING) == 0) {
+            _state.compare_exchange_weak(state, state | WRITER_PENDING, std::memory_order::relaxed, std::memory_order::relaxed);
+        }
+
+        for (size_t j = 0; j < backoffLimit; ++j) {
+            CPURelax();
+        }
+        if (backoffLimit < 1024) {
+            backoffLimit <<= 1;
+        }
+    }
+
+    for (;;) {
+        uint32_t state = _state.load(std::memory_order::relaxed);
+        if ((state & WRITER_ACTIVE) == 0 && (state >> READER_SHIFT) == 0) {
+            const uint32_t desired = (state & WRITER_PARKED) != 0 ? (state | WRITER_ACTIVE | WRITER_PENDING)
+                                                                  : ((state | WRITER_ACTIVE) & ~WRITER_PENDING);
+            if (_state.compare_exchange_weak(state, desired, std::memory_order::acquire, std::memory_order::relaxed)) {
+                return;
+            }
+            continue;
+        }
+
+        if ((state & (WRITER_PENDING | WRITER_PARKED)) != (WRITER_PENDING | WRITER_PARKED)) {
+            if (!_state.compare_exchange_weak(state, state | WRITER_PENDING | WRITER_PARKED, std::memory_order::relaxed, std::memory_order::relaxed)) {
+                continue;
+            }
+        }
+
+        Fiber*     self          = GetCurrentFiber();
+        const bool isWorkerFiber = (self != nullptr && !self->isMain);
+
+        Waiter node;
+        node.address = writerAddr;
+        node.fiber   = isWorkerFiber ? self : nullptr;
+        node.next    = nullptr;
+        node.signaled.store(false, std::memory_order::relaxed);
+
+        std::unique_lock<std::mutex> lock(writerBucket->mutex);
+        state = _state.load(std::memory_order::relaxed);
+        if (((state & WRITER_ACTIVE) == 0 && (state >> READER_SHIFT) == 0) || (state & WRITER_PARKED) == 0) [[unlikely]] {
+            lock.unlock();
+            continue;
+        }
+
+        node.next          = writerBucket->head;
+        writerBucket->head = &node;
+
+        if (!isWorkerFiber) {
+            node.cond.wait(lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
+        } else {
+            lock.unlock();
+            while (!node.signaled.load(std::memory_order::acquire)) {
+                YieldFiber();
+            }
+            node.signaled.store(false, std::memory_order::relaxed);
+        }
+    }
+}
+
+void SharedMutex::UnlockSlow() noexcept {
+    uint32_t state      = _state.load(std::memory_order::relaxed);
+    bool     wakeWriter = false;
+
+    for (;;) {
+        wakeWriter             = (state & WRITER_PARKED) != 0;
+        const uint32_t desired = wakeWriter ? ((state & ~WRITER_ACTIVE) | WRITER_PENDING) : (state & ~(WRITER_ACTIVE | WRITER_PENDING));
+        if (_state.compare_exchange_weak(state, desired, std::memory_order::release, std::memory_order::relaxed)) {
+            break;
+        }
+    }
+
+    if (wakeWriter) {
+        const void* writerAddr   = WriterParkingAddress(this);
+        Bucket*     writerBucket = &s_parkingLot[HashAddress<BUCKET_COUNT>(writerAddr)];
+        Waiter*     toWake       = nullptr;
+        bool        moreWriters  = false;
+
+        {
+            std::lock_guard<std::mutex> lock(writerBucket->mutex);
+            Waiter**                    curr = &writerBucket->head;
+            while (*curr != nullptr) {
+                if ((*curr)->address == writerAddr && toWake == nullptr) {
+                    toWake = *curr;
+                    *curr  = toWake->next;
+                    continue;
+                }
+                if ((*curr)->address == writerAddr) {
+                    moreWriters = true;
+                }
+                curr = &((*curr)->next);
+            }
+            if (!moreWriters) {
+                _state.fetch_and(~WRITER_PARKED, std::memory_order::relaxed);
+            }
+        }
+
+        if (toWake != nullptr) {
+            WakeWaiter(toWake);
+            return;
+        }
+
+        uint32_t cur = _state.load(std::memory_order::relaxed);
+        while ((cur & (WRITER_ACTIVE | WRITER_PARKED)) == 0 && (cur & WRITER_PENDING) != 0) {
+            if (_state.compare_exchange_weak(cur, cur & ~WRITER_PENDING, std::memory_order::relaxed, std::memory_order::relaxed)) {
+                break;
+            }
+        }
+    }
+
+    if ((state & READER_PARKED) != 0 || (_state.load(std::memory_order::relaxed) & READER_PARKED) != 0) {
+        const void* readerAddr   = ReaderParkingAddress(this);
+        Bucket*     readerBucket = &s_parkingLot[HashAddress<BUCKET_COUNT>(readerAddr)];
+        Waiter*     wakeList     = nullptr;
+
+        {
+            std::lock_guard<std::mutex> lock(readerBucket->mutex);
+            _state.fetch_and(~READER_PARKED, std::memory_order::relaxed);
+
+            Waiter** curr = &readerBucket->head;
+            while (*curr != nullptr) {
+                if ((*curr)->address == readerAddr) {
+                    Waiter* waiter = *curr;
+                    *curr          = waiter->next;
+                    waiter->next   = wakeList;
+                    wakeList       = waiter;
+                } else {
+                    curr = &((*curr)->next);
+                }
+            }
+        }
+
+        while (wakeList != nullptr) {
+            Waiter* waiter = wakeList;
+            wakeList       = waiter->next;
+            WakeWaiter(waiter);
+        }
+    }
+}
+
+void SharedMutex::LockSharedSlow() noexcept {
+    const void* readerAddr   = ReaderParkingAddress(this);
+    Bucket*     readerBucket = &s_parkingLot[HashAddress<BUCKET_COUNT>(readerAddr)];
+    size_t      backoffLimit = 1;
+
+    for (int i = 0; i < MAX_SPIN_COUNT; ++i) {
+        uint32_t state = _state.load(std::memory_order::relaxed);
+        if ((state & (WRITER_ACTIVE | WRITER_PENDING)) == 0) {
+            if (_state.compare_exchange_weak(state, state + READER_UNIT, std::memory_order::acquire, std::memory_order::relaxed)) {
+                return;
+            }
+        }
+
+        for (size_t j = 0; j < backoffLimit; ++j) {
+            CPURelax();
+        }
+        if (backoffLimit < 1024) {
+            backoffLimit <<= 1;
+        }
+    }
+
+    for (;;) {
+        uint32_t state = _state.load(std::memory_order::relaxed);
+        if ((state & (WRITER_ACTIVE | WRITER_PENDING)) == 0) {
+            if (_state.compare_exchange_weak(state, state + READER_UNIT, std::memory_order::acquire, std::memory_order::relaxed)) {
+                return;
+            }
+            continue;
+        }
+
+        if ((state & READER_PARKED) == 0) {
+            if (!_state.compare_exchange_weak(state, state | READER_PARKED, std::memory_order::relaxed, std::memory_order::relaxed)) {
+                continue;
+            }
+        }
+
+        Fiber*     self          = GetCurrentFiber();
+        const bool isWorkerFiber = (self != nullptr && !self->isMain);
+
+        Waiter node;
+        node.address = readerAddr;
+        node.fiber   = isWorkerFiber ? self : nullptr;
+        node.next    = nullptr;
+        node.signaled.store(false, std::memory_order::relaxed);
+
+        std::unique_lock<std::mutex> lock(readerBucket->mutex);
+        state = _state.load(std::memory_order::relaxed);
+        if ((state & (WRITER_ACTIVE | WRITER_PENDING)) == 0 || (state & READER_PARKED) == 0) [[unlikely]] {
+            lock.unlock();
+            continue;
+        }
+
+        node.next          = readerBucket->head;
+        readerBucket->head = &node;
+
+        if (!isWorkerFiber) {
+            node.cond.wait(lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
+        } else {
+            lock.unlock();
+            while (!node.signaled.load(std::memory_order::acquire)) {
+                YieldFiber();
+            }
+            node.signaled.store(false, std::memory_order::relaxed);
+        }
+    }
+}
+
+void SharedMutex::UnlockSharedSlow() noexcept {
+    const void* writerAddr   = WriterParkingAddress(this);
+    Bucket*     writerBucket = &s_parkingLot[HashAddress<BUCKET_COUNT>(writerAddr)];
+    Waiter*     toWake       = nullptr;
+    bool        moreWriters  = false;
+
+    {
+        std::lock_guard<std::mutex> lock(writerBucket->mutex);
+        Waiter**                    curr = &writerBucket->head;
+        while (*curr != nullptr) {
+            if ((*curr)->address == writerAddr && toWake == nullptr) {
+                toWake = *curr;
+                *curr  = toWake->next;
+                continue;
+            }
+            if ((*curr)->address == writerAddr) {
+                moreWriters = true;
+            }
+            curr = &((*curr)->next);
+        }
+        if (!moreWriters) {
+            _state.fetch_and(~WRITER_PARKED, std::memory_order::relaxed);
+        }
+    }
+
+    if (toWake != nullptr) {
+        WakeWaiter(toWake);
     }
 }
 

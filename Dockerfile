@@ -25,7 +25,6 @@ RUN pacman -Sy --noconfirm && \
     seatd \
     zstd \
     gtest \
-    fennel \
     pkgconf \
     wget \
     tar \
@@ -48,7 +47,7 @@ ENV CMAKE_PREFIX_PATH="/opt/vulkansdk/x86_64"
 
 # CI deliberately uses the system Lavapipe and validation layer packages.
 # CMake disables the checked-in Arch-built sandbox in ZHLN_IN_DOCKER mode,
-# leaving these environment variables as the source of truth for CTest.
+# leaving these environment variables as the source of truth for ztest.
 ENV VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 ENV VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d
@@ -64,26 +63,26 @@ RUN cmake -B build -S . -G Ninja \
     -DUSE_SANITIZERS=ON \
     -DZHLN_IN_DOCKER=ON
 
-# 2. Build everything (Engine, Asset Cooker, and Test Executables)
+# 2. Build everything (Engine, Asset Cooker, ztest, and Test Executables)
 RUN cmake --build build
 
 # 3. RUN THE TESTS
 # If any test fails, Docker build fails and stops the CI pipeline immediately!
-RUN ctest --test-dir build --output-on-failure -V
+RUN ./build/bin/ztest --test-dir build -V
 
-# 4. Collect the runtime payload: the binaries, the cooked asset pak and the
-#    script tree the engine loads.
-#    cp -L is the point of this step. The build tree symlinks both non-binary
-#    payloads -- build/data/base.pak points into the shared cooked-asset cache,
-#    and the static script files under build/scripts point back into the source
-#    tree -- and a symlink copied into the runner stage resolves to a path that
-#    does not exist there. Dereferencing here means the runner copies real files.
+# 4. Collect the runtime payload: the binaries, the cooked asset pak and, when
+#    configured, the gameplay script module. build/data/base.pak points into the
+#    shared cooked-asset cache, so dereference it for the runner image. A staged
+#    build/scripts tree may also be a symlink into the source tree; the script
+#    module is optional, so only copy that tree when the build produced it.
 RUN mkdir -p /workspace/dist/data && \
-    cp /workspace/build/zahlen /workspace/dist/ && \
+    cp /workspace/build/bin/zahlen /workspace/dist/ && \
     cp /workspace/build/libzahlen_engine.so /workspace/dist/ && \
     find /workspace/build -name "libJolt.so*" -exec cp -P {} /workspace/dist/ \; && \
     cp -L /workspace/build/data/base.pak /workspace/dist/data/base.pak && \
-    cp -rL /workspace/build/scripts /workspace/dist/scripts
+    if [ -d /workspace/build/scripts ]; then \
+        cp -rL /workspace/build/scripts /workspace/dist/scripts; \
+    fi
 
 
 # ==============================================================================
@@ -111,15 +110,7 @@ RUN pacman -S --needed --noconfirm \
 
 WORKDIR /app
 
-# The payload the builder collected: ./zahlen, its libraries, ./data/base.pak and
-# ./scripts. All four are read relative to the working directory.
-#
-# ./scripts is the tree the build assembles -- Fennel compiled to Lua, the
-# generated ffi_cdef_generated.lua and the static script files -- and not a
-# source directory: the sources moved to extensions/Scripting/Lua/scripts in the
-# layout refactor, so the top-level scripts directory this used to copy is gone.
-# ZHLN_COMPILED_SCRIPTS_DIR is the build tree, which makes build/scripts the tree
-# that `require 'scripts.core.*'` resolves against.
+# The payload the builder collected: ./zahlen, its libraries, and ./data/base.pak.
 COPY --from=builder /workspace/dist/ /app/
 # Shader sources and loose assets are read, and watched for hot reload, from this
 # layout rather than from the pak.

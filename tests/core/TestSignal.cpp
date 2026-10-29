@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Signal/SignalManager.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include <Zahlen/Core/SignalManager.hpp>
 #include <atomic>
 #include <expected>
 
@@ -41,6 +41,8 @@ struct StatefulCounter {
 };
 
 } // namespace
+
+namespace {
 
 struct SignalTestSuite {
     struct Tests {
@@ -107,6 +109,4 @@ struct SignalTestSuite {
     };
 };
 
-auto RunSignalSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<SignalTestSuite>();
-}
+} // namespace

@@ -36,7 +36,7 @@ namespace {
 // time, so the artifact left behind is the final raw frame plus its PNG
 // mirror) and returns the per-channel average of the window.
 //
-// The screenshot API reads the current frame back without advancing the
+// The capture API reads the current frame back without advancing the
 // engine, so each capture is preceded by one tick -- the same rhythm the
 // other headless suites use when sampling consecutive frames.
 [[nodiscard]] RgbImage CaptureAveraged(ZHLN::Engine& engine, uint32_t frames, std::string_view rawPath) {
@@ -267,6 +267,8 @@ void SetAoRadius(ZHLN::Engine& engine, float radius) {
 // ============================================================================
 // Test Suite
 // ============================================================================
+
+namespace {
 
 struct AmbientOcclusionTestSuite {
     AmbientOcclusionTestSuite() {
@@ -542,8 +544,4 @@ struct AmbientOcclusionTestSuite {
     };
 };
 
-// Exported for the GPU_Lighting group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunAmbientOcclusionSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<AmbientOcclusionTestSuite>();
-}
+} // namespace

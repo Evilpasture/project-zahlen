@@ -6,7 +6,6 @@
 #include "pipeline/ComputePass.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
-#include <cstdint>
 #include <expected>
 
 namespace ZHLN {
@@ -19,17 +18,17 @@ using VolumetricTemporalLayout    = Vk::ReflectedLayout;
 
 class VolumetricFogSystem {
   public:
-    VolumetricFogSystem()                                            = default;
-    ~VolumetricFogSystem()                                           = default;
-    VolumetricFogSystem(const VolumetricFogSystem&)                  = delete;
-    auto operator=(const VolumetricFogSystem&) -> VolumetricFogSystem& = delete;
-    VolumetricFogSystem(VolumetricFogSystem&&) noexcept              = delete;
+    VolumetricFogSystem()                                                  = default;
+    ~VolumetricFogSystem()                                                 = default;
+    VolumetricFogSystem(const VolumetricFogSystem&)                        = delete;
+    auto operator=(const VolumetricFogSystem&) -> VolumetricFogSystem&     = delete;
+    VolumetricFogSystem(VolumetricFogSystem&&) noexcept                    = delete;
     auto operator=(VolumetricFogSystem&&) noexcept -> VolumetricFogSystem& = delete;
-
+    // TODO(Evilpasture): decouple from impl
     [[nodiscard]] auto Build(RenderContext::Impl& impl) -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto InitializeNoise(RenderContext::Impl& impl) -> std::expected<void, ErrorCode>;
-    void DestroyNoise(Vk::Allocator& allocator) noexcept;
+    void               DestroyNoise(Vk::Allocator& allocator) noexcept;
 
     void InitSamplers(RenderContext::Impl& impl) noexcept;
 
@@ -50,8 +49,8 @@ class VolumetricFogSystem {
     Vk::FixedDoubleBufferedComputePass<VolumetricIntegrationLayout> _integrate;
     Vk::FixedDoubleBufferedComputePass<VolumetricTemporalLayout>    _temporal;
 
-    Vk::Image              _noiseImage;
-    VkImageViewCreateInfo _noiseInfo {};
+    Vk::Image     _noiseImage;
+    Vk::ImageView _noiseView;
 };
 
-}
+} // namespace ZHLN

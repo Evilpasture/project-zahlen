@@ -2,15 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Instance.hpp"
-#include "../diagnostics/GPUAddressTracker.hpp"
 #include "Extensions.hpp"
 #include <VkError.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdlib>
-#include <cstring>
-#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -82,16 +80,13 @@ Instance::Instance() noexcept = default;
 
 void Instance::Destroy() noexcept {
     if (_handle != VK_NULL_HANDLE) {
-        if (_addressBindingMessenger != VK_NULL_HANDLE && vkDestroyDebugUtilsMessengerEXT != nullptr) {
-            vkDestroyDebugUtilsMessengerEXT(_handle, _addressBindingMessenger, nullptr);
-        }
         if (_messenger != VK_NULL_HANDLE && vkDestroyDebugUtilsMessengerEXT != nullptr) {
             vkDestroyDebugUtilsMessengerEXT(_handle, _messenger, nullptr);
         }
         vkDestroyInstance(_handle, nullptr);
-        _handle                  = VK_NULL_HANDLE;
-        _messenger               = VK_NULL_HANDLE;
-        _addressBindingMessenger = VK_NULL_HANDLE;
+        _handle            = VK_NULL_HANDLE;
+        _messenger         = VK_NULL_HANDLE;
+        _debugUtilsEnabled = false;
     }
 
     if (_ownsGlobalDispatch) {
@@ -106,7 +101,7 @@ Instance::~Instance() noexcept {
 
 Instance::Instance(Instance&& other) noexcept:
     _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _messenger(std::exchange(other._messenger, VK_NULL_HANDLE)),
-    _addressBindingMessenger(std::exchange(other._addressBindingMessenger, VK_NULL_HANDLE)), _diagnostics(std::move(other._diagnostics)),
+    _debugUtilsEnabled(std::exchange(other._debugUtilsEnabled, false)),
     _ownsGlobalDispatch(std::exchange(other._ownsGlobalDispatch, false)) {
 }
 
@@ -114,40 +109,20 @@ auto Instance::operator=(Instance&& other) noexcept -> Instance& {
     if (this != &other) {
         Destroy();
 
-        _handle                  = std::exchange(other._handle, VK_NULL_HANDLE);
-        _messenger               = std::exchange(other._messenger, VK_NULL_HANDLE);
-        _addressBindingMessenger = std::exchange(other._addressBindingMessenger, VK_NULL_HANDLE);
-        _diagnostics             = std::move(other._diagnostics);
-        _ownsGlobalDispatch      = std::exchange(other._ownsGlobalDispatch, false);
+        _handle             = std::exchange(other._handle, VK_NULL_HANDLE);
+        _messenger          = std::exchange(other._messenger, VK_NULL_HANDLE);
+        _debugUtilsEnabled  = std::exchange(other._debugUtilsEnabled, false);
+        _ownsGlobalDispatch = std::exchange(other._ownsGlobalDispatch, false);
     }
     return *this;
 }
 
 auto VKAPI_CALL Instance::DebugCallback(
     const VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-    const VkDebugUtilsMessageTypeFlagsEXT        type,
+    const VkDebugUtilsMessageTypeFlagsEXT        /*type*/,
     const VkDebugUtilsMessengerCallbackDataEXT*  callbackData,
-    void*                                        userData
+    void*                                        /*userData*/
 ) noexcept -> VkBool32 {
-    if ((type & VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT) != 0) {
-        if (callbackData != nullptr) {
-            for (const auto* node = static_cast<const VkBaseInStructure*>(callbackData->pNext); node != nullptr; node = node->pNext) {
-                if (node->sType == VK_STRUCTURE_TYPE_DEVICE_ADDRESS_BINDING_CALLBACK_DATA_EXT) {
-                    if (auto* const diagnostics = static_cast<InstanceDiagnostics*>(userData); diagnostics != nullptr) {
-                        diagnostics->addressTracker.OnBindingEvent(*reinterpret_cast<const VkDeviceAddressBindingCallbackDataEXT*>(node), callbackData);
-                    }
-                    break;
-                }
-            }
-        }
-        return VK_FALSE;
-    }
-
-    auto* const diagnostics = static_cast<InstanceDiagnostics*>(userData);
-    if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0 && diagnostics != nullptr) {
-        diagnostics->validationTarget->fetch_add(1, std::memory_order::relaxed);
-    }
-
     const std::string_view message = callbackData != nullptr && callbackData->pMessage != nullptr ? std::string_view(callbackData->pMessage) :
                                                                                                     std::string_view("(no Vulkan diagnostic text)");
 
@@ -171,22 +146,11 @@ auto Instance::Create(
     const std::string_view                  appName,
     const uint32_t                          appVersion,
     const std::span<const std::string_view> extensions,
-    const ValidationMode                    validation,
-    DiagnosticsSink*                        diagnosticsSink
+    const ValidationMode                    validation
 ) noexcept -> std::expected<Instance, ErrorCode> {
     GlobalVolkDispatchLease globalDispatchLease;
     if (!globalDispatchLease.Acquired()) {
         return std::unexpected(InstanceError::GlobalDispatchInUse);
-    }
-
-    Instance result;
-    result._diagnostics.reset(new (std::nothrow) InstanceDiagnostics {});
-    if (result._diagnostics == nullptr) {
-        return std::unexpected(ToError(VK_ERROR_OUT_OF_HOST_MEMORY));
-    }
-    if (diagnosticsSink != nullptr && diagnosticsSink->Valid()) {
-        result._diagnostics->validationTarget = diagnosticsSink->validation;
-        result._diagnostics->deviceLostTarget = diagnosticsSink->deviceLost;
     }
 
     if (auto res = volkInitialize(); res != VK_SUCCESS) {
@@ -301,7 +265,7 @@ auto Instance::Create(
         .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
         .pfnUserCallback = &Instance::DebugCallback,
-        .pUserData       = result._diagnostics.get(),
+        .pUserData       = nullptr,
     };
 
     const void* validation_chain = nullptr;
@@ -326,14 +290,15 @@ auto Instance::Create(
 #endif
 
     VkInstance handle = VK_NULL_HANDLE;
-
     if (const auto res = vkCreateInstance(&create_info, nullptr, &handle); res != VK_SUCCESS) {
         return std::unexpected(ToError(res));
     }
 
     volkLoadInstance(handle);
-    result._handle                         = handle;
-    result._diagnostics->debugUtilsEnabled = debug_utils_enabled;
+
+    Instance result;
+    result._handle            = handle;
+    result._debugUtilsEnabled = debug_utils_enabled;
 
     if (validation != ValidationMode::Off && debug_utils_enabled && vkCreateDebugUtilsMessengerEXT != nullptr) {
         VkDebugUtilsMessengerCreateInfoEXT messenger_info = debug_info;
@@ -343,48 +308,11 @@ auto Instance::Create(
             result._messenger = VK_NULL_HANDLE;
             ZHLN::LogWarning("[Vulkan] Could not create validation debug messenger: {}", static_cast<int32_t>(messenger_created));
         }
-
-        if (vkCreateDebugUtilsMessengerEXT != nullptr &&
-
-            std::ranges::contains(enabled_extensions, std::string_view(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME))) {
-            const VkDebugUtilsMessengerCreateInfoEXT address_binding_info {
-                .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-                .pNext           = nullptr,
-                .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
-                .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT,
-                .pfnUserCallback = &Instance::DebugCallback,
-                .pUserData       = result._diagnostics.get(),
-            };
-            const VkResult address_messenger_created = vkCreateDebugUtilsMessengerEXT(handle, &address_binding_info, nullptr, &result._addressBindingMessenger);
-            if (address_messenger_created != VK_SUCCESS) {
-                result._addressBindingMessenger = VK_NULL_HANDLE;
-            } else {
-                result._diagnostics->hasAddressBindingMessenger = true;
-            }
-        }
     }
 
     result._ownsGlobalDispatch = true;
     globalDispatchLease.TransferToInstance();
     return result;
-}
-
-auto Instance::ValidationErrorCount() const noexcept -> uint32_t {
-    return _diagnostics != nullptr ? _diagnostics->validationTarget->load(std::memory_order::relaxed) : 0;
-}
-
-auto Instance::DeviceLostCount() const noexcept -> uint32_t {
-    return _diagnostics != nullptr ? _diagnostics->deviceLostTarget->load(std::memory_order::relaxed) : 0;
-}
-
-void Instance::IncrementDeviceLost() noexcept {
-    if (_diagnostics != nullptr) {
-        _diagnostics->deviceLostTarget->fetch_add(1, std::memory_order::relaxed);
-    }
-}
-
-auto InstanceBuilder::Build() noexcept -> std::expected<Instance, ErrorCode> {
-    return Vk::Instance::Create(_appName, _appVersion, _extensions, _validationMode, _diagnostics);
 }
 
 } // namespace ZHLN::Vk

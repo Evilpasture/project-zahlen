@@ -17,18 +17,24 @@
 // Every struct is emitted here, including the five the engine and the shaders
 // both have a word for -- Particle, ParticleEmitterParams,
 // MeshParticleEmitterParams, Light and FrameUniforms. There is no hand-written
-// half: the emitted definition *is* the ABI, it carries the padding the
-// reflection implies (_padN between members, alignas where the shader aligns a
-// lane), and the asserts under each struct hold it against the reflection it
-// came from. So a Slang edit cannot reshape a type the engine names, because
-// the engine no longer names one: it hands the renderer ParticleEmitterDesc,
-// LightDesc and FrameData, and src/render/GpuPack.cpp writes the generated
-// structs field by field.
+// half: the emitted definition *is* the ABI, and it is complete on its own --
+// every gap between members is a named _padN run and every lane carries the
+// alignment Slang gave it, so the struct's extent and its members' offsets are
+// spelled out in the text rather than inferred by the host compiler. That is
+// why nothing below re-checks the emission with static_asserts: there is no
+// pack the host compiler could choose that the text has not already fixed, and
+// a check that cannot fail is ceremony, not safety. So a Slang edit cannot
+// reshape a type the engine names, because the engine no longer names one: it
+// hands the renderer ParticleEmitterDesc, LightDesc and FrameData, and
+// src/render/GpuPack.cpp writes the generated structs field by field.
 //
-// One compile produces two outputs: GeneratedGpuTypes.hpp, the structs, and
-// the module's own SPIR-V, which src/render/GpuAbi.hpp embeds and re-reads
-// with its independent consteval parser. Both halves agree by construction,
-// and the check still fails against the module's bytes rather than our walk.
+// The scene push blob is emitted from the same walk: kScenePushLayout, the
+// frame-address offsets and the descriptor-index word inside
+// DescriptorHeapPushData, is what src/render/GpuAbi.cpp exports to the heap
+// writer. One compile, one output (the header); the module's own SPIR-V is
+// still written --out-abi-spv as the proof that the ABI module codegens for
+// compute, but nothing embeds it any more. There is no second reader of the
+// bytes to hold the header against, and none is wanted: the header is the ABI.
 //
 // One thing the walk refuses to derive, and fails on instead of guessing:
 //
@@ -66,6 +72,8 @@ namespace {
 constexpr std::string_view kAbiGlobal  = "abi";
 constexpr std::string_view kAbiWrapper = "GpuAbiTypes";
 constexpr std::string_view kEntryPoint = "CSMain";
+constexpr std::string_view kSceneGlobal = "scene";
+constexpr std::string_view kHeapStruct  = "DescriptorHeapPushData";
 
 // GPU enums are declared with an explicit uint underlying type in Slang. The
 // walk accepts their reflected four-byte layouts and uint32_t-valued cases only;
@@ -166,9 +174,9 @@ auto Render(const CxxType& type, std::string_view structName, std::string_view m
 }
 
 // One emitted member: a Slang field or a synthesized padding run. Padding
-// carries no annotation -- the surrounding offsets and the struct sizeof
-// prove it -- which is what distinguishes it from Slang's own _paddingCenter
-// and _pad members (real fields, checked like any other).
+// carries no annotation -- it is a byte array sized to the gap the reflection
+// left -- which is what distinguishes it from Slang's own _paddingCenter and
+// _pad members (real fields, spelled like any other).
 struct Field {
     std::string name {};
     CxxType     type {};
@@ -202,8 +210,8 @@ struct EnumDef {
 };
 
 // The member's alignment as Slang seats it: every alignas in the header
-// answers to this number, so a non-positive one fails rather than emitting
-// a struct the asserts cannot mean.
+// answers to this number, so a non-positive one fails rather than emitting a
+// struct whose lanes the host compiler would place somewhere else.
 auto ReadAlignment(std::string_view structName, std::string_view memberName, slang::TypeLayoutReflection* layout) -> uint32_t {
     const int32_t align = layout->getAlignment(kUniform);
     if (align <= 0) {
@@ -536,9 +544,14 @@ constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilp
 // sizes, padding and lanes of the compiled module. One definition per concept,
 // and this is it -- there is no hand-written half to alias, so a Slang edit
 // re-emits this file on the next build and nothing can drift behind the
-// shader's back. The asserts below hold the emitted struct against the
-// reflection it came from: a host compiler that packs differently fails here
-// instead of uploading skewed buffers.
+// shader's back.
+//
+// The definitions are the whole contract: every gap is an explicit `_padN` run
+// of the reflected size and every lane carries the alignment Slang gave it, so
+// each struct's extent is stated by the text rather than inferred from the host
+// compiler's packing rules. There is nothing left for a static_assert to add --
+// removing a member or reshaping one is a Slang edit that re-emits the struct,
+// which is the point.
 //
 // Nothing under include/ names what is in here. The engine authors its own
 // terms (Zahlen/ParticleEmitterDesc.hpp, Zahlen/Render/FrameData.hpp) and
@@ -553,11 +566,12 @@ constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilp
 #include <Jolt/Math/Float3.h>
 #include <Jolt/Math/Float4.h>
 #include <Jolt/Math/Mat44.h>
+
+#include "pipeline/PushDataLayout.hpp" // Vk::HeapPushDataLayout: kScenePushLayout's type
+
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <string_view>
-#include <tuple>
 
 namespace ZHLN::Slang {
 
@@ -579,48 +593,95 @@ auto EmitField(std::string& out, const Field& field, std::string_view structName
     std::format_to(std::back_inserter(out), "; // offset {}, size {}\n", field.offset, field.size);
 }
 
-auto EmitInventory(std::string& out, std::span<const StructDef> defs) -> void {
-    std::format_to(
-        std::back_inserter(out),
-        "\n// The ABI inventory, for the GpuAbi walk (src/render/GpuAbi.hpp): every struct\n"
-        "// above with the module-side name the lookup answers to.\n"
-        "template <typename T> struct SlangName;\n"
-    );
-    for (const StructDef& def: defs) {
-        std::format_to(
-            std::back_inserter(out),
-            "template <> struct SlangName<{}> {{ static constexpr ::std::string_view value = \"{}\"; }};\n",
-            def.name,
-            def.name
-        );
-    }
-    std::format_to(std::back_inserter(out), "using AllGpuTypes = ::std::tuple<");
-    bool first = true;
-    for (const StructDef& def: defs) {
-        std::format_to(std::back_inserter(out), "{}{}", first ? "" : ", ", def.name);
-        first = false;
-    }
-    std::format_to(std::back_inserter(out), ">;\n\n}} // namespace ZHLN::Slang\n");
-}
-
-// One definition per struct, and it is the definition: the members at the
-// offsets Slang seated them, the _padN between them, the alignment each lane
-// carries. The asserts that follow are the contract with the reflection this
-// emission came from -- and with the host compiler that has to reproduce it.
+// One enum per Slang enum the ABI reaches. The case list and its numbering are
+// the reflection's; the fixed `: uint32_t` base is what ReflectEnum demanded of
+// Slang (it fails on any other storage), so the width is settled before the
+// declaration is printed and needs no assert behind it.
 auto EmitEnum(std::string& out, const EnumDef& def) -> void {
     std::format_to(std::back_inserter(out), "// Reflected from Slang; do not define a parallel GPU enum.\nenum class {} : uint32_t {{\n", def.name);
     for (const EnumValue& value: def.values) {
         std::format_to(std::back_inserter(out), "    {} = {}u,\n", value.name, value.value);
     }
+    std::format_to(std::back_inserter(out), "}};\n\n");
+}
+
+// One frame-address relationship: a DescriptorHeapPushData word paired with
+// the GlobalSceneRegistry buffer binding it carries. Both halves come from
+// reflection -- the words from the generated struct's 8-byte members in
+// declaration order, the bindings from the scene ParameterBlock's buffer
+// members in declaration order -- so neither side is restated here, and the
+// declaration order is the whole association. The rows carry both names, so a
+// reorder of either declaration regenerates this file visibly; nothing at
+// compile time re-pins the pairs, which is why the two declarations are meant
+// to grow at the end rather than in the middle.
+struct FrameAddressRow {
+    std::string pushField {};
+    std::string registryField {};
+    uint32_t    binding = 0;
+    uint32_t    offset  = 0;
+    bool        uniformBuffer = false;
+};
+
+auto EmitFrameAddresses(std::string& out, std::span<const FrameAddressRow> rows) -> void {
+    std::format_to(std::back_inserter(out), "\n// The frame-address run: field placement is generated (above), CPU resource\n// selection is engine policy (src/render/RenderFrame.cpp).\nenum class FrameAddressField : uint32_t {{\n");
+    for (const FrameAddressRow& row: rows) {
+        std::format_to(std::back_inserter(out), "    {},\n", row.pushField);
+    }
+    std::format_to(std::back_inserter(out), "}};\n\nstruct FrameAddressMeta {{\n    FrameAddressField   field;\n    ::std::string_view  pushField;\n    ::std::string_view  registryField;\n    uint32_t            binding;\n    uint32_t            offset;\n    bool                uniformBuffer;\n}};\n\ninline constexpr uint32_t kFrameAddressCount = {};\ninline constexpr ::std::array<FrameAddressMeta, {}> kFrameAddressMeta = {{{{\n", rows.size(), rows.size());
+    for (const FrameAddressRow& row: rows) {
+        std::format_to(
+            std::back_inserter(out),
+            "    {{FrameAddressField::{}, \"{}\", \"{}\", {}u, {}u, {}}},\n",
+            row.pushField,
+            row.pushField,
+            row.registryField,
+            row.binding,
+            row.offset,
+            row.uniformBuffer ? "true" : "false"
+        );
+    }
+    std::format_to(std::back_inserter(out), "}}}};\n");
+}
+
+// The scene push blob's shape, read off the struct walk: where the 8-byte frame
+// addresses sit inside DescriptorHeapPushData (in declaration order, one row per
+// scene buffer binding), the descriptor-index word that follows them, and the
+// furthest byte a push writes. src/render/GpuAbi.cpp exports it as
+// GpuAbi::kScenePushLayout, so the numbers the heap writer pushes with are the
+// ones the shader's own declaration implies.
+struct ScenePushLayout {
+    std::vector<uint32_t> frameAddressOffsets {};
+    uint32_t              heapIndexOffset = 0;
+    uint32_t              requiredSize    = 0;
+};
+
+auto EmitScenePushLayout(std::string& out, const ScenePushLayout& layout) -> void {
+    std::string offsets;
+    for (size_t index = 0; index < layout.frameAddressOffsets.size(); ++index) {
+        std::format_to(std::back_inserter(offsets), "{}{}u", index == 0 ? "" : ", ", layout.frameAddressOffsets[index]);
+    }
     std::format_to(
         std::back_inserter(out),
-        "}};\nstatic_assert(sizeof({}) == sizeof(uint32_t), \"Slang::{} must retain its Slang uint storage width\");\n\n",
-        def.name,
-        def.name
+        "\n// DescriptorHeapPushData, as the heap writer writes it: the frame addresses,\n"
+        "// the descriptor-index word the heap writer patches per dispatch, and how far a\n"
+        "// push reaches. src/render/GpuAbi.cpp exports this; nothing re-reads the module's\n"
+        "// bytes to derive it.\n"
+        "inline constexpr ::ZHLN::Vk::HeapPushDataLayout kScenePushLayout = {{\n"
+        "    .frameAddressOffsets = {{{}}},\n"
+        "    .addressCount        = {}u,\n"
+        "    .heapIndexOffset     = {}u,\n"
+        "    .requiredSize        = {}u,\n"
+        "}};\n",
+        offsets,
+        layout.frameAddressOffsets.size(),
+        layout.heapIndexOffset,
+        layout.requiredSize
     );
 }
 
-auto EmitStructsHeader(std::span<const StructDef> defs, std::span<const EnumDef> enums) -> std::string {
+auto EmitStructsHeader(
+    std::span<const StructDef> defs, std::span<const EnumDef> enums, std::span<const FrameAddressRow> frameRows, const ScenePushLayout& scenePush
+) -> std::string {
     std::string text {kStructsPreamble};
     for (const EnumDef& def: enums) {
         EmitEnum(text, def);
@@ -633,30 +694,10 @@ auto EmitStructsHeader(std::span<const StructDef> defs, std::span<const EnumDef>
         }
         std::format_to(std::back_inserter(text), "}};\n");
         first = false;
-        std::format_to(
-            std::back_inserter(text),
-            "static_assert(sizeof({}) == {}, \"Slang::{} does not occupy what Slang reported; the host compiler packs "
-            "differently\");\n",
-            def.name,
-            def.size,
-            def.name
-        );
-        for (const Field& field: def.fields) {
-            if (field.isPad) {
-                continue;
-            }
-            std::format_to(
-                std::back_inserter(text),
-                "static_assert(offsetof({}, {}) == {}, \"Slang::{}::{} sits where Slang did not put it\");\n",
-                def.name,
-                field.name,
-                field.offset,
-                def.name,
-                field.name
-            );
-        }
     }
-    EmitInventory(text, defs);
+    EmitFrameAddresses(text, frameRows);
+    EmitScenePushLayout(text, scenePush);
+    std::format_to(std::back_inserter(text), "\n}} // namespace ZHLN::Slang\n");
     return text;
 }
 
@@ -712,11 +753,15 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
         Fail("gpu types: '{}' declares globals without a layout; it is not the gpu_abi module", options.module);
     }
     slang::VariableLayoutReflection* abi = nullptr;
+    slang::VariableLayoutReflection* scene = nullptr;
     for (unsigned i: std::views::iota(0u, globalsLayout->getFieldCount())) {
         slang::VariableLayoutReflection* field = globalsLayout->getFieldByIndex(i);
         const char*                       name  = field->getName();
         if (name != nullptr && std::string_view {name} == kAbiGlobal) {
             abi = field;
+        }
+        if (name != nullptr && std::string_view {name} == kSceneGlobal) {
+            scene = field;
         }
     }
     if (abi == nullptr) {
@@ -770,11 +815,157 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
         structs.push_back(std::move(built.definition));
     }
 
+    // The frame-address relationship, generated rather than hand-paired: the
+    // DescriptorHeapPushData 8-byte words (from the struct walk above) against
+    // the scene ParameterBlock's buffer bindings (name + binding index from
+    // this reflection), both in declaration order. A count mismatch fails here;
+    // the emitted rows carry both names, so a reorder of either declaration
+    // regenerates them visibly and lands in review with the Slang edit that
+    // caused it.
+    if (scene == nullptr) {
+        Fail("gpu types: '{}' declares no '{}' global; the frame-address metadata has no binding side", options.module, kSceneGlobal);
+    }
+    slang::TypeLayoutReflection* sceneLayout = scene->getTypeLayout();
+    if (sceneLayout->getType()->getKind() != slang::TypeReflection::Kind::ParameterBlock) {
+        Fail(
+            "gpu types: '{}.{}' is a {}, not the ParameterBlock wrapper",
+            options.module,
+            kSceneGlobal,
+            KindName(sceneLayout->getType()->getKind())
+        );
+    }
+    slang::TypeLayoutReflection* registryLayout = sceneLayout->getElementTypeLayout();
+
+    const StructDef* heapDef = nullptr;
+    for (const StructDef& def: structs) {
+        if (def.name == kHeapStruct) {
+            heapDef = &def;
+        }
+    }
+    if (heapDef == nullptr) {
+        Fail("gpu types: '{}' wraps no '{}'; the frame-address metadata has no field side", options.module, kHeapStruct);
+    }
+
+    std::vector<FrameAddressRow> frameRows;
+    uint32_t                     registryIndex = 0;
+    for (unsigned i: std::views::iota(0u, registryLayout->getFieldCount())) {
+        slang::VariableLayoutReflection* member      = registryLayout->getFieldByIndex(i);
+        slang::TypeLayoutReflection*     memberLayout = member->getTypeLayout();
+        const slang::TypeReflection::Kind kind        = memberLayout->getType()->getKind();
+        const SlangResourceShape          shape       = memberLayout->getType()->getResourceShape();
+        const bool uniformBuffer = kind == slang::TypeReflection::Kind::ConstantBuffer;
+        const bool storageBuffer = kind == slang::TypeReflection::Kind::Resource
+                                   && (shape & SLANG_RESOURCE_BASE_SHAPE_MASK) == SLANG_STRUCTURED_BUFFER;
+        if (!uniformBuffer && !storageBuffer) {
+            continue;
+        }
+        if (registryIndex >= static_cast<uint32_t>(heapDef->fields.size())) {
+            break;
+        }
+        const char* memberName = member->getName();
+        if (memberName == nullptr || memberName[0] == '\0') {
+            Fail("gpu types: '{}.{}' member {} is unnamed; the frame-address rows name both halves", options.module, kSceneGlobal, i);
+        }
+        frameRows.push_back(FrameAddressRow {
+            .pushField      = {},
+            .registryField  = memberName,
+            .binding        = member->getBindingIndex(),
+            .offset         = 0,
+            .uniformBuffer  = uniformBuffer,
+        });
+        ++registryIndex;
+    }
+
+    {
+        std::vector<const Field*> words;
+        for (const Field& field: heapDef->fields) {
+            if (!field.isPad && field.size == sizeof(uint64_t)) {
+                words.push_back(&field);
+            }
+        }
+        if (words.size() != frameRows.size()) {
+            Fail(
+                "gpu types: DescriptorHeapPushData declares {} 8-byte words but {} has {} buffer bindings; the frame-address run is one word per binding",
+                words.size(),
+                kSceneGlobal,
+                frameRows.size()
+            );
+        }
+        for (size_t i = 0; i < words.size(); ++i) {
+            frameRows[i].pushField = words[i]->name;
+            frameRows[i].offset    = words[i]->offset;
+        }
+    }
+
+    // The scene push blob, derived from the struct walk rather than from a
+    // parse of the module's bytes: the addresses are the rows above, and the
+    // descriptor-index word is the first 4-byte-or-wider member that follows
+    // the last one (DescriptorHeapPushData's `heapIndex`). The failures here
+    // are the ones the heap writer would otherwise hit at runtime, after the
+    // mapping had already claimed an offset nothing occupies.
+    ScenePushLayout scenePush;
+    scenePush.frameAddressOffsets.reserve(frameRows.size());
+    for (const FrameAddressRow& row: frameRows) {
+        scenePush.frameAddressOffsets.push_back(row.offset);
+    }
+    if (scenePush.frameAddressOffsets.empty()) {
+        Fail("gpu types: '{}' seats no 8-byte frame addresses; the heap writer has nothing to push", kHeapStruct);
+    }
+    // HeapPushDataLayout::kMaxAddresses. The tool has no RHI include path and
+    // this is the one number it has to agree with the container on.
+    constexpr size_t kMaxFrameAddresses = 16;
+    if (scenePush.frameAddressOffsets.size() > kMaxFrameAddresses) {
+        Fail(
+            "gpu types: '{}' seats {} frame addresses; Vk::HeapPushDataLayout holds {}",
+            kHeapStruct,
+            scenePush.frameAddressOffsets.size(),
+            kMaxFrameAddresses
+        );
+    }
+    const uint32_t afterAddresses = scenePush.frameAddressOffsets.back() + static_cast<uint32_t>(sizeof(uint64_t));
+    uint32_t       heapIndexOffset = std::numeric_limits<uint32_t>::max();
+    for (const Field& field: heapDef->fields) {
+        if (field.isPad || field.offset < afterAddresses || field.size < sizeof(uint32_t) || (field.offset % alignof(uint32_t)) != 0) {
+            continue;
+        }
+        heapIndexOffset = field.offset < heapIndexOffset ? field.offset : heapIndexOffset;
+    }
+    if (heapIndexOffset == std::numeric_limits<uint32_t>::max()) {
+        Fail(
+            "gpu types: '{}' declares no 4-byte member after its last frame address; the heap writer patches a descriptor index nothing holds",
+            kHeapStruct
+        );
+    }
+    scenePush.heapIndexOffset = heapIndexOffset;
+    scenePush.requiredSize    = heapIndexOffset + static_cast<uint32_t>(sizeof(uint32_t));
+
     std::vector<StructDef> defs;
     defs.reserve(nested.size() + structs.size());
-    std::ranges::move(nested, std::back_inserter(defs));
-    std::ranges::move(structs, std::back_inserter(defs));
-    WriteFileIfChanged(options.outStructs, EmitStructsHeader(defs, enums));
+    for (std::vector<StructDef>* bucket: {&nested, &structs}) {
+        for (StructDef& candidate: *bucket) {
+            const auto existing = std::ranges::find_if(defs, [&candidate](const StructDef& d) { return d.name == candidate.name; });
+            if (existing == defs.end()) {
+                defs.push_back(std::move(candidate));
+                continue;
+            }
+            // A type reachable twice -- a wrapper member another payload also
+            // holds (ParticleEmitterParams under ComputePushConstants and the
+            // emitter member) -- is one type and is emitted once. The same
+            // name with a different shape is a lie rather than a duplicate,
+            // and fails here.
+            if (existing->size != candidate.size || existing->fields.size() != candidate.fields.size()) {
+                Fail("gpu types: '{}' is reachable twice with different shapes ({} vs {} bytes)", candidate.name, existing->size, candidate.size);
+            }
+            for (size_t i = 0; i < existing->fields.size(); ++i) {
+                const Field& a = existing->fields[i];
+                const Field& b = candidate.fields[i];
+                if (a.name != b.name || a.offset != b.offset || a.size != b.size || a.isPad != b.isPad) {
+                    Fail("gpu types: '{}' is reachable twice and member {} does not agree between the paths", candidate.name, i);
+                }
+            }
+        }
+    }
+    WriteFileIfChanged(options.outStructs, EmitStructsHeader(defs, enums, frameRows, scenePush));
     WriteFileIfChanged(options.outSpv, spvBytes);
     std::println("zshader: gpu types: {} struct(s), {} enum(s) from {}", defs.size(), enums.size(), options.module);
 }

@@ -1,13 +1,19 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Core/Atomic.hpp>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <algorithm>
 #include <atomic>
+#include <bit>
 #include <condition_variable>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <mutex>
-#include <queue>
 #include <thread>
 #include <vector>
 
@@ -18,102 +24,197 @@
 
 namespace ZHLN::TaskSystem {
 
-struct WorkQueue {
-    std::mutex              mtx;
-    std::condition_variable cv;
-    std::queue<Fiber*>      fibers;
-    bool                    quit = false;
-
-    void Push(Fiber* f) {
-        std::lock_guard lock(mtx);
-        fibers.push(f);
-        cv.notify_one();
-    }
-
-    void PushSilent(Fiber* f) {
-        std::lock_guard lock(mtx);
-        fibers.push(f);
-    }
-
-    auto PopOrWait() -> Fiber* {
-        std::unique_lock lock(mtx);
-        cv.wait(lock, [this] -> bool { return !fibers.empty() || quit; });
-        if (quit && fibers.empty()) {
-            return nullptr;
-        }
-        Fiber* f = fibers.front();
-        fibers.pop();
-        return f;
-    }
-
-    auto TryPop() -> Fiber* {
-        std::lock_guard lock(mtx);
-        if (fibers.empty()) {
-            return nullptr;
-        }
-        Fiber* f = fibers.front();
-        fibers.pop();
-        return f;
-    }
-
-    void WakeAll() {
-        std::lock_guard lock(mtx);
-        quit = true;
-        cv.notify_all();
-    }
-
-    void Reset() {
-        std::lock_guard    lock(mtx);
-        std::queue<Fiber*> empty;
-        fibers.swap(empty);
-        quit = false;
-    }
-};
-
 namespace {
 
-thread_local Fiber* t_localFiber = nullptr;
+class BoundedFiberQueue {
+  public:
+    void Reset(size_t minCapacity) {
+        const size_t capacity = std::bit_ceil(std::max<size_t>(minCapacity, 64));
+        _mask                 = capacity - 1;
+        _cells                = std::make_unique<Cell[]>(capacity);
+        for (size_t i = 0; i < capacity; ++i) {
+            _cells[i].sequence.store(i, std::memory_order::relaxed);
+            _cells[i].fiber = nullptr;
+        }
+        _enqueuePos.store(0, std::memory_order::relaxed);
+        _dequeuePos.store(0, std::memory_order::relaxed);
+    }
 
-inline auto PushLocalFiber(Fiber* f) noexcept -> bool {
-    if (t_localFiber == nullptr) {
-        t_localFiber = f;
+    auto TryPush(Fiber* fiber) noexcept -> bool {
+        Cell*  cell = nullptr;
+        size_t pos  = _enqueuePos.load(std::memory_order::relaxed);
+        for (;;) {
+            cell             = &_cells[pos & _mask];
+            const size_t seq = cell->sequence.load(std::memory_order::acquire);
+            const auto   dif = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos);
+            if (dif == 0) {
+                if (_enqueuePos.compare_exchange_weak(pos, pos + 1, std::memory_order::relaxed, std::memory_order::relaxed)) {
+                    break;
+                }
+            } else if (dif < 0) {
+                return false;
+            } else {
+                pos = _enqueuePos.load(std::memory_order::relaxed);
+            }
+        }
+        cell->fiber = fiber;
+        cell->sequence.store(pos + 1, std::memory_order::release);
         return true;
     }
-    return false;
-}
 
-inline auto PopLocalFiber() noexcept -> Fiber* {
-    if (t_localFiber != nullptr) {
-        Fiber* f     = t_localFiber;
-        t_localFiber = nullptr;
-        return f;
+    [[nodiscard]] auto TryPop() noexcept -> Fiber* {
+        Cell*  cell = nullptr;
+        size_t pos  = _dequeuePos.load(std::memory_order::relaxed);
+        for (;;) {
+            cell             = &_cells[pos & _mask];
+            const size_t seq = cell->sequence.load(std::memory_order::acquire);
+            const auto   dif = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
+            if (dif == 0) {
+                if (_dequeuePos.compare_exchange_weak(pos, pos + 1, std::memory_order::relaxed, std::memory_order::relaxed)) {
+                    break;
+                }
+            } else if (dif < 0) {
+                return nullptr;
+            } else {
+                pos = _dequeuePos.load(std::memory_order::relaxed);
+            }
+        }
+        Fiber* fiber = cell->fiber;
+        cell->fiber  = nullptr;
+        cell->sequence.store(pos + _mask + 1, std::memory_order::release);
+        return fiber;
     }
-    return nullptr;
-}
 
-struct FiberData {
-    Task     task;
-    Counter* counter;
+    [[nodiscard]] auto Empty() const noexcept -> bool {
+        if (!_cells) {
+            return true;
+        }
+        const size_t pos = _dequeuePos.load(std::memory_order::relaxed);
+        const size_t seq = _cells[pos & _mask].sequence.load(std::memory_order::acquire);
+        return static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1) < 0;
+    }
+
+  private:
+    struct Cell {
+        ZHLN::Atomic<size_t> sequence {0};
+        Fiber*               fiber = nullptr;
+    };
+
+    std::unique_ptr<Cell[]>          _cells;
+    size_t                           _mask = 0;
+    alignas(64) ZHLN::Atomic<size_t> _enqueuePos {0};
+    alignas(64) ZHLN::Atomic<size_t> _dequeuePos {0};
 };
 
-WorkQueue                s_readyQueue;
-WorkQueue                s_freeQueue;
-std::vector<Fiber*>      s_fiberPool;
-std::vector<FiberData>   s_fiberData;
-std::vector<std::thread> s_threads;
+struct alignas(128) WorkerSlot {
+    BoundedFiberQueue readyQueue;
+    BoundedFiberQueue freeQueue;
+};
+
+struct FiberData {
+    Task     task {};
+    Counter* counter = nullptr;
+};
+
+std::unique_ptr<WorkerSlot[]> s_workerSlots;
+std::vector<Fiber*>           s_fiberPool;
+std::vector<FiberData>        s_fiberData;
+std::vector<std::thread>      s_threads;
 
 // Lifecycle transitions (including worker joins) are serialized. WorkerMain's
-// queue loop does not take this lock; all submitted tasks must finish before
-// Shutdown joins the workers.
-std::mutex               s_lifecycleMutex;
-bool                     s_running = false; // guarded by s_lifecycleMutex
-std::atomic<uint32_t>    s_workerCount {0};
-thread_local uint32_t    t_workerIndex = 0;
+// hot queue loop is lock-free and only enters s_sleepMutex when parking.
+std::mutex                            s_lifecycleMutex;
+bool                                  s_running = false;
+alignas(64) ZHLN::Atomic<uint32_t>    s_workerCount {0};
+alignas(64) ZHLN::Atomic<uint32_t>    s_parkedWorkers {0};
+alignas(64) ZHLN::Atomic<bool>        s_stopRequested {false};
+alignas(64) ZHLN::Atomic<uint32_t>    s_dispatchCursor {0};
+std::mutex                            s_sleepMutex;
+std::condition_variable               s_sleepCv;
+
+thread_local uint32_t t_workerIndex = 0;
 
 void SetCurrentThreadHighPriority() noexcept {
 #if defined(__APPLE__)
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
 #endif
+}
+
+[[nodiscard]] auto ClampSlot(uint32_t slot, uint32_t totalWorkers) noexcept -> uint32_t {
+    return slot < totalWorkers ? slot : 0;
+}
+
+[[nodiscard]] auto PopOrStealReady(uint32_t preferredSlot, uint32_t totalWorkers) noexcept -> Fiber* {
+    if (totalWorkers == 0 || !s_workerSlots) {
+        return nullptr;
+    }
+    const uint32_t base = ClampSlot(preferredSlot, totalWorkers);
+    if (Fiber* local = s_workerSlots[base].readyQueue.TryPop()) {
+        return local;
+    }
+    for (uint32_t offset = 1; offset < totalWorkers; ++offset) {
+        const uint32_t victim = (base + offset) % totalWorkers;
+        if (Fiber* stolen = s_workerSlots[victim].readyQueue.TryPop()) {
+            return stolen;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] auto HasAnyReadyWork(uint32_t totalWorkers) noexcept -> bool {
+    if (totalWorkers == 0 || !s_workerSlots) {
+        return false;
+    }
+    for (uint32_t i = 0; i < totalWorkers; ++i) {
+        if (!s_workerSlots[i].readyQueue.Empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] auto AllocateFiber(uint32_t preferredSlot, uint32_t totalWorkers) noexcept -> Fiber* {
+    if (totalWorkers == 0 || !s_workerSlots) {
+        return nullptr;
+    }
+    const uint32_t base = ClampSlot(preferredSlot, totalWorkers);
+    if (Fiber* local = s_workerSlots[base].freeQueue.TryPop()) {
+        return local;
+    }
+    for (uint32_t offset = 1; offset < totalWorkers; ++offset) {
+        const uint32_t donor = (base + offset) % totalWorkers;
+        if (Fiber* stolen = s_workerSlots[donor].freeQueue.TryPop()) {
+            return stolen;
+        }
+    }
+    return nullptr;
+}
+
+void RecycleFiber(Fiber* fiber, uint32_t preferredSlot, uint32_t totalWorkers) noexcept {
+    if (fiber == nullptr || !fiber->taskDone.exchange(false, std::memory_order::acquire)) {
+        return;
+    }
+    if (totalWorkers > 0 && s_workerSlots) {
+        s_workerSlots[ClampSlot(preferredSlot, totalWorkers)].freeQueue.TryPush(fiber);
+    }
+}
+
+void NotifyParkedWorkers(size_t pushedCount) noexcept {
+    if (pushedCount == 0) {
+        return;
+    }
+    std::atomic_thread_fence(std::memory_order::seq_cst);
+    if (s_parkedWorkers.load(std::memory_order::relaxed) == 0) {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(s_sleepMutex);
+    }
+    if (pushedCount == 1) {
+        s_sleepCv.notify_one();
+    } else {
+        s_sleepCv.notify_all();
+    }
 }
 
 void FiberMain(void* arg) {
@@ -133,45 +234,77 @@ void FiberMain(void* arg) {
     }
 }
 
-inline void RecycleFiber(Fiber* f) noexcept {
-    if (f == nullptr || !f->taskDone.exchange(false, std::memory_order::acquire)) {
-        return;
-    }
-    if (!PushLocalFiber(f)) {
-        s_freeQueue.Push(f);
-    }
-}
-
-void WorkerMain(uint32_t index) {
+void WorkerMain(uint32_t index, uint32_t totalWorkers) {
     SetCurrentThreadHighPriority();
     Fiber::InitMainThread();
     t_workerIndex = index;
 
-    while (true) {
-        if (Fiber* cached = PopLocalFiber()) {
-            s_freeQueue.Push(cached);
+    constexpr uint32_t kSpinIterations = 32;
+
+    for (;;) {
+        if (Fiber* fiber = PopOrStealReady(index, totalWorkers)) {
+            Fiber::Resume(fiber);
+            RecycleFiber(fiber, index, totalWorkers);
+            continue;
         }
-        Fiber* f = s_readyQueue.PopOrWait();
-        if (f == nullptr) {
+
+        Fiber* spunFiber = nullptr;
+        for (uint32_t spin = 0; spin < kSpinIterations; ++spin) {
+            if (s_stopRequested.load(std::memory_order::acquire)) {
+                break;
+            }
+            CPURelax();
+            spunFiber = PopOrStealReady(index, totalWorkers);
+            if (spunFiber != nullptr) {
+                break;
+            }
+        }
+        if (spunFiber != nullptr) {
+            Fiber::Resume(spunFiber);
+            RecycleFiber(spunFiber, index, totalWorkers);
+            continue;
+        }
+
+        s_parkedWorkers.fetch_add(1, std::memory_order::seq_cst);
+
+        if (Fiber* lateFiber = PopOrStealReady(index, totalWorkers)) {
+            s_parkedWorkers.fetch_sub(1, std::memory_order::relaxed);
+            Fiber::Resume(lateFiber);
+            RecycleFiber(lateFiber, index, totalWorkers);
+            continue;
+        }
+
+        if (s_stopRequested.load(std::memory_order::acquire)) {
+            s_parkedWorkers.fetch_sub(1, std::memory_order::relaxed);
             break;
         }
-        Fiber::Resume(f);
-        RecycleFiber(f);
+
+        {
+            std::unique_lock<std::mutex> lock(s_sleepMutex);
+            s_sleepCv.wait(lock, [totalWorkers] -> bool {
+                return s_stopRequested.load(std::memory_order::acquire) || HasAnyReadyWork(totalWorkers);
+            });
+        }
+
+        s_parkedWorkers.fetch_sub(1, std::memory_order::relaxed);
+
+        if (s_stopRequested.load(std::memory_order::acquire) && !HasAnyReadyWork(totalWorkers)) {
+            break;
+        }
     }
 }
 
-}
+} // namespace
 
 void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
-    std::lock_guard lock(s_lifecycleMutex);
+    std::lock_guard<std::mutex> lock(s_lifecycleMutex);
     if (s_running) {
         return;
     }
+
     SetCurrentThreadHighPriority();
     Fiber::InitMainThread();
-    s_readyQueue.Reset();
-    s_freeQueue.Reset();
-    t_localFiber = nullptr;
+
     if (numThreads == 0) {
         numThreads = std::thread::hardware_concurrency();
         if (numThreads == 0) {
@@ -182,57 +315,78 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
         }
     }
 
-    s_workerCount.store(numThreads + 1, std::memory_order::release);
+    const uint32_t totalWorkers = numThreads + 1;
+    const size_t   ringCapacity = static_cast<size_t>(numFibers) * 2 + 16;
+
+    s_stopRequested.store(false, std::memory_order::relaxed);
+    s_parkedWorkers.store(0, std::memory_order::relaxed);
+    s_dispatchCursor.store(0, std::memory_order::relaxed);
+
+    s_workerSlots = std::make_unique<WorkerSlot[]>(totalWorkers);
+    for (uint32_t slot = 0; slot < totalWorkers; ++slot) {
+        s_workerSlots[slot].readyQueue.Reset(ringCapacity);
+        s_workerSlots[slot].freeQueue.Reset(ringCapacity);
+    }
+
     t_workerIndex = numThreads;
 
     s_fiberPool.resize(numFibers);
     s_fiberData.resize(numFibers);
 
-    for (uint32_t i = 0; i < numFibers; i++) {
+    for (uint32_t i = 0; i < numFibers; ++i) {
         s_fiberData[i] = {};
         s_fiberPool[i] = Fiber::Create(stackSize, FiberMain, &s_fiberData[i]);
-        s_freeQueue.Push(s_fiberPool[i]);
+        s_workerSlots[i % totalWorkers].freeQueue.TryPush(s_fiberPool[i]);
     }
 
-    for (uint32_t i = 0; i < numThreads; i++) {
-        s_threads.emplace_back(WorkerMain, i);
-    }
+    s_workerCount.store(totalWorkers, std::memory_order::release);
     s_running = true;
+
+    s_threads.reserve(numThreads);
+    for (uint32_t i = 0; i < numThreads; ++i) {
+        s_threads.emplace_back(WorkerMain, i, totalWorkers);
+    }
 }
 
 auto GetWorkerIndex() -> uint32_t {
     return t_workerIndex;
 }
+
 auto GetWorkerCount() -> uint32_t {
     return s_workerCount.load(std::memory_order::acquire);
 }
 
 void Shutdown() {
-    std::lock_guard lock(s_lifecycleMutex);
+    std::lock_guard<std::mutex> lock(s_lifecycleMutex);
     if (!s_running) {
         return;
     }
 
-    s_readyQueue.WakeAll();
-    s_freeQueue.WakeAll();
+    s_stopRequested.store(true, std::memory_order::seq_cst);
+    {
+        std::lock_guard<std::mutex> sleepLock(s_sleepMutex);
+    }
+    s_sleepCv.notify_all();
 
-    for (auto& t: s_threads) {
-        if (t.joinable()) {
-            t.join();
+    for (auto& thread: s_threads) {
+        if (thread.joinable()) {
+            thread.join();
         }
     }
     s_threads.clear();
 
-    for (Fiber* f: s_fiberPool) {
-        Fiber::Destroy(f);
+    s_workerCount.store(0, std::memory_order::release);
+    s_running = false;
+
+    for (Fiber* fiber: s_fiberPool) {
+        Fiber::Destroy(fiber);
     }
     s_fiberPool.clear();
     s_fiberData.clear();
-    s_readyQueue.Reset();
-    s_freeQueue.Reset();
-    t_localFiber = nullptr;
-    s_workerCount.store(0, std::memory_order::release);
-    s_running = false;
+    s_workerSlots.reset();
+
+    s_parkedWorkers.store(0, std::memory_order::relaxed);
+    s_stopRequested.store(false, std::memory_order::relaxed);
 }
 
 void Dispatch(std::span<const Task> tasks, Counter* counter) {
@@ -240,19 +394,50 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
         return;
     }
 
-    if (counter != nullptr) {
-        counter->value.fetch_add(tasks.size(), std::memory_order::relaxed);
+    const uint32_t totalWorkers = s_workerCount.load(std::memory_order::acquire);
+    if (totalWorkers == 0) {
+        for (const auto& task: tasks) {
+            if (task.func != nullptr) {
+                task.func(task.arg);
+            }
+        }
+        return;
     }
 
-    Fiber*     currentFiber   = Fiber::GetCurrent();
-    const bool nestedDispatch = currentFiber != nullptr && !currentFiber->isMain;
+    if (counter != nullptr) {
+        counter->value.fetch_add(static_cast<uint32_t>(tasks.size()), std::memory_order::relaxed);
+    }
 
-    for (const auto& task: tasks) {
-        Fiber* f = PopLocalFiber();
-        if (f == nullptr) {
-            f = nestedDispatch ? s_freeQueue.TryPop() : s_freeQueue.PopOrWait();
+    Fiber*         currentFiber = Fiber::GetCurrent();
+    const bool     isMain       = (currentFiber == nullptr || currentFiber->isMain);
+    const uint32_t localSlot    = ClampSlot(t_workerIndex, totalWorkers);
+    const uint32_t startTarget  = tasks.size() == 1
+                                      ? localSlot
+                                      : (s_dispatchCursor.fetch_add(static_cast<uint32_t>(tasks.size()), std::memory_order::relaxed) % totalWorkers);
+
+    size_t pushedCount = 0;
+
+    for (size_t i = 0; i < tasks.size(); ++i) {
+        const Task& task  = tasks[i];
+        Fiber*      fiber = AllocateFiber(localSlot, totalWorkers);
+
+        if (fiber == nullptr && isMain) {
+            if (pushedCount > 0) {
+                NotifyParkedWorkers(pushedCount);
+                pushedCount = 0;
+            }
+            if (Fiber* ready = PopOrStealReady(localSlot, totalWorkers)) {
+                Fiber::Resume(ready);
+                RecycleFiber(ready, localSlot, totalWorkers);
+                fiber = AllocateFiber(localSlot, totalWorkers);
+            }
         }
-        if (f == nullptr) {
+
+        if (fiber == nullptr) {
+            if (pushedCount > 0) {
+                NotifyParkedWorkers(pushedCount);
+                pushedCount = 0;
+            }
             if (task.func != nullptr) {
                 task.func(task.arg);
             }
@@ -262,11 +447,17 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
             continue;
         }
 
-        auto* data    = static_cast<FiberData*>(f->arg);
+        auto* data    = static_cast<FiberData*>(fiber->arg);
         data->task    = task;
         data->counter = counter;
 
-        s_readyQueue.Push(f);
+        const uint32_t targetSlot = static_cast<uint32_t>((startTarget + i) % totalWorkers);
+        s_workerSlots[targetSlot].readyQueue.TryPush(fiber);
+        ++pushedCount;
+    }
+
+    if (pushedCount > 0) {
+        NotifyParkedWorkers(pushedCount);
     }
 }
 
@@ -275,17 +466,22 @@ void Wait(Counter* counter) {
         return;
     }
 
-    Fiber*   self      = Fiber::GetCurrent();
-    uint32_t spinCount = 0;
+    Fiber*         self      = Fiber::GetCurrent();
+    const bool     isMain    = (self == nullptr || self->isMain);
+    uint32_t       spinCount = 0;
 
     while (counter->value.load(std::memory_order::acquire) > 0) {
-        bool isMain = (self == nullptr || self->isMain);
+        const uint32_t totalWorkers = s_workerCount.load(std::memory_order::acquire);
+        if (totalWorkers == 0) {
+            CPURelax();
+            continue;
+        }
+        const uint32_t localSlot = ClampSlot(t_workerIndex, totalWorkers);
 
         if (isMain) {
-            Fiber* f = s_readyQueue.TryPop();
-            if (f != nullptr) {
-                Fiber::Resume(f);
-                RecycleFiber(f);
+            if (Fiber* fiber = PopOrStealReady(localSlot, totalWorkers)) {
+                Fiber::Resume(fiber);
+                RecycleFiber(fiber, localSlot, totalWorkers);
                 spinCount = 0;
             } else {
                 if (spinCount < 100) {
@@ -298,17 +494,27 @@ void Wait(Counter* counter) {
                     std::this_thread::yield();
                     spinCount = 0;
                 }
-                spinCount++;
+                ++spinCount;
             }
         } else {
-            s_readyQueue.PushSilent(self);
+            s_workerSlots[localSlot].readyQueue.TryPush(self);
+            NotifyParkedWorkers(1);
             Fiber::Yield();
         }
     }
 }
 
 void WakeUp(ZHLN::Fiber* fiber) {
-    s_readyQueue.Push(fiber);
+    if (fiber == nullptr) {
+        return;
+    }
+    const uint32_t totalWorkers = s_workerCount.load(std::memory_order::acquire);
+    if (totalWorkers == 0 || !s_workerSlots) {
+        return;
+    }
+    const uint32_t localSlot = ClampSlot(t_workerIndex, totalWorkers);
+    s_workerSlots[localSlot].readyQueue.TryPush(fiber);
+    NotifyParkedWorkers(1);
 }
 
-}
+} // namespace ZHLN::TaskSystem

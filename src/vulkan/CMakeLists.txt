@@ -1,19 +1,6 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-set(ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE
-    ""
-    CACHE
-      FILEPATH
-      "Optional renderer-internal source implementing ZHLN::Vk::CreateConfiguredGPUCrashTracker"
-)
-set(ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES
-    ""
-    CACHE
-      STRING
-      "Optional libraries linked only by the configured GPU diagnostics backend"
-)
-
 add_library(
   zahlen_vulkan STATIC
   ${PROJECT_SOURCE_DIR}/extern/volk/volk.c
@@ -39,7 +26,6 @@ add_library(
   pipeline/PipelineBuilder.cpp
   pipeline/PipelineBinaries.cpp
   pipeline/DescriptorHeap.cpp
-  pipeline/SamplerConfig.cpp
   pipeline/ShaderStages.cpp
   pipeline/ReflectedLayout.cpp
   pipeline/ComputePass.cpp
@@ -47,16 +33,6 @@ add_library(
   diagnostics/GPUAddressTracker.cpp
   diagnostics/GPUDiagnostics.cpp)
 set_target_properties(zahlen_vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-if(ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE)
-    target_sources(zahlen_vulkan PRIVATE "${ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE}")
-    target_compile_definitions(zahlen_vulkan
-                             PRIVATE ZHLN_CUSTOM_GPU_DIAGNOSTICS_BACKEND=1)
-    if(ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES)
-        target_link_libraries(zahlen_vulkan
-                          PRIVATE ${ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES})
-    endif()
-endif()
 
 option(ZHLN_ENABLE_CLANG_TIDY "Run Clang-Tidy analysis during compilation" OFF)
 
@@ -91,7 +67,7 @@ target_compile_options(
 
 target_link_libraries(
   zahlen_vulkan PUBLIC Vulkan-Headers GPUOpen::VulkanMemoryAllocator
-                       spirv_reflect)
+                       spirv-reflect-static)
 
 target_include_directories(
   zahlen_vulkan
@@ -104,9 +80,18 @@ target_include_directories(zahlen_vulkan SYSTEM
 target_compile_definitions(zahlen_vulkan PRIVATE VMA_STATIC_VULKAN_FUNCTIONS=0
                                                  VMA_DYNAMIC_VULKAN_FUNCTIONS=1)
 
-target_precompile_headers(
-  zahlen_vulkan PRIVATE
-  "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>")
+# Every src/vulkan/*.cpp TU relies on Rendering.hpp being force-included first
+# (defining ZHLN_RENDERING_HPP_INCLUDED and VK_NO_PROTOTYPES); keep PCH on both
+# GCC and Clang when enabled, and fall back to -include when ZHLN_ENABLE_PCH=OFF.
+if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_precompile_headers(
+      zahlen_vulkan PRIVATE
+      "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>")
+else()
+    target_compile_options(
+      zahlen_vulkan PRIVATE
+      "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include \"${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp\">")
+endif()
 
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 

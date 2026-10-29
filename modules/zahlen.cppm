@@ -116,16 +116,12 @@ module;
 #include <Jolt/Skeleton/SkeletonPose.h>
 // clang-format on
 
-// Preserve the existing umbrella-module export without exposing this engine
-// graph entry through the audio library's public headers.
-#include <AudioSystem.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
@@ -141,7 +137,6 @@ module;
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/Pages.hpp>
-#include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Prefetch.hpp>
 #include <Zahlen/Core/Print.hpp>
@@ -152,14 +147,16 @@ module;
 #include <Zahlen/Core/SkipList.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/FileSystem/FileWatcher.hpp>
+#include <Zahlen/FileSystem.hpp>
 #include <Zahlen/Format.hpp>
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/InputContext.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -170,13 +167,13 @@ module;
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
-#include <Zahlen/Scripting.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Threading/Channel.hpp>
 #include <Zahlen/Threading/ConditionalVariable.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/SharedMutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Vertex.hpp>
@@ -200,7 +197,6 @@ export import :ecs;
 export import :physics;
 export import :render;
 export import :audio;
-export import :scripting;
 export import :engine;
 
 export namespace JPH {
@@ -266,7 +262,10 @@ using ZHLN::FS::FileWatchCallback;
 using ZHLN::FS::FileWatchEvent;
 using ZHLN::FS::FileWatchHandle;
 using ZHLN::FS::HashPath;
+using ZHLN::FS::kPakFormatVersion;
 using ZHLN::FS::LoadRequest;
+using ZHLN::FS::MapAccess;
+using ZHLN::FS::MappedFile;
 using ZHLN::FS::PakEntry;
 using ZHLN::FS::PakHeader;
 using ZHLN::FS::VirtualFileSystem;
@@ -297,6 +296,11 @@ using ZHLN::FiberFunc;
 using ZHLN::GetCurrentFiber;
 using ZHLN::Mutex;
 using ZHLN::MutexGuard;
+using ZHLN::SharedLock;
+using ZHLN::SharedLockGuard;
+using ZHLN::SharedMutex;
+using ZHLN::WriteLock;
+using ZHLN::WriteLockGuard;
 using ZHLN::YieldFiber;
 
 namespace TaskSystem {
@@ -396,6 +400,9 @@ using ZHLN::ECS::Access;
 using ZHLN::ECS::ComponentAccess;
 using ZHLN::ECS::ComponentFamily;
 using ZHLN::ECS::EntityCommandBuffer;
+using ZHLN::ECS::EventBus;
+using ZHLN::ECS::EventReader;
+using ZHLN::ECS::EventWriter;
 using ZHLN::ECS::OptionRes;
 using ZHLN::ECS::Query;
 using ZHLN::ECS::Read;
@@ -431,6 +438,7 @@ using ZHLN::DrawParams;
 using ZHLN::Material;
 using ZHLN::MaterialDesc;
 using ZHLN::Mesh;
+using ZHLN::MeshletStreams;
 using ZHLN::PipelineHandle;
 using ZHLN::RenderContext;
 
@@ -439,61 +447,126 @@ using ZHLN::GUI::Alignment;
 using ZHLN::GUI::BakedFontAsset;
 using ZHLN::GUI::BakedFontLoader;
 using ZHLN::GUI::BoxConfig;
+using ZHLN::GUI::BuildFontAtlas;
 using ZHLN::GUI::Context;
 using ZHLN::GUI::DecodeCookedFont;
 using ZHLN::GUI::Direction;
+using ZHLN::GUI::ElementRect;
+using ZHLN::GUI::Frame;
 using ZHLN::GUI::GetDefaultBakedFont;
 using ZHLN::GUI::HasBakedFontLoader;
 using ZHLN::GUI::InstallBakedFontLoader;
 using ZHLN::GUI::kDefaultFontAssetPath;
 using ZHLN::GUI::LoadBakedFont;
 using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::ScrollBarStyle;
+using ZHLN::GUI::ScrollState;
 using ZHLN::GUI::SetDefaultBakedFont;
 using ZHLN::GUI::Sizing;
 using ZHLN::GUI::TextBounds;
 using ZHLN::GUI::TextLineHeight;
-using ZHLN::GUI::UISettingsComponent;
+using ZHLN::GUI::UIInput;
 using ZHLN::GUI::UninstallBakedFontLoader;
 } // namespace GUI
 
+using ZHLN::AudioAttenuationDesc;
+using ZHLN::AudioAttenuationModel;
+using ZHLN::AudioBus;
+using ZHLN::AudioBusId;
 using ZHLN::AudioConfig;
 using ZHLN::AudioContext;
+using ZHLN::AudioEvent;
+using ZHLN::AudioEventType;
 using ZHLN::AudioFilterType;
+using ZHLN::AudioHandle;
 using ZHLN::AudioNoiseType;
-using ZHLN::AudioSystem;
+using ZHLN::AudioOcclusionDesc;
+using ZHLN::AudioPlaybackMode;
+using ZHLN::AudioReverbConfig;
+using ZHLN::AudioReverbPreset;
 using ZHLN::AudioWaveformType;
+using ZHLN::ComputeOcclusionCutoffHz;
+using ZHLN::ComputeOcclusionDirectGain;
+using ZHLN::EvaluateDistanceAttenuation;
+using ZHLN::kAudioAttenuationModelCount;
+using ZHLN::kAudioBusCount;
+using ZHLN::kAudioEventTypeCount;
+using ZHLN::kAudioFilterTypeCount;
+using ZHLN::kAudioNoiseTypeCount;
+using ZHLN::kAudioPlaybackModeCount;
+using ZHLN::kAudioReverbPresetCount;
+using ZHLN::kAudioWaveformTypeCount;
+using ZHLN::kMaxAudioBuses;
+using ZHLN::MAX_VOICE_SLOTS;
+using ZHLN::VoiceDesc;
 
-using ZHLN::ScriptRunner;
-
+using ZHLN::ActionId;
+using ZHLN::ActionKind;
+using ZHLN::ActionState;
+using ZHLN::ApplyAxisDeadzone;
+using ZHLN::ApplyStickDeadzone;
+using ZHLN::ApplyTriggerDeadzone;
 using ZHLN::AssetLoadRequest;
 using ZHLN::AssetManager;
+using ZHLN::Axis2DValue;
+using ZHLN::BindingCaptureStatus;
 using ZHLN::Clock;
-using ZHLN::CommandHandler;
-using ZHLN::CommandLineError;
-using ZHLN::CommandLineOptions;
+using ZHLN::ClockConfig;
 using ZHLN::CPUProfiler;
+using ZHLN::DeadzoneConfig;
+using ZHLN::DeadzoneMode;
 using ZHLN::Engine;
 using ZHLN::EngineConfig;
+using ZHLN::FixedStepBatch;
+using ZHLN::GamepadAxis;
+using ZHLN::GamepadButton;
+using ZHLN::GamepadConnectionEvent;
+using ZHLN::GamepadRawSample;
+using ZHLN::GamepadRumble;
+using ZHLN::GamepadState;
 using ZHLN::GameplayDriver;
-using ZHLN::HandleCommandLine;
+using ZHLN::GameplayStatus;
+using ZHLN::InputAction;
+using ZHLN::InputActionMap;
+using ZHLN::InputBinding;
+using ZHLN::InputBindingKind;
+using ZHLN::InputBindingParseError;
+using ZHLN::InputContext;
+using ZHLN::InputDeviceId;
+using ZHLN::InputDeviceKind;
 using ZHLN::Kernel;
 using ZHLN::KeyCode;
+using ZHLN::KeyModifiers;
+using ZHLN::kGamepadAxisCount;
+using ZHLN::kGamepadButtonCount;
+using ZHLN::kKeyCodeCount;
+using ZHLN::kMaxGamepads;
+using ZHLN::kMaxPlayerSeats;
+using ZHLN::kMouseButtonCount;
+using ZHLN::kPrimarySeat;
+using ZHLN::kUnassignedSeat;
 using ZHLN::ModelNode;
 using ZHLN::ModelPart;
 using ZHLN::ModelPrefab;
+using ZHLN::MouseButton;
+using ZHLN::MouseButtonFromKeyCode;
 using ZHLN::PhysicsConfig;
 using ZHLN::PlatformHost;
+using ZHLN::PlayerSeat;
 using ZHLN::ProfileScope;
 using ZHLN::RenderConfig;
 using ZHLN::ScopedTimer;
+using ZHLN::SeatRoutingPolicy;
+using ZHLN::StickSample;
 using ZHLN::SystemContext;
+using ZHLN::ToKeyCode;
 using ZHLN::Window;
 using ZHLN::World;
 
 namespace PrefabFactory {
 using ZHLN::PrefabFactory::CreateBox;
 using ZHLN::PrefabFactory::CreateBoxMesh;
-using ZHLN::PrefabFactory::CreateFontAtlasTexture;
+using ZHLN::PrefabFactory::CreateFontAtlas;
 using ZHLN::PrefabFactory::CreatePlane;
 using ZHLN::PrefabFactory::CreatePlaneMesh;
 using ZHLN::PrefabFactory::CreateTetrahedronMesh;

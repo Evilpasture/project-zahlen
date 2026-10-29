@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Common.h>
 #include <cstddef>
 #include <cstdint>
 #ifdef _WIN32
@@ -100,18 +101,12 @@ using VOID = void;
 
 #endif
 
-#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#endif
-
 #if __cplusplus < 202400L
 #error "Project-Zahlen requires C++26"
 #endif
 
 #ifdef _MSC_VER
+#include <intrin.h>
 #ifndef ZHLN_RESTRICT
 #define ZHLN_RESTRICT __restrict
 #endif
@@ -121,30 +116,18 @@ using VOID = void;
 #endif
 #endif
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-#include <immintrin.h>
-#endif
-
 namespace ZHLN {
 
-inline auto GetPID() noexcept {
-#ifdef _WIN32
-    return static_cast<int>(GetCurrentProcessId());
-#else
-    return getpid();
-#endif
-}
+ZHLN_API auto GetPID() noexcept -> int;
 
 inline void DebugBreak() noexcept {
 #if defined(_WIN32) || defined(_WIN64)
 #if defined(_MSC_VER) || defined(__clang__)
     __debugbreak();
-#endif
-#elif defined(__linux__)
-#if defined(__GNUC__) || defined(__clang__)
+#elif defined(__GNUC__)
     __builtin_trap();
 #endif
-#elif defined(__APPLE__)
+#elif defined(__linux__) || defined(__APPLE__)
 #if defined(__GNUC__) || defined(__clang__)
     __builtin_trap();
 #endif
@@ -152,22 +135,20 @@ inline void DebugBreak() noexcept {
 }
 
 inline void CPURelax() noexcept {
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#if defined(__clang__) || defined(__GNUC__)
+    __builtin_ia32_pause();
+#elif defined(_MSC_VER)
     _mm_pause();
+#endif
 #elif defined(__aarch64__)
     __asm__ __volatile__("yield" ::: "memory");
 #else
-    std::this_thread::yield();
+    __asm__ __volatile__("" ::: "memory");
 #endif
 }
 
-inline void HaltThread() noexcept {
-#if defined(_WIN32)
-    ::Sleep(INFINITE);
-#else
-    pause();
-#endif
-}
+ZHLN_API void HaltThread() noexcept;
 
 struct StackBounds {
     void* base  = nullptr;
@@ -188,7 +169,6 @@ inline void SetCurrentStackBounds([[maybe_unused]] StackBounds bounds) noexcept 
     auto* const tib = reinterpret_cast<NT_TIB*>(NtCurrentTeb());
     tib->StackBase  = bounds.base;
     tib->StackLimit = bounds.limit;
-#else
 #endif
 }
 

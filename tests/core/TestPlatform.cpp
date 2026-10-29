@@ -23,6 +23,8 @@ auto Addr(const void* address) -> size_t {
 
 } // namespace
 
+namespace {
+
 struct PlatformTestSuite {
     struct Tests {
         // --- 1. Page Primitives ---
@@ -150,8 +152,4 @@ struct PlatformTestSuite {
     };
 };
 
-// Exported for the core group binary (RunCoreTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunPlatformSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<PlatformTestSuite>();
-}
+} // namespace

@@ -16,14 +16,17 @@ namespace ZHLN::Reflect {
 
 #if ZHLN_REFLECTION_AVAILABLE
 
-namespace TemplatedDetail {
-
-template <std::meta::info EntityInfo>
-consteval auto AnnotationsOf() {
-    return std::define_static_array(std::meta::annotations_of(EntityInfo));
-}
-
-}
+// NOTE: Never wrap `std::meta::annotations_of(EntityInfo)` in
+// `std::define_static_array(...)` or pass an annotation `std::meta::info` as a
+// template argument. `std::define_static_array` delegates to
+// `std::meta::reflect_constant_array`, whose `_ZTAX...` template-parameter
+// object mangling in GCC 16 encodes only the per-TU annotation ordinal for
+// `REFLECT_ANNOTATION` elements -- causing single-annotation entities imported
+// from two C++20 module BMIs (e.g. `ZHLN.Wire::WireError` and
+// `ZHLN.Network::MessageType`) to alias the same static annotation array.
+// Indexing `std::meta::annotations_of(EntityInfo)[Index]` directly inside
+// `consteval` helpers keyed on `<EntityInfo, Index>` avoids `reflect_constant_array`
+// completely while keeping all splices valid on both Clang (P2996) and GCC 16.
 
 template <typename Tag>
 consteval auto AnnotationHasType(std::meta::info annotation) -> bool {
@@ -88,9 +91,9 @@ consteval auto GetAnnotation() -> std::optional<Tag> {
     return std::nullopt;
 }
 
-template <std::meta::info a>
-consteval auto ExtractDescriptionText() -> std::string_view {
-    constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(a)));
+template <std::meta::info EntityInfo, std::size_t Index>
+consteval auto ExtractDescriptionTextAt() -> std::string_view {
+    constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(std::meta::annotations_of(EntityInfo)[Index])));
     if constexpr (std::meta::has_template_arguments(type)) {
         if constexpr (std::meta::template_of(type) == ^^ZHLN::Description) {
             using DescType = typename[:type:];
@@ -100,15 +103,9 @@ consteval auto ExtractDescriptionText() -> std::string_view {
     return {};
 }
 
-template <std::meta::info EntityInfo, std::size_t Index>
-consteval auto ExtractDescriptionTextAt() -> std::string_view {
-    constexpr auto annotations = TemplatedDetail::AnnotationsOf<EntityInfo>();
-    return ExtractDescriptionText<annotations[Index]>();
-}
-
 template <std::meta::info EntityInfo>
 consteval auto GetDescriptionText() -> std::string_view {
-    constexpr std::size_t count = TemplatedDetail::AnnotationsOf<EntityInfo>().size();
+    constexpr std::size_t count = std::meta::annotations_of(EntityInfo).size();
     std::string_view      result {};
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
         ((result.empty() ? (result = ExtractDescriptionTextAt<EntityInfo, Is>(), 0) : 0), ...);
@@ -117,9 +114,9 @@ consteval auto GetDescriptionText() -> std::string_view {
 }
 
 namespace TemplatedDetail {
-template <std::meta::info Annotation, typename F>
-consteval void InvokeAnnotationType(F&& f) {
-    constexpr auto type  = std::meta::remove_const(std::meta::dealias(std::meta::type_of(Annotation)));
+template <std::meta::info EntityInfo, std::size_t Index, typename F>
+consteval void InvokeAnnotationTypeAt(F&& f) {
+    constexpr auto type  = std::meta::remove_const(std::meta::dealias(std::meta::type_of(std::meta::annotations_of(EntityInfo)[Index])));
     using AnnotationType = typename[:type:];
     std::forward<F>(f).template operator()<AnnotationType>();
 }
@@ -127,19 +124,16 @@ consteval void InvokeAnnotationType(F&& f) {
 
 template <std::meta::info EntityInfo, typename F>
 consteval void ForEachAnnotationType(F&& f) {
-    constexpr auto annotations = TemplatedDetail::AnnotationsOf<EntityInfo>();
+    constexpr std::size_t count = std::meta::annotations_of(EntityInfo).size();
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        (TemplatedDetail::InvokeAnnotationType<annotations[Is]>(f), ...);
-    }(std::make_index_sequence<annotations.size()>());
+        (TemplatedDetail::InvokeAnnotationTypeAt<EntityInfo, Is>(f), ...);
+    }(std::make_index_sequence<count>());
 }
 
 template <typename T, typename F>
 consteval void ForEachAnnotationType(F&& f) {
-    constexpr auto entity      = std::meta::dealias(^^std::remove_cvref_t<T>);
-    constexpr auto annotations = TemplatedDetail::AnnotationsOf<entity>();
-    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        (TemplatedDetail::InvokeAnnotationType<annotations[Is]>(f), ...);
-    }(std::make_index_sequence<annotations.size()>());
+    constexpr auto entity = std::meta::dealias(^^std::remove_cvref_t<T>);
+    ForEachAnnotationType<entity>(std::forward<F>(f));
 }
 
 namespace TemplatedDetail {
@@ -155,7 +149,7 @@ consteval bool IsAnnotationOfTemplate(std::meta::info annotation) {
 
 template <template <auto...> class Template, std::meta::info EntityInfo>
 consteval std::size_t FirstAnnotationIndex() {
-    constexpr auto annotations = AnnotationsOf<EntityInfo>();
+    const auto annotations = std::meta::annotations_of(EntityInfo);
     for (std::size_t index = 0; index < annotations.size(); ++index) {
         if (IsAnnotationOfTemplate<Template>(annotations[index])) {
             return index;
@@ -185,12 +179,12 @@ consteval std::size_t AnnotationCountOf() {
 
 template <template <auto...> class Template, std::meta::info EntityInfo, std::size_t ArgumentIndex, typename Value = long double>
 consteval Value AnnotationTemplateArgument() {
-    constexpr auto annotations = TemplatedDetail::AnnotationsOf<EntityInfo>();
-    constexpr auto match       = TemplatedDetail::FirstAnnotationIndex<Template, EntityInfo>();
-    if constexpr (match < annotations.size()) {
-        constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotations[match])));
-        constexpr auto args = std::define_static_array(std::meta::template_arguments_of(type));
-        return static_cast<Value>([:args[ArgumentIndex]:]);
+    constexpr std::size_t count = std::meta::annotations_of(EntityInfo).size();
+    constexpr auto        match = TemplatedDetail::FirstAnnotationIndex<Template, EntityInfo>();
+    if constexpr (match < count) {
+        constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(std::meta::annotations_of(EntityInfo)[match])));
+        constexpr auto arg  = std::meta::template_arguments_of(type)[ArgumentIndex];
+        return static_cast<Value>([:arg:]);
     }
     return Value {};
 }
@@ -208,74 +202,6 @@ consteval auto AnnotatedName() -> std::string_view {
     if (!desc.empty()) {
         return desc;
     }
-    return TypeName<T>();
-}
-
-#else
-
-template <typename Tag, auto EntityInfo>
-consteval bool HasAnnotation() {
-    return false;
-}
-
-template <typename Tag, auto Fn>
-consteval auto FunctionHasAnnotation() -> bool {
-    return true;
-}
-
-template <typename Tag, typename T>
-consteval auto TypeHasAnnotation() -> bool {
-    return true;
-}
-
-template <auto EntityInfo>
-consteval std::string_view GetDescriptionText() {
-    return {};
-}
-
-template <auto EntityInfo, typename F>
-consteval void ForEachAnnotationType(F&& ) {
-}
-
-template <typename T, typename F>
-consteval void ForEachAnnotationType(F&& ) {
-}
-
-template <template <auto...> class Template, auto EntityInfo>
-consteval std::size_t AnnotationCountOf() {
-    return 0;
-}
-
-template <template <auto...> class Template, typename T>
-consteval std::size_t AnnotationCountOf() {
-    return 0;
-}
-
-template <template <auto...> class Template, auto EntityInfo, std::size_t ArgumentIndex, typename Value = long double>
-consteval Value AnnotationTemplateArgument() {
-    return Value {};
-}
-
-template <template <auto...> class Template, typename T, std::size_t ArgumentIndex, typename Value = long double>
-consteval Value AnnotationTemplateArgument() {
-    return Value {};
-}
-
-template <auto ScopeInfo, typename Tag, typename F>
-constexpr void ForEachAnnotatedTypeInScope(F&& ) {
-}
-
-template <typename Tag, typename F>
-constexpr void ForEachAnnotatedType(F&& ) {
-}
-
-template <typename Tag, typename T>
-consteval std::optional<Tag> GetAnnotation() {
-    return std::nullopt;
-}
-
-template <typename T>
-consteval std::string_view AnnotatedName() {
     return TypeName<T>();
 }
 

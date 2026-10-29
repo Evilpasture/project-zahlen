@@ -22,12 +22,13 @@
 #include "TestsFramework.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Camera.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/FramePlan.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -86,7 +87,6 @@ struct EngineOptions {
             .validationMode    = ZHLN::ValidationMode::On,
             .headless          = true,
             .enableMeshShading = opts.enableMeshShading,
-            .diagnostics       = &ZHLN::Test::g_renderDiagnostics
         },
         .enableFallbackScene = false,
     };
@@ -192,6 +192,8 @@ inline void ResetScene(ZHLN::Engine& engine) {
     // is the one ASan caught). A fresh engine has no callback, so neither
     // does a reset one.
     engine.SetUICallback(nullptr);
+    engine.GetPlatformHost().SetCursorMode(ZHLN::CursorMode::System);
+    engine.GetPlatformHost().CaptureMouse(false);
 }
 
 namespace Detail {
@@ -348,13 +350,35 @@ inline void EndSession() {
     }
 }
 
-// RAII form for a group binary's main.
-struct SessionScope {
+// RAII form for a group binary's main, and SessionFixture for DI consumers.
+struct ZHLN_ANNOTATION(ZHLN::Test::SessionFixture {}) SessionScope {
     explicit SessionScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32) { BeginSession(workerThreads, maxFibers); }
     ~SessionScope() { EndSession(); }
 
     SessionScope(const SessionScope&)                    = delete;
     auto operator=(const SessionScope&) -> SessionScope& = delete;
+};
+
+// Per-test headless Vulkan engine handle backed by the process-wide pool:
+// resets the scene and default camera on entry without recreating VkDevice.
+class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
+  public:
+    explicit PooledEngine(SessionScope&) : _handle(AcquireEngine()) {}
+    ~PooledEngine() = default;
+
+    PooledEngine(const PooledEngine&)            = delete;
+    PooledEngine& operator=(const PooledEngine&) = delete;
+    PooledEngine(PooledEngine&&)                 = delete;
+    PooledEngine& operator=(PooledEngine&&)      = delete;
+
+    [[nodiscard]] auto Get() const noexcept -> ZHLN::Engine* { return _handle.get(); }
+    [[nodiscard]] auto Handle() const noexcept -> EngineHandle { return _handle; }
+    auto               operator->() const noexcept -> ZHLN::Engine* { return _handle.get(); }
+    auto               operator*() const noexcept -> ZHLN::Engine& { return *_handle; }
+    explicit           operator bool() const noexcept { return static_cast<bool>(_handle); }
+
+  private:
+    EngineHandle _handle;
 };
 
 // Turns off TAA and zeroes the jitter history.
@@ -386,13 +410,68 @@ inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt) {
     }
 }
 
-// Renders, reads the frame back, and mirrors it to .png for inspection.
-[[nodiscard]] inline auto Capture(ZHLN::Engine& engine, std::string_view ppmPath) -> Image::RgbImage {
-    if (!engine.GetRenderContext().CaptureScreenshotPPM(ppmPath)) {
+// A captured frame, converted into the test image type -- in memory, with no
+// file in between. This is what assertions should run on: the renderer hands
+// back pixels and statistics, and a test that reparsed a file it had just
+// written would be testing the encoder as much as the renderer.
+[[nodiscard]] inline auto ToRgbImage(const ZHLN::CapturedFrame& frame) -> Image::RgbImage {
+    Image::RgbImage img;
+    if (!frame.Valid()) {
+        return img;
+    }
+    img.width  = static_cast<int>(frame.extent.width);
+    img.height = static_cast<int>(frame.extent.height);
+
+    switch (frame.format) {
+        case ZHLN::PixelFormat::Rgb8:
+            img.rgb = frame.pixels;
+            break;
+
+        case ZHLN::PixelFormat::Rgba8:
+            // Drop alpha: an RGB test image is what the suites' statistics expect.
+            img.rgb.resize(frame.PixelCount() * 3);
+            for (size_t i = 0; i < frame.PixelCount(); ++i) {
+                img.rgb[(i * 3) + 0] = frame.pixels[(i * 4) + 0];
+                img.rgb[(i * 3) + 1] = frame.pixels[(i * 4) + 1];
+                img.rgb[(i * 3) + 2] = frame.pixels[(i * 4) + 2];
+            }
+            break;
+
+        case ZHLN::PixelFormat::Rgba16F: {
+            // Tone-mapped through the same curve the encoder uses, so a wide
+            // capture reads the same here as the file it would produce.
+            const auto* const texels = reinterpret_cast<const uint16_t*>(frame.pixels.data());
+            img.rgb.resize(frame.PixelCount() * 3);
+            for (size_t i = 0; i < frame.PixelCount(); ++i) {
+                for (size_t channel = 0; channel < 3; ++channel) {
+                    const float linear         = ZHLN::Math::HalfToFloat(texels[(i * 4) + channel]);
+                    const float toned          = ZHLN::Math::AcesFilm(linear * ZHLN::kCaptureExposure);
+                    img.rgb[(i * 3) + channel] = static_cast<uint8_t>(std::clamp(toned, 0.0F, 1.0F) * 255.0F);
+                }
+            }
+            break;
+        }
+    }
+    if (!img.Valid()) {
         return {};
     }
-    const Image::RgbImage img = Image::LoadPPM(ppmPath);
-    if (img.Valid()) {
+    return img;
+}
+
+// Renders, reads the frame back into memory, and mirrors it to .ppm/.png so a
+// failing run leaves something to look at. The mirror is diagnostic only: the
+// returned image never came from disk.
+[[nodiscard]] inline auto Capture(ZHLN::Engine& engine, std::string_view ppmPath) -> Image::RgbImage {
+    const auto captured = engine.GetRenderContext().CaptureFrame();
+    if (!captured) {
+        return {};
+    }
+    const Image::RgbImage img = ToRgbImage(*captured);
+    if (!img.Valid()) {
+        return {};
+    }
+    if (!ppmPath.empty()) {
+        (void) Image::WritePPM(ppmPath, img);
         (void) Image::SavePNG(Image::PngPathOf(ppmPath), img);
     }
     return img;
@@ -427,7 +506,7 @@ RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, S
             );
         }
 
-        const uint32_t validationBefore = engine.GetRenderContext().GetValidationErrorCount();
+        const uint32_t validationBefore = ZHLN::Test::ValidationErrorCount();
 
         ZHLN::RenderContext* const preWarmup = &engine.GetRenderContext();
         TickFrames(engine, warmupFrames);
@@ -439,7 +518,7 @@ RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, S
         const bool                 ok      = sceneFn(engine);
         if (ok && &engine.GetRenderContext() == preWork) {
             if (outValidationDelta != nullptr) {
-                *outValidationDelta = engine.GetRenderContext().GetValidationErrorCount() - validationBefore;
+                *outValidationDelta = ZHLN::Test::ValidationErrorCount() - validationBefore;
             }
             return StableRunResult::Ok;
         }

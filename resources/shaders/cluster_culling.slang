@@ -54,14 +54,49 @@ void CSMain(uint3 id: SV_DispatchThreadID, uint3 gId: SV_GroupThreadID) {
 
     uint count = 0;
     uint list[Cluster.MaxLights];
+    float scores[Cluster.MaxLights];
+    uint  minSlot  = 0;
+    float minScore = 3.402823466e+38f;
 
-    for (uint i = 0; i < frame.lightCount && count < Cluster.MaxLights; ++i) {
+    for (uint i = 0; i < frame.lightCount; ++i) {
         if (lights[i].type == LightType::Directional || lights[i].type == LightType::Sun) {
             continue;
         }
 
-        if (SphereAABB(lights[i].positionView.xyz, lights[i].range, b.minPoint.xyz, b.maxPoint.xyz)) {
-            list[count++] = i;
+        if (!SphereAABB(lights[i].positionView.xyz, lights[i].range, b.minPoint.xyz, b.maxPoint.xyz)) {
+            continue;
+        }
+
+        // Keep the cluster's strongest contributors, not the first 64 by
+        // light index. In a lamp-dense scene the list overflows and raw index
+        // order starves late-added lights (bake VPLs, emissive proxies) --
+        // exactly in the enclosed rooms that depend on them. Score is the
+        // expected contribution at the cluster's nearest point: level over
+        // distance squared (color is hue-normalized, so intensity is the
+        // level).
+        float3 toLight = lights[i].positionView.xyz - clamp(lights[i].positionView.xyz, b.minPoint.xyz, b.maxPoint.xyz);
+        float  score   = lights[i].intensity / max(dot(toLight, toLight), 1.0f);
+        score *= max(dot(lights[i].color, float3(0.2126f, 0.7152f, 0.0722f)), 1e-3f);
+
+        if (count < Cluster.MaxLights) {
+            list[count]   = i;
+            scores[count] = score;
+            if (score < minScore) {
+                minScore = score;
+                minSlot  = count;
+            }
+            ++count;
+        } else if (score > minScore) {
+            list[minSlot]   = i;
+            scores[minSlot] = score;
+            minScore        = scores[0];
+            minSlot         = 0;
+            for (uint k = 1; k < Cluster.MaxLights; ++k) {
+                if (scores[k] < minScore) {
+                    minScore = scores[k];
+                    minSlot  = k;
+                }
+            }
         }
     }
 

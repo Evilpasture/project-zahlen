@@ -43,6 +43,8 @@ auto JoinedLogs(const ZHLN::GameConsole& console) -> std::string {
 
 } // namespace
 
+namespace {
+
 struct ConsoleDebuggerTestSuite {
     ConsoleDebuggerTestSuite() {
         ZHLN::ScriptBinder::Get().classes.clear();
@@ -195,9 +197,39 @@ struct ConsoleDebuggerTestSuite {
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(bad), "Invalid address format"));
             return {};
         }
+
+        std::expected<void, ZHLN::ErrorCode> patch_applies_lua_table_and_rolls_back_on_error() {
+            ZHLN::ECS::Registry reg;
+            reg.RegisterAllComponentsIn<ZHLN::Components>();
+            const ZHLN::Entity e = reg.Create();
+            reg.Add(e, ZHLN::Components::PBRComponent {.roughness = 0.5f, .metallic = 0.1f});
+            const std::string id = std::format("{}", e.Pack());
+
+            ZHLN::GameConsole okConsole;
+            ZHLN::ConsoleDebugger::Execute(
+                reg, okConsole, std::format("patch {} PBRComponent {{ roughness = 0.15 + 0.05, metallic = 0.8 }}", id)
+            );
+            ZHLN::Test::ExpectTrue(Contains(JoinedLogs(okConsole), "Patched PBRComponent"));
+            const auto updated = reg.Get<ZHLN::Components::PBRComponent>(e);
+            ZHLN::Test::ExpectTrue(updated.has_value());
+            if (updated) {
+                ZHLN::Test::ExpectEq(updated->roughness, 0.2f);
+                ZHLN::Test::ExpectEq(updated->metallic, 0.8f);
+            }
+
+            // Invalid field must roll back the entire patch cleanly.
+            ZHLN::GameConsole badConsole;
+            ZHLN::ConsoleDebugger::Execute(
+                reg, badConsole, std::format("patch {} PBRComponent {{ roughness = 0.99, noSuchProp = 1 }}", id)
+            );
+            ZHLN::Test::ExpectTrue(Contains(JoinedLogs(badConsole), "Failed to patch PBRComponent"));
+            const auto preserved = reg.Get<ZHLN::Components::PBRComponent>(e);
+            if (preserved) {
+                ZHLN::Test::ExpectEq(preserved->roughness, 0.2f);
+            }
+            return {};
+        }
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<ConsoleDebuggerTestSuite>();
-}
+} // namespace

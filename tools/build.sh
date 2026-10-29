@@ -11,6 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SPECIFIED_COMPILER=""
 ENABLE_SANITIZER=false
+ENABLE_SYNTAX_ONLY=false
 USER_CMAKE_ARGS=()
 BUILD_FLAGS=()
 
@@ -32,6 +33,9 @@ while [[ "$#" -gt 0 ]]; do
         --sanitize|--sanitizer|--asan)
             ENABLE_SANITIZER=true
             ;;
+        --syntax-only|--fsyntax-only)
+            ENABLE_SYNTAX_ONLY=true
+            ;;
         -D*)
             USER_CMAKE_ARGS+=("$1")
             ;;
@@ -49,7 +53,8 @@ if [[ -n "$SPECIFIED_COMPILER" ]]; then
     BASE_COMPILER="$SPECIFIED_COMPILER"
 elif [[ -L "$BASE_BUILD_DIR/current" ]]; then
     CURRENT_ACTIVE="$(basename "$(readlink "$BASE_BUILD_DIR/current")")"
-    BASE_COMPILER="${CURRENT_ACTIVE%-sanitized}"
+    BASE_COMPILER="${CURRENT_ACTIVE%-syntax}"
+    BASE_COMPILER="${BASE_COMPILER%-sanitized}"
 else
     BASE_COMPILER="default"
 fi
@@ -57,14 +62,18 @@ fi
 # 3. Determine final build folder name (COMPILER_TAG)
 INTERNAL_CMAKE_ARGS=()
 
-if [[ "$ENABLE_SANITIZER" == "true" ]]; then
+if [[ "$ENABLE_SYNTAX_ONLY" == "true" ]]; then
+    COMPILER_TAG="${BASE_COMPILER}-syntax"
+    INTERNAL_CMAKE_ARGS+=("-DZHLN_SYNTAX_ONLY=ON")
+elif [[ "$ENABLE_SANITIZER" == "true" ]]; then
     COMPILER_TAG="${BASE_COMPILER}-sanitized"
     INTERNAL_CMAKE_ARGS+=("-DUSE_SANITIZERS=ON")
 elif [[ -n "$SPECIFIED_COMPILER" ]]; then
     COMPILER_TAG="$BASE_COMPILER"
     INTERNAL_CMAKE_ARGS+=("-DUSE_SANITIZERS=OFF")
 elif [[ -L "$BASE_BUILD_DIR/current" ]]; then
-    COMPILER_TAG="$(basename "$(readlink "$BASE_BUILD_DIR/current")")"
+    CURRENT_TAG="$(basename "$(readlink "$BASE_BUILD_DIR/current")")"
+    COMPILER_TAG="${CURRENT_TAG%-syntax}"
 else
     COMPILER_TAG="default"
 fi
@@ -258,8 +267,10 @@ mkdir -p "$BUILD_DIR"
 # Truncate/initialize log file for this run
 : > "$LOG_FILE"
 
-# Update 'build/current' symlink and create a top-level 'build/build.log' pointer
-(cd "$BASE_BUILD_DIR" && ln -sfn "$COMPILER_TAG" current)
+# Update 'build/current' symlink for regular builds (don't hijack an existing active build in syntax-only mode)
+if [[ "$ENABLE_SYNTAX_ONLY" != "true" || ! -L "$BASE_BUILD_DIR/current" ]]; then
+    (cd "$BASE_BUILD_DIR" && ln -sfn "$COMPILER_TAG" current)
+fi
 ln -sf "$COMPILER_TAG/build.log" "$BASE_BUILD_DIR/build.log"
 
 
@@ -283,7 +294,7 @@ if [ ! -f "$BUILD_DIR/CMakeCache.txt" ] || [ ${#USER_CMAKE_ARGS[@]} -gt 0 ]; the
 fi
 
 # Link compile_commands.json to repository root
-if [[ -f "$BUILD_DIR/compile_commands.json" ]]; then
+if [[ -f "$BUILD_DIR/compile_commands.json" ]] && [[ "$ENABLE_SYNTAX_ONLY" != "true" || ! -e ./compile_commands.json ]]; then
     ln -sf "$BUILD_DIR/compile_commands.json" ./compile_commands.json
 fi
 

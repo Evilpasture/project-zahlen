@@ -3,18 +3,28 @@
 
 #pragma once
 
+// extensions/Scripting/ScriptBinder.hpp
+//
+// Reflection-driven property inspector for C++ structs and ECS components.
+// Used by ConsoleDebugger (`types`, `type`, `get`, `set`) without pulling in
+// any Lua or FFI dependency. Imperative method invocation (`ScriptMethod`) and
+// heap-owned return boxing (`OwnedObject`) have been retired: C++ systems own
+// all behavior, and state inspection/mutation operates strictly on reflected
+// data fields.
+
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+
+#include <cstddef>
 #include <expected>
 #include <functional>
-#include <memory>
 #include <ranges>
-#include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -26,7 +36,6 @@ enum class ScriptError : uint8_t {
     TypeNotFound,
     ComponentNotFound,
     PropertyNotFound,
-    MethodNotFound,
     TypeMismatch,
     ArityMismatch,
     InvalidEnumString,
@@ -41,48 +50,23 @@ struct ScriptArray {
 
 struct BoxedObject {
     std::string_view typeName;
-    Entity           ownerEntity = Entity::Null();
+    Entity           ownerEntity  = Entity::Null();
     std::string_view compName;
     std::string_view propName;
     size_t           elementIndex = SIZE_MAX;
     void*            rawPtr       = nullptr;
 };
 
-struct OwnedObject {
-    std::string_view      typeName;
-    std::shared_ptr<void> ptr;
-};
-
-using ScriptValVariant = std::variant<std::monostate, double, bool, std::string, BoxedObject, OwnedObject, ScriptArray>;
+using ScriptValVariant = std::variant<std::monostate, double, bool, std::string, BoxedObject, ScriptArray>;
 
 struct ScriptVal: ScriptValVariant {
     using ScriptValVariant::variant;
 };
 
-template <typename T>
-auto ToScriptValOwned(T&& val) -> ScriptVal;
-
 // ----------------------------------------------------------------------------
 // Value-type customization point
 // ----------------------------------------------------------------------------
-//
-// The generic conversions below know about arithmetic, bool, string, enum and
-// range types, and treat every other class as an opaque boxed object. That is
-// right for components -- a script holds one by reference -- but wrong for the
-// small value types the engine's methods pass by value: Entity, and Jolt's
-// Vec3/RVec3/Quat and their *Arg wrappers.
-//
-// Left generic, a Vec3 crosses as an opaque BoxedObject, so a script can only
-// hand back one it was already given and cannot write `pc:Raycast({0,5,0}, ...)`.
-// And FromScriptVal matches on Reflect::TypeName<T>, so a method taking Vec3Arg
-// would reject a Vec3 even though Vec3Arg exists purely to be built from one.
-//
-// Specializing this trait teaches the binder a type's script representation.
-// It stays a trait rather than overloads because the conversion functions are
-// templates in this namespace and their calls are dependent: an overload added
-// in another header would only be reachable through ADL, which for JPH types
-// would mean declaring into namespace JPH. Specializations are found at
-// instantiation, so a header included before Register<T>() is called is enough.
+
 template <typename T, typename = void>
 struct ScriptValueTrait {
     static constexpr bool specialized = false;
@@ -108,7 +92,7 @@ auto ToScriptVal(const T& val) -> ScriptVal {
     } else if constexpr (std::ranges::input_range<Decayed>) {
         ScriptArray arr;
         for (const auto& elem: val) {
-            arr.elements.push_back(ToScriptValOwned(elem));
+            arr.elements.push_back(ToScriptVal(elem));
         }
         return arr;
     } else if constexpr (std::is_class_v<Decayed>) {
@@ -126,41 +110,9 @@ auto ToScriptVal(const T& val) -> ScriptVal {
 }
 
 template <typename T>
-auto ToScriptValOwned(T&& val) -> ScriptVal {
-    using Decayed = std::decay_t<T>;
-    if constexpr (ScriptValueTrait<Decayed>::specialized) {
-        // Value types are small and cheap to copy; there is nothing to take
-        // ownership of, so the owned and borrowed paths are the same.
-        return ScriptValueTrait<Decayed>::To(val);
-    } else if constexpr (std::is_same_v<Decayed, bool>) {
-        return val;
-    } else if constexpr (std::is_arithmetic_v<Decayed>) {
-        return static_cast<double>(val);
-    } else if constexpr (std::is_constructible_v<std::string, Decayed>) {
-        return std::string(val);
-    } else if constexpr (std::is_enum_v<Decayed>) {
-        return std::string(ZHLN::Reflect::EnumToString(val));
-    } else if constexpr (std::ranges::input_range<Decayed>) {
-        ScriptArray arr;
-        for (auto&& elem: val) {
-            arr.elements.push_back(ToScriptValOwned(std::forward<decltype(elem)>(elem)));
-        }
-        return arr;
-    } else if constexpr (std::is_class_v<Decayed>) {
-        auto sharedPtr = std::make_shared<Decayed>(std::forward<T>(val));
-        return OwnedObject {.typeName = ZHLN::Reflect::TypeName<Decayed>(), .ptr = std::static_pointer_cast<void>(sharedPtr)};
-    } else {
-        return std::monostate {};
-    }
-}
-
-template <typename T>
 auto FromScriptVal(const ScriptVal& sval) -> std::expected<T, ErrorCode> {
     using Decayed = std::decay_t<T>;
     if constexpr (requires(const ScriptVal& s) { ScriptValueTrait<Decayed>::From(s); }) {
-        // Not every specialized type is constructible from a script -- an
-        // output-only type specializes To alone and falls through to the
-        // generic branch below, which reports TypeMismatch as it should.
         return ScriptValueTrait<Decayed>::From(sval);
     } else if constexpr (std::is_same_v<Decayed, bool>) {
         if (const auto* b = std::get_if<bool>(&sval)) {
@@ -214,13 +166,6 @@ auto FromScriptVal(const ScriptVal& sval) -> std::expected<T, ErrorCode> {
                 if (obj->typeName == ZHLN::Reflect::TypeName<Decayed>() && obj->rawPtr != nullptr) {
                     return *static_cast<const Decayed*>(obj->rawPtr);
                 }
-                return std::unexpected(ScriptError::TypeMismatch);
-            }
-            if (const auto* obj = std::get_if<OwnedObject>(&sval)) {
-                if (obj->typeName == ZHLN::Reflect::TypeName<Decayed>() && obj->ptr != nullptr) {
-                    return *static_cast<const Decayed*>(obj->ptr.get());
-                }
-                return std::unexpected(ScriptError::TypeMismatch);
             }
             return std::unexpected(ScriptError::TypeMismatch);
         } else {
@@ -233,38 +178,18 @@ auto FromScriptVal(const ScriptVal& sval) -> std::expected<T, ErrorCode> {
         if (const auto* obj = std::get_if<BoxedObject>(&sval)) {
             return static_cast<Decayed>(obj->rawPtr);
         }
-        if (const auto* obj = std::get_if<OwnedObject>(&sval)) {
-            return static_cast<Decayed>(obj->ptr.get());
-        }
         return std::unexpected(ScriptError::TypeMismatch);
     } else {
         return std::unexpected(ScriptError::UnsupportedConversion);
     }
 }
 
-template <typename T>
-struct function_traits;
-template <typename R, typename C, typename... Args>
-struct function_traits<R (C::*)(Args...)> {
-    using return_type             = R;
-    using args_tuple              = std::tuple<std::decay_t<Args>...>;
-    static constexpr size_t arity = sizeof...(Args);
-};
-template <typename R, typename C, typename... Args>
-struct function_traits<R (C::*)(Args...) const>: function_traits<R (C::*)(Args...)> {};
-
-template <typename R, typename C, typename... Args>
-struct function_traits<R (C::*)(Args...) noexcept>: function_traits<R (C::*)(Args...)> {};
-
-template <typename R, typename C, typename... Args>
-struct function_traits<R (C::*)(Args...) const noexcept>: function_traits<R (C::*)(Args...)> {};
-
 // ----------------------------------------------------------------------------
 // Registry Definitions
 // ----------------------------------------------------------------------------
 
 struct ScriptProperty {
-    std::string_view                                                                  name;
+    std::string_view                                                                      name;
     std::function<std::expected<ScriptVal, ErrorCode>(const void* instance)>              get;
     std::function<std::expected<void, ErrorCode>(void* instance, const ScriptVal& value)> set;
 
@@ -272,39 +197,11 @@ struct ScriptProperty {
     std::function<std::expected<void, ErrorCode>(void* instance, size_t index, const ScriptVal& value)> set_element_at = nullptr;
 };
 
-struct ScriptMethod {
-    std::string_view                                                                                name;
-    size_t                                                                                          arity;
-    std::function<std::expected<ScriptVal, ErrorCode>(void* instance, std::span<const ScriptVal> args)> invoke;
-};
-
 struct ScriptClassInfo {
-    std::string_view                                                name;
-    size_t                                                          size;
-    size_t                                                          alignment;
-    std::unordered_map<std::string_view, ScriptProperty>            properties;
-    std::unordered_map<std::string_view, std::vector<ScriptMethod>> methods;
-
-    [[nodiscard]] auto InvokeMethod(void* instance, std::string_view methodName, std::span<const ScriptVal> args) const -> std::expected<ScriptVal, ErrorCode> {
-        auto it = methods.find(methodName);
-        if (it == methods.end()) {
-            return std::unexpected(ScriptError::MethodNotFound);
-        }
-
-        ErrorCode lastError = ScriptError::ArityMismatch;
-        for (const auto& overload: it->second) {
-            if (overload.arity != args.size()) {
-                continue;
-            }
-
-            auto result = overload.invoke(instance, args);
-            if (result) {
-                return result.value();
-            }
-            lastError = result.error();
-        }
-        return std::unexpected(lastError);
-    }
+    std::string_view                                      name;
+    size_t                                                size;
+    size_t                                                alignment;
+    std::unordered_map<std::string_view, ScriptProperty>  properties;
 };
 
 class ScriptBinder {
@@ -320,30 +217,12 @@ class ScriptBinder {
     void Register() {
         static_assert(!ZHLN::Reflect::HasVirtualBases<T>(), "ScriptBinder: Virtual base classes are not supported due to dynamic pointer offset adjustment.");
 
-        ScriptClassInfo classInfo {.name = ZHLN::Reflect::TypeName<T>(), .size = sizeof(T), .alignment = alignof(T), .properties = {}, .methods = {}};
+        ScriptClassInfo classInfo {.name = ZHLN::Reflect::TypeName<T>(), .size = sizeof(T), .alignment = alignof(T), .properties = {}};
         PopulateClassInfo<T, T>(classInfo);
         classes[classInfo.name] = std::move(classInfo);
     }
 
   private:
-    // GCC-only suppression, and a narrow one. GCC's -Wreturn-type does not
-    // count a discarded `if constexpr` branch as covering the end of a
-    // function, so the if/else lambdas below report "no return statement" once
-    // per field of every registered type -- thousands of lines per build for
-    // code whose every path does return. Clang does not warn at all.
-    //
-    // This cannot be fixed by rewriting the branches as early returns. The else
-    // bodies are not merely unreachable for the rejected instantiations, they
-    // are ill-formed, and only compile because they are discarded:
-    // FromScriptVal<T[N]> would be a std::expected of an array type, which
-    // libstdc++ rejects with "function returning an array" (Components.hpp has
-    // two `char _pad[3]` fields, at 419 and 434), and in the method thunk
-    // `decltype(auto) ret = (pmf)(...)` would declare a variable of type void.
-    // Hoisting either out of the else turns a discarded statement into a
-    // compiled one.
-    //
-    // Scoped to this function rather than the file so a genuinely missing
-    // return anywhere else still diagnoses.
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wreturn-type"
@@ -412,65 +291,11 @@ class ScriptBinder {
 
             classInfo.properties[name] = std::move(prop);
         });
-
-        ZHLN::Reflect::ForEachMethodPointer<CurrentT>([&](std::string_view name, auto pmf) -> auto {
-            using Traits = function_traits<decltype(pmf)>;
-
-            ScriptMethod method {
-                .name = name, .arity = Traits::arity, .invoke = [pmf](void* inst, std::span<const ScriptVal> args) -> std::expected<ScriptVal, ErrorCode> {
-                    if (args.size() != Traits::arity) {
-                        return std::unexpected(ScriptError::ArityMismatch);
-                    }
-
-                    auto* typedInst = static_cast<CurrentT*>(static_cast<ClassT*>(inst));
-
-                    return [&]<size_t... Is>(std::index_sequence<Is...>) -> std::expected<ScriptVal, ErrorCode> {
-                        std::tuple<std::expected<std::tuple_element_t<Is, typename Traits::args_tuple>, ErrorCode>...> convertedArgs = {
-                            FromScriptVal<std::tuple_element_t<Is, typename Traits::args_tuple>>(args[Is])...
-                        };
-
-                        std::optional<ErrorCode> firstError;
-
-                        (
-                            [&]<size_t I>() -> auto {
-                                if (!std::get<I>(convertedArgs) && !firstError) {
-                                    firstError = std::get<I>(convertedArgs).error();
-                                }
-                            }.template operator()<Is>(),
-                            ...);
-
-                        if (firstError) {
-                            return std::unexpected(*firstError);
-                        }
-
-                        using RetType = typename Traits::return_type;
-                        if constexpr (std::is_same_v<RetType, void>) {
-                            (typedInst->*pmf)(std::get<Is>(convertedArgs).value()...);
-                            return ScriptVal {std::monostate {}};
-                        } else {
-                            decltype(auto) ret = (typedInst->*pmf)(std::get<Is>(convertedArgs).value()...);
-                            using RawRet       = decltype(ret);
-
-                            if constexpr (std::is_reference_v<RawRet>) {
-                                return ToScriptVal(ret);
-                            } else {
-                                return ToScriptValOwned(std::move(ret));
-                            }
-                        }
-                    }(std::make_index_sequence<Traits::arity> {});
-                }
-            };
-            classInfo.methods[name].push_back(std::move(method));
-        });
     }
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
 };
-
-// ----------------------------------------------------------------------------
-// Pure C++ Manifest Registration (ZERO Reflection Tokens)
-// ----------------------------------------------------------------------------
 
 template <typename Manifest>
 void RegisterManifest() {

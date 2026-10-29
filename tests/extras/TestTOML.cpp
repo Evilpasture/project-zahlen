@@ -71,6 +71,8 @@ struct Config {
 
 } // namespace
 
+namespace {
+
 struct TOMLTestSuite {
     struct Tests {
         // ====================================================================
@@ -146,7 +148,7 @@ struct TOMLTestSuite {
             };
 
             const std::string text   = ZHLN::ReflectTOML::SerializeTOML(original);
-            const auto        parsed = ZHLN::ReflectTOML::TryParse<Config>(text);
+            const auto        parsed = ZHLN::ReflectTOML::Parse<Config>(text);
             if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
                 return {};
             }
@@ -195,7 +197,7 @@ name = "sparse"
 width = 640   # height and fullscreen are not mentioned
 )";
 
-            const auto parsed = ZHLN::ReflectTOML::TryParse<Config>(kDocument);
+            const auto parsed = ZHLN::ReflectTOML::Parse<Config>(kDocument);
             if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
                 return {};
             }
@@ -240,7 +242,7 @@ at = [1.5, 0.0, -1.5]
 label = "two"
 )";
 
-            const auto parsed = ZHLN::ReflectTOML::TryParse<Config>(kDocument);
+            const auto parsed = ZHLN::ReflectTOML::Parse<Config>(kDocument);
             if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
                 return {};
             }
@@ -268,31 +270,31 @@ label = "two"
          */
         std::expected<void, ZHLN::ErrorCode> malformed_documents_are_rejected() {
             // Missing '='.
-            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("name \"x\"").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<Config>("name \"x\"").has_value());
             // Unterminated string.
-            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("name = \"x").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<Config>("name = \"x").has_value());
             // Unterminated array.
-            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("slots = [1, 2").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<Config>("slots = [1, 2").has_value());
             // Unterminated header.
-            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("[window\nwidth = 1").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<Config>("[window\nwidth = 1").has_value());
             // The same key twice in one table is an error, not last-wins:
             // silently picking one of two conflicting values is how a scene
             // ends up different from the file someone read.
-            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("revision = 1\nrevision = 2").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<Config>("revision = 1\nrevision = 2").has_value());
             // A value of the wrong shape.
-            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("revision = \"seven\"").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<Config>("revision = \"seven\"").has_value());
             // An enum spelling that does not exist.
-            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("difficulty = \"Impossible\"").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<Config>("difficulty = \"Impossible\"").has_value());
             // A table (or a scalar) where a sequence is declared. Worth its
             // own case: an array node answers its length and a table answers
             // zero, so without a shape check this reads as "empty" rather
             // than "wrong" and the field silently keeps its default.
-            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("slots = { a = 1 }").has_value());
-            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("slots = 3").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<Config>("slots = { a = 1 }").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<Config>("slots = 3").has_value());
 
             // An unknown key is survivable -- it is logged and skipped, so one
             // stale field in a scene file does not cost the whole scene.
-            const auto tolerated = ZHLN::ReflectTOML::TryParse<Config>("name = \"kept\"\nnosuchfield = 3");
+            const auto tolerated = ZHLN::ReflectTOML::Parse<Config>("name = \"kept\"\nnosuchfield = 3");
             ZHLN::Test::ExpectTrue(tolerated.has_value());
             if (tolerated) {
                 ZHLN::Test::ExpectEq(tolerated->name, "kept");
@@ -349,7 +351,7 @@ position = [2.0, 4.0, 2.0]
 intensity = 250.0
 )";
 
-            const auto scene = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(kScene);
+            const auto scene = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>(kScene);
             if (!ZHLN::Test::ExpectTrue(scene.has_value())) {
                 return {};
             }
@@ -364,9 +366,9 @@ intensity = 250.0
             // document -- the emitted text has to keep saying so.
             ZHLN::Test::ExpectTrue(ZHLN::ReflectTOML::SerializeTOML(*scene).contains("position = [0.0, 2.0, 12.0]"));
             // ... and only in that form.
-            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>("[camera.position]\nx = 1.0\n").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>("[camera.position]\nx = 1.0\n").has_value());
             // A Float3 accepts the integers a person types.
-            const auto integral = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>("[camera]\nposition = [0, 2, 12]\n");
+            const auto integral = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>("[camera]\nposition = [0, 2, 12]\n");
             ZHLN::Test::ExpectTrue(integral.has_value()) && ZHLN::Test::ExpectEq(integral->camera.position.z, 12.0f);
 
             ZHLN::Test::ExpectEq(scene->entities.size(), size_t {2});
@@ -394,7 +396,7 @@ intensity = 250.0
             }
 
             const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(*scene);
-            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
+            const auto        reparsed = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] re-emitted scene:\n{}", emitted);
                 return {};
@@ -493,7 +495,7 @@ intensity = 250.0
 
             // And the document layer can carry all of it without loss.
             const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(scene);
-            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
+            const auto        reparsed = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] re-emitted fallback scene:\n{}", emitted);
                 return {};
@@ -535,7 +537,7 @@ label = "Save"
 onClickAction = "editor.save_scene"
 )";
 
-            const auto parsed = ZHLN::ReflectTOML::TryParse<ZHLN::GUI::UINode>(kTree);
+            const auto parsed = ZHLN::ReflectTOML::Parse<ZHLN::GUI::UINode>(kTree);
             if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
                 return {};
             }
@@ -551,7 +553,7 @@ onClickAction = "editor.save_scene"
             }
 
             const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(*parsed);
-            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::GUI::UINode>(emitted);
+            const auto        reparsed = ZHLN::ReflectTOML::Parse<ZHLN::GUI::UINode>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] re-emitted ui tree:\n{}", emitted);
                 return {};
@@ -733,7 +735,7 @@ onClickAction = "editor.save_scene"
 
             // And the document carries all of it without loss.
             const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(scene);
-            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
+            const auto        reparsed = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] extracted scene:\n{}", emitted);
                 return {};
@@ -755,8 +757,4 @@ onClickAction = "editor.save_scene"
     };
 };
 
-// The extras test binaries are one suite per process (see
-// tests/extras/CMakeLists.txt), so this owns its own entry point.
-int main() {
-    return ZHLN::Test::Runner::Run<TOMLTestSuite>();
-}
+} // namespace

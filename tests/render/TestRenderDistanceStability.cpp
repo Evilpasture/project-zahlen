@@ -71,8 +71,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <expected>
-#include <filesystem>
-#include <fstream>
 #include <memory>
 #include <numbers>
 #include <span>
@@ -160,123 +158,13 @@ constexpr float    kEyeHeight            = 1.5f;
 // Image Helpers (same capture/diagnose pattern as TestLightingRayTraced)
 // ============================================================================
 
-struct RgbImage {
-    int                  width  = 0;
-    int                  height = 0;
-    std::vector<uint8_t> rgb;
+using RgbImage = ZHLN::Test::Image::RgbImage;
 
-    [[nodiscard]] bool Valid() const noexcept {
-        return width > 0 && height > 0 && rgb.size() == static_cast<size_t>(width) * static_cast<size_t>(height) * 3u;
-    }
-};
-
-[[nodiscard]] RgbImage LoadPPM(std::string_view path) {
-    RgbImage      img;
-    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
-    if (!ppm.is_open()) {
-        return img;
-    }
-
-    std::string header;
-    int         maxColor = 0;
-    ppm >> header >> img.width >> img.height >> maxColor;
-    ppm.get();
-
-    if (img.width <= 0 || img.height <= 0) {
-        return {};
-    }
-
-    img.rgb.resize(static_cast<size_t>(img.width) * static_cast<size_t>(img.height) * 3u);
-    ppm.read(reinterpret_cast<char*>(img.rgb.data()), static_cast<std::streamsize>(img.rgb.size()));
-    return img;
-}
-
-// Replaces a trailing ".ppm"/".PPM" with ".png"; appends ".png" otherwise.
-[[nodiscard]] std::string PngPathOf(std::string_view ppmPath) {
-    std::string png(ppmPath);
-    if (png.size() >= 4 && (png.ends_with(".ppm") || png.ends_with(".PPM"))) {
-        png.resize(png.size() - 4);
-    }
-    png += ".png";
-    return png;
-}
-
-[[nodiscard]] bool SavePNG(std::string_view path, const RgbImage& img) {
-    if (!img.Valid()) {
-        return false;
-    }
-    const std::string pathStr(path);
-    return stbi_write_png(pathStr.c_str(), img.width, img.height, 3, img.rgb.data(), img.width * 3) != 0;
-}
-
-struct FrameDiff {
-    uint32_t over12  = 0;
-    uint32_t over32  = 0;
-    double   meanAbs = 0.0;
-    double   frac12  = 0.0;
-    double   frac32  = 0.0;
-};
-
-[[nodiscard]] FrameDiff CompareFrames(const RgbImage& a, const RgbImage& b) {
-    FrameDiff d;
-    if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
-        return d;
-    }
-
-    uint64_t sum = 0;
-    for (size_t i = 0; i < a.rgb.size(); i += 3) {
-        const int dr    = std::abs(static_cast<int>(a.rgb[i + 0]) - static_cast<int>(b.rgb[i + 0]));
-        const int dg    = std::abs(static_cast<int>(a.rgb[i + 1]) - static_cast<int>(b.rgb[i + 1]));
-        const int db    = std::abs(static_cast<int>(a.rgb[i + 2]) - static_cast<int>(b.rgb[i + 2]));
-        const int worst = std::max({dr, dg, db});
-        sum += static_cast<uint64_t>(dr + dg + db);
-        if (worst > 12) {
-            ++d.over12;
-        }
-        if (worst > 32) {
-            ++d.over32;
-        }
-    }
-
-    const size_t pixels = a.rgb.size() / 3;
-    if (pixels > 0) {
-        d.meanAbs = static_cast<double>(sum) / (static_cast<double>(pixels) * 3.0);
-        d.frac12  = static_cast<double>(d.over12) / static_cast<double>(pixels);
-        d.frac32  = static_cast<double>(d.over32) / static_cast<double>(pixels);
-    }
-    return d;
-}
-
-[[nodiscard]] double Mean(std::span<const double> values) {
-    if (values.empty()) {
-        return 0.0;
-    }
-    double sum = 0.0;
-    for (double v: values) {
-        sum += v;
-    }
-    return sum / static_cast<double>(values.size());
-}
-
-[[nodiscard]] double StdDev(std::span<const double> values, double mean) {
-    if (values.size() < 2) {
-        return 0.0;
-    }
-    double sumSq = 0.0;
-    for (double v: values) {
-        const double d = v - mean;
-        sumSq += d * d;
-    }
-    return std::sqrt(sumSq / static_cast<double>(values.size() - 1));
-}
-
-[[nodiscard]] double CoefficientOfVariation(std::span<const double> values) {
-    const double mean = Mean(values);
-    if (mean <= 1e-9) {
-        return 0.0;
-    }
-    return StdDev(values, mean) / mean;
-}
+using ZHLN::Test::Image::CoefficientOfVariation;
+using ZHLN::Test::Image::CompareFrames;
+using ZHLN::Test::Image::FrameDiff;
+using ZHLN::Test::Image::Mean;
+using ZHLN::Test::Image::StdDev;
 
 // ============================================================================
 // Hue Signature Classification
@@ -476,14 +364,11 @@ void DisableTAA(ZHLN::Engine& engine) {
 
 // Captures through Engine::GetRenderContext() so the call always uses the
 // CURRENT context, never a reference that may dangle after a hot-rebuild.
-// Every capture is exported as PPM (engine-native) plus a PNG twin.
+// The pixels come back in memory; PPM + PNG are written only as diagnostics.
 [[nodiscard]] RgbImage Capture(ZHLN::Engine& engine, std::string_view path) {
-    if (!engine.GetRenderContext().CaptureScreenshotPPM(path)) {
-        return {};
-    }
-    const RgbImage img = LoadPPM(path);
+    RgbImage img = ZHLN::Test::Headless::Capture(engine, path);
     if (img.Valid()) {
-        (void) SavePNG(PngPathOf(path), img);
+        (void) ZHLN::Test::Image::SavePNG(ZHLN::Test::Image::PngPathOf(path), img);
     }
     return img;
 }
@@ -509,7 +394,7 @@ template <typename SceneFn>
             ZHLN::Println("    [WARN] {}: Vulkan device lost; engine hot-rebuilt. Re-warming and retrying (attempt {}/{}).", label, attempt, kMaxDeviceLostRecoveries);
         }
 
-        const uint32_t validationBefore = engine.GetRenderContext().GetValidationErrorCount();
+        const uint32_t validationBefore = ZHLN::Test::ValidationErrorCount();
 
         ZHLN::RenderContext* const preWarmup = &engine.GetRenderContext();
         TickFrames(engine, warmupFrames);
@@ -521,7 +406,7 @@ template <typename SceneFn>
         const bool                 ok      = sceneFn(engine);
         if (ok && &engine.GetRenderContext() == preWork) {
             if (outValidationDelta != nullptr) {
-                *outValidationDelta = engine.GetRenderContext().GetValidationErrorCount() - validationBefore;
+                *outValidationDelta = ZHLN::Test::ValidationErrorCount() - validationBefore;
             }
             return StableRunResult::Ok;
         }
@@ -568,7 +453,12 @@ template <typename SceneFn>
 // Test Suite
 // ============================================================================
 
-struct DistanceStabilitySuite {
+// Priority<100> runs this suite last in GPU_Pipeline regardless of link order:
+// CreateTestEngine evicts the pooled engine for an exclusive one, so running it
+// last avoids rebuilding the pool for any suite after it.
+namespace {
+
+struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
     DistanceStabilitySuite() {
         // Nested in the group binary's session: the task system and the pooled
         // engine outlive this suite (see HeadlessEngineFixture.hpp). A raw
@@ -601,7 +491,6 @@ struct DistanceStabilitySuite {
                 // Keep the default path, but allow an isolated vertex-path
                 // run to distinguish task-stage culling from a hue failure.
                 .enableMeshShading = std::getenv("ZHLN_TEST_NO_MESH_SHADING") == nullptr,
-                .diagnostics       = &ZHLN::Test::g_renderDiagnostics
             },
             .enableFallbackScene = false,
         };
@@ -648,6 +537,7 @@ struct DistanceStabilitySuite {
             if (!settingsEnts.empty()) {
                 reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                     pp.fullBright      = 0;
+                    pp.exposure        = 0.015f;
                     pp.ambientExposure = 10.0f;
                     pp.enableSSR       = 1;
                     pp.enableRTR       = 0;
@@ -1223,13 +1113,8 @@ struct DistanceStabilitySuite {
     };
 };
 
+} // namespace
+
 // ============================================================================
 // Group Binary Entry Point
 // ============================================================================
-
-// Exported for the GPU_Performance group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunDistanceStabilitySuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<DistanceStabilitySuite>();
-}
-

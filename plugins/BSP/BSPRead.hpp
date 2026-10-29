@@ -20,8 +20,10 @@
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <array>
 #include <cstddef>
+#include <cmath>
 #include <cstring>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -169,8 +171,100 @@ struct BSPMap {
     std::vector<DOverlay>    overlays;
     std::vector<DGameLump>   gameLumps;
     std::vector<StaticProp>  staticProps;
+    std::vector<DLeafAmbientIndex>    leafAmbientIndex;   // LDR, one per leaf (may be empty)
+    std::vector<DLeafAmbientLighting> leafAmbientSamples; // LDR ambient cube samples
 
+    // LUMP_LIGHTING (or LUMP_LIGHTING_HDR when it carries data): VRAD's baked
+    // radiance, one ColorRGBExp32 per luxel per style, addressed by
+    // DFace::lightofs. Empty on maps compiled without a bake.
+    std::vector<ColorRGBExp32> lighting;
+    // True only when `lighting` came from LUMP_LIGHTING_HDR together with the
+    // matching HDR face lump. Native lightmap ingestion keeps this provenance
+    // so Source's LDR fallback is never silently treated as authored HDR.
+    bool lightingIsHdr = false;
 };
+
+// Source VRAD ambient cube at a point (Source units). Walks the BSP node tree to
+// the containing leaf, then takes the nearest stored sample in that leaf. Sample
+// positions are the leaf bounds scaled by the 0..255 xyz bytes. Values are linear
+// radiance, decoded like DecodeVradLuxel (c * 2^e), so they are on the same scale
+// as the lightmaps. Returns false if the leaf has no samples.
+inline auto SampleLeafAmbientCube(const BSPMap& map, const std::array<float, 3>& p, std::array<std::array<float, 3>, 6>& out) -> bool {
+    if (map.nodes.empty() || map.leafs.empty()) {
+        return false;
+    }
+    int32_t node = 0;
+    while (node >= 0) {
+        const DNode&  n  = map.nodes[static_cast<size_t>(node)];
+        const DPlane& pl = map.planes[static_cast<size_t>(n.planenum)];
+        const float   d  = pl.normal[0] * p[0] + pl.normal[1] * p[1] + pl.normal[2] * p[2] - pl.dist;
+        node             = n.children[d >= 0.0f ? 0 : 1];
+    }
+    size_t leafIdx = static_cast<size_t>(-node - 1);
+    if (leafIdx >= map.leafs.size() || leafIdx >= map.leafAmbientIndex.size()) {
+        return false;
+    }
+    // About half of all leaves have no ambient samples of their own (corridors,
+    // thin spaces, leaves VRAD did not bake). Props there would otherwise stay
+    // unlit. Fall back to the nearest non-solid leaf that does have samples,
+    // measured as distance from the point to that leaf's bounding box.
+    if (map.leafAmbientIndex[leafIdx].sampleCount == 0) {
+        constexpr int32_t kContentsSolid = 0x1;
+        float             bestBox2       = std::numeric_limits<float>::max();
+        size_t            fallback       = static_cast<size_t>(-1);
+        for (size_t l = 0; l < map.leafs.size() && l < map.leafAmbientIndex.size(); ++l) {
+            if (map.leafAmbientIndex[l].sampleCount == 0 || (map.leafs[l].contents & kContentsSolid) != 0) {
+                continue;
+            }
+            float d2 = 0.0f;
+            for (size_t a = 0; a < 3; ++a) {
+                const float lo = static_cast<float>(map.leafs[l].mins[a]);
+                const float hi = static_cast<float>(map.leafs[l].maxs[a]);
+                const float d  = p[a] < lo ? lo - p[a] : (p[a] > hi ? p[a] - hi : 0.0f);
+                d2 += d * d;
+            }
+            if (d2 < bestBox2) {
+                bestBox2 = d2;
+                fallback = l;
+            }
+        }
+        if (fallback == static_cast<size_t>(-1)) {
+            return false;
+        }
+        leafIdx = fallback;
+    }
+    const DLeafAmbientIndex idx = map.leafAmbientIndex[leafIdx];
+    const DLeaf&            leaf = map.leafs[leafIdx];
+
+    size_t chosen = static_cast<size_t>(-1);
+    float  bestD2 = 0.0f;
+    for (uint16_t s = 0; s < idx.sampleCount; ++s) {
+        const size_t si = static_cast<size_t>(idx.firstSample) + s;
+        if (si >= map.leafAmbientSamples.size()) {
+            break;
+        }
+        const DLeafAmbientLighting& smp = map.leafAmbientSamples[si];
+        const uint8_t                xyz[3] = {smp.x, smp.y, smp.z};
+        float                        d2     = 0.0f;
+        for (size_t a = 0; a < 3; ++a) {
+            const float sp = static_cast<float>(leaf.mins[a]) + static_cast<float>(leaf.maxs[a] - leaf.mins[a]) * (static_cast<float>(xyz[a]) / 255.0f);
+            d2 += (sp - p[a]) * (sp - p[a]);
+        }
+        if (chosen == static_cast<size_t>(-1) || d2 < bestD2) {
+            chosen = si;
+            bestD2 = d2;
+        }
+    }
+    if (chosen == static_cast<size_t>(-1)) {
+        return false;
+    }
+    const DLeafAmbientLighting& best = map.leafAmbientSamples[chosen];
+    for (size_t f = 0; f < 6; ++f) {
+        const float scale = std::ldexp(1.0f, static_cast<int>(best.cube[f].exponent));
+        out[f]            = {static_cast<float>(best.cube[f].r) * scale, static_cast<float>(best.cube[f].g) * scale, static_cast<float>(best.cube[f].b) * scale};
+    }
+    return true;
+}
 
 // Parses a whole .bsp image. Strict on the container (ident, version window,
 // lump bounds) and on every struct read; empty lumps are legal and common.

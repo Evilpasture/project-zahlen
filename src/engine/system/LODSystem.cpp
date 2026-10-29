@@ -10,24 +10,23 @@
 
 namespace ZHLN {
 
-void LODSystem::Update(Engine& engine) {
-    auto& reg = engine.GetRegistry();
+void LODSystem::GraphUpdate(LODQuery query) {
     // LOD is picked from the camera's distance, so a world without one has no view
     // to quantify against and nothing to choose.
-    const auto camera = reg.GetSingleton<Components::CameraComponent>();
+    const auto camera = query.GetSingleton<Components::CameraComponent>();
     if (!camera) {
         return;
     }
     const auto& cam = camera->camera;
 
-    auto entities = reg.GetEntitiesWith<Components::LODComponent>();
+    auto entities = query.Entities<Components::LODComponent>();
     if (entities.empty()) {
         return;
     }
 
-    auto lods = reg.GetRawArray<Components::LODComponent>();
+    auto lods = query.Raw<Components::LODComponent>();
 
-    TaskSystem::ParallelFor(entities.size(), 256, [&](uint32_t start, uint32_t end, uint32_t) {
+    TaskSystem::ParallelFor(static_cast<uint32_t>(entities.size()), 256, [&](uint32_t start, uint32_t end, uint32_t) {
         for (uint32_t i = start; i < end; ++i) {
             Entity e        = entities[i];
             auto&  lodGroup = lods[i];
@@ -35,19 +34,19 @@ void LODSystem::Update(Engine& engine) {
                 continue;
             }
 
-            auto meshComp = reg.Get<Components::MeshComponent>(e);
+            auto meshComp = query.Get<Components::MeshComponent>(e);
             if (!meshComp) {
                 continue;
             }
 
             JPH::Vec3 worldPos = JPH::Vec3::sZero();
-            if (auto worldTrans = reg.Get<Components::WorldTransformComponent>(e)) {
+            if (auto worldTrans = query.Get<Components::WorldTransformComponent>(e)) {
                 worldPos = worldTrans->world.GetTranslation();
-            } else if (auto trans = reg.Get<Components::TransformComponent>(e)) {
+            } else if (auto trans = query.Get<Components::TransformComponent>(e)) {
                 worldPos = trans->position;
             }
 
-            float dist = (worldPos - cam.position).Length();
+            const float dist = (worldPos - cam.position).Length();
 
             uint8_t selectedLOD = lodGroup.count - 1;
 
@@ -64,6 +63,10 @@ void LODSystem::Update(Engine& engine) {
             }
         }
     });
+}
+
+void LODSystem::Update(Engine& engine) {
+    GraphUpdate(LODQuery {engine.GetRegistry()});
 }
 
 }

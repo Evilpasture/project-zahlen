@@ -105,7 +105,7 @@ auto LogicBenchmark::Initialize(size_t initialEntityCount, const PhysicsConfig& 
     SpawnFloor();
     SpawnWorkload(initialEntityCount);
 
-    m_runStartSeconds = m_clock.GetTotalTime();
+    m_runStartSeconds = m_clock.WallTimeSinceStart();
     ZHLN::Log(
         "[Bench] initialized: {} entities, {} bodies live, {} body budget (maxBodies {}, {} body pairs, {} contact constraints)", m_metrics.entityCount,
         m_liveBodies, m_bodyCeiling, config.maxBodies, config.maxBodyPairs, config.maxContactConstraints
@@ -207,12 +207,12 @@ void LogicBenchmark::Step(float fixedDt) {
         }
         ++bodies;
 
-        JPH::RVec3 position;
-        if (!physics.TryGetBodyPosition(physicsComponent->physicsHandle, position)) {
+        const auto position = physics.BodyPosition(physicsComponent->physicsHandle);
+        if (!position) {
             continue;
         }
         if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
-            transform->position = static_cast<JPH::Vec3>(position);
+            transform->position = static_cast<JPH::Vec3>(*position);
         }
     }
 
@@ -225,7 +225,7 @@ void LogicBenchmark::Step(float fixedDt) {
     m_metrics.maxTickTimeMs  = std::max(m_metrics.maxTickTimeMs, tickMilliseconds);
     // Running mean, so the average survives the history window rolling over.
     m_metrics.avgTickTimeMs += (tickMilliseconds - m_metrics.avgTickTimeMs) / static_cast<float>(m_metrics.totalTicks);
-    m_metrics.totalTimeSec        = m_clock.GetTotalTime() - m_runStartSeconds;
+    m_metrics.totalTimeSec        = m_clock.WallTimeSinceStart() - m_runStartSeconds;
     m_metrics.entityCount         = bodies;
     m_metrics.activePhysicsBodies = physics.GetActiveBodyCount();
 

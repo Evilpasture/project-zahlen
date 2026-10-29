@@ -3,7 +3,7 @@
 
 #pragma once
 #include "Rendering.hpp"
-#include "graph/RenderGraph.hpp"
+#include "graph/RenderPassDecl.hpp"
 #include "pipeline/FullscreenPass.hpp"
 #include <GeneratedGpuTypes.hpp>
 

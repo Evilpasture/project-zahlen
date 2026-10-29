@@ -7,8 +7,6 @@
 #include <chrono>
 #include <thread>
 
-#include <volk.h>
-#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Platform.hpp>
 
@@ -20,12 +18,33 @@
 #endif
 #else
 #include <dlfcn.h>
+#include <unistd.h>
 #endif
 
 #ifdef __APPLE__
 #include <pthread.h>
 #include <pthread/qos.h>
 #endif
+
+namespace ZHLN {
+
+auto GetPID() noexcept -> int {
+#ifdef _WIN32
+    return static_cast<int>(::GetCurrentProcessId());
+#else
+    return ::getpid();
+#endif
+}
+
+void HaltThread() noexcept {
+#if defined(_WIN32)
+    ::Sleep(INFINITE);
+#else
+    ::pause();
+#endif
+}
+
+} // namespace ZHLN
 
 namespace ZHLN::Platform {
 

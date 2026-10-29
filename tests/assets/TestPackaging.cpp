@@ -6,6 +6,8 @@
 #include <Zahlen/Core/AssetID.hpp>
 #include <expected>
 
+namespace {
+
 struct PackagingTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> asset_id_and_path_hashing() {
@@ -37,9 +39,4 @@ struct PackagingTestSuite {
     };
 };
 
-// Exported for the assets group binary (RunAssetsTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunPackagingSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<PackagingTestSuite>();
-}
-
+} // namespace

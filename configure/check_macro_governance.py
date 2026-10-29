@@ -87,52 +87,28 @@ CXX_SUFFIXES = {
 }
 
 
+SKIP_DIR_NAMES = {".git", "build", "target", "__pycache__", ".cache", "node_modules"}
+
+_COMMENT_OR_STRING_RE = re.compile(
+    r"//[^\n]*"
+    r"|/\*[\s\S]*?\*/"
+    r'|"(?:\\[\s\S]|[^"\\])*"'
+    r"|'(?:\\[\s\S]|[^'\\])*'"
+)
+
+
+def _blank_match(match: re.Match[str]) -> str:
+    span = match.group(0)
+    if "\n" not in span:
+        return " " * len(span)
+    return "\n".join(" " * len(part) for part in span.split("\n"))
+
+
 # Vendored from configure/check_reflection_boundary.py: comments and string
 # literals can mention macros (this file does) and must not count as uses.
 def strip_comments_and_strings(text: str) -> str:
     """Replace comments and string/char literals with spaces, newlines kept."""
-    out = list(text)
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c == "/" and i + 1 < n:
-            if text[i + 1] == "/":
-                while i < n and text[i] != "\n":
-                    out[i] = " "
-                    i += 1
-                continue
-            if text[i + 1] == "*":
-                out[i] = out[i + 1] = " "
-                i += 2
-                while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
-                    if text[i] != "\n":
-                        out[i] = " "
-                    i += 1
-                if i + 1 < n:
-                    out[i] = out[i + 1] = " "
-                    i += 2
-                continue
-        if c in "\"'":
-            quote, out[i] = c, " "
-            i += 1
-            while i < n:
-                if text[i] == "\\":
-                    out[i] = " "
-                    i += 1
-                    if i < n:
-                        out[i] = " "
-                        i += 1
-                    continue
-                if text[i] == quote:
-                    out[i] = " "
-                    i += 1
-                    break
-                if text[i] != "\n":
-                    out[i] = " "
-                i += 1
-            continue
-        i += 1
-    return "".join(out)
+    return _COMMENT_OR_STRING_RE.sub(_blank_match, text)
 
 
 define_directive = re.compile(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)")
@@ -158,9 +134,16 @@ def iter_sources(paths=None):
     for root in SOURCE_ROOTS:
         if not root.is_dir():
             continue
-        for path in sorted(root.rglob("*")):
-            if path.suffix.lower() in CXX_SUFFIXES and path.is_file():
-                yield path.resolve()
+        found: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIR_NAMES)
+            base = Path(dirpath)
+            for name in sorted(filenames):
+                candidate = base / name
+                if candidate.suffix.lower() in CXX_SUFFIXES and candidate.is_file():
+                    found.append(candidate.resolve())
+        found.sort()
+        yield from found
 
 
 def is_vendored(path: Path) -> bool:
@@ -200,6 +183,9 @@ def check_definitions(paths, allowed, third_party, suffixes, violations) -> int:
 
 def check_banned(paths, banned, violations) -> None:
     """Denylist uses. Needs no parser: the question is 'is NAME( being called'."""
+    if not banned:
+        return
+    compiled = []
     for name, spec in banned.items():
         function_like = (
             bool(spec.get("function_like", False)) if isinstance(spec, dict) else False
@@ -207,17 +193,23 @@ def check_banned(paths, banned, violations) -> None:
         pattern = re.compile(
             rf"\b{re.escape(name)}\s*\(" if function_like else rf"\b{re.escape(name)}\b"
         )
-        for path in iter_sources(paths):
-            if is_vendored(path):
-                continue
-            text = strip_comments_and_strings(path.read_text(errors="ignore"))
-            for lineno, line in enumerate(text.split("\n"), 1):
+        compiled.append((name, pattern))
+
+    for path in iter_sources(paths):
+        if is_vendored(path):
+            continue
+        raw = path.read_text(errors="ignore")
+        active = [(name, pat) for name, pat in compiled if name in raw]
+        if not active:
+            continue
+        raw_lines = raw.split("\n")
+        clean_lines = strip_comments_and_strings(raw).split("\n")
+        for name, pattern in active:
+            for lineno, line in enumerate(clean_lines, 1):
                 if pattern.search(line):
                     # A #define of a banned name is governed by the allowlist,
                     # not the denylist; only expansions are denied here.
-                    if define_directive.match(
-                        path.read_text(errors="ignore").split("\n")[lineno - 1]
-                    ):
+                    if define_directive.match(raw_lines[lineno - 1]):
                         continue
                     violations.append(
                         f"{path.relative_to(ROOT)}:{lineno}: banned macro {name} used"
@@ -247,6 +239,7 @@ INCLUDE_DIRS = (
     "extern/miniaudio",
     "extern/mimalloc/include",
     "extern/meshoptimizer",
+    "extern/simdjson/include",
     "extern/LuaJIT/src",
 )
 
@@ -354,6 +347,16 @@ def check_expansions_libclang(
         "-DGLFW_INCLUDE_NONE",
     ]
     flags += [f"-I{ROOT / d}" for d in INCLUDE_DIRS if (ROOT / d).is_dir()]
+    if not (ROOT / "extern/LuaJIT/src/luajit.h").is_file():
+        for sys_luajit in (Path("/usr/include/luajit-2.1"), Path("/usr/local/include/luajit-2.1")):
+            if sys_luajit.is_dir():
+                flags.append(f"-isystem{sys_luajit}")
+                break
+    if not (ROOT / "extern/glfw/include/GLFW/glfw3.h").is_file():
+        for sys_glfw in (Path("/usr/local/include"), Path("/opt/homebrew/include")):
+            if (sys_glfw / "GLFW/glfw3.h").is_file():
+                flags.append(f"-isystem{sys_glfw}")
+                break
     # libclang does not know this project's toolchain. Without the right
     # -isystem/-D it stops at the first libc++ header, and ZHLN_LIBCLANG_FLAGS
     # is how a caller hands it one.

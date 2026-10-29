@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "DescriptorMapping.hpp"
 #include "ShaderProgram.hpp"
 
 #include <Zahlen/Log.hpp>
@@ -25,8 +26,10 @@ namespace ZHLN::Vk {
 }
 
 struct HeapPassBindings {
-    std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
-    VkShaderDescriptorSetAndBindingMappingInfoEXT    info {};
+    // The mappings this set declares: semantic rows, 32 bytes each, owned here.
+    // Nothing in this header materializes them; a build site asks a
+    // HeapMappingArena for the driver struct when it creates a pipeline.
+    HeapMappingTable mappings;
 
     std::vector<uint32_t>    samplerSlots;
     std::vector<std::string> samplerNames;
@@ -66,19 +69,6 @@ struct HeapPassBindings {
     HeapLifecycle lifecycle = HeapLifecycle::Frame;
 
     uint32_t resourceBindingCount = 0;
-
-    void Finalize() noexcept {
-        info = {
-            .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
-            .pNext        = nullptr,
-            .mappingCount = static_cast<uint32_t>(entries.size()),
-            .pMappings    = entries.empty() ? nullptr : entries.data(),
-        };
-    }
-
-    [[nodiscard]] auto GetInfo() const noexcept -> const VkShaderDescriptorSetAndBindingMappingInfoEXT* {
-        return info.mappingCount > 0 ? &info : nullptr;
-    }
 };
 
 inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
@@ -93,7 +83,7 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     HeapLifecycle       lifecycle,
     HeapPassBindings&   out
 ) noexcept -> std::expected<void, ErrorCode> {
-    out.entries.clear();
+    out.mappings.clear();
     out.samplerSlots.clear();
     out.samplerNames.clear();
     out.resources.clear();
@@ -101,7 +91,6 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     out.indexPushOffset      = indexPushOffset;
     out.lifecycle            = lifecycle;
     out.resourceBindingCount = 0;
-    out.info                 = {};
 
     if (indexPushOffset == 0) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::MappingFailed);
@@ -116,77 +105,60 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
 
     out.resourceBindingCount = resourceCount;
 
-    const uint32_t stride  = static_cast<uint32_t>(heap.ResourceStride());
-    uint32_t       ordinal = 0;
+    uint32_t ordinal = 0;
 
     for (const auto& b: set.bindings) {
-        VkDescriptorSetAndBindingMappingEXT entry = {
-            .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
-            .pNext         = nullptr,
-            .descriptorSet = setIndex,
-            .firstBinding  = b.binding,
-            .bindingCount  = 1,
-            .resourceMask  = 0,
-            .source        = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT,
-            .sourceData    = {},
-        };
-
+        // A sampler binding is registered by the heap itself: slot allocation and
+        // the mapping that addresses it happen in one call.
         if (IsHeapSamplerType(b.descriptorType)) {
-            entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
-            auto slot          = heap.AllocateStaticSampler();
+            auto slot = heap.ApplyNewSamplerMapping(out.mappings, setIndex, b.binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT);
             if (!slot) [[unlikely]] {
                 return std::unexpected(slot.error());
             }
             out.samplerSlots.push_back(slot->index);
             out.samplerNames.push_back(b.name);
-            entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heap.SamplerOffset(slot->index));
-        } else {
-            switch (b.descriptorType) {
-                case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-                case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
-                    entry.resourceMask = (b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) ?
-                                             VK_SPIRV_RESOURCE_TYPE_COMBINED_SAMPLED_IMAGE_BIT_EXT :
-                                             VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
-                    break;
-                case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-                    entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_READ_WRITE_IMAGE_BIT_EXT;
-                    break;
-                case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-                    entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
-                    break;
-                case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-                    entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_ALL_EXT;
-                    break;
-                case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
-                    entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_ACCELERATION_STRUCTURE_BIT_EXT;
-                    break;
-                default:
-                    entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_ALL_EXT;
-                    break;
-            }
-
-            entry.source                               = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT;
-            entry.sourceData.pushIndex.heapOffset      = ordinal * stride;
-            entry.sourceData.pushIndex.pushOffset      = indexPushOffset;
-            entry.sourceData.pushIndex.heapIndexStride = stride;
-            entry.sourceData.pushIndex.heapArrayStride = 0;
-
-            if (b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-                auto smp = heap.AllocateStaticSampler();
-                if (!smp) [[unlikely]] {
-                    return std::unexpected(smp.error());
-                }
-                entry.sourceData.pushIndex.samplerHeapOffset = static_cast<uint32_t>(heap.SamplerOffset(smp->index));
-            }
-            out.resources.push_back(
-                {.name = b.name, .nameHash = NameHash(b.name), .descriptorType = b.descriptorType}
-            );
-            ++ordinal;
+            continue;
         }
 
-        out.entries.push_back(entry);
+        VkSpirvResourceTypeFlagsEXT mask = VK_SPIRV_RESOURCE_TYPE_ALL_EXT;
+        switch (b.descriptorType) {
+            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+            case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+                mask = (b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) ? VK_SPIRV_RESOURCE_TYPE_COMBINED_SAMPLED_IMAGE_BIT_EXT :
+                                                                                          VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
+                break;
+            case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+                mask = VK_SPIRV_RESOURCE_TYPE_READ_WRITE_IMAGE_BIT_EXT;
+                break;
+            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+                mask = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
+                break;
+            case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+                mask = VK_SPIRV_RESOURCE_TYPE_ALL_EXT;
+                break;
+            case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
+                mask = VK_SPIRV_RESOURCE_TYPE_ACCELERATION_STRUCTURE_BIT_EXT;
+                break;
+            default:
+                mask = VK_SPIRV_RESOURCE_TYPE_ALL_EXT;
+                break;
+        }
+
+        // The heap expands this into a push-index mapping; the byte offset the
+        // ordinal implies is computed at materialization, never here.
+        heap.ApplyPushIndexMapping(out.mappings, setIndex, b.binding, mask, ordinal, indexPushOffset);
+
+        if (b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+            auto smp = heap.ApplyPairedSamplerMapping(out.mappings.back());
+            if (!smp) [[unlikely]] {
+                return std::unexpected(smp.error());
+            }
+        }
+        out.resources.push_back(
+            {.name = b.name, .nameHash = NameHash(b.name), .descriptorType = b.descriptorType}
+        );
+        ++ordinal;
     }
-    out.Finalize();
     return {};
 }
 
@@ -206,8 +178,9 @@ inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, c
     ZHLN::Assert(b.samplerSlots.size() <= kMaxTrackedSamplers);
     std::array<bool, kMaxTrackedSamplers> initialized {};
 
-    uint32_t written = 0;
-    const auto init  = [&](const auto& sampler) {
+    uint32_t          written = 0;
+    SamplerWriteBatch batch;
+    const auto        init = [&](const auto& sampler) {
         using SamplerT      = std::remove_cvref_t<decltype(sampler)>;
         const auto position = b.FindSamplerPosition(SamplerT::name);
         if (!position) {
@@ -217,10 +190,11 @@ inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, c
             !initialized[*position], "descriptor-heap sampler init: sampler '{}' of set {} is initialized twice", SamplerT::name, b.setIndex
         );
         initialized[*position] = true;
-        heap.WriteSampler(SamplerHandle {b.samplerSlots[*position]}, sampler.value);
+        batch.AddSampler(SamplerHandle {b.samplerSlots[*position]}, sampler.value);
         ++written;
     };
     (init(samplers), ...);
+    heap.WriteSamplers(batch);
 
     ZHLN::Assert(
         written == b.samplerSlots.size(), "descriptor-heap sampler init: {} of {} samplers of set {} were initialized; the rest sample an unwritten slot",
@@ -273,19 +247,19 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] auto ViewInfoOf(const T& resource) noexcept -> VkImageViewCreateInfo {
+[[nodiscard]] auto ViewOf(const T& resource) noexcept -> ImageView {
     if constexpr (std::is_same_v<T, ImageWrite>) {
-        return resource.viewInfo;
+        return resource.view;
     } else if constexpr (IsTypedImage<T>::value) {
-        return resource.Raw().ViewInfo();
-    } else if constexpr (requires { resource.ViewInfo(); }) {
-        return resource.ViewInfo();
-    } else if constexpr (requires { resource.image.ViewInfo(); }) {
-        return resource.image.ViewInfo();
-    } else if constexpr (std::is_same_v<T, VkImageViewCreateInfo>) {
+        return resource.Raw().View();
+    } else if constexpr (requires { resource.View(); }) {
+        return resource.View();
+    } else if constexpr (requires { resource.image.View(); }) {
+        return resource.image.View();
+    } else if constexpr (std::is_same_v<T, ImageView>) {
         return resource;
     } else {
-        return VkImageViewCreateInfo {};
+        return ImageView {};
     }
 }
 
@@ -294,8 +268,8 @@ enum class WriteSource : uint8_t { Image, Buffer, AccelerationStructure, Unknown
 template <typename T>
 [[nodiscard]] constexpr auto WriteSourceOf() noexcept -> WriteSource {
     if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice> || std::is_same_v<T, ImageWrite> ||
-                  std::is_same_v<T, VkImageViewCreateInfo> || requires { std::declval<const T&>().ViewInfo(); } ||
-                  requires { std::declval<const T&>().image.ViewInfo(); }) {
+                  std::is_same_v<T, ImageView> || requires { std::declval<const T&>().View(); } ||
+                  requires { std::declval<const T&>().image.View(); }) {
         return WriteSource::Image;
     } else if constexpr (std::is_same_v<T, AsAddressWrite>) {
         return WriteSource::AccelerationStructure;
@@ -339,7 +313,9 @@ struct WriteShapeMatchesDeclaration {
 };
 
 template <typename Arg>
-[[nodiscard]] auto WriteHeapBinding(HeapManager& heap, uint32_t slot, VkDescriptorType descriptorType, const Arg& arg) noexcept -> bool {
+[[nodiscard]] auto WriteHeapBinding(
+    const HeapManager& heap, ResourceWriteBatch& batch, uint32_t slot, VkDescriptorType descriptorType, const Arg& arg
+) noexcept -> bool {
     using T = std::remove_cvref_t<Arg>;
 
     constexpr WriteSource source = WriteSourceOf<T>();
@@ -349,15 +325,15 @@ template <typename Arg>
         if constexpr (source != WriteSource::Image) {
             return false;
         } else {
-            const VkImageViewCreateInfo viewInfo = ViewInfoOf(arg);
-            if (viewInfo.image == VK_NULL_HANDLE) {
+            const ImageView view = ViewOf(arg);
+            if (view.Handle() == VK_NULL_HANDLE) {
                 if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
                     return BorrowedSliceOf(arg).image == VK_NULL_HANDLE;
                 }
                 return true;
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                heap.WriteStorageImage(StorageImageHandle {slot}, viewInfo, VK_IMAGE_LAYOUT_GENERAL);
+                batch.AddStorageImage(StorageImageHandle {slot}, view, VK_IMAGE_LAYOUT_GENERAL);
             } else {
                 VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                 if constexpr (IsTypedImage<T>::value) {
@@ -367,7 +343,7 @@ template <typename Arg>
                 } else if constexpr (std::is_same_v<T, ImageWrite>) {
                     layout = arg.layout;
                 }
-                heap.WriteImage(TextureHandle {slot}, viewInfo, layout);
+                batch.AddImage(TextureHandle {slot}, view, layout);
             }
             return true;
         }
@@ -396,9 +372,9 @@ template <typename Arg>
                 slice.address = DeviceAddress<> {heap.BufferAddress(slice.buffer)};
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-                heap.WriteBuffer(UniformBufferHandle {slot}, slice);
+                batch.AddBuffer(UniformBufferHandle {slot}, slice);
             } else {
-                heap.WriteBuffer(StorageBufferHandle {slot}, slice);
+                batch.AddBuffer(StorageBufferHandle {slot}, slice);
             }
             return true;
         }
@@ -408,7 +384,7 @@ template <typename Arg>
         if constexpr (source != WriteSource::AccelerationStructure) {
             return false;
         } else {
-            heap.WriteAccelerationStructure(AccelerationStructureHandle {slot}, arg.address);
+            batch.AddAccelerationStructure(AccelerationStructureHandle {slot}, arg.address);
             return true;
         }
     }
@@ -445,12 +421,13 @@ template <typename Declared, typename... Slots>
         block.has_value(), "descriptor-heap write: the {} transient partition has no room for a {} slot block (set {}); raise its capacity",
         b.lifecycle == HeapLifecycle::Immediate ? "immediate" : "frame", b.resourceBindingCount, b.setIndex
     );
-    const uint32_t partitionBase = b.lifecycle == HeapLifecycle::Immediate ?
-                                       _staticResourceCount + (kFramesInFlight * _frameTransientResourceCount) :
-                                       _staticResourceCount + (_currentFrameIndex * _frameTransientResourceCount);
-    const uint32_t blockBase = block.value_or(partitionBase);
+    if (!block) [[unlikely]] {
+        return HeapBlockBase {};
+    }
+    const uint32_t blockBase = *block;
 
-    const auto write = [&](const auto& slot) {
+    ResourceWriteBatch batch;
+    const auto         write = [&](const auto& slot) {
         using SlotT = std::remove_cvref_t<decltype(slot)>;
 
         const auto ordinal = b.FindResourceOrdinal(SlotT::name);
@@ -463,7 +440,7 @@ template <typename Declared, typename... Slots>
         named[*ordinal] = true;
 
         const auto& binding = b.resources[*ordinal];
-        if (!TemplatedDetail::WriteHeapBinding(*this, blockBase + *ordinal, binding.descriptorType, slot.value)) {
+        if (!TemplatedDetail::WriteHeapBinding(*this, batch, blockBase + *ordinal, binding.descriptorType, slot.value)) {
             ZHLN::Assert(
                 false, "descriptor-heap write: '{}' cannot supply binding '{}' of set {} (descriptor type {}); wrong kind or missing/mismatched image view metadata", SlotT::name,
                 binding.name, b.setIndex, static_cast<int>(binding.descriptorType)
@@ -471,6 +448,7 @@ template <typename Declared, typename... Slots>
         }
     };
     (write(slots), ...);
+    WriteResources(batch);
 
     uint32_t namedCount = 0;
     for (const bool flag: named) {

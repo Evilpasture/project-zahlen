@@ -76,6 +76,8 @@ auto SyntheticLoader(void* user, ZHLN::GUI::BakedFontAsset& out) -> bool {
 
 } // namespace
 
+namespace {
+
 struct FontAssetTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> cooked_font_round_trip() {
@@ -197,6 +199,4 @@ struct FontAssetTestSuite {
     };
 };
 
-auto RunFontAssetSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<FontAssetTestSuite>();
-}
+} // namespace

@@ -17,6 +17,7 @@
 //
 // Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 
+#include "TestsFramework.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -57,7 +58,7 @@ constexpr size_t kExpectedEntries3 = 3;
 
 constexpr uint32_t kZmetVersion          = 1u;
 constexpr uint32_t kMeshMagic            = 0x3048534Du; // 'MSH0'
-constexpr uint32_t kMeshVersion          = 7u;
+constexpr uint32_t kMeshVersion          = 8u;
 constexpr uint32_t kAnimMagic            = 0x304D4E41u; // 'ANM0'
 constexpr uint32_t kAnimVersion          = 1u;
 constexpr uint32_t kGlbMagic             = 0x46546C67u; // 'glTF'
@@ -93,7 +94,7 @@ enum class CookerTestError : uint8_t {
 // RAII Isolation Sandbox
 // ============================================================================
 
-struct TempSandbox {
+struct ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) TempSandbox {
     fs::path rootPath;
 
     explicit TempSandbox(std::string_view testName) {
@@ -102,6 +103,9 @@ struct TempSandbox {
         std::error_code ec;
         fs::create_directories(rootPath, ec);
     }
+
+    explicit TempSandbox(const ZHLN::Test::CaseInfo& info)
+        : TempSandbox(info.caseName.empty() ? "cook" : info.caseName) {}
 
     ~TempSandbox() {
         std::error_code ec;
@@ -170,16 +174,24 @@ inline bool ReadValue(std::istream& stream, T& outValue) {
 // step between there and the group: tests/ is one down, tests/asset_cooking/
 // is two.
 fs::path FindZcookExecutable() {
-    std::vector<fs::path> candidates = {"zcook",
+    std::vector<fs::path> candidates = {"../bin/zcook",
+                                        "../../bin/zcook",
+                                        "../../../bin/zcook",
+                                        "bin/zcook",
+                                        "build/current/bin/zcook",
+                                        "zcook",
                                         "./zcook",
                                         "../zcook",
                                         "../../zcook",
-                                        "bin/zcook",
+                                        "../bin/zcook.exe",
+                                        "../../bin/zcook.exe",
+                                        "../../../bin/zcook.exe",
+                                        "bin/zcook.exe",
+                                        "build/current/bin/zcook.exe",
                                         "zcook.exe",
                                         "./zcook.exe",
                                         "../zcook.exe",
-                                        "../../zcook.exe",
-                                        "bin/zcook.exe"};
+                                        "../../zcook.exe"};
 
     for (const auto& candidate: candidates) {
         std::error_code ec;
@@ -205,6 +217,33 @@ int RunZcook(const fs::path& zcookBin, std::string_view args) {
 }
 
 } // namespace
+
+class ZHLN_ANNOTATION(ZHLN::Test::SuiteFixture {}) CookerSession {
+  public:
+    CookerSession() : _tasks(kWorkerThreadCount, kFiberCount, kFiberStackSize), _zcook(FindZcookExecutable()) {}
+    ~CookerSession() = default;
+
+    CookerSession(const CookerSession&)            = delete;
+    CookerSession& operator=(const CookerSession&) = delete;
+    CookerSession(CookerSession&&)                 = delete;
+    CookerSession& operator=(CookerSession&&)      = delete;
+
+    [[nodiscard]] auto ZcookPath() const noexcept -> const fs::path& { return _zcook; }
+
+  private:
+    ZHLN::TaskSystem::Scope _tasks;
+    fs::path                _zcook;
+};
+
+struct ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) CookerFixture {
+    const fs::path& zcook;
+    TempSandbox&    sandbox;
+
+    CookerFixture(CookerSession& session, TempSandbox& sb) noexcept : zcook(session.ZcookPath()), sandbox(sb) {}
+
+    [[nodiscard]] auto SubPath(std::string_view rel) const -> fs::path { return sandbox.SubPath(rel); }
+    [[nodiscard]] auto Run(std::string_view args) const -> int { return RunZcook(zcook, args); }
+};
 
 // ============================================================================
 // Metadata Serializer for Compiler Input Generation

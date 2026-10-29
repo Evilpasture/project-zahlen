@@ -35,7 +35,7 @@ target_include_directories(zahlen_project_light_client PUBLIC
 )
 
 target_link_libraries(zahlen_project_light_client
-    PUBLIC zahlen_engine
+    PUBLIC zahlen_engine zahlen_socket
     PRIVATE zahlen_character_controller zahlen_camera ZLIB::ZLIB
 )
 
@@ -44,7 +44,3 @@ if(COMMAND zahlen_enable_reflection)
 endif()
 
 target_link_libraries(zahlen_project_light_client PRIVATE zahlen_warnings)
-
-if(ZHLN_HAVE_WINSOCK)
-    target_link_libraries(zahlen_project_light_client PRIVATE ws2_32)
-endif()

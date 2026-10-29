@@ -17,8 +17,12 @@
 
 #pragma once
 
+#include "TestsFramework.hpp"
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/World.hpp>
 #include <cstdint>
+#include <memory>
+#include <utility>
 
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -32,7 +36,7 @@ namespace ZHLN::Test::Fixture {
 //
 // Defaults match every existing call site: 2 workers, 32 fibers, minimum
 // stack. Raise them only for a suite that genuinely saturates the pool.
-class TaskSystemScope {
+class ZHLN_ANNOTATION(ZHLN::Test::SuiteFixture {}) TaskSystemScope {
   public:
     explicit TaskSystemScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32)
         : _tasks(workerThreads, maxFibers, ZHLN::kMinimumFiberStackSize) {}
@@ -53,7 +57,7 @@ class TaskSystemScope {
 // The factory is created only if one is not already live, matching the guard
 // the physics suites used, so a suite can share a process with another that
 // has already registered types.
-class JoltScope {
+class ZHLN_ANNOTATION(ZHLN::Test::SuiteFixture {}) JoltScope {
   public:
     JoltScope() {
         JPH::RegisterDefaultAllocator();
@@ -82,25 +86,54 @@ class JoltScope {
 };
 
 // Task system + Jolt, torn down in the order the physics suites used:
-// workers first, then the type registry.
-class TaskSystemAndJoltScope {
+// workers first, then the type registry (FixtureScopeStore destroys in
+// reverse-insertion LIFO order: JoltScope inserted first, TaskSystemScope
+// inserted second -> TaskSystemScope destroyed first, JoltScope second).
+class ZHLN_ANNOTATION(ZHLN::Test::SuiteFixture {}) TaskSystemAndJoltScope {
   public:
-    explicit TaskSystemAndJoltScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32) : _tasks(workerThreads, maxFibers) {}
-
+    TaskSystemAndJoltScope(JoltScope&, TaskSystemScope&) noexcept {}
     ~TaskSystemAndJoltScope() = default;
 
     TaskSystemAndJoltScope(const TaskSystemAndJoltScope&)            = delete;
     TaskSystemAndJoltScope& operator=(const TaskSystemAndJoltScope&) = delete;
     TaskSystemAndJoltScope(TaskSystemAndJoltScope&&)                 = delete;
     TaskSystemAndJoltScope& operator=(TaskSystemAndJoltScope&&)      = delete;
+};
+
+// Fresh headless ECS + Jolt World per test case, backed by the session-wide
+// fiber pool and Jolt type registry.
+class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) WorldFixture {
+  public:
+    explicit WorldFixture(TaskSystemAndJoltScope&) {
+        const ZHLN::PhysicsConfig cfg {
+            .maxBodies             = 256,
+            .maxBodyPairs          = 512,
+            .maxContactConstraints = 512,
+            .tempAllocatorSize     = 4 * 1024 * 1024,
+        };
+        auto res = ZHLN::World::Create(cfg);
+        if (res.has_value()) {
+            _world = std::move(res.value());
+        }
+    }
+
+    ~WorldFixture() = default;
+
+    WorldFixture(const WorldFixture&)            = delete;
+    WorldFixture& operator=(const WorldFixture&) = delete;
+    WorldFixture(WorldFixture&&)                 = delete;
+    WorldFixture& operator=(WorldFixture&&)      = delete;
+
+    [[nodiscard]] auto Get() const noexcept -> ZHLN::World* { return _world.get(); }
+    auto               operator->() const noexcept -> ZHLN::World* { return _world.get(); }
+    auto               operator*() const noexcept -> ZHLN::World& { return *_world; }
+    explicit           operator bool() const noexcept { return _world != nullptr; }
+
+    auto Registry() -> ZHLN::ECS::Registry& { return _world->GetRegistry(); }
+    auto Physics() -> ZHLN::PhysicsContext& { return _world->GetPhysics(); }
 
   private:
-    // Members destruct in reverse declaration order, so _jolt is declared
-    // first to get the teardown the physics suites used: workers shut down
-    // before the Jolt type registry goes away. Construction order (Jolt then
-    // tasks) does not matter -- neither subsystem depends on the other.
-    JoltScope       _jolt;
-    TaskSystemScope _tasks;
+    std::unique_ptr<ZHLN::World> _world;
 };
 
 } // namespace ZHLN::Test::Fixture

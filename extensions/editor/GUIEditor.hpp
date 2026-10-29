@@ -165,9 +165,9 @@ struct ComponentKind {
 // This is not every component in ZHLN::Components, and the reason is safety
 // rather than effort: a default-constructed MeshComponent names a GPU mesh that
 // does not exist, a PhysicsComponent names a body the physics world never
-// created, and an AnimatorComponent holds a raw pointer to a ModelPrefab.
-// Conjuring those from "Add Component" would put a dangling handle in the
-// registry on the click.
+// created, and an AnimatorComponent names a prefab asset and animation handle
+// that no spawner bound. Conjuring those from "Add Component" would put a
+// dangling handle in the registry on the click.
 //
 // The line drawn is therefore: the editor may add exactly what the inspector
 // can also show and edit, so "Add" never produces something the editor cannot
@@ -225,10 +225,10 @@ ZHLN_STATIC_API void UpdateTransformMode(
 // pipeline; the panel edits that engine's registry. GUI::Context itself remains
 // stateless with respect to the ECS.
 ZHLN_STATIC_API void DrawHierarchyPanel(
-    ZHLN::GUI::Context& gui,
-    ZHLN::Engine&       engine,
-    EditorState&        state,
-    std::string_view    id = "Hierarchy"
+    ZHLN::GUI::Frame& gui,
+    ZHLN::Engine&     engine,
+    EditorState&      state,
+    std::string_view  id = "Hierarchy"
 );
 
 // Draws the inspector for `state.selectedEntity`: a labelled header plus one
@@ -241,10 +241,10 @@ ZHLN_STATIC_API void DrawHierarchyPanel(
 //
 // NOTE: `reg` is separate from `gui` for the same reason as above.
 ZHLN_STATIC_API void DrawInspectorPanel(
-    ZHLN::GUI::Context&    gui,
-    ZHLN::ECS::Registry&   reg,
-    EditorState&           state,
-    std::string_view       id = "Inspector"
+    ZHLN::GUI::Frame&    gui,
+    ZHLN::ECS::Registry& reg,
+    EditorState&         state,
+    std::string_view     id = "Inspector"
 );
 
 } // namespace ZHLN::Editor

@@ -4,12 +4,17 @@ if(TARGET zahlen_project_light_client)
     # snapshot parser and the record graph. No socket and no renderer, so a
     # regression here names itself instead of needing a server to reproduce.
     set(TARGET_NAME TestProjectLightReplication)
-    add_executable(${TARGET_NAME} TestProjectLightReplication.cpp)
+    zahlen_wrap_ztest_sources(_pl_rep_sources _pl_rep_files TestProjectLightReplication.cpp)
+    add_executable(${TARGET_NAME}
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+        ${_pl_rep_sources}
+    )
 
     set_target_properties(${TARGET_NAME} PROPERTIES
         CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
+        ZHLN_ZTEST_SOURCE_FILES "${_pl_rep_files}"
     )
 
     target_link_libraries(${TARGET_NAME} PRIVATE
@@ -28,10 +33,12 @@ if(TARGET zahlen_project_light_client)
     if(USE_SANITIZERS)
         target_compile_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
             -fno-omit-frame-pointer
         )
         target_link_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
         )
         target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
     endif()
@@ -39,12 +46,17 @@ if(TARGET zahlen_project_light_client)
     zahlen_register_extras_test(${TARGET_NAME})
 
     set(TARGET_NAME TestProjectLightConfig)
-    add_executable(${TARGET_NAME} TestProjectLightConfig.cpp)
+    zahlen_wrap_ztest_sources(_pl_cfg_sources _pl_cfg_files TestProjectLightConfig.cpp)
+    add_executable(${TARGET_NAME}
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+        ${_pl_cfg_sources}
+    )
 
     set_target_properties(${TARGET_NAME} PROPERTIES
         CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
+        ZHLN_ZTEST_SOURCE_FILES "${_pl_cfg_files}"
     )
 
     target_link_libraries(${TARGET_NAME} PRIVATE
@@ -63,10 +75,12 @@ if(TARGET zahlen_project_light_client)
     if(USE_SANITIZERS)
         target_compile_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
             -fno-omit-frame-pointer
         )
         target_link_options(${TARGET_NAME} PRIVATE
             -fsanitize=address,undefined
+            -fno-sanitize=vptr
         )
         target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
     endif()

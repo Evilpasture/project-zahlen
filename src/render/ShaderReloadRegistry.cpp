@@ -37,12 +37,17 @@ void ShaderReloadRegistry::Register(std::string_view name, std::span<const char*
 }
 
 void ShaderReloadRegistry::Dispatch(std::string_view changedPath, const std::function<void()>& onFirstMatch) {
-    const size_t count = _entries.size();
-    bool         matched = false;
+    if (changedPath.empty() || _entries.empty()) {
+        return;
+    }
+
+    const std::string normalized = std::filesystem::path {changedPath}.lexically_normal().generic_string();
+    const size_t      count      = _entries.size();
+    bool              matched    = false;
 
     for (size_t index = 0; index < count; ++index) {
         Entry& entry = _entries[index];
-        if (std::find(entry.paths.begin(), entry.paths.end(), changedPath) == entry.paths.end()) {
+        if (std::find(entry.paths.begin(), entry.paths.end(), normalized) == entry.paths.end()) {
             continue;
         }
         if (!matched) {

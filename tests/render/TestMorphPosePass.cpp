@@ -48,6 +48,8 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
+#include <Animation/AnimationSystem.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
@@ -86,6 +88,8 @@ enum class MorphPosePassTestError : uint8_t {
     IdleAnimatorMissing ZHLN_ANNOTATION(ZHLN::Description<"An animated prefab had no animator to leave at its authored pose."> {}),
     IdleMorphWeightsChanged ZHLN_ANNOTATION(ZHLN::Description<"An idle animator changed the authored default morph weights during settle frames."> {}),
 };
+
+namespace {
 
 struct MorphPosePassSuite {
     // Morph targets per part. The pose pass clamps a node's channel to four;
@@ -127,40 +131,33 @@ struct MorphPosePassSuite {
     // Pooled, like every other suite in this group: the scene is what gets
     // thrown away between tests, and each test below spawns its own instances.
     [[nodiscard]] static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
-        return ZHLN::Test::Headless::AcquireEngine(
+        auto engine = ZHLN::Test::Headless::AcquireEngine(
             ZHLN::Test::Headless::EngineOptions {.appName = "Headless Morph Pose Pass", .width = 640, .height = 480}
         );
+        if (engine != nullptr) {
+            ZHLN::Animation::Install(*engine);
+        }
+        return engine;
     }
 
     [[nodiscard]] static auto CreateMorphMaterial(ZHLN::RenderContext& rc) -> std::expected<ZHLN::Material, ZHLN::ErrorCode> {
         return rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = {0.85f, 0.45f, 0.2f, 1.0f}});
     }
 
-    struct BuiltPrefab {
-        ZHLN::RenderContext* context = nullptr;
-        ZHLN::ModelPrefab prefab;
-
-        BuiltPrefab() = default;
-        BuiltPrefab(BuiltPrefab&&) = default;
-        BuiltPrefab(const BuiltPrefab&) = delete;
-        ~BuiltPrefab() {
-            if (context != nullptr) {
-                for (const auto& part: prefab.parts) {
-                    context->UnregisterGPUMesh(part.meshAsset);
-                    context->DestroyMesh(part.mesh);
-                }
-            }
-        }
-    };
-
     // One box part under one root node, `kMorphTargets` morph targets with real
-    // deltas in the shared pool, and a weights clip.
+    // deltas in the shared pool, and a weights clip, cached in AssetManager.
     //
     // `degenerateClip` appends the channel claim 2 is about: same path, same
     // target node, keyValues but no keyTimes.
-    [[nodiscard]] static auto BuildMorphPrefab(ZHLN::RenderContext& rc, bool degenerateClip) -> BuiltPrefab {
-        BuiltPrefab built;
-        built.context = &rc;
+    [[nodiscard]] static auto BuildMorphPrefab(ZHLN::Engine& engine, bool degenerateClip) -> const ZHLN::ModelPrefab& {
+        const std::string_view vPath = degenerateClip ? "zahlen_test_morph_pose_prefab_degenerate" : "zahlen_test_morph_pose_prefab";
+        const ZHLN::AssetID    id    = ZHLN::HashAssetPath(vPath);
+        if (const auto existing = engine.GetAssetManager().GetCachedPrefab(id)) {
+            return *existing;
+        }
+
+        auto& rc     = engine.GetRenderContext();
+        auto  prefab = std::make_unique<ZHLN::ModelPrefab>();
 
         const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.6f, 0.6f, 0.6f), JPH::Vec4(0.85f, 0.45f, 0.2f, 1.0f));
 
@@ -175,30 +172,30 @@ struct MorphPosePassSuite {
         }
 
         ZHLN::ModelPart part {};
-        part.name                   = ZHLN::String64("MorphBody");
-        part.nodeIndex              = 1;
-        part.localTransform         = JPH::Mat44::sIdentity();
-        part.mesh                   = box;
-        part.meshAsset              = ZHLN::HashAssetID("zahlen_test_morph_pose_box_mesh");
-        part.materialAsset          = ZHLN::HashAssetID("zahlen_test_morph_pose_box_material");
-        part.boundingRadius         = 2.0f;
-        part.morphOffset            = rc.AllocateMorphDeltas(std::span {deltas});
-        part.activeMorphCount       = kMorphTargets;
-        part.defaultMorphWeights.x  = kDefaultMorphWeight0;
-        part.defaultMorphWeights.y  = kDefaultMorphWeight1;
+        part.name                  = ZHLN::String64("MorphBody");
+        part.nodeIndex             = 1;
+        part.localTransform        = JPH::Mat44::sIdentity();
+        part.mesh                  = box;
+        part.meshAsset             = ZHLN::HashAssetID(degenerateClip ? "zahlen_test_morph_pose_box_mesh_deg" : "zahlen_test_morph_pose_box_mesh");
+        part.materialAsset         = ZHLN::HashAssetID("zahlen_test_morph_pose_box_material");
+        part.boundingRadius        = 2.0f;
+        part.morphOffset           = rc.AllocateMorphDeltas(std::span {deltas});
+        part.activeMorphCount      = kMorphTargets;
+        part.defaultMorphWeights.x = kDefaultMorphWeight0;
+        part.defaultMorphWeights.y = kDefaultMorphWeight1;
 
-        built.prefab.virtualPath = "zahlen_test_morph_pose_prefab";
-        built.prefab.parts.push_back(part);
+        prefab->virtualPath = vPath;
+        prefab->parts.push_back(part);
 
-        built.prefab.nodes.resize(2);
-        built.prefab.nodes[0].name           = ZHLN::String64("MorphRoot");
-        built.prefab.nodes[0].parentIndex    = -1;
-        built.prefab.nodes[0].localTransform = JPH::Mat44::sIdentity();
-        built.prefab.nodes[0].hasMesh        = false;
-        built.prefab.nodes[1].name           = ZHLN::String64("MorphBody");
-        built.prefab.nodes[1].parentIndex    = 0;
-        built.prefab.nodes[1].localTransform = JPH::Mat44::sIdentity();
-        built.prefab.nodes[1].hasMesh        = true;
+        prefab->nodes.resize(2);
+        prefab->nodes[0].name           = ZHLN::String64("MorphRoot");
+        prefab->nodes[0].parentIndex    = -1;
+        prefab->nodes[0].localTransform = JPH::Mat44::sIdentity();
+        prefab->nodes[0].hasMesh        = false;
+        prefab->nodes[1].name           = ZHLN::String64("MorphBody");
+        prefab->nodes[1].parentIndex    = 0;
+        prefab->nodes[1].localTransform = JPH::Mat44::sIdentity();
+        prefab->nodes[1].hasMesh        = true;
 
         ZHLN::AnimationClip weightsClip;
         weightsClip.name     = ZHLN::String64("MorphWeights");
@@ -212,7 +209,7 @@ struct MorphPosePassSuite {
                 .keyValues       = {0.0f, 0.0f, 1.0f, 1.0f}, // key 0: no morph, key 1: both targets fully weighted
             }
         );
-        built.prefab.animations.push_back(std::move(weightsClip));
+        prefab->animations.push_back(std::move(weightsClip));
 
         if (degenerateClip) {
             ZHLN::AnimationClip keyless;
@@ -227,10 +224,11 @@ struct MorphPosePassSuite {
                     .keyValues       = {0.25f, 0.75f}, // weights with no times to interpolate them at
                 }
             );
-            built.prefab.animations.push_back(std::move(keyless));
+            prefab->animations.push_back(std::move(keyless));
         }
 
-        return built;
+        engine.GetAssetManager().CachePrefab(id, std::move(prefab));
+        return *engine.GetAssetManager().GetCachedPrefab(id);
     }
 
     struct Instance {
@@ -257,7 +255,7 @@ struct MorphPosePassSuite {
 
         // Pair each animator root with its mesh child by walking the mesh
         // entities and keeping the ones whose parent carries *this* prefab.
-        // Spawn order is not a contract; the prefab pointer is.
+        const ZHLN::AssetID   expectedAsset = ZHLN::HashAssetPath(std::string_view(prefab.virtualPath));
         std::vector<Instance> instances;
         for (ZHLN::Entity mesh: reg.GetEntitiesWith<ZHLN::Components::MeshComponent>()) {
             auto hier = reg.Get<ZHLN::Components::HierarchyComponent>(mesh);
@@ -265,7 +263,7 @@ struct MorphPosePassSuite {
                 continue;
             }
             auto animator = reg.Get<ZHLN::Components::AnimatorComponent>(hier->parent);
-            if (!animator || animator->prefab != &prefab) {
+            if (!animator || animator->prefabAsset != expectedAsset) {
                 continue;
             }
             instances.push_back(Instance {.root = hier->parent, .mesh = mesh});
@@ -303,8 +301,8 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }
 
-            auto built = MorphPosePassSuite::BuildMorphPrefab(rc, /*degenerateClip=*/false);
-            auto instances = MorphPosePassSuite::SpawnInstances(*engine, built.prefab, *material, 1);
+            const auto& prefab    = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/false);
+            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, prefab, *material, 1);
             if (instances.size() != 1) {
                 return std::unexpected(MorphPosePassTestError::InstanceSpawnFailed);
             }
@@ -345,8 +343,8 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }
 
-            auto built     = MorphPosePassSuite::BuildMorphPrefab(rc, /*degenerateClip=*/false);
-            auto instances = MorphPosePassSuite::SpawnInstances(*engine, built.prefab, *material, MorphPosePassSuite::kStressInstances);
+            const auto& prefab    = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/false);
+            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, prefab, *material, MorphPosePassSuite::kStressInstances);
             if (instances.size() != MorphPosePassSuite::kStressInstances) {
                 return std::unexpected(MorphPosePassTestError::InstanceSpawnFailed);
             }
@@ -425,13 +423,12 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }
 
-            auto built = MorphPosePassSuite::BuildMorphPrefab(rc, /*degenerateClip=*/true);
-            auto instances =
-                MorphPosePassSuite::SpawnInstances(*engine, built.prefab, *material, MorphPosePassSuite::kDegenerateInstances);
+            const auto& prefab    = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/true);
+            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, prefab, *material, MorphPosePassSuite::kDegenerateInstances);
             if (instances.size() != MorphPosePassSuite::kDegenerateInstances) {
                 return std::unexpected(MorphPosePassTestError::InstanceSpawnFailed);
             }
-            if (built.prefab.animations.size() != 2) {
+            if (prefab.animations.size() != 2) {
                 return std::unexpected(MorphPosePassTestError::DegenerateClipMissing);
             }
 
@@ -515,8 +512,8 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }
 
-            auto built     = MorphPosePassSuite::BuildMorphPrefab(rc, /*degenerateClip=*/false);
-            auto instances = MorphPosePassSuite::SpawnInstances(*engine, built.prefab, *material, 1);
+            const auto& prefab    = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/false);
+            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, prefab, *material, 1);
             if (instances.empty()) {
                 return std::unexpected(MorphPosePassTestError::InstanceSpawnFailed);
             }
@@ -572,8 +569,4 @@ struct MorphPosePassSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunMorphPosePassSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<MorphPosePassSuite>();
-}
+} // namespace

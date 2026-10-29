@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Core.hpp>
 #include <array>
 #include <cstddef>
@@ -65,6 +66,38 @@ struct MethodCollector {
     static constexpr auto method_handles = get_methods();
 };
 
+template <std::meta::info EntityInfo, std::size_t Index>
+consteval auto ExtractAnnotationConstantAt() {
+    constexpr auto annotation = std::meta::annotations_of(EntityInfo)[Index];
+    constexpr auto type       = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotation)));
+    using AnnotationType      = typename[:type:];
+    return std::meta::extract<AnnotationType>(annotation);
+}
+
+template <std::meta::info EntityInfo>
+consteval auto EntityAnnotationCount() -> std::size_t {
+    return std::meta::annotations_of(EntityInfo).size();
+}
+
+template <typename T>
+consteval auto TypeAnnotationCount() -> std::size_t {
+    return std::meta::annotations_of(std::meta::dealias(^^std::remove_cvref_t<T>)).size();
+}
+
+template <typename T, std::size_t Index>
+consteval auto ExtractTypeAnnotationConstantAt() {
+    constexpr auto entity = std::meta::dealias(^^std::remove_cvref_t<T>);
+    return ExtractAnnotationConstantAt<entity, Index>();
+}
+
+}
+
+template <typename T, typename F>
+constexpr void ForEachTypeAnnotationConstant(F&& f) {
+    constexpr std::size_t count = TemplatedDetail::TypeAnnotationCount<T>();
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        (f.template operator()<TemplatedDetail::ExtractTypeAnnotationConstantAt<T, Is>()>(), ...);
+    }(std::make_index_sequence<count> {});
 }
 
 template <typename T, typename F>
@@ -151,55 +184,76 @@ constexpr void ForEachMethodPointer(F&& f) {
     };
 }
 
+template <typename T, std::meta::info MemberInfo>
+struct ReflectedMethod {
+    static constexpr std::string_view name  = std::meta::identifier_of(MemberInfo);
+    static constexpr std::size_t      arity = std::meta::parameters_of(MemberInfo).size();
+    using ReturnType                        = typename[:std::meta::return_type_of(MemberInfo):];
+
+    template <std::size_t Index>
+    using ParameterType = typename[:std::meta::type_of(std::meta::parameters_of(MemberInfo)[Index]):];
+
+    template <typename Receiver, typename... Args>
+    static constexpr decltype(auto) Invoke(Receiver&& receiver, Args&&... args) {
+        return (std::forward<Receiver>(receiver).[:MemberInfo:])(std::forward<Args>(args)...);
+    }
+
+    template <typename F>
+    static consteval void ForEachAnnotationType(F&& f) {
+        ::ZHLN::Reflect::ForEachAnnotationType<MemberInfo>(std::forward<F>(f));
+    }
+
+    static constexpr std::size_t annotationCount = TemplatedDetail::EntityAnnotationCount<MemberInfo>();
+
+    template <std::size_t Index>
+    static consteval auto AnnotationConstantAt() {
+        return TemplatedDetail::ExtractAnnotationConstantAt<MemberInfo, Index>();
+    }
+
+    template <typename F>
+    static constexpr void ForEachAnnotationConstant(F&& f) {
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (f.template operator()<AnnotationConstantAt<Is>()>(), ...);
+        }(std::make_index_sequence<annotationCount> {});
+    }
+};
+
+template <typename T, std::meta::info CtorInfo>
+struct ReflectedConstructor {
+    static constexpr std::size_t arity = std::meta::parameters_of(CtorInfo).size();
+
+    template <std::size_t Index>
+    using ParameterType = typename[:std::meta::type_of(std::meta::parameters_of(CtorInfo)[Index]):];
+};
+
+template <typename T, typename F>
+constexpr void ForEachReflectedConstructor(F&& f) {
+    [:Expand(TemplatedDetail::MembersOf<T>()):] >> [&]<auto member>() -> auto {
+        if constexpr (std::meta::is_constructor(member) && !std::meta::is_copy_constructor(member) && !std::meta::is_move_constructor(member)) {
+            f.template operator()<ReflectedConstructor<T, member>>();
+        }
+    };
+}
+
+template <typename T, typename F>
+constexpr void ForEachReflectedMethod(F&& f) {
+    [:Expand(TemplatedDetail::MembersOf<T>()):] >> [&]<auto member>() -> auto {
+        if constexpr (std::meta::is_function(member)
+                      && std::meta::has_identifier(member)
+                      && !std::meta::is_static_member(member)
+                      && !std::meta::is_special_member_function(member)
+                      && !std::meta::is_operator_function(member)) {
+            f.template operator()<ReflectedMethod<T, member>>();
+        }
+    };
+}
+
 template <typename T>
 constexpr auto CollectMethodResults(const T& inst) {
     using Collector = TemplatedDetail::MethodCollector<std::remove_cvref_t<T>>;
     return [&]<size_t... Is>(std::index_sequence<Is...>) -> auto {
         return std::tuple_cat(TemplatedDetail::ToTuple((inst.[:Collector::method_handles[Is]:]()))...);
     }(std::make_index_sequence<Collector::count> {});
-}
-
-#else
-
-template <typename T, typename F>
-constexpr void ForEachMemberFunction(F&& ) {
-}
-
-template <typename T>
-consteval auto BaseClasses() {
-    return std::array<int, 0> {};
-}
-
-template <typename T>
-consteval bool HasVirtualBases() {
-    return false;
-}
-
-template <typename T, typename F>
-constexpr void ForEachBase(F&& ) {
-}
-
-template <typename T>
-consteval std::size_t MemberFunctionCount() {
-    return 0;
-}
-
-template <typename T>
-consteval auto MemberFunctionNames() {
-    return std::array<std::string_view, 0> {};
-}
-
-template <typename T, typename F>
-constexpr void ForEachNestedType(F&& ) {
-}
-
-template <typename T, typename F>
-constexpr void ForEachMethodPointer(F&& ) {
-}
-
-template <typename T>
-constexpr auto CollectMethodResults(const T& ) {
-    return std::tuple {};
 }
 
 #endif

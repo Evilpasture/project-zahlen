@@ -1,15 +1,8 @@
 
+import gpu_push_constants;
 import common;
 import pbr_helpers;
 
-struct DecalPushConstants {
-    float4x4 worldMatrix;
-    float4x4 clipToLocal;
-    uint albedoIndex;
-    uint normalIndex;
-    float roughness;
-    float metallic;
-};
 [vk::push_constant]
 DecalPushConstants pc;
 
@@ -35,6 +28,7 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
     float3 localPos = CubeVertices[CubeIndices[vertexID]];
     float4 worldPos = mul(pc.worldMatrix, float4(localPos, 1.0f));
     output.pos      = mul(scene.frame.viewProj, worldPos);
+    output.pos.z   *= kSkyDepthSplit; // world band (kSkyDepthSplit)
     return output;
 }
 
@@ -52,9 +46,13 @@ PSOutput PSMain(VSOutput input) {
     float2 uv = input.pos.xy / scene.frame.screenResolution;
 
     float depth = texDepth.SampleLevel(pointSampler, uv, 0).r;
+    // Decals project onto world depth only: the background layer lives in
+    // (the depth band is retired: no layer owns a reserved slice any more.)
     if (depth >= 1.0f) {
         discard;
     }
+    // Undo the world band before clipToLocal, which expects the unbanded clip.
+
 
     float4 clipPos = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, depth, 1.0f);
 

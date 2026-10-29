@@ -25,8 +25,6 @@
 //   ./build/p2996/samples/BSPMurderDronesSample
 //   ./build/p2996/samples/BSPMurderDronesSample import/engine_assets/maps/gm_murder_drones.bsp
 
-#include <Zahlen/Core/Platform.hpp>
-
 #include <BSP/BSPGeometry.hpp>
 #include <BSP/BSPImporter.hpp>
 #include <BSP/BSPRead.hpp>
@@ -34,20 +32,21 @@
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
+#include <CommandLine/EngineCommandLine.hpp>
 #include <FreeCam/FreeCam.hpp>
 #include <Interaction/BSPInteraction.hpp>
 #include <Interaction/InteractionSystem.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Optional.hpp>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/FramePlan.hpp>
-#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -62,8 +61,9 @@
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <glTF/GLTFImporter.hpp>
 
 #if defined(ZHLN_HAS_FONTS)
@@ -109,8 +109,8 @@ import ZHLN.ProceduralAnimation;
 
 namespace {
 
-inline constexpr std::string_view kDefaultMapPath       = "import/engine_assets/maps/gm_murder_drones.bsp";
-inline constexpr std::string_view kDefaultAssetRoot     = "import/engine_assets";
+inline constexpr std::string_view kDefaultMapPath   = "import/engine_assets/maps/gm_murder_drones.bsp";
+inline constexpr std::string_view kDefaultAssetRoot = "import/engine_assets";
 
 // The procedural character's rig. GLTF::LoadGLBPrefab resolves its argument
 // under resources/assets/ relative to the working directory, so these are asset
@@ -155,14 +155,13 @@ void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outMin, JPH::Vec3
     outMin = JPH::Vec3(1e9f, 1e9f, 1e9f);
     outMax = JPH::Vec3(-1e9f, -1e9f, -1e9f);
     for (const ZHLN::ModelPart& part: prefab.parts) {
-        const JPH::Mat44 model       = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+        const JPH::Mat44 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
         const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         const JPH::Vec3  localCenter = (localMin + localMax) * 0.5f;
         const JPH::Vec3  halfExtent  = (localMax - localMin) * 0.5f;
         const JPH::Vec3  center      = model.Multiply3x3(localCenter) + model.GetTranslation();
-        const JPH::Vec3  extent      = (model.GetColumn3(0) * halfExtent.GetX()).Abs() +
-                                       (model.GetColumn3(1) * halfExtent.GetY()).Abs() +
+        const JPH::Vec3  extent      = (model.GetColumn3(0) * halfExtent.GetX()).Abs() + (model.GetColumn3(1) * halfExtent.GetY()).Abs() +
                                        (model.GetColumn3(2) * halfExtent.GetZ()).Abs();
         outMin                       = JPH::Vec3::sMin(outMin, center - extent);
         outMax                       = JPH::Vec3::sMax(outMax, center + extent);
@@ -189,12 +188,12 @@ inline constexpr float kPickDistance       = 400.0f; // m, ray length
 // been posed. Screen centre is where the camera looks, so this ray is exactly
 // what the eye is pointed at.
 struct CrosshairPick {
-    bool        hasHit    = false;
-    std::string label     = "world brush"; // entity name, or BSP world geometry
-    JPH::Vec3   position  = JPH::Vec3::sZero();
-    JPH::Vec3   normal    = JPH::Vec3::sAxisY();
-    float       distance  = 0.0f;
-    uint32_t    bodyIndex = 0;
+    bool         hasHit    = false;
+    std::string  label     = "world brush"; // entity name, or BSP world geometry
+    JPH::Vec3    position  = JPH::Vec3::sZero();
+    JPH::Vec3    normal    = JPH::Vec3::sAxisY();
+    float        distance  = 0.0f;
+    uint32_t     bodyIndex = 0;
     ZHLN::Entity entity    = ZHLN::Entity::Null();
 };
 
@@ -232,9 +231,7 @@ ZHLN::Bench::BenchmarkViewer* g_benchmarkViewer = nullptr;
 
 void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
     g_mouseCaptured = captured;
-    if (auto window = engine.GetWindow(); window) {
-        window->CaptureMouse(captured);
-    }
+    engine.GetPlatformHost().CaptureMouse(captured);
 }
 
 // Camera::GetViewMatrix builds its direction inline and exposes no accessor.
@@ -242,12 +239,7 @@ void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
 [[nodiscard]] auto CameraForward(const ZHLN::Camera& cam) -> JPH::Vec3 {
     const float yawRad   = JPH::DegreesToRadians(cam.yaw);
     const float pitchRad = JPH::DegreesToRadians(cam.pitch);
-    return JPH::Vec3(
-               JPH::Cos(yawRad) * JPH::Cos(pitchRad),
-               JPH::Sin(pitchRad),
-               JPH::Sin(yawRad) * JPH::Cos(pitchRad)
-    )
-        .Normalized();
+    return JPH::Vec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
 }
 
 // A readable label for whatever the crosshair is over. Prefers the Source
@@ -257,8 +249,7 @@ void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
 [[nodiscard]] auto PickLabel(const ZHLN::ECS::Registry& reg, ZHLN::Entity e) -> std::string {
     if (const auto meta = reg.Get<ZHLN::Interaction::BSPEntityMetadataComponent>(e)) {
         if (!meta->className.empty()) {
-            return std::string(meta->className.c_str()) +
-                   (meta->targetName.empty() ? std::string {} : (" '" + std::string(meta->targetName.c_str()) + "'"));
+            return std::string(meta->className.c_str()) + (meta->targetName.empty() ? std::string {} : (" '" + std::string(meta->targetName.c_str()) + "'"));
         }
     }
     if (const auto name = reg.Get<ZHLN::Components::NameComponent>(e); name && !name->name.empty()) {
@@ -294,14 +285,12 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
 
     // The player is a CharacterVirtual, not a Jolt body, so it is not
     // in the broadphase and cannot be hit -- no ignore handle is needed.
-    const ZHLN::Physics::RaycastResult hit = engine.GetPhysicsContext().Raycast(
-        JPH::RVec3(cc->camera.position), dir, kPickDistance
-    );
+    const ZHLN::Physics::RaycastResult hit = engine.GetPhysicsContext().Raycast(JPH::RVec3(cc->camera.position), dir, kPickDistance);
     if (!hit.hasHit) {
         return;
     }
 
-    g_pick.hasHit    = true;
+    g_pick.hasHit = true;
     // RaycastResult::position is RVec3 (double) and this struct is Vec3 (float):
     // DVec3's Vec3 conversion operator is explicit, so it has to be spelled out.
     g_pick.position  = static_cast<JPH::Vec3>(hit.position);
@@ -314,7 +303,7 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
     // (it unpacks Jolt's user data and checks the generation), so the mapping
     // is a direct handle comparison. GetEntitiesWith returns a span, not a
     // vector, so this walk allocates nothing.
-    for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
+    for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
         const auto phys = reg.Get<ZHLN::Components::PhysicsComponent>(e);
         if (!phys || phys->physicsHandle == ZHLN::Physics::BodyHandle::Null()) {
             continue;
@@ -333,9 +322,9 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
 // SetPendingUIData is not optional: RenderSystem draws whatever
 // Engine::GetPendingUIData() returns and nothing else fills it in, so a callback
 // that builds a Context and forgets this call renders nothing at all.
-void DrawCrosshairHUD(ZHLN::Engine& engine) {
-    ZHLN::GUI::Context ui(engine);
-    ui.BeginFrame(g_frameDt);
+void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui) {
+    hudGui.SetFontAtlas(engine.GetFontAtlas());
+    ZHLN::GUI::Frame ui = hudGui.BeginFrame(engine.ConsumeUIInput(g_frameDt));
 
     const ZHLN::Extent2D viewport = engine.GetPlatformHost().GetSize();
     const float          cx       = static_cast<float>(viewport.width) * 0.5f;
@@ -351,18 +340,17 @@ void DrawCrosshairHUD(ZHLN::Engine& engine) {
     // background colour, and BeginBox/EndBox is the whole contract.
     auto quad = [&ui](std::string_view id, float x, float y, float w, float h, const JPH::Vec4& color) -> void {
         ui.BeginBox(
-            id,
-            ZHLN::GUI::BoxConfig {
-                .width  = {.fixed = w},
-                .height = {.fixed = h},
-                .color  = color,
-                // Floating + non-zero offset is what takes a box out of the
-                // layout flow and pins it to the screen's top-left corner,
-                // which is the only anchor Clay offers. Everything below is
-                // pre-subtracted from the screen centre for that reason.
-                .offsetX = x,
-                .offsetY = y,
-            }
+            id, ZHLN::GUI::BoxConfig {
+                    .width  = {.fixed = w},
+                    .height = {.fixed = h},
+                    .color  = color,
+                    // Floating + non-zero offset is what takes a box out of the
+                    // layout flow and pins it to the screen's top-left corner,
+                    // which is the only anchor Clay offers. Everything below is
+                    // pre-subtracted from the screen centre for that reason.
+                    .offsetX = x,
+                    .offsetY = y,
+                }
         );
         ui.EndBox();
     };
@@ -371,14 +359,7 @@ void DrawCrosshairHUD(ZHLN::Engine& engine) {
     quad("xhair-right", cx + kCrosshairGap, cy - half, kCrosshairArm, kCrosshairThickness, armInk);
     quad("xhair-top", cx - half, cy - kCrosshairGap - kCrosshairArm, kCrosshairThickness, kCrosshairArm, armInk);
     quad("xhair-bottom", cx - half, cy + kCrosshairGap, kCrosshairThickness, kCrosshairArm, armInk);
-    quad(
-        "xhair-dot",
-        cx - kCrosshairDot * 0.5f,
-        cy - kCrosshairDot * 0.5f,
-        kCrosshairDot,
-        kCrosshairDot,
-        dotInk
-    );
+    quad("xhair-dot", cx - kCrosshairDot * 0.5f, cy - kCrosshairDot * 0.5f, kCrosshairDot, kCrosshairDot, dotInk);
 
     // Context prompt for the entity under the reticle. InteractionSystem uses
     // the same 2.5 m use range; keeping the HUD behind that gate means it never
@@ -397,8 +378,10 @@ void DrawCrosshairHUD(ZHLN::Engine& engine) {
         } else if (const auto button = reg.Get<ZHLN::Interaction::ButtonComponent>(g_pick.entity)) {
             if ((button->flags & ZHLN::Interaction::ButtonFlags::Locked) != ZHLN::Interaction::ButtonFlags::None) {
                 prompt = "Locked";
-            } else if (button->state == ZHLN::Interaction::ButtonState::Off ||
-                       (button->flags & ZHLN::Interaction::ButtonFlags::Toggle) != ZHLN::Interaction::ButtonFlags::None) {
+            } else if (
+                button->state == ZHLN::Interaction::ButtonState::Off ||
+                (button->flags & ZHLN::Interaction::ButtonFlags::Toggle) != ZHLN::Interaction::ButtonFlags::None
+            ) {
                 prompt = "Press E to activate";
             }
         }
@@ -439,7 +422,7 @@ void DrawCrosshairHUD(ZHLN::Engine& engine) {
         }
     }
 
-    engine.SetPendingUIData(ui.EndFrame());
+    engine.SubmitUI(std::move(ui).End());
 }
 
 // --- First-person rig -----------------------------------------------------------
@@ -450,19 +433,64 @@ void DrawCrosshairHUD(ZHLN::Engine& engine) {
 // contract ZHLN.ProceduralAnimation evaluates against. The eye height below is
 // only the fallback used until the procedural first-person layer publishes an
 // evaluated eye position; the walk and jump tuning stay this sample's own.
-inline constexpr float kEyeHeightMeters   = 1.62f; // used when the rig has no head
-inline constexpr float kWalkSpeedMeters   = 5.0f; // GMod walk is 200 u/s = 5.08 m/s
-inline constexpr float kJumpForceMeters   = 6.0f; // against the integrator's fixed 32 m/s^2 gravity
-inline constexpr float kLookSensitivity   = 0.12f;
+inline constexpr float kEyeHeightMeters = 1.62f; // used when the rig has no head
+inline constexpr float kWalkSpeedMeters = 5.0f;  // GMod walk is 200 u/s = 5.08 m/s
+inline constexpr float kJumpForceMeters = 6.0f;  // against the integrator's fixed 32 m/s^2 gravity
+inline constexpr float kLookSensitivity = 0.12f;
 // Cruise speed for the fly camera the V toggle hands the view to
 // (extensions/FreeCam). Walking is 5 m/s, so this is a map-tour pace, and the
 // extension's own sprint multiplier still applies on Left Shift.
-inline constexpr float kFlySpeedMeters    = 8.0f;
+inline constexpr float kFlySpeedMeters = 8.0f;
 
 // One sample process, one main camera and one player: the rig state is
 // file-static for the same reason the controller extension keeps its
 // PlayerInputSystem static inside its frame steps.
 ZHLN::Entity g_player = ZHLN::Entity::Null();
+
+// The player's glTF rig is spawned outside the BSP importer, so its parts get no
+// ambient cube from the importer. These globals let the frame loop sample the
+// leaf cube at the player's position and write it onto the rig parts, so the
+// character follows the lighting of the room it stands in.
+std::vector<ZHLN::Entity>       g_playerRigParts;
+const ZHLN::BSP::BSPMap*        g_rigCubeMap = nullptr;
+ZHLN::BSP::ImportOptions        g_rigImportOpts {};
+
+void UpdatePlayerRigAmbientCube(ZHLN::Engine& engine) {
+    if (g_rigCubeMap == nullptr || g_player == ZHLN::Entity::Null() || g_playerRigParts.empty()) {
+        return;
+    }
+    auto& reg = engine.GetRegistry();
+    if (!reg.IsAlive(g_player)) {
+        return;
+    }
+    const auto world = reg.Get<ZHLN::Components::WorldTransformComponent>(g_player);
+    if (!world) {
+        return;
+    }
+    // Inverse of ConvertPosition (Source -> engine): engine = (x*s, z*s, -y*s).
+    const JPH::Vec3 e = world->world.GetTranslation();
+    const float     s = g_rigImportOpts.unitScale;
+    const std::array<float, 3> src = {e.GetX() / s, -e.GetZ() / s, e.GetY() / s};
+
+    std::array<std::array<float, 3>, 6> cube {};
+    if (!ZHLN::BSP::SampleLeafAmbientCube(*g_rigCubeMap, src, cube)) {
+        return;
+    }
+    std::array<JPH::Float4, 6> engineCube {};
+    for (size_t f = 0; f < 6; ++f) {
+        const float k = g_rigImportOpts.propAmbientCubeScale;
+        engineCube[f] = {cube[f][0] * k, cube[f][1] * k, cube[f][2] * k, 1.0f};
+    }
+    for (ZHLN::Entity part: g_playerRigParts) {
+        if (!reg.IsAlive(part)) {
+            continue;
+        }
+        if (!reg.Get<ZHLN::Components::AmbientCubeComponent>(part)) {
+            reg.Add<ZHLN::Components::AmbientCubeComponent>(part);
+        }
+        reg.Patch<ZHLN::Components::AmbientCubeComponent>(part, [&](auto& c) { c.cube = engineCube; });
+    }
+}
 
 // --- Procedural character -------------------------------------------------------
 
@@ -691,13 +719,13 @@ ProceduralViewState g_view;
 // a size cap does not: UziProc.glb's beanie is 0.27 m across at the head against
 // a DEF-Neck-to-DEF-Head distance of 0.07 m, which is why the compact-accessory
 // cap rejects it.
-[[nodiscard]] bool IsHeadRestingPart(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex, JPH::Vec3Arg headPosition,
-                                     JPH::Vec3Arg neckPosition, float headScale) {
+[[nodiscard]] bool
+    IsHeadRestingPart(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex, JPH::Vec3Arg headPosition, JPH::Vec3Arg neckPosition, float headScale) {
     for (const ZHLN::ModelPart& part: prefab.parts) {
         if (part.nodeIndex != nodeIndex) {
             continue;
         }
-        const JPH::Mat44 model       = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+        const JPH::Mat44 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
         const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         const JPH::Vec3  localCenter = (localMin + localMax) * 0.5f;
@@ -711,8 +739,7 @@ ProceduralViewState g_view;
             continue;
         }
         const float reach = headScale * 1.8f;
-        if (std::abs(center.GetX() - headPosition.GetX()) > reach + extent.GetX() ||
-            std::abs(center.GetZ() - headPosition.GetZ()) > reach + extent.GetZ()) {
+        if (std::abs(center.GetX() - headPosition.GetX()) > reach + extent.GetX() || std::abs(center.GetZ() - headPosition.GetZ()) > reach + extent.GetZ()) {
             continue;
         }
         return true;
@@ -751,9 +778,8 @@ void CollectFirstPersonHeadMeshes(
         const bool underHead     = headNode >= 0 && IsNodeUnder(prefab, mesh->nodeIndex, headNode);
         const auto skeletalMesh  = registry.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
         const bool headSkin      = skeletalMesh && IsHeadDominatedSkin(prefab, skeletalMesh->skeletonIndex);
-        const bool headAccessory =
-            headNode >= 0 && (IsCompactHeadAccessory(prefab, mesh->nodeIndex, headPosition, neckPosition, headScale) ||
-                              IsHeadRestingPart(prefab, mesh->nodeIndex, headPosition, neckPosition, headScale));
+        const bool headAccessory = headNode >= 0 && (IsCompactHeadAccessory(prefab, mesh->nodeIndex, headPosition, neckPosition, headScale) ||
+                                                     IsHeadRestingPart(prefab, mesh->nodeIndex, headPosition, neckPosition, headScale));
         if (underHead || HasHeadVisualAncestor(prefab, mesh->nodeIndex) || headSkin || headAccessory) {
             state.headMeshes.push_back({.entity = entity, .originalFlags = mesh->flags});
         }
@@ -903,6 +929,11 @@ auto AttachCharacterRig(
             CollectFirstPersonHeadMeshes(reg, *prefab, std::span<const ZHLN::Entity>(parts.data() + 1, writtenCount - 1), viewState);
         }
 
+        // Keep the rig's visual parts so the frame loop can refresh their ambient cube.
+        if (writtenCount > 1) {
+            g_playerRigParts.assign(parts.begin() + 1, parts.begin() + writtenCount);
+        }
+
         // Clean up the redundant prefab container root (parts[0]).
         if (writtenCount > 0) {
             ZHLN::DespawnEntity(engine, parts[0]);
@@ -913,16 +944,16 @@ auto AttachCharacterRig(
         reg.Add(
             player,
             ZHLN::Components::AnimatorComponent {
+                .prefabAsset     = ZHLN::HashAssetPath(std::string_view(prefab->virtualPath)),
                 .currentTrackIdx = idleTrack,
                 .currentLoop     = true,
-                .prefab          = &*prefab,
             },
             ZHLN::ProceduralLocomotionTracksComponent {
                 .idleTrack = idleTrack,
                 .walkTrack = walkTrack,
                 .runTrack  = runTrack,
             },
-            ZHLN::Components::KinematicPoseOverrideComponent {}, ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by the optional subsystem
+            ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by the optional subsystem
             std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig, std::move(firstPerson)
         );
     } else {
@@ -932,7 +963,7 @@ auto AttachCharacterRig(
         ZHLN::BuildStandardProceduralRig(proceduralRig);
 
         reg.Add(
-            player, ZHLN::Components::KinematicPoseOverrideComponent {}, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
+            player, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
             animationConfig, std::move(firstPerson)
         );
     }
@@ -1163,7 +1194,7 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
         // RMB drag so a host that never captures still works exactly as before.
         if (const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
             input && (g_mouseCaptured || input->IsMouseButtonDown(static_cast<uint8_t>(ZHLN::KeyCode::RButton)))) {
-            g_view.yaw  += input->GetMouseDeltaX() * kLookSensitivity;
+            g_view.yaw += input->GetMouseDeltaX() * kLookSensitivity;
             g_view.pitch = std::clamp(g_view.pitch - (input->GetMouseDeltaY() * kLookSensitivity), -89.0f, 89.0f);
         }
         cc.camera.yaw      = g_view.yaw;
@@ -1225,7 +1256,7 @@ void PrintControlsBanner(std::string_view mapPath) {
 // grinding on the catcher can never flood stdout.
 inline constexpr float kVoidCatcherDropMeters = 15.0f;
 
-class VoidCatcherContactListener final : public JPH::ContactListener {
+class VoidCatcherContactListener final: public JPH::ContactListener {
   public:
     struct PropInfo {
         std::string display;
@@ -1237,17 +1268,17 @@ class VoidCatcherContactListener final : public JPH::ContactListener {
         JPH::Vec3   surfaceTouch {0.0f, 0.0f, 0.0f};
     };
 
-    VoidCatcherContactListener(JPH::ContactListener* inner, JPH::BodyID catcher, std::unordered_map<uint32_t, PropInfo> props)
-        : _inner(inner), _catcher(catcher), _props(std::move(props)) {}
+    VoidCatcherContactListener(JPH::ContactListener* inner, JPH::BodyID catcher, std::unordered_map<uint32_t, PropInfo> props):
+        _inner(inner), _catcher(catcher), _props(std::move(props)) {
+    }
 
     [[nodiscard]] auto Inner() const noexcept -> JPH::ContactListener* {
         return _inner;
     }
 
-    [[nodiscard]] auto OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg baseOffset,
-                                         const JPH::CollideShapeResult& result) -> JPH::ValidateResult override {
-        return _inner != nullptr ? _inner->OnContactValidate(b1, b2, baseOffset, result)
-                                 : JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
+    [[nodiscard]] auto OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg baseOffset, const JPH::CollideShapeResult& result)
+        -> JPH::ValidateResult override {
+        return _inner != nullptr ? _inner->OnContactValidate(b1, b2, baseOffset, result) : JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
     }
 
     void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings) override {
@@ -1274,7 +1305,7 @@ class VoidCatcherContactListener final : public JPH::ContactListener {
 
     // Drained once per frame from the main thread.
     auto TakePendingLogs() -> std::vector<PendingLog> {
-        const std::lock_guard lock(_mutex);
+        const std::lock_guard   lock(_mutex);
         std::vector<PendingLog> out;
         out.swap(_pending);
         return out;
@@ -1299,10 +1330,9 @@ class VoidCatcherContactListener final : public JPH::ContactListener {
                 return;
             }
             PendingLog entry;
-            entry.display   = propIt->second.display;
-            entry.fellPoint = manifold.mRelativeContactPointsOn1.empty()
-                                  ? JPH::Vec3(manifold.mBaseOffset)
-                                  : JPH::Vec3(manifold.GetWorldSpaceContactPointOn1(0));
+            entry.display         = propIt->second.display;
+            entry.fellPoint       = manifold.mRelativeContactPointsOn1.empty() ? JPH::Vec3(manifold.mBaseOffset) :
+                                                                                 JPH::Vec3(manifold.GetWorldSpaceContactPointOn1(0));
             const auto touchIt    = _lastTouch.find(propId.GetIndexAndSequenceNumber());
             entry.hadSurfaceTouch = touchIt != _lastTouch.end();
             if (entry.hadSurfaceTouch) {
@@ -1345,7 +1375,23 @@ JPH::BodyID                 g_voidCatcher {};
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
-    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)));
+    // The map's 3D skybox is background scenery the importer has to place into
+    // the level's own world; ImportOptions::importSkybox is off by default and
+    // this switch is what turns it back on.
+    bool importSkybox = false;
+    const std::array skyboxHandlers {
+        ZHLN::CommandHandler {
+            .key         = "--skybox",
+            .description = "Import the map's 3D skybox (background scenery; default: off)",
+            .action =
+                [&](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
+                    importSkybox = true;
+                    return {};
+                },
+        },
+    };
+
+    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)), skyboxHandlers);
     if (!optionsRes) {
         return EXIT_FAILURE;
     }
@@ -1410,9 +1456,12 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
     const auto& bspMap = *bspMapExp;
+    g_rigCubeMap       = &bspMap;
     ZHLN::Log("[BSPSample] Map version: {}", bspMap.version);
-    ZHLN::Log("[BSPSample] Entities: {}, Static Props: {}, Models: {}, Displacements: {}",
-        bspMap.entities.size(), bspMap.staticProps.size(), bspMap.models.size(), bspMap.dispInfos.size());
+    ZHLN::Log(
+        "[BSPSample] Entities: {}, Static Props: {}, Models: {}, Displacements: {}", bspMap.entities.size(), bspMap.staticProps.size(), bspMap.models.size(),
+        bspMap.dispInfos.size()
+    );
 
     // 4. Initialize Engine
     auto engineRes = ZHLN::Engine::Create(
@@ -1462,10 +1511,12 @@ auto main(int argc, char* argv[]) -> int {
     // as a module of this sample's own making -- the engine has no seam a host
     // reaches through any more, so the sample composes what it wants and reads
     // the placement error if the anchor is gone.
-    if (auto installed = engine->InstallModule(ZHLN::Module {
-            .name       = "BSPMurderDronesFirstPerson",
-            .frameSteps = kFirstPersonCameraStep,
-        });
+    if (auto installed = engine->InstallModule(
+            ZHLN::Module {
+                .name       = "BSPMurderDronesFirstPerson",
+                .frameSteps = kFirstPersonCameraStep,
+            }
+        );
         !installed) {
         ZHLN::LogError("[BSPSample] first-person camera step not placed: {}", ZHLN::ToString(installed.error()));
     }
@@ -1497,50 +1548,45 @@ auto main(int argc, char* argv[]) -> int {
         SetMouseCaptured(*engine, true);
         ZHLN::Log("[BSPSample] Mouse captured: move to look, no button held. M releases the cursor.");
     }
-    engine->SetUICallback([](ZHLN::Engine& eng) -> void { DrawCrosshairHUD(eng); });
+    ZHLN::GUI::Context hudGui;
+    engine->SetUICallback([&hudGui](ZHLN::Engine& eng) -> void { DrawCrosshairHUD(eng, hudGui); });
 
     // 5. Import BSP into ModelPrefab
     ZHLN::BSP::ImportOptions importOpts {
         .convertCoordinates   = true,
         .unitScale            = 0.0254f, // Convert inches to meters
         .includeDisplacements = true,
+        .importSkybox         = importSkybox,
         .gatherLights         = true,
         .buildColliders       = true,
         .assetRoot            = assetRoot.string(),
         .ambientOcclusion     = false,
+        // Source's compiled VRAD atlas is the static-world baseline. The old
+        // VPL reconstruction remains deliberately off: it duplicates the bake
+        // and burns the clustered/RTGI budget this sample is meant to relieve.
+        .useVradLightmaps     = true,
+        .ingestVradBake       = false,
     };
 
     const std::string virtualPath = mapPath.string();
     ZHLN::Log("[BSPSample] Importing BSP geometry and resolving materials...");
-    auto prefabOpt = ZHLN::BSP::LoadBSPPrefabFromMemory(
-        engine->GetRenderContext(),
-        engine->GetAssetManager(),
-        bspBytes,
-        virtualPath,
-        importOpts
-    );
+    g_rigImportOpts = importOpts;
+    auto prefabOpt  = ZHLN::BSP::LoadBSPPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bspBytes, virtualPath, importOpts);
     if (!prefabOpt) {
         ZHLN::LogError("[BSPSample] Failed to import BSP prefab for '{}'", virtualPath);
         return EXIT_FAILURE;
     }
     const auto& prefab = *prefabOpt;
-    ZHLN::Log("[BSPSample] Imported prefab: {} part(s), {} node(s), {} light(s)",
-        prefab.parts.size(), prefab.nodes.size(), prefab.lights.size());
+    ZHLN::Log("[BSPSample] Imported prefab: {} part(s), {} node(s), {} light(s)", prefab.parts.size(), prefab.nodes.size(), prefab.lights.size());
 
     // 5b. Preload static prop models referenced by the map into AssetManager
-    const size_t preloadedProps = ZHLN::BSP::PreloadStaticProps(
-        engine->GetRenderContext(),
-        engine->GetAssetManager(),
-        bspMap,
-        importOpts
-    );
+    const size_t preloadedProps = ZHLN::BSP::PreloadStaticProps(engine->GetRenderContext(), engine->GetAssetManager(), bspMap, importOpts);
     ZHLN::Log("[BSPSample] Preloaded {} static prop model prefab(s)", preloadedProps);
 
     // 6. Describe and Instantiate Scene
     ZHLN::Log("[BSPSample] Translating BSP entities and static props to Scene...");
     const ZHLN::Scene::Scene sceneDesc = ZHLN::BSP::DescribeScene(bspMap, virtualPath, importOpts);
-    ZHLN::Log("[BSPSample] Scene description ready: {} entity(ies), {} light(s)",
-        sceneDesc.entities.size(), sceneDesc.lights.size());
+    ZHLN::Log("[BSPSample] Scene description ready: {} entity(ies), {} light(s)", sceneDesc.entities.size(), sceneDesc.lights.size());
 
     auto instanceExp = ZHLN::Scene::Instantiate(*engine, sceneDesc);
     if (!instanceExp) {
@@ -1548,8 +1594,7 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
     const auto& instance = *instanceExp;
-    ZHLN::Log("[BSPSample] Instantiated {} scene entities and {} lights",
-        instance.entities.size(), instance.lights.size());
+    ZHLN::Log("[BSPSample] Instantiated {} scene entities and {} lights", instance.entities.size(), instance.lights.size());
 
     // 7. Initialize Interactive Entities (doors, buttons, triggers)
     ZHLN::Interaction::InitializeBSPEntities(engine->GetRegistry(), bspMap, instance, importOpts);
@@ -1573,10 +1618,10 @@ auto main(int argc, char* argv[]) -> int {
     const JPH::Vec3 mapCenter = (boundsMin + boundsMax) * 0.5f;
     const float     mapRadius = std::max((boundsMax - boundsMin).Length() * 0.5f, 10.0f);
 
-    ZHLN::Log("[BSPSample] Map bounds: min=({:.1f}, {:.1f}, {:.1f}), max=({:.1f}, {:.1f}, {:.1f}), radius={:.1f} m",
-        boundsMin.GetX(), boundsMin.GetY(), boundsMin.GetZ(),
-        boundsMax.GetX(), boundsMax.GetY(), boundsMax.GetZ(),
-        mapRadius);
+    ZHLN::Log(
+        "[BSPSample] Map bounds: min=({:.1f}, {:.1f}, {:.1f}), max=({:.1f}, {:.1f}, {:.1f}), radius={:.1f} m", boundsMin.GetX(), boundsMin.GetY(),
+        boundsMin.GetZ(), boundsMax.GetX(), boundsMax.GetY(), boundsMax.GetZ(), mapRadius
+    );
 
     // 7b. Void-fall diagnostic: an invisible sensor slab one fixed drop below
     // the map bounds, plus a contact listener chained in front of the engine's
@@ -1589,7 +1634,7 @@ auto main(int argc, char* argv[]) -> int {
         auto& reg     = engine->GetRegistry();
 
         std::unordered_map<uint32_t, VoidCatcherContactListener::PropInfo> propBodies;
-        for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
+        for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
             const auto phys = reg.Get<ZHLN::Components::PhysicsComponent>(e);
             if (!phys || phys->isStatic || phys->physicsHandle == ZHLN::Physics::BodyHandle::Null()) {
                 continue;
@@ -1598,10 +1643,9 @@ auto main(int argc, char* argv[]) -> int {
             if (!source || !std::string_view(source->source.c_str()).ends_with(".mdl")) {
                 continue; // world brush geometry, doors, buttons: not props
             }
-            const auto  name    = reg.Get<ZHLN::Components::NameComponent>(e);
-            std::string display = (name && name->name.c_str()[0] != '\0') ? name->name.c_str()
-                                                                           : source->source.c_str();
-            const JPH::BodyID id = ZHLN::Physics::GetBodyID(physics.GetWorld(), phys->physicsHandle);
+            const auto        name                     = reg.Get<ZHLN::Components::NameComponent>(e);
+            std::string       display                  = (name && name->name.c_str()[0] != '\0') ? name->name.c_str() : source->source.c_str();
+            const JPH::BodyID id                       = ZHLN::Physics::GetBodyID(physics.GetWorld(), phys->physicsHandle);
             propBodies[id.GetIndexAndSequenceNumber()] = VoidCatcherContactListener::PropInfo {std::move(display)};
         }
 
@@ -1620,8 +1664,7 @@ auto main(int argc, char* argv[]) -> int {
 
         g_voidListener = new VoidCatcherContactListener(system.GetContactListener(), g_voidCatcher, std::move(propBodies));
         system.SetContactListener(g_voidListener);
-        ZHLN::Log("[BSPSample] Void catcher armed {:.0f} m below the map: props that slip through visible geometry are logged once.",
-                  kVoidCatcherDropMeters);
+        ZHLN::Log("[BSPSample] Void catcher armed {:.0f} m below the map: props that slip through visible geometry are logged once.", kVoidCatcherDropMeters);
     }
 
     // 8b. Load the procedural rig before the CharacterVirtual exists, so the
@@ -1700,13 +1743,11 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         const JPH::Mat44 playerWorld = ZHLN::Math::CreateTransform(spawnCenter, JPH::Quat::sIdentity());
-        g_player = reg.Create(
-            ZHLN::Components::PlayerTagComponent {},
-            ZHLN::Components::NameComponent {.name = ZHLN::String64("Player_Procedural")},
+        g_player                     = reg.Create(
+            ZHLN::Components::PlayerTagComponent {}, ZHLN::Components::NameComponent {.name = ZHLN::String64("Player_Procedural")},
             ZHLN::Components::TransformComponent {.position = spawnCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
             ZHLN::Components::WorldTransformComponent {.world = playerWorld, .previous = playerWorld},
-            ZHLN::Components::PhysicsComponent {.physicsHandle = playerBody, .isStatic = false},
-            ZHLN::Character::InputComponent {},
+            ZHLN::Components::PhysicsComponent {.physicsHandle = playerBody, .isStatic = false}, ZHLN::Character::InputComponent {},
             ZHLN::Character::MovementComponent {.speed = kWalkSpeedMeters, .jumpForce = kJumpForceMeters}
         );
 
@@ -1749,33 +1790,31 @@ auto main(int argc, char* argv[]) -> int {
                 p.exposure        = 0.18f;
                 p.tonemapper      = 1;
                 p.ambientExposure = 1.2f;
-                // Ray-traced reflections, and -- less obviously -- the gate that
-                // makes lighting.slang *sample* the ray-traced shadow mask:
-                // RenderGraphBuild.hpp derives the shader's pc.enableRTR from
-                // post.enableRTR, so without this an enableShadows pass would
-                // trace a mask that nothing reads.
-                p.enableRTR       = 1;
+                p.giMode          = 0; // No screen-space AO/GI over baked diffuse.
+                p.enableSSR       = 0;
+                // The native VRAD atlas is the static world-lighting source.
+                // Keep the Source-fidelity baseline free of RTR/RTGI work;
+                // dynamic-light experiments can opt these features back in.
+                p.enableRTR = 0;
             });
             const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::AASettingsComponent>();
             reg.Patch<ZHLN::Components::AASettingsComponent>(camera, [](auto& aa) { aa.state.mode = ZHLN::AAMode::SMAA; });
 
-            // Enable the independent one-bounce RTGI path alongside runtime
-            // BSP lights; the shared A-Trous pass handles the spatial noise.
-            //
-            // denoiserPasses > 0 is what makes RenderFrame.cpp treat rtHistoryValid
-            // as true, i.e. temporal accumulation and TAA reprojection across
-            // frames; leaving it at 0 would disable denoising but not the
-            // tracing, so it is pinned here rather than left to a default.
+            // VRAD already contains the static direct/indirect transport.
+            // Until the later stencil-mask stage selectively re-enables RT for
+            // dynamic receivers, do not trace shadows, reflections or diffuse
+            // GI for this Source baseline.
             const ZHLN::Entity rtSettings = reg.SingletonEntity<ZHLN::Components::RayTracingSettingsComponent>();
             if (rtSettings == ZHLN::Entity::Null()) {
                 reg.Create(ZHLN::Components::RayTracingSettingsComponent {
-                    .config = {.enableShadows = true, .enableDiffuseGI = true, .denoiserPasses = 2}
+                    .config = {.enableReflections = false, .enableShadows = false, .enableDiffuseGI = false, .denoiserPasses = 0}
                 });
             } else {
                 reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(rtSettings, [](auto& rt) {
-                    rt.config.enableShadows   = true;
-                    rt.config.enableDiffuseGI = true;
-                    rt.config.denoiserPasses  = 2;
+                    rt.config.enableReflections = false;
+                    rt.config.enableShadows     = false;
+                    rt.config.enableDiffuseGI   = false;
+                    rt.config.denoiserPasses    = 0;
                 });
             }
             reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [mapRadius](auto& s) {
@@ -1801,8 +1840,8 @@ auto main(int argc, char* argv[]) -> int {
                 ZHLN::Components::TransformComponent {.position = sunPos, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
                 ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
                 ZHLN::Components::LightComponent {
-                    .type      = ZHLN::LightType::Sun,
-                    .color     = JPH::Vec3(0.95f, 0.96f, 1.00f),
+                    .type  = ZHLN::LightType::Sun,
+                    .color = JPH::Vec3(0.95f, 0.96f, 1.00f),
                     // A dim fill keeps the level navigable when it has no
                     // authored light_environment; the runtime BSP lights and
                     // RTGI provide the remaining illumination.
@@ -1829,17 +1868,18 @@ auto main(int argc, char* argv[]) -> int {
     // or dropping it (Detach) is the whole mode switch -- FreeCamSystem drives
     // the pose while it is on, FirstPersonCameraStep yields to it, and the
     // controller extension freezes the character's intent off the same flag.
-    bool freeCamKeyWasDown = false;
-    bool captureKeyWasDown = false;
+    bool freeCamKeyWasDown   = false;
+    bool captureKeyWasDown   = false;
     bool pickKeyWasDown      = false;
     bool viewKeyWasDown      = false;
     bool benchKeyWasDown     = false;
     bool telemetryKeyWasDown = false;
 
-    ZHLN::Clock clock;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     while (engine->IsRunning()) {
+        ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
-        const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        const float dt = clock.Tick();
         g_frameDt      = dt;
 
         // Hoisted out of the block that used to own it: the free-camera, mouse
@@ -1854,7 +1894,6 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         {
-
             // Raw, like the other samples' edge detection: no console or text
             // field in this sample captures the keyboard.
             const bool freeCamKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::V));
@@ -1905,8 +1944,7 @@ auto main(int argc, char* argv[]) -> int {
             if (captureKeyDown && !captureKeyWasDown) {
                 SetMouseCaptured(*engine, !g_mouseCaptured);
                 ZHLN::Log(
-                    "[BSPSample] Mouse {}: {}.",
-                    g_mouseCaptured ? "captured" : "released",
+                    "[BSPSample] Mouse {}: {}.", g_mouseCaptured ? "captured" : "released",
                     g_mouseCaptured ? "move to look, no button held" : "the cursor is back; M re-captures"
                 );
             }
@@ -1953,8 +1991,8 @@ auto main(int argc, char* argv[]) -> int {
                     ZHLN::Log(
                         "[BSPSample] CROSSHAIR hit '{}' at {:.2f} m -- pos ({:.2f}, {:.2f}, {:.2f})  normal "
                         "({:.2f}, {:.2f}, {:.2f})  body {}",
-                        g_pick.label, g_pick.distance, g_pick.position.GetX(), g_pick.position.GetY(), g_pick.position.GetZ(),
-                        g_pick.normal.GetX(), g_pick.normal.GetY(), g_pick.normal.GetZ(), g_pick.bodyIndex
+                        g_pick.label, g_pick.distance, g_pick.position.GetX(), g_pick.position.GetY(), g_pick.position.GetZ(), g_pick.normal.GetX(),
+                        g_pick.normal.GetY(), g_pick.normal.GetZ(), g_pick.bodyIndex
                     );
                 } else {
                     ZHLN::Log("[BSPSample] CROSSHAIR no hit within {:.1f} m.", kPickDistance);
@@ -1985,6 +2023,7 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+        UpdatePlayerRigAmbientCube(*engine);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
             engine->GetPlatformHost().Close();
             break;
@@ -1999,16 +2038,20 @@ auto main(int argc, char* argv[]) -> int {
         // Void-fall diagnostic drain: at most one line per prop per run, so a
         // prop grinding on the catcher can never flood stdout.
         if (g_voidListener != nullptr) {
-            for (const auto& entry : g_voidListener->TakePendingLogs()) {
+            for (const auto& entry: g_voidListener->TakePendingLogs()) {
                 if (entry.hadSurfaceTouch) {
-                    ZHLN::Log("[BSPSample] VOID FALL: prop '{}' reached the void at ({:.2f}, {:.2f}, {:.2f}); last surface contact at "
-                              "({:.2f}, {:.2f}, {:.2f}) -- it fell through visible geometry.",
-                              entry.display, entry.fellPoint.GetX(), entry.fellPoint.GetY(), entry.fellPoint.GetZ(),
-                              entry.surfaceTouch.GetX(), entry.surfaceTouch.GetY(), entry.surfaceTouch.GetZ());
+                    ZHLN::Log(
+                        "[BSPSample] VOID FALL: prop '{}' reached the void at ({:.2f}, {:.2f}, {:.2f}); last surface contact at "
+                        "({:.2f}, {:.2f}, {:.2f}) -- it fell through visible geometry.",
+                        entry.display, entry.fellPoint.GetX(), entry.fellPoint.GetY(), entry.fellPoint.GetZ(), entry.surfaceTouch.GetX(),
+                        entry.surfaceTouch.GetY(), entry.surfaceTouch.GetZ()
+                    );
                 } else {
-                    ZHLN::Log("[BSPSample] VOID FALL: prop '{}' reached the void at ({:.2f}, {:.2f}, {:.2f}); no surface contact was "
-                              "recorded before the fall.",
-                              entry.display, entry.fellPoint.GetX(), entry.fellPoint.GetY(), entry.fellPoint.GetZ());
+                    ZHLN::Log(
+                        "[BSPSample] VOID FALL: prop '{}' reached the void at ({:.2f}, {:.2f}, {:.2f}); no surface contact was "
+                        "recorded before the fall.",
+                        entry.display, entry.fellPoint.GetX(), entry.fellPoint.GetY(), entry.fellPoint.GetZ()
+                    );
                 }
             }
         }

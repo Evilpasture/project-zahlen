@@ -114,35 +114,6 @@ struct CallableInspector {
     }
 };
 
-#else // !ZHLN_REFLECTION_AVAILABLE (Stub for stock clangd)
-
-template <auto Fn>
-struct CallableInspector {
-    using Callable = std::remove_cvref_t<decltype(Fn)>;
-
-    static consteval auto ParameterCount() -> std::size_t {
-        return 0;
-    }
-
-    template <std::size_t I>
-    using ParameterType = void;
-
-    template <typename F>
-    static void ForEachParameter(F&&) noexcept {
-    }
-
-    static consteval auto Name() -> std::string_view {
-        return "Callable";
-    }
-    static auto NameCString() -> const char* {
-        return "Callable";
-    }
-
-    template <template <typename> class Resolver, typename Context>
-    static void Invoke(Context&) noexcept {
-    }
-};
-
 #endif
 
 } // namespace ZHLN::Reflect

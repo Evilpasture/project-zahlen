@@ -1,19 +1,13 @@
 
+import gpu_push_constants;
 import common;
 import gpu_buffer;
 import math.transform;
 import particles;
 import uniforms;
 
-struct ComputePushConstants {
-    uint64_t particleBufferAddr;
-    uint particleCount;
-    float deltaTime;
-    MeshParticleEmitterParams p;
-};
-
 [vk::push_constant]
-ComputePushConstants pc;
+MeshParticleComputePush pc;
 
 [numthreads(64, 1, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {

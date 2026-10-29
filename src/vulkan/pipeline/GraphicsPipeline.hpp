@@ -43,7 +43,9 @@ constexpr auto operator|=(MaterialFlags& left, MaterialFlags right) noexcept -> 
     return (flags & flag) != MaterialFlags::None;
 }
 
-inline constexpr size_t k_material_flag_variant_count = 5;
+// None, translucent, translucent+depth, additive, additive+depth, opaque+depth.
+// DoubleSided only changes culling and deliberately shares these state variants.
+inline constexpr size_t k_material_flag_variant_count = 6;
 
 [[nodiscard]] constexpr auto MaterialFlagVariantIndex(MaterialFlags flags) noexcept -> size_t {
     constexpr uint8_t k_known_mask = static_cast<uint8_t>(MaterialFlags::DoubleSided) | static_cast<uint8_t>(MaterialFlags::TranslucentBlend) |
@@ -56,7 +58,7 @@ inline constexpr size_t k_material_flag_variant_count = 5;
     const bool translucent = HasFlag(flags, MaterialFlags::TranslucentBlend);
     const bool additive    = HasFlag(flags, MaterialFlags::AdditiveBlend);
     const bool depth_write = HasFlag(flags, MaterialFlags::DepthWrite);
-    if ((translucent && additive) || (depth_write && !translucent && !additive)) {
+    if (translucent && additive) {
         return k_material_flag_variant_count;
     }
 
@@ -66,7 +68,7 @@ inline constexpr size_t k_material_flag_variant_count = 5;
     if (additive) {
         return depth_write ? 4U : 3U;
     }
-    return 0;
+    return depth_write ? 5U : 0U;
 }
 
 struct PipelineCreateBindings {
@@ -119,6 +121,23 @@ consteval void AppendColorFormat(std::array<VkFormat, N>& formats, size_t& outIn
         using Resource      = typename Usage::Resource;
         formats[outIndex++] = Resource::format;
     }
+}
+
+template <typename UsageList, size_t Index, size_t N>
+consteval void AppendColorMask(std::array<VkColorComponentFlags, N>& masks, size_t& outIndex) noexcept {
+    using Usage = typename UsageList::template type<Index>;
+    if constexpr (IsColorAttachmentUsage<Usage>()) {
+        masks[outIndex++] = Usage::channel_mask;
+    }
+}
+
+template <typename UsageList, size_t... Index>
+[[nodiscard]] consteval auto MakeColorMasks(std::index_sequence<Index...>) noexcept {
+    constexpr size_t count = CountColorAttachments<UsageList>(std::index_sequence<Index...> {});
+    std::array<VkColorComponentFlags, count> masks {};
+    size_t outIndex = 0;
+    (AppendColorMask<UsageList, Index>(masks, outIndex), ...);
+    return masks;
 }
 
 template <typename UsageList, size_t... Index>
@@ -233,6 +252,7 @@ struct PassAttachmentFormats {
     static constexpr size_t   color_count   = PipelineDetail::CountColorAttachments<UsageList>(k_usage_indices);
     static constexpr size_t   depth_count   = PipelineDetail::CountDepthAttachments<UsageList>(k_usage_indices);
     static constexpr auto     color_formats = PipelineDetail::MakeColorFormats<UsageList>(k_usage_indices);
+    static constexpr auto     color_masks   = PipelineDetail::MakeColorMasks<UsageList>(k_usage_indices);
     static constexpr VkFormat depth_format  = PipelineDetail::FindDepthFormat<UsageList>(k_usage_indices);
     static constexpr bool     has_depth     = depth_count != 0;
 
@@ -386,6 +406,14 @@ struct GraphicsPipeline {
     static_assert(ShaderModule::template PushLayoutMatches<PushConstants>(), "Graphics pass push constants must match shader reflection.");
     static_assert(material_variant_index < k_material_flag_variant_count, "Invalid MaterialFlags combination.");
     static_assert(!is_blended || Attachments::color_count == 1, "Blend material variants require exactly one color attachment.");
+    // PipelineBuilder currently has a single colorWriteMask shared by every
+    // attachment. Refuse mixed-mask MRT instead of silently violating a graph
+    // usage contract; add per-attachment builder state before enabling it.
+    static_assert(Attachments::color_count <= 1 || [] {
+        for (auto mask: Attachments::color_masks)
+            if (mask != (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT)) return false;
+        return true;
+    }(), "Mixed channel masks need per-attachment pipeline state");
     static_assert(!HasFlag(Flags, MaterialFlags::DepthWrite) || Attachments::has_depth, "DepthWrite requires a pass depth attachment.");
 
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
@@ -436,6 +464,12 @@ struct GraphicsPipeline {
             .viewMask           = PipelineDetail::PassViewMask<PassContract>(),
             .specializationInfo = bindings.specialization,
             .colorWriteEnable   = PipelineDetail::PassColorWriteEnable<PassContract>(),
+            .colorWriteMask     = [] {
+                if constexpr (Attachments::color_count == 1)
+                    return Attachments::color_masks[0];
+                else
+                    return VkColorComponentFlags(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+            }(),
         };
 
         return PipelineBuilder<>::WithConfig(config).Binaries(binaries).Build(device);

@@ -4,6 +4,10 @@
 #pragma once
 
 #include "Platform.hpp"
+#if !defined(_WIN32)
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 namespace ZHLN {
 

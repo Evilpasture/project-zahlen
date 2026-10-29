@@ -107,8 +107,33 @@ void LightingSystem::Update(ECS::Query<const Components::LightComponent, const C
             desc.castsShadow      = light.castsShadow;
             desc.direction        = light.direction;
             desc.color            = light.color;
+            desc.points           = light.points;
             desc.innerConeRadians = light.innerConeRadians;
             desc.outerConeRadians = light.outerConeRadians;
+            desc.baked            = light.baked;
+
+            JPH::Vec3 lightPos    = JPH::Vec3::sZero();
+            bool      hasLightPos = query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
+                lightPos = worldTrans.world.GetTranslation();
+            });
+            if (!hasLightPos) {
+                hasLightPos = query.Patch<Components::TransformComponent>(e, [&](const auto& trans) { lightPos = trans.position; });
+            }
+            if (!hasLightPos && light.type == LightType::Area) {
+                lightPos    = 0.25f * (light.points.GetColumn3(0) + light.points.GetColumn3(1) + light.points.GetColumn3(2) + light.points.GetColumn3(3));
+                hasLightPos = true;
+            }
+            desc.position = lightPos;
+
+            if (light.type == LightType::Spot && desc.direction.LengthSq() <= 1e-8f) {
+                if (!query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
+                        desc.direction = worldTrans.world.GetColumn3(2);
+                    })) {
+                    query.Patch<Components::TransformComponent>(e, [&](const auto& trans) {
+                        desc.direction = trans.GetLocalMatrix().GetColumn3(2);
+                    });
+                }
+            }
 
             RankedLight entry {};
             entry.desc   = desc;
@@ -117,15 +142,6 @@ void LightingSystem::Update(ECS::Query<const Components::LightComponent, const C
 
             if (light.type == LightType::Point || light.type == LightType::Spot) {
                 entry.isRanged = true;
-
-                JPH::Vec3 lightPos    = JPH::Vec3::sZero();
-                bool      hasLightPos = query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
-                    lightPos = worldTrans.world.GetTranslation();
-                });
-
-                if (!hasLightPos) {
-                    hasLightPos = query.Patch<Components::TransformComponent>(e, [&](const auto& trans) { lightPos = trans.position; });
-                }
 
                 if (hasLightPos) {
                     const float distSq = std::max((lightPos - viewPos).LengthSq(), 1.0f);

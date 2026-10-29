@@ -119,9 +119,9 @@ RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept:
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, ZHLN::Optional<FS::FileSystemWatcher&> fileSystemWatcher) noexcept
+auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg) noexcept
     -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
-    auto impl               = std::make_unique<Impl>(target, fileSystemWatcher);
+    auto impl               = std::make_unique<Impl>(target);
     impl->appName           = cfg.appName;
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
 
@@ -137,12 +137,9 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
 
     return GetPlatformInstanceExtensions(target)
         .and_then([&](auto&& inst_exts) -> std::expected<void, ErrorCode> {
-            return Vk::InstanceBuilder()
-                .AppName(impl->appName)
-                .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
-                .Extensions(inst_exts)
-                .Diagnostics(cfg.diagnostics)
-                .Build()
+            return Vk::Instance::Create(
+                       impl->appName, VK_MAKE_API_VERSION(0, 1, 0, 0), inst_exts, static_cast<Vk::ValidationMode>(cfg.validationMode)
+                   )
                 .transform([&](Vk::Instance inst) -> void {
                     instanceObject = std::move(inst);
                     instanceView   = Vk::InstanceView(instanceObject);
@@ -174,23 +171,37 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
+            const Vk::DeviceScoreFunction ttyScorer =
+                (target.IsTTY() && mode == PresentationMode::NativeSwapchain)
+                    ? +[](const Vk::PhysicalDeviceInfo& info, const void*) noexcept -> int32_t {
+                          const int32_t base = Vk::DefaultDeviceScore(info);
+                          if (base < 0) {
+                              return -1;
+                          }
+                          return Vk::HasConnectedDisplay(info.handle) ? (base + 2'000'000) : base;
+                      }
+                    : nullptr;
             return Vk::ContextBuilder()
                 .Instance(instanceView)
                 .Surface(raw_surface)
+                .ScoreFunction(ttyScorer)
                 .SelectPhysicalDevice()
                 .transform([&](const Vk::PhysicalDeviceInfo& info) -> void { physicalInfo = info; });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             if (target.IsTTY() && mode == PresentationMode::NativeSwapchain) {
-                uint32_t modeWidth  = 0;
-                uint32_t modeHeight = 0;
-                auto     surfaceRes = Vk::CreateDisplaySurface(instanceView.Handle(), physicalInfo.handle, modeWidth, modeHeight);
+                auto surfaceRes = Vk::CreateDisplaySurface(instanceView.Handle(), physicalInfo.handle);
                 if (!surfaceRes) {
                     return std::unexpected(surfaceRes.error());
                 }
-                width       = static_cast<int>(modeWidth);
-                height      = static_cast<int>(modeHeight);
-                raw_surface = surfaceRes->Release();
+                physicalInfo = Vk::InspectPhysicalDevice(physicalInfo.handle, surfaceRes->surface.Get());
+                if (!physicalInfo.hasPresent) {
+                    return std::unexpected(Vk::SurfaceCreationError::IncompatibleDisplay);
+                }
+                width       = static_cast<int>(surfaceRes->extent.width);
+                height      = static_cast<int>(surfaceRes->extent.height);
+                raw_surface = surfaceRes->surface.Release();
+                target.SetFramebufferExtent(surfaceRes->extent.width, surfaceRes->extent.height);
             }
             return {};
         })
@@ -208,12 +219,8 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
                         .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
                         .Build()
                         .transform([&](auto&& context) -> auto {
-                            impl->ctx         = std::forward<decltype(context)>(context);
-                            const auto vendor = static_cast<Vk::GPUVendor>(physicalInfo.properties.properties.vendorID);
-                            impl->diagnostics.gpuDiagnostics.Create(
-                                vendor, impl->ctx.Device(), impl->ctx.Physical(), impl->ctx.Instance().AddressTracker(),
-                                Vk::DiagnosticConfig {.crashDumpPath = cfg.crashDumpPath}
-                            );
+                            impl->ctx = std::forward<decltype(context)>(context);
+                            impl->diagnostics.gpuDiagnostics.Create(impl->ctx, {.crashDumpPath = cfg.crashDumpPath});
                         });
                 });
         })
@@ -231,7 +238,6 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return impl->InitSubsystems(cfg, width, height); })
         .transform([&]() -> std::unique_ptr<ZHLN::RenderContext> {
-            impl->diagnostics.BeginShaderObservation();
             return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl));
         });
 }
@@ -241,13 +247,14 @@ void RenderContext::Destroy() noexcept {
         return;
     }
 
-    const bool deviceLost = GetDeviceLostCount() > 0;
-
     if (_impl->ctx.Device() != nullptr) {
-        if (deviceLost) {
+        if (_impl->deviceLost.load(std::memory_order::relaxed)) {
             _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
-        } else {
-            if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
+        } else if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
+            if (Vk::IsDeviceLost(idle.error())) {
+                _impl->NoteDeviceLost("RenderContext::Destroy");
+                _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
+            } else {
                 ZHLN::LogError("Failed to wait for idle while destroying destinations ({})", idle.error());
             }
         }

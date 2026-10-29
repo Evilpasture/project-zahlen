@@ -108,11 +108,23 @@ class EntityCommandBuffer {
         (AddComponent<Ts>(e), ...);
     }
 
+    template <typename T>
+    void RemoveComponent(Entity e) {
+        using ComponentType = std::decay_t<T>;
+        uint32_t familyId   = ComponentFamily::GetTypeID<ComponentType>();
+        auto     applyFn    = [](Registry& reg, Entity target, void*) -> void { reg.Remove<ComponentType>(target); };
+        _commands.push_back({CommandType::RemoveComponent, e, familyId, nullptr, nullptr, applyFn});
+    }
+
+    [[nodiscard]] auto Empty() const noexcept -> bool {
+        return _commands.empty();
+    }
+
     void Playback();
     void Reset() noexcept;
 
   private:
-    enum class CommandType : uint8_t { Create, Destroy, AddComponent };
+    enum class CommandType : uint8_t { Create, Destroy, AddComponent, RemoveComponent };
 
     struct Command {
         CommandType type;

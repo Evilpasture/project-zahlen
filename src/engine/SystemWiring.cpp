@@ -2,16 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "SystemWiring.hpp"
-
-#include "LODSystem.hpp"
-#include "NativeScriptModule.hpp"
-#include "AnimationSystem.hpp"
 #include "ArticulationSystem.hpp"
 #include "AudioSystem.hpp"
 #include "CameraSystem.hpp"
 #include "CullingSystem.hpp"
 #include "DecalSystem.hpp"
 #include "EnvironmentSunSystem.hpp"
+#include "LODSystem.hpp"
 #include "LightingSystem.hpp"
 #include "PhysicsStateSystem.hpp"
 #include "PhysicsSystem.hpp"
@@ -22,71 +19,52 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
+#include <Zahlen/Frame.hpp>
 #include <Zahlen/FramePlan.hpp>
+#include <Zahlen/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Scripting.hpp>
-#include <Zahlen/Frame.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/GUI.hpp>
-#include <algorithm>
-#include <filesystem>
-#include <format>
 #include <string_view>
 
 namespace ZHLN {
-namespace {
+namespace { namespace Steps {
 
-namespace Steps {
-
-
-void HostUICallback(Engine& engine, float , FrameContext& ) {
+void HostUICallback(Engine& engine, float, FrameContext&) {
     if (const auto cb = engine.GetUICallback(); cb && static_cast<bool>(*cb)) {
         (*cb)(engine);
+        if (engine.GetPendingUIData().Empty()) {
+            if (auto st = engine.GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+                st->wantCaptureKeyboard = false;
+                st->wantCaptureMouse    = false;
+            }
+        }
+    }
+    if (const auto st = engine.GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+        engine.GetInput().SyncCaptureFlags(st->wantCaptureKeyboard, st->wantCaptureMouse);
+        engine.GetInput().RefreshActionsForCurrentFrame(&engine.GetEventBus());
     }
 }
 
-void HotReload(Engine& engine, float , FrameContext& ) {
+void HotReload(Engine& engine, float, FrameContext&) {
     engine.GetFileSystemWatcher().DispatchEvents();
 }
 
-void Physics(Engine& engine, float dt, FrameContext& ) {
+void Physics(Engine& engine, float dt, FrameContext&) {
     PhysicsSystem::Update(engine, dt, engine.GetPhysicsAccumulator());
 }
 
 void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
-    switch (ctx.driver) {
-        using enum GameplayDriver;
-        case Cpp: {
-            ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-            ctx.status = engine.UpdateNativeGameplay(dt);
-            break;
-        }
-        case Scripted: {
-            ZHLN::ScopedTimer profTimer("ECS System: Scripted Update");
-            engine.GetScriptRunner().CallUpdate(&engine, dt);
-            break;
-        }
-        case Hybrid: {
-            {
-                ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-                ctx.status = engine.UpdateNativeGameplay(dt);
-            }
-            {
-                ZHLN::ScopedTimer profTimer("ECS System: Scripted Update");
-                engine.GetScriptRunner().CallUpdate(&engine, dt);
-            }
-            break;
-        }
-    }
+    ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
+    ctx.status = engine.UpdateNativeGameplay(dt);
 }
 
-void UpdateGraph(Engine& engine, float dt, FrameContext& ) {
+void UpdateGraph(Engine& engine, float dt, FrameContext&) {
     // Before Execute, and on this thread: the scratch arenas are per-worker and
     // this is the last point at which no worker holds a pointer into one.
     engine.ResetWorkerScratch();
@@ -94,25 +72,27 @@ void UpdateGraph(Engine& engine, float dt, FrameContext& ) {
     engine.GetUpdateGraph().Execute(frame);
 }
 
-void CommandPlayback(Engine& engine, float , FrameContext& ) {
+void CommandPlayback(Engine& engine, float, FrameContext&) {
     engine.GetMainECB().Playback();
 }
 
-void CleanupScene(Engine& engine, float , FrameContext& ) {
+void CleanupScene(Engine& engine, float, FrameContext&) {
     engine.ProcessPendingDestroy();
 }
 
-void Camera(Engine& engine, float dt, FrameContext& ) {
+void Camera(Engine& engine, float dt, FrameContext&) {
     // No instance and no function-local static: the pass is stateless, and the
     // camera it projects is component data.
     CameraSystem::Update(engine, dt, engine.GetCurrentAlpha());
 }
 
-void LOD(Engine& engine, float , FrameContext& ) {
-    LODSystem::Update(engine);
+void LOD(Engine&, float, FrameContext&) {
+    // Preserved as a named Phase::Camera anchor for external modules; actual LOD
+    // selection runs inside RenderGraph (LODSystem::GraphUpdate) in parallel with
+    // DecalSystem and LightingSystem ahead of CullingSystem.
 }
 
-void RenderGraph(Engine& engine, float dt, FrameContext& ) {
+void RenderGraph(Engine& engine, float dt, FrameContext&) {
     engine.GetSceneData().Clear();
     engine.ResetWorkerScratch();
     const Frame frame = engine.MakeFrame(dt);
@@ -133,15 +113,12 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
     }
 }
 
-
-void TransformHistory(Engine& engine, float , FrameContext& ) {
-    ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
+void TransformHistory(Engine& engine, float, FrameContext&) {
+    ZHLN::ScopedTimer profTimer("ECS System: Update Transform History");
     TransformSystem::UpdateTransformHistory(engine.GetRegistry());
 }
 
-}
-
-}
+}} // namespace ::Steps
 
 // Core's own steps, and the names modules anchor to.
 //
@@ -166,7 +143,7 @@ void BuildCoreFramePlan(Engine& engine) {
     };
 
     require(plan.Append(Phase::UI, "HostUICallback", Steps::HostUICallback));
-    require(plan.Append(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload));
+    require(plan.Append(Phase::HotReload, "StateAndShaderReload", Steps::HotReload));
     require(plan.Append(Phase::Physics, "PhysicsSystem", Steps::Physics));
     require(plan.Append(Phase::Gameplay, "GameplayModule", Steps::Gameplay));
     require(plan.Append(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph));
@@ -189,16 +166,16 @@ void BuildSystemGraphs(Engine& engine) {
     // Every graph node derives its name, thunk and component hazards from its
     // callable's signature. The camera is modified in the earlier frame phase.
     updateGraph.AddSystem<&VisualInterpolationSystem::Update>();
-    updateGraph.AddSystem<&AnimationSystem::Update>();
     updateGraph.AddSystem<&ArticulationSystem::Update>();
     updateGraph.AddSystem<&TransformSystem::Update>();
     updateGraph.AddSystem<&AudioSystem>();
+    updateGraph.AddSystem<&EnvironmentSunSystem::Update>();
 
     renderGraph.DeclareExternalWrites("ExternalPreRenderWrites", {ECS::Write<Components::CameraComponent>()});
-    renderGraph.AddSystem<&EnvironmentSunSystem::Update>();
-    renderGraph.AddSystem<&CullingSystem::GraphUpdate>();
+    renderGraph.AddSystem<&LODSystem::GraphUpdate>();
     renderGraph.AddSystem<&DecalSystem::Update>();
     renderGraph.AddSystem<&LightingSystem::Update>();
+    renderGraph.AddSystem<&CullingSystem::GraphUpdate>();
 
     // Every module the application installed contributes its nodes here, in
     // install order, and each one's signature-derived hazards are what order
@@ -220,9 +197,9 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 
-    reg.Create(
-        Components::MainCameraTagComponent {}, Components::CameraComponent {}, Components::AASettingsComponent {}
-    );
+    reg.GetOrEmplaceSingleton<Components::InputStateComponent>();
+
+    reg.Create(Components::MainCameraTagComponent {}, Components::CameraComponent {}, Components::AASettingsComponent {});
 
     // A scene reset clears the registry, so the engine-level singletons World::Create()
     // seeds are re-seeded here alongside the rest of the scene's settings.
@@ -231,9 +208,7 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
         Components::CullingStatsComponent {}, Components::DebugSettingsComponent {.physicsDrawMode = 0}
     );
 
-    reg.Create(GUI::UISettingsComponent {});
-
-    engine.SeedSceneFontAtlas(reg);
+    engine.EnsureFontAtlas();
 
     // The graphs are rebuilt per scene; the frame plan is not. A scene reset
     // clears the registry and rebuilds the graphs, and both are scene state --
@@ -243,4 +218,4 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
     return true;
 }
 
-}
+} // namespace ZHLN

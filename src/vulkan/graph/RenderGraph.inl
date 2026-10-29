@@ -9,17 +9,20 @@ namespace ZHLN::Vk {
 namespace TemplatedDetail {
 
 template <typename UsagesList, typename TargetResource>
-struct FindResourceUsage;
-
-template <typename TargetResource>
-struct FindResourceUsage<TypeList<>, TargetResource> {
+struct FindResourceUsage {
     using type = void;
 };
 
 template <typename Head, typename... Tail, typename TargetResource>
 struct FindResourceUsage<TypeList<Head, Tail...>, TargetResource> {
-    using type =
-        std::conditional_t<std::is_same_v<typename Head::Resource, TargetResource>, Head, typename FindResourceUsage<TypeList<Tail...>, TargetResource>::type>;
+    static consteval auto Select() {
+        if constexpr (std::is_same_v<typename Head::Resource, TargetResource>) {
+            return std::type_identity<Head> {};
+        } else {
+            return std::type_identity<typename FindResourceUsage<TypeList<Tail...>, TargetResource>::type> {};
+        }
+    }
+    using type = typename decltype(Select())::type;
 };
 
 template <typename OutList, template <typename> class Predicate>
@@ -70,7 +73,8 @@ struct CombineSameResourceUsage<Existing, Incoming> {
         Existing::access | Incoming::access,
         Existing::final_layout,
         Existing::final_stage | Incoming::final_stage,
-        Existing::final_access | Incoming::final_access>;
+        Existing::final_access | Incoming::final_access,
+        Existing::channel_mask | Incoming::channel_mask>;
 };
 
 template <typename List, typename T>
@@ -78,11 +82,14 @@ struct MergeUsageIntoList;
 
 template <typename... Ts, typename T>
 struct MergeUsageIntoList<TypeList<Ts...>, T> {
-    static constexpr bool contains_resource = (std::is_same_v<typename Ts::Resource, typename T::Resource> || ...);
-    using type                              = std::conditional_t<
-                                     contains_resource,
-                                     TypeList<typename CombineSameResourceUsage<Ts, T>::type...>,
-                                     TypeList<Ts..., T>>;
+    static consteval auto Select() {
+        if constexpr ((std::is_same_v<typename Ts::Resource, typename T::Resource> || ...)) {
+            return std::type_identity<TypeList<typename CombineSameResourceUsage<Ts, T>::type...>> {};
+        } else {
+            return std::type_identity<TypeList<Ts..., T>> {};
+        }
+    }
+    using type = typename decltype(Select())::type;
 };
 
 template <typename List1>
@@ -145,7 +152,7 @@ consteval auto GetResourceIndexImpl(TypeList<Ts...> ) -> size_t {
 
 template <typename ResourceList, typename Target>
 consteval auto GetResourceIndex() -> size_t {
-    if constexpr (std::is_same_v<Target, detail::DummyResource>) {
+    if constexpr (std::is_same_v<Target, detail::DummyResource> || std::is_same_v<Target, EmptyResourceTag<>>) {
         return 0;
     } else {
         constexpr size_t idx = GetResourceIndexImpl<Target>(ResourceList {});
@@ -189,6 +196,9 @@ consteval auto ComputeStateTable() {
     constexpr size_t num_resources = ResourceList::size;
 
     std::array<std::array<ResourceState, num_resources>, num_passes> table {};
+    if constexpr (num_passes == 0 || num_resources == 0) {
+        return table;
+    } else {
     std::array<ResourceState, num_resources>                         current_states {};
 
     [&]<size_t... Is>(std::index_sequence<Is...>) {
@@ -356,6 +366,7 @@ consteval auto ComputeStateTable() {
     simulate_passes(true);
 
     return table;
+    }
 }
 
 template <typename T>
@@ -367,118 +378,15 @@ template <typename T>
     }
 }
 
-template <typename Resources, typename C>
-struct AllDisjointFrom<Resources, TypeList<>, C> {
-    static constexpr bool value = true;
-};
-
-template <typename Resources, typename Head, typename... Tail, typename C>
-struct AllDisjointFrom<Resources, TypeList<Head, Tail...>, C> {
-    static constexpr bool value = ArePassesDisjoint<Resources, Head, C>::value && AllDisjointFrom<Resources, TypeList<Tail...>, C>::value;
-};
-
-template <typename Resources, typename Acc>
-struct FirstRun<Resources, Acc, TypeList<>> {
-    using type = Acc;
-};
-
-template <typename Resources, typename... AccT, typename Head, typename... Tail>
-struct FirstRun<Resources, TypeList<AccT...>, TypeList<Head, Tail...>> {
-    using Acc = TypeList<AccT...>;
-
-    static constexpr bool can_join =
-        (sizeof...(AccT) > 0) && AllForkablePasses<Acc>::value && IsForkablePass<Head>::value && AllDisjointFrom<Resources, Acc, Head>::value;
-    using type = std::conditional_t<can_join, typename FirstRun<Resources, TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
-};
-
-template <typename List, size_t N>
-struct DropFront;
-
-template <typename... Ts, size_t N>
-struct DropFront<TypeList<Ts...>, N> {
-    using type =
-        decltype([]<size_t... Is>(std::index_sequence<Is...>) { return TypeList<Ts...[Is + N]...> {}; }(std::make_index_sequence<sizeof...(Ts) - N> {}));
-};
-
-template <typename Resources>
-struct AutoForkRuns<Resources, TypeList<>> {
-    using type = TypeList<>;
-};
-
-template <typename Resources, typename Head, typename... Tail>
-struct AutoForkRuns<Resources, TypeList<Head, Tail...>> {
-    using First = typename FirstRun<Resources, TypeList<Head>, TypeList<Tail...>>::type;
-
-    using Rest     = typename DropFront<TypeList<Tail...>, First::size - 1>::type;
-    using RestRuns = typename AutoForkRuns<Resources, Rest>::type;
-    using type     = typename AppendLists<TypeList<typename WrapRun<First>::type>, RestRuns>::type;
-};
-
-template <typename Resources>
-struct FirstRunOfList<Resources, TypeList<>> {
-    using type = TypeList<>;
-};
-
-template <typename Resources, typename Head, typename... Tail>
-struct FirstRunOfList<Resources, TypeList<Head, Tail...>> {
-    using type = typename FirstRun<Resources, TypeList<Head>, TypeList<Tail...>>::type;
-};
-
-template <size_t N, typename... Ts>
-constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
-    return std::apply(
-        [](auto&&... args) {
-            return std::pair {
-                [&]<size_t... Is>(std::index_sequence<Is...>) { return std::tuple(std::move(args...[Is])...); }(std::make_index_sequence<N> {}),
-                [&]<size_t... Js>(std::index_sequence<Js...>) {
-                    return std::tuple(std::move(args...[Js + N])...);
-                }(std::make_index_sequence<sizeof...(Ts) - N> {})
-            };
-        },
-        std::move(t)
-    );
-}
-
-template <typename... P, typename Tuple>
-constexpr auto WrapRunTupleImpl(Tuple&& front) noexcept {
-    if constexpr (sizeof...(P) == 1) {
-        return std::get<0>(std::forward<Tuple>(front));
+template <size_t Offset, size_t Len, typename... Passes>
+constexpr auto ExtractForkRun(std::tuple<Passes...>& passes) noexcept {
+    if constexpr (Len == 1) {
+        return std::move(std::get<Offset>(passes));
     } else {
-        return std::apply([](auto&&... ps) { return ParallelPass<P...>(std::forward<decltype(ps)>(ps)...); }, std::forward<Tuple>(front));
+        return [&]<size_t... Ks>(std::index_sequence<Ks...>) {
+            return ParallelPass<Passes...[Offset + Ks]...>(std::move(std::get<Offset + Ks>(passes))...);
+        }(std::make_index_sequence<Len> {});
     }
-}
-
-template <typename Run, typename Tuple>
-constexpr auto WrapRunTuple(Tuple front) noexcept {
-    return [&front]<typename... P>(TypeList<P...>) { return WrapRunTupleImpl<P...>(std::move(front)); }(Run {});
-}
-
-template <typename Resources, typename Run, typename RestTypes, typename Tuple>
-constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
-    auto [front, rest] = SplitFront<Run::size>(std::move(t));
-    auto wrapped       = WrapRunTuple<Run>(std::move(front));
-    if constexpr (RestTypes::size == 0) {
-        return std::tuple {std::move(wrapped)};
-    } else {
-        using NextRun  = typename FirstRunOfList<Resources, RestTypes>::type;
-        using RestRest = typename DropFront<RestTypes, NextRun::size>::type;
-        return std::tuple_cat(std::tuple {std::move(wrapped)}, AutoForkPeelImpl<Resources, NextRun, RestRest>(std::move(rest)));
-    }
-}
-
-}
-
-namespace TemplatedDetail {
-
-template <typename Tag, typename GraphResT>
-consteval auto ReflectedMemberName() -> std::string_view {
-    constexpr auto names = Reflect::FieldNames<GraphResT>();
-    for (std::size_t i = 0; i < names.size(); ++i) {
-        if (Reflect::HasTag<Tag, GraphResT>(names[i])) {
-            return names[i];
-        }
-    }
-    return {};
 }
 
 }
@@ -493,27 +401,24 @@ constexpr void ResourceBinder<ResourceList>::Bind(ImageSlice slice) noexcept {
 template <typename ResourceList>
 template <typename ContextImpl>
 constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcept {
-    using GraphResT = typename ContextImpl::GraphResources;
-
-    [&]<typename... Tags>(TypeList<Tags...>) noexcept {
-        (
-            [&]() noexcept {
-                using Tag = Tags;
-
-                if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
-                    auto ref = ResourceResolver<Tag>::Resolve(impl);
-                    this->template Bind<Tag>(ref);
-                } else {
-
-                    constexpr std::string_view member = TemplatedDetail::ReflectedMemberName<Tag, GraphResT>();
-                    Reflect::VisitFieldByName(impl.graphResources, member, [&](auto& image) noexcept {
-                        auto ref = MakeRef<Tag>(image);
-                        this->template Bind<Tag>(ref);
-                    });
-                }
-            }(),
-            ...);
+    // Explicit resolvers cover presentation depth, swapchain, history and
+    // shadow views (which need more than the graph target's default view).
+    [&]<typename... Resources>(TypeList<Resources...>) noexcept {
+        ([&] noexcept {
+            if constexpr (requires { ResourceResolver<Resources>::Resolve(impl); })
+                this->template Bind<Resources>(ResourceResolver<Resources>::Resolve(impl));
+        }(), ...);
     }(ResourceList {});
+
+    // C++26 field reflection visits the members at compile time. Type identity
+    // selects only requested targets; there is no per-frame string lookup.
+    Reflect::ForEachField(impl.graphResources, [&]<typename Target>(const Target& rt) noexcept {
+        using Resource = typename Target::TagType;
+        if constexpr (IsInList<ResourceList, Resource>::value &&
+                      !requires { ResourceResolver<Resource>::Resolve(impl); }) {
+            this->template Bind<Resource>(rt.AsSlice());
+        }
+    });
 }
 
 template <typename ResourceList>
@@ -523,8 +428,14 @@ constexpr auto ResourceBinder<ResourceList>::GetBindings() const noexcept -> std
 
 template <typename... Passes>
 constexpr auto PassPack<Passes...>::BuildGraph() && {
-    auto forked = AutoForkPasses<ResourcesOf<Passes...>>(std::move(passes));
-    return std::apply([](auto&&... p) { return CompileTimeFrameGraph(std::move(p)...); }, forked);
+    if constexpr (sizeof...(Passes) == 0) {
+        return CompileTimeFrameGraph<Passes...> {};
+    } else {
+        constexpr auto plan = TemplatedDetail::ComputeForkPlan<ResourcesOf<Passes...>, Passes...>();
+        return [&]<size_t... Rs>(std::index_sequence<Rs...>) {
+            return CompileTimeFrameGraph(TemplatedDetail::ExtractForkRun<plan.offsets[Rs], plan.lengths[Rs]>(passes)...);
+        }(std::make_index_sequence<plan.numRuns> {});
+    }
 }
 
 template <typename... Passes>
@@ -624,7 +535,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     constexpr auto barrier_plan = BuildBarrierPlan<PassIndex, PassType>();
 
     if constexpr (barrier_plan.count > 0) {
-        std::array<VkImageMemoryBarrier2, barrier_plan.count> barriers {};
+        std::array<ImageBarrier, barrier_plan.count> barriers {};
 
         [&]<size_t... Bs>(std::index_sequence<Bs...>) {
             (
@@ -637,23 +548,20 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
                     constexpr TemplatedDetail::ResourceState prev_state = StateTable[PassIndex][r_idx];
                     const auto&                              resource   = bindings[r_idx];
 
-                    barriers[Bs] = MakeImageBarrier({
-                        .image      = resource.image,
-                        .src_access = prev_state.access,
-                        .dst_access = UsageType::access,
-                        .src_layout = prev_state.layout,
-                        .dst_layout = UsageType::layout,
-                        .src_stage  = prev_state.stage,
-                        .dst_stage  = UsageType::stage,
-                        .aspect     = Img::aspect,
-                        .base_mip   = 0,
-                        .mip_count  = VK_REMAINING_MIP_LEVELS,
-                    });
+                    barriers[Bs] = ImageBarrier::Transition(
+                        resource.View().WithAspect(Img::aspect).AllSubresources(),
+                        prev_state.layout,
+                        UsageType::layout,
+                        prev_state.stage,
+                        prev_state.access,
+                        UsageType::stage,
+                        UsageType::access
+                    );
                 }(),
                 ...);
         }(std::make_index_sequence<barrier_plan.count> {});
 
-        PipelineBarrier(cmd, {}, barriers);
+        ImageBarrier::Record(cmd, barriers);
     }
 
     if constexpr (requires { PassType::is_fork; }) {
@@ -713,18 +621,6 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
 
         WriteScopeEnd(cmd, frameIndex, pass_name, profiler);
     }
-}
-
-inline VkCommandBuffer RasterPassContextBase::Cmd() const noexcept {
-    return m_cmd;
-}
-
-inline VkExtent2D RasterPassContextBase::Extent() const noexcept {
-    return m_extent;
-}
-
-inline void RasterPassContextBase::SetExtent(VkExtent2D extent) noexcept {
-    m_extent = extent;
 }
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
@@ -894,11 +790,12 @@ constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, VkFo
 template <typename Resources, typename... Passes>
 constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept {
     if constexpr (sizeof...(Passes) == 0) {
-        return std::tuple {};
+        return std::tuple<Passes...> {};
     } else {
-        using First = typename TemplatedDetail::FirstRunOfList<Resources, TypeList<Passes...>>::type;
-        using Rest  = typename TemplatedDetail::DropFront<TypeList<Passes...>, First::size>::type;
-        return TemplatedDetail::AutoForkPeelImpl<Resources, First, Rest>(std::move(passes));
+        constexpr auto plan = TemplatedDetail::ComputeForkPlan<Resources, Passes...>();
+        return [&]<size_t... Rs>(std::index_sequence<Rs...>) {
+            return std::tuple {TemplatedDetail::ExtractForkRun<plan.offsets[Rs], plan.lengths[Rs]>(passes)...};
+        }(std::make_index_sequence<plan.numRuns> {});
     }
 }
 
@@ -906,12 +803,10 @@ constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept {
 
 namespace ZHLN::Vk::Debug {
 
-namespace {
 template <typename UsagesList, typename Target>
 struct IsResourceInUsages {
     static constexpr bool value = false;
 };
-}
 
 template <typename... Us, typename Target>
 struct IsResourceInUsages<TypeList<Us...>, Target> {
@@ -974,7 +869,16 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
 
 template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... ResIdxs>
 constexpr void PrintResources(VisualizerStringT& msg, std::index_sequence<ResIdxs...> ) noexcept {
-    [&]<typename... R>(TypeList<R...>) { (PrintResourceState<GraphT, PassIdx, ResIdxs, Pass, R...[ResIdxs]>(msg), ...); }(Resources {});
+    [&]<typename... R>(TypeList<R...>) {
+        (
+            [&]<size_t ResIdx, typename Res>() {
+                if constexpr (IsResourceInUsages<typename Pass::Usages, Res>::value) {
+                    PrintResourceState<GraphT, PassIdx, ResIdx, Pass, Res>(msg);
+                }
+            }.template operator()<ResIdxs, R>(),
+            ...
+        );
+    }(Resources {});
 }
 
 template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT>

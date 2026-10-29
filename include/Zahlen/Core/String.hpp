@@ -19,10 +19,12 @@ class FixedString {
   public:
     static constexpr size_t kMaxTextLength = Capacity - 1;
 
-    constexpr FixedString() noexcept = default;
+    constexpr FixedString() noexcept {
+        _data[0] = '\0';
+    }
 
     constexpr FixedString(const char* s) noexcept {
-        assign(s);
+        assign(s != nullptr ? std::string_view(s) : std::string_view {});
     }
 
     constexpr FixedString(std::string_view sv) noexcept {
@@ -30,10 +32,7 @@ class FixedString {
     }
 
     constexpr void assign(std::string_view sv) noexcept {
-        _len = std::min(sv.size(), Capacity - 1);
-        for (size_t i = 0; i < _len; ++i) {
-            _data[i] = sv[i];
-        }
+        _len        = sv.copy(_data.data(), Capacity - 1);
         _data[_len] = '\0';
     }
 
@@ -47,15 +46,20 @@ class FixedString {
         _data[_len] = '\0';
     }
 
-    [[nodiscard]] constexpr auto data() noexcept -> char* {
+    [[nodiscard]] constexpr auto data() & noexcept -> char* {
         return _data.data();
     }
-    [[nodiscard]] constexpr auto data() const noexcept -> const char* {
+    [[nodiscard]] constexpr auto data() const& noexcept -> const char* {
         return _data.data();
     }
-    [[nodiscard]] constexpr auto c_str() const noexcept -> const char* {
+    constexpr auto data() &&      = delete;
+    constexpr auto data() const&& = delete;
+
+    [[nodiscard]] constexpr auto c_str() const& noexcept -> const char* {
         return _data.data();
     }
+    constexpr auto c_str() const&& = delete;
+
     [[nodiscard]] constexpr auto size() const noexcept -> size_t {
         return _len;
     }
@@ -66,16 +70,17 @@ class FixedString {
         return Capacity;
     }
 
-    constexpr auto operator[](size_t i) noexcept -> char& {
+    constexpr auto operator[](size_t i) & noexcept -> char& {
         return _data[i];
     }
-    constexpr auto operator[](size_t i) const noexcept -> const char& {
+    constexpr auto operator[](size_t i) const& noexcept -> const char& {
         return _data[i];
     }
 
-    [[nodiscard]] constexpr operator std::string_view() const noexcept {
+    [[nodiscard]] constexpr operator std::string_view() const& noexcept {
         return std::string_view {_data.data(), _len};
     }
+    constexpr operator std::string_view() const&& = delete;
 
     constexpr auto operator<=>(const FixedString& other) const noexcept {
         return std::string_view(*this) <=> std::string_view(other);
@@ -84,6 +89,11 @@ class FixedString {
     constexpr auto operator==(const FixedString& other) const noexcept -> bool {
         return std::string_view(*this) == std::string_view(other);
     }
+
+    [[nodiscard]] constexpr operator const char*() const& noexcept {
+        return _data.data();
+    }
+    constexpr operator const char*() const&& = delete;
 
     constexpr void clear() noexcept {
         _len     = 0;
@@ -100,7 +110,7 @@ class FixedString {
     }
 
   private:
-    std::array<char, Capacity> _data {};
+    std::array<char, Capacity> _data;
     size_t                     _len = 0;
 };
 
@@ -112,7 +122,7 @@ using String64  = FixedString<64>;
 using String128 = FixedString<128>;
 using String256 = FixedString<256>;
 
-}
+} // namespace ZHLN
 
 namespace std {
 template <size_t N>
@@ -121,4 +131,4 @@ struct formatter<ZHLN::FixedString<N>, char>: formatter<string_view, char> {
         return formatter<string_view, char>::format(string_view(str), ctx);
     }
 };
-}
+} // namespace std

@@ -153,23 +153,6 @@ if(WIN32)
     message(STATUS "Host tool DLL directories (PATH for the tools the build runs): ${ZHLN_RUNTIME_DLL_DIRS}")
 endif()
 
-# The same directories, for one registered test. A test binary is built into
-# build/tests/... -- not beside the DLLs it links -- so it needs the loader path
-# whether or not it runs a tool of its own, and the ones that run zcook pass it on
-# to a grandchild process.
-#
-# APPEND, because the groups own ENVIRONMENT for their own variables (the
-# sanitizer profile, the Vulkan sandbox pin) and this must not clobber them; and
-# path_list_prepend rather than an ENVIRONMENT entry, which would replace PATH
-# outright and drop whatever PATH the test was started with.
-function(zahlen_add_runtime_dll_path TEST_NAME)
-    if(ZHLN_RUNTIME_DLL_DIRS)
-        set_property(TEST "${TEST_NAME}" APPEND PROPERTY
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${ZHLN_RUNTIME_DLL_PATH}"
-        )
-    endif()
-endfunction()
-
 # The same directories again, this time copied beside one built binary.
 #
 # The two halves of the problem look alike and are not. Rounds 4 and 5 are about
@@ -200,7 +183,7 @@ endfunction()
 # there, which matters because an empty list would leave `cmake -E
 # copy_if_different` with a destination and nothing to copy.
 function(zahlen_add_runtime_dlls TARGET_NAME)
-    if(NOT WIN32)
+    if(NOT WIN32 OR ZHLN_SYNTAX_ONLY)
         return()
     endif()
     add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
@@ -210,4 +193,19 @@ function(zahlen_add_runtime_dlls TARGET_NAME)
         COMMAND_EXPAND_LISTS
         COMMENT "Copying the runtime DLLs beside ${TARGET_NAME}"
     )
+endfunction()
+
+# Primary applications and CLI/host toolchain executables are emitted into
+# ${CMAKE_BINARY_DIR}/bin/ (while samples stay in samples/ and test workers stay
+# in tests/). Setting RUNTIME_OUTPUT_DIRECTORY on zahlen_engine as well places
+# libzahlen_engine.dll directly into bin/ on Windows PE without moving
+# libzahlen_engine.so / .dylib on ELF or Mach-O (which follow LIBRARY_OUTPUT_DIRECTORY).
+set(ZHLN_BIN_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin")
+
+function(zahlen_set_bin_output)
+    foreach(_tgt IN LISTS ARGN)
+        set_target_properties(${_tgt} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${ZHLN_BIN_OUTPUT_DIR}"
+        )
+    endforeach()
 endfunction()

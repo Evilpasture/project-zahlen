@@ -47,7 +47,7 @@ set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/math/transform.slang"
     "${SHADER_SRC_DIR}/instance_data.slang"
     "${SHADER_SRC_DIR}/volumetric_grid.slang"
-    "${SHADER_SRC_DIR}/ddgi_common.slang"
+    "${SHADER_SRC_DIR}/rcgi_common.slang"
 )
 
 # The vendored Slang's shape, stated once: both fallbacks below -- the slangc
@@ -141,6 +141,11 @@ elseif(TARGET slangc)
 else()
     set(SLANG_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
     if(EXISTS "${SLANG_SOURCE_DIR}/CMakeLists.txt")
+        if(NOT ZHLN_HAS_PYTHON)
+            message(FATAL_ERROR
+                "Building vendored Slang from source (${SLANG_SOURCE_DIR}) requires Python 3 (upstream SPIRV-Tools codegen), "
+                "but ZHLN_HAS_PYTHON=OFF. Install a prebuilt Slang / Vulkan SDK on PATH or CMAKE_PREFIX_PATH, or install Python 3.")
+        endif()
         if(ZHLN_SLANG_VENDORED)
             message(STATUS "ZHLN_SLANG_VENDORED: building slangc from the pinned ${SLANG_SOURCE_DIR}")
         else()
@@ -194,6 +199,12 @@ else()
         set(ZHLN_SLANG_TARGET slang::slang)
         message(STATUS "Found libslang (config): ${slang_DIR}")
     elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang/CMakeLists.txt")
+        if(NOT ZHLN_HAS_PYTHON)
+            message(FATAL_ERROR
+                "Building vendored libslang from source (${CMAKE_CURRENT_SOURCE_DIR}/extern/slang) requires Python 3 "
+                "(upstream SPIRV-Tools codegen), but ZHLN_HAS_PYTHON=OFF. Install a prebuilt Slang / Vulkan SDK on "
+                "CMAKE_PREFIX_PATH, or install Python 3.")
+        endif()
         if(ZHLN_SLANG_VENDORED)
             message(STATUS "ZHLN_SLANG_VENDORED: building libslang from the pinned ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
         else()
@@ -316,17 +327,25 @@ if(ZHLN_SLANGC_PROBEABLE OR ZHLN_SLANG_IMPORTED)
     # either stream -- so capture both and only trust a dotted version.
     set(ZHLN_SLANGC_VERSION "unknown")
     if(ZHLN_SLANGC_PROBEABLE)
-        execute_process(COMMAND ${SLANG_EXECUTABLE} -version
-            RESULT_VARIABLE ZHLN_SLANGC_VERSION_RESULT
-            OUTPUT_VARIABLE ZHLN_SLANGC_VERSION_OUT
-            ERROR_VARIABLE ZHLN_SLANGC_VERSION_ERR
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_STRIP_TRAILING_WHITESPACE)
-        string(STRIP "${ZHLN_SLANGC_VERSION_OUT} ${ZHLN_SLANGC_VERSION_ERR}" ZHLN_SLANGC_VERSION_LINE)
-        # CMake's regex engine has no {n} intervals: spell the four digits out.
-        if(ZHLN_SLANGC_VERSION_RESULT EQUAL 0
-           AND ZHLN_SLANGC_VERSION_LINE MATCHES "([0-9][0-9][0-9][0-9]\\.[0-9]+)")
-            set(ZHLN_SLANGC_VERSION "${CMAKE_MATCH_1}")
+        file(TIMESTAMP "${SLANG_EXECUTABLE}" _zhln_slangc_mtime UTC)
+        set(_zhln_slangc_cache_key "${SLANG_EXECUTABLE};${_zhln_slangc_mtime}")
+        if(ZHLN_CACHED_SLANGC_KEY STREQUAL "${_zhln_slangc_cache_key}" AND DEFINED ZHLN_CACHED_SLANGC_VERSION)
+            set(ZHLN_SLANGC_VERSION "${ZHLN_CACHED_SLANGC_VERSION}")
+        else()
+            execute_process(COMMAND ${SLANG_EXECUTABLE} -version
+                RESULT_VARIABLE ZHLN_SLANGC_VERSION_RESULT
+                OUTPUT_VARIABLE ZHLN_SLANGC_VERSION_OUT
+                ERROR_VARIABLE ZHLN_SLANGC_VERSION_ERR
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_STRIP_TRAILING_WHITESPACE)
+            string(STRIP "${ZHLN_SLANGC_VERSION_OUT} ${ZHLN_SLANGC_VERSION_ERR}" ZHLN_SLANGC_VERSION_LINE)
+            # CMake's regex engine has no {n} intervals: spell the four digits out.
+            if(ZHLN_SLANGC_VERSION_RESULT EQUAL 0
+               AND ZHLN_SLANGC_VERSION_LINE MATCHES "([0-9][0-9][0-9][0-9]\\.[0-9]+)")
+                set(ZHLN_SLANGC_VERSION "${CMAKE_MATCH_1}")
+            endif()
+            set(ZHLN_CACHED_SLANGC_KEY "${_zhln_slangc_cache_key}" CACHE INTERNAL "slangc probe key")
+            set(ZHLN_CACHED_SLANGC_VERSION "${ZHLN_SLANGC_VERSION}" CACHE INTERNAL "slangc probed version")
         endif()
     endif()
     # libslang: the versioned filename is the only version the target carries
@@ -500,15 +519,15 @@ function(add_shader_target TARGET_SUFFIX)
         list(APPEND ALL_SHADER_ENTRY_SOURCES "${SHADER_PATH}")
 
         # Export the cooked path under the macro name the catalog knows it by.
-        # A source file can then #embed it (src/render/GpuAbi.hpp reads
-        # gpu_abi.slang's own bytes at compile time), which #embed requires to
-        # be a preprocessing-time file name -- a string constant is too late.
+        # zshader names it back through --bytes, and a build that wants the
+        # bytes in the binary can #embed the path it carries -- which requires
+        # a preprocessing-time file name, so it has to arrive as a macro and
+        # never as a string constant.
         set(${MACRO} ${${MACRO}} PARENT_SCOPE)
     endforeach()
 
     set(TGT zahlen_engine_${TARGET_SUFFIX})
-    add_custom_target(${TGT} ALL DEPENDS ${OUTPUTS})
-    add_dependencies(zahlen_engine ${TGT})
+    add_custom_target(${TGT} DEPENDS ${OUTPUTS})
 
     list(APPEND ALL_GENERATED_SPVS ${OUTPUTS})
     set(ALL_SHADER_MACRO_PATHS ${ALL_SHADER_MACRO_PATHS} PARENT_SCOPE)
@@ -553,8 +572,7 @@ function(compile_shaders TARGET_NAME)
         endforeach()
     endforeach()
 
-    add_custom_target(${TARGET_NAME}_shader_gen ALL DEPENDS ${ALL_SPV_OUTPUTS})
-    add_dependencies(${TARGET_NAME} ${TARGET_NAME}_shader_gen)
+    add_custom_target(${TARGET_NAME}_shader_gen DEPENDS ${ALL_SPV_OUTPUTS})
 
     set(ALL_SHADER_MACRO_PATHS ${ALL_SHADER_MACRO_PATHS} PARENT_SCOPE)
     set(ALL_GENERATED_SPVS ${ALL_GENERATED_SPVS} ${ALL_SPV_OUTPUTS} PARENT_SCOPE)
@@ -602,54 +620,19 @@ add_shader_target(hiz_generate_shader
     STAGES "${SHADER_SRC_DIR}/hiz_generate.slang|CSMain|cs_6_0|SHADER_HIZ_GENERATE_SLANG_CS_PATH"
 )
 
-# Ray-traced sun shadow mask and its edge-avoiding A-Trous wavelet denoiser.
-# The mask is traced at 1-2 SPP with blue-noise/Vogel-disk jitter and then
-# smoothed by `denoiserPasses` iterations of the wavelet before the lighting
-# pass reads a single load instead of a ray.
-add_shader_target(rt_shadow_shader
-    STAGES "${SHADER_SRC_DIR}/rt_shadow.slang|CSMain|cs_6_0|SHADER_RT_SHADOW_SLANG_CS_PATH"
+# Deterministic Radiance Cascades Global Illumination (RCGI):
+# surface-pinned probe pyramid setup, wave-coherent RayQuery cascade trace +
+# parallax-corrected bilateral merge, and groupshared full-res resolve.
+add_shader_target(rcgi_probe_setup_shader
+    STAGES "${SHADER_SRC_DIR}/rcgi_probe_setup.slang|CSMain|cs_6_0|SHADER_RCGI_PROBE_SETUP_SLANG_CS_PATH"
 )
 
-add_shader_target(shadow_denoise_atrous_shader
-    STAGES "${SHADER_SRC_DIR}/shadow_denoise_atrous.slang|CSMain|cs_6_0|SHADER_SHADOW_DENOISE_ATROUS_SLANG_CS_PATH"
+add_shader_target(rcgi_cascade_trace_merge_shader
+    STAGES "${SHADER_SRC_DIR}/rcgi_cascade_trace_merge.slang|CSMain|cs_6_0|SHADER_RCGI_CASCADE_TRACE_MERGE_SLANG_CS_PATH"
 )
 
-# Color A-Trous wavelet over the composited HDR scene color for ray-traced
-# shadows/reflections. RTGI is denoised separately before albedo modulation.
-add_shader_target(hdr_denoise_atrous_shader
-    STAGES "${SHADER_SRC_DIR}/hdr_denoise_atrous.slang|CSMain|cs_6_0|SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
-)
-
-# Half-resolution RT reflection tracing for the VNDF roughness band; the
-# reflection pass upsamples the composed result.
-add_shader_target(rtr_half_shader
-    STAGES "${SHADER_SRC_DIR}/rtr_half.slang|CSMain|cs_6_0|SHADER_RTR_HALF_SLANG_CS_PATH"
-)
-
-# Half-resolution RTGI trace, pre-albedo denoise and bilateral composite.
-# Trace/denoise need ray tracing; composite is always available and passes
-# through direct lighting when the independent diffuse-GI toggle is off.
-add_shader_target(rtgi_half_shader
-    STAGES "${SHADER_SRC_DIR}/rtgi_half.slang|CSMain|cs_6_0|SHADER_RTGI_HALF_SLANG_CS_PATH"
-)
-
-# A-Trous filtering of the half-resolution incoming-radiance signal before
-# RtgiComposite applies surface albedo, avoiding texture-detail blur.
-add_shader_target(rtgi_denoise_atrous_shader
-    STAGES "${SHADER_SRC_DIR}/rtgi_denoise_atrous.slang|CSMain|cs_6_0|SHADER_RTGI_DENOISE_ATROUS_SLANG_CS_PATH"
-)
-
-add_shader_target(rtgi_composite_shader
-    STAGES "${SHADER_SRC_DIR}/rtgi_composite.slang|CSMain|cs_6_0|SHADER_RTGI_COMPOSITE_SLANG_CS_PATH"
-)
-
-# World-space DDGI probe ray trace and octahedral irradiance/distance atlas update.
-add_shader_target(ddgi_trace_shader
-    STAGES "${SHADER_SRC_DIR}/ddgi_trace.slang|CSMain|cs_6_0|SHADER_DDGI_TRACE_SLANG_CS_PATH"
-)
-
-add_shader_target(ddgi_update_irradiance_shader
-    STAGES "${SHADER_SRC_DIR}/ddgi_update_irradiance.slang|CSMain|cs_6_0|SHADER_DDGI_UPDATE_IRRADIANCE_SLANG_CS_PATH"
+add_shader_target(rcgi_resolve_shader
+    STAGES "${SHADER_SRC_DIR}/rcgi_resolve.slang|CSMain|cs_6_0|SHADER_RCGI_RESOLVE_SLANG_CS_PATH"
 )
 
 # Half-resolution GTAO horizon search for the AO-only GI modes; the lighting
@@ -688,7 +671,9 @@ add_shader_target(skinning_shader
 add_shader_target(forward_shader
     STAGES
         "${SHADER_SRC_DIR}/basic.slang|VSMainForward|vs_6_5|SHADER_BASIC_SLANG_VS_FORWARD_PATH"
+        "${SHADER_SRC_DIR}/basic.slang|VSMainEmissive|vs_6_5|SHADER_BASIC_SLANG_VS_EMISSIVE_PATH"
         "${SHADER_SRC_DIR}/basic.slang|PSForward|ps_6_0|SHADER_FORWARD_SLANG_PS_PATH"
+        "${SHADER_SRC_DIR}/basic.slang|PSEmissive|ps_6_0|SHADER_EMISSIVE_SLANG_PS_PATH"
         "${SHADER_SRC_DIR}/basic_mesh.slang|MeshMainForward|ms_6_5|SHADER_BASIC_SLANG_MESH_FORWARD_PATH"
 )
 
@@ -878,6 +863,7 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "BasicVSShadow=SHADER_BASIC_SLANG_VS_SHADOW_PATH"
     "BasicMeshShadow=SHADER_BASIC_SLANG_MESH_SHADOW_PATH"
     "BasicVSForward=SHADER_BASIC_SLANG_VS_FORWARD_PATH"
+    "BasicVSEmissive=SHADER_BASIC_SLANG_VS_EMISSIVE_PATH"
     "BasicMeshForward=SHADER_BASIC_SLANG_MESH_FORWARD_PATH"
     "BlitVS=SHADER_BLIT_SLANG_VS_PATH"
     "BlitPS=SHADER_BLIT_SLANG_PS_PATH"
@@ -908,11 +894,9 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "LightingNortVS=SHADER_LIGHTING_NORT_SLANG_VS_PATH"
     "LightingNortPS=SHADER_LIGHTING_NORT_SLANG_PS_PATH"
     "VolumetricClearCS=SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH"
-    "HdrDenoiseAtrousCS=SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
-    "RtrHalfCS=SHADER_RTR_HALF_SLANG_CS_PATH"
-    "RtgiHalfCS=SHADER_RTGI_HALF_SLANG_CS_PATH"
-    "RtgiDenoiseCS=SHADER_RTGI_DENOISE_ATROUS_SLANG_CS_PATH"
-    "RtgiCompositeCS=SHADER_RTGI_COMPOSITE_SLANG_CS_PATH"
+    "RcgiProbeSetupCS=SHADER_RCGI_PROBE_SETUP_SLANG_CS_PATH"
+    "RcgiCascadeTraceMergeCS=SHADER_RCGI_CASCADE_TRACE_MERGE_SLANG_CS_PATH"
+    "RcgiResolveCS=SHADER_RCGI_RESOLVE_SLANG_CS_PATH"
     "GtaoCS=SHADER_AO_GTAO_SLANG_CS_PATH"
     "VolumetricFogInjectCS=SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH"
     "VolumetricLightInjectCS=SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH"
@@ -935,6 +919,7 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "ClusterCullingCS=SHADER_CLUSTER_CULLING_CS_PATH"
     "SkinningCS=SHADER_SKINNING_SLANG_CS_PATH"
     "ForwardPS=SHADER_FORWARD_SLANG_PS_PATH"
+    "EmissivePS=SHADER_EMISSIVE_SLANG_PS_PATH"
     "DebugLineVS=SHADER_DEBUG_LINE_SLANG_VS_PATH"
     "DebugLinePS=SHADER_DEBUG_LINE_SLANG_PS_PATH"
     "HangGpuCS=SHADER_HANG_GPU_SLANG_CS_PATH"
@@ -944,10 +929,6 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "IblShCS=SHADER_IBL_SH_CS_PATH"
     "SmaaLutCS=SHADER_SMAA_LUT_CS_PATH"
     "GpuSceneCS=SHADER_GPU_SCENE_CS_PATH"
-    "RtShadowCS=SHADER_RT_SHADOW_SLANG_CS_PATH"
-    "ShadowDenoiseAtrousCS=SHADER_SHADOW_DENOISE_ATROUS_SLANG_CS_PATH"
-    "DdgiTraceCS=SHADER_DDGI_TRACE_SLANG_CS_PATH"
-    "DdgiUpdateIrradianceCS=SHADER_DDGI_UPDATE_IRRADIANCE_SLANG_CS_PATH"
 )
 
 # A type whose macro no cook produced would reach the generator as `Type=` and
@@ -987,15 +968,9 @@ set(ZHLN_SHADER_CATALOG_SETS
     "BloomThreshold=BloomThresholdCS"
     "BloomDown=BloomDownCS"
     "BloomUp=BloomUpCS"
-    "HdrDenoise=HdrDenoiseAtrousCS"
-    "RtShadow=RtShadowCS"
-    "ShadowDenoise=ShadowDenoiseAtrousCS"
-    "RtrHalf=RtrHalfCS"
-    "RtgiHalf=RtgiHalfCS"
-    "RtgiDenoise=RtgiDenoiseCS"
-    "RtgiComposite=RtgiCompositeCS"
-    "DdgiTrace=DdgiTraceCS"
-    "DdgiUpdateIrradiance=DdgiUpdateIrradianceCS"
+    "RcgiProbeSetup=RcgiProbeSetupCS"
+    "RcgiCascadeTraceMerge=RcgiCascadeTraceMergeCS"
+    "RcgiResolve=RcgiResolveCS"
     "Gtao=GtaoCS"
     "Taa=TaaPS"
     "Fxaa=FxaaPS"
@@ -1025,18 +1000,27 @@ add_subdirectory("${CMAKE_SOURCE_DIR}/tools/zshader" "${CMAKE_BINARY_DIR}/tools/
 # tile that is cheaper at both ends -- 1024x1024 of noise compresses to within
 # 8KB of its own raw size, and the decode disappears.
 #
-# Stdlib-only on purpose: this needs the interpreter GovernanceChecks found and
-# no third-party package, because the build promises an interpreter and nothing
-# else. See configure/cook_blue_noise.py.
+# Decoded by zshader (--cook-rgba / --out-rgba, tools/zshader/ImageCook.cpp) so
+# the shader catalog build has zero host Python requirement.
 set(ZHLN_BLUE_NOISE_SOURCE "${CMAKE_SOURCE_DIR}/src/render/LDR_RGBA_0.png")
 set(ZHLN_BLUE_NOISE_COOKED "${GEN_INCLUDE_DIR}/blue_noise.rgba")
 add_custom_command(
     OUTPUT "${ZHLN_BLUE_NOISE_COOKED}"
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/configure/cook_blue_noise.py"
-        -i "${ZHLN_BLUE_NOISE_SOURCE}"
-        -o "${ZHLN_BLUE_NOISE_COOKED}"
-    DEPENDS "${CMAKE_SOURCE_DIR}/configure/cook_blue_noise.py" "${ZHLN_BLUE_NOISE_SOURCE}"
-    COMMENT "cook_blue_noise: decoding the blue-noise tile to raw RGBA"
+    # Same order-only rule as the catalog and gpu-types commands: $<TARGET_FILE:zshader>
+    # orders zshader's link before this command without making the binary a file-level
+    # DEPENDS input that would re-decode the PNG whenever zshader relinks.
+    COMMAND ${CMAKE_COMMAND} -E env
+        "PATH=${ZHLN_SLANG_LIB_DIR}\;${ZHLN_SLANG_GLSLANG_DIR}\;$ENV{PATH}"
+        "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}"
+        "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}"
+        ${ZHLN_SLANG_GLSLANG_ORDER}
+        $<TARGET_FILE:zshader>
+        --cook-rgba "${ZHLN_BLUE_NOISE_SOURCE}"
+        --out-rgba "${ZHLN_BLUE_NOISE_COOKED}"
+    DEPENDS
+        "${ZHLN_BLUE_NOISE_SOURCE}"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/ImageCook.cpp"
+    COMMENT "zshader: decoding the blue-noise tile to raw RGBA"
     VERBATIM
 )
 
@@ -1050,12 +1034,9 @@ set(ZHLN_SHADER_BLOBS
 )
 
 # gpu_abi.slang is not a pass: nothing builds a pipeline from it and the engine
-# never loads its bytes. It exists so the host types can be held against a real
-# compilation of them, and that check reads the module in a constant expression
-# (src/render/GpuAbi.hpp) -- which is why its bytes are embedded there and not
-# in the generated bytecode: one copy, in the translation units that check it.
-# The gpu-types command below compiles the module in-process and emits its
-# SPIR-V itself, so no slangc cook produces it and no catalog entry carries it.
+# never loads its bytes. It is the module the host types are reflected out of:
+# zshader compiles it in-process and writes GeneratedGpuTypes.hpp from its
+# layout, so no slangc cook produces it and no catalog entry carries it.
 
 set(ZSHADER_ARGS
     --out-header "${ZHLN_SHADER_CATALOG_HEADER}"
@@ -1103,7 +1084,6 @@ add_custom_command(
         ${ZHLN_SLANG_GLSLANG_ORDER}
         $<TARGET_FILE:zshader> ${ZSHADER_ARGS}
     DEPENDS
-        ${ALL_GENERATED_SPVS}
         ${ALL_SHADER_ENTRY_SOURCES}
         ${ZHLN_SHADER_COMMON_SOURCES}
         "${CMAKE_SOURCE_DIR}/src/render/ltc_mat.dds"
@@ -1117,32 +1097,35 @@ add_custom_command(
         "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.hpp"
         "${CMAKE_SOURCE_DIR}/tools/zshader/Emit.cpp"
         "${CMAKE_SOURCE_DIR}/tools/zshader/GpuTypes.cpp"
-    COMMENT "zshader: reflecting the cooked shaders into the catalog"
+    COMMENT "zshader: reflecting Slang shaders into the catalog"
     VERBATIM
 )
 add_custom_target(zahlen_shader_catalog
     DEPENDS "${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}"
 )
+add_custom_target(zahlen_shaders_spv
+    DEPENDS ${ALL_GENERATED_SPVS}
+)
 
 # --- THE GPU HOST TYPES ---
-# zshader's second mode compiles the gpu_abi module in-process -- the same
-# module src/render/GpuAbi.hpp holds the host structs against -- and walks its
+# zshader's second mode compiles the gpu_abi module in-process and walks its
 # reflected layout into the generated host structs (GeneratedGpuTypes.hpp):
-# every struct gpu_abi.slang wraps that the engine does not define itself,
-# minus GPUMeshlet, whose ABI is the raw word protocol rather than the declared
-# layout (see GpuTypes.cpp). The same compile emits the module's SPIR-V, which
-# is what GpuAbi.hpp embeds, so the header and the bytes it is checked against
-# are never more than one build apart. src/render/GpuLayout.hpp includes the
-# header and re-exports the renderer-only structs under the names the renderer
-# uses; it is renderer-internal, and nothing under include/ reaches it.
+# every struct gpu_abi.slang wraps -- GPUMeshlet included -- plus the
+# scene push layout (Slang::kScenePushLayout) the heap writer pushes with.
+# src/render/GpuLayout.hpp includes the header and re-exports the
+# renderer-only structs under the names the renderer uses; it is
+# renderer-internal, and nothing under include/ reaches it.
 #
 # One definition per concept, and it is the generated one: the reflection is the
 # ABI, so tools/zshader emits every GPU-visible struct from it -- Particle,
 # ParticleEmitterParams, MeshParticleEmitterParams, Light and FrameUniforms
-# included -- with the members at the offsets Slang seated them and the padding
-# and alignment that implies, then asserts each struct against the reflection it
-# came from. A Slang edit that moves a member re-emits the definition rather than
-# skewing a hand-written one, and no public type is reshaped by it.
+# included -- with the members at the offsets Slang seated them, every gap
+# spelled as an explicit padding member and every lane carrying Slang's
+# alignment. The emission is therefore complete on its own: there is no
+# static_assert under a struct, because the text has already fixed the layout
+# the host compiler would otherwise be free to choose. A Slang edit that moves
+# a member re-emits the definition rather than skewing a hand-written one, and
+# no public type is reshaped by it.
 #
 # The header is generated, so every target compiling a translation unit that
 # reaches it -- directly or through src/render/GpuLayout.hpp -- orders itself
@@ -1150,9 +1133,10 @@ add_custom_target(zahlen_shader_catalog
 # directory files. The engine is deliberately absent: nothing under include/
 # names a generated type any more, so zahlen_engine (and everything that links
 # it) can be scanned and built without the shader tool having run at all.
-# The SPIR-V rides the same edge: it is the command's second output, so the
-# compile definition in src/render/CMakeLists.txt never names a file the build
-# has not produced yet.
+#
+# The module's SPIR-V is still the command's second output, as the proof that
+# gpu_abi.slang codegens for compute, but nothing embeds it: the generated
+# header is the ABI, and GpuAbi.cpp exports the layout out of it directly.
 set(ZHLN_GPU_TYPES_HEADER "${GEN_INCLUDE_DIR}/GeneratedGpuTypes.hpp")
 set(SHADER_GPU_ABI_CS_PATH "${GEN_INCLUDE_DIR}/gpu_abi.spv")
 add_custom_command(

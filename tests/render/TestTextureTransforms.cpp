@@ -136,6 +136,8 @@ constexpr std::array kSampleUV {
 
 } // namespace
 
+namespace {
+
 struct TextureTransformsTestSuite {
     TextureTransformsTestSuite() { ZHLN::Test::Headless::BeginSession(); }
     ~TextureTransformsTestSuite() { ZHLN::Test::Headless::EndSession(); }
@@ -255,6 +257,4 @@ struct TextureTransformsTestSuite {
     };
 };
 
-auto RunTextureTransformsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<TextureTransformsTestSuite>();
-}
+} // namespace

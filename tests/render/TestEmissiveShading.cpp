@@ -5,13 +5,11 @@
 //
 // Emission has to be additive, not reflectance.
 //
-// The deferred G-Buffer used to fold emission into the albedo attachment
-// (basic.slang wrote `albedo.rgb + emissive` to SV_Target0). The lighting pass
-// then multiplied that attachment by incident light, so an emissive surface
-// only glowed while something else was already lighting it: at night, in
-// shadow, or on a face turned away from the sun, a neon material went black.
-// Emission now owns G-Buffer attachment 3 and lighting.slang adds it to the
-// composed result unconditionally.
+// The compact deferred G-Buffer has no dedicated emissive attachment. Ordinary
+// lit emitters remain deferred for AO, SSR visibility, and motion vectors; the
+// EmissivePass samples their material a second time and adds HDR radiance to
+// LightingGI before reflection writes HdrSceneColor. Bloom then thresholds that
+// final HDR image, without treating emission as incident-light reflectance.
 //
 // The scene here is the one that used to fail: no sun, no point/spot lights, and
 // ambient turned all the way down. Whatever the emissive box shows in that
@@ -110,18 +108,18 @@ const JPH::Float4 kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f
 // The halo frames run the bloom composite here, not at the engine default
 // 0.0 (which multiplies the whole Kawase chain by zero at composite --
 // blit.slang -- and made the patch-2 explicit on/off match bit-for-bit).
-// 0.01 is the production default (0.5) scaled by source energy: this neon
+// 0.003 is the production default (0.5) scaled by source energy: this neon
 // is 80x while production HDR sources are ~2-4, so a full-strength
 // composite would white out the room. Working point is on-halo in the
 // tens of luma (the feed gate needs > dark + 4, the slab bound < 127):
 // if a future run reads halo > 100, halve this; if < 15, double it.
 // Level the scene here, never in the gates.
-constexpr float kHaloBloomStrength = 0.01f;
+constexpr float kHaloBloomStrength = 0.003f;
 
 // Builds the unlit scene: one box at the origin, no lights of any kind, and
 // ambient/GI dialled out so nothing but emission can brighten a surface.
 //
-// `glowIntensity` overrides the emissive -> bloom feed. std::nullopt leaves
+// `glowIntensity` adds a direct HDR bloom feed. std::nullopt leaves
 // whatever the engine ships as its default, so the "on" case measures the
 // halo a scene gets without asking for anything; 0 renders the same scene
 // with the glow layer switched off.
@@ -229,6 +227,8 @@ struct UnlitMeasurement {
 
 } // namespace
 
+namespace {
+
 struct EmissiveShadingTestSuite {
     EmissiveShadingTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -325,9 +325,9 @@ struct EmissiveShadingTestSuite {
             }
 
             // 4. Emission is local to the emitter. A corner of the same frame
-            //    must not have brightened with it -- that would mean the new
-            //    attachment is leaking into pixels the geometry never wrote,
-            //    which is what an uncleared or mis-bound target looks like.
+            //    must not have brightened with it -- that would mean the
+            //    additive composite is affecting pixels the geometry never
+            //    covered, as an unbound or uncleared render target would.
             if (emissiveCorner.meanLuma > 12.0) {
                 ZHLN::Println("    [INFO] corner meanLuma={:.1f}", emissiveCorner.meanLuma);
                 return std::unexpected(EmissiveShadingError::BackgroundNotDark);
@@ -339,20 +339,18 @@ struct EmissiveShadingTestSuite {
         /**
          * An imported neon material glows past its own edges.
          *
-         * Emission owning a G-Buffer channel fixed the shading (see the test
-         * above) and cost the halo, and the reason turned out to be units
-         * rather than the bloom chain. Emission is no longer multiplied by
-         * incident light, so an emitter tops out at its emissiveFactor -- and
-         * glTF clamps that to [0,1] without KHR_materials_emissive_strength.
-         * Against `hdrColor *= 0.015` in blit.slang that is ~8/255 on screen:
-         * the neon surface itself was nearly black, so there was nothing for
-         * any glow to be a halo of.
+         * The compact path composites emission after deferred lighting (see
+         * the test above), so emission is no longer multiplied by incident
+         * light. The halo issue is then one of units rather than the bloom
+         * chain: glTF clamps emissiveFactor to [0,1] without
+         * KHR_materials_emissive_strength. Against `hdrColor *= 0.015` in
+         * blit.slang that is ~8/255 on screen, leaving little for a glow halo.
          *
          * Two changes make this scene the scene an asset author sees in
          * Babylon. The importer converts glTF emissive into engine HDR units
-         * (kGLTFEmissiveDisplayScale), and bloom_threshold_cs feeds emission
-         * into the Kawase cascade ungated -- exactly once, since the bright
-         * pass now runs on the frame with emission removed.
+         * (kGLTFEmissiveDisplayScale), and bloom_threshold_cs feeds final
+         * HdrSceneColor into the Kawase cascade, with glowIntensity providing
+         * an optional direct HDR feed for dim emitters.
          *
          * The band above the box is outside the geometry, so anything bright
          * in it arrived by blur; the far corner is the control for "the whole
@@ -369,8 +367,8 @@ struct EmissiveShadingTestSuite {
             // the two is what makes this a test of the glow layer rather than
             // of one hand-picked brightness: whatever the tonemapper and the
             // Kawase cascade do, they do it identically to both frames.
-            // Explicit on/off at full linear feed (bloom_threshold_cs adds
-            // emissive * glowIntensity ungated), with the bloom composite
+            // Explicit on/off at full linear HDR feed (bloom_threshold_cs adds
+            // hdrSceneColor * glowIntensity), with the bloom composite
             // running on BOTH frames: the engine default bloomStrength 0.0
             // multiplies the chain away at composite, so flipping the feed
             // with the master off compares off against off -- the patch-2
@@ -420,7 +418,4 @@ struct EmissiveShadingTestSuite {
     };
 };
 
-// Exported for the GPU_Lighting group binary.
-auto RunEmissiveShadingSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<EmissiveShadingTestSuite>();
-}
+} // namespace

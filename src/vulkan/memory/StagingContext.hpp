@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../core/Handles.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstddef>
@@ -43,14 +44,18 @@ class SubmittedStagingWork {
   private:
     friend class StagingContext;
     SubmittedStagingWork(
-        Allocator& allocator, const Context& ctx, CommandPool<QueueType::Graphics>&& pool, std::vector<Buffer> buffers, VkSemaphore timeline
+        Allocator&                         allocator,
+        const Context&                     ctx,
+        CommandPool<QueueType::Graphics>&& pool,
+        std::vector<Buffer>                buffers,
+        Semaphore                          timeline
     ) noexcept;
 
     Allocator*                       _allocator;
     const Context*                   _ctx;
     CommandPool<QueueType::Graphics> _cmdPool;
     std::vector<Buffer>             _stagingBuffers;
-    VkSemaphore                     _timeline = VK_NULL_HANDLE;
+    Semaphore                        _timeline;
 };
 
 class StagingContext {

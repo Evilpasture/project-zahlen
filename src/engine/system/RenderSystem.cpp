@@ -203,6 +203,13 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
             scratchVbo = EnsureSkinnedScratch(rc, *skelMesh, gpuMesh.vertexCount);
         }
 
+        // The 3D skybox is ordinary geometry now: it is placed where the
+        // importer authored it and submitted with the transform it was given,
+        // like every other mesh. It used to be re-based onto the camera here
+        // (and, before that, composited into a second depth band), which is
+        // what made it occlude and parallax unlike anything else in the world.
+        // Nothing about it is special-cased in this loop any more; the flag
+        // only survives as far as the TLAS mask and the shadow filter below.
         DrawFlags drawFlags = meshComp->flags;
         if (inMain) {
             drawFlags |= DrawFlags::VisibleInMain;
@@ -273,9 +280,8 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
             }
         }
 
-        rc.Draw(
-            gpuMat, gpuMesh,
-            {.transform           = worldMat,
+        DrawParams drawParams {
+             .transform           = worldMat,
              .prevTransform       = prevMat,
              .cullRadius          = meshComp->cullRadius,
              .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
@@ -286,8 +292,13 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
              .flags               = drawFlags,
              .skinnedVertexBuffer = scratchVbo,
              .roughness           = roughness,
-             .metallic            = metallic}
-        );
+             .metallic            = metallic
+        };
+        if (auto ambient = reg.Get<Components::AmbientCubeComponent>(e)) {
+            drawParams.hasAmbientCube = true;
+            drawParams.ambientCube    = ambient->cube;
+        }
+        rc.Draw(gpuMat, gpuMesh, drawParams);
     }
 }
 
@@ -533,7 +544,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     if (const UIDrawData uiData = engine.GetPendingUIData(); !uiData.Empty()) {
         if (auto ui_res = gpuFrame.RenderUI(
                 UIView {
-                    .viewport   = viewport,
+                    .viewport   = {},
                     .target     = attachment,
                     .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
                 },
@@ -543,6 +554,28 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
             return std::unexpected(ui_res.error());
         }
         engine.SetPendingUIData(UIDrawData {});
+    }
+
+    if (const auto& host = engine.GetPlatformHost(); host.UsesCustomCursor()) {
+        const auto     input    = reg.GetSingleton<Components::InputStateComponent>();
+        const Extent2D hostSize = host.GetSize();
+        const float    rawX     = input ? input->mouseX : static_cast<float>(hostSize.width) * 0.5f;
+        const float    rawY     = input ? input->mouseY : static_cast<float>(hostSize.height) * 0.5f;
+        const float    cursorX  = hostSize.width > 0 ? std::clamp(rawX, 0.0f, static_cast<float>(hostSize.width - 1)) : rawX;
+        const float    cursorY  = hostSize.height > 0 ? std::clamp(rawY, 0.0f, static_cast<float>(hostSize.height - 1)) : rawY;
+
+        const CustomCursor cursor(cursorX, cursorY);
+        if (auto cursor_res = gpuFrame.RenderUI(
+                UIView {
+                    .viewport   = {},
+                    .target     = attachment,
+                    .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+                },
+                cursor.DrawData()
+            );
+            !cursor_res) {
+            return std::unexpected(cursor_res.error());
+        }
     }
 
     if (auto end_res = std::move(gpuFrame).End(); !end_res) {

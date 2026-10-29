@@ -13,6 +13,10 @@
 
 namespace ZHLN {
 
+namespace ECS {
+class EntityCommandBuffer;
+}
+
 class ZHLN_API TransformSystem {
   public:
     // Per-system cache for detecting local-transform and parent changes. The
@@ -44,11 +48,13 @@ class ZHLN_API TransformSystem {
         };
 
         struct Node {
-            Entity   entity        = Entity::Null();
-            Entity   parent        = Entity::Null();
-            uint32_t parentIndex   = NoNode;
-            bool     dirty         = false;
-            bool     preserveWorld = false;
+            JPH::Mat44 resolvedWorld    = JPH::Mat44::sIdentity();
+            Entity     entity           = Entity::Null();
+            Entity     parent           = Entity::Null();
+            uint32_t   parentIndex      = NoNode;
+            bool       dirty            = false;
+            bool       preserveWorld    = false;
+            bool       hasResolvedWorld = false;
         };
 
         std::vector<Snapshot>  snapshots;
@@ -66,11 +72,12 @@ class ZHLN_API TransformSystem {
         uint64_t               epoch = 0;
     };
 
-    // A raw Registry& is explicit: a missing WorldTransformComponent must be
-    // inserted, so the graph serialises this structural writer.
+    // Structural insertion of missing WorldTransformComponent entries goes
+    // through the node's EntityCommandBuffer so TransformSystem only locks
+    // Hierarchy/Transform/WorldTransform instead of AllComponents.
     static void Update(
         ECS::Query<const Components::HierarchyComponent, const Components::TransformComponent, Components::WorldTransformComponent&> query,
-        ECS::Registry&                                                                                                               registry,
+        ECS::EntityCommandBuffer&                                                                                                    ecb,
         ECS::Local<ScratchStorage>                                                                                                   scratch
     );
 

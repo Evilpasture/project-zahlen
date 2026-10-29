@@ -74,12 +74,18 @@ set(SAMPLE_SOURCES
 # the decomposition: a sample waits only on the optional targets it uses, and a
 # sample with no optional targets gets no simdjson, sockets, or VFX toolkit.
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain zahlen_camera zahlen_character_controller)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_GlTFInspectorSample zahlen_gltf)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf zahlen_cdn zahlen_freecam)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_GlTFInspectorSample zahlen_gltf zahlen_skeletal_animation)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github zahlen_skeletal_animation)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf zahlen_cdn zahlen_freecam zahlen_skeletal_animation)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_DeviceLostRecoverySample zahlen_freecam)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking zahlen_netpbm zahlen_skeletal_animation)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_bsp zahlen_character_controller zahlen_interaction zahlen_freecam zahlen_camera zahlen_animation zahlen_gltf zahlen_benchmark_viewer)
+
+set(ZHLN_MODULE_SAMPLES
+    BSPMurderDronesSample
+    GlTFInspectorSample
+    ProceduralAnimationSample
+)
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     get_filename_component(SAMPLE_NAME ${SAMPLE_SRC} NAME_WE)
@@ -102,15 +108,22 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     # No WIN32 keyword: on Windows, these are console applications by default.
     add_executable(${SAMPLE_NAME} ${SAMPLE_SRC})
 
+    set(ZHLN_SAMPLE_USES_MODULES OFF)
+    if(SAMPLE_NAME IN_LIST ZHLN_MODULE_SAMPLES)
+        set(ZHLN_SAMPLE_USES_MODULES ON)
+    endif()
+
     set_target_properties(${SAMPLE_NAME} PROPERTIES
         CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
-        CXX_SCAN_FOR_MODULES ON
+        CXX_SCAN_FOR_MODULES ${ZHLN_SAMPLE_USES_MODULES}
     )
 
     target_link_libraries(${SAMPLE_NAME} PRIVATE
         zahlen_engine
+        zahlen_engine_cli
+        zahlen_signal
         Jolt
         zahlen_warnings
     )

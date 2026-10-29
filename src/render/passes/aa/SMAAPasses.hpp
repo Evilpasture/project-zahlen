@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "FrameContext.hpp"
-#include "graph/RenderGraph.hpp"
-#include "passes/aa/AntiAliasingResources.hpp"
+#include "RenderTargetTags.hpp"
+#include "graph/RenderPassDecl.hpp"
+
+namespace ZHLN {
+struct AntiAliasingResources;
+struct RenderFrameContext;
+} // namespace ZHLN
 
 namespace ZHLN::Passes {
 

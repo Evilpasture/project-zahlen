@@ -1100,25 +1100,7 @@ auto GetOrCreateCompiledPrimitive(
     // VK_EXT_mesh_shader streams. They are plain storage buffers read through
     // BDA by the task/mesh shaders; the vertex/index buffers above stay live
     // for BLAS builds and for the legacy vertex pipeline.
-    const bool hasMeshlets    = !primJob.meshlets.Empty();
-    const auto packedMeshlets = PackMeshlets(primJob.meshlets.meshlets);
-
-    BufferHandle meshletVbo =
-        hasMeshlets ?
-            ctx.CreateBuffer(BufferDesc {.usage = BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = kMeshletPackedBytes}) :
-            BufferHandle::Invalid;
-    BufferHandle meshletVertexVbo = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {primJob.meshlets.vertices}) : BufferHandle::Invalid;
-    BufferHandle meshletTriVbo    = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {primJob.meshlets.triangles}) : BufferHandle::Invalid;
-    const bool   completeMeshlets = hasMeshlets && meshletVbo != BufferHandle::Invalid && meshletVertexVbo != BufferHandle::Invalid &&
-                                    meshletTriVbo != BufferHandle::Invalid;
-    if (hasMeshlets && !completeMeshlets) {
-        ctx.DestroyBuffer(meshletVbo);
-        ctx.DestroyBuffer(meshletVertexVbo);
-        ctx.DestroyBuffer(meshletTriVbo);
-        meshletVbo       = BufferHandle::Invalid;
-        meshletVertexVbo = BufferHandle::Invalid;
-        meshletTriVbo    = BufferHandle::Invalid;
-    }
+    const MeshletStreams ml = ctx.UploadMeshlets(primJob.meshlets);
 
     Mesh subMesh = {
         .posBuffer           = posVbo,
@@ -1128,10 +1110,10 @@ auto GetOrCreateCompiledPrimitive(
         .indexBuffer         = ibo,
         .vertexCount         = static_cast<uint32_t>(primJob.positions.size()),
         .indexCount          = primJob.indexCount,
-        .meshletBuffer       = meshletVbo,
-        .meshletVertexBuffer = meshletVertexVbo,
-        .meshletTriBuffer    = meshletTriVbo,
-        .meshletCount        = completeMeshlets ? static_cast<uint32_t>(primJob.meshlets.meshlets.size()) : 0u
+        .meshletBuffer       = ml.meshlets,
+        .meshletVertexBuffer = ml.vertices,
+        .meshletTriBuffer    = ml.triangles,
+        .meshletCount        = ml.count,
     };
 
     if (auto res = ctx.BuildMeshBLAS(subMesh); !res) [[unlikely]] {
@@ -1476,8 +1458,8 @@ auto BuildModelPrefab(
         std::vector<CSGModifier> csgModifiers;
         if (node->extras.start_offset != node->extras.end_offset) {
             const std::string_view extras_json(data->json + node->extras.start_offset, node->extras.end_offset - node->extras.start_offset);
-            if (const auto extras_res = ZHLN::ReflectJSON::TryParse<NodeExtras>(extras_json)) {
-                if (auto csg_res = ZHLN::ReflectJSON::TryParse<std::vector<CSGModifier>>(extras_res->csg_data)) {
+            if (const auto extras_res = ZHLN::ReflectJSON::Parse<NodeExtras>(extras_json)) {
+                if (auto csg_res = ZHLN::ReflectJSON::Parse<std::vector<CSGModifier>>(extras_res->csg_data)) {
                     csgModifiers = std::move(*csg_res);
                 }
             }

@@ -10,8 +10,8 @@
 # and applied from the root's REFLECTION FLAGS PROPAGATION section.
 
 # --- DETECT C++26 LANGUAGE FEATURE FLAGS ---
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
+include(CompilerFlagProbe)
+zhln_check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
 
 if(COMPILER_HAS_REFLECTION)
     message(STATUS "C++26 Static Reflection supported via -freflection")
@@ -19,16 +19,24 @@ if(COMPILER_HAS_REFLECTION)
     # flag; -freflection alone supplies only P2996. GCC exposes it with
     # -freflection, so the extra flag is Clang-specific.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        check_cxx_compiler_flag("-freflection -fparameter-reflection" COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
+        zhln_check_cxx_compiler_flag("-fconstexpr-steps=33554432" COMPILER_HAS_CONSTEXPR_STEPS_FLAG)
+        zhln_check_cxx_compiler_flag("-freflection -fparameter-reflection" COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
         if(NOT COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
             # Newer forks also provide a unified flag for companion proposals.
-            check_cxx_compiler_flag("-freflection -freflection-latest" COMPILER_HAS_REFLECTION_LATEST_FLAG)
+            zhln_check_cxx_compiler_flag("-freflection -freflection-latest" COMPILER_HAS_REFLECTION_LATEST_FLAG)
             if(NOT COMPILER_HAS_REFLECTION_LATEST_FLAG)
                 message(FATAL_ERROR "This Clang supports -freflection but not P3096 parameter reflection (-fparameter-reflection or -freflection-latest).")
             endif()
         endif()
     endif()
 else()
+    if(NOT ZHLN_HAS_PYTHON)
+        message(FATAL_ERROR
+            "C++26 static reflection (-freflection) is not supported by ${CMAKE_CXX_COMPILER_ID} (${CMAKE_CXX_COMPILER}), "
+            "and Python 3 was not found (ZHLN_HAS_PYTHON=OFF) to run the fallback reflection transpiler "
+            "(tools/transpile_reflection.py). Configure with a -freflection compiler (GCC 16+ or clang-p2996) "
+            "or install Python 3.")
+    endif()
     message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
 endif()
 
@@ -151,6 +159,11 @@ function(zahlen_enable_reflection TARGET_NAME)
             target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-fparameter-reflection>")
         elseif(COMPILER_HAS_REFLECTION_LATEST_FLAG)
             target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-freflection-latest>")
+        endif()
+        if(COMPILER_HAS_CONSTEXPR_STEPS_FLAG)
+            # Match GCC's default -fconstexpr-ops-limit=33554432 (2^25); Clang's
+            # pre-reflection 2^20 default can saturate on large P2996 schemas.
+            target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-fconstexpr-steps=33554432>")
         endif()
         if(ZHLN_HAS_ANNOTATION_ATTRIBUTES)
             # The same set has one more member: the annotation syntax only

@@ -4,10 +4,8 @@
 #pragma once
 
 #include <Jolt/Jolt.h>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
@@ -15,11 +13,11 @@
 #include <Zahlen/FramePlan.hpp>
 #include <Zahlen/GameModule.hpp>
 #include <Zahlen/PoseUploads.hpp>
-#include <Zahlen/ScriptCommandRegistry.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/SystemContext.hpp>
 #include <Zahlen/WindowInput.hpp>
 #include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/gui/Font.hpp>
 #include <Zahlen/gui/UIData.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -27,6 +25,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string_view>
 
 namespace ZHLN {
 
@@ -37,7 +36,6 @@ struct SceneData;
 class PhysicsContext;
 class AudioContext;
 class AssetManager;
-class ScriptRunner;
 class Window;
 namespace FS {
 class FileSystemWatcher;
@@ -53,9 +51,26 @@ class Registry;
 template <typename Services>
 class SystemGraph;
 class EntityCommandBuffer;
+class EventBus;
+}
+
+namespace GUI {
+struct UIInput;
 }
 
 class ArticulationSystem;
+class Engine;
+
+struct EngineRunConfig {
+    std::string_view             appName        = "Zahlen Engine";
+    bool                         vsync          = true;
+    bool                         fullscreen     = false;
+    ValidationMode               validationMode = ValidationMode::On;
+    bool                         headless       = false;
+    uint32_t                     fpsLimit       = 0;
+    GameplayDriver               driver         = GameplayDriver::Cpp;
+    std::function<void(Engine&)> onFrameEvents  = nullptr;
+};
 
 class ZHLN_API Engine {
   public:
@@ -128,7 +143,8 @@ class ZHLN_API Engine {
     auto               GetSceneData() -> SceneData&;
     auto               GetAssetManager() -> AssetManager&;
     auto               GetAudioContext() -> AudioContext&;
-    auto               GetScriptRunner() -> ScriptRunner&;
+    auto               GetInput() noexcept -> InputContext&;
+    [[nodiscard]] auto GetInput() const noexcept -> const InputContext&;
     auto               GetFileSystemWatcher() -> FileSystemWatcher&;
     [[nodiscard]] auto GetRegistry() -> ECS::Registry&;
     [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
@@ -136,6 +152,8 @@ class ZHLN_API Engine {
     auto GetUpdateGraph() -> SimGraph&;
     auto GetRenderGraph() -> RenderGraph&;
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
+    auto GetEventBus() noexcept -> ECS::EventBus&;
+    [[nodiscard]] auto GetEventBus() const noexcept -> const ECS::EventBus&;
     // Run the batched cleanup pass now (normally after ECB playback each frame).
     void ProcessPendingDestroy();
     // Release every scene-owned resource before clearing the registry/ECB.
@@ -158,8 +176,15 @@ class ZHLN_API Engine {
 
     void SetUICallback(UICallback callback);
 
-    void               SetPendingUIData(const UIDrawData& uiData) noexcept;
+    void               SetPendingUIData(UIDrawData uiData) noexcept;
     [[nodiscard]] auto GetPendingUIData() const noexcept -> UIDrawData;
+
+    void               SetFontAtlas(const FontAtlas& fontAtlas) noexcept;
+    [[nodiscard]] auto GetFontAtlas() -> const FontAtlas&;
+    [[nodiscard]] auto GetFontAtlas() const noexcept -> const FontAtlas&;
+
+    [[nodiscard]] auto ConsumeUIInput(float dt) noexcept -> GUI::UIInput;
+    void               SubmitUI(UIDrawData uiData) noexcept;
 
     void AddDeviceLostCallback(DeviceLostCallback callback);
 
@@ -192,21 +217,26 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetFramePlan() -> FramePlan&;
     [[nodiscard]] auto GetFramePlan() const noexcept -> const FramePlan&;
 
-    // Module-contributed script verbs. The registry is engine state because the
-    // engine is what a dispatch has in hand; it is empty in a host that installs
-    // no modules, and a C++-only host still reaches the verbs it does hold.
-    [[nodiscard]] auto GetScriptCommands() noexcept -> ScriptCommandRegistry&;
-    [[nodiscard]] auto GetScriptCommands() const noexcept -> const ScriptCommandRegistry&;
-
     void               SetPhysicsSubstepHooks(PhysicsSubstepHooks hooks);
     [[nodiscard]] auto GetPhysicsSubstepHooks() const noexcept -> const PhysicsSubstepHooks&;
 
-    // The pose pipeline's inbound edge, and the counterpart of GetPoseUploads
-    // below: the engine owns the queue poses leave through, so it owns the list
-    // modifiers contribute to as well. A module appends its processor at install
-    // time; the animation system walks the list through the services bundle, by
-    // reference, so an install after the graphs exist still takes effect.
-    [[nodiscard]] auto GetPosePostProcessors() -> PosePostProcessorPipeline&;
+    [[nodiscard]] auto Services() noexcept -> ECS::ExtensionServices&;
+    [[nodiscard]] auto Services() const noexcept -> const ECS::ExtensionServices&;
+
+    template <typename T, typename... Args>
+    auto EmplaceService(Args&&... args) -> T& {
+        return Services().Emplace<T>(std::forward<Args>(args)...);
+    }
+
+    template <typename T>
+    [[nodiscard]] auto Service() noexcept -> ZHLN::Optional<T&> {
+        return Services().Get<T>();
+    }
+
+    template <typename T>
+    [[nodiscard]] auto Service() const noexcept -> ZHLN::Optional<const T&> {
+        return Services().Get<T>();
+    }
 
     void AddTeardownHook(TeardownHook hook);
 
@@ -225,14 +255,20 @@ class ZHLN_API Engine {
 
     [[nodiscard]] auto FallbackSceneEnabled() const noexcept -> bool;
 
-    void SeedSceneFontAtlas(ECS::Registry& reg);
+    void EnsureFontAtlas();
+
+    // Best-effort diagnostic snapshot (engine summary, active camera + SIMD
+    // frustum planes, and physics body/contact trace) exposed for caller-owned
+    // crash/signal handlers without exposing Engine internals.
+    void TraceDiagnostics() const noexcept;
 
     // The composition root's install pass, run once the engine exists and before
     // the first scene. It names the modules the engine runs with; the engine
     // cannot name them itself (ARCHITECTURE.md 1.2).
     using ModuleInstaller = void (*)(Engine&);
+    using RunConfig       = EngineRunConfig;
 
-    static auto Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr)
+    static auto Run(const RunConfig& runConfig = {}, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr)
         -> std::expected<void, ErrorCode>;
 
   private:
@@ -245,8 +281,6 @@ class ZHLN_API Engine {
     void EnsureFramePlan();
 
     auto InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode>;
-
-    void RegisterBootScriptWatches();
 
     std::unique_ptr<EngineImpl> _impl;
 };

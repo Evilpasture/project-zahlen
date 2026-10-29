@@ -41,6 +41,12 @@ void EntityCommandBuffer::Playback() {
                 }
                 break;
             }
+            case CommandType::RemoveComponent: {
+                if (cmd.applyFn != nullptr) {
+                    cmd.applyFn(*_registry, target, nullptr);
+                }
+                break;
+            }
         }
     }
     Reset();

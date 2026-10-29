@@ -23,88 +23,53 @@ auto TargetManager::CreateCascadeViews(VkDevice device, const Vk::Image& image) 
 }
 
 auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::expected<void, ErrorCode> {
-    auto assign = [&](auto& member, auto e) -> std::expected<void, ErrorCode> {
-        if (!e) {
-            return std::unexpected(e.error());
-        }
-        member.Destroy(_allocator);
-        member = std::move(*e);
-        return {};
-    };
-
     std::expected<void, ErrorCode> result {};
-
-    Reflect::ForEachReflectedField<GraphResources::ReflectMetadata>(_graph, [&]<typename Tag>(auto& rt) {
-        if (!result) {
+    Reflect::ForEachField(_graph, [&]<typename TargetT>(TargetT& rt) {
+        if (!result)
             return;
-        }
-        if constexpr (Tag::is_swapchain || std::is_same_v<Tag, Res_ShadowAtlas> || std::is_same_v<Tag, Res_ShadowMap>) {
-            return;
-        } else if constexpr (Tag::is_3d) {
-            result = assign(
-                rt, Vk::RenderTarget3D<Tag::format>::Create(
-                        _allocator, _ctx.Device(), voxelExtent, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferDst
-                    )
-            );
-        } else if constexpr (requires {
-                                 rt.mipLevels;
-                                 rt.mipAttachmentViews;
-                             }) {
-
-            Vk::ImageUsage usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferSrc | Vk::ImageUsage::TransferDst;
-            if constexpr (std::is_same_v<Tag, Res_HiZ>) {
-                usage |= Vk::ImageUsage::Storage;
-            }
-            result = assign(rt, Vk::MipmappedRenderTarget<Tag::format>::Create(_allocator, _ctx.Device(), ext, usage));
-        } else if constexpr (std::is_same_v<Tag, Res_DdgiIrradiance>) {
-            const VkExtent2D ddgiIrrExt = {.width = 640u, .height = 320u};
-            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), ddgiIrrExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
-        } else if constexpr (std::is_same_v<Tag, Res_DdgiDistance>) {
-            const VkExtent2D ddgiDistExt = {.width = 1024u, .height = 512u};
-            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), ddgiDistExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
-        } else if constexpr (std::is_same_v<Tag, Res_DdgiRays>) {
-            const VkExtent2D ddgiRaysExt = {.width = 2048u, .height = 64u};
-            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), ddgiRaysExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
-        } else if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
-            result = assign(
-                rt, Vk::RenderTarget<Tag::format>::Create(_allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled})
-            );
+        using Resource = typename TargetT::TagType;
+        if constexpr (Resource::is_swapchain || std::is_same_v<Resource, Res_ShadowAtlas> || std::is_same_v<Resource, Res_ShadowMap>) {
+            return; // The swapchain and shadow dimensions have independent owners.
         } else {
-            Vk::ImageUsage extra = Vk::ImageUsage::None;
-            if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
-                extra = Vk::ImageUsage::TransferSrc;
-            }
-            if constexpr (std::is_same_v<Tag, Res_LightingGI>) {
-                extra |= Vk::ImageUsage::Storage;
-            }
-            if constexpr (Tag::scale_divisor > 1) {
-                extra |= Vk::ImageUsage::Storage;
-            }
-            if constexpr (std::is_same_v<Tag, Res_HdrSceneColor> || std::is_same_v<Tag, Res_DenoiseA> || std::is_same_v<Tag, Res_DenoiseB> ||
-                          std::is_same_v<Tag, Res_RtShadowMask> || std::is_same_v<Tag, Res_RtShadowHistory> ||
-                          std::is_same_v<Tag, Res_ShadowDenoiseA> || std::is_same_v<Tag, Res_ShadowDenoiseB>) {
+            VkExtent2D     requested = ext;
+            Vk::ImageUsage extra     = Vk::ImageUsage::None;
+            if constexpr (std::is_same_v<Resource, Res_RcgiProbes>) {
+                const uint32_t alignedW = std::max(32u, (requested.width + 31u) & ~31u);
+                const uint32_t alignedH = std::max(32u, (requested.height + 31u) & ~31u);
+                requested               = {alignedW / 2u, alignedH / 4u};
+                extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
+            } else if constexpr (std::is_same_v<Resource, Res_RcgiCascadeA> || std::is_same_v<Resource, Res_RcgiCascadeB>) {
+                requested = {
+                    std::max(32u, (requested.width + 31u) & ~31u),
+                    std::max(32u, (requested.height + 31u) & ~31u),
+                };
                 extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
             }
-            if constexpr (std::is_same_v<Tag, Res_RtrHalf> || std::is_same_v<Tag, Res_RtrHistory> ||
-                          std::is_same_v<Tag, Res_RtgiHalf> || std::is_same_v<Tag, Res_RtgiHistory>) {
-                extra |= Vk::ImageUsage::TransferDst;
+            // OpaqueSceneCopyPass and CaptureFrame transition this image to
+            // TRANSFER_SRC to copy out the composited HDR scene color.
+            if constexpr (std::is_same_v<Resource, Res_HdrSceneColor>) {
+                extra |= Vk::ImageUsage::TransferSrc;
             }
-            const VkExtent2D scaled = {.width = std::max(1u, ext.width / Tag::scale_divisor), .height = std::max(1u, ext.height / Tag::scale_divisor)};
-            result                  = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), scaled, extra));
+            if constexpr (std::is_same_v<Resource, Res_LightingGI> || std::is_same_v<Resource, Res_HiZ>) {
+                extra |= Vk::ImageUsage::Storage;
+            }
+            auto created = TargetT::Create(_allocator, _ctx.Device(), requested, voxelExtent, extra);
+            if (!created) {
+                result = std::unexpected(created.error());
+                return;
+            }
+            rt.Destroy(_allocator);
+            rt = std::move(*created);
         }
     });
-
-    if (!result) {
-        return result;
-    }
-    return {};
+    return result;
 }
 
 auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     const VkExtent2D cascadeExt = {.width = kShadowResolution, .height = kShadowResolution};
     const VkExtent2D atlasExt   = {.width = kShadowAtlasSize, .height = kShadowAtlasSize};
 
-    auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+    auto sm_res = Vk::RenderTarget<Res_ShadowMap>::Create(
         _allocator, _ctx.Device(), cascadeExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
     );
     if (!sm_res) {
@@ -115,7 +80,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _graph.shadowMap.Destroy(_allocator);
     _graph.shadowMap = std::move(*sm_res);
 
-    auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+    auto smp_res = Vk::RenderTarget<Res_ShadowMap>::Create(
         _allocator, _ctx.Device(), cascadeExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
     );
     if (!smp_res) {
@@ -141,7 +106,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
         }
     }
 
-    auto sa_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+    auto sa_res = Vk::RenderTarget<Res_ShadowAtlas>::Create(
         _allocator, _ctx.Device(), atlasExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
     );
     if (!sa_res) [[unlikely]] {
@@ -161,13 +126,17 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
         return std::unexpected(Vk::AttachmentViewCreationError::CreationFailed);
     }
 
-    if (auto immediate = Vk::ExecuteImmediate(_ctx, _ring, [&](VkCommandBuffer cmd) -> void {
-        const std::array shadows = {_graph.shadowMap.image.Handle(), _shadowMapPrev.image.Handle(), _graph.shadowAtlas.image.Handle()};
-        for (const auto img: shadows) {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT);
-        }
-    }); !immediate) [[unlikely]] {
+    if (auto immediate = Vk::ExecuteImmediate(
+            _ctx, _ring,
+            [&](VkCommandBuffer cmd) -> void {
+                const std::array shadows = {_graph.shadowMap.View(), _shadowMapPrev.View(), _graph.shadowAtlas.View()};
+                for (const auto& view: shadows) {
+                    view.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd);
+                    view.Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+                }
+            }
+        );
+        !immediate) [[unlikely]] {
         return std::unexpected(immediate.error());
     }
 
@@ -182,13 +151,13 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
     ).and_then([&]() -> std::expected<void, ErrorCode> {
         const VkExtent2D ext = {.width = resolution, .height = resolution};
 
-        auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+        auto sm_res = Vk::RenderTarget<Res_ShadowMap>::Create(
             _allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
         );
         if (!sm_res) {
             return std::unexpected(sm_res.error());
         }
-        auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+        auto smp_res = Vk::RenderTarget<Res_ShadowMap>::Create(
             _allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
         );
         if (!smp_res) {
@@ -214,13 +183,17 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
             _shadowCascadeViewsPrev = std::move(*r);
         }
 
-        if (auto immediate = Vk::ExecuteImmediate(_ctx, _ring, [&](VkCommandBuffer cmd) -> void {
-            const std::array shadows = {_graph.shadowMap.image.Handle(), _shadowMapPrev.image.Handle()};
-            for (const auto img: shadows) {
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT);
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT);
-            }
-        }); !immediate) [[unlikely]] {
+        if (auto immediate = Vk::ExecuteImmediate(
+                _ctx, _ring,
+                [&](VkCommandBuffer cmd) -> void {
+                    const std::array shadows = {_graph.shadowMap.View(), _shadowMapPrev.View()};
+                    for (const auto& view: shadows) {
+                        view.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd);
+                        view.Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+                    }
+                }
+            );
+            !immediate) [[unlikely]] {
             return std::unexpected(immediate.error());
         }
 
@@ -235,59 +208,34 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
     );
 
     const std::array colorTargets = {
-        _graph.sceneColor.image.Handle(),
-        _graph.velocityBuffer.image.Handle(),
-        _graph.normalRoughnessBuffer.image.Handle(),
-        _graph.emissiveBuffer.image.Handle(),
-        _graph.clearcoatBuffer.image.Handle(),
-        _graph.anisotropyBuffer.image.Handle(),
-        _graph.sheenBuffer.image.Handle(),
-        _graph.hdrSceneColor.image.Handle(),
-        _graph.lightingTarget.image.Handle(),
-        _graph.smaaEdgeTarget.image.Handle(),
-        _graph.smaaWeightTarget.image.Handle(),
-        _graph.transNormalBuffer.image.Handle(),
-        _graph.transAnisotropyBuffer.image.Handle(),
-        _graph.transSheenBuffer.image.Handle(),
-        _graph.transLightingTarget.image.Handle()
+        _graph.sceneColor.View(),       _graph.velocityBuffer.View(),     _graph.normalRoughnessBuffer.View(),
+        _graph.bakedMask.View(),        _graph.hdrSceneColor.View(),      _graph.lightingTarget.View(),
+        _graph.lightingGI.View(),       _graph.lightingAo.View(),         _graph.smaaEdgeTarget.View(),
+        _graph.smaaWeightTarget.View(), _graph.transNormalBuffer.View(),  _graph.transAnisotropyBuffer.View(),
+        _graph.transSheenBuffer.View(), _graph.transLightingTarget.View(),
     };
-    for (auto* const img: colorTargets) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+    std::array<Vk::ImageBarrier, colorTargets.size()> toColor {};
+    std::array<Vk::ImageBarrier, colorTargets.size()> toRead {};
+    for (size_t i = 0; i < colorTargets.size(); ++i) {
+        toColor[i] = Vk::ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(colorTargets[i]);
+        toRead[i]  = Vk::ImageBarrier::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(colorTargets[i]);
     }
+    Vk::ImageBarrier::Record(cmd, toColor);
+    Vk::ImageBarrier::Record(cmd, toRead);
 
-    const std::array bloomComputeTargets = {_graph.bloomThresholdTarget.image.Handle(), _graph.bloomDown1.image.Handle(), _graph.bloomDown2.image.Handle(),
-                                            _graph.bloomDown3.image.Handle(),           _graph.bloomUp2.image.Handle(),   _graph.bloomUp1.image.Handle(),
-                                            _graph.bloomFinalTarget.image.Handle()};
-    for (auto* const img: bloomComputeTargets) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-    }
-
-    const std::array denoiseTargets = {
-        _graph.denoiseA.image.Handle(),       _graph.denoiseB.image.Handle(),       _graph.shadowDenoiseA.image.Handle(),
-        _graph.shadowDenoiseB.image.Handle(), _graph.rtgiDenoiseA.image.Handle(),   _graph.rtgiDenoiseB.image.Handle(),
-        _graph.ddgiRays.image.Handle()
+    const std::array generalTargets = {
+        _graph.bloomThresholdTarget.View(), _graph.bloomDown1.View(), _graph.bloomDown2.View(),      _graph.bloomDown3.View(),
+        _graph.bloomUp2.View(),             _graph.bloomUp1.View(),   _graph.bloomFinalTarget.View(), _graph.rcgiProbes.View(),
+        _graph.rcgiCascadeA.View(),         _graph.rcgiCascadeB.View(),
     };
-    for (auto* const img: denoiseTargets) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+    std::array<Vk::ImageBarrier, generalTargets.size()> toGeneral {};
+    for (size_t i = 0; i < generalTargets.size(); ++i) {
+        toGeneral[i] = Vk::ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_GENERAL>(generalTargets[i]);
     }
+    Vk::ImageBarrier::Record(cmd, toGeneral);
 
-    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        cmd, Color4 {1.0f, 1.0f, 1.0f, 1.0f}, _graph.rtShadowMask, _graph.rtShadowHistory
-    );
-    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, _graph.rtrHalf, _graph.rtrHistory, _graph.rtgiHalf, _graph.rtgiHistory, _graph.ddgiIrradiance
-    );
-    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        cmd, _graph.ddgiDistance, Color4 {50.0f, 2500.0f, 0.0f, 0.0f}
-    );
-
-    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
-        cmd, _graph.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-    );
-    Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        cmd, _graph.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-    );
+    _graph.transDepthBuffer.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(cmd);
+    _graph.transDepthBuffer.Transition<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
 
     Vk::ClearColorAndTransition(cmd, _graph.hizMap, 1.0f);
 }
@@ -296,18 +244,15 @@ void TargetManager::Clear() noexcept {
     _shadowCascadeViews.clear();
     _shadowCascadeViewsPrev.clear();
     _shadowAtlasView = {};
-    Reflect::ForEachReflectedField<GraphResources::ReflectMetadata>(_graph, [&]<typename Tag>(auto& target) { target.Destroy(_allocator); });
-
-    _graph.shadowMap.Destroy(_allocator);
-    _graph.bloomBlurTarget.Destroy(_allocator);
+    Reflect::ForEachField(_graph, [&](auto& target) { target.Destroy(_allocator); });
     _shadowMapPrev.Destroy(_allocator);
 }
 
 void TargetManager::NameGraphTargets() const noexcept {
-    Reflect::ForEachReflectedField<GraphResources::ReflectMetadata>(_graph, [&]<typename Tag>(auto& rt) {
-        if constexpr (requires { rt.image.Handle(); }) {
-            Vk::Debug::SetImageName(_ctx, rt.image.Handle(), Tag::name.string_view());
-        }
+    Reflect::ForEachField(_graph, [&](const auto& rt) {
+        using Resource = typename std::remove_cvref_t<decltype(rt)>::TagType;
+        if (rt.Valid())
+            Vk::Debug::SetImageName(_ctx, rt.image.Handle(), Resource::name.string_view());
     });
 }
 

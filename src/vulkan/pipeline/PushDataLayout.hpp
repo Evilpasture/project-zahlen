@@ -9,24 +9,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <string_view>
 
 namespace ZHLN::Vk {
 
-[[nodiscard]] constexpr auto AlignUp(uint32_t value, uint32_t alignment) noexcept -> uint32_t {
-    return alignment == 0 ? value : (value + alignment - 1) / alignment * alignment;
-}
-
 enum class SpirvLayoutError : uint8_t {
-    InvalidArguments ZHLN_ANNOTATION(ZHLN::Description<"SPIR-V blob or type name is empty">{}) = 1,
-    ModuleParseFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to parse SPIR-V module">{}),
-    TypeNotFound ZHLN_ANNOTATION(ZHLN::Description<"Type was not found in compiled SPIR-V">{}),
-    EmptyLayout ZHLN_ANNOTATION(ZHLN::Description<"Reflected type has zero size">{}),
-    TypeSizeMismatch ZHLN_ANNOTATION(ZHLN::Description<"GPU type size does not match the C++ host type">{}),
+    ModuleParseFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to parse SPIR-V module">{}) = 1,
 };
 
-inline constexpr std::string_view kDescriptorHeapPushDataTypeName = "DescriptorHeapPushData";
-
+// The scene push blob's shape, as the renderer fills it: where the frame
+// addresses sit, which word carries the descriptor index, and how far a push
+// reaches. The RHI supplies the container and writes what it is handed; the
+// numbers come from Slang's own reflection of DescriptorHeapPushData
+// (tools/zshader emits them as Slang::kScenePushLayout, and
+// src/render/GpuAbi.cpp exports that constant under this type).
 struct HeapPushDataLayout {
     static constexpr size_t kMaxAddresses = 16;
 

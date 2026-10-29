@@ -1,15 +1,10 @@
 
+import gpu_push_constants;
 import common;
 import gpu_buffer;
 import particles;
 import uniforms;
 
-struct ComputePushConstants {
-    uint64_t particleBufferAddr;
-    uint particleCount;
-    float deltaTime;
-    ParticleEmitterParams p;
-};
 [vk::push_constant]
 ComputePushConstants pc;
 

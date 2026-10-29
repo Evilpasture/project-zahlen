@@ -130,7 +130,7 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
     return true;
 }
 
-bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height, VkImageLayout srcLayout) noexcept {
+bool ReadBackPixels(const Vk::ImageView& view, uint32_t width, uint32_t height, VkImageLayout srcLayout) noexcept {
     auto acquired = g.ring.Acquire();
     if (!acquired) { return false; }
     auto slot = *acquired;
@@ -138,31 +138,15 @@ bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height, VkImageLayou
     if (!recording) { return false; }
     const VkCommandBuffer cmd = recording->Handle();
 
-    auto barrier = [&](VkImageLayout from, VkImageLayout to, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess, VkPipelineStageFlags2 dstStage,
-                       VkAccessFlags2 dstAccess) {
-        Vk::ImageBarrier(cmd, Vk::ImageBarrierDesc {
-                                  .image      = image,
-                                  .src_access = srcAccess,
-                                  .dst_access = dstAccess,
-                                  .src_layout = from,
-                                  .dst_layout = to,
-                                  .src_stage  = srcStage,
-                                  .dst_stage  = dstStage,
-                                  .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-                                  .base_mip   = 0,
-                                  .mip_count  = 1,
-                              });
-    };
-
-    barrier(
-        srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+    view.Transition(
+        cmd, srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
         VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT
     );
 
-    Vk::CopyImageToBuffer(cmd, image, g.staging, VkExtent2D {width, height});
+    Vk::CopyImageToBuffer(cmd, view.Handle(), g.staging, VkExtent2D {width, height});
 
-    barrier(
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, VK_PIPELINE_STAGE_2_TRANSFER_BIT, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    view.Transition(
+        cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, VK_PIPELINE_STAGE_2_TRANSFER_BIT, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
         VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
     );
 
@@ -300,7 +284,7 @@ void Shutdown() noexcept;
 
     if (!EnsureStaging(static_cast<VkDeviceSize>(width) * height * 4))
         return false;
-    if (!ReadBackPixels(src.Handle(), width, height, srcLayout)) {
+    if (!ReadBackPixels(src.View().Mip(0), width, height, srcLayout)) {
         Log("Readback copy failed; frame skipped.");
         return !glfwWindowShouldClose(target);
     }

@@ -6,51 +6,53 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <numbers>
 #include <string_view>
-#include <vector>
 
 namespace ZHLN {
 
-void EnvironmentSunSystem::Update(ECS::Registry& registry, ECS::Res<AssetManager> assets) {
+void EnvironmentSunSystem::Update(SunEnvQuery query, ECS::EntityCommandBuffer& ecb, ECS::Res<AssetManager> assets) {
     using EnvironmentSunTagComponent = Components::EnvironmentSunTagComponent;
     using EnvironmentMapComponent = Components::EnvironmentMapComponent;
     using LightComponent = Components::LightComponent;
     using SunTagComponent = Components::SunTagComponent;
     using PendingDestroy = Components::PendingDestroy;
-    const auto ownedSpan = registry.GetEntitiesWith<EnvironmentSunTagComponent>();
+    const auto ownedSpan = query.Entities<EnvironmentSunTagComponent>();
     const Entity owned = ownedSpan.empty() ? Entity::Null() : ownedSpan.front();
 
     bool authoredSun = false;
-    for (const Entity entity: registry.GetEntitiesWith<LightComponent>()) {
-        const auto light = registry.Get<LightComponent>(entity);
-        if (!registry.Get<EnvironmentSunTagComponent>(entity) &&
-            !registry.Get<PendingDestroy>(entity) && light && light->type == LightType::Sun) {
+    for (const Entity entity: query.Entities<LightComponent>()) {
+        const auto light = query.Get<LightComponent>(entity);
+        if (!query.Get<EnvironmentSunTagComponent>(entity) &&
+            !query.Get<PendingDestroy>(entity) && light && light->type == LightType::Sun) {
             authoredSun = true;
             break;
         }
     }
     if (!authoredSun) {
-        for (const Entity entity: registry.GetEntitiesWith<SunTagComponent>()) {
-            if (!registry.Get<EnvironmentSunTagComponent>(entity) && !registry.Get<PendingDestroy>(entity)) {
+        for (const Entity entity: query.Entities<SunTagComponent>()) {
+            if (!query.Get<EnvironmentSunTagComponent>(entity) && !query.Get<PendingDestroy>(entity)) {
                 authoredSun = true;
                 break;
             }
         }
     }
 
-    const Entity envEntity = registry.SingletonEntity<EnvironmentMapComponent>();
-    const auto   env       = registry.Get<EnvironmentMapComponent>(envEntity);
-    const auto   pixels    = env && !env->source.empty() && !registry.Get<PendingDestroy>(envEntity)
+    const auto envEntities = query.Entities<EnvironmentMapComponent>();
+    const Entity envEntity = envEntities.empty() ? Entity::Null() : envEntities.front();
+    const auto   env       = envEntity != Entity::Null() ? query.Get<EnvironmentMapComponent>(envEntity) : Optional<const EnvironmentMapComponent&> {};
+    const auto   pixels    = env && !env->source.empty() && !query.Get<PendingDestroy>(envEntity)
         ? assets->FindEnvironmentImage(std::string_view(env->source)) : std::nullopt;
     const EnvironmentSun* sun = pixels && pixels->sun ? &*pixels->sun : nullptr;
 
     if (authoredSun || sun == nullptr) {
         if (ownedSpan.empty()) return;
-        // These entities contain only ECS data, no GPU/physics/audio handles.
-        // Structural writes are serialized by the graph's Registry& hazard.
-        const std::vector<Entity> obsolete {ownedSpan.begin(), ownedSpan.end()};
-        for (const Entity entity: obsolete) registry.Destroy(entity);
+        for (const Entity entity: ownedSpan) {
+            if (!query.Get<PendingDestroy>(entity)) {
+                ecb.DestroyEntity(entity);
+            }
+        }
         if (authoredSun && sun != nullptr) {
             Log("[IBL] Authored sun replaces cooked HDR sun; conditioned IBL and original visible sky remain in use.");
         }
@@ -66,16 +68,19 @@ void EnvironmentSunSystem::Update(ECS::Registry& registry, ECS::Res<AssetManager
         .direction = JPH::Vec3(dir[0], dir[1], dir[2]).Normalized(),
     };
     if (owned == Entity::Null()) {
-        registry.Create(EnvironmentSunTagComponent {}, baked);
-    } else if (registry.Get<LightComponent>(owned)) {
-        registry.Patch<LightComponent>(owned, [&](auto& light) { light = baked; });
+        ecb.CreateEntity(EnvironmentSunTagComponent {}, baked);
+    } else if (auto existingLight = query.Get<LightComponent>(owned)) {
+        *existingLight = baked;
     } else {
-        registry.Add(owned, baked);
+        ecb.AddComponent(owned, baked);
     }
     // Guard against stale duplicates after a scene import or data-only edit.
     if (ownedSpan.size() > 1) {
-        const std::vector<Entity> duplicates {ownedSpan.begin() + 1, ownedSpan.end()};
-        for (const Entity entity: duplicates) registry.Destroy(entity);
+        for (const Entity entity: ownedSpan.subspan(1)) {
+            if (!query.Get<PendingDestroy>(entity)) {
+                ecb.DestroyEntity(entity);
+            }
+        }
     }
 }
 

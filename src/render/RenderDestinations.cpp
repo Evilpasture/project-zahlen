@@ -12,7 +12,7 @@ namespace ZHLN {
 namespace {
 
 [[nodiscard]] auto AcquireDestinationImage(
-    FrameDestinations& destinations, uint64_t& nextAcquisitionSerial, FrameDestinations::Window& dest, Vk::InstanceView instance
+    FrameDestinations& destinations, uint64_t& nextAcquisitionSerial, FrameDestinations::Window& dest
 ) noexcept
     -> std::expected<ZHLN::Optional<FrameDestinations::Acquired&>, ErrorCode> {
     if (dest.acquired.has_value()) {
@@ -28,9 +28,6 @@ namespace {
     auto                    acquired      = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, !dest.IsPrimary());
 
     if (!acquired) {
-        if (Vk::IsDeviceLost(acquired.error())) {
-            instance.IncrementDeviceLost();
-        }
         destinations.AbortRecording(dest.id);
         dest.cachedGeneration = destPresenter.resourceGeneration;
         return std::unexpected(AsFrameError(acquired.error()));
@@ -58,6 +55,49 @@ namespace {
 }
 
 } // namespace
+
+auto RenderContext::Impl::EnsureDepthTarget(FrameDestinations::Window& destination) noexcept -> std::expected<void, ErrorCode> {
+    const VkExtent2D extent = destination.Presenter().Extent();
+    if (extent.width == 0 || extent.height == 0) {
+        return std::unexpected(DestinationError::SurfaceUnusable);
+    }
+
+    auto& target = destination.IsPrimary() ? primaryDepthTarget : destination.depthTarget;
+    if (target.Valid() && target.extent.width == extent.width && target.extent.height == extent.height) {
+        return {};
+    }
+
+    auto created = Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+        allocator, ctx.Device(), extent, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
+    );
+    if (!created) {
+        return std::unexpected(created.error());
+    }
+
+    target.Destroy(allocator);
+    target = std::move(*created);
+
+    if (destination.IsPrimary()) {
+        if (auto immediate = Vk::ExecuteImmediate(
+                ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+                    target.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(cmd);
+                    target.Transition<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+                }
+            );
+            !immediate) {
+            target.Destroy(allocator);
+            return std::unexpected(immediate.error());
+        }
+        if (decalDepthSlot.Valid()) {
+            heapManager.BindImage(decalDepthSlot, target.image.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
+        Vk::Debug::SetImageName(ctx, target.image.Handle(), "DepthTarget");
+    } else {
+        Vk::Debug::SetImageName(ctx, target.image.Handle(), "WindowDepthTarget");
+    }
+
+    return {};
+}
 
 auto RenderContext::Impl::FindOrCreateDestination(const PresentationTarget& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode> {
     if (auto existing = destinations.Find(aux)) {
@@ -136,8 +176,30 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
         ZHLN::Log("[Render] Window presenter created for {:p} (primary={}).", static_cast<const void*>(dest.target), dest.IsPrimary() ? 1 : 0);
     }
 
-    const auto acquired = AcquireDestinationImage(destinations, nextAcquisition, dest, ctx.Instance());
+    // Rebuild an auxiliary swapchain before the renderer allocates its matching
+    // scene-depth image. AcquireNext can still handle out-of-date images below.
+    if (!dest.acquired && !dest.IsPrimary() && dest.Presenter().HasSwapchain()) {
+        const Extent2D requested = aux.GetFramebufferExtent();
+        const VkExtent2D current = dest.Presenter().Extent();
+        if (requested.width != 0 && requested.height != 0 &&
+            (requested.width != current.width || requested.height != current.height)) {
+            if (auto rebuilt = dest.Presenter().Rebuild(requested.width, requested.height); !rebuilt) {
+                return std::unexpected(rebuilt.error());
+            }
+        }
+    }
+
+    if (!dest.acquired) {
+        if (auto depth = EnsureDepthTarget(dest); !depth) {
+            return std::unexpected(depth.error());
+        }
+    }
+
+    const auto acquired = AcquireDestinationImage(destinations, nextAcquisition, dest);
     if (!acquired) {
+        if (acquired.error().Is(FrameResult::DeviceLost)) {
+            NoteDeviceLost("AcquireDestinationImage");
+        }
         return std::unexpected(acquired.error());
     }
     if (!acquired->has_value()) {
@@ -150,12 +212,23 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
         }
     } else {
         Vk::SwapchainPresenter& destPresenter = dest.Presenter();
-        auto                    recording     = Vk::CommandRecorder::Begin(destPresenter.SlotCommand(destPresenter.frameIndex));
+
+        // This is where a window's graphics command stream begins -- one stream
+        // carrying the scene graph, its fork secondaries' setup, the Blit pass
+        // and the UI pass -- so this is where BeginStream establishes its heap
+        // state: both segments bound and the frame address block pushed, before
+        // the first command. The state survives until the buffer is reset,
+        // because HeapManager writes into one pair of device-addressable heap
+        // buffers that are created once and never rebound with other contents.
+        auto recording = BeginStream(destPresenter.SlotCommand(destPresenter.frameIndex));
         if (!recording) {
             dest.acquired.reset();
             return std::unexpected(recording.error());
         }
-        destinations.AddRecording(dest.id, std::move(*recording));
+
+        // From here on the stream is the destination table's, and it only needs
+        // the handle: the heap state lives on the command buffer, not in the type.
+        destinations.AddRecording(dest.id, std::move(*recording).Release());
     }
     destinations.SetActive(dest.id);
     return FrameTarget {rendererId, frameSerial, dest.id, dest.acquired->serial};
@@ -202,18 +275,26 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
     if (!entry || entry->IsPrimary()) {
         return;
     }
-    if (ctx.Device() != VK_NULL_HANDLE) {
+    if (ctx.Device() != VK_NULL_HANDLE && !deviceLost.load(std::memory_order::relaxed)) {
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && Vk::IsDeviceLost(waited.error())) {
-            ctx.Instance().IncrementDeviceLost();
+            NoteDeviceLost("ReleaseTarget");
         }
     }
+    destinations.AbortRecording(entry->id);
+    entry->depthTarget.Destroy(allocator);
     destinations.Detach(aux);
 }
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
-    if (ctx.Device() != VK_NULL_HANDLE) {
+    if (ctx.Device() != VK_NULL_HANDLE && !deviceLost.load(std::memory_order::relaxed)) {
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && Vk::IsDeviceLost(waited.error())) {
-            ctx.Instance().IncrementDeviceLost();
+            NoteDeviceLost("DestroyDestinations");
+        }
+    }
+    destinations.AbortRecordings();
+    for (auto& destination: destinations.Windows()) {
+        if (!destination.IsPrimary()) {
+            destination.depthTarget.Destroy(allocator);
         }
     }
     destinations.Clear();

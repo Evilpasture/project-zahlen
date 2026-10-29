@@ -41,17 +41,19 @@ install their frame steps or physics hooks. Consumers using only procedural
 animation (without character movement) can register just that subsystem after
 scene initialization.
 
-`Register` installs the extension-owned ECS types and inserts its evaluator before
-the generic core `ArticulationSystem` phase. Core knows only about
-`KinematicPoseOverrideComponent`, not about gait, hair, IK, or `RigBoneMap`.
-When a procedural entity gains `RagdollComponent`, the extension evaluator creates
-a missing `KinematicPoseOverrideComponent` automatically before publishing its
-motor target, so articulation cannot silently fall back to bind pose because of
-a spawn omission. Every distinct skin/joint offset on the character receives its
-own procedural palette; this is required when body, feet, clothing, and hair are
-exported as separate skins. The evaluator logs both the distinct palette count
-and the number of non-skinned attachments synchronized each frame topology
-changes, making skin-vs-attachment failures visible immediately.
+`Register` installs the extension-owned ECS types (`AnimationContext`, skeletal
+animation systems, and procedural synthesis) and inserts its evaluator before the
+generic core `ArticulationSystem` phase. Core knows only about
+`PoseUploadQueue` (skinning palettes and kinematic pose transfers), not about
+gait, hair, IK, or `RigBoneMap`. When a procedural entity gains
+`RagdollComponent`, the extension evaluator publishes its kinematic motor target
+directly through `PoseUploadQueue::PushKinematic`, so articulation cannot
+silently fall back to bind pose because of a spawn omission. Every distinct
+skin/joint offset on the character receives its own procedural palette; this is
+required when body, feet, clothing, and hair are exported as separate skins. The
+evaluator logs both the distinct palette count and the number of non-skinned
+attachments synchronized each frame topology changes, making skin-vs-attachment
+failures visible immediately.
 
 Run the same sample with another packed GLB without editing C++:
 
@@ -354,7 +356,9 @@ layers after evaluating `AnimatorComponent::currentTrackIdx`. If that index is
 to select by name:
 
 ```cpp
-animator.currentTrackIdx = ZHLN::FindAnimationTrack(*animator.prefab, "idle");
+if (const auto prefab = engine.GetAssetManager().GetCachedPrefab(animator.prefabAsset); prefab.has_value()) {
+    animator.currentTrackIdx = ZHLN::FindAnimationTrack(*prefab, "idle");
+}
 ```
 
 The lookup is case-insensitive, prefers an exact name, then accepts a substring

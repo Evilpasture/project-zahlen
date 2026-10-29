@@ -4,7 +4,7 @@
 #pragma once
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/EnumFlags.hpp>
-#include <Zahlen/Core/Pair.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Render/Handles.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -68,11 +68,14 @@ enum class MaterialTextureSlot : uint8_t {
     SheenRoughness,
     Occlusion,
     Transmission,
-    Specular,
-    Count
+    Specular
 };
+// The slot count is reflected, not sentineled: a Count enumerator would make
+// every reflection tool (EnumCount, EnumNames, ForEachEnumerator, EnumToString)
+// see a phantom seventeenth slot.
+inline constexpr size_t kMaterialTextureSlotCount = Reflect::EnumCount<MaterialTextureSlot>();
 inline constexpr uint32_t kMaterialSamplerVariantCount = 9; // Three S modes x three T modes.
-using MaterialSamplerAddresses                         = std::array<TextureSamplerAddress, static_cast<size_t>(MaterialTextureSlot::Count)>;
+using MaterialSamplerAddresses                         = std::array<TextureSamplerAddress, kMaterialTextureSlotCount>;
 
 // glTF textureInfo, not the image, owns the UV transform and set selection.
 // Apply offset + rotation * scale to TEXCOORD_0 or TEXCOORD_1 per reference.
@@ -87,7 +90,19 @@ struct MaterialTextureTransform {
     uint32_t       texCoord                                                   = 0;
     constexpr bool operator==(const MaterialTextureTransform&) const noexcept = default;
 };
-using MaterialTextureTransforms = std::array<MaterialTextureTransform, static_cast<size_t>(MaterialTextureSlot::Count)>;
+using MaterialTextureTransforms = std::array<MaterialTextureTransform, kMaterialTextureSlotCount>;
+
+struct MeshletStreams {
+    using enum BufferHandle;
+    BufferHandle meshlets  = Invalid;
+    BufferHandle vertices  = Invalid;
+    BufferHandle triangles = Invalid;
+    uint32_t     count     = 0;
+
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return count != 0 && meshlets != Invalid && vertices != Invalid && triangles != Invalid;
+    }
+};
 
 struct Mesh {
     using enum BufferHandle;
@@ -112,6 +127,10 @@ struct Material {
     TextureHandle             normalMap                = TextureHandle::Invalid;
     TextureHandle             pbrMap                   = TextureHandle::Invalid;
     TextureHandle             emissiveMap              = TextureHandle::Invalid;
+    // Authoritative static diffuse irradiance (for example Source VRAD), not
+    // AO and not material emission. It is sampled with the mesh's UV1.
+    TextureHandle             bakedIrradianceMap       = TextureHandle::Invalid;
+    float                     bakedIrradianceScale     = 1.0f;
     JPH::Float4               baseColorFactor          = {1.0f, 1.0f, 1.0f, 1.0f};
     JPH::Float4               emissiveFactor           = {0.0f, 0.0f, 0.0f, 1.0f};
     float                     metallicFactor           = 1.0f;
@@ -154,6 +173,11 @@ struct Material {
     // response in holds a multiple of the 0.04 baseline, and clamping once is
     // what keeps every path agreeing on the same reflectance.
     bool                      specularEnabled      = false;
+    // Scale the deferred image-based reflection independently of the glTF
+    // specular extension; optionally gate it with base-color texture alpha.
+    bool                      environmentReflectionEnabled    = false;
+    bool                      environmentReflectionAlphaMask   = false;
+    float                     environmentReflectionFactor     = 1.0f;
     float                     specularFactor       = 1.0f;
     JPH::Float3               specularColorFactor {1.0f, 1.0f, 1.0f};
     TextureHandle             specularMap          = TextureHandle::Invalid;
@@ -186,6 +210,13 @@ enum class DrawFlags : uint32_t {
     VisibleInShadow = 1 << 3,
     Hidden          = 1 << 4,
     Viewmodel       = 1 << 5,
+    // Background layer (Source's 3D-skybox world): rasterized into the shared
+    // G-buffer by BackgroundGBufferPass with its clip depth remapped to the
+    // far band [kSkyDepthSplit, 1] while the main world uses [0, kSkyDepthSplit]
+    // -- Source's depth-range remap, so the map keeps every pixel it covers no
+    // matter how close the background geometry sits. Never visible in the
+    // shadow passes.
+    Background = 1 << 6,
 };
 
 enum class CSGOperation : uint8_t { Difference = 0, Union = 1, Intersection = 2 };
@@ -220,6 +251,11 @@ struct MaterialDesc {
     TextureHandle             normalMap                = TextureHandle::Invalid;
     TextureHandle             pbrMap                   = TextureHandle::Invalid;
     TextureHandle             emissiveMap              = TextureHandle::Invalid;
+    // A linear HDR baked-diffuse input. It has a separate semantic from
+    // occlusionMap because authored irradiance and ambient occlusion are not
+    // interchangeable PBR quantities.
+    TextureHandle             bakedIrradianceMap       = TextureHandle::Invalid;
+    float                     bakedIrradianceScale     = 1.0f;
     TextureHandle             filmThicknessMap         = TextureHandle::Invalid;
     TextureHandle             iridescenceMap           = TextureHandle::Invalid;
     TextureHandle             volumeThicknessMap       = TextureHandle::Invalid;
@@ -241,6 +277,11 @@ struct MaterialDesc {
     // See Material: `specularEnabled` is the extension's presence on this
     // material, not a deviation of the factors from their defaults.
     bool                      specularEnabled      = false;
+    // Scale the deferred image-based reflection independently of the glTF
+    // specular extension; optionally gate it with base-color texture alpha.
+    bool                      environmentReflectionEnabled    = false;
+    bool                      environmentReflectionAlphaMask   = false;
+    float                     environmentReflectionFactor     = 1.0f;
     float                     specularFactor       = 1.0f;
     JPH::Float3               specularColorFactor {1.0f, 1.0f, 1.0f};
     TextureHandle             specularMap          = TextureHandle::Invalid;
@@ -281,6 +322,11 @@ struct DrawParams {
 
     JPH::Float4 colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f};
     JPH::Float4 emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f};
+
+    // Optional ambient cube (+X,-X,+Y,-Y,+Z,-Z linear radiance) for meshes without
+    // baked lightmaps. Only read when hasAmbientCube is set.
+    bool                       hasAmbientCube = false;
+    std::array<JPH::Float4, 6> ambientCube {};
 };
 
 struct CSGCutterParams {

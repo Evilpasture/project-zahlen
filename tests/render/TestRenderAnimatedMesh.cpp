@@ -3,6 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
+#include <Animation/AnimationSystem.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
@@ -16,7 +17,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <fstream>
 #include <glTF/GLTFImporter.hpp>
 #include <span>
 #include <string>
@@ -49,6 +49,8 @@ enum class AnimatedMeshTestError : uint8_t {
     MissingEmissiveGlow ZHLN_ANNOTATION(ZHLN::Description<"Automated pixel analysis detected zero emissive purple pixels.">{}),
 };
 
+namespace {
+
 struct RenderAnimatedMeshTestSuite {
     RenderAnimatedMeshTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -74,9 +76,9 @@ struct RenderAnimatedMeshTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(AnimatedMeshTestError::EngineInitFailed);
             }
+            ZHLN::Animation::Install(*engine);
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
 
             // 2. Directional Sun Lighting
             const ZHLN::Entity sunEnt = reg.Create();
@@ -158,27 +160,13 @@ struct RenderAnimatedMeshTestSuite {
                 ZHLN::Test::ExpectTrue(skin.has_value() && skin->skinnedScratch == buffer);
             }
 
-            // 6. Automated Pixel Readback & Color Histogram Analysis
-            const std::string ppmPath    = "headless_skinning_output.ppm";
-            const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
-            if (!captureRes) {
+            // 6. Frame capture and color histogram analysis, in memory.
+            const std::string ppmPath = "headless_skinning_output.ppm";
+            const auto        frame   = ZHLN::Test::Headless::Capture(*engine, ppmPath);
+            if (!frame.Valid()) {
                 return std::unexpected(AnimatedMeshTestError::RenderOutputBlank);
             }
-
-            std::ifstream ppm(ppmPath, std::ios::binary);
-            if (!ppm.is_open()) {
-                return std::unexpected(AnimatedMeshTestError::RenderOutputBlank);
-            }
-
-            std::string header;
-            int         width    = 0;
-            int         height   = 0;
-            int         maxColor = 0;
-            ppm >> header >> width >> height >> maxColor;
-            ppm.get(); // consume newline
-
-            std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
-            ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+            const std::vector<uint8_t>& pixels = frame.rgb;
 
             uint32_t purpleEmissivePixels   = 0;
             uint32_t visibleCharacterPixels = 0;
@@ -215,9 +203,4 @@ struct RenderAnimatedMeshTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunRenderAnimatedMeshSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<RenderAnimatedMeshTestSuite>();
-}
-
+} // namespace

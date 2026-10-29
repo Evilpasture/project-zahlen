@@ -4,6 +4,10 @@
 
 add_library(zahlen_physics STATIC
     Physics.cpp
+    BodyTable.hpp
+    CharacterManager.hpp
+    CharacterManager.cpp
+    CommandMailbox.hpp
     PhysicsWorld.hpp
     PhysicsWorld.cpp
     PhysicsContactEvents.hpp
@@ -13,7 +17,11 @@ add_library(zahlen_physics STATIC
     ConstraintFactory.cpp
     PhysicsDebug.cpp
     PhysicsDebug.hpp
+    RagdollManager.hpp
     RagdollFactory.cpp
+    ShapeCache.hpp
+    ShapeCache.cpp
+    TransformBuffer.hpp
 )
 set_target_properties(zahlen_physics PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -48,5 +56,12 @@ target_compile_definitions(zahlen_physics PUBLIC
 )
 
 target_compile_options(zahlen_physics PRIVATE -fno-exceptions -fno-rtti)
+
+if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_precompile_headers(zahlen_physics PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:${PROJECT_SOURCE_DIR}/include/Zahlen/Math3D.hpp>"
+        "$<$<COMPILE_LANGUAGE:CXX>:${PROJECT_SOURCE_DIR}/include/Zahlen/Log.hpp>"
+    )
+endif()
 
 target_link_libraries(zahlen_physics PRIVATE zahlen_warnings)

@@ -7,6 +7,8 @@
 #endif
 
 #include "../VkError.hpp"
+#include <Zahlen/Log.hpp>
+
 namespace ZHLN::Vk {
 
 struct DrawState {
@@ -79,7 +81,7 @@ class CommandRing {
     CommandRing(const CommandRing&)                    = delete;
     auto operator=(const CommandRing&) -> CommandRing& = delete;
     CommandRing(CommandRing&& other) noexcept:
-        _device(std::exchange(other._device, VK_NULL_HANDLE)), _timeline(std::exchange(other._timeline, VK_NULL_HANDLE)), _pools(std::move(other._pools)),
+        _device(std::exchange(other._device, VK_NULL_HANDLE)), _timeline(std::move(other._timeline)), _pools(std::move(other._pools)),
         _cmds(std::move(other._cmds)), _completionValues(std::exchange(other._completionValues, {})), _nextValue(other._nextValue.exchange(0)),
         _index(other._index.exchange(0)) {
     }
@@ -87,7 +89,7 @@ class CommandRing {
         if (this != &other) {
             [[maybe_unused]] auto cleanup = Cleanup();
             _device                       = std::exchange(other._device, VK_NULL_HANDLE);
-            _timeline                     = std::exchange(other._timeline, VK_NULL_HANDLE);
+            _timeline                     = std::move(other._timeline);
             _pools                        = std::move(other._pools);
             _cmds                         = std::move(other._cmds);
             _completionValues             = std::exchange(other._completionValues, {});
@@ -97,17 +99,22 @@ class CommandRing {
         return *this;
     }
     [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
-        _device = device;
-        const VkSemaphoreTypeCreateInfo type {
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0
-        };
-        const VkSemaphoreCreateInfo info {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &type};
-        if (vkCreateSemaphore(device, &info, nullptr, &_timeline) != VK_SUCCESS)
+        _device       = device;
+        auto timeline = Semaphore::CreateTimeline(device);
+        if (!timeline) [[unlikely]] {
             return std::unexpected(CommandRingError::TimelineCreationFailed);
+        }
+        _timeline = std::move(*timeline);
         for (size_t i = 0; i < Capacity; ++i) {
-            _pools[i] = CommandPool<QType>(device, queueFamily);
-            auto a    = _pools[i].Allocate(1);
-            if (!a) {
+            auto created = CommandPool<QType>::Create(device, queueFamily);
+            if (!created) [[unlikely]] {
+                if (auto cleanup = Cleanup(); !cleanup) {
+                    return std::unexpected(cleanup.error());
+                }
+                return std::unexpected(created.error());
+            }
+            _pools[i] = std::move(*created);
+            if (auto a = _pools[i].Allocate(1); !a) [[unlikely]] {
                 if (auto cleanup = Cleanup(); !cleanup) {
                     return std::unexpected(cleanup.error());
                 }
@@ -138,11 +145,8 @@ class CommandRing {
             _pools[i] = {};
             _cmds[i]  = {};
         }
-        if (_timeline != VK_NULL_HANDLE) {
-            vkDestroySemaphore(_device, _timeline, nullptr);
-        }
+        _timeline.Reset();
         _device           = VK_NULL_HANDLE;
-        _timeline         = VK_NULL_HANDLE;
         _completionValues = {};
         return {};
     }
@@ -154,20 +158,24 @@ class CommandRing {
     [[nodiscard]] auto WaitValue(uint64_t value) const noexcept -> VkResult {
         if (value == 0)
             return VK_SUCCESS;
-        const VkSemaphoreWaitInfo w {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &_timeline, .pValues = &value};
+        const VkSemaphore         raw = _timeline.Get();
+        const VkSemaphoreWaitInfo w {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &raw, .pValues = &value};
         return vkWaitSemaphores(_device, &w, UINT64_MAX);
     }
     [[nodiscard]] auto Acquire() noexcept -> std::expected<Slot, ErrorCode> {
         const uint32_t i = _index.fetch_add(1, std::memory_order_relaxed) % Capacity;
-        if (const VkResult r = WaitValue(_completionValues[i]); r != VK_SUCCESS)
+        if (const VkResult r = WaitValue(_completionValues[i]); r != VK_SUCCESS) {
             return std::unexpected(ToError(r));
-        _pools[i].Reset();
+        }
+        if (auto reset = _pools[i].Reset(); !reset) [[unlikely]] {
+            return std::unexpected(reset.error());
+        }
         return Slot {_cmds[i], i, _completionValues[i]};
     }
     [[nodiscard]] auto Submit(VkQueue queue, Slot slot, ExecutableCommands cmds) noexcept -> std::expected<void, ErrorCode> {
         const uint64_t value  = _nextValue.fetch_add(1, std::memory_order_relaxed) + 1;
-        const auto     signal = MakeSemaphoreSubmitInfo(_timeline, value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
-        auto           result = QueueSubmit(queue, std::move(cmds), {}, std::span<const VkSemaphoreSubmitInfo> {&signal, 1});
+        const auto     signal = SemaphoreSubmit::Timeline(_timeline, value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+        auto           result = QueueSubmit(queue, std::move(cmds), {}, std::span<const SemaphoreSubmit> {&signal, 1});
         if (result)
             _completionValues[slot.index] = value;
         return result;
@@ -186,8 +194,8 @@ class CommandRing {
     }
 
   private:
-    VkDevice                                   _device   = VK_NULL_HANDLE;
-    VkSemaphore                                _timeline = VK_NULL_HANDLE;
+    VkDevice                                   _device = VK_NULL_HANDLE;
+    Semaphore                                  _timeline;
     std::array<CommandPool<QType>, Capacity>   _pools {};
     std::array<CommandBuffer<QType>, Capacity> _cmds {};
     std::array<uint64_t, Capacity>             _completionValues {};
@@ -232,8 +240,7 @@ template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename R
 
     if (const VkResult waited = ring.WaitValue(*submitted); waited != VK_SUCCESS) [[unlikely]] {
         if (waited == VK_ERROR_DEVICE_LOST) {
-
-            ctx.Instance().IncrementDeviceLost();
+            ZHLN::LogError("[DeviceLost] Vulkan immediate submission lost device");
         }
         return std::unexpected(ToError(waited));
     }
@@ -275,7 +282,7 @@ template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename R
     };
     if (const VkResult waited = vkWaitSemaphores(ctx.Device(), &waitInfo, UINT64_MAX); waited != VK_SUCCESS) [[unlikely]] {
         if (waited == VK_ERROR_DEVICE_LOST) {
-            ctx.Instance().IncrementDeviceLost();
+            ZHLN::LogError("[DeviceLost] Vulkan immediate submission lost device");
         }
         return std::unexpected(ToError(waited));
     }

@@ -40,6 +40,8 @@ using ZHLN::GUI::TextEdit::Modifiers;
 
 } // namespace
 
+namespace {
+
 struct TextEditTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> basic_typing_and_navigation() {
@@ -259,6 +261,4 @@ struct TextEditTestSuite {
     };
 };
 
-auto RunTextEditSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<TextEditTestSuite>();
-}
+} // namespace

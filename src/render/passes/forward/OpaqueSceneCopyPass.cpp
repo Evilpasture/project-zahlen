@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/forward/OpaqueSceneCopyPass.hpp"
+#include "FrameContext.hpp"
 
 namespace ZHLN::Passes {
 
@@ -16,9 +17,7 @@ void OpaqueSceneCopyPass::operator()(VkCommandBuffer cmd) const noexcept {
     if (dst.mipLevels > 1) {
         Vk::GenerateMipmaps(cmd, dst.image.Handle(), dst.extent.width, dst.extent.height);
     } else {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            cmd, dst.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
-        );
+        dst.View().Mip(0).Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
     }
 }
 

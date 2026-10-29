@@ -52,28 +52,27 @@ std::vector<uint32_t> MakeGridIndices() {
     return out;
 }
 
-// Byte-level comparison of the three streams the GPU consumes. The meshlet
-// stream compares packed: the desc is a logical view and carries no layout,
-// so determinism is pinned on the wire bytes PackMeshlets emits.
+// Bit-exact comparison of the three logical meshlet streams. MeshletDesc consists
+// of 15 contiguous 32-bit fields (60 bytes, zero padding), so memcmp pins both
+// exact float bit patterns and cooked .zmesh reproducibility.
 bool StreamsEqual(const ZHLN::MeshletBuildResult& a, const ZHLN::MeshletBuildResult& b) {
-    if (a.meshlets.size() != b.meshlets.size() || a.vertices.size() != b.vertices.size() || a.triangles.size() != b.triangles.size()) {
+    if (a != b) {
         return false;
     }
-    const auto packedA = ZHLN::PackMeshlets(a.meshlets);
-    const auto packedB = ZHLN::PackMeshlets(b.meshlets);
-    return packedA == packedB && std::memcmp(a.vertices.data(), b.vertices.data(), a.vertices.size() * sizeof(uint32_t)) == 0 &&
+    return std::memcmp(a.meshlets.data(), b.meshlets.data(), a.meshlets.size() * sizeof(ZHLN::MeshletDesc)) == 0 &&
+           std::memcmp(a.vertices.data(), b.vertices.data(), a.vertices.size() * sizeof(uint32_t)) == 0 &&
            std::memcmp(a.triangles.data(), b.triangles.data(), a.triangles.size()) == 0;
 }
 
 } // namespace
 
+namespace {
+
 struct MeshletTestSuite {
     struct Tests {
         // The cooker and JIT importer write the same independent SoA streams.
-        // Pin each shader-visible stride and offset; a total-size-only check
-        // would miss swapping tangent-frame and surface bytes in a .zmesh.
-        // The meshlet stride is pinned as the packed wire number; the packer
-        // is checked against it in build_is_deterministic below.
+        // Pin each shader-visible vertex stride/offset and the cooked MeshletDesc
+        // record stride; GPU wire packing of GPUMeshlet lives inside zahlen_render.
         std::expected<void, ZHLN::ErrorCode> gpu_stream_layout_is_pinned() {
             if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexPosition), size_t {12})) {
                 return std::unexpected(MeshletTestError::LayoutDrift);
@@ -87,9 +86,7 @@ struct MeshletTestSuite {
             if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexSkin), size_t {12})) {
                 return std::unexpected(MeshletTestError::LayoutDrift);
             }
-            // The meshlet wire stride is a documented number, not a struct size:
-            // the shaders index the packed stream by hand.
-            if (!ZHLN::Test::ExpectEq(ZHLN::kMeshletPackedBytes, uint32_t {64})) {
+            if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::MeshletDesc), size_t {60})) {
                 return std::unexpected(MeshletTestError::LayoutDrift);
             }
             return {};
@@ -115,11 +112,6 @@ struct MeshletTestSuite {
             }
             if (!StreamsEqual(a, b)) {
                 return std::unexpected(MeshletTestError::NotDeterministic);
-            }
-            // PackMeshlets must emit whole wire records: the stride pinned above
-            // is only true if the packer agrees with it.
-            if (!ZHLN::Test::ExpectEq(ZHLN::PackMeshlets(a.meshlets).size(), a.meshlets.size() * ZHLN::kMeshletPackedBytes)) {
-                return std::unexpected(MeshletTestError::LayoutDrift);
             }
             return {};
         }
@@ -191,6 +183,12 @@ struct MeshletTestSuite {
             if (!StreamsEqual(viaSpan, viaRaw)) {
                 return std::unexpected(MeshletTestError::StrideForwardingBroken);
             }
+
+            const std::vector<ZHLN::VertexPosition> soup = {{{-1.0f, -1.0f, 0.0f}}, {{1.0f, -1.0f, 0.0f}}, {{0.0f, 1.0f, 0.0f}}};
+            const std::vector<uint32_t>             seq  = {0, 1, 2};
+            if (!ZHLN::Test::ExpectEq(ZHLN::BuildMeshlets(soup), ZHLN::BuildMeshlets(seq, soup))) {
+                return std::unexpected(MeshletTestError::StrideForwardingBroken);
+            }
             return {};
         }
 
@@ -198,6 +196,10 @@ struct MeshletTestSuite {
         // classic indexed draw path instead of building a broken meshlet stream.
         std::expected<void, ZHLN::ErrorCode> degenerate_input_yields_empty_result() {
             const auto positions = MakeGridPositions();
+
+            if (!ZHLN::Test::ExpectTrue(ZHLN::BuildMeshlets(std::span {positions}.first(2)).Empty())) {
+                return std::unexpected(MeshletTestError::StreamInvariantBroken);
+            }
 
             if (!ZHLN::Test::ExpectTrue(ZHLN::BuildMeshlets(std::vector<uint32_t> {0, 1}, positions).Empty())) {
                 return std::unexpected(MeshletTestError::StreamInvariantBroken);
@@ -220,9 +222,4 @@ struct MeshletTestSuite {
     };
 };
 
-// Exported for the assets group binary (RunAssetsTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunMeshletsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<MeshletTestSuite>();
-}
-
+} // namespace

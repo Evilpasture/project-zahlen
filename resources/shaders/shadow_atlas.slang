@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_push_constants;
 import common;
 
 // One shadow-atlas tile, one draw.
@@ -17,11 +18,8 @@ import common;
 // and a hardware depth attachment per draw -- Early-Z and depth compression
 // both stay on, which the cube-array path could only do by giving up on more
 // than four lights.
-struct ShadowAtlasPush {
-    float4x4 viewProj;
-};
 [vk::push_constant]
-ShadowAtlasPush pc;
+ShadowTilePush pc;
 
 [shader("vertex")]
 ShadowGeometryOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInstanceID) {

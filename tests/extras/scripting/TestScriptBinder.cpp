@@ -60,17 +60,11 @@ consteval std::string_view ReflectFieldName(std::string_view fallback) noexcept 
     return fallback;
 }
 
-template <typename T, size_t Index>
-consteval std::string_view ReflectMethodName(std::string_view fallback) noexcept {
-    if constexpr (ZHLN::Reflect::MemberFunctionCount<T>() > Index) {
-        return ZHLN::Reflect::MemberFunctionNames<T>()[Index];
-    }
-    return fallback;
-}
-
 // ============================================================================
 // Test Suite Class
 // ============================================================================
+
+namespace {
 
 struct ScriptBinderTestSuite {
     // Isolate binder singleton registration state before and after execution
@@ -163,90 +157,18 @@ struct ScriptBinderTestSuite {
             auto setRes = propHealth->second.set(&player, ZHLN::ToScriptVal(75.0f));
 
             if (!ZHLN::Test::ExpectTrue(setRes.has_value())) {
-                return std::unexpected(ScriptBinderTestError::MethodInvocationFailed);
+                return std::unexpected(ScriptBinderTestError::PropertyAccessFailed);
             }
             ZHLN::Test::ExpectEq(player.health, 75.0f);
 
-            return {};
-        }
-
-        std::expected<void, ZHLN::ErrorCode> method_invocation() {
-            auto& binder = ZHLN::ScriptBinder::Get();
-            binder.Register<MockPlayer>();
-
-            std::string_view typeName = ZHLN::Reflect::TypeName<MockPlayer>();
-            auto             it       = binder.classes.find(typeName);
-
-            if (!ZHLN::Test::ExpectTrue(it != binder.classes.end())) {
-                return std::unexpected(ScriptBinderTestError::ClassNotRegistered);
-            }
-
-            const auto& classInfo = it->second;
-            MockPlayer  player;
-            player.health = 100.0f;
-            player.score  = 10;
-
-            // Reflect method names dynamically at compile time
-            constexpr std::string_view takeDamageMethod = ReflectMethodName<MockPlayer, 0>("take_damage");
-            constexpr std::string_view addScoreMethod   = ReflectMethodName<MockPlayer, 2>("add_score");
-
-            // Invoke void take_damage(float)
-            std::array<ZHLN::ScriptVal, 1> damageArgs = {ZHLN::ToScriptVal(30.0f)};
-            auto                           damageRes  = classInfo.InvokeMethod(&player, takeDamageMethod, damageArgs);
-
-            if (!ZHLN::Test::ExpectTrue(damageRes.has_value())) {
-                return std::unexpected(ScriptBinderTestError::MethodInvocationFailed);
-            }
-            ZHLN::Test::ExpectEq(player.health, 70.0f);
-
-            // Invoke int32_t add_score(int32_t)
-            std::array<ZHLN::ScriptVal, 1> scoreArgs = {ZHLN::ToScriptVal(15)};
-            auto                           scoreRes  = classInfo.InvokeMethod(&player, addScoreMethod, scoreArgs);
-
-            if (!ZHLN::Test::ExpectTrue(scoreRes.has_value())) {
-                return std::unexpected(ScriptBinderTestError::PropertyAccessFailed);
-            }
-
-            auto newScore = ZHLN::FromScriptVal<int32_t>(*scoreRes);
-
-            if (!ZHLN::Test::ExpectTrue(newScore.has_value())) {
-                return std::unexpected(ScriptBinderTestError::PropertyAccessFailed);
-            }
-            ZHLN::Test::ExpectEq(*newScore, 25);
-            ZHLN::Test::ExpectEq(player.score, 25);
-
-            return {};
-        }
-
-        std::expected<void, ZHLN::ErrorCode> error_handling_invalid_access() {
-            auto& binder = ZHLN::ScriptBinder::Get();
-            binder.Register<MockPlayer>();
-
-            auto it = binder.classes.find(ZHLN::Reflect::TypeName<MockPlayer>());
-
-            if (!ZHLN::Test::ExpectTrue(it != binder.classes.end())) {
-                return std::unexpected(ScriptBinderTestError::ClassNotRegistered);
-            }
-
-            const auto& classInfo = it->second;
-            MockPlayer  player;
-
-            // Verify non-existent method invocation returns an error
-            auto badMethod = classInfo.InvokeMethod(&player, "non_existent_function", {});
-            ZHLN::Test::ExpectFalse(badMethod.has_value());
-
-            // Verify arity mismatch returns an error
-            constexpr std::string_view addScoreMethod = ReflectMethodName<MockPlayer, 2>("add_score");
-            auto                       badArity       = classInfo.InvokeMethod(&player, addScoreMethod, {});
-            ZHLN::Test::ExpectFalse(badArity.has_value());
+            // Verify type-mismatched property write fails cleanly without mutating
+            auto badSet = propHealth->second.set(&player, ZHLN::ToScriptVal(std::string("not_a_float")));
+            ZHLN::Test::ExpectFalse(badSet.has_value());
+            ZHLN::Test::ExpectEq(player.health, 75.0f);
 
             return {};
         }
     };
 };
 
-// Exported for the scripting group binary (RunScriptingTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunScriptBinderSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<ScriptBinderTestSuite>();
-}
+} // namespace

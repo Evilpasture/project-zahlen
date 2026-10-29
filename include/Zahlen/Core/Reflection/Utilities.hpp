@@ -4,10 +4,11 @@
 
 #pragma once
 
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Reflection/Core.hpp>
+#include <Zahlen/Core/Reflection/EnumFormat.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
-#include <Zahlen/Core/Hash.hpp>
 #include <cstddef>
 #include <format>
 #include <functional>
@@ -20,32 +21,6 @@
 namespace ZHLN::Reflect {
 
 #if ZHLN_REFLECTION_AVAILABLE
-
-template <typename E>
-    requires std::is_enum_v<E>
-constexpr auto EnumToFlagsString(E value, std::string& out_buffer) -> std::string_view {
-    out_buffer.clear();
-    using Under    = std::underlying_type_t<E>;
-    auto val_under = static_cast<Under>(value);
-
-    [:Expand(TemplatedDetail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
-        constexpr E                enum_val   = static_cast<E>([:enumerator:]);
-        auto                       enum_under = static_cast<Under>(enum_val);
-        constexpr std::string_view name       = std::meta::identifier_of(enumerator);
-
-        if (enum_under != 0 && (val_under & enum_under) == enum_under) {
-            if (!out_buffer.empty()) {
-                out_buffer += " | ";
-            }
-            out_buffer += name;
-        }
-    };
-
-    if (out_buffer.empty() && val_under == 0) {
-        return EnumToString(value);
-    }
-    return out_buffer;
-}
 
 template <typename T>
 consteval auto GetFloatFieldsCount() -> std::size_t {
@@ -60,20 +35,6 @@ consteval auto GetFloatFieldsCount() -> std::size_t {
         }
     }
     return members.size();
-}
-
-#else
-
-template <typename E>
-    requires std::is_enum_v<E>
-constexpr std::string_view EnumToFlagsString(E , std::string& out_buffer) {
-    out_buffer.clear();
-    return "";
-}
-
-template <typename T>
-consteval std::size_t GetFloatFieldsCount() {
-    return 0;
 }
 
 #endif
@@ -133,7 +94,7 @@ namespace TemplatedDetail {
 template <typename T>
 concept Formattable = requires(const T& val, std::format_context ctx) { std::formatter<std::remove_cvref_t<T>, char>().format(val, ctx); };
 
-}
+} // namespace TemplatedDetail
 
 template <typename T>
 auto ToDebugString(const T& t) -> std::string;
@@ -186,39 +147,4 @@ auto ToDebugString(const T& t) -> std::string {
     return out;
 }
 
-template <typename E, typename... Args>
-    requires std::is_enum_v<E>
-inline auto FormatEnumMessage(E value, Args&&... args) -> std::string {
-    std::string_view fmt = EnumToMessage(value);
-    if constexpr (sizeof...(Args) == 0) {
-        return std::string(fmt);
-    } else {
-        return std::vformat(fmt, std::make_format_args(args...));
-    }
-}
-
-template <typename E, typename... Args>
-    requires std::is_enum_v<E>
-inline auto FormatEnumMessageString(E value, Args&&... args) -> std::string {
-    std::string_view fmt = EnumToMessage(value);
-    if constexpr (sizeof...(Args) == 0) {
-        return std::string(fmt);
-    } else {
-        return std::vformat(fmt, std::make_format_args(args...));
-    }
-}
-
-}
-
-namespace std {
-
-template <typename E>
-    requires std::is_enum_v<E>
-struct formatter<E, char>: formatter<string_view, char> {
-    template <typename FormatContext>
-    auto format(E val, FormatContext& ctx) const {
-        return formatter<string_view, char>::format(ZHLN::Reflect::EnumToMessage(val), ctx);
-    }
-};
-
-}
+} // namespace ZHLN::Reflect

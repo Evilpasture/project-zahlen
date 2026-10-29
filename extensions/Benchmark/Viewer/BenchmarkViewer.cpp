@@ -57,22 +57,6 @@ inline constexpr float kTableNameMax         = 150.0f;
 inline constexpr float kStageSparkHeight     = 12.0f;
 inline constexpr float kSparkBarGap          = 1.0f;
 
-// Row pitch of the CPU scope table. Used to report how many of its rows fit in
-// the scroll area, which is the one thing about this panel whose length is not
-// a constant: it grows with the number of registered scopes.
-inline constexpr float kCpuRowPitch = 14.0f;
-
-// How much panel height is spent above the CPU table: title, the stat lines,
-// the chart, the buttons, the hardware grid and the GPU table. A measurement,
-// not a derivation -- Clay resolves child heights while laying out, and the
-// scroll area's height has to be known before that happens. If the rows above
-// ever grow, this is the constant that has to follow them.
-inline constexpr float kTelemetryTopReserve = 580.0f;
-
-// Floor for the scroll area, so a short window still leaves room for a few rows
-// instead of collapsing the table to nothing.
-inline constexpr float kCpuTableMinHeight = 96.0f;
-
 // The machine section: a grid of per-core cells. Cells are as wide as the
 // content divided by how many fit across, and the number across is chosen from
 // the core count so a 20-core machine is five rows and a 128-thread one is
@@ -275,13 +259,9 @@ inline constexpr float kChartScaleLows    = 1.5f;
 struct BenchmarkViewer::Impl {
     std::unique_ptr<LogicBenchmark> benchmark;
 
-    // The viewer's own wall clock: the accumulator that turns a host's frame
-    // rate into the benchmark's fixed one. It is read every frame even while
-    // paused, because Clock::GetDeltaTime is what moves the clock forward --
-    // one that fell behind would hand the first frame after a resume a
-    // backlog of ticks.
-    Clock frameClock;
-    float accumulatorSeconds = 0.0f;
+    // The viewer's own monotonic clock (`maxDeltaTime = 0.25f`), with built-in
+    // pause resync and fixed-step accumulation for stepping the benchmark.
+    Clock frameClock {ClockConfig {.maxDeltaTime = 0.25f}};
 
     // The engine frame this viewer has already been ticked for. Both drawing
     // entry points advance the benchmark and sample the telemetry, and a host
@@ -356,19 +336,21 @@ struct BenchmarkViewer::Impl {
         };
     }
 
-    void DrawBenchmarkPanel(GUI::Context& ui);
-    void DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& engine);
+    GUI::Context gui;
+
+    void DrawBenchmarkPanel(GUI::Frame& ui);
+    void DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& engine);
 
     // The machine under the frames: CPU usage and clock (machine-wide, then
     // every core as a cell), and the GPU's utilization and clock. Reads the
     // SystemTelemetry the frame telemetry owns; nothing here names a platform.
-    void DrawHardwareSection(GUI::Context& ui, const SystemSnapshot& system, SystemTelemetry& counters);
-    void DrawCoreGrid(GUI::Context& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters);
-    void DrawCoreCell(GUI::Context& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters);
-    void DrawFrameTimeChart(GUI::Context& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats);
-    void DrawStageColumns(GUI::Context& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix);
-    void DrawStageColumn(GUI::Context& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix, size_t column);
-    void DrawStageRow(GUI::Context& ui, const FrameStageRow& row, const TableStyle& style, std::string_view prefix, size_t column, size_t index);
+    void DrawHardwareSection(GUI::Frame& ui, const SystemSnapshot& system, SystemTelemetry& counters);
+    void DrawCoreGrid(GUI::Frame& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters);
+    void DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters);
+    void DrawFrameTimeChart(GUI::Frame& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats);
+    void DrawStageColumns(GUI::Frame& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix);
+    void DrawStageColumn(GUI::Frame& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix, size_t column);
+    void DrawStageRow(GUI::Frame& ui, const FrameStageRow& row, const TableStyle& style, std::string_view prefix, size_t column, size_t index);
     void ToggleCapture();
 
     // `part` tells the row's boxes apart (0 name, 1 value, 2 spark box, 3+ spark
@@ -380,36 +362,33 @@ struct BenchmarkViewer::Impl {
 };
 
 void BenchmarkViewer::Impl::Advance() noexcept {
-    const float dt = std::min(frameClock.GetDeltaTime(), 0.25f);
+    frameClock.SetPaused(!running || benchmark == nullptr);
+    frameClock.Tick();
 
     if (benchmark == nullptr || !running) {
-        accumulatorSeconds = 0.0f;
+        frameClock.ResetFixedAccumulator();
         return;
     }
 
-    accumulatorSeconds += dt;
-
-    int steps = 0;
-    while (accumulatorSeconds >= kFixedStep && steps < kMaxTicksPerFrame) {
+    const FixedStepBatch batch = frameClock.ConsumeFixedSteps(kFixedStep, static_cast<uint32_t>(kMaxTicksPerFrame));
+    for (uint32_t step = 0; step < batch.steps; ++step) {
         benchmark->Step(kFixedStep);
-        accumulatorSeconds -= kFixedStep;
-        ++steps;
     }
 
-    if (steps >= kMaxTicksPerFrame) {
+    if (batch.steps >= static_cast<uint32_t>(kMaxTicksPerFrame)) {
         // The host's frame was longer than the whole budget. Drop the backlog
         // instead of carrying it: a measuring tool that stutters the thing it
         // is measuring has stopped measuring it.
-        accumulatorSeconds = 0.0f;
+        frameClock.ResetFixedAccumulator();
     }
 }
 
 void BenchmarkViewer::Impl::BuildTableStyles(ZHLN::Engine& engine, std::span<const FrameStageRow> gpu, std::span<const FrameStageRow> cpu) {
     // The atlas the Context will draw with, so the columns are sized against the
     // font that is actually on screen rather than a guess at its metrics.
-    const auto             settings = engine.GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
-    const ZHLN::FontAtlas* atlas    = (settings && settings->fontAtlas.glyphCount > 0) ? &settings->fontAtlas : nullptr;
-    const float            advance  = AdvancePerChar(atlas, kTableFontSize);
+    const ZHLN::FontAtlas& font    = engine.GetFontAtlas();
+    const ZHLN::FontAtlas* atlas   = (font.glyphCount > 0) ? &font : nullptr;
+    const float            advance = AdvancePerChar(atlas, kTableFontSize);
 
     // What the screen can give the panel: the window, less the margin it keeps
     // at both edges, less the benchmark panel's half of the left side.
@@ -446,7 +425,7 @@ void BenchmarkViewer::Impl::BuildTableStyles(ZHLN::Engine& engine, std::span<con
     telemetryWidth   = content + (kPanelPadding * 2.0f);
 }
 
-void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Context& ui) {
+void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
     if (benchmark == nullptr) {
         return;
     }
@@ -538,7 +517,7 @@ void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Context& ui) {
     );
 }
 
-void BenchmarkViewer::Impl::DrawFrameTimeChart(GUI::Context& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats) {
+void BenchmarkViewer::Impl::DrawFrameTimeChart(GUI::Frame& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats) {
     if (samples.empty()) {
         return;
     }
@@ -571,7 +550,7 @@ void BenchmarkViewer::Impl::DrawFrameTimeChart(GUI::Context& ui, std::span<const
     );
 }
 
-void BenchmarkViewer::Impl::DrawStageColumns(GUI::Context& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix) {
+void BenchmarkViewer::Impl::DrawStageColumns(GUI::Frame& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix) {
     if (rows.empty()) {
         return;
     }
@@ -588,7 +567,7 @@ void BenchmarkViewer::Impl::DrawStageColumns(GUI::Context& ui, std::span<const F
 }
 
 void BenchmarkViewer::Impl::DrawStageColumn(
-    GUI::Context&                  ui,
+    GUI::Frame&                    ui,
     std::span<const FrameStageRow> rows,
     const TableStyle&              style,
     std::string_view               prefix,
@@ -598,7 +577,10 @@ void BenchmarkViewer::Impl::DrawStageColumn(
         return;
     }
 
-    ui.Column(2.0f, [&]() -> void {
+    // Fit-height rather than ui.Column: a grow-height child inside a scroll
+    // container reports content at least as tall as the container, which would
+    // make the panel's scroll area look unscrollable however long the list is.
+    ui.Box("", GUI::BoxConfig {.gap = 2.0f, .direction = GUI::Direction::Column}, [&]() -> void {
         for (size_t i = 0; i < rows.size(); ++i) {
             DrawStageRow(ui, rows[i], style, prefix, column, i);
         }
@@ -606,7 +588,7 @@ void BenchmarkViewer::Impl::DrawStageColumn(
 }
 
 void BenchmarkViewer::Impl::DrawStageRow(
-    GUI::Context&        ui,
+    GUI::Frame&          ui,
     const FrameStageRow& row,
     const TableStyle&    style,
     std::string_view     prefix,
@@ -691,7 +673,7 @@ void BenchmarkViewer::Impl::DrawStageRow(
     }
 }
 
-void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Context& ui, const SystemSnapshot& system, SystemTelemetry& counters) {
+void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnapshot& system, SystemTelemetry& counters) {
     // Nothing was read, and the reason is the only useful thing left to draw. It
     // is a note, not an error: a machine whose platform exposes no counters is
     // running the frames perfectly well, and the frame numbers above are
@@ -804,7 +786,7 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Context& ui, const SystemSn
     }
 }
 
-void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Context& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters) {
+void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Frame& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters) {
     if (cores.empty()) {
         return;
     }
@@ -851,7 +833,7 @@ void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Context& ui, std::span<const CoreT
     }
 }
 
-void BenchmarkViewer::Impl::DrawCoreCell(GUI::Context& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters) {
+void BenchmarkViewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters) {
     const std::string_view id = TableId("core", 0, cell, 0);
 
     ui.Box(
@@ -938,7 +920,7 @@ void BenchmarkViewer::Impl::ToggleCapture() {
     ZHLN::LogError("[Bench] frame telemetry capture could not open {}", telemetry.CapturePath().string());
 }
 
-void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& engine) {
+void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& engine) {
     const FrameTelemetrySnapshot&        stats    = telemetry.Snapshot();
     SystemTelemetry&                     system   = telemetry.System();
     const std::span<const float>         chart    = telemetry.ChartSamples();
@@ -971,107 +953,95 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& e
         [&]() -> void {
             GUI::Widget::ResetHover(hover); // this frame's card is set by whatever the pointer is over
 
-            ui.Text("Frame Telemetry  (host frames)", 16.0f, kTitleInk);
+            // The panel is taller than most windows once its tables grow (the
+            // GPU list alone is 35 stages today). Rather than budgeting the
+            // leftover height with a measured constant that goes stale whenever
+            // a section grows, the panel scrolls as a whole; the framework's bar
+            // on the right edge is the affordance, and it tracks whatever is
+            // below the fold.
+            const float panelScrollH =
+                std::max(240.0f, static_cast<float>(viewport.height) - (2.0f * kPanelMargin) - (2.0f * kPanelPadding));
+            ui.ScrollArea(
+                "TelemetryPanelScroll",
+                GUI::BoxConfig {
+                    .width     = {.grow = 1.0f},
+                    .height    = {.fixed = panelScrollH},
+                    .gap       = 6.0f,
+                    .direction = GUI::Direction::Column,
+                },
+                [&]() -> void {
 
-            // Three short lines rather than two long ones: at 13 px these are 27
-            // to 45 characters wide against a content width that holds about 66,
-            // so none of them can wrap into the ones below.
-            ui.Row(10.0f, [&]() -> void {
-                ui.Text(std::format("avg {:.1f} fps", stats.avgFps), 17.0f, kTitleInk);
-                ui.Text(std::format("now {:.1f}", stats.instantFps), 12.0f, kBodyInk);
-                ui.Text(std::format("frame {:.2f} ms", stats.frameMsLast), 12.0f, kBodyInk);
-            });
+                ui.Text("Frame Telemetry  (host frames)", 16.0f, kTitleInk);
 
-            ui.Text(std::format("1% low {:.2f} ms   0.1% low {:.2f} ms", stats.frameMsLow1, stats.frameMsLow01), 13.0f, kBodyInk);
-            ui.Text(std::format("avg {:.2f}  min {:.2f}  max {:.2f} ms", stats.frameMsAvg, stats.frameMsMin, stats.frameMsMax), 12.0f, kCpuNameInk);
-            ui.Text(std::format("{} frames   {:.0f} s window", stats.frames, stats.windowSeconds), 12.0f, kCpuNameInk);
-            if (stats.clippedSamples > 0) {
-                ui.Text(std::format("{} frames over {:.0f} ms counted apart", stats.clippedSamples, FrameTelemetry::kSampleCeilingMs), 11.0f, kSlowBarInk);
-            }
+                // Three short lines rather than two long ones: at 13 px these are 27
+                // to 45 characters wide against a content width that holds about 66,
+                // so none of them can wrap into the ones below.
+                ui.Row(10.0f, [&]() -> void {
+                    ui.Text(std::format("avg {:.1f} fps", stats.avgFps), 17.0f, kTitleInk);
+                    ui.Text(std::format("now {:.1f}", stats.instantFps), 12.0f, kBodyInk);
+                    ui.Text(std::format("frame {:.2f} ms", stats.frameMsLast), 12.0f, kBodyInk);
+                });
 
-            DrawFrameTimeChart(ui, chart, stats);
-
-            ui.Row(6.0f, [&]() -> void {
-                if (ui.Button(telemetry.IsCapturing() ? "Stop capture" : "Capture CSV")) {
-                    ToggleCapture();
+                ui.Text(std::format("1% low {:.2f} ms   0.1% low {:.2f} ms", stats.frameMsLow1, stats.frameMsLow01), 13.0f, kBodyInk);
+                ui.Text(std::format("avg {:.2f}  min {:.2f}  max {:.2f} ms", stats.frameMsAvg, stats.frameMsMin, stats.frameMsMax), 12.0f, kCpuNameInk);
+                ui.Text(std::format("{} frames   {:.0f} s window", stats.frames, stats.windowSeconds), 12.0f, kCpuNameInk);
+                if (stats.clippedSamples > 0) {
+                    ui.Text(std::format("{} frames over {:.0f} ms counted apart", stats.clippedSamples, FrameTelemetry::kSampleCeilingMs), 11.0f, kSlowBarInk);
                 }
-                if (ui.Button("Clear")) {
-                    telemetry.Reset();
-                }
-            });
 
-            // What the capture button writes, for the pointer that asks: the
-            // button is named for the file, and the file's path is not worth a
-            // line of the panel for the rest of the session.
-            const std::string_view captureLabel = telemetry.IsCapturing() ? std::string_view("Stop capture") : std::string_view("Capture CSV");
-            if (ui.IsPointerOver(captureLabel)) {
-                GUI::Widget::SetHover(hover, captureLabel);
-                GUI::Widget::AddHoverLine(hover, "one CSV row per frame: the frame columns, then the machine columns");
-                GUI::Widget::AddHoverLine(hover, "written under build/cache/captures/");
-            }
+                DrawFrameTimeChart(ui, chart, stats);
 
-            if (telemetry.IsCapturing()) {
-                ui.Text(std::format("capturing {}   ({} frames)", telemetry.CapturePath().filename().string(), telemetry.CapturedFrames()), 11.0f, kFastBarInk);
-            } else if (!telemetry.CapturePath().empty()) {
-                ui.Text(
-                    std::format("last capture {}   ({} frames)", telemetry.CapturePath().filename().string(), telemetry.CapturedFrames()), 11.0f, kCpuNameInk
-                );
-            }
-
-            // The machine the frames ran on, between the host's own numbers and
-            // the profiler's tables: the frame text above says how fast, these
-            // say what the machine was busy with while it was fast.
-            DrawHardwareSection(ui, system.Snapshot(), system);
-
-            ui.Text(std::format("GPU  {:.2f} ms total   ({} stages)", stats.gpuTotalMs, gpuCount), 13.0f, kTitleInk);
-            DrawStageColumns(ui, stages.first(gpuCount), tableGpu, "g");
-
-            if (stages.size() > gpuCount) {
-                const size_t cpuCount = stages.size() - gpuCount;
-
-                // The scope table is the only part of this panel that has no
-                // natural bound, so it is the part that scrolls. Everything above
-                // it keeps the panel's top edge at a fixed place on screen; the
-                // table takes whatever height is left and clips the rest, which
-                // is what keeps the panel inside the viewport no matter how many
-                // scopes are registered.
-                const float cpuHeight =
-                    std::max(kCpuTableMinHeight, static_cast<float>(viewport.height) - kPanelMargin - kTelemetryTopReserve);
-
-                // Resolved from the previous frame, so on the first frame of the
-                // area's life the count is simply not reported yet.
-                const GUI::ScrollState scroll  = ui.GetScrollState("TelemetryCpuScopes");
-                const size_t           visible = static_cast<size_t>(scroll.containerH / kCpuRowPitch);
-
-                ui.Text(
-                    (scroll.Scrollable() && (visible > 0) && (visible < cpuCount))
-                        ? std::format("CPU  ({} scopes, ~{} shown - scroll)", cpuCount, visible)
-                        : std::format("CPU  ({} scopes)", cpuCount),
-                    13.0f, kTitleInk
-                );
-
-                // Rows go straight into the scroll area rather than into a
-                // ui.Column: BeginColumn sizes its height with grow, and a
-                // growing child inside a fixed-height scroll container reports a
-                // content height that is always at least the container's, which
-                // would make the area look scrollable when it is not.
-                ui.ScrollArea(
-                    "TelemetryCpuScopes",
-                    GUI::BoxConfig {
-                        .width     = {.grow = 1.0f},
-                        .height    = {.fixed = cpuHeight},
-                        .gap       = 2.0f,
-                        .direction = GUI::Direction::Column,
-                    },
-                    [&]() -> void {
-                        // One column: the scopes are named in prose, and the full
-                        // width is what lets those names be drawn as written.
-                        for (size_t i = 0; i < cpuCount; ++i) {
-                            DrawStageRow(ui, stages[gpuCount + i], tableCpu, "c", 0, i);
-                        }
+                ui.Row(6.0f, [&]() -> void {
+                    if (ui.Button(telemetry.IsCapturing() ? "Stop capture" : "Capture CSV")) {
+                        ToggleCapture();
                     }
-                );
-            }
+                    if (ui.Button("Clear")) {
+                        telemetry.Reset();
+                    }
+                });
+
+                // What the capture button writes, for the pointer that asks: the
+                // button is named for the file, and the file's path is not worth a
+                // line of the panel for the rest of the session.
+                const std::string_view captureLabel = telemetry.IsCapturing() ? std::string_view("Stop capture") : std::string_view("Capture CSV");
+                if (ui.IsPointerOver(captureLabel)) {
+                    GUI::Widget::SetHover(hover, captureLabel);
+                    GUI::Widget::AddHoverLine(hover, "one CSV row per frame: the frame columns, then the machine columns");
+                    GUI::Widget::AddHoverLine(hover, "written under build/cache/captures/");
+                }
+
+                if (telemetry.IsCapturing()) {
+                    ui.Text(std::format("capturing {}   ({} frames)", telemetry.CapturePath().filename().string(), telemetry.CapturedFrames()), 11.0f, kFastBarInk);
+                } else if (!telemetry.CapturePath().empty()) {
+                    ui.Text(
+                        std::format("last capture {}   ({} frames)", telemetry.CapturePath().filename().string(), telemetry.CapturedFrames()), 11.0f, kCpuNameInk
+                    );
+                }
+
+                // The machine the frames ran on, between the host's own numbers and
+                // the profiler's tables: the frame text above says how fast, these
+                // say what the machine was busy with while it was fast.
+                DrawHardwareSection(ui, system.Snapshot(), system);
+
+                ui.Text(std::format("GPU  {:.2f} ms total   ({} stages)", stats.gpuTotalMs, gpuCount), 13.0f, kTitleInk);
+                DrawStageColumns(ui, stages.first(gpuCount), tableGpu, "g");
+
+                if (stages.size() > gpuCount) {
+                    const size_t cpuCount = stages.size() - gpuCount;
+
+                    // The scope list has no natural bound -- it grows with every
+                    // registered scope -- but the panel's own scroll area now owns
+                    // the viewport budget, so the rows just flow and the panel
+                    // scrolls when they overflow. Rows go in directly rather than
+                    // through ui.Column for the same reason as the GPU table's.
+                    ui.Text(std::format("CPU  ({} scopes)", cpuCount), 13.0f, kTitleInk);
+                    for (size_t i = 0; i < cpuCount; ++i) {
+                        DrawStageRow(ui, stages[gpuCount + i], tableCpu, "c", 0, i);
+                    }
+                }
+
+                }
+            );
 
             // Last of all, so that it is on top of everything above it: out of
             // the layout flow, beside the panel it belongs to.
@@ -1090,12 +1060,10 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
     // viewer only has to be the thing its UI phase calls. The options are the
     // defaults (windowed, vsync, validation on) because the CLI is the host's
     // to parse, not the tool's -- see the header.
-    ZHLN::CommandLineOptions options {};
-    options.driver = ZHLN::GameplayDriver::Cpp;
-
-    // Static storage duration is required: the crash handler keeps the address
-    // of this struct in its signal slots. See <Zahlen/Core/CrashState.hpp>.
-    static ZHLN::CrashState crashState;
+    const ZHLN::Engine::RunConfig runConfig {
+        .appName = "Zahlen Benchmark Viewer",
+        .driver  = ZHLN::GameplayDriver::Cpp,
+    };
 
     BenchmarkViewer* self = this;
     ZHLN::Clock      uiClock;
@@ -1103,8 +1071,10 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
     m_impl->visible          = true;
     m_impl->telemetryVisible = true; // the standalone tool is the window for both panels
 
-    auto ran =
-        ZHLN::Engine::Run(options, crashState, [self, &uiClock](ZHLN::Engine& engine) -> void { self->UpdateAndRenderUI(engine, uiClock.GetDeltaTime()); });
+    auto ran = ZHLN::Engine::Run(
+        runConfig,
+        [self, &uiClock](ZHLN::Engine& engine) -> void { self->UpdateAndRenderUI(engine, uiClock.Tick()); }
+    );
 
     // The engine is gone, and with it the scheduler the benchmark's World waits
     // on at teardown (see the lifetime note in the header). Release the
@@ -1112,7 +1082,7 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
     // leaving a World for whoever destroys the viewer afterwards. The viewer is
     // empty again and a later Attach() re-arms it.
     m_impl->benchmark.reset();
-    m_impl->accumulatorSeconds = 0.0f;
+    m_impl->frameClock.ResetFixedAccumulator();
 
     // A capture started from the panel ends with the run: the summary line and
     // the flush belong to this call, not to whichever destructor comes next.
@@ -1137,7 +1107,7 @@ void BenchmarkViewer::Attach(ZHLN::Engine& engine, size_t initialEntities) {
         return;
     }
 
-    m_impl->accumulatorSeconds = 0.0f;
+    m_impl->frameClock.Reset();
     ZHLN::Log("[Bench] viewer attached to the engine: {} entities, panel {}.", initialEntities, m_impl->visible ? "shown" : "hidden");
 }
 
@@ -1189,18 +1159,18 @@ void BenchmarkViewer::UpdateAndRenderUI(ZHLN::Engine& engine, float dt) {
         return;
     }
 
-    GUI::Context ui(engine);
-    ui.BeginFrame(dt);
+    m_impl->gui.SetFontAtlas(engine.GetFontAtlas());
+    GUI::Frame ui = m_impl->gui.BeginFrame(engine.ConsumeUIInput(dt));
     if (m_impl->visible && m_impl->benchmark != nullptr) {
         m_impl->DrawBenchmarkPanel(ui);
     }
     if (m_impl->telemetryVisible) {
         m_impl->DrawTelemetryPanel(ui, engine);
     }
-    engine.SetPendingUIData(ui.EndFrame());
+    engine.SubmitUI(std::move(ui).End());
 }
 
-void BenchmarkViewer::DrawPanel(GUI::Context& ui, ZHLN::Engine& engine) {
+void BenchmarkViewer::DrawPanel(GUI::Frame& ui, ZHLN::Engine& engine) {
     if (m_impl->benchmark == nullptr) {
         Attach(engine, m_impl->pendingEntities);
     }
@@ -1210,12 +1180,12 @@ void BenchmarkViewer::DrawPanel(GUI::Context& ui, ZHLN::Engine& engine) {
     }
 }
 
-void BenchmarkViewer::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& engine) {
+void BenchmarkViewer::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& engine) {
     Tick(engine);
     m_impl->DrawTelemetryPanel(ui, engine);
 }
 
-void BenchmarkViewer::DrawPanels(GUI::Context& ui, ZHLN::Engine& engine) {
+void BenchmarkViewer::DrawPanels(GUI::Frame& ui, ZHLN::Engine& engine) {
     if (m_impl->benchmark == nullptr) {
         Attach(engine, m_impl->pendingEntities);
     }
@@ -1255,12 +1225,10 @@ void BenchmarkViewer::ToggleTelemetryVisible() noexcept {
 
 void BenchmarkViewer::SetRunning(bool running) noexcept {
     if (running && !m_impl->running) {
-        // Resume where the pause ended: the clock is read once so the interval
-        // just spent paused is not replayed as ticks.
-        static_cast<void>(m_impl->frameClock.GetDeltaTime());
-        m_impl->accumulatorSeconds = 0.0f;
+        m_impl->frameClock.ResetFixedAccumulator();
     }
     m_impl->running = running;
+    m_impl->frameClock.SetPaused(!running);
 }
 
 auto BenchmarkViewer::IsRunning() const noexcept -> bool {

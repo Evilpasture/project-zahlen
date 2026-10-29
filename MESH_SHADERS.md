@@ -228,7 +228,7 @@ and quietly stay on the vertex pipeline forever — the feature would look
 
 ## 7. Tests
 
-`tests/render/TestMeshShaders.cpp`, in the `GPU_Pipeline` group binary (ctest: `GPU_Pipeline`, or `ctest -R GPU_Pipeline`):
+`tests/render/TestMeshShaders.cpp`, in the `GPU_Pipeline` group binary (`./build/bin/ztest GPU_Pipeline` or `./build/bin/ztest -k MeshShaderSuite`):
 
 | Test | What it proves |
 | --- | --- |
@@ -257,8 +257,8 @@ The parity test controls for engine nondeterminism explicitly:
   once. The mesh path is allowed to differ by at most twice the vertex-vs-
   vertex noise (or the absolute floor, whichever is larger). Without a
   control there is no way to distinguish a path divergence from engine noise.
-* **Validation errors fail the test.** The engine's
-  `RenderContext::GetValidationErrorCount()` is snapshotted around the rendered
+* **Validation errors fail the test.** `ZHLN::Test::ValidationErrorCount()`
+  (populated via `ZHLN::SetLogObserver`) is snapshotted around the rendered
   frames; correct pixels produced through invalid API usage is not a pass.
 
 The comparator was itself validated against synthetic divergences (identical frames, a dropped cluster, a

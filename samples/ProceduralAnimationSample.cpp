@@ -1,14 +1,17 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <CommandLine/EngineCommandLine.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/FramePlan.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -621,16 +624,16 @@ auto AttachCharacterRig(
         reg.Add(
             player,
             ZHLN::Components::AnimatorComponent {
+                .prefabAsset     = ZHLN::HashAssetPath(std::string_view(prefab->virtualPath)),
                 .currentTrackIdx = idleTrack,
                 .currentLoop     = true,
-                .prefab          = &*prefab,
             },
             ZHLN::ProceduralLocomotionTracksComponent {
                 .idleTrack = idleTrack,
                 .walkTrack = walkTrack,
                 .runTrack  = runTrack,
             },
-            ZHLN::Components::KinematicPoseOverrideComponent {}, ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by the optional subsystem
+            ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by the optional subsystem
             std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig, ZHLN::FirstPersonVisibilityComponent {}, std::move(itemHandling)
         );
     } else {
@@ -640,7 +643,7 @@ auto AttachCharacterRig(
         ZHLN::BuildStandardProceduralRig(proceduralRig);
 
         reg.Add(
-            player, ZHLN::Components::KinematicPoseOverrideComponent {}, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
+            player, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
             animationConfig, ZHLN::FirstPersonVisibilityComponent {}, std::move(itemHandling)
         );
     }
@@ -663,7 +666,7 @@ auto main(int argc, char* argv[]) -> int {
 
     // Crash diagnostics keep their state in a caller-owned struct; static
     // storage duration is required because its address is copied into the
-    // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
+    // signal handler slots. See <Signal/CrashHandler.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
@@ -754,8 +757,7 @@ auto main(int argc, char* argv[]) -> int {
 
     SetHandgunVisibility(engine->GetRegistry(), handgun, false);
 
-    ZHLN::Clock clock;
-    float       sampleTime      = 0.0f;
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     bool        handgunEquipped = false;
     bool        equipKeyWasDown = false;
     bool        slowMotion      = false;
@@ -766,7 +768,8 @@ auto main(int argc, char* argv[]) -> int {
     );
 
     while (engine->IsRunning()) {
-        const auto dt = std::min(clock.GetDeltaTime(), 0.05f);
+        clock.Tick();
+        ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
         auto& registry = engine->GetRegistry();
@@ -818,6 +821,7 @@ auto main(int argc, char* argv[]) -> int {
         viewState.toggleKeyWasDown = viewKeyDown;
         if (tabKeyDown && !tabKeyWasDown) {
             slowMotion = !slowMotion;
+            clock.SetTimeScale(slowMotion ? 0.25f : 1.0f);
             ZHLN::Log("[Sample] Slow motion: {}.", slowMotion ? "ON (0.25x)" : "OFF (1.0x)");
         }
         tabKeyWasDown = tabKeyDown;
@@ -829,14 +833,13 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         // 2. Update Procedural Look-At Orbit via Multi-Component Patch
-        sampleTime += dt;
+        const auto sampleTime = static_cast<float>(clock.UnscaledElapsedTime());
         registry.Patch<ZHLN::Components::TransformComponent, ZHLN::ProceduralLookAtComponent>(player, [&](const auto& trans, auto& lookAt) -> auto {
             lookAt.targetWorldPos = trans.position + trans.rotation * JPH::Vec3(std::sin(sampleTime * 0.65f) * 2.2f, 1.65f, 4.0f);
         });
 
-        // 3. Synchronized Engine Tick (apply slow motion time scale)
-        const float scaledDt = slowMotion ? dt * 0.25f : dt;
-        const auto status = engine->Tick(scaledDt, ZHLN::GameplayDriver::Cpp);
+        // 3. Synchronized Engine Tick (uses Clock's scaled DeltaTime)
+        const auto status = engine->Tick(clock.DeltaTime(), ZHLN::GameplayDriver::Cpp);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
             engine->GetPlatformHost().Close();
             break;

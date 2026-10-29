@@ -32,7 +32,7 @@ This roadmap tracks the complete integration of Source Engine assets (materials,
   - Luxel-to-UV mapping using `DTexInfo.lightmapVecs` and `DFace.lightmapTextureMinsInLuxels` / `lightmapTextureSizeInLuxels`.
   - Vertex emission into `VertexSurface.uv1` (TEXCOORD_1).
   - External PNG lightmap atlas integration (`lightmaps/<mapname>_lightmap0.png`) and internal luxel buffer sampling.
-  - Binding lightmap atlas handles into `MaterialDesc.occlusionMap`.
+  - Binding decoded native VRAD atlas pages through the dedicated `MaterialDesc.bakedIrradianceMap` semantic (never `occlusionMap`).
 - [x] **Verification**:
   - Comprehensive standalone unit and integration test suite (`tests/extras/TestBSPMaterials.cpp`).
 

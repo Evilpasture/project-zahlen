@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 
-#include "NativeSurfaceInternal.hpp"
 #include "PresentationTarget.hpp"
 #include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Window.hpp>
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -22,6 +23,8 @@ namespace {
 struct HeadlessBackend {
     PresentationTarget target;
     std::string        clipboard;
+    CursorMode         cursorMode    = CursorMode::System;
+    bool               mouseCaptured = false;
 
     HeadlessBackend(uint32_t width, uint32_t height) noexcept: target(PresentationTarget::ForHeadless({.width = width, .height = height})) {
     }
@@ -37,6 +40,18 @@ struct HeadlessBackend {
     void Close() const noexcept {
         target.Close();
     }
+    void SetCursorMode(CursorMode mode) noexcept {
+        cursorMode = mode;
+    }
+    [[nodiscard]] auto GetCursorMode() const noexcept -> CursorMode {
+        return cursorMode;
+    }
+    void CaptureMouse(bool captured) noexcept {
+        mouseCaptured = captured;
+    }
+    [[nodiscard]] auto IsMouseCaptured() const noexcept -> bool {
+        return mouseCaptured;
+    }
 };
 
 struct TTYBackendState {
@@ -44,11 +59,12 @@ struct TTYBackendState {
     WindowInputReceiver receiver;
     void*               ttyContext = nullptr;
     std::string         clipboard;
+    CursorMode          cursorMode = CursorMode::Custom;
 
     TTYBackendState(uint32_t width, uint32_t height, const WindowInputReceiver& rx) noexcept: receiver(rx) {
         ttyContext = TTYBackend::Init(width, height);
 
-        auto surface = NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(DrmTarget {.fd = -1, .connectorId = 0, .crtcId = 0}));
+        auto surface = NativeSurfaceHandle(DrmTarget {.fd = -1, .connectorId = 0, .crtcId = 0});
         target       = PresentationTarget::ForTTY(
             ttyContext, [](void* ) noexcept {  }, {.width = width, .height = height},
             std::move(surface)
@@ -63,7 +79,8 @@ struct TTYBackendState {
     }
 
     TTYBackendState(TTYBackendState&& other) noexcept:
-        target(std::move(other.target)), receiver(other.receiver), ttyContext(other.ttyContext), clipboard(std::move(other.clipboard)) {
+        target(std::move(other.target)), receiver(other.receiver), ttyContext(other.ttyContext), clipboard(std::move(other.clipboard)),
+        cursorMode(other.cursorMode) {
         other.ttyContext = nullptr;
     }
 
@@ -76,6 +93,7 @@ struct TTYBackendState {
             receiver         = other.receiver;
             ttyContext       = other.ttyContext;
             clipboard        = std::move(other.clipboard);
+            cursorMode       = other.cursorMode;
             other.ttyContext = nullptr;
         }
         return *this;
@@ -92,11 +110,27 @@ struct TTYBackendState {
     }
     void PollEvents() noexcept {
         if (ttyContext != nullptr) {
+            const Extent2D extent = target.GetFramebufferExtent();
+            TTYBackend::SetScreenSize(ttyContext, extent.width, extent.height);
             TTYBackend::ProcessEvents(ttyContext, receiver);
         }
     }
     void Close() const noexcept {
         target.Close();
+    }
+    void SetCursorMode(CursorMode mode) noexcept {
+        cursorMode = mode;
+    }
+    [[nodiscard]] auto GetCursorMode() const noexcept -> CursorMode {
+        return cursorMode;
+    }
+    void CaptureMouse(bool captured) noexcept {
+        if (ttyContext != nullptr) {
+            TTYBackend::SetMouseCaptured(ttyContext, captured);
+        }
+    }
+    [[nodiscard]] auto IsMouseCaptured() const noexcept -> bool {
+        return ttyContext != nullptr && TTYBackend::IsMouseCaptured(ttyContext);
     }
 };
 
@@ -114,9 +148,28 @@ struct WindowedBackend {
     }
     void PollEvents() noexcept {
         glfwPollEvents();
+        if (window != nullptr) {
+            window->ProcessEvents();
+        }
     }
     void Close() const noexcept {
         window->Close();
+    }
+    void SetCursorMode(CursorMode mode) noexcept {
+        if (window != nullptr) {
+            window->SetCursorMode(mode);
+        }
+    }
+    [[nodiscard]] auto GetCursorMode() const noexcept -> CursorMode {
+        return window != nullptr ? window->GetCursorMode() : CursorMode::System;
+    }
+    void CaptureMouse(bool captured) noexcept {
+        if (window != nullptr) {
+            window->CaptureMouse(captured);
+        }
+    }
+    [[nodiscard]] auto IsMouseCaptured() const noexcept -> bool {
+        return window != nullptr && window->IsMouseCaptured();
     }
 };
 
@@ -251,6 +304,50 @@ auto PlatformHost::HasNativeSurface() const noexcept -> bool {
     return Target().GetNativeSurface().Valid();
 }
 
+void PlatformHost::SetCursorMode(CursorMode mode) noexcept {
+    std::visit(
+        Overloaded {
+            [](std::monostate&) noexcept {},
+            [mode](auto& backend) noexcept { backend.SetCursorMode(mode); },
+        },
+        _impl->backend
+    );
+}
+
+auto PlatformHost::GetCursorMode() const noexcept -> CursorMode {
+    return std::visit(
+        Overloaded {
+            [](const std::monostate&) noexcept -> CursorMode { return CursorMode::System; },
+            [](const auto& backend) noexcept -> CursorMode { return backend.GetCursorMode(); },
+        },
+        _impl->backend
+    );
+}
+
+auto PlatformHost::UsesCustomCursor() const noexcept -> bool {
+    return Valid() && GetCursorMode() == CursorMode::Custom && !IsMouseCaptured();
+}
+
+void PlatformHost::CaptureMouse(bool captured) noexcept {
+    std::visit(
+        Overloaded {
+            [](std::monostate&) noexcept {},
+            [captured](auto& backend) noexcept { backend.CaptureMouse(captured); },
+        },
+        _impl->backend
+    );
+}
+
+auto PlatformHost::IsMouseCaptured() const noexcept -> bool {
+    return std::visit(
+        Overloaded {
+            [](const std::monostate&) noexcept -> bool { return false; },
+            [](const auto& backend) noexcept -> bool { return backend.IsMouseCaptured(); },
+        },
+        _impl->backend
+    );
+}
+
 
 void PlatformHost::Focus() noexcept {
     std::visit(
@@ -334,6 +431,39 @@ void PlatformHost::SetFileDropHandler(void (*handler)(void* userdata, const File
         },
         _impl->backend
     );
+}
+
+auto PlatformHost::SetGamepadRumble(uint8_t slot, [[maybe_unused]] const GamepadRumble& rumble) noexcept -> bool {
+    if (slot >= kMaxGamepads) {
+        return false;
+    }
+#if defined(_WIN32)
+    struct XInputVibration {
+        uint16_t wLeftMotorSpeed;
+        uint16_t wRightMotorSpeed;
+    };
+    using XInputSetStateFn = unsigned long(__stdcall*)(unsigned long, XInputVibration*);
+
+    static XInputSetStateFn s_xinputSetState = []() noexcept -> XInputSetStateFn {
+        HMODULE mod = LoadLibraryW(L"xinput1_4.dll");
+        if (mod == nullptr) {
+            mod = LoadLibraryW(L"xinput9_1_0.dll");
+        }
+        if (mod == nullptr) {
+            return nullptr;
+        }
+        return reinterpret_cast<XInputSetStateFn>(GetProcAddress(mod, "XInputSetState"));
+    }();
+
+    if (s_xinputSetState != nullptr) {
+        XInputVibration vib {
+            .wLeftMotorSpeed  = static_cast<uint16_t>(std::clamp(rumble.lowFrequency, 0.0f, 1.0f) * 65535.0f),
+            .wRightMotorSpeed = static_cast<uint16_t>(std::clamp(rumble.highFrequency, 0.0f, 1.0f) * 65535.0f),
+        };
+        return s_xinputSetState(static_cast<unsigned long>(slot), &vib) == 0UL;
+    }
+#endif
+    return false;
 }
 
 

@@ -16,13 +16,13 @@
 //     #include <toml/TOML.hpp>
 //     #include <toml/SceneTOML.hpp>
 //
-//     const auto scene = ReflectTOML::TryParse<ZHLN::Scene::Scene>(text);
+//     const auto scene = ReflectTOML::Parse<ZHLN::Scene::Scene>(text);
 //     const auto built = ZHLN::Scene::Instantiate(engine, *scene);
 //
 // The bindings live here, not in toml/TOML.hpp (that header stays free of any
 // dependency on Jolt) and not in Zahlen/Scene.hpp (the core scene model stays
 // free of any dependency on the document format), and they must be visible
-// wherever ReflectTOML::TryParse / SerializeTOML is instantiated over one of
+// wherever ReflectTOML::Parse / SerializeTOML is instantiated over one of
 // these vector types, or the field serialises as a table of members instead
 // of `[x, y, z]`.
 //

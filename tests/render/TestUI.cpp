@@ -13,7 +13,6 @@
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <expected>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -59,13 +58,13 @@ struct SolidPayload {
 // even if a childless box were laid out to nothing -- the colour is what the
 // capture is asked about, and the text never is a different hue than the box.
 [[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const JPH::Vec4& color, float size) -> SolidPayload {
-    ZHLN::GUI::Context ui(engine);
-    ui.BeginFrame(1.0f / 60.0f);
+    ZHLN::GUI::Context gui(engine.GetFontAtlas());
+    ZHLN::GUI::Frame   ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = engine.GetPlatformHost().GetSize(), .dt = 1.0f / 60.0f});
     ui.Box(
         "Solid", ZHLN::GUI::BoxConfig {.width = {.fixed = size}, .height = {.fixed = size}, .color = color, .padding = 12.0f},
         [&]() { ui.Text("X", 24.0f, color); }
     );
-    const ZHLN::UIDrawData frame = ui.EndFrame();
+    const ZHLN::UIDrawData frame = std::move(ui).End();
 
     SolidPayload payload;
     payload.batches.assign(frame.batches.begin(), frame.batches.end());
@@ -75,6 +74,8 @@ struct SolidPayload {
 }
 
 } // namespace
+
+namespace {
 
 struct UITestSuite {
     UITestSuite() {
@@ -99,9 +100,10 @@ struct UITestSuite {
             auto& rc = engine->GetRenderContext();
 
             // Set up a simple UI scene
+            ZHLN::GUI::Context gui(engine->GetFontAtlas());
             engine->SetUICallback([&](ZHLN::Engine& eng) {
-                ZHLN::GUI::Context ui(eng);
-                ui.BeginFrame(0.016f);
+                gui.SetFontAtlas(eng.GetFontAtlas());
+                ZHLN::GUI::Frame ui = gui.BeginFrame(eng.ConsumeUIInput(0.016f));
 
                 ui.Box(
                     "TestBox",
@@ -116,7 +118,7 @@ struct UITestSuite {
                     }
                 );
 
-                eng.SetPendingUIData(ui.EndFrame());
+                eng.SubmitUI(std::move(ui).End());
             });
 
             constexpr float dt = 1.0f / 60.0f;
@@ -126,23 +128,15 @@ struct UITestSuite {
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
+            // The frame comes back in memory; the .ppm is only a diagnostic
+            // mirror, so the assertions below read the pixels the renderer
+            // produced rather than a file this test just wrote.
             const std::string ppmPath = "headless_ui_output.ppm";
-            if (!rc.CaptureScreenshotPPM(ppmPath)) {
+            const auto        frame   = ZHLN::Test::Headless::Capture(*engine, ppmPath);
+            if (!frame.Valid()) {
                 return std::unexpected(UITestError::RenderOutputBlank);
             }
-
-            std::ifstream ppm(ppmPath, std::ios::binary);
-            if (!ppm.is_open()) {
-                return std::unexpected(UITestError::RenderOutputBlank);
-            }
-
-            std::string header;
-            int         width = 0, height = 0, maxColor = 0;
-            ppm >> header >> width >> height >> maxColor;
-            ppm.get();
-
-            std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
-            ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+            const std::vector<uint8_t>& pixels = frame.rgb;
 
             uint32_t greenBoxPixels = 0;
             uint32_t blueTextPixels = 0;
@@ -195,9 +189,10 @@ struct UITestSuite {
             bool     wasClickedA = false;
             bool     wasClickedB = false;
 
+            ZHLN::GUI::Context gui(engine->GetFontAtlas());
             engine->SetUICallback([&](ZHLN::Engine& eng) {
-                ZHLN::GUI::Context ui(eng);
-                ui.BeginFrame(0.016f);
+                gui.SetFontAtlas(eng.GetFontAtlas());
+                ZHLN::GUI::Frame ui = gui.BeginFrame(eng.ConsumeUIInput(0.016f));
 
                 ui.Box(
                     "Container",
@@ -219,7 +214,7 @@ struct UITestSuite {
                     }
                 );
 
-                eng.SetPendingUIData(ui.EndFrame());
+                eng.SubmitUI(std::move(ui).End());
             });
 
             constexpr float dt = 1.0f / 60.0f;
@@ -587,9 +582,85 @@ struct UITestSuite {
             }
             return {};
         }
+
+        // 7. System vs. Custom Cursor Mode across PlatformHost + RenderSystem
+        std::expected<void, ZHLN::ErrorCode> system_vs_custom_cursor_mode() {
+            auto engine = CreateTestEngine(640, 480);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(UITestError::EngineInitFailed);
+            }
+
+            auto& host  = engine->GetPlatformHost();
+            auto& input = engine->GetRegistry().GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+            input.ApplyLocalMotion(320.0f, 240.0f);
+
+            if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::System) ||
+                !ZHLN::Test::ExpectFalse(host.IsMouseCaptured()) ||
+                !ZHLN::Test::ExpectFalse(host.UsesCustomCursor())) {
+                return std::unexpected(UITestError::UINotRendered);
+            }
+
+            auto countBrightCenterPixels = [](const RgbImage& img) -> uint32_t {
+                uint32_t bright = 0;
+                for (int y = 236; y <= 244 && y < img.height; ++y) {
+                    for (int x = 316; x <= 324 && x < img.width; ++x) {
+                        const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3;
+                        if (img.rgb[idx] > 200 && img.rgb[idx + 1] > 200 && img.rgb[idx + 2] > 200) {
+                            ++bright;
+                        }
+                    }
+                }
+                return bright;
+            };
+
+            // System mode: no custom cursor rendered into headless target.
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            const auto systemFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_system.ppm");
+            if (!systemFrame.Valid()) {
+                return std::unexpected(UITestError::RenderOutputBlank);
+            }
+            const uint32_t systemBright = countBrightCenterPixels(systemFrame);
+
+            // Custom mode: custom cursor rendered at (320, 240).
+            host.SetCursorMode(ZHLN::CursorMode::Custom);
+            if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::Custom) ||
+                !ZHLN::Test::ExpectTrue(host.UsesCustomCursor())) {
+                return std::unexpected(UITestError::UINotRendered);
+            }
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            const auto customFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_custom.ppm");
+            if (!customFrame.Valid()) {
+                return std::unexpected(UITestError::RenderOutputBlank);
+            }
+            const uint32_t customBright = countBrightCenterPixels(customFrame);
+
+            // Mouse capture hides custom cursor while preserving CursorMode::Custom.
+            host.CaptureMouse(true);
+            if (!ZHLN::Test::ExpectTrue(host.IsMouseCaptured()) ||
+                !ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::Custom) ||
+                !ZHLN::Test::ExpectFalse(host.UsesCustomCursor())) {
+                return std::unexpected(UITestError::UINotRendered);
+            }
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            const auto capturedFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_captured.ppm");
+            if (!capturedFrame.Valid()) {
+                return std::unexpected(UITestError::RenderOutputBlank);
+            }
+            const uint32_t capturedBright = countBrightCenterPixels(capturedFrame);
+
+            host.CaptureMouse(false);
+            const bool restoredCustom = host.UsesCustomCursor();
+            host.SetCursorMode(ZHLN::CursorMode::System);
+
+            if (!ZHLN::Test::ExpectEq(systemBright, 0u) ||
+                !ZHLN::Test::ExpectGt(customBright, 12u) ||
+                !ZHLN::Test::ExpectEq(capturedBright, 0u) ||
+                !ZHLN::Test::ExpectTrue(restoredCustom)) {
+                return std::unexpected(UITestError::UINotRendered);
+            }
+            return {};
+        }
     };
 };
 
-auto RunUISuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<UITestSuite>();
-}
+} // namespace

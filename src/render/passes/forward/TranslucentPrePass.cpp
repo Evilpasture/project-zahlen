@@ -8,9 +8,7 @@
 namespace ZHLN::Passes {
 
 void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
-    frame.BindHeapsAndPushFrame(cmd);
-
-    PassContext passCtx(cmd, frame);
+    Vk::CommandEncoder encoder(cmd);
     const auto  sceneVp = frame.EffectiveViewport();
 
     const auto norm_att  = Vk::Assume<Vk::ColorWrite<Res_TransNorm>>(frame.graphResources.transNormalBuffer);
@@ -20,10 +18,10 @@ void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     Vk::DynamicPass(norm_att.Extent())
         .Viewport(sceneVp)
-        .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
-        .AddColor(aniso_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorAnisotropy)
-        .AddColor(sheen_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorSheen)
-        .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
+        .ClearColor(norm_att, kClearColorNormalRoughness)
+        .ClearColor(aniso_att, kClearColorAnisotropy)
+        .ClearColor(sheen_att, kClearColorSheen)
+        .ClearDepth(depth_att, kClearDepthValue)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < frame.queues.Draws().size(); ++i) {
                 const auto& drawCmd = frame.queues.Draws()[i];
@@ -32,7 +30,7 @@ void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
                 }
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive(), drawCmd.prePassMaterial->pipeline);
+                SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive(), drawCmd.prePassMaterial->pipeline);
             }
         });
 }

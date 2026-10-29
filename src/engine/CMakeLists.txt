@@ -11,19 +11,20 @@
 
 set(RAW_ENGINE_SOURCES
     Log.cpp
-    diagnostics/CrashHandler.cpp
     diagnostics/StackTrace.cpp
     diagnostics/MemoryInspector.cpp
     diagnostics/SanitizerBridges.cpp
-    SignalManager.cpp
+    diagnostics/RenderDocInit.cpp
     Engine.cpp
     EngineGlobals.cpp
+    InputContext.cpp
     Kernel.cpp
     World.cpp
     SystemWiring.cpp
     Hierarchy.cpp
     PrefabFactory.cpp
-    system/AnimationSystem.cpp
+    MeshBuilder.cpp
+    Meshlet.cpp
     AssetManager.cpp
     Platform.cpp
     Profiler.cpp
@@ -37,20 +38,28 @@ set(RAW_ENGINE_SOURCES
     system/LODSystem.cpp
     system/SceneResources.cpp
     system/SceneCleanupSystem.cpp
-    CommandLine.cpp
     FramePlan.cpp
-    ScriptCommandRegistry.cpp
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp
     system/LightingSystem.cpp
     system/EnvironmentSunSystem.cpp
     system/CameraSystem.cpp
     Scene.cpp
-    ScriptRunner.cpp
 )
 
 zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})
 target_sources(zahlen_engine PRIVATE ${ENGINE_SOURCES})
+
+if(USE_SANITIZERS)
+    add_library(zahlen_sanitizer_options OBJECT diagnostics/SanitizerOptions.cpp)
+    set_target_properties(zahlen_sanitizer_options PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_options(zahlen_sanitizer_options PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+    )
+    target_sources(zahlen_engine INTERFACE
+        $<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:$<TARGET_OBJECTS:zahlen_sanitizer_options>>
+    )
+endif()
 
 target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

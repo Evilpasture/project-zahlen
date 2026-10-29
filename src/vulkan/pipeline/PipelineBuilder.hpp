@@ -25,6 +25,13 @@ enum class PipelineBuilderError : uint8_t {
     MissingShaders         ZHLN_ANNOTATION(ZHLN::Description<"Missing shader stages."> {}) = 1,
     PipelineCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline creation failed."> {}) = 4,
     OutOfHostMemory        ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory."> {}) = 5,
+    MissingVertexOrMeshShader ZHLN_ANNOTATION(ZHLN::Description<"A vertex or mesh shader is required."> {}) = 6,
+    StencilFormatRequired ZHLN_ANNOTATION(ZHLN::Description<"Stencil state requires an attachment format with stencil support."> {}) = 7,
+    InvalidVertexInput ZHLN_ANNOTATION(ZHLN::Description<"Nonzero vertex input counts require corresponding data pointers."> {}) = 8,
+    TooManyColorAttachments ZHLN_ANNOTATION(ZHLN::Description<"Color attachment count cannot be represented as uint32_t."> {}) = 9,
+    NoUsableShaderStages ZHLN_ANNOTATION(ZHLN::Description<"No usable shader stages were assembled."> {}) = 10,
+    InvalidDevice ZHLN_ANNOTATION(ZHLN::Description<"A non-null Vulkan device is required."> {}) = 11,
+    InvalidComputeShader ZHLN_ANNOTATION(ZHLN::Description<"Compute shader code must be non-null with a nonzero, word-aligned size."> {}) = 12,
 };
 
 struct StencilState {
@@ -53,11 +60,14 @@ struct PipelineConfig {
     bool                dynamicCullMode = false;
     VkFrontFace         frontFace       = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
-    bool depthTest  = true;
-    bool depthWrite = true;
+    bool        depthTest    = true;
+    bool        depthWrite   = true;
+    VkCompareOp depthCompare = VK_COMPARE_OP_LESS;
 
     bool blendEnable   = false;
     bool additiveBlend = false;
+    bool preserveBlendAlpha = false;
+    bool accumulateBlendAlpha = false;
 
     uint32_t viewMask = 0;
 
@@ -65,6 +75,8 @@ struct PipelineConfig {
 
     std::optional<StencilState> stencil;
     bool                        colorWriteEnable = true;
+    VkColorComponentFlags       colorWriteMask   = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                                   VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 };
 
 [[nodiscard]] auto FormatHasStencil(VkFormat format) noexcept -> bool;
@@ -143,6 +155,11 @@ class PipelineBuilder {
         return *this;
     }
 
+    auto DynamicCullMode(bool enabled = true) noexcept -> PipelineBuilder& {
+        _cfg.dynamicCullMode = enabled;
+        return *this;
+    }
+
     auto ViewMask(uint32_t mask) noexcept -> PipelineBuilder& {
         _cfg.viewMask = mask;
         return *this;
@@ -158,14 +175,43 @@ class PipelineBuilder {
         return *this;
     }
 
+    auto DepthCompare(VkCompareOp op) noexcept -> PipelineBuilder& {
+        _cfg.depthCompare = op;
+        return *this;
+    }
+
     auto AlphaBlend() noexcept -> PipelineBuilder& {
         _cfg.blendEnable = true;
         return *this;
     }
 
+    // RGB-only radiance overlay. The destination alpha is not radiance.
+    // Protect it with both blend factors AND the color write mask.
+    auto AdditiveRGBPreserveAlpha() noexcept -> PipelineBuilder& {
+        _cfg.blendEnable = true;
+        _cfg.additiveBlend = true;
+        _cfg.preserveBlendAlpha = true;
+        _cfg.accumulateBlendAlpha = false;
+        _cfg.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
+        return *this;
+    }
+
+    // Explicit alpha accumulation for attachments where alpha is radiance.
+    auto AdditiveRGBA() noexcept -> PipelineBuilder& {
+        _cfg.blendEnable = true;
+        _cfg.additiveBlend = true;
+        _cfg.preserveBlendAlpha = false;
+        _cfg.accumulateBlendAlpha = true;
+        _cfg.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        return *this;
+    }
+
+    // Historical API: RGB adds; alpha REPLACES. Avoid on semantic attachments.
     auto AdditiveBlend() noexcept -> PipelineBuilder& {
         _cfg.blendEnable   = true;
         _cfg.additiveBlend = true;
+        _cfg.preserveBlendAlpha = false;
+        _cfg.accumulateBlendAlpha = false;
         return *this;
     }
 
@@ -220,20 +266,23 @@ class PipelineBuilder {
     template <typename Func>
     [[nodiscard]] auto Assemble(Func&& callback) const& noexcept -> std::invoke_result_t<Func, const VkGraphicsPipelineCreateInfo&> {
         const PipelineConfig& config = _cfg;
-        if (!config.stages || config.colorFormats.size() > UINT32_MAX) {
-            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        if (!config.stages) {
+            return std::unexpected(PipelineBuilderError::MissingShaders);
+        }
+        if (config.colorFormats.size() > UINT32_MAX) {
+            return std::unexpected(PipelineBuilderError::TooManyColorAttachments);
         }
 
         const ShaderStages& shaders       = *config.stages->Get();
         const bool          mesh_pipeline = shaders.mesh.code != nullptr;
         if (!mesh_pipeline && shaders.vert.code == nullptr) {
-            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+            return std::unexpected(PipelineBuilderError::MissingVertexOrMeshShader);
         }
         if (config.stencil.has_value() && !FormatHasStencil(config.depthFormat)) {
-            return std::unexpected(ToError(VK_ERROR_FORMAT_NOT_SUPPORTED));
+            return std::unexpected(PipelineBuilderError::StencilFormatRequired);
         }
         if (!mesh_pipeline && ((config.bindingCount != 0 && config.bindings == nullptr) || (config.attributeCount != 0 && config.attributes == nullptr))) {
-            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+            return std::unexpected(PipelineBuilderError::InvalidVertexInput);
         }
 
         constexpr uint32_t                                        k_max_stages = 3;
@@ -274,7 +323,7 @@ class PipelineBuilder {
         }
         append_stage(shaders.frag, config.psMapping);
         if (stage_count == 0) {
-            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+            return std::unexpected(PipelineBuilderError::NoUsableShaderStages);
         }
 
         const VkPipelineVertexInputStateCreateInfo vertex_input {
@@ -310,21 +359,20 @@ class PipelineBuilder {
             .sType             = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
             .depthTestEnable   = config.depthTest ? VK_TRUE : VK_FALSE,
             .depthWriteEnable  = config.depthWrite ? VK_TRUE : VK_FALSE,
-            .depthCompareOp    = VK_COMPARE_OP_LESS,
+            .depthCompareOp    = config.depthCompare,
             .stencilTestEnable = config.stencil.has_value() ? VK_TRUE : VK_FALSE,
             .front             = config.stencil.has_value() ? config.stencil->front : no_stencil,
             .back              = config.stencil.has_value() ? config.stencil->back : no_stencil,
         };
 
-        const VkColorComponentFlags write_mask =
-            config.colorWriteEnable ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT : 0;
+        const VkColorComponentFlags write_mask = config.colorWriteEnable ? config.colorWriteMask : 0;
         const VkPipelineColorBlendAttachmentState blend_state {
             .blendEnable         = config.blendEnable ? VK_TRUE : VK_FALSE,
             .srcColorBlendFactor = config.additiveBlend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA,
             .dstColorBlendFactor = config.additiveBlend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
             .colorBlendOp        = VK_BLEND_OP_ADD,
-            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-            .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+            .srcAlphaBlendFactor = config.preserveBlendAlpha ? VK_BLEND_FACTOR_ZERO : VK_BLEND_FACTOR_ONE,
+            .dstAlphaBlendFactor = (config.preserveBlendAlpha || config.accumulateBlendAlpha) ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ZERO,
             .alphaBlendOp        = VK_BLEND_OP_ADD,
             .colorWriteMask      = write_mask,
         };
@@ -448,6 +496,12 @@ class PipelineBuilder {
         return *this;
     }
 
+    // Per-attachment mask; the render graph contract can supply this value.
+    auto ColorWriteMask(VkColorComponentFlags mask) noexcept -> PipelineBuilder& {
+        _cfg.colorWriteMask = mask;
+        return *this;
+    }
+
     template <size_t N>
         requires (N != std::dynamic_extent)
     [[nodiscard]] auto ColorFormats(std::span<const VkFormat, N> formats) && noexcept -> PipelineBuilder<N, HasDepth> {
@@ -490,7 +544,7 @@ class PipelineBuilder {
 
     [[nodiscard]] auto CreatePipeline(VkDevice device) const noexcept -> std::expected<VkPipeline, ErrorCode> {
         if (device == VK_NULL_HANDLE) {
-            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+            return std::unexpected(PipelineBuilderError::InvalidDevice);
         }
         return Assemble([&](const VkGraphicsPipelineCreateInfo& info) -> std::expected<VkPipeline, ErrorCode> {
             auto session = PipelineBinarySession::Begin(device, _cfg.binaries, info);
@@ -541,7 +595,7 @@ class ComputePipelineBuilder {
     template <typename Func>
     [[nodiscard]] auto Assemble(Func&& callback) const noexcept -> std::invoke_result_t<Func, const VkComputePipelineCreateInfo&> {
         if (!ValidShader(_shader)) {
-            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+            return std::unexpected(PipelineBuilderError::InvalidComputeShader);
         }
 
         std::array<char, 64>           entry_name {};

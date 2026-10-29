@@ -12,7 +12,7 @@
 
 option(ZHLN_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
-include(CheckCXXCompilerFlag)
+include(CompilerFlagProbe)
 
 set(ZHLN_WARNING_CANDIDATES
     -Wall
@@ -59,10 +59,12 @@ set(ZHLN_WARNING_SUPPRESSIONS
     -Wmicrosoft-enum-forward-reference
 )
 
+zhln_check_cxx_compiler_flags_batch("${ZHLN_WARNING_CANDIDATES}")
+zhln_check_cxx_compiler_flags_batch("${ZHLN_WARNING_SUPPRESSIONS}")
+
 set(ZHLN_COMPILE_WARNINGS "")
 foreach(_FLAG IN LISTS ZHLN_WARNING_CANDIDATES)
     string(MAKE_C_IDENTIFIER "ZHLN_HAS${_FLAG}" _VAR)
-    check_cxx_compiler_flag("${_FLAG}" ${_VAR})
     if(${_VAR})
         list(APPEND ZHLN_COMPILE_WARNINGS "${_FLAG}")
     endif()
@@ -70,7 +72,6 @@ endforeach()
 
 foreach(_POS IN LISTS ZHLN_WARNING_SUPPRESSIONS)
     string(MAKE_C_IDENTIFIER "ZHLN_HAS${_POS}" _VAR)
-    check_cxx_compiler_flag("${_POS}" ${_VAR})
     if(${_VAR})
         # -Wfoo -> -Wno-foo: suppress only a warning the compiler actually has.
         string(REGEX REPLACE "^-W" "-Wno-" _NEG "${_POS}")

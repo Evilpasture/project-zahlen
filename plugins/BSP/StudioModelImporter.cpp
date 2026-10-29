@@ -23,10 +23,13 @@
 namespace ZHLN::BSP {
 namespace {
 
-auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true) -> TextureHandle {
+auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureHandle {
     if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
         auto vtfExp = DecodeVTF(bytes);
         if (vtfExp.has_value()) {
+            if (sourceNormal) {
+                ConvertSourceNormalInPlace(*vtfExp);
+            }
             auto texRes = ctx.CreateTexture(name, vtfExp->rgba8, Extent2D {vtfExp->width, vtfExp->height}, isSRGB);
             if (texRes.has_value()) {
                 return *texRes;
@@ -65,7 +68,16 @@ auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string
     }
 
     const std::string_view vmtText(reinterpret_cast<const char*>(vmtBytes->data()), vmtBytes->size());
-    const auto             vmtMatExp = ParseVMT(vmtText);
+    const auto             vmtMatExp = ResolveVmtMaterial(
+        vmtText,
+        [&vfs](std::string_view includePath) -> std::optional<std::string> {
+            const auto includeBytes = vfs.ReadFile(std::string(includePath));
+            if (!includeBytes.has_value() || includeBytes->empty()) {
+                return std::nullopt;
+            }
+            return std::string(reinterpret_cast<const char*>(includeBytes->data()), includeBytes->size());
+        }
+    );
     if (!vmtMatExp.has_value()) {
         return desc;
     }
@@ -96,7 +108,7 @@ auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string
         if (bumpPath.has_value()) {
             const auto bumpBytes = vfs.ReadFile(*bumpPath);
             if (bumpBytes.has_value()) {
-                desc.normalMap = LoadTextureFromBytes(ctx, vmt.bumpMap, *bumpBytes, false);
+                desc.normalMap = LoadTextureFromBytes(ctx, vmt.bumpMap, *bumpBytes, false, true);
             }
         }
     }
@@ -254,27 +266,11 @@ auto LoadStudioModelPrefabFromMemory(
             continue;
         }
 
-        const auto meshletResult = BuildMeshlets(std::span {partData.indices}, std::span {partData.positions});
-
-        const BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.positions});
-        const BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.tangentFrames});
-        const BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.surfaces});
-        const BufferHandle ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {partData.indices});
-
-        const bool hasMeshlets    = !meshletResult.Empty();
-        const auto packedMeshlets = PackMeshlets(meshletResult.meshlets);
-
-        BufferHandle meshletVbo = hasMeshlets ? ctx.CreateBuffer(BufferDesc {
-                                                    .usage  = BufferUsage::Storage,
-                                                    .data   = std::as_bytes(std::span {packedMeshlets}),
-                                                    .stride = kMeshletPackedBytes,
-                                                }) :
-                                                BufferHandle::Invalid;
-
-        BufferHandle meshletVertexVbo = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {meshletResult.vertices}) : BufferHandle::Invalid;
-        BufferHandle meshletTriVbo    = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {meshletResult.triangles}) : BufferHandle::Invalid;
-        const bool   completeMeshlets = hasMeshlets && meshletVbo != BufferHandle::Invalid && meshletVertexVbo != BufferHandle::Invalid &&
-                                      meshletTriVbo != BufferHandle::Invalid;
+        const BufferHandle   posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.positions});
+        const BufferHandle   frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.tangentFrames});
+        const BufferHandle   surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.surfaces});
+        const BufferHandle   ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {partData.indices});
+        const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(std::span {partData.indices}, std::span {partData.positions}));
 
         Mesh subMesh = {
             .posBuffer           = posVbo,
@@ -284,10 +280,10 @@ auto LoadStudioModelPrefabFromMemory(
             .indexBuffer         = ibo,
             .vertexCount         = partData.VertexCount(),
             .indexCount          = partData.IndexCount(),
-            .meshletBuffer       = meshletVbo,
-            .meshletVertexBuffer = meshletVertexVbo,
-            .meshletTriBuffer    = meshletTriVbo,
-            .meshletCount        = completeMeshlets ? static_cast<uint32_t>(meshletResult.meshlets.size()) : 0u,
+            .meshletBuffer       = ml.meshlets,
+            .meshletVertexBuffer = ml.vertices,
+            .meshletTriBuffer    = ml.triangles,
+            .meshletCount        = ml.count,
         };
 
         if (auto res = ctx.BuildMeshBLAS(subMesh); !res) [[unlikely]] {

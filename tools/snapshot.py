@@ -72,8 +72,10 @@ PRESETS = {
         "include/Zahlen/World.hpp",
         "include/Zahlen/SystemContext.hpp",
         "include/Zahlen/FrameScheduler.hpp",
-        "include/Zahlen/CommandLine.hpp",
+        "include/Zahlen/FramePlan.hpp",
         "include/Zahlen/Config.hpp",
+        "extensions/CommandLine",
+        "extensions/Signal",
         "src/engine",
         "modules/zahlen-engine.cppm",
     ],
@@ -141,7 +143,7 @@ def get_git_tracked_files(
         ".toml",
     }
     include_filenames = {"CMakeLists.txt"}
-    exclude_paths = {"extensions/Scripting/Lua/scripts/core/fennel.lua"}
+    exclude_paths: set[str] = set()
 
     # Base ignore paths
     ignore_paths = {"third_party", "extern"}
@@ -254,8 +256,6 @@ def generate_snapshot_string(tracked_files, target_dir, active_presets=None):
             lang = "bash"
         elif ext == ".md":
             lang = "markdown"
-        elif ext == ".fnl":
-            lang = "fennel"
         elif ext == ".toml":
             lang = "toml"
         else:

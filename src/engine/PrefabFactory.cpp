@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/AssetManager.hpp>
+#include <optional>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -14,7 +15,6 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
-#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -80,16 +80,11 @@ void ReleaseOwnedMeshes(RenderContext& ctx, ECS::Registry& reg) {
     }
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
-    return CreateFontAtlasTexture(ctx, registry, std::nullopt, GUI::kDefaultFontAssetID);
+auto CreateFontAtlas(RenderContext& ctx) -> FontAtlas {
+    return CreateFontAtlas(ctx, std::nullopt, GUI::kDefaultFontAssetID);
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> TextureHandle {
-    auto uiSettings = registry.GetSingleton<GUI::UISettingsComponent>();
-    if (!uiSettings) {
-        return TextureHandle::Invalid;
-    }
-
+auto CreateFontAtlas(RenderContext& ctx, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> FontAtlas {
     GUI::BakedFontAsset        ownedAsset;
     const GUI::BakedFontAsset* asset = &ResolveFontAsset(assetMgr, fontID, ownedAsset);
 
@@ -101,7 +96,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::O
 
     if ((asset->atlasWidth == 0) || (asset->atlasHeight == 0) || asset->coverage.empty()) {
         LogWarning("No baked font available; text cannot be drawn.");
-        return TextureHandle::Invalid;
+        return GUI::BuildFontAtlas(*asset, TextureHandle::Invalid);
     }
 
     std::vector<uint32_t> rgbaPixels(asset->coverage.size());
@@ -109,31 +104,17 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::O
         rgbaPixels[i] = (static_cast<uint32_t>(asset->coverage[i]) << 24) | 0x00FFFFFF;
     }
 
-    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", {asset->atlasWidth, asset->atlasHeight}, rgbaPixels, false);
-
-    FontAtlas& font     = uiSettings->fontAtlas;
-    font                = FontAtlas {};
-    font.texture        = texHandle;
-    font.atlasWidth     = static_cast<float>(asset->atlasWidth);
-    font.atlasHeight    = static_cast<float>(asset->atlasHeight);
-    font.fontSize       = asset->fontSize;
-    font.baseline       = asset->baseline;
-    font.lineHeight     = asset->lineHeight;
-    font.isSDF          = asset->isSDF;
-    font.firstCodepoint = asset->firstCodepoint;
-    font.glyphCount     = static_cast<uint32_t>(std::min<size_t>(asset->glyphs.size(), FontAtlas::kMaxGlyphs));
-    for (uint32_t i = 0; i < font.glyphCount; ++i) {
-        font.glyphs[i] = asset->glyphs[i];
-    }
-
-    uiSettings->defaultFontAtlas = texHandle;
-
-    return texHandle;
+    // No mip chain: the atlas packs glyphs side by side, so a generated mip
+    // averages neighbours into each other and any sampled LOD above zero
+    // smears text together. Single-level also pins the sampler at mip 0 no
+    // matter the LOD range the scene sampler uses.
+    const TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", {asset->atlasWidth, asset->atlasHeight}, rgbaPixels, false, false);
+    return GUI::BuildFontAtlas(*asset, texHandle);
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, std::string_view path) -> TextureHandle {
+auto CreateFontAtlas(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) -> FontAtlas {
     const AssetID id = path.empty() ? GUI::kDefaultFontAssetID : HashAssetID(path);
-    return CreateFontAtlasTexture(ctx, registry, assetMgr, id);
+    return CreateFontAtlas(ctx, assetMgr, id);
 }
 
 auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool {
@@ -325,6 +306,8 @@ auto InstantiateMeshPart(
 
     Entity    e     = reg.Create();
     DrawFlags flags = DrawFlags::None;
+    flags |= part.drawFlags;
+    flags |= params.drawFlags;
     if (part.isSkinned && params.isAnimated) {
         flags |= DrawFlags::Skinned;
     }
@@ -400,9 +383,11 @@ auto InstantiateMeshPart(
     return e;
 }
 
-auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult, float emissiveFactorScale) -> Entity {
+// Conditional policy lives in the call site (whether to spawn at all); the
+// optional is whether a light was created -- no Entity::Null() sentinel.
+auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult, float emissiveFactorScale) -> std::optional<Entity> {
     if (part.defaultMaterial.unlit)
-        return Entity::Null(); // KHR_materials_unlit ignores emissive factors.
+        return std::nullopt; // KHR_materials_unlit ignores emissive factors.
     // Virtual lights approximate authored emission, not the presentation
     // boost chosen by the importer. Fidelity captures never opt into them.
     const float        invImportScale = 1.0f / emissiveFactorScale;
@@ -411,7 +396,7 @@ auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity paren
 
     float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
-        return Entity::Null();
+        return std::nullopt;
     }
 
     JPH::Vec3 localCenter(
@@ -690,10 +675,10 @@ auto InstantiatePrefab(
         if (params.isAnimated && (!prefab.animations.empty() || !prefab.skeletons.empty())) {
             reg.Add(
                 rootEntity, Components::AnimatorComponent {
+                                .prefabAsset      = HashAssetPath(std::string_view(prefab.virtualPath)),
                                 .currentTrackIdx  = prefab.animations.empty() ? -1 : 0,
                                 .currentTrackTime = 0.0f,
                                 .currentLoop      = true,
-                                .prefab           = &prefab,
                             }
             );
         }
@@ -723,11 +708,12 @@ auto InstantiatePrefab(
         }
         spawnedCount++;
 
-        Entity glowEnt = params.emissiveVirtualLights ? TrySpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult, prefab.emissiveFactorScale) :
-                                                        Entity::Null();
-        if (glowEnt != Entity::Null()) {
+        const auto glowEnt = params.emissiveVirtualLights ?
+                                 SpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult, prefab.emissiveFactorScale) :
+                                 std::optional<Entity> {};
+        if (glowEnt) {
             if (outBuffer != nullptr && spawnedCount < maxCount) {
-                outBuffer[spawnedCount] = glowEnt;
+                outBuffer[spawnedCount] = *glowEnt;
             }
             spawnedCount++;
         }
@@ -821,7 +807,6 @@ void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
     ZHLN::Log("[Engine] Device Lost: Rebuilding procedural resources; other GPU assets re-upload lazily.");
 
     ctx.ClearGPUCaches();
-    CreateFontAtlasTexture(ctx, reg);
 
     // The scene owns its procedural mesh buffers. Its recipes survive device
     // loss, but its old handles do not; rebuild these with the new context.

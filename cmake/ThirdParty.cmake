@@ -8,9 +8,142 @@
 # includes this once, before the core subsystems, so the vendor cache variables
 # below are settled before any vendor CMakeLists runs.
 
-# Vulkan-Headers is a vendored submodule. Its CMake project provides the
-# Vulkan-Headers interface target; no installed SDK or loader is required.
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/Vulkan-Headers EXCLUDE_FROM_ALL SYSTEM)
+# --- Vulkan-Headers ---
+# Vulkan-Headers is header-only; the renderer needs no Vulkan SDK or loader.
+# Prefer a compatible system copy on Unix, but the renderer's Vulkan 1.4 and
+# extension declarations are newer than many distro packages. Verify every
+# extension-name macro consumed by the code before using it; otherwise use the
+# pinned submodule so old headers fail over at configure time, not mid-build.
+option(ZHLN_VULKAN_HEADERS_VENDORED
+    "Build and use the vendored extern/Vulkan-Headers, ignoring system headers" OFF)
+
+set(ZHLN_HAS_VULKAN_HEADERS FALSE)
+if(ZHLN_BUILD_RENDER AND UNIX AND NOT ZHLN_VULKAN_HEADERS_VENDORED)
+    find_path(_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE
+        NAMES vulkan/vulkan_core.h
+        HINTS
+            "${VULKAN_HEADERS_ROOT}"
+            ENV VULKAN_HEADERS_ROOT
+            ENV VULKAN_SDK
+            /opt/homebrew/opt/vulkan-headers
+            /usr/local/opt/vulkan-headers
+            /usr/local
+        PATH_SUFFIXES include
+        QUIET
+    )
+    if(NOT _ZHLN_PROBE_VULKAN_HEADERS_INCLUDE)
+        unset(_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE CACHE)
+    endif()
+
+    if(_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE)
+        set(_zhln_sys_vulkan_core "${_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE}/vulkan/vulkan_core.h")
+        set(_zhln_required_vulkan_macros
+            VK_HEADER_VERSION
+            VK_VERSION_1_4
+            VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME
+            VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+            VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME
+            VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME
+            VK_EXT_DEVICE_FAULT_EXTENSION_NAME
+            VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME
+            VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME
+            VK_EXT_LAYER_SETTINGS_EXTENSION_NAME
+            VK_EXT_MESH_SHADER_EXTENSION_NAME
+            VK_EXT_PRESENT_MODE_FIFO_LATEST_READY_EXTENSION_NAME
+            VK_EXT_PRESENT_TIMING_EXTENSION_NAME
+            VK_EXT_ROBUSTNESS_2_EXTENSION_NAME
+            VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME
+            VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME
+            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
+            VK_KHR_DEVICE_FAULT_EXTENSION_NAME
+            VK_KHR_DISPLAY_EXTENSION_NAME
+            VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME
+            VK_KHR_MAINTENANCE_5_EXTENSION_NAME
+            VK_KHR_PIPELINE_BINARY_EXTENSION_NAME
+            VK_KHR_PRESENT_ID_2_EXTENSION_NAME
+            VK_KHR_PRESENT_MODE_FIFO_LATEST_READY_EXTENSION_NAME
+            VK_KHR_RAY_QUERY_EXTENSION_NAME
+            VK_KHR_SHADER_ABORT_EXTENSION_NAME
+            VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME
+            VK_KHR_SURFACE_EXTENSION_NAME
+            VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME
+            VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME
+            VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME
+        )
+        file(STRINGS "${_zhln_sys_vulkan_core}" _zhln_sys_vulkan_macro_lines
+            REGEX "^#define[ \\t]+(VK_HEADER_VERSION|VK_VERSION_1_4|VK_[A-Z0-9_]+_EXTENSION_NAME)[ \\t]")
+        set(_zhln_sys_vulkan_macros)
+        set(_zhln_sys_vulkan_header_version "unknown")
+        foreach(_line IN LISTS _zhln_sys_vulkan_macro_lines)
+            if(_line MATCHES "^#define[ \\t]+([A-Za-z0-9_]+)")
+                list(APPEND _zhln_sys_vulkan_macros "${CMAKE_MATCH_1}")
+            endif()
+            if(_line MATCHES "^#define[ \\t]+VK_HEADER_VERSION[ \\t]+([0-9]+)")
+                set(_zhln_sys_vulkan_header_version "${CMAKE_MATCH_1}")
+            endif()
+        endforeach()
+
+        set(_zhln_missing_vulkan_macros)
+        foreach(_macro IN LISTS _zhln_required_vulkan_macros)
+            list(FIND _zhln_sys_vulkan_macros "${_macro}" _macro_index)
+            if(_macro_index EQUAL -1)
+                list(APPEND _zhln_missing_vulkan_macros "${_macro}")
+            endif()
+        endforeach()
+
+        if(NOT _zhln_missing_vulkan_macros)
+            add_library(Vulkan-Headers INTERFACE IMPORTED GLOBAL)
+            if(NOT TARGET Vulkan::Headers)
+                add_library(Vulkan::Headers ALIAS Vulkan-Headers)
+            endif()
+            set(_zhln_sys_vulkan_include_is_implicit FALSE)
+            foreach(_implicit_include IN LISTS
+                CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES
+                CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES
+            )
+                if("${_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE}" STREQUAL "${_implicit_include}")
+                    set(_zhln_sys_vulkan_include_is_implicit TRUE)
+                    break()
+                endif()
+            endforeach()
+            # Do not emit an explicit -isystem /usr/include: it is already in
+            # the compiler's default search path and can break #include_next.
+            if(NOT _zhln_sys_vulkan_include_is_implicit)
+                target_include_directories(Vulkan-Headers SYSTEM INTERFACE
+                    "${_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE}")
+            endif()
+            set(ZHLN_HAS_VULKAN_HEADERS TRUE)
+            message(STATUS
+                "Using system Vulkan-Headers revision ${_zhln_sys_vulkan_header_version} "
+                "(${_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE})")
+        else()
+            string(JOIN ", " _zhln_missing_vulkan_macro_list ${_zhln_missing_vulkan_macros})
+            message(STATUS
+                "System Vulkan-Headers revision ${_zhln_sys_vulkan_header_version} "
+                "(${_ZHLN_PROBE_VULKAN_HEADERS_INCLUDE}) lacks required renderer declarations "
+                "(${_zhln_missing_vulkan_macro_list}); using the vendored headers")
+        endif()
+
+        unset(_zhln_sys_vulkan_core)
+        unset(_zhln_required_vulkan_macros)
+        unset(_zhln_sys_vulkan_macro_lines)
+        unset(_zhln_sys_vulkan_macros)
+        unset(_zhln_sys_vulkan_header_version)
+        unset(_zhln_missing_vulkan_macros)
+        unset(_zhln_missing_vulkan_macro_list)
+        unset(_zhln_sys_vulkan_include_is_implicit)
+        unset(_line)
+        unset(_macro)
+        unset(_macro_index)
+        unset(_implicit_include)
+    endif()
+endif()
+
+if(ZHLN_BUILD_RENDER AND NOT ZHLN_HAS_VULKAN_HEADERS)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/Vulkan-Headers EXCLUDE_FROM_ALL SYSTEM)
+endif()
 
 # --- mimalloc ---
 if(APPLE)
@@ -117,88 +250,301 @@ int main(void) { return sizeof(ZHLNBlock) == 0; }
 endif()
 
 # --- GLFW ---
-set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-if(UNIX AND NOT APPLE)
-    # GLFW 3.4+ always compiles the null platform. X11/Wayland are extra
-    # backends that need their -dev packages; without them, glfwInit fails
-    # over to TTY/KMS instead of failing configure.
-    find_package(X11 QUIET)
-    set(_zhln_glfw_x11 FALSE)
-    if(X11_FOUND
-       AND X11_Xrandr_INCLUDE_PATH
-       AND X11_Xinerama_INCLUDE_PATH
-       AND X11_Xkb_INCLUDE_PATH
-       AND X11_Xcursor_INCLUDE_PATH
-       AND X11_Xi_INCLUDE_PATH
-       AND X11_Xshape_INCLUDE_PATH)
-        set(_zhln_glfw_x11 TRUE)
+# Prefer a system GLFW 3.4+ package on Unix when available (Window.cpp and
+# EngineGlobals.cpp require GLFW 3.4's runtime platform selection APIs:
+# glfwGetPlatform, GLFW_PLATFORM_WAYLAND/X11, glfwInitHint(GLFW_PLATFORM, ...)),
+# and fall back to building the vendored extern/glfw from source otherwise.
+option(ZHLN_GLFW_VENDORED
+    "Build and use the vendored extern/glfw, ignoring any system GLFW" OFF)
+
+set(ZHLN_HAS_GLFW FALSE)
+if(UNIX AND NOT ZHLN_GLFW_VENDORED)
+    find_path(_ZHLN_PROBE_GLFW_H
+        NAMES GLFW/glfw3.h
+        HINTS "${GLFW_ROOT}" ENV GLFW_ROOT /opt/homebrew/opt/glfw /usr/local
+        PATH_SUFFIXES include
+        QUIET
+    )
+    if(NOT _ZHLN_PROBE_GLFW_H)
+        unset(_ZHLN_PROBE_GLFW_H CACHE)
     endif()
 
-    set(_zhln_glfw_wayland FALSE)
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(ZHLN_WAYLAND QUIET
-            wayland-client>=0.2.7
-            wayland-cursor>=0.2.7
-            wayland-egl>=0.2.7
-            xkbcommon>=0.5.0)
-        find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
-        if(ZHLN_WAYLAND_FOUND AND WAYLAND_SCANNER_EXECUTABLE)
-            set(_zhln_glfw_wayland TRUE)
+    if(_ZHLN_PROBE_GLFW_H OR DEFINED ENV{PKG_CONFIG_PATH})
+        find_package(glfw3 3.4 CONFIG QUIET)
+        if(glfw3_FOUND AND TARGET glfw)
+            set_target_properties(glfw PROPERTIES IMPORTED_GLOBAL TRUE)
+            get_target_property(_zhln_sys_glfw_inc glfw INTERFACE_INCLUDE_DIRECTORIES)
+            if(_zhln_sys_glfw_inc)
+                target_include_directories(glfw SYSTEM INTERFACE ${_zhln_sys_glfw_inc})
+            endif()
+            set(ZHLN_HAS_GLFW TRUE)
+            message(STATUS "Using system GLFW ${glfw3_VERSION} (CMake package)")
+        endif()
+
+        if(NOT ZHLN_HAS_GLFW)
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(ZHLN_SYS_GLFW QUIET IMPORTED_TARGET glfw3>=3.4)
+            endif()
+            if(ZHLN_SYS_GLFW_FOUND AND TARGET PkgConfig::ZHLN_SYS_GLFW)
+                add_library(glfw INTERFACE IMPORTED GLOBAL)
+                target_link_libraries(glfw INTERFACE PkgConfig::ZHLN_SYS_GLFW)
+                if(ZHLN_SYS_GLFW_INCLUDE_DIRS)
+                    target_include_directories(glfw SYSTEM INTERFACE ${ZHLN_SYS_GLFW_INCLUDE_DIRS})
+                elseif(_ZHLN_PROBE_GLFW_H)
+                    target_include_directories(glfw SYSTEM INTERFACE "${_ZHLN_PROBE_GLFW_H}")
+                endif()
+                set(ZHLN_HAS_GLFW TRUE)
+                message(STATUS "Using system GLFW ${ZHLN_SYS_GLFW_VERSION} (pkg-config)")
+            endif()
+        endif()
+
+        if(NOT ZHLN_HAS_GLFW AND _ZHLN_PROBE_GLFW_H AND EXISTS "${_ZHLN_PROBE_GLFW_H}/GLFW/glfw3native.h")
+            file(STRINGS "${_ZHLN_PROBE_GLFW_H}/GLFW/glfw3.h" _zhln_glfw_ver_lines
+                REGEX "^#define GLFW_VERSION_(MAJOR|MINOR)[ \t]+[0-9]+")
+            set(_zhln_glfw_major 0)
+            set(_zhln_glfw_minor 0)
+            foreach(_line IN LISTS _zhln_glfw_ver_lines)
+                if(_line MATCHES "GLFW_VERSION_MAJOR[ \t]+([0-9]+)")
+                    set(_zhln_glfw_major "${CMAKE_MATCH_1}")
+                elseif(_line MATCHES "GLFW_VERSION_MINOR[ \t]+([0-9]+)")
+                    set(_zhln_glfw_minor "${CMAKE_MATCH_1}")
+                endif()
+            endforeach()
+            if("${_zhln_glfw_major}.${_zhln_glfw_minor}" VERSION_GREATER_EQUAL "3.4")
+                find_library(_ZHLN_SYS_GLFW_LIB
+                    NAMES glfw glfw3
+                    HINTS "${GLFW_ROOT}" ENV GLFW_ROOT /opt/homebrew/opt/glfw /usr/local
+                    QUIET
+                )
+                if(_ZHLN_SYS_GLFW_LIB)
+                    find_package(Threads QUIET)
+                    add_library(glfw INTERFACE IMPORTED GLOBAL)
+                    target_include_directories(glfw SYSTEM INTERFACE "${_ZHLN_PROBE_GLFW_H}")
+                    target_link_libraries(glfw INTERFACE "${_ZHLN_SYS_GLFW_LIB}" Threads::Threads ${CMAKE_DL_LIBS})
+                    set(ZHLN_HAS_GLFW TRUE)
+                    message(STATUS "Using system GLFW ${_zhln_glfw_major}.${_zhln_glfw_minor}: ${_ZHLN_SYS_GLFW_LIB}")
+                else()
+                    unset(_ZHLN_SYS_GLFW_LIB CACHE)
+                endif()
+            endif()
         endif()
     endif()
-
-    set(GLFW_BUILD_X11 ${_zhln_glfw_x11} CACHE BOOL "Build GLFW with X11" FORCE)
-    set(GLFW_BUILD_WAYLAND ${_zhln_glfw_wayland} CACHE BOOL "Build GLFW with Wayland" FORCE)
-    if(_zhln_glfw_x11 OR _zhln_glfw_wayland)
-        message(STATUS "GLFW window backends: X11=${_zhln_glfw_x11} Wayland=${_zhln_glfw_wayland}")
-    else()
-        message(STATUS "No X11/Wayland development files; GLFW builds the null platform only.")
-    endif()
 endif()
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
 
-# The macOS SDK marks sprintf deprecated and the vendored cocoa joystick
-# still uses it; silence the deprecation noise on the vendored target only.
-if(APPLE)
-    target_compile_options(glfw PRIVATE
-        -Wno-deprecated-declarations
-        "$<$<OR:$<COMPILE_LANGUAGE:C>,$<COMPILE_LANGUAGE:OBJC>>:-fblocks>"
-    )
-    if(_zhln_use_blocks_clang)
-        set_property(TARGET glfw PROPERTY C_COMPILER_LAUNCHER "${ZHLN_BLOCKS_C_COMPILER_LAUNCHER}")
-        set_property(TARGET glfw PROPERTY OBJC_COMPILER_LAUNCHER "${ZHLN_BLOCKS_C_COMPILER_LAUNCHER}")
+if(ZHLN_HAS_GLFW)
+    target_compile_definitions(glfw INTERFACE GLFW_INCLUDE_NONE)
+
+    if(UNIX AND NOT APPLE)
+        # src/window/CMakeLists.txt gates ZHLN_WINDOW_NATIVE_{X11,WAYLAND} on
+        # _zhln_glfw_{x11,wayland}, which makes Window.cpp include
+        # <GLFW/glfw3native.h> and call glfwGet{X11,Wayland}{Display,Window}.
+        # Probe both header availability and exported symbols on the system
+        # library so native Vulkan surfaces match what system GLFW compiled in.
+        include(CheckCSourceCompiles)
+
+        set(_zhln_glfw_x11 FALSE)
+        find_path(_ZHLN_PROBE_XLIB_H NAMES X11/Xlib.h QUIET)
+        find_path(_ZHLN_PROBE_XRANDR_H NAMES X11/extensions/Xrandr.h QUIET)
+        if(_ZHLN_PROBE_XLIB_H AND _ZHLN_PROBE_XRANDR_H)
+            block(PROPAGATE ZHLN_SYS_GLFW_HAS_X11)
+                set(CMAKE_REQUIRED_INCLUDES "${_ZHLN_PROBE_XLIB_H}" "${_ZHLN_PROBE_XRANDR_H}")
+                set(CMAKE_REQUIRED_LIBRARIES glfw)
+                check_c_source_compiles([=[
+#define GLFW_INCLUDE_NONE
+#define GLFW_EXPOSE_NATIVE_X11
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+int main(void) { return glfwGetX11Display() != 0; }
+]=] ZHLN_SYS_GLFW_HAS_X11)
+            endblock()
+            if(ZHLN_SYS_GLFW_HAS_X11)
+                set(_zhln_glfw_x11 TRUE)
+                target_include_directories(glfw SYSTEM INTERFACE "${_ZHLN_PROBE_XLIB_H}" "${_ZHLN_PROBE_XRANDR_H}")
+            endif()
+        else()
+            if(NOT _ZHLN_PROBE_XLIB_H)
+                unset(_ZHLN_PROBE_XLIB_H CACHE)
+            endif()
+            if(NOT _ZHLN_PROBE_XRANDR_H)
+                unset(_ZHLN_PROBE_XRANDR_H CACHE)
+            endif()
+        endif()
+
+        set(_zhln_glfw_wayland FALSE)
+        find_path(_ZHLN_PROBE_WAYLAND_H NAMES wayland-client.h QUIET)
+        if(_ZHLN_PROBE_WAYLAND_H)
+            block(PROPAGATE ZHLN_SYS_GLFW_HAS_WAYLAND)
+                set(CMAKE_REQUIRED_INCLUDES "${_ZHLN_PROBE_WAYLAND_H}")
+                set(CMAKE_REQUIRED_LIBRARIES glfw)
+                check_c_source_compiles([=[
+#define GLFW_INCLUDE_NONE
+#define GLFW_EXPOSE_NATIVE_WAYLAND
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+int main(void) { return glfwGetWaylandDisplay() != 0; }
+]=] ZHLN_SYS_GLFW_HAS_WAYLAND)
+            endblock()
+            if(ZHLN_SYS_GLFW_HAS_WAYLAND)
+                set(_zhln_glfw_wayland TRUE)
+                target_include_directories(glfw SYSTEM INTERFACE "${_ZHLN_PROBE_WAYLAND_H}")
+            endif()
+        else()
+            unset(_ZHLN_PROBE_WAYLAND_H CACHE)
+        endif()
+
+        message(STATUS "System GLFW native backends: X11=${_zhln_glfw_x11} Wayland=${_zhln_glfw_wayland}")
+    endif()
+else()
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    if(UNIX AND NOT APPLE)
+        # GLFW 3.4+ always compiles the null platform. X11/Wayland are extra
+        # backends that need their -dev packages; without them, glfwInit fails
+        # over to TTY/KMS instead of failing configure.
+        # Guard FindX11 (4 try_compiles + 30 find_library calls) and Wayland
+        # pkg-config spawns behind fast header probes; unsetting NOTFOUND entries
+        # keeps warm reconfigures sub-millisecond while still picking up newly
+        # installed -dev packages without wiping the build directory.
+        set(_zhln_glfw_x11 FALSE)
+        find_path(_ZHLN_PROBE_XLIB_H NAMES X11/Xlib.h QUIET)
+        if(_ZHLN_PROBE_XLIB_H)
+            find_package(X11 QUIET)
+            if(X11_FOUND
+               AND X11_Xrandr_INCLUDE_PATH
+               AND X11_Xinerama_INCLUDE_PATH
+               AND X11_Xkb_INCLUDE_PATH
+               AND X11_Xcursor_INCLUDE_PATH
+               AND X11_Xi_INCLUDE_PATH
+               AND X11_Xshape_INCLUDE_PATH)
+                set(_zhln_glfw_x11 TRUE)
+            endif()
+        else()
+            unset(_ZHLN_PROBE_XLIB_H CACHE)
+        endif()
+
+        set(_zhln_glfw_wayland FALSE)
+        find_path(_ZHLN_PROBE_WAYLAND_H NAMES wayland-client.h QUIET)
+        if(_ZHLN_PROBE_WAYLAND_H)
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(ZHLN_WAYLAND QUIET
+                    wayland-client>=0.2.7
+                    wayland-cursor>=0.2.7
+                    wayland-egl>=0.2.7
+                    xkbcommon>=0.5.0)
+                find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
+                if(ZHLN_WAYLAND_FOUND AND WAYLAND_SCANNER_EXECUTABLE)
+                    set(_zhln_glfw_wayland TRUE)
+                endif()
+            endif()
+        else()
+            unset(_ZHLN_PROBE_WAYLAND_H CACHE)
+        endif()
+
+        set(GLFW_BUILD_X11 ${_zhln_glfw_x11} CACHE BOOL "Build GLFW with X11" FORCE)
+        set(GLFW_BUILD_WAYLAND ${_zhln_glfw_wayland} CACHE BOOL "Build GLFW with Wayland" FORCE)
+        if(_zhln_glfw_x11 OR _zhln_glfw_wayland)
+            message(STATUS "GLFW window backends: X11=${_zhln_glfw_x11} Wayland=${_zhln_glfw_wayland}")
+        else()
+            message(STATUS "No X11/Wayland development files; GLFW builds the null platform only.")
+        endif()
+    endif()
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
+    target_compile_definitions(glfw INTERFACE GLFW_INCLUDE_NONE)
+
+    # The macOS SDK marks sprintf deprecated and the vendored cocoa joystick
+    # still uses it; silence the deprecation noise on the vendored target only.
+    if(APPLE)
+        target_compile_options(glfw PRIVATE
+            -Wno-deprecated-declarations
+            "$<$<OR:$<COMPILE_LANGUAGE:C>,$<COMPILE_LANGUAGE:OBJC>>:-fblocks>"
+        )
+        if(_zhln_use_blocks_clang)
+            set_property(TARGET glfw PROPERTY C_COMPILER_LAUNCHER "${ZHLN_BLOCKS_C_COMPILER_LAUNCHER}")
+            set_property(TARGET glfw PROPERTY OBJC_COMPILER_LAUNCHER "${ZHLN_BLOCKS_C_COMPILER_LAUNCHER}")
+        endif()
     endif()
 endif()
 
 # --- LuaJIT ---
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LuaJIT SYSTEM)
+# Lua is strictly a sandboxed, reflection-driven state and configuration layer
+# (plugins/lua/ReflectLua); FFI isolation is enforced at VM creation by never
+# opening luaopen_ffi or luaopen_package.
+#
+# Prefer a system LuaJIT 2.1+ package on Unix when available (e.g. `luajit` on
+# Arch/NixOS, `libluajit-5.1-dev` on Debian/Ubuntu, `luajit-devel` on Fedora),
+# and fall back to building the vendored extern/LuaJIT from source otherwise.
+option(ZHLN_LUAJIT_VENDORED
+    "Build and use the vendored extern/LuaJIT, ignoring any system LuaJIT" OFF)
 
-# LuaJIT's CMake produces the static library only. The CLI is what drives the
-# vendored Fennel compiler (tools/fennelc.lua); host `fennel` is not required.
-if(TARGET LuaJIT AND EXISTS "${CMAKE_SOURCE_DIR}/extern/LuaJIT/src/luajit.c" AND NOT TARGET luajit)
-    add_executable(luajit "${CMAKE_SOURCE_DIR}/extern/LuaJIT/src/luajit.c")
-    target_link_libraries(luajit PRIVATE LuaJIT)
-    set_target_properties(luajit PROPERTIES
-        C_STANDARD 99
-        C_STANDARD_REQUIRED ON
-        C_EXTENSIONS ON
+set(ZHLN_HAS_LUAJIT FALSE)
+if(UNIX AND NOT ZHLN_LUAJIT_VENDORED)
+    find_path(_ZHLN_PROBE_LUAJIT_H
+        NAMES luajit.h
+        HINTS "${LUAJIT_ROOT}" ENV LUAJIT_ROOT /opt/homebrew/opt/luajit /usr/local
+        PATH_SUFFIXES luajit-2.1 include/luajit-2.1
+        QUIET
     )
-    if(UNIX AND NOT APPLE)
-        target_link_libraries(luajit PRIVATE dl m)
-    elseif(UNIX)
-        target_link_libraries(luajit PRIVATE m)
+    if(NOT _ZHLN_PROBE_LUAJIT_H)
+        unset(_ZHLN_PROBE_LUAJIT_H CACHE)
+    endif()
+
+    if(_ZHLN_PROBE_LUAJIT_H OR DEFINED ENV{PKG_CONFIG_PATH})
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(ZHLN_SYS_LUAJIT QUIET IMPORTED_TARGET luajit>=2.1)
+        endif()
+
+        if(ZHLN_SYS_LUAJIT_FOUND AND TARGET PkgConfig::ZHLN_SYS_LUAJIT)
+            add_library(LuaJIT INTERFACE IMPORTED GLOBAL)
+            target_link_libraries(LuaJIT INTERFACE PkgConfig::ZHLN_SYS_LUAJIT)
+            if(ZHLN_SYS_LUAJIT_INCLUDE_DIRS)
+                target_include_directories(LuaJIT SYSTEM INTERFACE ${ZHLN_SYS_LUAJIT_INCLUDE_DIRS})
+            elseif(_ZHLN_PROBE_LUAJIT_H)
+                target_include_directories(LuaJIT SYSTEM INTERFACE "${_ZHLN_PROBE_LUAJIT_H}")
+            endif()
+            set(ZHLN_HAS_LUAJIT TRUE)
+            message(STATUS "Using system LuaJIT ${ZHLN_SYS_LUAJIT_VERSION} (pkg-config)")
+        elseif(_ZHLN_PROBE_LUAJIT_H AND EXISTS "${_ZHLN_PROBE_LUAJIT_H}/lua.hpp")
+            find_library(_ZHLN_SYS_LUAJIT_LIB
+                NAMES luajit-5.1 luajit
+                HINTS "${LUAJIT_ROOT}" ENV LUAJIT_ROOT /opt/homebrew/opt/luajit /usr/local
+                QUIET
+            )
+            if(_ZHLN_SYS_LUAJIT_LIB)
+                add_library(LuaJIT INTERFACE IMPORTED GLOBAL)
+                target_include_directories(LuaJIT SYSTEM INTERFACE "${_ZHLN_PROBE_LUAJIT_H}")
+                target_link_libraries(LuaJIT INTERFACE "${_ZHLN_SYS_LUAJIT_LIB}" ${CMAKE_DL_LIBS} m)
+                set(ZHLN_HAS_LUAJIT TRUE)
+                message(STATUS "Using system LuaJIT: ${_ZHLN_SYS_LUAJIT_LIB} (${_ZHLN_PROBE_LUAJIT_H})")
+            else()
+                unset(_ZHLN_SYS_LUAJIT_LIB CACHE)
+            endif()
+        endif()
     endif()
 endif()
 
+if(NOT ZHLN_HAS_LUAJIT)
+    # Keep LUAJIT_DISABLE_FFI OFF because extern/LuaJIT/CMakeLists.txt hardcodes
+    # `-D FFI` in DASM_FLAGS and omits LUAJIT_FEATURES_DEFINITIONS on
+    # luaJIT_buildvm on POSIX.
+    set(LUAJIT_DISABLE_FFI OFF CACHE BOOL "Keep LuaJIT buildvm and lib_buffer consistent on POSIX" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LuaJIT SYSTEM)
+endif()
+
 # --- Jolt Physics ---
+option(ZHLN_ENABLE_THIRDPARTY_LTO "Enable interprocedural optimization (LTO) on vendored third-party libraries" OFF)
+set(INTERPROCEDURAL_OPTIMIZATION ${ZHLN_ENABLE_THIRDPARTY_LTO} CACHE BOOL "Enable interprocedural optimizations" FORCE)
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
 set(USE_RTTI OFF CACHE BOOL "" FORCE)
 set(TARGET_UNIT_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
 set(JPH_BUILD_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
+if(NOT ZHLN_BUILD_RENDER)
+    set(JPH_USE_VK OFF CACHE BOOL "Use Vulkan" FORCE)
+endif()
 
 if(APPLE)
     # Jolt enables its Metal backend by default, which adds Objective-C++ files
@@ -253,8 +599,10 @@ set_target_properties(Jolt PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
-# --- VulkanMemoryAllocator ---
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
+if(ZHLN_BUILD_RENDER)
+    # --- VulkanMemoryAllocator ---
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
+endif()
 
 # --- meshoptimizer (VK_EXT_mesh_shader meshlet generation) ---
 # Used by the offline cooker (zcook) and by the runtime glTF importer through
@@ -265,17 +613,135 @@ set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/meshoptimizer EXCLUDE_FROM_ALL SYSTEM)
 set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-# --- SPIRV-Reflect (tracked in third_party/) ---
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
+if(ZHLN_BUILD_RENDER)
+    # --- SPIRV-Reflect (vendored at extern/SPIRV-Reflect) ---
+    # Reflection of compiled SPIR-V for zahlen_vulkan's pipeline layout builder.
+    # Upstream's CMake builds its spirv-reflect command-line tools (and install
+    # rules) by default; zahlen only embeds the static library, so everything
+    # else is forced off before the upstream CMakeLists runs. The static target
+    # upstream provides is spirv-reflect-static, not the spirv_reflect target
+    # the old third_party/ wrapper defined, so consumers link that name.
+    set(SPIRV_REFLECT_EXECUTABLE OFF CACHE BOOL "" FORCE)
+    set(SPIRV_REFLECT_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SPIRV_REFLECT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(SPIRV_REFLECT_STATIC_LIB ON CACHE BOOL "" FORCE)
+    set(SPIRV_REFLECT_SHARED_LIB OFF CACHE BOOL "" FORCE)
+    set(SPIRV_REFLECT_INSTALL OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/SPIRV-Reflect EXCLUDE_FROM_ALL SYSTEM)
+    # The old vendored wrapper built this as C11 + PIC; upstream's static target
+    # sets neither. PIC is required: the archive is linked into the shared
+    # zahlen_engine (through the static zahlen_vulkan).
+    set_target_properties(spirv-reflect-static PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED ON
+        C_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON
+    )
+endif()
 
-# --- simdjson (vendored at extern/simdjson) ---
-# plugins/json is its only consumer. Provisioned here like every other extern/
-# entry so no platform needs a system simdjson: pkg-config discovery has no
-# story on a bare Windows toolchain, which is exactly what used to break
-# plugins/json there. As a subproject simdjson turns its developer mode and
-# install rules off by itself; BUILD_SHARED_LIBS is OFF project-wide, so its
-# simdjson target is a static archive, aliased as simdjson::simdjson.
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/simdjson EXCLUDE_FROM_ALL SYSTEM)
+# --- simdjson ---
+# plugins/json is its only consumer (via simdjson::simdjson). Prefer a system
+# simdjson package on Unix when available, and fall back to building the
+# vendored extern/simdjson from source otherwise (including bare Windows
+# toolchains with no system package manager).
+#
+# simdjson's own C++26 static-reflection APIs must stay OFF even though the
+# engine compiles with -freflection: since simdjson 5.0 they are auto-detected
+# from feature-test macros in every TU that includes <simdjson.h> unless
+# SIMDJSON_STATIC_REFLECTION=0 is defined (upstream's default AUTO mode omits
+# that flag from installed simdjsonTargets.cmake), and simdjson/annotations.h
+# contains `throw std::meta::exception(...)` in consteval functions which GCC
+# rejects under -fno-exceptions. Zahlen uses its own reflection serializer
+# (JSONSchema.hpp), so force SIMDJSON_STATIC_REFLECTION=0 in both the system
+# and vendored paths.
+option(ZHLN_SIMDJSON_VENDORED
+    "Build and use the vendored extern/simdjson, ignoring any system simdjson" OFF)
+
+set(ZHLN_HAS_SIMDJSON FALSE)
+if(UNIX AND NOT ZHLN_SIMDJSON_VENDORED)
+    find_path(_ZHLN_PROBE_SIMDJSON_H
+        NAMES simdjson.h
+        HINTS "${SIMDJSON_ROOT}" ENV SIMDJSON_ROOT /opt/homebrew/opt/simdjson /usr/local
+        PATH_SUFFIXES include
+        QUIET
+    )
+    if(NOT _ZHLN_PROBE_SIMDJSON_H)
+        unset(_ZHLN_PROBE_SIMDJSON_H CACHE)
+    endif()
+
+    if(_ZHLN_PROBE_SIMDJSON_H OR DEFINED ENV{PKG_CONFIG_PATH})
+        # Omit a version argument here: upstream simdjson writes
+        # COMPATIBILITY SameMinorVersion into simdjson-config-version.cmake, so
+        # `find_package(simdjson 3.0)` would reject 3.1+, 4.x, and 5.x.
+        find_package(simdjson CONFIG QUIET)
+        if(simdjson_FOUND AND TARGET simdjson::simdjson)
+            set_target_properties(simdjson::simdjson PROPERTIES IMPORTED_GLOBAL TRUE)
+            get_target_property(_zhln_sys_simdjson_inc simdjson::simdjson INTERFACE_INCLUDE_DIRECTORIES)
+            if(_zhln_sys_simdjson_inc)
+                target_include_directories(simdjson::simdjson SYSTEM INTERFACE ${_zhln_sys_simdjson_inc})
+            endif()
+            get_target_property(_zhln_sys_simdjson_defs simdjson::simdjson INTERFACE_COMPILE_DEFINITIONS)
+            if(_zhln_sys_simdjson_defs)
+                list(REMOVE_ITEM _zhln_sys_simdjson_defs "SIMDJSON_STATIC_REFLECTION=1")
+                set_target_properties(simdjson::simdjson PROPERTIES
+                    INTERFACE_COMPILE_DEFINITIONS "${_zhln_sys_simdjson_defs}")
+            endif()
+            target_compile_definitions(simdjson::simdjson INTERFACE SIMDJSON_STATIC_REFLECTION=0)
+            set(ZHLN_HAS_SIMDJSON TRUE)
+            message(STATUS "Using system simdjson ${simdjson_VERSION} (CMake package)")
+        endif()
+
+        if(NOT ZHLN_HAS_SIMDJSON)
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(ZHLN_SYS_SIMDJSON QUIET IMPORTED_TARGET simdjson)
+            endif()
+            if(ZHLN_SYS_SIMDJSON_FOUND AND TARGET PkgConfig::ZHLN_SYS_SIMDJSON)
+                add_library(simdjson::simdjson INTERFACE IMPORTED GLOBAL)
+                target_link_libraries(simdjson::simdjson INTERFACE PkgConfig::ZHLN_SYS_SIMDJSON)
+                if(ZHLN_SYS_SIMDJSON_INCLUDE_DIRS)
+                    target_include_directories(simdjson::simdjson SYSTEM INTERFACE ${ZHLN_SYS_SIMDJSON_INCLUDE_DIRS})
+                elseif(_ZHLN_PROBE_SIMDJSON_H)
+                    target_include_directories(simdjson::simdjson SYSTEM INTERFACE "${_ZHLN_PROBE_SIMDJSON_H}")
+                endif()
+                target_compile_definitions(simdjson::simdjson INTERFACE SIMDJSON_STATIC_REFLECTION=0)
+                set(ZHLN_HAS_SIMDJSON TRUE)
+                message(STATUS "Using system simdjson ${ZHLN_SYS_SIMDJSON_VERSION} (pkg-config)")
+            endif()
+        endif()
+
+        if(NOT ZHLN_HAS_SIMDJSON AND _ZHLN_PROBE_SIMDJSON_H)
+            find_library(_ZHLN_SYS_SIMDJSON_LIB
+                NAMES simdjson
+                HINTS "${SIMDJSON_ROOT}" ENV SIMDJSON_ROOT /opt/homebrew/opt/simdjson /usr/local
+                QUIET
+            )
+            if(_ZHLN_SYS_SIMDJSON_LIB)
+                find_package(Threads QUIET)
+                add_library(simdjson::simdjson INTERFACE IMPORTED GLOBAL)
+                target_include_directories(simdjson::simdjson SYSTEM INTERFACE "${_ZHLN_PROBE_SIMDJSON_H}")
+                target_link_libraries(simdjson::simdjson INTERFACE "${_ZHLN_SYS_SIMDJSON_LIB}" Threads::Threads)
+                target_compile_definitions(simdjson::simdjson INTERFACE
+                    SIMDJSON_THREADS_ENABLED=1
+                    SIMDJSON_STATIC_REFLECTION=0
+                )
+                set(ZHLN_HAS_SIMDJSON TRUE)
+                message(STATUS "Using system simdjson: ${_ZHLN_SYS_SIMDJSON_LIB} (${_ZHLN_PROBE_SIMDJSON_H})")
+            else()
+                unset(_ZHLN_SYS_SIMDJSON_LIB CACHE)
+            endif()
+        endif()
+    endif()
+endif()
+
+if(NOT ZHLN_HAS_SIMDJSON)
+    set(SIMDJSON_STATIC_REFLECTION_MODE "OFF" CACHE STRING "" FORCE)
+    # C++26 guarantees <bit>; pre-seeding skips simdjson's try_compile check, and
+    # disabling PCH on this single-TU library avoids building a throwaway .pch.
+    set(SIMDJSON_HAS_BIT_HEADER TRUE CACHE BOOL "" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/simdjson EXCLUDE_FROM_ALL SYSTEM)
+    set_target_properties(simdjson PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+endif()
 
 # --- test-harness toggles for vendor projects ---
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)

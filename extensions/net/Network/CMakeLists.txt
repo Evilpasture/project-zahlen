@@ -43,6 +43,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
+    CXX_SCAN_FOR_MODULES ON
     POSITION_INDEPENDENT_CODE ON
 )
 
@@ -78,15 +79,7 @@ if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()
 
-target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
-
-# NetworkClient.cpp is POSIX sockets on Linux and macOS and winsock2 on Windows
-# (the includes are #ifdef'd inside the file). winsock is a library, not just a
-# header, so the import library has to be on this archive's link line; CMake
-# carries a PRIVATE link-only dependency through to consumers, which is where
-# this archive's undefined WSAStartup and friends get resolved.
-if(ZHLN_HAVE_WINSOCK)
-    target_link_libraries(${TARGET_NAME} PRIVATE
-        ws2_32
-    )
-endif()
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_warnings
+    zahlen_socket
+)

@@ -55,7 +55,7 @@ auto HasHover(const HoverState& state) noexcept -> bool {
 }
 
 auto HoverCardPlacement(
-    float width, float height, const GUI::Context::ElementRect& anchor, const GUI::Context::ElementRect* panel, const ZHLN::Extent2D& viewport,
+    float width, float height, const GUI::ElementRect& anchor, const GUI::ElementRect* panel, const ZHLN::Extent2D& viewport,
     const HoverCardStyle& style
 ) noexcept -> HoverCardOffset {
     const float windowWidth   = static_cast<float>(viewport.width);
@@ -90,13 +90,13 @@ auto HoverCardPlacement(
 }
 
 void DrawHoverCard(
-    GUI::Context& ui, const HoverState& state, const ZHLN::Extent2D& viewport, const HoverCardStyle& style, std::string_view besideId
+    GUI::Frame& ui, const HoverState& state, const ZHLN::Extent2D& viewport, const HoverCardStyle& style, std::string_view besideId
 ) {
     if (!HasHover(state)) {
         return;
     }
 
-    const std::optional<GUI::Context::ElementRect> anchor = ui.GetLastFrameRect(state.id);
+    const std::optional<GUI::ElementRect> anchor = ui.GetLastFrameRect(state.id);
     if (!anchor) {
         return; // the element is not in the last frame's tree yet
     }
@@ -123,7 +123,7 @@ void DrawHoverCard(
 
     // Where it goes is the widget's own rule, in one place, and the rendering is
     // the last thing that happens to it (see HoverCardPlacement).
-    const std::optional<GUI::Context::ElementRect> panel = besideId.empty() ? std::nullopt : ui.GetLastFrameRect(besideId);
+    const std::optional<GUI::ElementRect> panel = besideId.empty() ? std::nullopt : ui.GetLastFrameRect(besideId);
     const HoverCardOffset where = HoverCardPlacement(width, height, *anchor, panel ? &*panel : nullptr, viewport, style);
 
     ui.Box(

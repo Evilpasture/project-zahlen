@@ -14,6 +14,8 @@
 // Test Suite
 // ============================================================================
 
+namespace {
+
 struct RayTracedShadowsTestSuite {
     RayTracedShadowsTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -145,14 +147,11 @@ struct RayTracedShadowsTestSuite {
                         mA.meanLuma, mB.meanLuma, mClear.meanLuma, temporalDiff.frac32, signalDiff.frac32, repeatDiff.frac32
                     );
 
-                    // Occlusion is the A/B mean delta (the shadow drops the
+                    // Occlusion is the A/clear mean delta (the shadow drops the
                     // floor band ~95 luma), not a dark-pixel count: luma < 24
                     // reads 0 on both sides of a working shadow once the scene
-                    // is this bright. Stability is dither-aware: the RT shadow
-                    // is 1 SPP stochastic by design (see the noise suite), so
-                    // consecutive frames MUST differ in the penumbra -- what
-                    // must hold is that the dither sits an order of magnitude
-                    // below the occlusion signal, and that settled means agree.
+                    // is this bright. Hybrid CascadePCSS * RtContactShadow is
+                    // deterministic, so consecutive static frames agree cleanly.
                     const bool shadowExist       = ZHLN::Test::ExpectGt(mClear.meanLuma, mA.meanLuma * 1.25 + 1.0);
                     const bool notBlackout       = ZHLN::Test::ExpectGt(mA.meanLuma, 5.0);
                     const bool ditherBelowSignal = ZHLN::Test::ExpectLt(temporalDiff.frac32, 0.1 * signalDiff.frac32);
@@ -184,8 +183,4 @@ struct RayTracedShadowsTestSuite {
     };
 };
 
-// Exported for the GPU_Lighting group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunRayTracedShadowsSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<RayTracedShadowsTestSuite>();
-}
+} // namespace

@@ -9,6 +9,8 @@
 #include <Zahlen/Threading/Thread.hpp>
 #include <expected>
 
+namespace {
+
 struct RenderComputeTestSuite {
     RenderComputeTestSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -58,8 +60,4 @@ struct RenderComputeTestSuite {
     };
 };
 
-// Exported for the GPU_Pipeline group binary, which aggregates every suite in
-// this domain through Runner::RunDeferred.
-auto RunRenderComputeSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<RenderComputeTestSuite>();
-}
+} // namespace

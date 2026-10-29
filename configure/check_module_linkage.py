@@ -50,6 +50,7 @@ does not answer it.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -84,53 +85,28 @@ CXX_SUFFIXES = {
 }
 TRANSLATION_UNIT_SUFFIXES = {".c", ".cc", ".cpp", ".cxx"}
 MODULE_UNIT_SUFFIXES = {".cppm", ".ixx"}
+SKIP_DIR_NAMES = {".git", "build", "target", "__pycache__", ".cache", "node_modules"}
+
+_COMMENT_OR_STRING_RE = re.compile(
+    r"//[^\n]*"
+    r"|/\*[\s\S]*?\*/"
+    r'|"(?:\\[\s\S]|[^"\\])*"'
+    r"|'(?:\\[\s\S]|[^'\\])*'"
+)
+
+
+def _blank_match(match: re.Match[str]) -> str:
+    span = match.group(0)
+    if "\n" not in span:
+        return " " * len(span)
+    return "\n".join(" " * len(part) for part in span.split("\n"))
 
 
 # Vendored from configure/check_macro_governance.py: a comment that says `inline` is
 # prose about the keyword, not a use of it, and this file is full of both.
 def strip_comments_and_strings(text: str) -> str:
     """Replace comments and string/char literals with spaces, newlines kept."""
-    out = list(text)
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c == "/" and i + 1 < n:
-            if text[i + 1] == "/":
-                while i < n and text[i] != "\n":
-                    out[i] = " "
-                    i += 1
-                continue
-            if text[i + 1] == "*":
-                out[i] = out[i + 1] = " "
-                i += 2
-                while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
-                    if text[i] != "\n":
-                        out[i] = " "
-                    i += 1
-                if i + 1 < n:
-                    out[i] = out[i + 1] = " "
-                i += 2
-                continue
-        if c in "\"'":
-            quote, i = c, i + 1
-            out[i - 1] = " "
-            while i < n and text[i] != quote:
-                if text[i] == "\\":
-                    out[i] = " "
-                    i += 1
-                    if i < n and text[i] != "\n":
-                        out[i] = " "
-                        i += 1
-                    continue
-                if text[i] != "\n":
-                    out[i] = " "
-                i += 1
-            if i < n:
-                out[i] = " "
-                i += 1
-            continue
-        i += 1
-    return "".join(out)
+    return _COMMENT_OR_STRING_RE.sub(_blank_match, text)
 
 
 def iter_sources(paths=None):
@@ -143,9 +119,16 @@ def iter_sources(paths=None):
     for root in SOURCE_ROOTS:
         if not root.is_dir():
             continue
-        for path in sorted(root.rglob("*")):
-            if path.suffix.lower() in CXX_SUFFIXES and path.is_file():
-                yield path.resolve()
+        found: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIR_NAMES)
+            base = Path(dirpath)
+            for name in sorted(filenames):
+                candidate = base / name
+                if candidate.suffix.lower() in CXX_SUFFIXES and candidate.is_file():
+                    found.append(candidate.resolve())
+        found.sort()
+        yield from found
 
 
 def is_vendored(path: Path) -> bool:
@@ -309,16 +292,23 @@ def collect(paths):
     found: list = []
     scanned = 0
     units = {"interface": 0, "implementation": 0}
+    kind_of: dict = {}
     for path in iter_sources(paths):
         if is_vendored(path):
             continue
+        suffix = path.suffix.lower()
+        if suffix not in MODULE_UNIT_SUFFIXES and suffix not in TRANSLATION_UNIT_SUFFIXES:
+            continue
         text = path.read_text(errors="ignore")
+        if suffix in TRANSLATION_UNIT_SUFFIXES and "module" not in text:
+            continue
         kind = module_kind(path, text)
         if not kind or kind not in units:
             continue
         scanned += 1
         units[kind] += 1
         relative = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+        kind_of[relative] = kind
         clean = strip_comments_and_strings(text)
         lines = clean.split("\n")
         start = purview_start(clean)
@@ -382,7 +372,7 @@ def collect(paths):
             for _ in range(closes):
                 if stack:
                     stack.pop()
-    return found, scanned, units
+    return found, scanned, units, kind_of
 
 
 def check(declarations, kind_of, violations) -> int:
@@ -450,16 +440,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    declarations, scanned, units = collect(args.file)
-    kind_of = {}
-    for path in iter_sources(args.file):
-        if is_vendored(path):
-            continue
-        text = path.read_text(errors="ignore")
-        kind = module_kind(path, text)
-        if kind in ("interface", "implementation"):
-            relative = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
-            kind_of[relative] = kind
+    declarations, scanned, units, kind_of = collect(args.file)
 
     if args.list:
         for declaration in sorted(declarations, key=lambda d: (str(d.path), d.line)):

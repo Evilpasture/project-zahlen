@@ -6,7 +6,6 @@ ThresholdPushConstants pc;
 
 Texture2D<float4> texInput;
 SamplerState smp;
-Texture2D<float4> texEmissive;
 RWTexture2D<float4> outImage;
 
 static const float3 kLumaBT709 = float3(0.2126, 0.7152, 0.0722);
@@ -24,10 +23,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float3 color = texInput.SampleLevel(smp, uv, 0).rgb;
 
-    float3 emissive = texEmissive.SampleLevel(smp, uv, 0).rgb;
-    float3 surface  = max(color - emissive, 0.0f);
-
-    float luma = dot(surface, kLumaBT709);
+    float luma = dot(color, kLumaBT709);
 
     // The scene buffer is raw HDR radiance; exposure is applied much later,
     // in the tonemap blit. Comparing raw luma against a display-referred
@@ -45,12 +41,16 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     soft       = (soft * soft) / (4.0 * knee + 1e-5);
 
     float contribution = max(soft, exposedLuma - threshold) / max(exposedLuma, 1e-5);
-    float3 brightColor = surface * contribution;
+    float3 brightColor = color * contribution;
 
     static const float maxLuma = 128.0;
     if (exposedLuma > maxLuma) {
         brightColor *= (maxLuma / exposedLuma);
     }
 
-    outImage[tid.xy] = float4(brightColor + emissive * max(pc.glowIntensity, 0.0f), 1.0);
+    // The optional glow feed remains a direct HDR contribution, rather than a
+    // second material attachment. It keeps the artist control useful for dim
+    // emissive sources that intentionally sit below the physical threshold.
+    brightColor += color * max(pc.glowIntensity, 0.0f);
+    outImage[tid.xy] = float4(brightColor, 1.0);
 }
