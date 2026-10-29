@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <span>
 #include <type_traits>
@@ -21,6 +22,14 @@ using TaskFn = void (*)(void*);
 struct Task {
     TaskFn func;
     void*  arg;
+};
+
+enum class BackgroundDispatchError : uint8_t {
+    InvalidTask = 1,
+    SchedulerUnavailable,
+    NoBackgroundWorkers,
+    NoAvailableFiber,
+    QueueFull
 };
 
 struct Counter {
@@ -54,6 +63,13 @@ struct Scope final {
 };
 
 void Dispatch(std::span<const Task> tasks, Counter* counter = nullptr);
+
+// Queue one long-lived job only for WorkerMain. Unlike Dispatch, it never runs
+// inline or through main-thread Dispatch/Wait work stealing; scheduler and
+// fiber-capacity failures are returned instead. The job occupies one worker
+// and one fiber until it returns.
+[[nodiscard]] auto DispatchBackground(Task task, Counter* counter = nullptr) noexcept
+    -> std::expected<void, BackgroundDispatchError>;
 
 void Wait(Counter* counter);
 

@@ -22,7 +22,8 @@ enum class TaskSystemError : uint32_t {
     DispatchFailed ZHLN_ANNOTATION(ZHLN::Description<"Dispatched tasks failed to execute or update shared memory.">{}) = 1,
     ParallelForFailed ZHLN_ANNOTATION(ZHLN::Description<"ParallelFor processing failed to reach or verify all iterations.">{}),
     ParallelInvokeFailed ZHLN_ANNOTATION(ZHLN::Description<"ParallelInvoke returned before its tasks completed.">{}),
-    LifecycleFailed ZHLN_ANNOTATION(ZHLN::Description<"Task system lifecycle did not serialize or restart cleanly.">{})
+    LifecycleFailed ZHLN_ANNOTATION(ZHLN::Description<"Task system lifecycle did not serialize or restart cleanly.">{}),
+    BackgroundDispatchFailed ZHLN_ANNOTATION(ZHLN::Description<"Background work did not stay asynchronous or complete.">{})
 };
 
 static_assert(!std::is_copy_constructible_v<ZHLN::TaskSystem::Scope> && !std::is_copy_assignable_v<ZHLN::TaskSystem::Scope>);
@@ -175,6 +176,32 @@ struct TaskSystemTestSuite {
 
             if (accum.load(std::memory_order::relaxed) != 8) {
                 return std::unexpected(TaskSystemError::DispatchFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> background_dispatch_runs_only_on_worker_slots() {
+            struct Probe {
+                uint32_t workerIndex = 0;
+                std::atomic<bool> completed {false};
+            } probe;
+
+            const auto execute = [](void* raw) {
+                auto& value = *static_cast<Probe*>(raw);
+                value.workerIndex = ZHLN::TaskSystem::GetWorkerIndex();
+                value.completed.store(true, std::memory_order::relaxed);
+            };
+            const ZHLN::TaskSystem::Task task {.func = execute, .arg = &probe};
+            ZHLN::TaskSystem::Counter completion;
+            auto scheduled = ZHLN::TaskSystem::DispatchBackground(task, &completion);
+            if (!scheduled) {
+                return std::unexpected(TaskSystemError::BackgroundDispatchFailed);
+            }
+
+            ZHLN::TaskSystem::Wait(&completion);
+            const uint32_t mainWorkerIndex = ZHLN::TaskSystem::GetWorkerCount() - 1;
+            if (!probe.completed.load(std::memory_order::relaxed) || probe.workerIndex >= mainWorkerIndex) {
+                return std::unexpected(TaskSystemError::BackgroundDispatchFailed);
             }
             return {};
         }

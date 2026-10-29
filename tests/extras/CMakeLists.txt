@@ -170,17 +170,24 @@ zahlen_register_extras_test(${TARGET_NAME})
 
 # --- Grouped Non-Module Extras Binaries (6 links instead of 20) ---
 
-# 1. Extras_Socket: POSIX/Win32 socket ownership, TCP, and UDP loopback.
+# 1. Extras_Socket: TCP/UDP, local IPC, and Discord RPC/service integration.
 zahlen_add_extras_group(Extras_Socket
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestSocket.cpp
+    TestLocalStream.cpp
+    TestDiscordRPC.cpp
 )
 target_link_libraries(Extras_Socket PRIVATE
     zahlen_engine
     zahlen_socket
+    zahlen_discord_rpc
+    zahlen_discord_engine
+    zahlen_serialization
 )
 zahlen_register_extras_test(Extras_Socket)
 zahlen_add_extras_build_alias(Extras_Socket TestSocket)
+zahlen_add_extras_build_alias(Extras_Socket TestLocalStream)
+zahlen_add_extras_build_alias(Extras_Socket TestDiscordRPC)
 
 # 2. Extras_UI: UI schema, widgets, console debugger, and baked font loader.
 zahlen_add_extras_group(Extras_UI

@@ -47,7 +47,8 @@ enum class SocketErrorDomain : uint8_t {
     None,
     Posix,
     Winsock,
-    Resolver
+    Resolver,
+    LocalIPC
 };
 
 struct SocketFailure {

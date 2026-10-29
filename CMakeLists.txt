@@ -522,6 +522,8 @@ if(ZHLN_BUILD_EXTRAS)
     zahlen_module
     zahlen_animation
     zahlen_socket
+    zahlen_discord_rpc
+    zahlen_discord_engine
     zahlen_network
     zahlen_datamodel
     zahlen_vfx

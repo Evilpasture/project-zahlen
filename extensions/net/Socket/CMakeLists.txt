@@ -6,9 +6,15 @@
 set(TARGET_NAME zahlen_socket)
 
 if(WIN32)
-    set(ZHLN_SOCKET_BACKEND SocketWin32.cpp)
+    set(ZHLN_SOCKET_BACKEND
+        SocketWin32.cpp
+        LocalStreamWin32.cpp
+    )
 else()
-    set(ZHLN_SOCKET_BACKEND SocketPosix.cpp)
+    set(ZHLN_SOCKET_BACKEND
+        SocketPosix.cpp
+        LocalStreamPosix.cpp
+    )
 endif()
 
 add_library(${TARGET_NAME} STATIC
@@ -22,8 +28,11 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-target_include_directories(${TARGET_NAME} PUBLIC
-    ${PROJECT_SOURCE_DIR}/extensions/net
+target_include_directories(${TARGET_NAME}
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/extensions/net
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
 )
 
 if(ZHLN_HAVE_WINSOCK)

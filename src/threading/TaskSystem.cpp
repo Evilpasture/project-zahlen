@@ -108,6 +108,8 @@ class BoundedFiberQueue {
 
 struct alignas(128) WorkerSlot {
     BoundedFiberQueue readyQueue;
+    // Separate queue: main-thread Dispatch/Wait work stealing never runs these jobs.
+    BoundedFiberQueue backgroundQueue;
     BoundedFiberQueue freeQueue;
 };
 
@@ -161,12 +163,37 @@ void SetCurrentThreadHighPriority() noexcept {
     return nullptr;
 }
 
+[[nodiscard]] auto PopOrStealBackground(uint32_t preferredSlot, uint32_t totalWorkers) noexcept -> Fiber* {
+    if (totalWorkers <= 1 || !s_workerSlots) {
+        return nullptr;
+    }
+    const uint32_t backgroundWorkers = totalWorkers - 1;
+    const uint32_t base = ClampSlot(preferredSlot, backgroundWorkers);
+    if (Fiber* local = s_workerSlots[base].backgroundQueue.TryPop()) {
+        return local;
+    }
+    for (uint32_t offset = 1; offset < backgroundWorkers; ++offset) {
+        const uint32_t victim = (base + offset) % backgroundWorkers;
+        if (Fiber* stolen = s_workerSlots[victim].backgroundQueue.TryPop()) {
+            return stolen;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] auto PopOrStealWorkerReady(uint32_t preferredSlot, uint32_t totalWorkers) noexcept -> Fiber* {
+    if (Fiber* background = PopOrStealBackground(preferredSlot, totalWorkers)) {
+        return background;
+    }
+    return PopOrStealReady(preferredSlot, totalWorkers);
+}
+
 [[nodiscard]] auto HasAnyReadyWork(uint32_t totalWorkers) noexcept -> bool {
     if (totalWorkers == 0 || !s_workerSlots) {
         return false;
     }
     for (uint32_t i = 0; i < totalWorkers; ++i) {
-        if (!s_workerSlots[i].readyQueue.Empty()) {
+        if (!s_workerSlots[i].readyQueue.Empty() || !s_workerSlots[i].backgroundQueue.Empty()) {
             return true;
         }
     }
@@ -242,7 +269,7 @@ void WorkerMain(uint32_t index, uint32_t totalWorkers) {
     constexpr uint32_t kSpinIterations = 32;
 
     for (;;) {
-        if (Fiber* fiber = PopOrStealReady(index, totalWorkers)) {
+        if (Fiber* fiber = PopOrStealWorkerReady(index, totalWorkers)) {
             Fiber::Resume(fiber);
             RecycleFiber(fiber, index, totalWorkers);
             continue;
@@ -254,7 +281,7 @@ void WorkerMain(uint32_t index, uint32_t totalWorkers) {
                 break;
             }
             CPURelax();
-            spunFiber = PopOrStealReady(index, totalWorkers);
+            spunFiber = PopOrStealWorkerReady(index, totalWorkers);
             if (spunFiber != nullptr) {
                 break;
             }
@@ -267,7 +294,7 @@ void WorkerMain(uint32_t index, uint32_t totalWorkers) {
 
         s_parkedWorkers.fetch_add(1, std::memory_order::seq_cst);
 
-        if (Fiber* lateFiber = PopOrStealReady(index, totalWorkers)) {
+        if (Fiber* lateFiber = PopOrStealWorkerReady(index, totalWorkers)) {
             s_parkedWorkers.fetch_sub(1, std::memory_order::relaxed);
             Fiber::Resume(lateFiber);
             RecycleFiber(lateFiber, index, totalWorkers);
@@ -325,6 +352,7 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
     s_workerSlots = std::make_unique<WorkerSlot[]>(totalWorkers);
     for (uint32_t slot = 0; slot < totalWorkers; ++slot) {
         s_workerSlots[slot].readyQueue.Reset(ringCapacity);
+        s_workerSlots[slot].backgroundQueue.Reset(ringCapacity);
         s_workerSlots[slot].freeQueue.Reset(ringCapacity);
     }
 
@@ -354,6 +382,48 @@ auto GetWorkerIndex() -> uint32_t {
 
 auto GetWorkerCount() -> uint32_t {
     return s_workerCount.load(std::memory_order::acquire);
+}
+
+auto DispatchBackground(const Task task, Counter* counter) noexcept
+    -> std::expected<void, BackgroundDispatchError> {
+    if (task.func == nullptr) {
+        return std::unexpected(BackgroundDispatchError::InvalidTask);
+    }
+
+    const uint32_t totalWorkers = s_workerCount.load(std::memory_order::acquire);
+    if (totalWorkers == 0 || !s_workerSlots) {
+        return std::unexpected(BackgroundDispatchError::SchedulerUnavailable);
+    }
+    if (totalWorkers <= 1) {
+        return std::unexpected(BackgroundDispatchError::NoBackgroundWorkers);
+    }
+
+    const uint32_t backgroundWorkers = totalWorkers - 1;
+    const uint32_t targetSlot = s_dispatchCursor.fetch_add(1, std::memory_order::relaxed) % backgroundWorkers;
+    Fiber* fiber = AllocateFiber(targetSlot, totalWorkers);
+    if (fiber == nullptr) {
+        return std::unexpected(BackgroundDispatchError::NoAvailableFiber);
+    }
+
+    auto* data = static_cast<FiberData*>(fiber->arg);
+    data->task = task;
+    data->counter = counter;
+    if (counter != nullptr) {
+        counter->value.fetch_add(1, std::memory_order::relaxed);
+    }
+
+    if (!s_workerSlots[targetSlot].backgroundQueue.TryPush(fiber)) {
+        if (counter != nullptr) {
+            counter->value.fetch_sub(1, std::memory_order::release);
+        }
+        data->task = {};
+        data->counter = nullptr;
+        s_workerSlots[targetSlot].freeQueue.TryPush(fiber);
+        return std::unexpected(BackgroundDispatchError::QueueFull);
+    }
+
+    NotifyParkedWorkers(1);
+    return {};
 }
 
 void Shutdown() {
