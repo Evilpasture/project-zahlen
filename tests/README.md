@@ -197,6 +197,34 @@ every `test_*` function in that namespace.
   gets a frame list. Windows workers emit the same
   records, but the win32 reader is synchronous and leaves frames as
   `module+0xoffset` (`llvm-symbolizer` resolves those by hand).
+- Perf measurements (`ZHLN::Test::WaitIdle`): mark a case whose result depends on
+  a quiet machine --
+
+  ```cpp
+  struct ZHLN_ANNOTATION(ZHLN::Test::WaitIdle<"frame budget"> {}) PerfSuite {
+      auto upload_throughput() -> void { /* timed work */ }
+  };
+  ```
+
+  `ztest` pulls that case out of its file's parallel shard and gives it a shard
+  of its own. The shard is only scheduled once every other worker has exited and
+  been reaped, so nothing of the suite is competing for CPU, the GPU queue, or
+  the page cache while the case is timed; ordinary parallelism resumes the
+  moment it returns. A running measurement also blocks new spawns, so a shard
+  that was queued behind it cannot start in the middle of the window. When it
+  runs, the isolation is reported rather than assumed:
+
+  ```
+    [ WAIT-IDLE ] Machine quiesced for tests/perf/TestPerf.cpp::PerfSuite::upload_throughput -- no other worker is running.
+    [ PASS ] tests/perf/TestPerf.cpp::PerfSuite::upload_throughput (41.20 ms, exclusive: machine idle for 812.40 ms before start)
+  ```
+
+  "idle for N ms before start" is measured from the moment the run last became
+  fully idle, so a case that had to wait for a long shard to drain shows the
+  larger number. `--collect-only` marks such cases `[wait-idle]`. `-k`/`-m`
+  filters apply as usual: a filter that excludes the case means no draining
+  happens at all. On Windows each shard already owns the machine, so the mark
+  only affects reporting there.
 
 ## Pytest-Style Fixtures, `@parametrize`, & Decomposing `Expect`
 

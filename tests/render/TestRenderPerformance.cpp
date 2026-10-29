@@ -990,7 +990,10 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
 namespace {
 
-struct RenderPerformanceValidationSuite {
+// Same gate as the throughput suite below: these cases compare against a stored
+// baseline, so a reading taken beside other workers is a report about the host
+// rather than about the renderer.
+struct ZHLN_ANNOTATION(ZHLN::Test::WaitIdle<"baseline comparison reads the GPU alone"> {}) RenderPerformanceValidationSuite {
     static inline std::unique_ptr<ZHLN::Engine> s_engine;
 
     RenderPerformanceValidationSuite() {
@@ -1067,7 +1070,11 @@ struct RenderPerformanceValidationSuite {
 
 namespace {
 
-struct RenderPerformanceThroughputSuite {
+// These cases are throughput gates: each one reports a baseline ratio, so a
+// reading taken while another worker is still running is a regression report
+// about the machine, not about the renderer. WaitIdle quiesces the other pools
+// for the duration of the case.
+struct ZHLN_ANNOTATION(ZHLN::Test::WaitIdle<"throughput gate reads the GPU alone"> {}) RenderPerformanceThroughputSuite {
     static inline std::unique_ptr<ZHLN::Engine> s_engine;
 
     RenderPerformanceThroughputSuite() {

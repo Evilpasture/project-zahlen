@@ -51,6 +51,7 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestSoA.cpp
     core/TestTestFramework.cpp
     core/TestTextEdit.cpp
+    core/TestWaitIdle.cpp
     ecs/TestECS.cpp
     ecs/TestEventBus.cpp
     ecs/TestSystemGraph.cpp

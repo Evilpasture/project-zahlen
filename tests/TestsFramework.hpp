@@ -163,6 +163,30 @@ struct Tags {
 template <ZHLN::StringLiteral Name>
 using Tag = Tags<Name>;
 
+// Marks a case as a measurement: ztest drains the machine before running it.
+// A case carrying this mark is pulled out of its parallel shard and given a
+// shard of its own, which is only scheduled once every other worker has exited
+// and been reaped -- so no CPU contention, no competing GPU queue and no other
+// process's page-cache churn is in the window being timed. Normal parallelism
+// resumes as soon as the measurement returns.
+//
+// The name is deliberate: what the annotation asks for is a *quiescent* machine
+// at the start of the case, not merely "last", and not a different test order.
+//
+//   struct ZHLN_ANNOTATION(ZHLN::Test::WaitIdle<"frame budget"> {}) PerfSuite {
+//       auto test_upload_throughput() -> void { ... }
+//   };
+//
+// `Reason` is a StringLiteral, so it has to be spelled as a string literal --
+// `WaitIdle<someConstexprStringView>` does not compile, because StringLiteral
+// deduces its length from `const char (&)[N]` and a string_view is not a
+// character array.
+template <ZHLN::StringLiteral Reason = "">
+struct WaitIdle {
+    static constexpr bool             isWaitIdle = true;
+    static constexpr std::string_view reason     = Reason;
+};
+
 struct AllowValidation {
     static constexpr bool isAllowValidation = true;
 };
@@ -1142,6 +1166,7 @@ struct RunnerOptions {
     std::vector<std::string> sourceFiles;              // --file=<relFile>
     std::vector<std::string> exactCases;               // --exact=<nodeId>
     std::string              skipUntilCase;            // --skip-until=<nodeId>
+    bool                     skipWaitIdle = false;     // --no-wait-idle (parallel pass only)
 };
 
 struct SkipUntilState {
@@ -1161,6 +1186,8 @@ struct CaseMarks {
     bool                             allowValidationErrors = false;
     bool                             allowDeviceLost       = false;
     bool                             isHelper              = false;
+    bool                             waitIdle              = false;
+    std::string_view                 waitIdleReason        = {};
     std::array<std::string_view, 16> tags                  = {};
     std::size_t                      tagCount              = 0;
 
@@ -1205,6 +1232,10 @@ consteval void ApplyAnnotation(CaseMarks& marks) {
     }
     if constexpr (requires { Annotation::isTestHelper; }) {
         marks.isHelper = true;
+    }
+    if constexpr (requires { Annotation::isWaitIdle; }) {
+        marks.waitIdle       = true;
+        marks.waitIdleReason = Annotation::reason;
     }
 }
 
@@ -1879,6 +1910,14 @@ inline auto ParseRunnerOptions(int argc, char** argv) -> RunnerOptions {
             },
         },
         ZHLN::CliFlag {
+            .key         = "--no-wait-idle",
+            .description = "Skip ZHLN::Test::WaitIdle cases (they run in their own shard)",
+            .action      = [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
+                opts.skipWaitIdle = true;
+                return {};
+            },
+        },
+        ZHLN::CliFlag {
             .key         = "--skip-until",
             .placeholder = "<nodeId>",
             .description = "Skip cases through <nodeId> and resume after",
@@ -2037,6 +2076,14 @@ inline auto CaseMatchesOptions(
         if (!found) {
             return false;
         }
+    }
+
+    // A ZHLN::Test::WaitIdle case always runs in a shard of its own, so it must
+    // not also be picked up by the ordinary shard that covers its file -- that
+    // second run would be neither isolated nor expected, and it would show up as
+    // a duplicate result for the same node id.
+    if (opts.skipWaitIdle && marks.waitIdle) {
+        return false;
     }
 
     if (!opts.keywordExpr.empty()) {
@@ -2633,11 +2680,26 @@ inline void EmitSuiteCasesRuntime(
                 state  = "quarantine";
                 reason = SanitizeProtocolField(desc.marks.quarantineReason);
             }
-            ZHLN::Println("@@ZTEST CASE\t{}\t{}\t{}\t{}\t{}\t{}", relFile, nodeId, tagsCsv, timeoutSec, state, reason);
+            // The trailing column is appended rather than inserted so a reader
+            // that only knows the original six fields keeps parsing: unknown
+            // trailing columns are ignored, a shifted one is not.
+            ZHLN::Println(
+                "@@ZTEST CASE\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                relFile,
+                nodeId,
+                tagsCsv,
+                timeoutSec,
+                state,
+                reason,
+                desc.marks.waitIdle ? "wait-idle" : ""
+            );
         } else {
             std::string suffix;
             if (!tagsCsv.empty()) {
                 suffix += std::format(" [tags: {}]", tagsCsv);
+            }
+            if (desc.marks.waitIdle) {
+                suffix += " [wait-idle]";
             }
             if (desc.marks.isSkipped) {
                 suffix += desc.marks.skipReason.empty() ? " [skip]" : std::format(" [skip: {}]", desc.marks.skipReason);

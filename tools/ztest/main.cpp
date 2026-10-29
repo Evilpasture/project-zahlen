@@ -478,6 +478,12 @@ struct CaseOutcome {
     CaseStatus  status     = CaseStatus::Pass;
     int64_t     durationUs = 0;
     std::string diagnostics;
+    // True when the case ran on a quiesced machine (ZHLN::Test::WaitIdle), with
+    // how long the machine had been idle when it started. Reported rather than
+    // silently implied: a measurement whose isolation cannot be seen cannot be
+    // trusted when it disagrees with a previous run.
+    bool        quiesced   = false;
+    int64_t     quiesceUs  = 0;
 };
 
 struct DiscoveredCase {
@@ -488,6 +494,9 @@ struct DiscoveredCase {
     uint32_t                 timeoutSec = 15;
     std::string              state      = "normal";
     std::string              reason;
+    // ZHLN::Test::WaitIdle: the case must observe a quiescent machine, so it
+    // gets a shard of its own that only starts once every other worker is gone.
+    bool                     waitIdle = false;
 };
 
 // ============================================================================
@@ -1149,6 +1158,13 @@ struct WorkItem {
     std::string              skipUntilCase;
     uint32_t                 respawnDepth   = 0;
     bool                     explicitTarget = false;
+    // Set on a shard that carries exactly one ZHLN::Test::WaitIdle case: the
+    // scheduler holds it back until nothing else is running.
+    bool                     waitIdle       = false;
+    std::string              waitIdleCase; // node id, for the [ WAIT-IDLE ] line
+    // True on an ordinary shard that happens to cover files containing WaitIdle
+    // cases: those cases are excluded there and run in their own shard instead.
+    bool                     suppressWaitIdle = false;
 };
 
 struct ProcessResult {
@@ -1196,6 +1212,9 @@ auto BuildWorkerArgv(const WorkItem& item, const ZtestOptions& opts, bool listMo
     if (!item.skipUntilCase.empty()) {
         args.push_back(std::format("--skip-until={}", item.skipUntilCase));
     }
+    if (item.suppressWaitIdle) {
+        args.emplace_back("--no-wait-idle");
+    }
     return args;
 }
 
@@ -1226,6 +1245,9 @@ struct ActiveWorker {
     std::string                           progressGlyphs;
     std::string                           crashReport; // raw @@ZTEST STACKTRACE-* block, see RenderWorkerCrashReport
     bool                                  crashAnnounced = false; // worker closed the case with `... CRASHED` and is exiting
+    // For a WaitIdle shard: how long the machine had been quiet when this
+    // worker was started. Zero for everything else.
+    int64_t                               quiesceUs = 0;
     uint32_t                              localTotal  = 0;
     uint32_t                              localPassed = 0;
     uint32_t                              localFailed = 0;
@@ -1954,6 +1976,11 @@ auto CollectItems(
         if (cols.size() >= 7) {
             dc.reason = cols[6];
         }
+        // Trailing and optional: the column was added after the first six were
+        // in use, so its absence simply means "not a measurement".
+        if (cols.size() >= 8) {
+            dc.waitIdle = cols[7] == "wait-idle";
+        }
         discovered.push_back(std::move(dc));
     };
 
@@ -2099,6 +2126,10 @@ auto PrintCollectedItems(std::span<const DiscoveredCase> discovered) -> int {
     ZHLN::Println("{}collected {} item(s){}\n", kAnsiBold, discovered.size(), ZHLN::Color::Reset);
     for (const auto& dc: discovered) {
         ZHLN::Print("  {}", dc.nodeId);
+        if (dc.waitIdle) {
+            // Says why this case will interrupt the parallel run when it runs.
+            ZHLN::Print(" {}[wait-idle]{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
+        }
         if (!dc.tags.empty()) {
             ZHLN::Print("{} [tags: {}]{}", ZHLN::Color::Gray, JoinDelimited(dc.tags, ','), ZHLN::Color::Reset);
         }
@@ -2129,7 +2160,41 @@ auto BuildShardedExecutionQueue(
     std::map<std::string, std::size_t>       cpuShardIndex;
     std::map<const TargetSpec*, std::size_t> gpuShardIndex;
 
+    // Files that own at least one measurement. Their ordinary shards have to be
+    // told to skip those cases, otherwise the case runs twice: once inside the
+    // per-file shard and once in its exclusive one.
+    std::set<std::string> filesWithMeasurements;
+    // GPU shards are pooled per *target*, not per file, so one shard can cover
+    // several files at once. A file-keyed lookup therefore cannot suppress a
+    // measurement that lives in a pooled shard; the target has to be tracked too.
+    std::set<const TargetSpec*> gpuTargetsWithMeasurements;
     for (const auto& dc: discovered) {
+        if (dc.waitIdle) {
+            filesWithMeasurements.insert(std::format("{}\t{}", dc.target->name, dc.relFile));
+            if (EqualsIgnoreCase(dc.target->pool, "gpu")) {
+                gpuTargetsWithMeasurements.insert(dc.target);
+            }
+        }
+    }
+
+    for (const auto& dc: discovered) {
+        // A measurement cannot share a shard: the whole point of WaitIdle is
+        // that nothing else of ours is running while it is timed, which the
+        // scheduler can only honour if the case is alone in its worker. This
+        // comes before the shard grouping below so the case never joins -- or
+        // creates -- a per-file shard.
+        if (dc.waitIdle) {
+            WorkItem solo {};
+            solo.target        = dc.target;
+            solo.shardLabel    = dc.relFile;
+            solo.sourceFiles   = {dc.relFile};
+            solo.exactCases    = {dc.nodeId};
+            solo.waitIdle      = true;
+            solo.waitIdleCase  = dc.nodeId;
+            queue.push_back(std::move(solo));
+            continue;
+        }
+
         const bool isGpu = EqualsIgnoreCase(dc.target->pool, "gpu");
         if (!isGpu) {
             const std::string key = std::format("{}\t{}", dc.target->name, dc.relFile);
@@ -2142,6 +2207,7 @@ auto BuildShardedExecutionQueue(
                 if (const auto baseIt = baseByTarget.find(dc.target); baseIt != baseByTarget.end()) {
                     shard.exactCases = baseIt->second->exactCases;
                 }
+                shard.suppressWaitIdle = filesWithMeasurements.contains(key);
                 cpuShardIndex.emplace(key, queue.size());
                 queue.push_back(std::move(shard));
             }
@@ -2155,6 +2221,9 @@ auto BuildShardedExecutionQueue(
                 if (const auto baseIt = baseByTarget.find(dc.target); baseIt != baseByTarget.end()) {
                     shard.exactCases = baseIt->second->exactCases;
                 }
+                // The measurement already has its own solo shard, so the pooled
+                // shard must skip it -- otherwise it runs twice.
+                shard.suppressWaitIdle = gpuTargetsWithMeasurements.contains(dc.target);
                 gpuShardIndex.emplace(dc.target, queue.size());
                 queue.push_back(std::move(shard));
             } else {
@@ -2167,8 +2236,18 @@ auto BuildShardedExecutionQueue(
         }
     }
 
+    // Measurements run before the backlog, not after it. Queue order comes from
+    // the file name (CollectItems sorts by relFile), so a suite that sorts late
+    // -- "tests/render/..." against "tests/core/..." -- would otherwise reach
+    // its turn only once every ordinary shard ahead of it had drained, which is
+    // indistinguishable from "this ran last". Draining an idle machine is free,
+    // so hoisting the measurements costs nothing and makes the promise literal:
+    // quiesce, measure, refill. `stable_partition` is applied in two passes so
+    // serial shards keep the front of the ordinary section rather than being
+    // dragged behind the measurements.
+    std::ranges::stable_partition(queue, [](const WorkItem& item) { return item.waitIdle; });
     std::ranges::stable_partition(queue, [](const WorkItem& item) {
-        return !EqualsIgnoreCase(item.target->pool, "serial");
+        return item.waitIdle || !EqualsIgnoreCase(item.target->pool, "serial");
     });
     return queue;
 }
@@ -2380,7 +2459,22 @@ auto main(int argc, char** argv) -> int {
         const double ms = static_cast<double>(outcome.durationUs) / 1000.0;
         switch (outcome.status) {
             case CaseStatus::Pass:
-                if (opts.verbose && !opts.quiet) {
+                if (outcome.quiesced) {
+                    // A measurement always reports itself, even non-verbose: the
+                    // number is only comparable across runs if the reader can
+                    // tell it was taken on an idle machine.
+                    statusLine.Clear();
+                    if (!opts.quiet) {
+                        ZHLN::Println(
+                            "  {}[ PASS ]{} {} ({:.2f} ms, exclusive: machine idle for {:.2f} ms before start)",
+                            ZHLN::Color::Green,
+                            ZHLN::Color::Reset,
+                            outcome.nodeId,
+                            ms,
+                            static_cast<double>(outcome.quiesceUs) / 1000.0
+                        );
+                    }
+                } else if (opts.verbose && !opts.quiet) {
                     statusLine.Clear();
                     ZHLN::Println(
                         "  {}[ PASS ]{} {} ({:.2f} ms)", ZHLN::Color::Green, ZHLN::Color::Reset, outcome.nodeId, ms
@@ -2519,6 +2613,8 @@ auto main(int argc, char** argv) -> int {
                     .status      = st,
                     .durationUs  = durUs,
                     .diagnostics = std::move(diagnostics),
+                    .quiesced    = w.item.waitIdle,
+                    .quiesceUs   = w.quiesceUs,
                 });
                 w.inFlightFile.clear();
                 w.inFlightNodeId.clear();
@@ -2566,6 +2662,14 @@ auto main(int argc, char** argv) -> int {
     std::vector<ActiveWorker> active;
     auto                      lastRunTick = std::chrono::steady_clock::time_point {};
 
+    // When the scheduler last observed `active` going from non-empty to empty.
+    // A WaitIdle shard measures "how quiet was the machine" from this stamp,
+    // which is why it lives next to `active` rather than inside a worker.
+    // Seeded with "now": the run starts with nothing of ours executing, so a
+    // measurement scheduled first measures from startup rather than carrying no
+    // stamp at all.
+    std::optional<std::chrono::steady_clock::time_point> lastIdleStamp = std::chrono::steady_clock::now();
+
     auto refreshRunStatus = [&](bool force) {
         if (!statusLine.Enabled() || opts.verbose || active.empty()) {
             return;
@@ -2611,7 +2715,13 @@ auto main(int argc, char** argv) -> int {
         uint32_t runningGpu    = 0;
         bool     runningSerial = false;
         for (const auto& w: active) {
-            if (EqualsIgnoreCase(w.item.target->pool, "serial")) {
+            // A running measurement blocks scheduling exactly like a serial
+            // shard, and for the same reason: the window it is timing must not
+            // contain work that started after it was granted the machine. This
+            // has to be read off the *item*, not the pool name -- a measurement
+            // can live in an ordinary "cpu" target, and then the pool check
+            // alone would let a sibling spawn beside it.
+            if (EqualsIgnoreCase(w.item.target->pool, "serial") || w.item.waitIdle) {
                 runningSerial = true;
             } else if (EqualsIgnoreCase(w.item.target->pool, "gpu")) {
                 ++runningGpu;
@@ -2624,7 +2734,44 @@ auto main(int argc, char** argv) -> int {
         for (std::size_t idx = 0; !runningSerial && idx < pending.size();) {
             const bool isSerial = EqualsIgnoreCase(pending[idx].target->pool, "serial");
             const bool isGpu    = EqualsIgnoreCase(pending[idx].target->pool, "gpu");
-            if (isSerial) {
+
+            // WaitIdle is the same barrier as a serial shard, and then some: a
+            // serial shard merely runs alone, while this one must also not have
+            // its measurement polluted by the tail of anything that ran before
+            // it. Draining to `active.empty()` is that guarantee -- the workers
+            // below are reaped, not just stopped, because a killed-but-unreaped
+            // worker still owns its pages, file descriptors and (for a GPU
+            // case) its device context.
+            if (pending[idx].waitIdle) {
+                if (active.empty() && !runningSerial) {
+                    const std::string_view label =
+                        pending[idx].waitIdleCase.empty() ? std::string_view {pending[idx].shardLabel} : std::string_view {pending[idx].waitIdleCase};
+                    // Printed under -v too: a drained run is the moment a
+                    // perf problem is usually being diagnosed, so hiding the
+                    // barrier there hides the explanation for a long pause.
+                    // --quiet still suppresses it.
+                    if (!opts.quiet) {
+                        statusLine.Clear();
+                        ZHLN::Println(
+                            "  {}[ WAIT-IDLE ]{} Machine quiesced for {} -- no other worker is running.",
+                            ZHLN::Color::Cyan,
+                            ZHLN::Color::Reset,
+                            label
+                        );
+                    }
+                } else {
+                    // Do not step over it. `++idx` here is what made a measured
+                    // case wait for the whole suite: every sibling spawned ahead
+                    // of it drags the pool to exhaust time with it, so a run that
+                    // starts with `--gpu-jobs 6` busy never reaches the gate
+                    // until the very end. Stop this pass instead and let the
+                    // reap loop come back once `active` has drained; the backlog
+                    // sitting behind the measurement is launched immediately
+                    // afterwards, which is the "parallelism resumes straight
+                    // away" half of the contract.
+                    break;
+                }
+            } else if (isSerial) {
                 if (!active.empty()) {
                     ++idx;
                     continue;
@@ -2640,15 +2787,27 @@ auto main(int argc, char** argv) -> int {
             WorkItem nextItem = std::move(pending[idx]);
             pending.erase(pending.begin() + static_cast<std::ptrdiff_t>(idx));
 
-            auto spawned = SpawnWorkerPosix(mf, nextItem, opts, false, false, statusLine);
+            // Stamped before the fork so the number describes the window the
+            // measurement actually starts in, not the cost of spawning it.
+            const bool                   isMeasurement = nextItem.waitIdle;
+            const auto                   quiesceStart  = lastIdleStamp;
+            auto                         spawned       = SpawnWorkerPosix(mf, nextItem, opts, false, false, statusLine);
             if (!spawned) {
                 missingBinary = true;
                 ++hardFailureCount;
                 continue;
             }
+            if (isMeasurement && quiesceStart.has_value()) {
+                spawned->quiesceUs =
+                    std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - *quiesceStart).count();
+            }
             active.push_back(std::move(*spawned));
             spawnedAny = true;
-            if (isSerial) {
+            if (isSerial || isMeasurement) {
+                // Stop this pass immediately: a measurement owns the machine
+                // until it exits, so nothing else may be launched beside it.
+                // (Reading the item rather than only the pool is what makes a
+                // WaitIdle case in an ordinary "cpu" target isolate correctly.)
                 runningSerial = true;
             } else if (isGpu) {
                 ++runningGpu;
@@ -2827,6 +2986,12 @@ auto main(int argc, char** argv) -> int {
             }
         }
 
+        if (active.empty()) {
+            lastIdleStamp = std::chrono::steady_clock::now();
+        } else {
+            lastIdleStamp.reset();
+        }
+
         refreshRunStatus(false);
     }
 #else
@@ -2926,6 +3091,11 @@ auto main(int argc, char** argv) -> int {
                         .status      = st,
                         .durationUs  = durUs,
                         .diagnostics = std::move(diagnostics),
+                        // The win32 reader is already synchronous: each shard
+                        // owns the machine outright, so a measurement there is
+                        // quiesced by construction rather than by waiting.
+                        .quiesced    = item.waitIdle,
+                        .quiesceUs   = 0,
                     });
                     inFile.clear();
                     inNodeId.clear();
