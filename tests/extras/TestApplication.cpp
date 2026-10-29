@@ -4,11 +4,16 @@
 // CLI early exits and callable shape require no GPU/device or Engine::Create.
 #include "TestsFramework.hpp"
 #include <Zahlen/App.hpp>
+#include <Zahlen/HostRunner.hpp>
+#include <Zahlen/KernelApp.hpp>
+#include <Zahlen/Core/Description.hpp>
 #include <array>
 #include <concepts>
 #include <cstdlib>
+#include <cstdint>
 #include <expected>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -35,6 +40,26 @@ template <typename T>
 concept HasNativeGameplayToggle = requires(T config) { config.enableNativeGameplay; };
 static_assert(!HasNativeGameplayToggle<EngineRunConfig>);
 static_assert(!HasNativeGameplayToggle<EngineConfig>);
+
+struct LaunchOptions {
+    uint32_t cubes ZHLN_ANNOTATION(Description<"Initial physics boxes"> {}, = CliRange<0, 64> {}, = CliShort<'c'> {}) = 5;
+    int32_t  seed ZHLN_ANNOTATION(Description<"Signed random seed"> {}) = 0;
+};
+struct StartOnlyLayer { void Start(Engine&) {} };
+struct TickOnlyLayer { void Tick(Engine&, float) {} };
+struct NotALayer { void Update(Engine&) {} };
+struct MoveOnlyLayer {
+    std::unique_ptr<int> value;
+    bool* called = nullptr;
+    void Start(Engine&) { *called = true; }
+    void Tick(Engine&, float) { *called = true; }
+};
+static_assert(AppLayer<StartOnlyLayer>);
+static_assert(AppLayer<TickOnlyLayer>);
+static_assert(AppLayer<MoveOnlyLayer>);
+static_assert(!AppLayer<NotALayer>);
+static_assert(!std::copy_constructible<MoveOnlyLayer>);
+static_assert(std::copy_constructible<Application>); // reflected keys and owned layers survive copies
 } // namespace
 
 void test_app_help_exits_without_running_gameplay() {
@@ -121,6 +146,89 @@ void test_app_custom_flags_bulk_registration_and_help_via_span() {
     char missing[] = "--level";
     char* bad[]    = {program, missing};
     Expect(app.Run(std::span<char* const>(bad)) == EXIT_FAILURE);
+}
+
+void test_reflected_cli_config_keeps_owned_keys_and_validates_atomically() {
+    LaunchOptions options;
+    Application app;
+    {
+        auto source = App();
+        source.WithConfig(options);
+        app = source; // the original owner of the dynamically constructed keys dies
+    }
+
+    char program[] = "test-application";
+    char cubes[]   = "--cubes=64";
+    char seed[]    = "--seed=-7";
+    char help[]    = "--help";
+    char* good[]   = {program, cubes, seed, help};
+    Expect(app.Run(std::span<char* const>(good)) == EXIT_SUCCESS); // help exits before Engine::Create
+    Expect(options.cubes == 64u);
+    Expect(options.seed == -7);
+
+    char outOfRange[] = "--cubes=65";
+    char* tooMany[]  = {program, outOfRange};
+    Expect(app.Run(std::span<char* const>(tooMany)) == EXIT_FAILURE);
+    Expect(options.cubes == 64u); // validation never partially overwrites a field
+
+    char negative[] = "--cubes=-1";
+    char* unsignedNegative[] = {program, negative};
+    Expect(app.Run(std::span<char* const>(unsignedNegative)) == EXIT_FAILURE);
+    Expect(options.cubes == 64u);
+
+    char overflow[] = "--seed=999999999999999999999999999";
+    char* badOverflow[] = {program, overflow};
+    Expect(app.Run(std::span<char* const>(badOverflow)) == EXIT_FAILURE);
+    Expect(options.seed == -7);
+
+    char trailing[] = "--seed=12bad";
+    char* badSeed[] = {program, trailing};
+    Expect(app.Run(std::span<char* const>(badSeed)) == EXIT_FAILURE);
+    Expect(options.seed == -7);
+
+    char missing[]   = "--cubes";
+    char* noValue[]  = {program, missing};
+    Expect(app.Run(std::span<char* const>(noValue)) == EXIT_FAILURE);
+    Expect(options.cubes == 64u);
+
+    char shortCubes[] = "-c=12";
+    char* shortArgs[] = {program, shortCubes, help};
+    Expect(app.Run(std::span<char* const>(shortArgs)) == EXIT_SUCCESS);
+    Expect(options.cubes == 12u);
+}
+
+void test_layered_application_help_does_not_start_layers() {
+    bool called = false;
+    char program[] = "test-application";
+    char help[]    = "--help";
+    char* args[]   = {program, help};
+    Expect(App().AddLayer(MoveOnlyLayer {.value = std::make_unique<int>(1), .called = &called}).Run(2, args) == EXIT_SUCCESS);
+    Expect(!called);
+}
+
+void test_kernel_app_early_cli_exits_and_validates_c_arguments() {
+    char program[] = "test-kernel-app";
+    char help[]    = "--help";
+    char* args[]   = {program, help};
+    Expect(KernelApp().Named("Test Kernel Tool").Run(2, args) == EXIT_SUCCESS);
+    Expect(KernelApp().Run(-1, args) == EXIT_FAILURE);
+    Expect(KernelApp().Run(1, nullptr) == EXIT_FAILURE);
+}
+
+void test_frame_pacer_prefers_display_timing_only_when_it_meets_cap() {
+    FramePacer uncapped;
+    Expect(uncapped.TargetFrameTime() == 0.0);
+    Expect(uncapped.DisplayPaced(0.010f));
+    Expect(uncapped.SelectDelta(0.02f, 0.010f) == 0.010f);
+    uncapped.EndFrame(FramePacer::BeginFrame(), std::nullopt);
+
+    FramePacer capped(60);
+    Expect(capped.TargetFrameTime() > 0.0);
+    Expect(capped.DisplayPaced(0.020f));
+    Expect(!capped.DisplayPaced(0.001f));
+    Expect(capped.SelectDelta(0.003f, 0.001f) == 0.003f);
+    Expect(capped.SelectDelta(0.003f, 0.020f) == 0.020f);
+    capped.EndFrame(FramePacer::BeginFrame(), 0.020f); // already display-paced: no sleep
 }
 
 } // namespace ZHLN::Test

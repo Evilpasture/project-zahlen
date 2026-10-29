@@ -429,7 +429,6 @@ if(ZHLN_BUILD_EXTRAS)
     # add_subdirectory(extensions) further down: a link item resolves to its
     # target by generate time, whatever the order here.
     target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine
-                          zahlen_engine_cli zahlen_signal
                           zahlen_widgets Jolt)
     target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
 

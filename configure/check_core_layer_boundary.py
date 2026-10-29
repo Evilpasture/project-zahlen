@@ -10,8 +10,9 @@ The repository's source layers are deliberately distinct:
 All three may consume Core. None may become a dependency of src/, include/, or
 modules/, except the application facade include/Zahlen/App.hpp: that header
 belongs to zahlen_application, not zahlen_engine, and may include precisely the
-CommandLine/EngineCommandLine.hpp contract it publishes. Core may not include
-App.hpp itself. This configure-time check catches imported C++ modules and
+CommandLine/EngineCommandLine.hpp contract it publishes. App.hpp, HostRunner.hpp
+and KernelApp.hpp are app-owned public headers; Core may include none of them.
+This configure-time check catches imported C++ modules and
 headers, including headers included through their public short include roots.
 CMake target links are kept explicit in the root composition layer and should
 not be added to targets that build Core sources.
@@ -25,8 +26,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE_ROOTS = (ROOT / "src", ROOT / "include", ROOT / "modules")
-# Physical header location is not ownership: App.hpp belongs to zahlen_application.
+# Physical header location is not ownership: these facades belong to app/.
 APP_FACADE = Path("include/Zahlen/App.hpp")
+APP_PUBLIC_HEADERS = frozenset({
+    APP_FACADE,
+    Path("include/Zahlen/HostRunner.hpp"),
+    Path("include/Zahlen/KernelApp.hpp"),
+})
 APP_CLI_CONTRACT = "CommandLine/EngineCommandLine.hpp"
 LAYER_ROOTS = (ROOT / "plugins", ROOT / "extensions", ROOT / "gameplay")
 LAYER_INCLUDE_ROOTS = (
@@ -132,13 +138,18 @@ def main() -> int:
 
             for match in include_pattern.finditer(text):
                 include = normalize(match.group(2))
-                # Neither the public spelling nor a same-directory/relative
-                # include may pull the application facade back into Core.
-                facade_spelling = include in {"Zahlen/App.hpp", "App.hpp", APP_FACADE.as_posix()}
-                facade_relative = (Path(include).name == "App.hpp" and
-                                   (path.parent / match.group(2)).resolve() == ROOT / APP_FACADE)
-                if relative_path != APP_FACADE and (facade_spelling or facade_relative):
-                    violations.append(f"{relative_path} includes the application facade from Core")
+                # Neither a public spelling nor a same-directory/relative
+                # include may pull any app-owned facade back into Core.
+                facade_spelling = any(include in {
+                    f"Zahlen/{facade.name}", facade.name, facade.as_posix()
+                } for facade in APP_PUBLIC_HEADERS)
+                facade_relative = any(
+                    Path(include).name == facade.name and
+                    (path.parent / match.group(2)).resolve() == ROOT / facade
+                    for facade in APP_PUBLIC_HEADERS
+                )
+                if relative_path not in APP_PUBLIC_HEADERS and (facade_spelling or facade_relative):
+                    violations.append(f"{relative_path} includes an application facade from Core")
                     continue
                 candidates = (headers.get(include) or headers.get(Path(include).name)) if include else None
                 if not candidates:

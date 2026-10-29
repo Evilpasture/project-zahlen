@@ -3,11 +3,11 @@
 
 // The default executable is a statically linked C++ game, not a DLL host.
 // App owns platform setup, modules, input polling, frame pacing and teardown.
-#include <CommandLine/CommandLine.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Input.hpp>
@@ -18,18 +18,19 @@
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <charconv>
 #include <cstdint>
-#include <expected>
-#include <string_view>
 
 namespace {
 
+struct GameLaunchConfig {
+    uint32_t cubes ZHLN_ANNOTATION(ZHLN::Description<"Initial physics boxes (0-64)"> {}, = ZHLN::CliRange<0, 64> {}, = ZHLN::CliShort<'c'> {}) = 5;
+    uint32_t seed ZHLN_ANNOTATION(ZHLN::Description<"Jitter the initial box grid reproducibly (default: 0)"> {}) = 0;
+};
+
 struct SandboxGame {
-    ZHLN::Entity lamp       = ZHLN::Entity::Null();
-    float        elapsed    = 0.0f;
-    uint32_t     spawnCubes = 5;
-    uint32_t     seed       = 0;
+    GameLaunchConfig& launch;
+    ZHLN::Entity      lamp    = ZHLN::Entity::Null();
+    float             elapsed = 0.0f;
 
     void Start(ZHLN::Engine& engine) {
         if (auto cli = engine.Service<ZHLN::CommandLineOptions>()) {
@@ -56,12 +57,13 @@ struct SandboxGame {
 
         // --cubes controls the initial physics population. --seed optionally
         // jitters the grid with a fixed integer LCG (the default stays aligned).
-        uint32_t random = seed;
+        const uint32_t seed = launch.seed;
+        uint32_t       random = seed;
         const auto jitter = [&random]() -> float {
             random = random * 1664525u + 1013904223u;
             return (static_cast<float>(random >> 24) / 255.0f - 0.5f) * 0.6f;
         };
-        for (uint32_t i = 0; i < spawnCubes; ++i) {
+        for (uint32_t i = 0; i < launch.cubes; ++i) {
             const float x      = (static_cast<float>(i % 8) - 2.0f) * 1.65f + (seed ? jitter() : 0.0f);
             const float z      = static_cast<float>(i / 8) * 1.65f + (seed ? jitter() : 0.0f);
             const float stripe = static_cast<float>(i % 5);
@@ -158,40 +160,9 @@ struct SandboxGame {
 } // namespace
 
 int main(int argc, char* argv[]) {
-    SandboxGame game;
-    const auto parseNumber = [](std::string_view value) -> std::expected<uint32_t, ZHLN::ErrorCode> {
-        if (value.empty()) {
-            return std::unexpected(ZHLN::CommandLineError::MissingValue);
-        }
-        uint32_t count = 0;
-        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), count);
-        if (error != std::errc {} || end != value.data() + value.size()) {
-            return std::unexpected(ZHLN::CommandLineError::InvalidValue);
-        }
-        return count;
-    };
-
+    GameLaunchConfig launch;
     return ZHLN::App()
-        .AddCliOption(
-            "--cubes", "<count>", "Initial physics boxes (0-64)",
-            [&](ZHLN::CommandLineOptions&, std::string_view value) -> std::expected<void, ZHLN::ErrorCode> {
-                auto count = parseNumber(value);
-                if (!count) return std::unexpected(count.error());
-                if (*count > 64) return std::unexpected(ZHLN::CommandLineError::InvalidValue);
-                game.spawnCubes = *count;
-                return {};
-            },
-            "-c"
-        )
-        .AddCliOption(
-            "--seed", "<integer>", "Jitter the initial box grid reproducibly (default: 0)",
-            [&](ZHLN::CommandLineOptions&, std::string_view value) -> std::expected<void, ZHLN::ErrorCode> {
-                auto seed = parseNumber(value);
-                if (!seed) return std::unexpected(seed.error());
-                game.seed = *seed;
-                return {};
-            }
-        )
-        .OnStart([&](ZHLN::Engine& engine) { game.Start(engine); })
-        .Run(argc, argv, [&](ZHLN::Engine& engine, float dt) { game.Tick(engine, dt); });
+        .WithConfig(launch)
+        .AddLayer(SandboxGame {.launch = launch})
+        .Run(argc, argv);
 }

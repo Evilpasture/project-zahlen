@@ -1,85 +1,21 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Application owns ordinary-game composition and its outer frame loop. Optional
-// extension wiring stays here, not in the game or the engine's launch settings.
-#include "engine/Platform.hpp"
+// Application composes the game and its frame plan. CMake generates the
+// optional default-module install pass in DefaultModules.cpp.
 #include <CommandLine/EngineCommandLine.hpp>
-#include <Signal/CrashHandler.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/Clock.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#if defined(ZHLN_APP_HAS_FONTS)
-#include <Fonts/Fonts.hpp>
-#endif
-#if defined(ZHLN_APP_HAS_CHARACTER_CONTROLLER)
-#include <CharacterController/CharacterController.hpp>
-#endif
-#if defined(ZHLN_APP_HAS_CAMERA)
-#include <Camera/TargetCamera.hpp>
-#endif
-#if defined(ZHLN_APP_HAS_INTERACTION)
-#include <Interaction/InteractionSystem.hpp>
-#endif
-#if defined(ZHLN_APP_HAS_TERRAIN)
-#include <Terrain/TerrainSystem.hpp>
-#endif
-#if defined(ZHLN_APP_HAS_ANIMATION)
-#include <Animation/IK.hpp>
-#endif
-#if defined(ZHLN_APP_HAS_FREECAM)
-#include <FreeCam/FreeCam.hpp>
-#endif
-#if defined(ZHLN_APP_HAS_RAGDOLL_AUTHORING)
-#include <RagdollAuthoring/RagdollAuthoring.hpp>
-#endif
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <span>
-#include <thread>
 #include <utility>
 
 namespace ZHLN {
-
-void InstallApplicationDefaults(Engine& engine) {
-#if defined(ZHLN_APP_HAS_FONTS)
-    // Prime the cache before InitializeDefaultScene uploads the font atlas.
-    if (auto fontID = Fonts::LoadFontAsset(engine, Fonts::VendoredDefaultFontSource()); !fontID) {
-        LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
-    }
-#endif
-    // Character declares MovementComponent writes; Interaction reads it.
-#if defined(ZHLN_APP_HAS_CHARACTER_CONTROLLER)
-    Character::Install(engine);
-#endif
-#if defined(ZHLN_APP_HAS_CAMERA)
-    CameraRig::Install(engine);
-#endif
-#if defined(ZHLN_APP_HAS_INTERACTION)
-    Interaction::Install(engine);
-#endif
-#if defined(ZHLN_APP_HAS_TERRAIN)
-    Terrain::Install(engine);
-#endif
-#if defined(ZHLN_APP_HAS_ANIMATION)
-    IK::Install(engine); // installs Animation before IK
-#endif
-#if defined(ZHLN_APP_HAS_FREECAM)
-    FreeCam::Install(engine);
-#endif
-#if defined(ZHLN_APP_HAS_RAGDOLL_AUTHORING)
-    RagdollAuthoring::Install(engine);
-#endif
-}
 
 auto Application::RunFromCLI(EngineRunConfig config, std::span<char* const> args, const Update& update) const -> int {
     const CommandLineOptions defaults {
@@ -107,12 +43,9 @@ auto Application::RunFromCLI(EngineRunConfig config, std::span<char* const> args
 }
 
 auto Application::RunConfigured(const EngineRunConfig& config, const Update& update, const CommandLineOptions* options) const -> int {
-    // App owns both process-level crash reporting and the lifetime of the
-    // platform, task workers, and engine. Never nest Engine::Run here.
-    static CrashState crashState;
-    SetupSignalHandler(crashState);
-    Platform::Init();
-    TaskSystem::Scope tasks; // Engine must be destroyed before its workers.
+    // Keep the Engine lifetime inside the shared process/task scope. Never
+    // nest Engine::Run here: it creates another TaskSystem::Scope.
+    ProcessScope process;
 
     auto created = Engine::Create(Engine::MakeConfig(config));
     if (!created) {
@@ -141,33 +74,39 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
     if (_ui) {
         engine->SetUICallback(_ui);
     }
+    for (const auto& layer: _layers) {
+        if (layer.start != nullptr) {
+            layer.start(layer.state.get(), *engine);
+        }
+    }
     if (_start) {
         _start(*engine);
     }
 
-    const double targetFrameTime = config.fpsLimit > 0 ? 1.0 / static_cast<double>(config.fpsLimit) : 0.0;
-    Clock        runClock({.maxDeltaTime = 0.1f});
+    FramePacer pacer(config.fpsLimit);
+    Clock      runClock({.maxDeltaTime = 0.1f});
     while (engine->IsRunning()) {
-        const auto frameStart = Clock::SteadyClock::now();
-        CheckForCrashes(crashState, engine.get());
-        engine->ProcessEvents();
+        const auto frameStart = FramePacer::BeginFrame();
+        process.PollCrashes(engine.get());
+        engine->ProcessEvents(); // includes input and renderer resize synchronization
         if (!engine->IsRunning()) {
             break;
         }
 
         const float rawDt = runClock.Tick();
-        auto&       registry = engine->GetRegistry();
-        if (auto input = registry.GetSingleton<Components::InputStateComponent>(); input && input->needsResize) {
-            engine->GetRenderContext().SetResolution(input->newSize);
-            input->needsResize = false;
-            continue;
+        const std::optional<float> pacedDt = engine->GetRenderContext().GetPacedDeltaTime();
+        const float dt = pacer.SelectDelta(rawDt, pacedDt);
+        for (const auto& layer: _layers) {
+            if (layer.tick != nullptr) {
+                layer.tick(layer.state.get(), *engine, dt);
+                if (!engine->IsRunning()) {
+                    break;
+                }
+            }
         }
-
-        constexpr double           kFpsCapSlack = 1.05;
-        const std::optional<float> pacedDt      = engine->GetRenderContext().GetPacedDeltaTime();
-        const bool displayPaced = pacedDt.has_value() &&
-                                  (config.fpsLimit == 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
-        const float dt = displayPaced ? *pacedDt : rawDt;
+        if (!engine->IsRunning()) {
+            break;
+        }
         if (update) {
             update(*engine, dt);
             if (!engine->IsRunning()) {
@@ -178,20 +117,7 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
             LogError("[Application] engine frame failed");
             return EXIT_FAILURE;
         }
-
-        if (config.fpsLimit > 0 && !displayPaced) {
-            const auto now = Clock::SteadyClock::now();
-            const double elapsed = std::chrono::duration<double>(now - frameStart).count();
-            if (elapsed < targetFrameTime) {
-                const double sleepTime = targetFrameTime - elapsed;
-                if (sleepTime > 0.002) {
-                    std::this_thread::sleep_for(std::chrono::microseconds(static_cast<int64_t>((sleepTime - 0.001) * 1e6)));
-                }
-                while (std::chrono::duration<double>(Clock::SteadyClock::now() - frameStart).count() < targetFrameTime) {
-                    CPURelax();
-                }
-            }
-        }
+        pacer.EndFrame(frameStart, pacedDt);
     }
     return EXIT_SUCCESS;
 }

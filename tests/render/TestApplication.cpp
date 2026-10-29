@@ -7,6 +7,8 @@
 #include <Zahlen/App.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/GameModule.hpp>
+#include <Zahlen/Kernel.hpp>
+#include <Zahlen/KernelApp.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
@@ -25,6 +27,29 @@ namespace ZHLN::Test {
 static_assert(ECS::ResolvableFrom<SystemContext, ECS::Res<CommandLineOptions>>);
 static_assert(ECS::ResolvableFrom<ECS::Carrier<RenderServices>, ECS::Res<CommandLineOptions>>);
 
+struct StartPhaseLayer {
+    std::vector<std::string_view>* calls = nullptr;
+    void Start(Engine&) { calls->push_back("start-only"); }
+};
+
+struct TickPhaseLayer {
+    std::vector<std::string_view>* calls = nullptr;
+    void Tick(Engine&, float) { calls->push_back("tick-only"); }
+};
+
+struct RecordingLayer {
+    std::vector<std::string_view>* calls = nullptr;
+    void Start(Engine& engine) {
+        calls->push_back("layer-start");
+        Expect(engine.GetRegistry().GetSingleton<Components::CameraComponent>().has_value());
+    }
+    void Tick(Engine& engine, float dt) {
+        calls->push_back("layer-tick");
+        Expect(engine.GetCurrentFrame() == 0);
+        Expect(dt >= 0.0f);
+    }
+};
+
 void test_app_composes_before_scene_and_runs_gameplay_after_events() {
     std::vector<std::string_view> calls;
     int                           updates = 0;
@@ -35,6 +60,9 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         .headless       = true,
     };
     auto application = App(config);
+    application.AddLayer(StartPhaseLayer {.calls = &calls});
+    application.AddLayer(RecordingLayer {.calls = &calls});
+    application.AddLayer(TickPhaseLayer {.calls = &calls});
     application.Install([&](Engine& engine) {
         calls.push_back("install");
         Expect(!engine.Service<CommandLineOptions>()); // no-CLI Run stays service-free
@@ -51,7 +79,10 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         Expect(plan.Find("GameplayModule") == nullptr);
         // ProcessEvents begins an input frame. If update runs before it, the
         // deliberately stale mouse delta below is still visible to gameplay.
-        engine.GetRegistry().GetSingleton<Components::InputStateComponent>()->mouseDeltaX = 123.0f;
+        auto input = engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
+        input->mouseDeltaX = 123.0f;
+        // A resize is consumed during Engine::ProcessEvents, not by App's loop.
+        input->ApplyResize({.width = 800, .height = 600});
         const auto modules = engine.GetInstalledModules();
         Expect(std::ranges::any_of(modules, [](const Module& module) { return module.name == "AppTestModule"; }));
         Expect(!std::ranges::any_of(modules, [](const Module& module) { return module.name == "FallbackScene"; }));
@@ -69,6 +100,8 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         const auto input = engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
         Expect(input.has_value());
         Expect(input->mouseDeltaX == 0.0f);
+        Expect(!input->needsResize);
+        Expect(input->newSize.width == 800u);
         Expect(engine.GetCurrentFrame() == 0);
         calls.push_back("update");
         engine.GetPlatformHost().Close();
@@ -76,7 +109,7 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
 
     Expect(code == EXIT_SUCCESS);
     Expect(updates == 1);
-    Expect(calls == std::vector<std::string_view> {"install", "start", "update"});
+    Expect(calls == std::vector<std::string_view> {"install", "start-only", "layer-start", "start", "layer-tick", "tick-only", "update"});
 }
 
 void test_app_cli_options_service_is_available_before_install_and_scene_start() {
@@ -130,6 +163,35 @@ void test_app_cli_options_service_is_available_before_install_and_scene_start() 
     });
     Expect(code == EXIT_SUCCESS);
     Expect(installed && started && updated);
+}
+
+void test_kernel_app_owns_process_input_and_shutdown_without_an_ecs_world() {
+    bool started = false;
+    bool inputReset = false;
+    bool updated = false;
+    bool rendered = false;
+    bool shutdown = false;
+    const int code = KernelApp(RenderConfig {
+        .appName        = "KernelApplicationTest",
+        .width          = 320,
+        .height         = 180,
+        .validationMode = ValidationMode::Off,
+        .headless       = true,
+    })
+        .OnStart([&](Kernel&) { started = true; })
+        .OnInputFrame([&](Kernel&, float) { inputReset = true; })
+        .OnUpdate([&](Kernel& kernel, float dt) {
+            Expect(started && inputReset);
+            Expect(dt >= 0.0f);
+            updated = true;
+            kernel.GetPlatformHost().Close(); // no GPU frame or Window required
+        })
+        .OnRender([&](Kernel&, FrameScope&) { rendered = true; })
+        .OnShutdown([&](Kernel&) { shutdown = true; })
+        .Run();
+    Expect(code == EXIT_SUCCESS);
+    Expect(started && inputReset && updated && shutdown);
+    Expect(!rendered);
 }
 
 } // namespace ZHLN::Test

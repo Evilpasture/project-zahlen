@@ -25,19 +25,16 @@
 // tree; Design-mode hits and hierarchy clicks write the same selectedId
 // string that FindNodeById / InsertChild / RemoveNodeById already speak.
 
-#include <CommandLine/EngineCommandLine.hpp>
-#include <Signal/CrashHandler.hpp>
-#include <Zahlen/Clock.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
+#include <Zahlen/KernelApp.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/View.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Widget/TextFit.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/EventBus.hpp>
@@ -196,8 +193,6 @@ struct WindowUIInputCollector {
                     self->state.ApplyWheel(delta);
                     self->scrollDelta += delta;
                 },
-            .onResize =
-                [](void* ud, ZHLN::Extent2D extent) -> void { static_cast<WindowUIInputCollector*>(ud)->state.ApplyResize(extent); },
             .onChar =
                 [](void* ud, unsigned int codepoint) -> void {
                     auto* self = static_cast<WindowUIInputCollector*>(ud);
@@ -995,146 +990,67 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
-    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)));
-    if (!optionsRes) {
-        return EXIT_FAILURE;
-    }
-    const auto& options = optionsRes.value();
-    if (options.helpRequested || options.versionRequested) {
-        return EXIT_SUCCESS;
-    }
-
-    ZHLN::SetLogLevel(options.logLevel);
-
-    // Crash diagnostics keep their state in a caller-owned struct; static
-    // storage duration is required because its address is copied into the
-    // signal handler slots. See <Signal/CrashHandler.hpp>.
-    static ZHLN::CrashState crashState;
-    ZHLN::SetupSignalHandler(crashState);
-    ZHLN::TaskSystem::Scope taskScope;
-
     Session session;
     session.tree       = MakeDemoTree();
     session.selectedId = "panel";
     BindHostActions(session);
 
-    auto kernelRes = ZHLN::Kernel::Create(
-        {.appName           = "Zahlen UI Editor",
-         .width             = options.fullscreen ? 0u : 1280u,
-         .height            = options.fullscreen ? 0u : 720u,
-         .vsync             = options.vsync,
-         .fullscreen        = options.fullscreen,
-         .validationMode    = options.validationMode,
-         .headless          = options.headless,
-         .enableMeshShading = true},
-        session.editorInput.MakeReceiver()
-    );
-    if (!kernelRes) {
-        ZHLN::LogError("Failed to initialize Kernel: {}", kernelRes.error());
-        return EXIT_FAILURE;
-    }
-
-    auto kernel = std::move(kernelRes.value());
-    kernel->GetPlatformHost().Focus();
-
-    // Fonts are first-class assets with an AssetID: load the font asset from
-    // paks (or fontbm pair), build the GPU FontAtlas value, and feed it
-    // directly into GUI::Context. Core never parses an outline font here either.
     ZHLN::AssetID activeFontAssetID = ZHLN::GUI::kDefaultFontAssetID;
+    auto rebuildFonts = [&](ZHLN::Kernel& kernel) {
+        // The restored renderer is a new device; never reuse its predecessor's
+        // FontAtlas handles, and do not hold a RenderContext reference across
+        // Kernel::HandleDeviceLost.
+        session.fontAtlas = ZHLN::PrefabFactory::CreateFontAtlas(
+            kernel.GetRenderContext(), kernel.GetAssetManager(), activeFontAssetID
+        );
+        session.editorGui.SetFontAtlas(session.fontAtlas);
+        session.previewGui.SetFontAtlas(session.fontAtlas);
+    };
+
+    return ZHLN::KernelApp()
+        .Named("Zahlen UI Editor")
+        .Input(session.editorInput.MakeReceiver())
+        .OnStart([&](ZHLN::Kernel& kernel) {
+            // Fonts are assets, not a renderer-owned outline parser. Prime the
+            // baked fallback before creating the application's two GUI atlases.
 #if defined(ZHLN_HAS_FONTS)
-    if (auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel->GetAssetManager(), ZHLN::Fonts::VendoredDefaultFontSource())) {
-        activeFontAssetID = *fontAssetID;
-    } else {
-        ZHLN::LogWarning("Font asset failed to load ({}), falling back to embedded default.", fontAssetID.error());
-    }
+            if (auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel.GetAssetManager(), ZHLN::Fonts::VendoredDefaultFontSource())) {
+                activeFontAssetID = *fontAssetID;
+            } else {
+                ZHLN::LogWarning("Font asset failed to load ({}), falling back to embedded default.", fontAssetID.error());
+            }
 #endif
-    ZHLN::PrefabFactory::PrimeDefaultBakedFont(kernel->GetAssetManager());
-    session.fontAtlas = ZHLN::PrefabFactory::CreateFontAtlas(
-        kernel->GetRenderContext(), kernel->GetAssetManager(), activeFontAssetID
-    );
-    session.editorGui.SetFontAtlas(session.fontAtlas);
-    session.previewGui.SetFontAtlas(session.fontAtlas);
-
-    ZHLN::Clock clock;
-    while (kernel->IsRunning()) {
-        session.dt = clock.Tick();
-        session.previewInput.state.BeginFrame();
-
-        // Mirrors Engine::ProcessEvents: crash poll, per-frame input reset,
-        // then the Kernel's window pump.
-        ZHLN::CheckForCrashes(crashState, nullptr);
-        session.editorInput.state.BeginFrame();
-        kernel->ProcessEvents();
-
-        if (session.editorInput.state.needsResize) {
-            kernel->GetRenderContext().SetResolution(session.editorInput.state.newSize);
-            session.editorInput.state.needsResize = false;
-        }
-
-        if (session.previewWindow && !session.previewWindow->IsRunning()) {
-            StopPreview(*kernel, session);
-        }
-        if (session.openPreviewRequested) {
-            session.openPreviewRequested = false;
-            OpenPreview(*kernel, session);
-        }
-
-        auto& rc    = kernel->GetRenderContext();
-        auto  begin = rc.BeginFrame();
-        if (!begin) {
-            using enum ZHLN::FrameResult;
-            if (begin.error().Is(DeviceLost)) {
-                if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
-                    ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
-                    break;
+            ZHLN::PrefabFactory::PrimeDefaultBakedFont(kernel.GetAssetManager());
+            rebuildFonts(kernel);
+        })
+        .OnInputFrame([&](ZHLN::Kernel&, float) {
+            session.previewInput.state.BeginFrame();
+            session.editorInput.state.BeginFrame();
+        })
+        .OnUpdate([&](ZHLN::Kernel& kernel, float dt) {
+            session.dt = dt;
+            if (session.previewWindow && !session.previewWindow->IsRunning()) {
+                StopPreview(kernel, session);
+            }
+            if (session.openPreviewRequested) {
+                session.openPreviewRequested = false;
+                OpenPreview(kernel, session);
+            }
+        })
+        .OnRender([&](ZHLN::Kernel& kernel, ZHLN::FrameScope& gpuFrame) {
+            DrawFrame(kernel, session, gpuFrame);
+            if (session.previewWindow) {
+                DrawPreview(kernel, session, gpuFrame);
+            }
+        })
+        .OnDeviceRestored([&](ZHLN::Kernel& kernel) { rebuildFonts(kernel); })
+        .OnFrameEnd([&](ZHLN::Kernel&) {
+            session.events.Drain<GUI::UiActionEvent>([](const GUI::UiActionEvent& event) {
+                if (event.id == "editor.save_scene") {
+                    ZHLN::Log("[UIEditor] editor.save_scene");
                 }
-                rc.ClearGPUCaches();
-                session.fontAtlas = ZHLN::PrefabFactory::CreateFontAtlas(rc, kernel->GetAssetManager(), activeFontAssetID);
-                session.editorGui.SetFontAtlas(session.fontAtlas);
-                session.previewGui.SetFontAtlas(session.fontAtlas);
-            } else {
-                ZHLN::Log("[UIEditor] BeginFrame failed ({})", begin.error());
-            }
-            continue;
-        }
-        if (!begin->has_value()) {
-            // Minimised (or momentarily zero-sized) window: nothing to draw into.
-            continue;
-        }
-        ZHLN::FrameScope gpuFrame = std::move(**begin);
-
-        DrawFrame(*kernel, session, gpuFrame);
-        if (session.previewWindow) {
-            DrawPreview(*kernel, session, gpuFrame);
-        }
-
-        auto end = std::move(gpuFrame).End();
-        if (!end) {
-            using enum ZHLN::FrameResult;
-            if (end.error().Is(DeviceLost)) {
-                if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
-                    ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
-                    break;
-                }
-                rc.ClearGPUCaches();
-                session.fontAtlas = ZHLN::PrefabFactory::CreateFontAtlas(rc, kernel->GetAssetManager(), activeFontAssetID);
-                session.editorGui.SetFontAtlas(session.fontAtlas);
-                session.previewGui.SetFontAtlas(session.fontAtlas);
-            } else {
-                ZHLN::Log("[UIEditor] EndFrame failed ({})", end.error());
-            }
-        }
-        // end->has_value() (PresentSuboptimal) needs nothing from this caller:
-        // the frame was drawn, one of its presents did not go through as asked,
-        // and the renderer has already rebuilt the swapchain for it.
-
-        session.events.Drain<GUI::UiActionEvent>([](const GUI::UiActionEvent& event) {
-            if (event.id == "editor.save_scene") {
-                ZHLN::Log("[UIEditor] editor.save_scene");
-            }
-        });
-    }
-
-    StopPreview(*kernel, session);
-    return EXIT_SUCCESS;
+            });
+        })
+        .OnShutdown([&](ZHLN::Kernel& kernel) { StopPreview(kernel, session); })
+        .Run(argc, argv);
 }

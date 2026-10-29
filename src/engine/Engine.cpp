@@ -357,6 +357,7 @@ void Engine::ProcessEvents() {
     }
 
     _impl->kernel->ProcessEvents();
+    SynchronizeResize();
 
     if (inputState) {
         input.SyncCaptureFlags(inputState->wantCaptureKeyboard, inputState->wantCaptureMouse);
@@ -364,8 +365,23 @@ void Engine::ProcessEvents() {
     input.RefreshActionsForCurrentFrame(&_impl->world->GetEventBus());
 }
 
+void Engine::SynchronizeResize() {
+    auto state = _impl->world->GetRegistry().GetSingleton<Components::InputStateComponent>();
+    if (!state || !state->needsResize) {
+        return;
+    }
+    const Extent2D actual = _impl->kernel->GetPlatformHost().GetSize();
+    if (state->newSize.width != actual.width || state->newSize.height != actual.height) {
+        // Headless/TTY receivers can submit a size without a primary-window
+        // extent change; windowed targets were already handled by the Kernel.
+        _impl->kernel->GetRenderContext().SetResolution(state->newSize);
+    }
+    state->needsResize = false;
+}
+
 void Engine::PollLateInput() {
     _impl->kernel->ProcessEvents();
+    SynchronizeResize();
     auto& input = _impl->world->GetInput();
     if (auto inputState = _impl->world->GetRegistry().GetSingleton<Components::InputStateComponent>()) {
         input.SyncCaptureFlags(inputState->wantCaptureKeyboard, inputState->wantCaptureMouse);
@@ -848,15 +864,7 @@ auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstal
 
         const float rawDt = runClock.Tick();
 
-        {
-            auto& r = engine->GetRegistry();
-            if (auto st = r.GetSingleton<Components::InputStateComponent>(); st && st->needsResize) {
-                engine->GetRenderContext().SetResolution(st->newSize);
-                st->needsResize = false;
-                continue;
-            }
-        }
-
+        // Kernel/Engine already synchronized a resize during ProcessEvents.
         constexpr double           kFpsCapSlack  = 1.05;
         const std::optional<float> pacedDt       = engine->GetRenderContext().GetPacedDeltaTime();
         const bool                 displayPaced  = pacedDt.has_value() &&

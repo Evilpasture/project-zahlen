@@ -275,6 +275,10 @@ class ZHLN_API Engine {
                     EventPoller pollEvents = nullptr) -> std::expected<void, ErrorCode>;
 
   private:
+    // Consume window-input resize notifications during the event pump. The
+    // application and bespoke hosts never need to inspect ECS resize flags.
+    void SynchronizeResize();
+
     // Build the service bundles and the two typed graphs on first use.
     void EnsureSystemGraphs();
 

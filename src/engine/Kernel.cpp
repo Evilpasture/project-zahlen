@@ -90,6 +90,7 @@ struct Kernel::Impl {
     std::unique_ptr<AssetManager> assetManager;
 
     PlatformHost primaryHost;
+    Extent2D     primaryExtent {}; // last size synchronized during ProcessEvents
 
     std::vector<std::unique_ptr<Window>> secondaryWindows;
 
@@ -180,6 +181,7 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
+    _impl->primaryExtent = _impl->primaryHost.GetSize();
     _impl->BeginShaderObservation();
 
     _impl->audioContext = std::make_unique<AudioContext>(AudioConfig {.headless = cfg.headless});
@@ -241,6 +243,16 @@ auto Kernel::GetWindow() noexcept -> ZHLN::Optional<Window&> {
 
 void Kernel::ProcessEvents() {
     _impl->primaryHost.PollEvents();
+
+    // The primary presentation target reports the actual framebuffer extent.
+    // Synchronize at event-poll time, before either Engine or a Kernel-only
+    // tool begins its frame. A headless caller's SetResolution is still valid:
+    // its target size changes here only when the caller changed it explicitly.
+    const Extent2D size = _impl->primaryHost.GetSize();
+    if (size.width != _impl->primaryExtent.width || size.height != _impl->primaryExtent.height) {
+        _impl->primaryExtent = size;
+        _impl->renderContext->SetResolution(size);
+    }
 
     if (_impl->primaryHost.WantsQuitProcess()) {
         _impl->primaryHost.AcknowledgeQuitProcess();

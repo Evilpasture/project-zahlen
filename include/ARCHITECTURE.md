@@ -108,9 +108,10 @@ void   Update(Engine& engine, float dt);
 ## 1.2 Core and Optional-Layer Boundaries
 
 `src/`, most of `include/`, and the existing top-level `modules/` directory
-form the **Core Engine**. The public header `include/Zahlen/App.hpp` is the one
-exception: although physically under `include/`, it is the application facade
-owned by `zahlen_application`, not by `zahlen_engine`. The `modules/` directory
+form the **Core Engine**. The public `include/Zahlen/{App,HostRunner,KernelApp}.hpp`
+headers are exceptions: physically under `include/`, they are application
+facades owned by `zahlen_application` / `zahlen_host_runner`, not `zahlen_engine`.
+Only `App.hpp` consumes the optional CLI layer. The `modules/` directory
 is reserved for the engine's C++ module interfaces; it is not a catch-all for
 additional subsystems. Optional code is organized by architectural role instead:
 
@@ -127,8 +128,9 @@ not in the reusable Zahlen wire-protocol extension.
 
 > **Rule: dependencies point outward from Core.** Plugins, extensions, and
 > gameplay may consume Core; code under `src/`, `include/` (except the
-> application facade), or `modules/` must never include, import, or link an
-> optional-layer target. Core may not include `<Zahlen/App.hpp>`.
+> application facades), or `modules/` must never include, import, or link an
+> optional-layer target. Core may not include `<Zahlen/App.hpp>`,
+> `<Zahlen/HostRunner.hpp>` or `<Zahlen/KernelApp.hpp>`.
 
 `configure/check_core_layer_boundary.py` enforces the source/header half of this
 rule during CMake configuration. It scans module imports and resolves headers
@@ -206,7 +208,8 @@ and optional third-party dependencies stay local to the owning target.
 | `zahlen_project_light_lua` | `gameplay/ProjectLight/LuaBindings/` | DataModel ↔ LuaJIT adapter; the only target where the two layers meet |
 | `zahlen_alife`, `zahlen_interaction`, `zahlen_fallback_scene` | `gameplay/` | Domain-specific simulation, interaction rules, and fallback game scene |
 | `zahlen_datamodel`, `zahlen_project_light_client` | `gameplay/ProjectLight/` | ProjectLight's stable-ID object graph and optional native client |
-| `zahlen_application` | `app/` | Game loop, registered CLI and optional-module wiring; publicly links `zahlen_engine_cli` for the `App.hpp` facade |
+| `zahlen_host_runner` | `app/` | Shared process/crash/task lifetime and frame pacing; `KernelApp` drives Kernel-only tools with no gameplay links |
+| `zahlen_application` | `app/` | Game loop, reflected/registered CLI, layers and CMake-generated optional-module wiring; publicly links `zahlen_engine_cli` for the `App.hpp` facade |
 | `zahlen_scene_documents` | `tools/scene/` | TOML/Lua scene import shared only by tools |
 | `zahlen_world_editor`, `zahlen_benchmark_app`, `zahlen_scene_host` | `tools/{editor,benchmark,scene}/` | Separate world-editor, headless-benchmark and scene/file-watcher hosts |
 
@@ -263,9 +266,13 @@ A few examples illustrate the intended seam:
   Lua-independent property inspector lives in `extensions/Scripting/`.
 
 The ordinary-game composition root lives in `app/Application.cpp`, above
-`src/`, with optional extension `#ifdef`s confined to that wiring closet.
-`app/main.cpp` links the preset and contains only game code. Tool-specific
-composition roots live under `tools/`, each with its own executable target.
+`src/`. `app/CMakeLists.txt` generates `DefaultModules.cpp` from
+`app/DefaultModules.cpp.in`: only existing optional targets contribute includes,
+links and calls, in font → character → camera → interaction → terrain → IK →
+FreeCam → ragdoll order. Application code contains no optional-module compiler
+definitions or `#if` wall. `app/main.cpp` links the preset and contains only game
+code. Tool-specific composition roots remain separate executables under
+`tools/`; `zahlen_ui_editor` is a Kernel-only composition root under `app/`.
 Core remains usable without optional targets and does not register or call
 into an optional implementation unless a Core-owned seam is provided.
 
@@ -401,14 +408,15 @@ runs its callback **before** the engine's frame plan. System-driven games may
 omit the callback and install their own ECS systems instead:
 
 ```
-App: ProcessEvents → Run(Engine&, dt) callback → Engine::Tick(dt)
+App: ProcessEvents (resize included) → layers.Tick → Run(Engine&, dt) callback → Engine::Tick(dt)
 Tick: UI / state-file watches → PlayerIntent → Physics
       → ECS systems (including interpolation / audio) → Camera → Render / Present
 ```
 
-1. **Input & OS Events**: `Application` pumps OS/window events and updates raw mouse/keyboard states before calling the compiled C++ game callback.
-2. **Compiled gameplay**: `App().Run(callback)` owns the per-frame game update; `App().Install(...)` composes systems and frame steps before the first scene. `Engine::Run` is available for tools with their own composition and event poller.
+1. **Input & OS Events**: `Application` calls `Engine::ProcessEvents` before layers/gameplay. `Kernel::ProcessEvents` detects a changed primary framebuffer extent and notifies the renderer; Engine consumes the WindowInputReceiver's `InputStateComponent::needsResize` notification during the same pump (including headless/TTY synthetic sizes) and clears it. Neither `Application::RunConfigured` nor the low-level `Engine::Run` reads the singleton or skips a gameplay frame for resize.
+2. **Compiled gameplay**: `App().Run(callback)` owns the per-frame game update; `App().Install(...)` composes systems and frame steps before the first scene. `App().AddLayer(...)` owns heterogeneously typed start/tick layers (including move-only ones) using a one-time state allocation and two plain function pointers, no virtual call per frame. Each layer starts after the scene and ticks in insertion order before the optional `Run(callback)`. `Engine::Run` remains a low-level Core entry for bespoke hosts with their own composition and event poller.
    `Application::Run(std::span<char* const> args, callback)` parses engine flags and registered `.AddCliOption(...)` / `.WithCliOptions(...)` handlers together; the `Run(argc, argv, callback)` adapter checks the C arguments first. App handlers appear under **Application Options** in `--help`. After a successful parse (and before default modules, installers and scene initialization), the application emplaces a copy of `CommandLineOptions` in `Engine::Services()`. Installers and `OnStart` use `Engine::Service<CommandLineOptions>()`; simulation and render graph systems may resolve `ECS::Res<CommandLineOptions>` through `ExtensionServices`. CLI args and handler metadata are borrowed for the synchronous `Run` lifetime. Bare `Run()` / `Run(callback)` skip parsing and do not publish a CLI service.
+   `.WithConfig(launch)` reflects each integral, non-bool member into a `--member` handler, uses its `Description` annotation for help and optional `CliRange<Min, Max>` bounds and `CliShort<'c'>` aliases. It checks the entire `from_chars` result and only commits a validated value; generated flag strings are owned by the application and survive copying it, while the launch config itself must outlive `Run`. `app/main.cpp` registers `SandboxGame` with `.AddLayer(...)` and uses this typed binding for `--cubes`/`--seed`.
 3. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
 4. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching modules are installed, Interaction and Terrain nodes contributed through the `Module` the application installed; `BuildSystemGraphs` walks `Engine::GetInstalledModules()` and asks each one for its systems). `VisualInterpolationSystem` reads PhysicsWorld pose history and writes interpolated transforms; static bodies are skipped.
 5. **Render Graph Execution**: `CullingSystem` performs frustum culling, `LightingSystem` gathers lights, and `RenderSystem` records Vulkan commands and presents. `Engine::Tick` reports `FrameStatus::Error` if device-lost recovery fails.
@@ -667,18 +675,20 @@ The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 (`app/UIEditor.cpp`), built only when optional layers are enabled (the document it edits,
 `GUI::UINode`, is the `extensions/UI/` schema): left Hierarchy of `UINode` ids, centre canvas
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
-`FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
-same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and drawn by
-the editor itself: `RenderUI` into the frame target
-`kernel.AcquireTarget(previewWindow)` hands back, with
-`rc.EndFrame()` presenting every window the frame touched. Nothing about the
-window declares what it draws — the caller picks the passes
-(`RenderScene` / `RenderUI` / `DispatchSimulations`).
-`BlitPrimary` passes mirror the resolved 3D output; a `RenderScene` call
-targeting a second window's frame target re-executes the graph for it. CameraSystem
-still writes the main camera into every `CameraComponent`.
-Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.
-Closing that window leaves the editor running.
+`FindNodeById(tree, selectedId)`. It has no `Engine`, World or ECS: it configures
+`KernelApp` with input/update/render callbacks and an atlas-rebuild callback.
+`zahlen_host_runner` shares `ProcessScope` and `FramePacer` with games, while
+`KernelApp` owns Kernel creation, event polling, frame acquisition/presentation,
+device-loss recovery and teardown. The atlas rebuild runs only after Kernel has
+created the replacement renderer and cleared its GPU caches. Preview is a second
+OS window owned by the same Kernel (`Kernel::AddWindow`) and drawn by the editor:
+`gpuFrame.RenderUI` into `kernel.AcquireTarget(previewWindow)`; the single
+`FrameScope::End` presents every window touched in that frame. Closing the preview
+leaves the editor running.
+
+Engine-based hosts can also add a window; their 3D `BlitPrimary` passes mirror the
+resolved output, and a `RenderScene` call targeting a second window re-executes
+the graph for that window. The Kernel-only UI editor does neither.
 G / S / R on the canvas grab, scale and rotate the selection with pixel /
 15° snap; inspector sliders snap to whole pixels so layout is not float soup.
 
