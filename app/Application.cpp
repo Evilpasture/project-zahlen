@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace ZHLN {
 
@@ -76,8 +77,21 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
         LogError("[Application] initial scene failed");
         return std::unexpected(AppError::SceneInitFailed);
     }
-    if (_ui) {
-        engine->SetUICallback(_ui);
+    // Core has one host UI step; dispatch the UI-capable layers there in
+    // registration order. Snapshot their slots so the Engine's callback owns
+    // their (possibly move-only) state for this Run.
+    std::vector<LayerSlot> uiLayers;
+    for (const auto& layer: _layers) {
+        if (layer.ui != nullptr) {
+            uiLayers.push_back(layer);
+        }
+    }
+    if (!uiLayers.empty()) {
+        engine->SetUICallback([layers = std::move(uiLayers)](Engine& active) {
+            for (const auto& layer: layers) {
+                layer.ui(layer.state.get(), active);
+            }
+        });
     }
     for (const auto& layer: _layers) {
         if (layer.start != nullptr) {
@@ -90,6 +104,7 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
 
     FramePacer pacer(config.fpsLimit);
     Clock      runClock({.maxDeltaTime = 0.1f});
+    bool       frameFailed = false;
     while (engine->IsRunning()) {
         const auto frameStart = FramePacer::BeginFrame();
         process.PollCrashes(engine.get());
@@ -120,9 +135,20 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
         }
         if (engine->Tick(dt) == FrameStatus::Error) {
             LogError("[Application] engine frame failed");
-            return std::unexpected(AppError::FrameTickFailed);
+            frameFailed = true;
+            break;
         }
         pacer.EndFrame(frameStart, pacedDt);
+    }
+    // Every successfully initialized layer gets Stop while the Engine is still
+    // alive, even if events, a layer/update, or a failed frame ended the loop.
+    for (auto it = _layers.rbegin(); it != _layers.rend(); ++it) {
+        if (it->stop != nullptr) {
+            it->stop(it->state.get(), *engine);
+        }
+    }
+    if (frameFailed) {
+        return std::unexpected(AppError::FrameTickFailed);
     }
     return AppExitReason::UserClosed;
 }

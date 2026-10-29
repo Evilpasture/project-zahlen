@@ -1,11 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Opt-in local GPU test: a whole application launch, stopped before the first
-// Tick so we can pin the ordering of composition, scene, input and gameplay.
+// Opt-in local GPU test: whole application launches. Most stop before the
+// first Tick; a failure probe runs a UI-only frame without GPU rendering.
 #include "TestsFramework.hpp"
 #include <Zahlen/App.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/FramePlan.hpp>
 #include <Zahlen/GameModule.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/KernelApp.hpp>
@@ -114,6 +115,129 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
     ExpectUserClosed(result);
     Expect(updates == 1);
     Expect(calls == std::vector<std::string_view> {"install", "start-only", "layer-start", "start", "layer-tick", "tick-only", "update"});
+}
+
+// Move-only state must survive the UI callback's type erasure and remain
+// available to Stop while the Engine and its scene still exist.
+struct UILifecycleLayer {
+    std::unique_ptr<int>             state;
+    std::vector<std::string_view>* calls = nullptr;
+    void Start(Engine&) {
+        ++*state;
+        calls->push_back("layer-start");
+    }
+    void Tick(Engine&, float) {
+        ++*state;
+        calls->push_back("layer-tick");
+    }
+    void UI(Engine& engine) {
+        Expect(*state == 3);
+        Expect(engine.GetCurrentFrame() == 0);
+        calls->push_back("layer-ui");
+    }
+    void Stop(Engine& engine) {
+        Expect(*state == 3);
+        Expect(engine.GetRegistry().GetSingleton<Components::CameraComponent>().has_value());
+        calls->push_back("layer-stop");
+    }
+};
+
+struct UIOnlyPhaseLayer {
+    std::vector<std::string_view>* calls = nullptr;
+    void UI(Engine&) { calls->push_back("ui-only"); }
+};
+
+struct StopOnlyPhaseLayer {
+    std::vector<std::string_view>* calls = nullptr;
+    void Stop(Engine&) { calls->push_back("stop-only"); }
+};
+
+struct HUDPhaseLayer {
+    std::vector<std::string_view>* calls = nullptr;
+    void UI(Engine&) { calls->push_back("hud-ui"); }
+};
+
+void RunHostUIPhaseForTest(Engine& engine) {
+    // Exercise the actual Core UI phase without running GPU/render steps.
+    const auto* uiStep = engine.GetFramePlan().Find("HostUICallback");
+    Expect(uiStep != nullptr);
+    if (uiStep != nullptr) {
+        Expect(uiStep->phase == FramePhase::UI);
+        Expect(uiStep->run != nullptr);
+        if (uiStep->run != nullptr) {
+            FrameContext frame;
+            uiStep->run(engine, 0.0f, frame);
+            Expect(frame.status == FrameStatus::OK);
+        }
+    }
+}
+
+void test_app_ui_only_layer_uses_engine_ui_phase() {
+    std::vector<std::string_view> calls;
+    auto app = App(EngineRunConfig {
+        .appName        = "UIOnlyAppLayerTest",
+        .validationMode = ValidationMode::Off,
+        .headless       = true,
+    });
+    app.AddLayer(UIOnlyPhaseLayer {.calls = &calls});
+    const auto result = app.Run([&](Engine& engine, float) {
+        RunHostUIPhaseForTest(engine);
+        engine.GetPlatformHost().Close();
+    });
+    ExpectUserClosed(result);
+    Expect(calls == std::vector<std::string_view> {"ui-only"});
+}
+
+void test_app_layers_render_ui_in_order_and_stop_before_engine_teardown() {
+    std::vector<std::string_view> calls;
+    auto app = App(EngineRunConfig {
+        .appName        = "AppLayerLifecycleTest",
+        .validationMode = ValidationMode::Off,
+        .headless       = true,
+    });
+    app.AddLayer(UILifecycleLayer {.state = std::make_unique<int>(1), .calls = &calls});
+    app.AddLayer(UIOnlyPhaseLayer {.calls = &calls});
+    app.AddLayer(StopOnlyPhaseLayer {.calls = &calls});
+    app.AddLayer(HUDPhaseLayer {.calls = &calls});
+    app.OnStart([&](Engine&) { calls.push_back("app-start"); });
+
+    const auto result = app.Run([&](Engine& engine, float) {
+        calls.push_back("update");
+        RunHostUIPhaseForTest(engine);
+        engine.GetPlatformHost().Close();
+    });
+    ExpectUserClosed(result);
+    Expect(calls == std::vector<std::string_view> {
+        "layer-start", "app-start", "layer-tick", "update",
+        "layer-ui", "ui-only", "hud-ui", "stop-only", "layer-stop"
+    });
+}
+
+void test_app_stops_layers_on_typed_frame_failure() {
+    std::vector<std::string_view> calls;
+    auto app = App(EngineRunConfig {
+        .appName        = "AppLayerFrameFailureTest",
+        .validationMode = ValidationMode::Off,
+        .headless       = true,
+    });
+    app.AddLayer(UILifecycleLayer {.state = std::make_unique<int>(1), .calls = &calls});
+    app.OnStart([&](Engine& engine) {
+        // Replace the plan with a single deterministic failing UI step. This
+        // tests the frame-error result and cleanup without a GPU frame.
+        auto& plan = engine.GetFramePlan();
+        plan.Clear();
+        const auto placed = plan.Append(FramePhase::UI, "EmitUIAndFail", +[](Engine& active, float, FrameContext& frame) {
+            if (const auto cb = active.GetUICallback()) {
+                (*cb)(active);
+            }
+            frame.status = FrameStatus::Error;
+        });
+        Expect(placed.has_value());
+    });
+    const auto result = app.Run([&](Engine&, float) { calls.push_back("update"); });
+    Expect(!result.has_value());
+    if (!result) Expect(result.error().Is(AppError::FrameTickFailed));
+    Expect(calls == std::vector<std::string_view> {"layer-start", "layer-tick", "update", "layer-ui", "layer-stop"});
 }
 
 void test_app_cli_options_service_is_available_before_install_and_scene_start() {

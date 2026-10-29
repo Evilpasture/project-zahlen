@@ -30,14 +30,19 @@ namespace ZHLN {
 // the first scene; Core does not depend on optional gameplay targets.
 void InstallApplicationDefaults(Engine& engine);
 
-// A layer may implement either or both phases. Calls are nonvirtual, in the
-// order added, with the scene already built for Start and input already pumped
-// for Tick. Layers are owned by the Application, including move-only objects.
+// A layer may implement any of Start, Tick, UI and Stop. Start runs after
+// scene creation; Tick runs after event/input pumping; UI runs in the Engine's
+// UI frame phase. These run in registration order, and Stop runs in reverse
+// order before Engine teardown. Layers can own move-only state.
 template <typename T>
 concept AppLayer = requires(std::remove_cvref_t<T>& layer, Engine& engine) {
     layer.Start(engine);
 } || requires(std::remove_cvref_t<T>& layer, Engine& engine, float dt) {
     layer.Tick(engine, dt);
+} || requires(std::remove_cvref_t<T>& layer, Engine& engine) {
+    layer.UI(engine);
+} || requires(std::remove_cvref_t<T>& layer, Engine& engine) {
+    layer.Stop(engine);
 };
 
 // Bounds for integral CLI configuration fields. The existing
@@ -168,6 +173,12 @@ class Application {
         if constexpr (requires(Stored& l, Engine& engine, float dt) { l.Tick(engine, dt); }) {
             slot.tick = [](void* state, Engine& engine, float dt) { static_cast<Stored*>(state)->Tick(engine, dt); };
         }
+        if constexpr (requires(Stored& l, Engine& engine) { l.UI(engine); }) {
+            slot.ui = [](void* state, Engine& engine) { static_cast<Stored*>(state)->UI(engine); };
+        }
+        if constexpr (requires(Stored& l, Engine& engine) { l.Stop(engine); }) {
+            slot.stop = [](void* state, Engine& engine) { static_cast<Stored*>(state)->Stop(engine); };
+        }
         _layers.push_back(std::move(slot));
         return *this;
     }
@@ -176,11 +187,6 @@ class Application {
     // initial scene is built (e.g. to spawn persistent entities).
     auto OnStart(std::function<void(Engine&)> start) -> Application& {
         _start = std::move(start);
-        return *this;
-    }
-
-    auto OnUI(Engine::UICallback callback) -> Application& {
-        _ui = std::move(callback);
         return *this;
     }
 
@@ -225,10 +231,12 @@ class Application {
   private:
     struct LayerSlot {
         // Shared ownership keeps the existing copyable Application API and
-        // leaves no virtual dispatch in the per-frame Start/Tick call paths.
+        // leaves no virtual dispatch in any of the four lifecycle phases.
         std::shared_ptr<void> state;
-        void (*start)(void*, Engine&)        = nullptr;
-        void (*tick)(void*, Engine&, float)  = nullptr;
+        void (*start)(void*, Engine&)       = nullptr;
+        void (*tick)(void*, Engine&, float) = nullptr;
+        void (*ui)(void*, Engine&)          = nullptr;
+        void (*stop)(void*, Engine&)        = nullptr;
     };
 
     using Update = std::function<void(Engine&, float)>;
@@ -250,7 +258,6 @@ class Application {
     auto RunFromCLI(EngineRunConfig config, std::span<char* const> args, const Update& update) const -> AppRunResult;
 
     EngineRunConfig                           _config;
-    Engine::UICallback                        _ui;
     std::function<void(Engine&)>              _start;
     std::vector<std::function<void(Engine&)>> _installers;
     std::vector<CommandHandler>               _cliHandlers;

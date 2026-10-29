@@ -46,18 +46,33 @@ struct LaunchOptions {
 };
 struct StartOnlyLayer { void Start(Engine&) {} };
 struct TickOnlyLayer { void Tick(Engine&, float) {} };
+struct UIOnlyLayer {
+    bool* called = nullptr;
+    void UI(Engine&) { if (called) *called = true; }
+};
+struct StopOnlyLayer {
+    bool* called = nullptr;
+    void Stop(Engine&) { if (called) *called = true; }
+};
 struct NotALayer { void Update(Engine&) {} };
 struct MoveOnlyLayer {
     std::unique_ptr<int> value;
     bool* called = nullptr;
     void Start(Engine&) { *called = true; }
     void Tick(Engine&, float) { *called = true; }
+    void UI(Engine&) { *called = true; }
+    void Stop(Engine&) { *called = true; }
 };
 static_assert(AppLayer<StartOnlyLayer>);
 static_assert(AppLayer<TickOnlyLayer>);
+static_assert(AppLayer<UIOnlyLayer>);
+static_assert(AppLayer<StopOnlyLayer>);
 static_assert(AppLayer<MoveOnlyLayer>);
 static_assert(!AppLayer<NotALayer>);
 static_assert(!std::copy_constructible<MoveOnlyLayer>);
+template <typename T>
+concept HasApplicationOnUI = requires(T& app, Engine::UICallback callback) { app.OnUI(std::move(callback)); };
+static_assert(!HasApplicationOnUI<Application>); // application UI only comes from layers
 static_assert(std::copy_constructible<Application>); // reflected keys and owned layers survive copies
 static_assert(std::same_as<decltype(App().Run()), AppRunResult>);
 static_assert(std::same_as<decltype(KernelApp().Run()), AppRunResult>);
@@ -224,13 +239,19 @@ void test_reflected_cli_config_keeps_owned_keys_and_validates_atomically() {
     Expect(options.cubes == 12u);
 }
 
-void test_layered_application_help_does_not_start_layers() {
+void test_layered_application_help_does_not_invoke_any_layer_phase() {
     bool called = false;
     char program[] = "test-application";
     char help[]    = "--help";
     char* args[]   = {program, help};
-    ExpectExit(App().AddLayer(MoveOnlyLayer {.value = std::make_unique<int>(1), .called = &called}).Run(2, args), AppExitReason::CliHelpRequested);
-    Expect(!called);
+    ExpectExit(
+        App().AddLayer(MoveOnlyLayer {.value = std::make_unique<int>(1), .called = &called})
+            .AddLayer(UIOnlyLayer {.called = &called})
+            .AddLayer(StopOnlyLayer {.called = &called})
+            .Run(2, args),
+        AppExitReason::CliHelpRequested
+    );
+    Expect(!called); // early CLI exits never reach Start, Tick, UI or Stop
 }
 
 void test_kernel_app_early_cli_exits_and_validates_c_arguments() {
