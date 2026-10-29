@@ -19,6 +19,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <cstdint>
+#include <cstdlib>
 
 namespace {
 
@@ -161,8 +162,9 @@ struct SandboxGame {
 
 int main(int argc, char* argv[]) {
     GameLaunchConfig launch;
-    return ZHLN::App()
+    const auto result = ZHLN::App()
         .WithConfig(launch)
         .AddLayer(SandboxGame {.launch = launch})
         .Run(argc, argv);
+    return result ? EXIT_SUCCESS : EXIT_FAILURE;
 }

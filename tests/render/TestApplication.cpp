@@ -13,7 +13,6 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <algorithm>
-#include <cstdlib>
 #include <expected>
 #include <memory>
 #include <span>
@@ -26,6 +25,11 @@ namespace ZHLN::Test {
 // through their existing extension-service slots (without an Engine field).
 static_assert(ECS::ResolvableFrom<SystemContext, ECS::Res<CommandLineOptions>>);
 static_assert(ECS::ResolvableFrom<ECS::Carrier<RenderServices>, ECS::Res<CommandLineOptions>>);
+
+void ExpectUserClosed(const AppRunResult& result) {
+    Expect(result.has_value());
+    if (result) Expect(*result == AppExitReason::UserClosed);
+}
 
 struct StartPhaseLayer {
     std::vector<std::string_view>* calls = nullptr;
@@ -93,7 +97,7 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
 
     // A move-only callback proves Run does not copy its user's game logic.
     auto state = std::make_unique<int>(42);
-    const int code = application.Run([&, state = std::move(state)](Engine& engine, float dt) {
+    const auto result = application.Run([&, state = std::move(state)](Engine& engine, float dt) {
         ++updates;
         Expect(*state == 42);
         Expect(dt >= 0.0f);
@@ -107,7 +111,7 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         engine.GetPlatformHost().Close();
     });
 
-    Expect(code == EXIT_SUCCESS);
+    ExpectUserClosed(result);
     Expect(updates == 1);
     Expect(calls == std::vector<std::string_view> {"install", "start-only", "layer-start", "start", "layer-tick", "tick-only", "update"});
 }
@@ -155,13 +159,13 @@ void test_app_cli_options_service_is_available_before_install_and_scene_start() 
     char option[]  = "--region=atrium";
     char vsync[]   = "--vsync=off";
     char* args[]   = {program, option, vsync};
-    const int code = app.Run(std::span<char* const>(args), [&](Engine& engine) {
+    const auto result = app.Run(std::span<char* const>(args), [&](Engine& engine) {
         Expect(started);
         Expect(engine.Service<CommandLineOptions>().has_value());
         updated = true;
         engine.GetPlatformHost().Close();
     });
-    Expect(code == EXIT_SUCCESS);
+    ExpectUserClosed(result);
     Expect(installed && started && updated);
 }
 
@@ -171,7 +175,7 @@ void test_kernel_app_owns_process_input_and_shutdown_without_an_ecs_world() {
     bool updated = false;
     bool rendered = false;
     bool shutdown = false;
-    const int code = KernelApp(RenderConfig {
+    const auto result = KernelApp(RenderConfig {
         .appName        = "KernelApplicationTest",
         .width          = 320,
         .height         = 180,
@@ -189,7 +193,7 @@ void test_kernel_app_owns_process_input_and_shutdown_without_an_ecs_world() {
         .OnRender([&](Kernel&, FrameScope&) { rendered = true; })
         .OnShutdown([&](Kernel&) { shutdown = true; })
         .Run();
-    Expect(code == EXIT_SUCCESS);
+    ExpectUserClosed(result);
     Expect(started && inputReset && updated && shutdown);
     Expect(!rendered);
 }

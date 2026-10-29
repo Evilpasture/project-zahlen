@@ -12,8 +12,8 @@
 # a second, and unlike a compiled checker there is nothing to build before the
 # configure can be told a boundary was crossed. Reruns on an unchanged tree
 # are faster still: per-file scan results are cached under the system temp
-# directory, keyed by path, mtime and size, and ZHLN_PROVENANCE_CACHE=0 turns
-# the cache off.
+# directory, keyed by path, mtime and size plus the first-party header layout,
+# and ZHLN_PROVENANCE_CACHE=0 turns the cache off.
 #
 # The rule, from the consumer's side: for every symbol in the tables below,
 # the file that names it must reach a provider through its own include closure
@@ -363,6 +363,17 @@ my %tree_files;
     }
 }
 
+# Cached include closures contain resolved absolute paths. A header move (or a
+# newly added header resolving an old spelling) changes those closures even
+# when the including sources have unchanged mtimes. Invalidate the whole cache
+# when the first-party header inventory changes; individual file stats still
+# handle content edits without forcing a full scan.
+my $HEADER_LAYOUT = Digest::SHA::sha1_hex(join("\n", sort grep {
+    my ($suffix) = /(\.[^.]*)$/;
+    defined $suffix && $HEADER_SUFFIXES{lc $suffix};
+} keys %tree_files));
+my $CACHE_SCHEMA = 2;
+
 my %resolvable = map { $tree_files{$_} => 1 } keys %tree_files;
 
 # For each walked directory, the names directly inside it -- plus a full
@@ -509,8 +520,8 @@ sub resolve {
 # for half a thousand files is most of this script's cost. A record is
 # [mtime, size, includes, resolved, dangling, used, defined]; the first two
 # gate reuse, the last three exist only for files the check inspects itself.
-# Invalidation is stat-based (mtime+size, like make); anything stale is
-# dropped at load and recomputed exactly as a cold run would. Point
+# Invalidation is stat-based (mtime+size, like make) and header-layout-based;
+# anything stale is dropped and recomputed exactly as a cold run would. Point
 # ZHLN_PROVENANCE_CACHE at a path to relocate the cache, or set it to 0 to
 # disable caching entirely.
 my %records;
@@ -531,9 +542,12 @@ sub load_cache {
     $CACHE_FILE = cache_file();
     return unless defined $CACHE_FILE && -f $CACHE_FILE;
     my $data = eval { Storable::retrieve($CACHE_FILE) };
-    return unless ref $data eq 'HASH';
-    for my $path (keys %$data) {
-        my $rec = $data->{$path};
+    return unless ref($data) eq 'HASH'
+        && ($data->{schema} // 0) == $CACHE_SCHEMA
+        && ($data->{header_layout} // '') eq $HEADER_LAYOUT
+        && ref($data->{records}) eq 'HASH';
+    for my $path (keys %{ $data->{records} }) {
+        my $rec = $data->{records}{$path};
         my @st = stat $path;
         next unless @st && $rec->[0] == $st[9] && $rec->[1] == $st[7];
         $records{$path}   = $rec;
@@ -546,7 +560,11 @@ sub save_cache {
     return unless $DIRTY && defined $CACHE_FILE;
     my $tmp = "$CACHE_FILE.$$";
     eval {
-        Storable::nstore(\%records, $tmp);
+        Storable::nstore({
+            schema => $CACHE_SCHEMA,
+            header_layout => $HEADER_LAYOUT,
+            records => \%records,
+        }, $tmp);
         rename $tmp, $CACHE_FILE;
         1;
     } or do {

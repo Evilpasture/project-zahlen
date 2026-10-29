@@ -5,6 +5,7 @@
 
 // Kernel-only composition root for 2D tools: no World, ECS, physics or
 // simulation graph. The host-runner target owns its CLI and process lifetime.
+#include <Zahlen/AppOutcome.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/WindowInput.hpp>
 #include <cstdint>
@@ -63,12 +64,12 @@ class KernelApp {
         return *this;
     }
 
-    auto Run() const -> int;
-    auto Run(std::span<char* const> args) const -> int;
-    auto Run(int argc, char* argv[]) const -> int;
+    [[nodiscard]] auto Run() const -> AppRunResult;
+    [[nodiscard]] auto Run(std::span<char* const> args) const -> AppRunResult;
+    [[nodiscard]] auto Run(int argc, char* argv[]) const -> AppRunResult;
 
   private:
-    auto RunConfigured(RenderConfig config, uint32_t fpsLimit) const -> int;
+    auto RunConfigured(RenderConfig config, uint32_t fpsLimit) const -> AppRunResult;
 
     RenderConfig                              _config;
     WindowInputReceiver                      _receiver {};

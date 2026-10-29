@@ -7,15 +7,11 @@ The repository's source layers are deliberately distinct:
   * extensions/ reusable engine subsystems and network/platform I/O;
   * gameplay/   domain-specific systems and ProjectLight integration.
 
-All three may consume Core. None may become a dependency of src/, include/, or
-modules/, except the application facade include/Zahlen/App.hpp: that header
-belongs to zahlen_application, not zahlen_engine, and may include precisely the
-CommandLine/EngineCommandLine.hpp contract it publishes. App.hpp, HostRunner.hpp
-and KernelApp.hpp are app-owned public headers; Core may include none of them.
-This configure-time check catches imported C++ modules and
-headers, including headers included through their public short include roots.
-CMake target links are kept explicit in the root composition layer and should
-not be added to targets that build Core sources.
+The outer layers, including app/include/, may consume Core. None may become
+a dependency of src/, include/, or modules/. This configure-time check catches
+imported C++ modules and headers, including short public include spellings
+such as <Zahlen/App.hpp>. CMake keeps app/include/ on application/host targets,
+not Core targets, so the compiler also rejects these headers from Core.
 """
 
 from __future__ import annotations
@@ -26,16 +22,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE_ROOTS = (ROOT / "src", ROOT / "include", ROOT / "modules")
-# Physical header location is not ownership: these facades belong to app/.
-APP_FACADE = Path("include/Zahlen/App.hpp")
-APP_PUBLIC_HEADERS = frozenset({
-    APP_FACADE,
-    Path("include/Zahlen/HostRunner.hpp"),
-    Path("include/Zahlen/KernelApp.hpp"),
-})
-APP_CLI_CONTRACT = "CommandLine/EngineCommandLine.hpp"
-LAYER_ROOTS = (ROOT / "plugins", ROOT / "extensions", ROOT / "gameplay")
+LAYER_ROOTS = (ROOT / "plugins", ROOT / "extensions", ROOT / "gameplay", ROOT / "app")
 LAYER_INCLUDE_ROOTS = (
+    ROOT / "app" / "include",
     ROOT / "plugins",
     ROOT / "extensions",
     ROOT / "extensions" / "net",
@@ -138,33 +127,18 @@ def main() -> int:
 
             for match in include_pattern.finditer(text):
                 include = normalize(match.group(2))
-                # Neither a public spelling nor a same-directory/relative
-                # include may pull any app-owned facade back into Core.
-                facade_spelling = any(include in {
-                    f"Zahlen/{facade.name}", facade.name, facade.as_posix()
-                } for facade in APP_PUBLIC_HEADERS)
-                facade_relative = any(
-                    Path(include).name == facade.name and
-                    (path.parent / match.group(2)).resolve() == ROOT / facade
-                    for facade in APP_PUBLIC_HEADERS
-                )
-                if relative_path not in APP_PUBLIC_HEADERS and (facade_spelling or facade_relative):
-                    violations.append(f"{relative_path} includes an application facade from Core")
-                    continue
                 candidates = (headers.get(include) or headers.get(Path(include).name)) if include else None
                 if not candidates:
                     continue
-                if relative_path == APP_FACADE and include == APP_CLI_CONTRACT:
-                    continue  # Allow only this application's public CLI contract.
                 if not resolves_in_core(include, path):
                     spelled = candidates[0].relative_to(ROOT).as_posix()
                     violations.append(
-                        f"{relative_path} includes {spelled} from an optional layer "
+                        f"{relative_path} includes {spelled} from an outer layer "
                         f"(written as '{include}')"
                     )
 
     if violations:
-        print("Core-to-optional-layer dependency boundary violated:", file=sys.stderr)
+        print("Core-to-outer-layer dependency boundary violated:", file=sys.stderr)
         for violation in sorted(set(violations)):
             print(f"  - {violation}", file=sys.stderr)
         print(
@@ -174,7 +148,7 @@ def main() -> int:
         return 1
 
     header_count = len([key for key in headers if "/" in key])
-    print(f"Core/layer boundary OK ({len(modules)} optional modules, {header_count} headers indexed).")
+    print(f"Core/layer boundary OK ({len(modules)} outer-layer modules, {header_count} headers indexed).")
     return 0
 
 

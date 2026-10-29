@@ -7,12 +7,12 @@
 // its CLI contract. zahlen_application publishes zahlen_engine_cli to callers.
 #include <CommandLine/EngineCommandLine.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/AppOutcome.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <charconv>
 #include <concepts>
 #include <cstddef>
-#include <cstdlib>
 #include <expected>
 #include <functional>
 #include <memory>
@@ -186,14 +186,14 @@ class Application {
 
     // System-driven apps need no per-frame callable. With no CLI parse there is
     // no CommandLineOptions service; a span-based Run publishes parsed options.
-    auto Run() const -> int { return RunConfigured(_config, {}, nullptr); }
-    auto Run(std::span<char* const> args) const -> int { return RunFromCLI(_config, args, {}); }
+    [[nodiscard]] auto Run() const -> AppRunResult { return RunConfigured(_config, {}, nullptr); }
+    [[nodiscard]] auto Run(std::span<char* const> args) const -> AppRunResult { return RunFromCLI(_config, args, {}); }
 
     // Adapter for main(int argc, char* argv[]). Reject malformed C arguments
     // instead of silently turning them into a valid empty command line.
-    auto Run(int argc, char* argv[]) const -> int {
+    [[nodiscard]] auto Run(int argc, char* argv[]) const -> AppRunResult {
         if (argc < 0 || (argc > 0 && argv == nullptr)) {
-            return EXIT_FAILURE;
+            return std::unexpected(AppError::InvalidArguments);
         }
         return Run(MakeSpan(argc, argv));
     }
@@ -203,21 +203,21 @@ class Application {
     // synchronously until Run returns; even move-only state can be captured.
     template <typename GameLogic>
         requires(std::invocable<GameLogic&, Engine&> || std::invocable<GameLogic&, Engine&, float>)
-    auto Run(GameLogic&& logic) const -> int {
+    [[nodiscard]] auto Run(GameLogic&& logic) const -> AppRunResult {
         return RunConfigured(_config, BindLogic(logic), nullptr);
     }
 
     template <typename GameLogic>
         requires(std::invocable<GameLogic&, Engine&> || std::invocable<GameLogic&, Engine&, float>)
-    auto Run(std::span<char* const> args, GameLogic&& logic) const -> int {
+    [[nodiscard]] auto Run(std::span<char* const> args, GameLogic&& logic) const -> AppRunResult {
         return RunFromCLI(_config, args, BindLogic(logic));
     }
 
     template <typename GameLogic>
         requires(std::invocable<GameLogic&, Engine&> || std::invocable<GameLogic&, Engine&, float>)
-    auto Run(int argc, char* argv[], GameLogic&& logic) const -> int {
+    [[nodiscard]] auto Run(int argc, char* argv[], GameLogic&& logic) const -> AppRunResult {
         if (argc < 0 || (argc > 0 && argv == nullptr)) {
-            return EXIT_FAILURE;
+            return std::unexpected(AppError::InvalidArguments);
         }
         return Run(MakeSpan(argc, argv), std::forward<GameLogic>(logic));
     }
@@ -246,8 +246,8 @@ class Application {
         }
     }
 
-    auto RunConfigured(const EngineRunConfig& config, const Update& update, const CommandLineOptions* options) const -> int;
-    auto RunFromCLI(EngineRunConfig config, std::span<char* const> args, const Update& update) const -> int;
+    auto RunConfigured(const EngineRunConfig& config, const Update& update, const CommandLineOptions* options) const -> AppRunResult;
+    auto RunFromCLI(EngineRunConfig config, std::span<char* const> args, const Update& update) const -> AppRunResult;
 
     EngineRunConfig                           _config;
     Engine::UICallback                        _ui;

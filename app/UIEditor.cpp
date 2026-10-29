@@ -50,6 +50,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -1007,7 +1008,7 @@ auto main(int argc, char* argv[]) -> int {
         session.previewGui.SetFontAtlas(session.fontAtlas);
     };
 
-    return ZHLN::KernelApp()
+    const auto result = ZHLN::KernelApp()
         .Named("Zahlen UI Editor")
         .Input(session.editorInput.MakeReceiver())
         .OnStart([&](ZHLN::Kernel& kernel) {
@@ -1053,4 +1054,5 @@ auto main(int argc, char* argv[]) -> int {
         })
         .OnShutdown([&](ZHLN::Kernel& kernel) { StopPreview(kernel, session); })
         .Run(argc, argv);
+    return result ? EXIT_SUCCESS : EXIT_FAILURE;
 }

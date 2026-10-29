@@ -10,14 +10,13 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <cstdlib>
 #include <optional>
 #include <span>
 #include <utility>
 
 namespace ZHLN {
 
-auto Application::RunFromCLI(EngineRunConfig config, std::span<char* const> args, const Update& update) const -> int {
+auto Application::RunFromCLI(EngineRunConfig config, std::span<char* const> args, const Update& update) const -> AppRunResult {
     const CommandLineOptions defaults {
         .validationMode = config.validationMode,
         .vsync          = config.vsync,
@@ -28,10 +27,16 @@ auto Application::RunFromCLI(EngineRunConfig config, std::span<char* const> args
     auto parsed = HandleCommandLine(args, _cliHandlers, defaults);
     if (!parsed) {
         LogError("[Application] command line: {}", parsed.error());
-        return EXIT_FAILURE;
+        return std::unexpected(parsed.error()); // keep the original CLI error category
     }
-    if (parsed->helpRequested || parsed->versionRequested || parsed->printGraphRequested) {
-        return EXIT_SUCCESS;
+    if (parsed->helpRequested) {
+        return AppExitReason::CliHelpRequested;
+    }
+    if (parsed->versionRequested) {
+        return AppExitReason::CliVersionRequested;
+    }
+    if (parsed->printGraphRequested) {
+        return AppExitReason::CliGraphRequested;
     }
     SetLogLevel(parsed->logLevel);
     config.vsync          = parsed->vsync;
@@ -42,7 +47,7 @@ auto Application::RunFromCLI(EngineRunConfig config, std::span<char* const> args
     return RunConfigured(config, update, &*parsed);
 }
 
-auto Application::RunConfigured(const EngineRunConfig& config, const Update& update, const CommandLineOptions* options) const -> int {
+auto Application::RunConfigured(const EngineRunConfig& config, const Update& update, const CommandLineOptions* options) const -> AppRunResult {
     // Keep the Engine lifetime inside the shared process/task scope. Never
     // nest Engine::Run here: it creates another TaskSystem::Scope.
     ProcessScope process;
@@ -50,7 +55,7 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
     auto created = Engine::Create(Engine::MakeConfig(config));
     if (!created) {
         LogError("[Application] engine creation failed: {}", created.error());
-        return EXIT_FAILURE;
+        return std::unexpected(created.error()); // preserve the underlying init error
     }
     auto engine = std::move(*created);
     engine->GetPlatformHost().Focus();
@@ -69,7 +74,7 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
     }
     if (!engine->InitializeDefaultScene()) {
         LogError("[Application] initial scene failed");
-        return EXIT_FAILURE;
+        return std::unexpected(AppError::SceneInitFailed);
     }
     if (_ui) {
         engine->SetUICallback(_ui);
@@ -115,11 +120,11 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
         }
         if (engine->Tick(dt) == FrameStatus::Error) {
             LogError("[Application] engine frame failed");
-            return EXIT_FAILURE;
+            return std::unexpected(AppError::FrameTickFailed);
         }
         pacer.EndFrame(frameStart, pacedDt);
     }
-    return EXIT_SUCCESS;
+    return AppExitReason::UserClosed;
 }
 
 } // namespace ZHLN

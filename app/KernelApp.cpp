@@ -10,25 +10,25 @@
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <cstddef>
-#include <cstdlib>
+#include <expected>
 #include <optional>
 #include <span>
 #include <utility>
 
 namespace ZHLN {
 
-auto KernelApp::Run() const -> int {
+auto KernelApp::Run() const -> AppRunResult {
     return RunConfigured(_config, 0);
 }
 
-auto KernelApp::Run(int argc, char* argv[]) const -> int {
+auto KernelApp::Run(int argc, char* argv[]) const -> AppRunResult {
     if (argc < 0 || (argc > 0 && argv == nullptr)) {
-        return EXIT_FAILURE;
+        return std::unexpected(AppError::InvalidArguments);
     }
     return Run(argc > 0 ? std::span<char* const>(argv, static_cast<size_t>(argc)) : std::span<char* const> {});
 }
 
-auto KernelApp::Run(std::span<char* const> args) const -> int {
+auto KernelApp::Run(std::span<char* const> args) const -> AppRunResult {
     const CommandLineOptions defaults {
         .validationMode = _config.validationMode,
         .vsync          = _config.vsync,
@@ -38,10 +38,16 @@ auto KernelApp::Run(std::span<char* const> args) const -> int {
     auto parsed = HandleCommandLine(args, {}, defaults);
     if (!parsed) {
         LogError("[KernelApp] command line: {}", parsed.error());
-        return EXIT_FAILURE;
+        return std::unexpected(parsed.error());
     }
-    if (parsed->helpRequested || parsed->versionRequested || parsed->printGraphRequested) {
-        return EXIT_SUCCESS;
+    if (parsed->helpRequested) {
+        return AppExitReason::CliHelpRequested;
+    }
+    if (parsed->versionRequested) {
+        return AppExitReason::CliVersionRequested;
+    }
+    if (parsed->printGraphRequested) {
+        return AppExitReason::CliGraphRequested;
     }
     SetLogLevel(parsed->logLevel);
 
@@ -57,13 +63,13 @@ auto KernelApp::Run(std::span<char* const> args) const -> int {
     return RunConfigured(std::move(config), parsed->fpsLimit);
 }
 
-auto KernelApp::RunConfigured(RenderConfig config, uint32_t fpsLimit) const -> int {
+auto KernelApp::RunConfigured(RenderConfig config, uint32_t fpsLimit) const -> AppRunResult {
     // Both the renderer and all application-owned GPU state die before workers.
     ProcessScope process;
     auto created = Kernel::Create(config, _receiver);
     if (!created) {
         LogError("[KernelApp] kernel creation failed: {}", created.error());
-        return EXIT_FAILURE;
+        return std::unexpected(created.error()); // retain the actual Kernel/renderer error
     }
     auto kernel = std::move(*created);
     kernel->GetPlatformHost().Focus();
@@ -71,22 +77,21 @@ auto KernelApp::RunConfigured(RenderConfig config, uint32_t fpsLimit) const -> i
         _onStart(*kernel);
     }
 
-    auto recover = [&]() -> bool {
+    auto recover = [&]() -> std::expected<void, ErrorCode> {
         if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
-            LogError("[KernelApp] GPU device recovery failed: {}", rebuilt.error());
-            return false;
+            return std::unexpected(rebuilt.error());
         }
         // Never reuse a reference to the old RenderContext across recovery.
         kernel->GetRenderContext().ClearGPUCaches();
         if (_onDeviceRestored) {
             _onDeviceRestored(*kernel);
         }
-        return true;
+        return {};
     };
 
     FramePacer pacer(fpsLimit);
     Clock      clock({.maxDeltaTime = 0.1f});
-    bool       failed = false;
+    std::optional<ErrorCode> failure;
     while (kernel->IsRunning()) {
         const auto frameStart = FramePacer::BeginFrame();
         const float rawDt     = clock.Tick();
@@ -111,12 +116,14 @@ auto KernelApp::RunConfigured(RenderConfig config, uint32_t fpsLimit) const -> i
         auto began = rc.BeginFrame();
         if (!began) {
             if (began.error().Is(FrameResult::DeviceLost)) {
-                if (!recover()) {
-                    failed = true;
+                if (auto restored = recover(); !restored) {
+                    LogError("[KernelApp] GPU device recovery failed: {}", restored.error());
+                    failure = restored.error();
                     break;
                 }
             } else {
                 LogError("[KernelApp] BeginFrame failed: {}", began.error());
+                if (!failure) failure = began.error(); // the tool may keep running
             }
             pacer.EndFrame(frameStart, pacedDt);
             continue;
@@ -133,12 +140,14 @@ auto KernelApp::RunConfigured(RenderConfig config, uint32_t fpsLimit) const -> i
         auto ended = std::move(gpuFrame).End();
         if (!ended) {
             if (ended.error().Is(FrameResult::DeviceLost)) {
-                if (!recover()) {
-                    failed = true;
+                if (auto restored = recover(); !restored) {
+                    LogError("[KernelApp] GPU device recovery failed: {}", restored.error());
+                    failure = restored.error();
                     break;
                 }
             } else {
                 LogError("[KernelApp] EndFrame failed: {}", ended.error());
+                if (!failure) failure = ended.error();
             }
         }
         // PresentSuboptimal is already handled by the renderer's target rebuild.
@@ -150,7 +159,10 @@ auto KernelApp::RunConfigured(RenderConfig config, uint32_t fpsLimit) const -> i
     if (_onShutdown) {
         _onShutdown(*kernel);
     }
-    return failed ? EXIT_FAILURE : EXIT_SUCCESS;
+    if (failure) {
+        return std::unexpected(*failure);
+    }
+    return AppExitReason::UserClosed;
 }
 
 } // namespace ZHLN

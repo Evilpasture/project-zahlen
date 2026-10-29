@@ -14,7 +14,11 @@ target_link_libraries(zahlen_host_runner
     PUBLIC zahlen_engine_cli
     PRIVATE zahlen_signal zahlen_warnings
 )
-target_include_directories(zahlen_host_runner PRIVATE ${PROJECT_SOURCE_DIR}/src)
+# Only app-owned targets publish the host-facing headers under app/include/.
+target_include_directories(zahlen_host_runner
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE ${PROJECT_SOURCE_DIR}/src
+)
 target_compile_definitions(zahlen_host_runner PRIVATE JPH_DOUBLE_PRECISION)
 zahlen_enable_reflection(zahlen_host_runner)
 
@@ -34,11 +38,13 @@ target_link_libraries(zahlen_application
     PUBLIC zahlen_engine zahlen_engine_cli
     PRIVATE zahlen_host_runner zahlen_warnings
 )
-target_include_directories(zahlen_application PRIVATE
-    ${PROJECT_SOURCE_DIR}/src
-    ${PROJECT_SOURCE_DIR}/plugins
-    ${PROJECT_SOURCE_DIR}/extensions
-    ${PROJECT_SOURCE_DIR}/gameplay
+target_include_directories(zahlen_application
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/plugins
+        ${PROJECT_SOURCE_DIR}/extensions
+        ${PROJECT_SOURCE_DIR}/gameplay
 )
 target_compile_definitions(zahlen_application PRIVATE JPH_DOUBLE_PRECISION)
 zahlen_enable_reflection(zahlen_application)

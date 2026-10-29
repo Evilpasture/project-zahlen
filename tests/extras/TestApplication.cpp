@@ -9,7 +9,6 @@
 #include <Zahlen/Core/Description.hpp>
 #include <array>
 #include <concepts>
-#include <cstdlib>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -60,6 +59,20 @@ static_assert(AppLayer<MoveOnlyLayer>);
 static_assert(!AppLayer<NotALayer>);
 static_assert(!std::copy_constructible<MoveOnlyLayer>);
 static_assert(std::copy_constructible<Application>); // reflected keys and owned layers survive copies
+static_assert(std::same_as<decltype(App().Run()), AppRunResult>);
+static_assert(std::same_as<decltype(KernelApp().Run()), AppRunResult>);
+
+void ExpectExit(const AppRunResult& result, AppExitReason reason) {
+    Expect(result.has_value());
+    if (result) Expect(*result == reason);
+}
+
+template <typename E>
+    requires std::is_enum_v<E>
+void ExpectError(const AppRunResult& result, E expected) {
+    Expect(!result.has_value());
+    if (!result) Expect(result.error().Is(expected));
+}
 } // namespace
 
 void test_app_help_exits_without_running_gameplay() {
@@ -67,8 +80,22 @@ void test_app_help_exits_without_running_gameplay() {
     char option[]  = "--help";
     char* args[]   = {program, option};
     bool  ran      = false;
-    Expect(App().Run(2, args, [&](Engine&) { ran = true; })) == EXIT_SUCCESS;
+    ExpectExit(App().Run(2, args, [&](Engine&) { ran = true; }), AppExitReason::CliHelpRequested);
     Expect(!ran);
+}
+
+void test_app_version_exits_before_host_creation() {
+    char program[] = "test-application";
+    char version[] = "--version";
+    char* args[]   = {program, version};
+    ExpectExit(App().Run(2, args), AppExitReason::CliVersionRequested);
+}
+
+void test_app_graph_request_has_its_own_early_exit_reason() {
+    char program[] = "test-application";
+    char graph[]   = "--print-graph=none";
+    char* args[]   = {program, graph};
+    ExpectExit(App().Run(2, args), AppExitReason::CliGraphRequested);
 }
 
 void test_app_rejects_removed_tool_mode_flags_without_starting_engine() {
@@ -77,9 +104,9 @@ void test_app_rejects_removed_tool_mode_flags_without_starting_engine() {
     char bench[]   = "--benchmark";
     char* args[]   = {program, editor};
     bool  ran      = false;
-    Expect(App().Run(2, args, [&](Engine&) { ran = true; })) == EXIT_FAILURE;
+    ExpectError(App().Run(2, args, [&](Engine&) { ran = true; }), CommandLineError::UnknownArgument);
     args[1] = bench;
-    Expect(App().Run(2, args, [&](Engine&) { ran = true; })) == EXIT_FAILURE;
+    ExpectError(App().Run(2, args, [&](Engine&) { ran = true; }), CommandLineError::UnknownArgument);
     Expect(!ran);
 }
 
@@ -87,11 +114,11 @@ void test_app_rejects_invalid_args_before_engine_creation() {
     char program[] = "test-application";
     char unknown[] = "--not-an-engine-option";
     char* args[]   = {program, unknown};
-    Expect(App().Run(2, args)) == EXIT_FAILURE;
-    Expect(App().Run(-1, args)) == EXIT_FAILURE;
-    Expect(App().Run(1, nullptr)) == EXIT_FAILURE;
-    Expect(App().Run(-1, args, [](Engine&) {})) == EXIT_FAILURE;
-    Expect(App().Run(1, nullptr, [](Engine&) {})) == EXIT_FAILURE;
+    ExpectError(App().Run(2, args), CommandLineError::UnknownArgument);
+    ExpectError(App().Run(-1, args), AppError::InvalidArguments);
+    ExpectError(App().Run(1, nullptr), AppError::InvalidArguments);
+    ExpectError(App().Run(-1, args, [](Engine&) {}), AppError::InvalidArguments);
+    ExpectError(App().Run(1, nullptr, [](Engine&) {}), AppError::InvalidArguments);
 }
 
 void test_app_custom_flags_bulk_registration_and_help_via_span() {
@@ -137,7 +164,7 @@ void test_app_custom_flags_bulk_registration_and_help_via_span() {
     char dry[]     = "--dry-run";
     char help[]    = "--help";
     char* args[]   = {program, stage, number, dry, help};
-    Expect(app.Run(std::span<char* const>(args), [&](Engine&) { ran = true; }) == EXIT_SUCCESS);
+    ExpectExit(app.Run(std::span<char* const>(args), [&](Engine&) { ran = true; }), AppExitReason::CliHelpRequested);
     Expect(!ran); // --help exits before Engine::Create
     Expect(level == "ruins");
     Expect(seed == 19);
@@ -145,7 +172,7 @@ void test_app_custom_flags_bulk_registration_and_help_via_span() {
 
     char missing[] = "--level";
     char* bad[]    = {program, missing};
-    Expect(app.Run(std::span<char* const>(bad)) == EXIT_FAILURE);
+    ExpectError(app.Run(std::span<char* const>(bad)), CommandLineError::MissingValue);
 }
 
 void test_reflected_cli_config_keeps_owned_keys_and_validates_atomically() {
@@ -162,38 +189,38 @@ void test_reflected_cli_config_keeps_owned_keys_and_validates_atomically() {
     char seed[]    = "--seed=-7";
     char help[]    = "--help";
     char* good[]   = {program, cubes, seed, help};
-    Expect(app.Run(std::span<char* const>(good)) == EXIT_SUCCESS); // help exits before Engine::Create
+    ExpectExit(app.Run(std::span<char* const>(good)), AppExitReason::CliHelpRequested); // help exits before Engine::Create
     Expect(options.cubes == 64u);
     Expect(options.seed == -7);
 
     char outOfRange[] = "--cubes=65";
     char* tooMany[]  = {program, outOfRange};
-    Expect(app.Run(std::span<char* const>(tooMany)) == EXIT_FAILURE);
+    ExpectError(app.Run(std::span<char* const>(tooMany)), CommandLineError::InvalidValue);
     Expect(options.cubes == 64u); // validation never partially overwrites a field
 
     char negative[] = "--cubes=-1";
     char* unsignedNegative[] = {program, negative};
-    Expect(app.Run(std::span<char* const>(unsignedNegative)) == EXIT_FAILURE);
+    ExpectError(app.Run(std::span<char* const>(unsignedNegative)), CommandLineError::InvalidValue);
     Expect(options.cubes == 64u);
 
     char overflow[] = "--seed=999999999999999999999999999";
     char* badOverflow[] = {program, overflow};
-    Expect(app.Run(std::span<char* const>(badOverflow)) == EXIT_FAILURE);
+    ExpectError(app.Run(std::span<char* const>(badOverflow)), CommandLineError::InvalidValue);
     Expect(options.seed == -7);
 
     char trailing[] = "--seed=12bad";
     char* badSeed[] = {program, trailing};
-    Expect(app.Run(std::span<char* const>(badSeed)) == EXIT_FAILURE);
+    ExpectError(app.Run(std::span<char* const>(badSeed)), CommandLineError::InvalidValue);
     Expect(options.seed == -7);
 
     char missing[]   = "--cubes";
     char* noValue[]  = {program, missing};
-    Expect(app.Run(std::span<char* const>(noValue)) == EXIT_FAILURE);
+    ExpectError(app.Run(std::span<char* const>(noValue)), CommandLineError::MissingValue);
     Expect(options.cubes == 64u);
 
     char shortCubes[] = "-c=12";
     char* shortArgs[] = {program, shortCubes, help};
-    Expect(app.Run(std::span<char* const>(shortArgs)) == EXIT_SUCCESS);
+    ExpectExit(app.Run(std::span<char* const>(shortArgs)), AppExitReason::CliHelpRequested);
     Expect(options.cubes == 12u);
 }
 
@@ -202,7 +229,7 @@ void test_layered_application_help_does_not_start_layers() {
     char program[] = "test-application";
     char help[]    = "--help";
     char* args[]   = {program, help};
-    Expect(App().AddLayer(MoveOnlyLayer {.value = std::make_unique<int>(1), .called = &called}).Run(2, args) == EXIT_SUCCESS);
+    ExpectExit(App().AddLayer(MoveOnlyLayer {.value = std::make_unique<int>(1), .called = &called}).Run(2, args), AppExitReason::CliHelpRequested);
     Expect(!called);
 }
 
@@ -210,9 +237,17 @@ void test_kernel_app_early_cli_exits_and_validates_c_arguments() {
     char program[] = "test-kernel-app";
     char help[]    = "--help";
     char* args[]   = {program, help};
-    Expect(KernelApp().Named("Test Kernel Tool").Run(2, args) == EXIT_SUCCESS);
-    Expect(KernelApp().Run(-1, args) == EXIT_FAILURE);
-    Expect(KernelApp().Run(1, nullptr) == EXIT_FAILURE);
+    ExpectExit(KernelApp().Named("Test Kernel Tool").Run(2, args), AppExitReason::CliHelpRequested);
+    ExpectError(KernelApp().Run(-1, args), AppError::InvalidArguments);
+    ExpectError(KernelApp().Run(1, nullptr), AppError::InvalidArguments);
+
+    char version[] = "--version";
+    char* versionArgs[] = {program, version};
+    ExpectExit(KernelApp().Run(2, versionArgs), AppExitReason::CliVersionRequested);
+
+    char invalid[] = "--not-a-kernel-option";
+    char* badArgs[] = {program, invalid};
+    ExpectError(KernelApp().Run(2, badArgs), CommandLineError::UnknownArgument);
 }
 
 void test_frame_pacer_prefers_display_timing_only_when_it_meets_cap() {

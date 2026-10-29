@@ -107,10 +107,10 @@ void   Update(Engine& engine, float dt);
 
 ## 1.2 Core and Optional-Layer Boundaries
 
-`src/`, most of `include/`, and the existing top-level `modules/` directory
-form the **Core Engine**. The public `include/Zahlen/{App,HostRunner,KernelApp}.hpp`
-headers are exceptions: physically under `include/`, they are application
-facades owned by `zahlen_application` / `zahlen_host_runner`, not `zahlen_engine`.
+`src/`, `include/`, and the existing top-level `modules/` directory
+form the **Core Engine**. The public `app/include/Zahlen/{App,AppOutcome,HostRunner,KernelApp}.hpp`
+headers are owned and published by `zahlen_application` / `zahlen_host_runner`,
+not `zahlen_engine`; their `#include <Zahlen/...>` spellings stay the same.
 Only `App.hpp` consumes the optional CLI layer. The `modules/` directory
 is reserved for the engine's C++ module interfaces; it is not a catch-all for
 additional subsystems. Optional code is organized by architectural role instead:
@@ -127,21 +127,24 @@ ProjectLight-specific MessagePack/zlib protocol types live with that client,
 not in the reusable Zahlen wire-protocol extension.
 
 > **Rule: dependencies point outward from Core.** Plugins, extensions, and
-> gameplay may consume Core; code under `src/`, `include/` (except the
-> application facades), or `modules/` must never include, import, or link an
-> optional-layer target. Core may not include `<Zahlen/App.hpp>`,
-> `<Zahlen/HostRunner.hpp>` or `<Zahlen/KernelApp.hpp>`.
+> gameplay and the application host may consume Core; code under `src/`,
+> `include/`, or `modules/` must never include, import, or link an outer-layer
+> target. Core may not include the app-owned public headers
+> `<Zahlen/{App,AppOutcome,HostRunner,KernelApp}.hpp>`.
 
 `configure/check_core_layer_boundary.py` enforces the source/header half of this
 rule during CMake configuration. It scans module imports and resolves headers
-against the optional layers' public include roots, so both a spelled path and a
-short include such as `#include <json/JSON.hpp>` are caught. Its only exception
-allows `include/Zahlen/App.hpp` to name the public
-`<CommandLine/EngineCommandLine.hpp>` contract supplied by `zahlen_application`;
-`zahlen_application` publicly links `zahlen_engine_cli`. No Core header or source
-is granted that dependency. CMake links remain explicit: the composition roots
-in `app/`, samples, tests, and host tools may select the targets they use, while
-Core targets must not depend on them.
+against the optional layers' and `app/include/`'s public include roots, so both
+a spelled path and a short include such as `#include <Zahlen/App.hpp>` or
+`#include <json/JSON.hpp>` are caught, with no application-facade exception.
+Only `zahlen_application` and `zahlen_host_runner` publish `app/include/` to
+their consumers; Core targets never receive that include root. Thus a Core
+source including `<Zahlen/App.hpp>` also fails at compilation, independently of
+the Python check. `App.hpp` can consume the CLI contract because
+`zahlen_application` publicly links `zahlen_engine_cli`; Core does not. CMake
+links remain explicit: the composition roots in `app/`, samples, tests, and
+host tools may select the targets they use, while Core targets must not depend
+on them.
 
 `configure/check_layer_dag.py` enforces the edge *between* the optional layers
 that has to point one way: nothing under `plugins/` or `extensions/` may include
@@ -208,8 +211,8 @@ and optional third-party dependencies stay local to the owning target.
 | `zahlen_project_light_lua` | `gameplay/ProjectLight/LuaBindings/` | DataModel ↔ LuaJIT adapter; the only target where the two layers meet |
 | `zahlen_alife`, `zahlen_interaction`, `zahlen_fallback_scene` | `gameplay/` | Domain-specific simulation, interaction rules, and fallback game scene |
 | `zahlen_datamodel`, `zahlen_project_light_client` | `gameplay/ProjectLight/` | ProjectLight's stable-ID object graph and optional native client |
-| `zahlen_host_runner` | `app/` | Shared process/crash/task lifetime and frame pacing; `KernelApp` drives Kernel-only tools with no gameplay links |
-| `zahlen_application` | `app/` | Game loop, reflected/registered CLI, layers and CMake-generated optional-module wiring; publicly links `zahlen_engine_cli` for the `App.hpp` facade |
+| `zahlen_host_runner` | `app/` | Shared process/crash/task lifetime and frame pacing; `KernelApp` drives Kernel-only tools with no gameplay links; publishes `app/include/` |
+| `zahlen_application` | `app/` | Game loop, reflected/registered CLI, layers and CMake-generated optional-module wiring; publishes `app/include/` and publicly links `zahlen_engine_cli` for the `App.hpp` facade |
 | `zahlen_scene_documents` | `tools/scene/` | TOML/Lua scene import shared only by tools |
 | `zahlen_world_editor`, `zahlen_benchmark_app`, `zahlen_scene_host` | `tools/{editor,benchmark,scene}/` | Separate world-editor, headless-benchmark and scene/file-watcher hosts |
 
@@ -417,6 +420,7 @@ Tick: UI / state-file watches → PlayerIntent → Physics
 2. **Compiled gameplay**: `App().Run(callback)` owns the per-frame game update; `App().Install(...)` composes systems and frame steps before the first scene. `App().AddLayer(...)` owns heterogeneously typed start/tick layers (including move-only ones) using a one-time state allocation and two plain function pointers, no virtual call per frame. Each layer starts after the scene and ticks in insertion order before the optional `Run(callback)`. `Engine::Run` remains a low-level Core entry for bespoke hosts with their own composition and event poller.
    `Application::Run(std::span<char* const> args, callback)` parses engine flags and registered `.AddCliOption(...)` / `.WithCliOptions(...)` handlers together; the `Run(argc, argv, callback)` adapter checks the C arguments first. App handlers appear under **Application Options** in `--help`. After a successful parse (and before default modules, installers and scene initialization), the application emplaces a copy of `CommandLineOptions` in `Engine::Services()`. Installers and `OnStart` use `Engine::Service<CommandLineOptions>()`; simulation and render graph systems may resolve `ECS::Res<CommandLineOptions>` through `ExtensionServices`. CLI args and handler metadata are borrowed for the synchronous `Run` lifetime. Bare `Run()` / `Run(callback)` skip parsing and do not publish a CLI service.
    `.WithConfig(launch)` reflects each integral, non-bool member into a `--member` handler, uses its `Description` annotation for help and optional `CliRange<Min, Max>` bounds and `CliShort<'c'>` aliases. It checks the entire `from_chars` result and only commits a validated value; generated flag strings are owned by the application and survive copying it, while the launch config itself must outlive `Run`. `app/main.cpp` registers `SandboxGame` with `.AddLayer(...)` and uses this typed binding for `--cubes`/`--seed`.
+   `Application::Run` and `KernelApp::Run` return `AppRunResult = std::expected<AppExitReason, ErrorCode>` rather than an OS exit integer. CLI help/version/graph requests and normal host closure are distinct `AppExitReason` values; the parser's `CommandLineError` and the underlying Engine/Kernel/render/recovery errors are propagated unchanged. `AppError` represents invalid C argument vectors or scene/tick failures without a lower-layer error code. `app/main.cpp` and `app/UIEditor.cpp` map success/failure to process status **only inside main**; tests inspect typed outcomes. This does not make process-wide `ProcessScope` state safe for uncoordinated concurrent runners.
 3. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
 4. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching modules are installed, Interaction and Terrain nodes contributed through the `Module` the application installed; `BuildSystemGraphs` walks `Engine::GetInstalledModules()` and asks each one for its systems). `VisualInterpolationSystem` reads PhysicsWorld pose history and writes interpolated transforms; static bodies are skipped.
 5. **Render Graph Execution**: `CullingSystem` performs frustum culling, `LightingSystem` gathers lights, and `RenderSystem` records Vulkan commands and presents. `Engine::Tick` reports `FrameStatus::Error` if device-lost recovery fails.

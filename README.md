@@ -106,14 +106,15 @@ opt-in core-only build, set `ZHLN_BUILD_EXTRAS=OFF` before `add_subdirectory`;
 asset cooking and data/profile iteration targets can be added separately when needed.
 
 ### 4. Game Entry Point (`src/main.cpp`)
-Link the reusable application layer (`target_link_libraries(my_game PRIVATE zahlen_application)`) instead of composing engine services, optional modules, crash handling and the main loop in each game. For example:
+Link the reusable application layer (`target_link_libraries(my_game PRIVATE zahlen_application)`) instead of composing engine services, optional modules, crash handling and the main loop in each game. The target publishes the app-owned headers from `app/include/Zahlen/` (including `App.hpp` and `AppOutcome.hpp`); Core does not expose this include root. The `#include <Zahlen/App.hpp>` spelling is unchanged. For example:
 
 ```cpp
 #include <Zahlen/App.hpp>
 #include <Zahlen/PrefabFactory.hpp>
+#include <cstdlib>
 
 int main(int argc, char* argv[]) {
-    return ZHLN::App()
+    const auto result = ZHLN::App()
         .OnStart([](ZHLN::Engine& engine) {
             // Persistent entities are created ONCE, after the default scene exists.
             (void) ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3(1.0f, 1.0f, 1.0f));
@@ -124,6 +125,7 @@ int main(int argc, char* argv[]) {
             (void) engine;
             (void) dt;
         });
+    return result ? EXIT_SUCCESS : EXIT_FAILURE; // only main translates to an OS code
 }
 ```
 
@@ -149,8 +151,11 @@ app.Install([&](ZHLN::Engine& engine) {
     auto cli = engine.Service<ZHLN::CommandLineOptions>();
     if (cli) { /* use cli->headless, cli->args, and level here */ }
 });
-return app.Run(argc, argv); // --level=courtyard and -l courtyard both work
+const auto result = app.Run(argc, argv); // --level=courtyard and -l courtyard both work
+return result ? EXIT_SUCCESS : EXIT_FAILURE; // in main() only
 ```
+
+`Run` returns `ZHLN::AppRunResult` (`std::expected<AppExitReason, ErrorCode>`), not an OS status. Successful reasons distinguish `UserClosed` (including an application-requested primary-window close), `CliHelpRequested`, `CliVersionRequested`, and `CliGraphRequested`. CLI errors keep the exact `CommandLineError` (e.g. `result.error().Is(CommandLineError::InvalidValue)`), and engine creation errors preserve the underlying `ErrorCode`. `AppError::InvalidArguments`, `SceneInitFailed`, and `FrameTickFailed` cover failures that have no lower-level error code. Only executable `main()` translates the result to `EXIT_SUCCESS` or `EXIT_FAILURE`. `KernelApp` uses the same result type and preserves Kernel/render/device-recovery error codes. Typed results allow embedding and precise assertions; process-wide platform/task/signal ownership still requires callers to coordinate simultaneous runs.
 
 `.AddCliOption(ZHLN::CommandHandler{...})` and `.WithCliOptions(std::span<const ZHLN::CommandHandler>)` are also available. Registered flags appear under **Application Options** in `--help`; actions run during parsing, and errors stop before engine creation. Handlers own neither their `string_view` metadata nor captured state, and `CommandLineOptions::args` / `appHandlers` borrow argv and the application's handlers: keep those alive through synchronous `Run`. The parsed options are copied into the Engine's extension services before default modules, installers and initial-scene setup, so gameplay systems may request `ZHLN::ECS::Res<ZHLN::CommandLineOptions>` as well. No-CLI `Run()` / `Run(callback)` do not create that service.
 

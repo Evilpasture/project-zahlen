@@ -5,7 +5,8 @@
 
 The tests/ tree may only exercise public behaviour through public headers:
 
-  * include/Zahlen/**
+  * include/Zahlen/** (Core APIs)
+  * app/include/Zahlen/** (application and host APIs)
   * plugins/**, extensions/**, and gameplay/** (optional public layers)
   * the in-tree test framework
   * third-party and standard-library headers
@@ -27,6 +28,7 @@ TESTS = ROOT / "tests"
 SRC = ROOT / "src"
 INCLUDE = ROOT / "include"
 OPTIONAL_PUBLIC_ROOTS = (
+    ROOT / "app" / "include",
     ROOT / "plugins",
     ROOT / "extensions",
     ROOT / "extensions" / "net",
@@ -190,8 +192,9 @@ def main() -> int:
         for violation in violations:
             print(f"  - {violation}", file=sys.stderr)
         print(
-            "Remove the internal include or rewrite the test against include/Zahlen "
-            "(or plugins/, extensions/, or gameplay/). Do not add src/ to test include directories.",
+            "Remove the internal include or rewrite the test against a public header "
+            "(include/Zahlen, app/include/Zahlen, plugins/, extensions/, or gameplay/). "
+            "Do not add src/ to test include directories.",
             file=sys.stderr,
         )
         return 1
