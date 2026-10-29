@@ -120,6 +120,10 @@ auto Engine::UpdateNativeGameplay(float dt) -> GameplayStatus {
     return _impl->nativeScriptModule != nullptr ? _impl->nativeScriptModule->Update(this, dt) : GameplayStatus::OK;
 }
 
+auto Engine::IsNativeGameplayEnabled() const noexcept -> bool {
+    return _impl->config.enableNativeGameplay;
+}
+
 auto Engine::IsNativeGameplayLoaded() const noexcept -> bool {
     return _impl->nativeScriptModule != nullptr && _impl->nativeScriptModule->IsLoaded();
 }
@@ -819,6 +823,7 @@ auto Engine::MakeConfig(const RunConfig& runConfig) -> EngineConfig {
                 .validationMode = runConfig.validationMode,
                 .headless       = runConfig.headless,
             },
+        .enableNativeGameplay = runConfig.enableNativeGameplay,
     };
 }
 

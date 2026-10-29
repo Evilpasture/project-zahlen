@@ -277,8 +277,8 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
         // Alert toast box
         std::string reasonTitle =
-            (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] MISSING NATIVE MODULE ('libgameplay.so')" :
-                                                                "[WARNING] NO GAMEPLAY MODULE DETECTED";
+            (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] LEGACY GAMEPLAY LIBRARY NOT FOUND" :
+                                                                "[INFO] NO SCENE CONFIGURED";
 
         ui.BeginBox("FallbackAlertBox", GUI::BoxConfig {
             .width        = { .grow = 1.0f },
@@ -344,15 +344,20 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
 namespace {
 
-// Auto-detect missing native gameplay modules and engage the Fallback Preset.
+// The standalone scene host installs this when no document was requested.
+// Missing legacy DLLs are only an error if somebody explicitly opted in.
 void FallbackStep(Engine& engine, float dt, FrameContext& ctx) {
     if (!engine.FallbackSceneEnabled()) {
         return;
     }
 
     if (!DefaultPreset::IsActive() && ctx.driver == GameplayDriver::Cpp && !engine.IsNativeGameplayLoaded()) {
+        const bool legacyRequested = engine.IsNativeGameplayEnabled();
         DefaultPreset::BuildFallbackScene(
-            engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
+            engine,
+            legacyRequested ? FallbackReason::MissingNativeModule : FallbackReason::NoSceneConfigured,
+            legacyRequested ? "Opted-in scripts/gameplay dynamic library was not found."
+                            : "No scene document selected; try zahlen for the compiled C++ sandbox or pass --scene."
         );
     }
 

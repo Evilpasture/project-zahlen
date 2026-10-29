@@ -14,6 +14,10 @@
 
 namespace ZHLN {
 
+// DEPRECATED compatibility adapter for the old GAMEPLAY_API DLL/so/dylib.
+// Constructed only when EngineConfig::enableNativeGameplay is explicitly true;
+// statically linked App games never register a watch or load this library.
+// Avoid passing owning allocations or reflected type identities across its ABI.
 class NativeScriptModule {
   public:
     using UpdateFn = GameplayStatus (*)(Engine*, float);

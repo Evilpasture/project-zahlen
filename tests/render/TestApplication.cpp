@@ -36,6 +36,8 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
     application.OnStart([&](Engine& engine) {
         calls.push_back("start");
         Expect(engine.GetRegistry().GetSingleton<Components::CameraComponent>().has_value());
+        Expect(!engine.IsNativeGameplayEnabled());
+        Expect(!engine.IsNativeGameplayLoaded());
         // ProcessEvents begins an input frame. If update runs before it, the
         // deliberately stale mouse delta below is still visible to gameplay.
         engine.GetRegistry().GetSingleton<Components::InputStateComponent>()->mouseDeltaX = 123.0f;

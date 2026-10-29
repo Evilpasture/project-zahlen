@@ -58,4 +58,10 @@ void test_app_rejects_invalid_args_before_engine_creation() {
     Expect(App().Run(-1, args)) == EXIT_FAILURE;
 }
 
+void test_app_rejects_compiled_and_legacy_gameplay_together_before_engine_creation() {
+    bool ran = false;
+    Expect(App(EngineRunConfig {.enableNativeGameplay = true}).Run([&](Engine&) { ran = true; }) == EXIT_FAILURE);
+    Expect(!ran);
+}
+
 } // namespace ZHLN::Test

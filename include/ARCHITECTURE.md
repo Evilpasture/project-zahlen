@@ -165,7 +165,8 @@ without inverting the DAG. `Zahlen/gui/FontLoader.hpp` (`BakedFontLoader`) and
    components.
 3. **The host connects them.** `app/Application.cpp` supplies the reusable
    `zahlen_application` preset and outer loop for ordinary C++ games;
-   `app/main.cpp` is a small `App().Run(...)` game. Host-specific choices live
+   `app/main.cpp` is a compiled `App().Run(...)` physics/lighting/audio sandbox.
+   Host-specific choices live
    in dedicated executables: `tools/editor/main.cpp` owns the paused world
    editor, `tools/benchmark/main.cpp` owns a headless logic workload, and
    `tools/scene/main.cpp` owns document boot, fallback, Discord and the Lua
@@ -388,24 +389,22 @@ Two consequences are worth stating, because they are what the design buys:
   is built once. Rebuilding it per scene was how a replayed module step could
   accumulate a second copy.
 
-The steps themselves still run in a strict, deterministic sequence:
+An ordinary game is statically compiled into its executable. The application
+runs gameplay **before** the engine's frame plan; the plan's old DLL slot is a
+no-op unless the legacy loader was explicitly enabled:
 
 ```
-[ ProcessEvents ] ──> [ Physics System (60Hz Jolt Step) ] ──> [ Visual Interpolation ]
-                                                                        │
-                                                                        ▼
-[ Render System ] <── [ ECS Update Graph ] <── [ Gameplay Update ]
+App: ProcessEvents → Run(Engine&, dt) callback → Engine::Tick(dt)
+Tick: Input / HotReload → PlayerIntent → Physics → [opt-in legacy DLL]
+      → ECS systems (including interpolation / audio) → Camera → Render / Present
 ```
 
-1. **Input & OS Events**: `ProcessEvents()` pumps OS/window events and updates raw mouse/keyboard states.
-2. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
-3. **Visual Interpolation**: `VisualInterpolationSystem::Update()` reads PhysicsWorld SoA pose history under one lock (`FillBodyStates`) and writes interpolated `TransformComponent`s. Character yaw comes from `MovementComponent`; Jolt CharacterVirtual does not simulate it. Static bodies (`PhysicsComponent::isStatic`) are skipped.
-5. **Gameplay Update**: The active gameplay driver (`--driver=scripted`, `cpp`, or `hybrid`) executes the update ticks. A scripted driver runs the optional scripting runtime (Fennel/LuaJIT); a C++ driver loads a native `.so`/`.dll`.
-6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching modules are installed, Interaction and Terrain nodes contributed through the `Module` the application installed; `BuildSystemGraphs` walks `Engine::GetInstalledModules()` and asks each one for its systems).
-7. **Render Graph Execution**:
-   * `CullingSystem`: Performs frustum culling on main and shadow viewports.
-   * `LightingSystem`: Gathers active light sources and updates light cluster volumes.
-   * `RenderSystem`: Records multi-pass Vulkan commands and presents to the swapchain.
+1. **Input & OS Events**: `Application` pumps OS/window events and updates raw mouse/keyboard states before calling the compiled C++ game callback.
+2. **Compiled gameplay**: `App().Run(callback)` owns the per-frame game update. `EngineRunConfig::enableNativeGameplay` defaults to false; `Engine::Create` and `Engine::Run` do not load `scripts/gameplay` or watch its DLL unless the caller opts in. `App` rejects combining both game entry points.
+3. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
+4. **Legacy DLL slot**: The frame plan retains `GameplayModule` as an anchor for backward compatibility, but only calls `NativeGameplayUpdate` if `enableNativeGameplay` was explicitly set. `--driver=native` is an alias for the C++ driver, **not** an opt-in to the DLL.
+5. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching modules are installed, Interaction and Terrain nodes contributed through the `Module` the application installed; `BuildSystemGraphs` walks `Engine::GetInstalledModules()` and asks each one for its systems). `VisualInterpolationSystem` reads PhysicsWorld pose history and writes interpolated transforms; static bodies are skipped.
+6. **Render Graph Execution**: `CullingSystem` performs frustum culling, `LightingSystem` gathers lights, and `RenderSystem` records Vulkan commands and presents.
 
 ### 3.1 Signature-driven ECS systems
 

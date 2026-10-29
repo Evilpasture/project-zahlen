@@ -3,8 +3,9 @@
 
 # gameplay/FallbackScene -- the compiled-in fail-safe scene (zahlen_fallback_scene).
 #
-# Boot-failure detection plus the demo scene and popup UI it engages: the
-# engine's own visual representation, not substrate. Core keeps what this
+# Optional no-document diagnostic scene and popup UI. A missing native DLL
+# only counts as a failure when the scene host explicitly opts into legacy
+# dynamic gameplay; neither the game nor Core installs this module by default. Core keeps what this
 # composes -- Scene::Instantiate, the frame-scheduler extension seam, the
 # enableFallbackScene config flag and the teardown-hook list -- and a host
 # that wants no fallback simply never calls Install.

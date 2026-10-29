@@ -121,7 +121,9 @@ struct CommandLineTestSuite {
             ZHLN::Test::ExpectTrue(config.render.fullscreen);
             ZHLN::Test::ExpectTrue(config.render.headless);
             ZHLN::Test::ExpectEq(config.render.validationMode, ZHLN::ValidationMode::Off);
-            ZHLN::Test::ExpectTrue(config.enableNativeGameplay);
+            ZHLN::Test::ExpectFalse(config.enableNativeGameplay);
+            const ZHLN::EngineRunConfig legacy {.enableNativeGameplay = true};
+            ZHLN::Test::ExpectTrue(ZHLN::Engine::MakeConfig(legacy).enableNativeGameplay);
             return {};
         }
 

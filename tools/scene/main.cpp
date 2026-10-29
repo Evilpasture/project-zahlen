@@ -40,6 +40,7 @@ namespace {
 struct HostLaunchConfig {
     std::filesystem::path scenePath;
     std::filesystem::path graphicsConfigPath = "config/graphics.lua";
+    bool                  legacyNativeGameplay = false;
 };
 
 HostLaunchConfig s_HostLaunchConfig;
@@ -206,6 +207,14 @@ auto main(int argc, char* argv[]) -> int {
                 return {};
             },
         },
+        ZHLN::CommandHandler {
+            .key         = "--legacy-gameplay-dll",
+            .description = "Opt in to deprecated scripts/gameplay dynamic-library hot reload",
+            .action      = [](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
+                s_HostLaunchConfig.legacyNativeGameplay = true;
+                return {};
+            },
+        },
     };
     const auto parsed = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)), appHandlers);
     if (!parsed) {
@@ -214,7 +223,11 @@ auto main(int argc, char* argv[]) -> int {
     }
     if (parsed->helpRequested || parsed->versionRequested || parsed->printGraphRequested) return EXIT_SUCCESS;
     if (parsed->benchmark || parsed->launchEditor) {
-        ZHLN::LogError("[SceneHost] use zahlen_benchmark or zahlen_editor for those tools");
+        ZHLN::LogError("[SceneHost] use zahlen-benchmark or zahlen-editor for those tools");
+        return EXIT_FAILURE;
+    }
+    if (s_HostLaunchConfig.legacyNativeGameplay && !s_HostLaunchConfig.scenePath.empty()) {
+        ZHLN::LogError("[SceneHost] choose a scene document or legacy DLL gameplay, not both");
         return EXIT_FAILURE;
     }
     ZHLN::SetLogLevel(parsed->logLevel);
@@ -234,6 +247,7 @@ auto main(int argc, char* argv[]) -> int {
         .headless       = parsed->headless,
         .fpsLimit       = parsed->fpsLimit,
         .driver         = parsed->driver,
+        .enableNativeGameplay = s_HostLaunchConfig.legacyNativeGameplay,
     };
     auto result = ZHLN::Engine::Run(config, nullptr, &InstallHostWithState, pollCrashes);
     if (!result) {

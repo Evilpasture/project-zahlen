@@ -122,6 +122,10 @@ auto Application::RunFromCLI(EngineRunConfig config, int argc, char* argv[], con
 }
 
 auto Application::RunConfigured(const EngineRunConfig& config, const Update& update) const -> int {
+    if (config.enableNativeGameplay && update) {
+        LogError("[Application] legacy DLL gameplay and a compiled Run callback cannot run together");
+        return EXIT_FAILURE;
+    }
     // App owns both process-level crash reporting and the lifetime of the
     // platform, task workers, and engine. Never nest Engine::Run here.
     static CrashState crashState;
@@ -129,9 +133,8 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
     Platform::Init();
     TaskSystem::Scope tasks; // Engine must be destroyed before its workers.
 
-    EngineConfig engineConfig = Engine::MakeConfig(config);
-    engineConfig.enableNativeGameplay = !static_cast<bool>(update);
-    auto created = Engine::Create(engineConfig);
+    // MakeConfig propagates the explicit (normally false) legacy opt-in.
+    auto created = Engine::Create(Engine::MakeConfig(config));
     if (!created) {
         LogError("[Application] engine creation failed: {}", created.error());
         return EXIT_FAILURE;

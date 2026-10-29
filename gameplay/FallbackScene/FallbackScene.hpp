@@ -3,10 +3,10 @@
 
 // gameplay/FallbackScene/FallbackScene.hpp
 //
-// The compiled-in fail-safe scene and its boot-failure detection. Moved out
-// of core: the scene content (emblem, ground, orbit light), the popup UI and
-// the missing-module detection are a demo visual representation coupled to
-// the engine's own boot flow, not engine substrate. Core keeps the pieces
+// The compiled-in diagnostic scene for a tool host with no scene document.
+// Moved out of core: the scene content (emblem, ground, orbit light), the popup
+// and explicit-legacy-module failure reporting are application policy, not
+// engine substrate. Core keeps the pieces
 // this composes -- the Scene::Instantiate path, the frame/graph extension
 // seams, the enableFallbackScene config flag and the teardown-hook list --
 // and a host that wants none of it simply never calls Install.
@@ -27,7 +27,7 @@ struct Scene;
 
 namespace FallbackScene {
 
-enum class FallbackReason : uint8_t { None = 0, MissingNativeModule };
+enum class FallbackReason : uint8_t { None = 0, MissingNativeModule, NoSceneConfigured };
 
 // Compiled-in fail-safe scene. Hosts that do not want it set
 // `EngineConfig::enableFallbackScene` false at Create rather than talking to

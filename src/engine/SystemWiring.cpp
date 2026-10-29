@@ -60,7 +60,10 @@ void Physics(Engine& engine, float dt, FrameContext&) {
 }
 
 void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
-    ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
+    if (!engine.IsNativeGameplayEnabled()) {
+        return; // compiled App gameplay already ran before Tick
+    }
+    ZHLN::ScopedTimer profTimer("Legacy DLL Gameplay Update");
     ctx.status = engine.UpdateNativeGameplay(dt);
 }
 

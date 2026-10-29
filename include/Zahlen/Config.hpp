@@ -192,8 +192,9 @@ struct EngineConfig {
     PhysicsConfig physics;
     RenderConfig  render;
     bool          enableFallbackScene = true;
-    // A callback-driven app need not load/watch scripts/gameplay as well.
-    bool          enableNativeGameplay = true;
+    // DEPRECATED opt-in compatibility path: dlopen + watch scripts/gameplay.
+    // Normal Engine::Create / App() games compile gameplay into their executable.
+    bool          enableNativeGameplay = false;
 };
 
 }
