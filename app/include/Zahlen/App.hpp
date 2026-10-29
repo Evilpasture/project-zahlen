@@ -9,8 +9,11 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/AppOutcome.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <charconv>
+#include <cmath>
 #include <concepts>
 #include <cstddef>
 #include <expected>
@@ -45,12 +48,25 @@ concept AppLayer = requires(std::remove_cvref_t<T>& layer, Engine& engine) {
     layer.Stop(engine);
 };
 
-// Bounds for integral CLI configuration fields. The existing
-// ZHLN_ANNOTATION annotation syntax attaches this to a reflected member.
+// Bounds for integral or floating-point CLI configuration fields. The
+// ZHLN_ANNOTATION syntax attaches this to a reflected member.
 template <auto Min, auto Max>
 struct CliRange {
-    static_assert(std::integral<decltype(Min)> && std::integral<decltype(Max)>, "CliRange bounds must be integral");
-    static_assert(std::cmp_less_equal(Min, Max), "CliRange minimum must not exceed maximum");
+    static_assert(
+        std::is_arithmetic_v<decltype(Min)> && std::is_arithmetic_v<decltype(Max)> &&
+        !std::same_as<std::remove_cv_t<decltype(Min)>, bool> &&
+        !std::same_as<std::remove_cv_t<decltype(Max)>, bool>,
+        "CliRange bounds must be numeric (not bool)"
+    );
+    static_assert([] {
+        if constexpr (std::integral<decltype(Min)> && std::integral<decltype(Max)> &&
+                      !std::same_as<std::remove_cv_t<decltype(Min)>, bool> &&
+                      !std::same_as<std::remove_cv_t<decltype(Max)>, bool>) {
+            return std::cmp_less_equal(Min, Max);
+        } else {
+            return static_cast<long double>(Min) <= static_cast<long double>(Max);
+        }
+    }(), "CliRange minimum must not exceed maximum");
 };
 
 // Optional single-letter short alias for a reflected field (e.g. -c).
@@ -58,6 +74,13 @@ template <char Key>
 struct CliShort {
     static_assert((Key >= 'a' && Key <= 'z') || (Key >= 'A' && Key <= 'Z'), "CliShort requires a letter");
 };
+
+namespace TemplatedDetail {
+template <typename T>
+inline constexpr bool IsAppConfigFixedString = false;
+template <size_t N>
+inline constexpr bool IsAppConfigFixedString<FixedString<N>> = true;
+} // namespace TemplatedDetail
 
 class Application {
   public:
@@ -106,42 +129,126 @@ class Application {
         });
     }
 
-    // Bind integral fields of an annotated config to --member-name. Reflected
-    // keys and short aliases are owned here (unlike hand-written handlers).
-    // The config itself is borrowed and must outlive the synchronous Run.
+    // Bind reflected config fields to --kebab-case-member-name. Text for keys,
+    // short aliases and enum choices is owned here; the target config is borrowed
+    // and must outlive synchronous Run. Each field is committed only when valid.
     template <typename ConfigStruct>
         requires(!std::is_const_v<ConfigStruct> && std::is_class_v<ConfigStruct>)
     auto WithConfig(ConfigStruct& target) -> Application& {
         Reflect::ForEachDataMember<ConfigStruct>([&]<auto member>() {
             using Field = std::remove_cvref_t<decltype(Reflect::MemberValue<member>(target))>;
-            static_assert(std::integral<Field> && !std::same_as<Field, bool>, "Reflected CLI fields must be integral (not bool)");
-            static_assert(Reflect::AnnotationCountOf<CliRange, member>() <= 1, "Only one CliRange annotation is allowed per field");
+            static_assert(
+                (std::integral<Field> && !std::same_as<Field, bool>) || std::same_as<Field, bool> ||
+                std::floating_point<Field> || std::same_as<Field, std::string> ||
+                TemplatedDetail::IsAppConfigFixedString<Field> || std::is_enum_v<Field>,
+                "WithConfig supports bool, numbers, std::string, FixedString<N> and reflected enums"
+            );
+            constexpr size_t rangeCount = Reflect::AnnotationCountOf<CliRange, member>();
+            static_assert(rangeCount <= 1, "Only one CliRange annotation is allowed per field");
+            static_assert(
+                rangeCount == 0 || ((std::integral<Field> && !std::same_as<Field, bool>) || std::floating_point<Field>),
+                "CliRange applies only to numeric config fields"
+            );
             static_assert(Reflect::AnnotationCountOf<CliShort, member>() <= 1, "Only one CliShort annotation is allowed per field");
             constexpr std::string_view name = Reflect::MemberName<member>();
             static_assert(!name.empty(), "Reflected CLI fields must be named");
             constexpr std::string_view description = Reflect::GetDescriptionText<member>();
 
-            auto key = std::make_shared<const std::string>(std::string("--") + std::string(name));
+            std::string keyText = "--";
+            for (size_t i = 0; i < name.size(); ++i) {
+                const char c = name[i];
+                if (c == '_') {
+                    if (keyText.back() != '-') {
+                        keyText.push_back('-');
+                    }
+                } else if (c >= 'A' && c <= 'Z') {
+                    const char prev = i > 0 ? name[i - 1] : '\0';
+                    const char next = i + 1 < name.size() ? name[i + 1] : '\0';
+                    const bool boundary = (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9') ||
+                                          (prev >= 'A' && prev <= 'Z' && next >= 'a' && next <= 'z');
+                    if (boundary && keyText.back() != '-') {
+                        keyText.push_back('-');
+                    }
+                    keyText.push_back(static_cast<char>(c - 'A' + 'a'));
+                } else {
+                    keyText.push_back(c);
+                }
+            }
+            auto key = std::make_shared<const std::string>(std::move(keyText));
             std::shared_ptr<const std::string> shortKey;
             if constexpr (Reflect::AnnotationCountOf<CliShort, member>() > 0) {
                 constexpr char letter = Reflect::AnnotationTemplateArgument<CliShort, member, 0, char>();
                 shortKey = std::make_shared<const std::string>(std::string("-") + letter);
             }
+            std::string_view placeholder;
+            std::shared_ptr<const std::string> enumChoices;
+            if constexpr (std::same_as<Field, bool>) {
+                placeholder = "[on|off|true|false]";
+            } else if constexpr (std::integral<Field>) {
+                placeholder = "<integer>";
+            } else if constexpr (std::floating_point<Field>) {
+                placeholder = "<number>";
+            } else if constexpr (std::same_as<Field, std::string> || TemplatedDetail::IsAppConfigFixedString<Field>) {
+                placeholder = "<text>";
+            } else if constexpr (std::is_enum_v<Field>) {
+                constexpr auto names = Reflect::EnumNames<Field>();
+                static_assert(!names.empty(), "A reflected CLI enum must have at least one enumerator");
+                std::string choices = "<";
+                for (std::string_view choice: names) {
+                    if (choices.size() > 1) {
+                        choices.push_back('|');
+                    }
+                    choices.append(choice);
+                }
+                choices.push_back('>');
+                enumChoices = std::make_shared<const std::string>(std::move(choices));
+                placeholder = *enumChoices;
+            }
             AddCliOption(CommandHandler {
-                .key         = *key,
-                .shortKey    = shortKey ? std::string_view(*shortKey) : std::string_view {},
-                .placeholder = "<integer>",
-                .description = description.empty() ? std::string_view(*key).substr(2) : description,
-                .action      = [&target](CommandLineOptions&, std::string_view value) -> std::expected<void, ErrorCode> {
-                    if (value.empty()) {
-                        return std::unexpected(CommandLineError::MissingValue);
-                    }
+                .key              = *key,
+                .shortKey         = shortKey ? std::string_view(*shortKey) : std::string_view {},
+                .placeholder      = placeholder,
+                .description      = description.empty() ? std::string_view(*key).substr(2) : description,
+                .action           = [&target](CommandLineOptions&, std::string_view value) -> std::expected<void, ErrorCode> {
                     Field parsed {};
-                    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed);
-                    if (error != std::errc {} || end != value.data() + value.size()) {
-                        return std::unexpected(CommandLineError::InvalidValue);
+                    if constexpr (std::same_as<Field, bool>) {
+                        if (value.empty() || value == "on" || value == "true" || value == "1" || value == "yes") {
+                            parsed = true;
+                        } else if (value == "off" || value == "false" || value == "0" || value == "no") {
+                            parsed = false;
+                        } else {
+                            return std::unexpected(CommandLineError::InvalidValue);
+                        }
+                    } else {
+                        if (value.empty()) {
+                            return std::unexpected(CommandLineError::MissingValue);
+                        }
+                        if constexpr (std::integral<Field>) {
+                            const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed);
+                            if (error != std::errc {} || end != value.data() + value.size()) {
+                                return std::unexpected(CommandLineError::InvalidValue);
+                            }
+                        } else if constexpr (std::floating_point<Field>) {
+                            const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed, std::chars_format::general);
+                            if (error != std::errc {} || end != value.data() + value.size() || !std::isfinite(parsed)) {
+                                return std::unexpected(CommandLineError::InvalidValue);
+                            }
+                        } else if constexpr (std::same_as<Field, std::string>) {
+                            parsed.assign(value);
+                        } else if constexpr (TemplatedDetail::IsAppConfigFixedString<Field>) {
+                            if (value.size() > Field::kMaxTextLength) {
+                                return std::unexpected(CommandLineError::InvalidValue); // never truncate a CLI path/name
+                            }
+                            parsed.assign(value);
+                        } else if constexpr (std::is_enum_v<Field>) {
+                            auto selected = Reflect::StringToEnum<Field>(value);
+                            if (!selected) {
+                                return std::unexpected(CommandLineError::InvalidValue);
+                            }
+                            parsed = *selected;
+                        }
                     }
-                    if constexpr (Reflect::AnnotationCountOf<CliRange, member>() > 0) {
+                    if constexpr (rangeCount > 0) {
                         constexpr long double minimum = Reflect::AnnotationTemplateArgument<CliRange, member, 0, long double>();
                         constexpr long double maximum = Reflect::AnnotationTemplateArgument<CliRange, member, 1, long double>();
                         const long double number = static_cast<long double>(parsed);
@@ -149,13 +256,17 @@ class Application {
                             return std::unexpected(CommandLineError::InvalidValue);
                         }
                     }
-                    Reflect::MemberValue<member>(target) = parsed; // commit only after validation
+                    Reflect::MemberValue<member>(target) = std::move(parsed); // commit only after validation
                     return {};
                 },
+                .mirrorEngineFlag = true, // built-in flags also update matching reflected fields
             });
-            _reflectedOptionNames.push_back(std::move(key));
+            _reflectedOptionText.push_back(std::move(key));
             if (shortKey) {
-                _reflectedOptionNames.push_back(std::move(shortKey));
+                _reflectedOptionText.push_back(std::move(shortKey));
+            }
+            if (enumChoices) {
+                _reflectedOptionText.push_back(std::move(enumChoices));
             }
         });
         return *this;
@@ -261,7 +372,7 @@ class Application {
     std::function<void(Engine&)>              _start;
     std::vector<std::function<void(Engine&)>> _installers;
     std::vector<CommandHandler>               _cliHandlers;
-    std::vector<std::shared_ptr<const std::string>> _reflectedOptionNames;
+    std::vector<std::shared_ptr<const std::string>> _reflectedOptionText;
     std::vector<LayerSlot>                    _layers;
     bool                                      _defaultModules = true;
 };

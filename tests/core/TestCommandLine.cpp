@@ -194,6 +194,82 @@ struct CommandLineTestSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::ErrorCode> reflected_handlers_mirror_successful_engine_flags_only() {
+            int headlessSeen = 0;
+            int fullscreenSeen = 0;
+            int manualSeen = 0;
+            bool engineAppliedFirst = true;
+            const std::array handlers = {
+                ZHLN::CommandHandler {
+                    .key = "--headless", // a manual collision before the reflected one stays shadowed
+                    .action = [&](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
+                        ++manualSeen;
+                        return {};
+                    },
+                },
+                ZHLN::CommandHandler {
+                    .key = "--headless",
+                    .action = [&](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                        ++headlessSeen;
+                        engineAppliedFirst &= opt.headless == (v == "on");
+                        return {};
+                    },
+                    .mirrorEngineFlag = true,
+                },
+                ZHLN::CommandHandler {
+                    .key = "--fullscreen",
+                    .action = [&](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                        ++fullscreenSeen;
+                        engineAppliedFirst &= opt.fullscreen == (v == "true");
+                        return {};
+                    },
+                    .mirrorEngineFlag = true,
+                },
+                ZHLN::CommandHandler {
+                    .key = "--vsync", // manual collisions remain engine-shadowed by default
+                    .action = [&](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
+                        ++manualSeen;
+                        return {};
+                    },
+                },
+            };
+            std::array<char*, 4> args = {
+                (char*) "zahlen", (char*) "--headless=on", (char*) "--fullscreen=true", (char*) "--vsync=off"
+            };
+            auto result = ZHLN::HandleCommandLine(args, handlers);
+            ZHLN::Test::ExpectTrue(result.has_value());
+            if (result) {
+                ZHLN::Test::ExpectTrue(result->headless);
+                ZHLN::Test::ExpectTrue(result->fullscreen);
+                ZHLN::Test::ExpectFalse(result->vsync);
+            }
+            ZHLN::Test::ExpectTrue(engineAppliedFirst);
+            ZHLN::Test::ExpectEq(headlessSeen, 1);
+            ZHLN::Test::ExpectEq(fullscreenSeen, 1);
+            ZHLN::Test::ExpectEq(manualSeen, 0);
+
+            std::array<char*, 2> invalid = {(char*) "zahlen", (char*) "--headless=maybe"};
+            const auto badEngine = ZHLN::HandleCommandLine(invalid, handlers);
+            ZHLN::Test::ExpectFalse(badEngine.has_value());
+            if (!badEngine) ZHLN::Test::ExpectEq(badEngine.error(), ZHLN::CommandLineError::InvalidValue);
+            ZHLN::Test::ExpectEq(headlessSeen, 1); // never mirror a rejected engine value
+
+            const std::array rejectMirror = {
+                ZHLN::CommandHandler {
+                    .key = "--headless",
+                    .action = [](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
+                        return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+                    },
+                    .mirrorEngineFlag = true,
+                },
+            };
+            std::array<char*, 2> valid = {(char*) "zahlen", (char*) "--headless=on"};
+            const auto rejected = ZHLN::HandleCommandLine(valid, rejectMirror);
+            ZHLN::Test::ExpectFalse(rejected.has_value());
+            if (!rejected) ZHLN::Test::ExpectEq(rejected.error(), ZHLN::CommandLineError::InvalidValue);
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> invalid_values_and_unknown_flags() {
             // Test invalid numeric argument
             std::array<char*, 2> badFps    = {(char*) "zahlen", (char*) "--fps-limit=not_a_number"};

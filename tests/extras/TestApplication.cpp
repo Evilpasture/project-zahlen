@@ -11,12 +11,15 @@
 #include <concepts>
 #include <cstdint>
 #include <expected>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace ZHLN::Test {
 
@@ -43,6 +46,21 @@ static_assert(!HasNativeGameplayToggle<EngineConfig>);
 struct LaunchOptions {
     uint32_t cubes ZHLN_ANNOTATION(Description<"Initial physics boxes"> {}, = CliRange<0, 64> {}, = CliShort<'c'> {}) = 5;
     int32_t  seed ZHLN_ANNOTATION(Description<"Signed random seed"> {}) = 0;
+};
+
+enum class QualitySetting { Low, Medium, Ultra };
+struct RichLaunchOptions {
+    bool           godMode ZHLN_ANNOTATION(Description<"Enable invincibility"> {}, = CliShort<'g'> {}) = false;
+    bool           headless   = false; // engine option and reflected field both change
+    bool           fullscreen = false;
+    bool           vsync      = true;
+    float          gamma ZHLN_ANNOTATION(CliRange<0.5f, 2.0f> {}) = 1.0f;
+    double         threshold ZHLN_ANNOTATION(CliRange<-1.0, 1.0> {}) = 0.0;
+    std::string    scene  = "original.scene";
+    String32       name   {"Original"};
+    String64       server {"localhost"};
+    QualitySetting quality ZHLN_ANNOTATION(Description<"Quality preset"> {}, = CliShort<'q'> {}) = QualitySetting::Low;
+    uint32_t       fpsLimit ZHLN_ANNOTATION(CliRange<0, 144> {}) = 0;
 };
 struct StartOnlyLayer { void Start(Engine&) {} };
 struct TickOnlyLayer { void Tick(Engine&, float) {} };
@@ -76,6 +94,26 @@ static_assert(!HasApplicationOnUI<Application>); // application UI only comes fr
 static_assert(std::copy_constructible<Application>); // reflected keys and owned layers survive copies
 static_assert(std::same_as<decltype(App().Run()), AppRunResult>);
 static_assert(std::same_as<decltype(KernelApp().Run()), AppRunResult>);
+
+// Exercise CLI success without creating a GPU/Engine: --help follows the
+// tokens under test, while failures stop before reaching it.
+auto RunConfigCli(Application& app, std::initializer_list<std::string_view> tokens, bool appendHelp = false) -> AppRunResult {
+    std::vector<std::string> strings;
+    strings.reserve(tokens.size() + 2);
+    strings.emplace_back("test-application");
+    for (std::string_view token: tokens) {
+        strings.emplace_back(token);
+    }
+    if (appendHelp) {
+        strings.emplace_back("--help");
+    }
+    std::vector<char*> args;
+    args.reserve(strings.size());
+    for (auto& text: strings) {
+        args.push_back(text.data());
+    }
+    return app.Run(std::span<char* const>(args));
+}
 
 void ExpectExit(const AppRunResult& result, AppExitReason reason) {
     Expect(result.has_value());
@@ -237,6 +275,106 @@ void test_reflected_cli_config_keeps_owned_keys_and_validates_atomically() {
     char* shortArgs[] = {program, shortCubes, help};
     ExpectExit(app.Run(std::span<char* const>(shortArgs)), AppExitReason::CliHelpRequested);
     Expect(options.cubes == 12u);
+}
+
+void test_reflected_config_supports_bool_floats_text_and_enum_choices() {
+    RichLaunchOptions options;
+    Application       app;
+    bool              manualHeadlessCalled = false;
+    {
+        auto source = App();
+        source.AddCliOption("--headless", "", "Ordinary colliding handler", [&](CommandLineOptions&, std::string_view) {
+            manualHeadlessCalled = true;
+            return std::expected<void, ErrorCode> {};
+        });
+        source.WithConfig(options);
+        app = source; // source dies: keys, short aliases, and enum help must survive
+    }
+
+    bool sawChoice = false;
+    bool sawBool = false;
+    bool engineMatchesFields = false;
+    app.AddCliOption("--inspect-config", "", "Inspect reflected metadata", [&](CommandLineOptions& cli, std::string_view) {
+        for (const auto& handler: cli.appHandlers) {
+            if (handler.key == "--quality") {
+                sawChoice = handler.placeholder == "<Low|Medium|Ultra>" && handler.shortKey == "-q" &&
+                            handler.description == "Quality preset";
+            }
+            if (handler.key == "--god-mode") {
+                sawBool = handler.placeholder == "[on|off|true|false]" && handler.shortKey == "-g";
+            }
+        }
+        engineMatchesFields = cli.headless == options.headless && cli.fullscreen == options.fullscreen &&
+                              cli.vsync == options.vsync && cli.fpsLimit == options.fpsLimit;
+        return std::expected<void, ErrorCode> {};
+    });
+
+    // Bare bool, explicit on/off/true/false, separated and = values, general
+    // floating-point notation, a spaced scene name, fixed strings, and enums.
+    ExpectExit(
+        RunConfigCli(app, {"--god-mode", "--headless=on", "--fullscreen=false", "--vsync=off", "--gamma=1.25",
+                           "--threshold=-1.25e-1", "--scene", "mountain level.scene", "--name=Hero",
+                           "--server", "example.test", "-q=Ultra", "--fps-limit=120", "--inspect-config"}, true),
+        AppExitReason::CliHelpRequested
+    );
+    Expect(options.godMode && options.headless && !options.fullscreen && !options.vsync);
+    Expect(options.gamma == 1.25f && options.threshold == -0.125);
+    Expect(options.scene == "mountain level.scene" && std::string_view(options.name) == "Hero");
+    Expect(std::string_view(options.server) == "example.test" && options.quality == QualitySetting::Ultra);
+    Expect(options.fpsLimit == 120u && sawChoice && sawBool && engineMatchesFields);
+    Expect(!manualHeadlessCalled); // even an earlier manual collision must not hide the reflected field
+
+    ExpectExit(
+        RunConfigCli(app, {"-g=off", "--headless", "off", "--fullscreen", "--vsync", "--gamma", "0.75",
+                           "--threshold=1e-2", "--quality", "Medium", "--fps-limit=0", "--inspect-config"}, true),
+        AppExitReason::CliHelpRequested
+    );
+    Expect(!options.godMode && !options.headless && options.fullscreen && options.vsync);
+    Expect(options.gamma == 0.75f && options.threshold == 0.01 && options.quality == QualitySetting::Medium);
+    Expect(options.fpsLimit == 0u && engineMatchesFields);
+
+    // std::string has no fixed capacity; FixedString<N> accepts exactly N-1
+    // bytes, rejects N bytes rather than silently truncating an existing value.
+    const std::string longScene(300, 's');
+    const std::string nameLimit(31, 'N');
+    const std::string sceneArg = "--scene=" + longScene;
+    const std::string nameArg = "--name=" + nameLimit;
+    ExpectExit(RunConfigCli(app, {sceneArg, nameArg}, true), AppExitReason::CliHelpRequested);
+    Expect(options.scene == longScene && std::string_view(options.name) == nameLimit);
+}
+
+void test_reflected_config_invalid_values_preserve_fields_and_typed_errors() {
+    RichLaunchOptions options;
+    auto app = App();
+    app.WithConfig(options);
+    const std::string tooLongName = "--name=" + std::string(32, 'N');
+    struct Case { std::string_view token; CommandLineError error; };
+    for (const Case c: {
+        Case {"--god-mode=perhaps", CommandLineError::InvalidValue},
+        Case {"--headless=perhaps", CommandLineError::InvalidValue}, // engine must validate first
+        Case {"--gamma=bad", CommandLineError::InvalidValue},
+        Case {"--gamma=1.25bad", CommandLineError::InvalidValue},
+        Case {"--gamma=1e999", CommandLineError::InvalidValue},
+        Case {"--gamma=nan", CommandLineError::InvalidValue},
+        Case {"--gamma=0.25", CommandLineError::InvalidValue},
+        Case {"--threshold=1.1", CommandLineError::InvalidValue},
+        Case {"--threshold=not-a-number", CommandLineError::InvalidValue},
+        Case {"--quality=ultra", CommandLineError::InvalidValue}, // enum names are exact
+        Case {"--quality=Unknown", CommandLineError::InvalidValue},
+        Case {"--fps-limit=145", CommandLineError::InvalidValue}, // numeric range on mirrored field
+        Case {tooLongName, CommandLineError::InvalidValue},
+        Case {"--gamma", CommandLineError::MissingValue},
+        Case {"--threshold", CommandLineError::MissingValue},
+        Case {"--scene=", CommandLineError::MissingValue},
+        Case {"--server", CommandLineError::MissingValue},
+        Case {"--quality", CommandLineError::MissingValue},
+    }) {
+        ExpectError(RunConfigCli(app, {c.token}), c.error);
+        Expect(!options.godMode && !options.headless && !options.fullscreen && options.vsync);
+        Expect(options.gamma == 1.0f && options.threshold == 0.0 && options.fpsLimit == 0u);
+        Expect(options.scene == "original.scene" && std::string_view(options.name) == "Original");
+        Expect(std::string_view(options.server) == "localhost" && options.quality == QualitySetting::Low);
+    }
 }
 
 void test_layered_application_help_does_not_invoke_any_layer_phase() {

@@ -39,6 +39,9 @@ struct CommandHandler {
     std::string_view                                                                     placeholder = "";
     std::string_view                                                                     description = "";
     std::function<std::expected<void, ErrorCode>(CommandLineOptions&, std::string_view)> action;
+    // Reflected application fields may observe a matching engine flag after
+    // its own action succeeds. Ordinary app handlers stay engine-shadowed.
+    bool mirrorEngineFlag = false;
 };
 
 struct CommandLineOptions {
@@ -66,10 +69,11 @@ struct EngineError {
     bool        silent = false;
 };
 
-// Engine handlers win on key collisions: an application handler sharing an
-// engine key is unreachable. Defaults are applied first, then the environment,
-// then CLI flags. Hosts with nonstandard launch settings can pass their own
-// defaults without losing them when no matching flag was supplied.
+// Engine handlers win on key collisions. Reflected config handlers may opt
+// into observing the same successful engine action, so a matching field stays
+// in sync; ordinary app handlers remain shadowed. Defaults are applied first,
+// then the environment, then CLI flags. Hosts with nonstandard launch settings
+// can pass their own defaults without losing them when no flag was supplied.
 [[nodiscard]] auto HandleCommandLine(
     std::span<char* const>          args,
     std::span<const CommandHandler> appHandlers = {},

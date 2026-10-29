@@ -159,7 +159,25 @@ return result ? EXIT_SUCCESS : EXIT_FAILURE; // in main() only
 
 `.AddCliOption(ZHLN::CommandHandler{...})` and `.WithCliOptions(std::span<const ZHLN::CommandHandler>)` are also available. Registered flags appear under **Application Options** in `--help`; actions run during parsing, and errors stop before engine creation. Handlers own neither their `string_view` metadata nor captured state, and `CommandLineOptions::args` / `appHandlers` borrow argv and the application's handlers: keep those alive through synchronous `Run`. The parsed options are copied into the Engine's extension services before default modules, installers and initial-scene setup, so gameplay systems may request `ZHLN::ECS::Res<ZHLN::CommandLineOptions>` as well. No-CLI `Run()` / `Run(callback)` do not create that service.
 
-For integral launch settings, the default sandbox demonstrates the reflected alternative: fields annotated with `ZHLN::Description<"...">` and optional `ZHLN::CliRange<Min, Max>` / `ZHLN::CliShort<'c'>` are registered by `.WithConfig(launch)` as `--field-name` options. For example, `app/main.cpp` uses `uint32_t cubes ZHLN_ANNOTATION(ZHLN::Description<"Initial physics boxes (0-64)"> {}, = ZHLN::CliRange<0, 64> {}, = ZHLN::CliShort<'c'> {}) = 5;`. The generated handlers own their flag names, reject empty, malformed, trailing, overflowing and out-of-range values, and only update the borrowed config after validation. Keep `launch` alive through `Run`; use `.AddCliOption(...)` for non-integral options or custom aliases.
+`.WithConfig(launch)` binds reflected fields to flags, converting `godMode` to `--god-mode` (and `fpsLimit` to `--fps-limit`). It supports non-bool integrals, `bool`, `float`, `double`, `std::string`, `ZHLN::FixedString<N>` (including `String32` / `String64` / `String128` / `String256`), and enums. For example:
+
+```cpp
+enum class Quality { Low, High };
+struct Launch {
+    bool godMode = false;
+    float gamma ZHLN_ANNOTATION(ZHLN::CliRange<0.5f, 2.0f> {}) = 1.0f;
+    std::string scene = "arena";
+    ZHLN::String64 server {"localhost"};
+    Quality quality = Quality::Low;
+};
+Launch launch;
+auto app = ZHLN::App();
+app.WithConfig(launch); // --god-mode, --gamma, --scene, --server, --quality
+```
+
+A bare bool flag sets `true`; `--god-mode=off` / `--god-mode=false` set `false` (also `on`, `true`, `1` / `0`, `yes` / `no`). Non-bool flags require a nonempty value; floats use `std::from_chars` in general format, reject non-finite values, and may use `CliRange<Min, Max>` just like integers. Enums accept exact `Reflect::StringToEnum<E>()` names and show the `Reflect::EnumNames<E>()` choices in `--help` (e.g. `--quality <Low|High>`). `ZHLN::Description<"...">` supplies help text and `ZHLN::CliShort<'c'>` supplies a short alias; the sandbox demonstrates both for `--cubes` in `app/main.cpp`. Generated flag names, aliases and enum-help text are owned by the application, including after a copy. Fixed-capacity strings reject overlong inputs rather than truncating them, and each field changes only after its input is valid. Keep the borrowed `launch` alive through synchronous `Run`. Because the tokenizer treats a leading `-` as another flag, spell negative numbers as `--threshold=-0.125`.
+
+Engine flags run first. When a reflected field matches one (such as `headless`, `fullscreen`, `vsync`, or `fpsLimit`), the same value then reaches that field; a failed engine action never reaches it, and field validation can still reject it. Ordinary `.AddCliOption(...)` handlers with matching keys remain engine-shadowed, even when registered before the reflected field. CLI failures remain inspectable `CommandLineError` values, including errors from a reflected field.
 
 Games may also use `.AddLayer(layer)` for a move-only or copyable object implementing any of `Start(Engine&)`, `Tick(Engine&, float)`, `UI(Engine&)`, and `Stop(Engine&)`; UI-only and Stop-only layers are valid. Layers are owned by the application. `Start` runs after scene creation, `Tick` runs after events but before an optional per-frame `Run(callback)`, and `UI` runs in registration order in the Engine's UI frame phase. Once scene initialization succeeds, `Stop` runs in reverse registration order with the Engine still alive, on normal closure or frame failure (but not on CLI early exits or failed initialization). Dispatch uses function pointers, not virtual methods; state is allocated once per layer. The sandbox registers `SandboxGame` as a layer instead of storing its update in a capturing callback.
 

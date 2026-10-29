@@ -334,16 +334,26 @@ auto HandleCommandLine(
     const std::vector<CliToken> tokens = TokenizeCliArgs(args);
 
     for (const auto& tok: tokens) {
-        const auto*           it      = std::ranges::find_if(kEngineHandlers, [&](const auto& h) { return MatchesHandler(h, tok.key); });
-        const CommandHandler* handler = it != kEngineHandlers.end() ? &*it : nullptr;
-        if (handler == nullptr) {
-            const auto appIt = std::ranges::find_if(appHandlers, [&](const auto& h) { return MatchesHandler(h, tok.key); });
-            handler          = appIt != appHandlers.end() ? &*appIt : nullptr;
+        const auto engineIt = std::ranges::find_if(kEngineHandlers, [&](const auto& h) { return MatchesHandler(h, tok.key); });
+        if (engineIt != kEngineHandlers.end()) {
+            if (auto result = engineIt->action(options, tok.value); !result) {
+                return std::unexpected(result.error());
+            }
+            // Only opted-in reflected fields see a built-in token. Search all
+            // matches: an earlier ordinary colliding handler must not hide one.
+            for (const auto& appHandler: appHandlers) {
+                if (appHandler.mirrorEngineFlag && MatchesHandler(appHandler, tok.key)) {
+                    if (auto mirrored = appHandler.action(options, tok.value); !mirrored) {
+                        return std::unexpected(mirrored.error());
+                    }
+                }
+            }
+            continue;
         }
 
-        if (handler != nullptr) {
-            auto result = handler->action(options, tok.value);
-            if (!result) {
+        const auto appIt = std::ranges::find_if(appHandlers, [&](const auto& h) { return MatchesHandler(h, tok.key); });
+        if (appIt != appHandlers.end()) {
+            if (auto result = appIt->action(options, tok.value); !result) {
                 return std::unexpected(result.error());
             }
         } else {
