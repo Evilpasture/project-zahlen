@@ -100,6 +100,14 @@ class Application {
         return *this;
     }
 
+    // Validate or acquire application resources after CLI parsing and early
+    // exits, but before process setup or Engine::Create. A failure keeps its
+    // typed ErrorCode and never starts an engine. Borrowed state must outlive Run.
+    auto BeforeEngineCreate(std::function<std::expected<void, ErrorCode>()> prepare) -> Application& {
+        _prepare = std::move(prepare);
+        return *this;
+    }
+
     // Add game-specific flags to the same parse and --help menu as engine flags.
     // Actions run during parsing and may capture game setup state; the handler's
     // string_views must remain valid until Run returns.
@@ -368,13 +376,14 @@ class Application {
     auto RunConfigured(const EngineRunConfig& config, const Update& update, const CommandLineOptions* options) const -> AppRunResult;
     auto RunFromCLI(EngineRunConfig config, std::span<char* const> args, const Update& update) const -> AppRunResult;
 
-    EngineRunConfig                           _config;
-    std::function<void(Engine&)>              _start;
-    std::vector<std::function<void(Engine&)>> _installers;
-    std::vector<CommandHandler>               _cliHandlers;
+    EngineRunConfig                                 _config;
+    std::function<std::expected<void, ErrorCode>()> _prepare;
+    std::function<void(Engine&)>                    _start;
+    std::vector<std::function<void(Engine&)>>       _installers;
+    std::vector<CommandHandler>                     _cliHandlers;
     std::vector<std::shared_ptr<const std::string>> _reflectedOptionText;
-    std::vector<LayerSlot>                    _layers;
-    bool                                      _defaultModules = true;
+    std::vector<LayerSlot>                          _layers;
+    bool                                            _defaultModules = true;
 };
 
 [[nodiscard]] inline auto App(EngineRunConfig config = {}) -> Application {

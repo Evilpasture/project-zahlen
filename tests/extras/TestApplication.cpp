@@ -43,6 +43,8 @@ concept HasNativeGameplayToggle = requires(T config) { config.enableNativeGamepl
 static_assert(!HasNativeGameplayToggle<EngineRunConfig>);
 static_assert(!HasNativeGameplayToggle<EngineConfig>);
 
+enum class PreparationFailure : uint8_t { Refused = 1 };
+
 struct LaunchOptions {
     uint32_t cubes ZHLN_ANNOTATION(Description<"Initial physics boxes"> {}, = CliRange<0, 64> {}, = CliShort<'c'> {}) = 5;
     int32_t  seed ZHLN_ANNOTATION(Description<"Signed random seed"> {}) = 0;
@@ -161,6 +163,43 @@ void test_app_rejects_removed_tool_mode_flags_without_starting_engine() {
     args[1] = bench;
     ExpectError(App().Run(2, args, [&](Engine&) { ran = true; }), CommandLineError::UnknownArgument);
     Expect(!ran);
+}
+
+void test_app_preparation_preserves_typed_failure_and_skips_cli_early_exits() {
+    bool prepared = false;
+    bool installed = false;
+    bool started = false;
+    int  cliActions = 0;
+    auto app = App();
+    app.AddCliOption("--scene", "<name>", "Scene to prepare", [&](CommandLineOptions&, std::string_view value) {
+        Expect(value == "ready");
+        ++cliActions;
+        return std::expected<void, ErrorCode> {};
+    });
+    app.BeforeEngineCreate([&]() -> std::expected<void, ErrorCode> {
+        prepared = true;
+        Expect(!installed && !started);
+        return std::unexpected(PreparationFailure::Refused);
+    });
+    app.Install([&](Engine&) { installed = true; });
+    app.OnStart([&](Engine&) { started = true; });
+
+    ExpectError(RunConfigCli(app, {"--scene=ready"}), PreparationFailure::Refused);
+    Expect(prepared && cliActions == 1 && !installed && !started);
+
+    prepared = false;
+    ExpectExit(RunConfigCli(app, {"--help"}), AppExitReason::CliHelpRequested);
+    ExpectExit(RunConfigCli(app, {"--version"}), AppExitReason::CliVersionRequested);
+    ExpectExit(RunConfigCli(app, {"--print-graph=none"}), AppExitReason::CliGraphRequested);
+    Expect(!prepared && cliActions == 1 && !installed && !started);
+
+    ExpectError(RunConfigCli(app, {"--unknown"}), CommandLineError::UnknownArgument);
+    char program[] = "test-application";
+    char* args[] = {program};
+    ExpectError(app.Run(-1, args), AppError::InvalidArguments);
+    Expect(!prepared && !installed && !started);
+    ExpectError(app.Run(), PreparationFailure::Refused); // no-CLI runs also use the same preparation seam
+    Expect(prepared && !installed && !started);
 }
 
 void test_app_rejects_invalid_args_before_engine_creation() {

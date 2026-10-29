@@ -49,6 +49,11 @@ auto Application::RunFromCLI(EngineRunConfig config, std::span<char* const> args
 }
 
 auto Application::RunConfigured(const EngineRunConfig& config, const Update& update, const CommandLineOptions* options) const -> AppRunResult {
+    if (_prepare) {
+        if (auto prepared = _prepare(); !prepared) {
+            return std::unexpected(prepared.error());
+        }
+    }
     // Keep the Engine lifetime inside the shared process/task scope. Never
     // nest Engine::Run here: it creates another TaskSystem::Scope.
     ProcessScope process;

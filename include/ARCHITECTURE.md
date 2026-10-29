@@ -213,6 +213,7 @@ and optional third-party dependencies stay local to the owning target.
 | `zahlen_datamodel`, `zahlen_project_light_client` | `gameplay/ProjectLight/` | ProjectLight's stable-ID object graph and optional native client |
 | `zahlen_host_runner` | `app/` | Shared process/crash/task lifetime and frame pacing; `KernelApp` drives Kernel-only tools with no gameplay links; publishes `app/include/` |
 | `zahlen_application` | `app/` | Game loop, reflected/registered CLI, layers and CMake-generated optional-module wiring; publishes `app/include/` and publicly links `zahlen_engine_cli` for the `App.hpp` facade |
+| `zahlen_project_light_app` | `app/ProjectLightClientMain.cpp` | Optional ProjectLight entrypoint: App lifecycle with only the client's selected gameplay modules and connection preflight |
 | `zahlen_scene_documents` | `tools/scene/` | TOML/Lua scene import shared only by tools |
 | `zahlen_world_editor`, `zahlen_benchmark_app`, `zahlen_scene_host` | `tools/{editor,benchmark,scene}/` | Separate world-editor, headless-benchmark and scene/file-watcher hosts |
 

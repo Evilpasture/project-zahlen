@@ -247,6 +247,7 @@ void test_app_cli_options_service_is_available_before_install_and_scene_start() 
         .headless       = true,
     };
     bool             actionRan = false;
+    bool             prepared  = false;
     bool             installed = false;
     bool             started   = false;
     bool             updated   = false;
@@ -261,7 +262,14 @@ void test_app_cli_options_service_is_available_before_install_and_scene_start() 
             return {};
         }
     );
+    app.BeforeEngineCreate([&]() -> std::expected<void, ErrorCode> {
+        Expect(actionRan && region == "atrium");
+        Expect(!installed && !started);
+        prepared = true;
+        return {};
+    });
     app.Install([&](Engine& engine) {
+        Expect(prepared);
         auto parsed = engine.Service<CommandLineOptions>();
         Expect(parsed.has_value());
         if (parsed) {
@@ -290,7 +298,7 @@ void test_app_cli_options_service_is_available_before_install_and_scene_start() 
         engine.GetPlatformHost().Close();
     });
     ExpectUserClosed(result);
-    Expect(installed && started && updated);
+    Expect(prepared && installed && started && updated);
 }
 
 void test_kernel_app_owns_process_input_and_shutdown_without_an_ecs_world() {
