@@ -4,6 +4,7 @@
 #pragma once
 
 #include <CommandLine/CommandLine.hpp>
+#include <Signal/WorkerCrashReports.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
@@ -2792,7 +2793,7 @@ inline auto ExecuteSuiteRuntime(
 
         if (marks.isSkipped) {
             if (opts.workerMode) {
-                ZHLN::Println("@@ZTEST BEGIN\t{}\t{}", relFile, nodeId);
+                ZHLN::BeginWorkerCase(relFile, nodeId);
             }
             if (marks.skipReason.empty()) {
                 ZHLN::Println("  {}[ SKIP ] {}{}", Color::Yellow, name, Color::Reset);
@@ -2800,7 +2801,7 @@ inline auto ExecuteSuiteRuntime(
                 ZHLN::Println("  {}[ SKIP ] {}{} ({})", Color::Yellow, name, Color::Reset, marks.skipReason);
             }
             if (opts.workerMode) {
-                ZHLN::Println("@@ZTEST END\t{}\t{}\tSKIP\t0", relFile, nodeId);
+                ZHLN::EndWorkerCase(relFile, nodeId, "SKIP", 0);
             }
             stats.skipped++;
             continue;
@@ -2819,7 +2820,9 @@ inline auto ExecuteSuiteRuntime(
         }
 
         if (opts.workerMode) {
-            ZHLN::Println("@@ZTEST BEGIN\t{}\t{}", relFile, nodeId);
+            // Also arms crash attribution for this case: if the process dies
+            // before the matching EndWorkerCase below, the handler names it.
+            ZHLN::BeginWorkerCase(relFile, nodeId);
         }
         ZHLN::Println("  [ RUN  ] {}", name);
 
@@ -2927,10 +2930,7 @@ inline auto ExecuteSuiteRuntime(
                 );
             }
             if (opts.workerMode) {
-                ZHLN::Println(
-                    "@@ZTEST END\t{}\t{}\t{}\t{}",
-                    relFile, nodeId, quarantineEnabled ? "QUARANTINE_PASS" : "PASS", elapsedUs
-                );
+                ZHLN::EndWorkerCase(relFile, nodeId, quarantineEnabled ? "QUARANTINE_PASS" : "PASS", elapsedUs);
             }
             stats.passed++;
         } else {
@@ -2992,10 +2992,7 @@ inline auto ExecuteSuiteRuntime(
             }
 
             if (opts.workerMode) {
-                ZHLN::Println(
-                    "@@ZTEST END\t{}\t{}\t{}\t{}",
-                    relFile, nodeId, quarantineEnabled ? "QUARANTINE" : "FAIL", elapsedUs
-                );
+                ZHLN::EndWorkerCase(relFile, nodeId, quarantineEnabled ? "QUARANTINE" : "FAIL", elapsedUs);
             }
 
             if (quarantineEnabled) {
@@ -3196,10 +3193,21 @@ class Runner {
     ) {
         const RunnerOptions opts = TemplatedDetail::ParseRunnerOptions(argc, argv);
 
+        // Worker mode is the only mode where the events are consumed by another
+        // process, so it is the only one that needs framed crash reports: a
+        // worker that dies has to explain itself on the pipe, because nobody is
+        // left to write a "what was running" line afterwards. `--ztest-list`
+        // runs stay unarmed -- the discovery pass has nothing to attribute.
+        if (opts.workerMode) {
+            ZHLN::InstallWorkerCrashReports();
+        }
+
         if (opts.parseFailed) {
+            ZHLN::UninstallWorkerCrashReports();
             return 2;
         }
         if (opts.showHelp) {
+            ZHLN::UninstallWorkerCrashReports();
             return 0;
         }
 
@@ -3211,6 +3219,7 @@ class Runner {
             if (opts.collectOnly) {
                 ZHLN::Println("\n{} test(s) collected across {} module/suite entry(ies).", collected, entries.size());
             }
+            ZHLN::UninstallWorkerCrashReports();
             return 0;
         }
 
@@ -3246,10 +3255,19 @@ class Runner {
             return Summarize(totalStats, opts);
         };
 
+        const auto finish = [](int exitCode) {
+            // Disarm before the process winds down: at this point a fatal signal
+            // is a teardown bug, not a test crash worth framing, and the report
+            // path is the one piece of the runner that must not outlive its
+            // cases.
+            ZHLN::UninstallWorkerCrashReports();
+            return exitCode;
+        };
+
         if (!anyRunnable) {
-            return runMatched();
+            return finish(runMatched());
         }
-        return std::forward<SessionWrapper>(sessionWrapper)(runMatched);
+        return finish(std::forward<SessionWrapper>(sessionWrapper)(runMatched));
     }
 
     static int Summarize(const TestStats& totalStats, const RunnerOptions& opts) {

@@ -149,6 +149,54 @@ every `test_*` function in that namespace.
   `Timeout<Seconds>` / watchdog deadline, `ztest` attributes the failure to that
   exact node ID and automatically respawns the remaining items in that file/group
   via `--skip-until`.
+- Crash stack traces: a worker arms `ZHLN::InstallWorkerCrashReports()`
+  (`extensions/Signal/WorkerCrashReports.hpp`) in `--ztest-worker` mode. A fatal signal
+  (SIGSEGV/SIGBUS/SIGILL/SIGFPE/SIGABRT) or `std::terminate` makes the worker
+  close the in-flight case and stream a framed `@@ZTEST STACKTRACE-*` record from
+  inside the handler -- async-signal-safe, no allocation, on an alternate signal
+  stack -- before it exits with `128 + signal`. `ztest` symbolizes those frames
+  against the worker binary with `addr2line` (set `ADDR2LINE=<path>` to pick a
+  specific one, `llvm-addr2line`/`eu-addr2line` are accepted) and prints them
+  under the `[ CRASH ]` line:
+
+  ```
+    [ CRASH ] tests/core/TestFoo.cpp::FooSuite::breaks
+      Exception: SIGSEGV at address 0x0 on thread 41237
+      case was still in flight: it never reached @@ZTEST END
+      Stack trace (4 frames):
+        0   in FooSuite::breaks() at tests/core/TestFoo.cpp:88
+        1   in main at tests/main.cpp:6
+        ...
+  ```
+
+  `--stack-frames <N>` caps the printed depth (0 = everything the worker
+  captured), `--no-symbolize` prints raw `module+0xoffset` frames, and
+  `ZHLN_ZTEST_SYMBOLIZE=0` / `ZHLN_ZTEST_STACK_FRAMES=<N>` set the same defaults
+  from the environment.
+
+  On macOS the worker walks its own Mach-O load commands at install time to map
+  address ranges to images, and ships *link-time* frame addresses -- the vmaddr
+  form `atos` and `llvm-addr2line` expect, not a distance from the image base.
+  Apple ships no `addr2line`, so symbolization there needs `llvm-addr2line`
+  or `llvm-symbolizer` on `PATH` (they come with `brew install llvm`); point
+  `ADDR2LINE` at one if it lives outside `PATH` (it is read from the environment
+  of the `ztest` process, so either `export` it or put the tool on `PATH`).
+  Without either, frames still print in the `module+0xoffset` form:
+
+  ```sh
+  ADDR2LINE=/opt/homebrew/opt/llvm/bin/llvm-addr2line .build/bin/ztest
+  ```
+
+  Frames in `dyld` and `libsystem` resolve to symbol names only: Apple strips
+  line tables from the system images, so those show `in _sigtramp` rather than
+  `in _sigtramp at file:line`, which is expected.
+
+  `std::terminate` is captured as well (a no-exceptions build has nowhere else
+  to put `std::terminate()`, a bare `throw`, or a `noexcept` violation), so
+  instead of a worker that just stops after `[ RUN ]` the offending case still
+  gets a frame list. Windows workers emit the same
+  records, but the win32 reader is synchronous and leaves frames as
+  `module+0xoffset` (`llvm-symbolizer` resolves those by hand).
 
 ## Pytest-Style Fixtures, `@parametrize`, & Decomposing `Expect`
 

@@ -8,6 +8,11 @@
 # `zahlen_signal` directly without pulling `zahlen_engine` into CLI-only tools.
 # Public headers are included as <Signal/SignalManager.hpp>, <Signal/SignalSafe.hpp>,
 # <Signal/SignalSafetyInspector.hpp>, and <Signal/CrashHandler.hpp>.
+#
+# Signal/WorkerCrashReports.cpp is what a *test worker* runs inside a fatal-signal
+# handler, so it touches no allocator, no logger and no symbol resolver.
+# Signal/StackSymbolizer.cpp is its parent-side counterpart -- it runs in `ztest`,
+# after the worker is gone, and shells out to addr2line.
 
 if(TARGET zahlen_signal)
     return()
@@ -17,6 +22,8 @@ set(TARGET_NAME zahlen_signal)
 
 add_library(${TARGET_NAME} STATIC
     SignalManager.cpp
+    StackSymbolizer.cpp
+    WorkerCrashReports.cpp
 )
 
 set_target_properties(${TARGET_NAME} PROPERTIES
@@ -36,6 +43,15 @@ target_include_directories(${TARGET_NAME} PUBLIC
 target_compile_options(${TARGET_NAME} PUBLIC
     $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
 )
+
+if(WIN32)
+    # dbghelp: `SymbolResolver`-equivalent lookups for the win32 symbolizer path
+    # (see the note in the root CMakeLists.txt). MSVC autolinks it from the
+    # #pragma in the source; every other toolchain needs the import library.
+    if(NOT MSVC)
+        target_link_libraries(${TARGET_NAME} PRIVATE dbghelp)
+    endif()
+endif()
 
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})

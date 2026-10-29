@@ -13,10 +13,16 @@
 // isolated worker processes while pooling GPU workers per binary, streams
 // structured `@@ZTEST` events, enforces per-worker wall-clock watchdogs, and
 // respawns workers with `--skip-until` if an individual case crashes or hangs.
+//
+// A crash is reported by the worker itself: <Signal/StackCapture.hpp> closes the
+// in-flight case and emits an `@@ZTEST STACKTRACE-*` record from inside the fatal
+// signal handler, and this side symbolizes the frames it carries (addr2line on
+// POSIX) before printing them under the `[ CRASH ]` line.
 
 #include <CommandLine/CommandLine.hpp>
 #include <Signal/SignalManager.hpp>
 #include <Signal/SignalSafe.hpp>
+#include <Signal/StackSymbolizer.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/Description.hpp>
@@ -422,6 +428,37 @@ struct ZtestOptions {
     bool                     onlyCpu          = false;
     bool                     onlyGpu          = false;
     bool                     earlyExitOk      = false;
+    bool                     symbolizeCrashes = true;  // --no-symbolize
+    uint32_t                 traceFrameLimit  = 0;     // 0 = every frame the worker captured
+};
+
+// ============================================================================
+// Worker Crash Reports (`@@ZTEST STACKTRACE-*`)
+// ============================================================================
+//
+// A worker built against extensions/Signal/WorkerCrashReports.hpp reports a fatal
+// signal or a std::terminate as a framed record before it dies: the in-flight
+// case is closed with `@@ZTEST END ... CRASHED`, then the trace arrives as
+// BEGIN / NOTE / FRAME / END. A worker that predates that header just dies, in
+// which case the case is attributed by the in-flight BEGIN and the report
+// stays empty -- the printed diagnostics are then exactly what they were.
+
+struct WorkerTraceFrame {
+    int            index        = 0;
+    uintptr_t      address      = 0;
+    std::string    module;
+    uintptr_t      moduleOffset = 0;
+};
+
+struct WorkerCrashReport {
+    std::string                   nodeId;
+    uint64_t                      threadId     = 0;
+    std::string                   reason;
+    uintptr_t                     faultAddress = 0;
+    int                           frameCount   = 0; // as declared by the worker in STACKTRACE-END
+    bool                          complete     = false;
+    std::vector<std::string>      notes;
+    std::vector<WorkerTraceFrame> frames;
 };
 
 enum class CaseStatus : uint8_t {
@@ -472,11 +509,25 @@ auto FlagTakesSeparateValue(std::string_view flag) noexcept -> bool {
     return flag == "--test-dir" || flag == "-B" || flag == "--build-dir" || flag == "-k" || flag == "--filter"
         || flag == "-m" || flag == "--mark" || flag == "-j" || flag == "--jobs" || flag == "--gpu-jobs"
         || flag == "--maxfail" || flag == "--durations" || flag == "--timeout" || flag == "--select"
-        || flag == "--validation";
+        || flag == "--validation" || flag == "--stack-frames";
 }
 
 auto ParseCommandLine(int argc, char** argv) -> std::optional<ZtestOptions> {
     ZtestOptions             opts {};
+
+    // Worker crash traces: environment first, flags after, so a shell export is
+    // a default and an explicit flag still wins.
+    if (const char* symbolizeEnv = std::getenv("ZHLN_ZTEST_SYMBOLIZE"); symbolizeEnv != nullptr) {
+        const std::string_view value {symbolizeEnv};
+        opts.symbolizeCrashes = !(value == "0" || value == "off" || value == "false" || value == "no");
+    }
+    if (const char* framesEnv = std::getenv("ZHLN_ZTEST_STACK_FRAMES"); framesEnv != nullptr) {
+        uint32_t parsed = 0;
+        if (ParseIntegral(std::string_view {framesEnv}, parsed)) {
+            opts.traceFrameLimit = parsed;
+        }
+    }
+
     std::vector<std::string> normalized;
     normalized.reserve(static_cast<std::size_t>(std::max(1, argc)));
     normalized.emplace_back((argc > 0 && argv != nullptr && argv[0] != nullptr) ? argv[0] : "ztest");
@@ -725,6 +776,36 @@ auto ParseCommandLine(int argc, char** argv) -> std::optional<ZtestOptions> {
             },
         },
         ZHLN::CliFlag {
+            .key         = "--stack-frames",
+            .placeholder = "<N>",
+            .description = "Frame limit for worker crash stack traces (0 = all captured frames)",
+            .action      = [&](std::string_view v) -> std::expected<void, ZHLN::CommandLineError> {
+                uint32_t parsed = 0;
+                if (!ParseIntegral(v, parsed)) {
+                    ZHLN::Println(stderr, "Error: Invalid integer '{}' for --stack-frames.", v);
+                    return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+                }
+                opts.traceFrameLimit = parsed;
+                return {};
+            },
+        },
+        ZHLN::CliFlag {
+            .key         = "--no-symbolize",
+            .description = "Print raw worker stack frames without calling addr2line",
+            .action      = [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
+                opts.symbolizeCrashes = false;
+                return {};
+            },
+        },
+        ZHLN::CliFlag {
+            .key         = "--symbolize",
+            .description = "Symbolize worker crash frames (default; ADDR2LINE=<path> overrides the tool)",
+            .action      = [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
+                opts.symbolizeCrashes = true;
+                return {};
+            },
+        },
+        ZHLN::CliFlag {
             .key         = "--timeout",
             .placeholder = "<sec>",
             .description = "Override per-worker watchdog timeout in seconds",
@@ -780,13 +861,27 @@ auto ParseCommandLine(int argc, char** argv) -> std::optional<ZtestOptions> {
         },
     };
 
+    static constexpr std::array<ZHLN::CliEnvDoc, 2> kEnvironmentDocs {{
+        {
+            .name        = "ZHLN_ZTEST_SYMBOLIZE",
+            .value       = "0|1",
+            .description = "0 = print raw crash frames instead of running addr2line",
+        },
+        {
+            .name        = "ZHLN_ZTEST_STACK_FRAMES",
+            .value       = "<N>",
+            .description = "Default for --stack-frames (0 = all captured frames)",
+        },
+    }};
+
     const auto parsedRes = ZHLN::ParseCli(
         std::span<char* const>(argPtrs.data(), argPtrs.size()),
         flags,
         ZHLN::CliParseConfig {
-            .programTitle   = "Zahlen Test Orchestrator (ztest)",
-            .usageSuffix    = "[options] [path|file::test ...]",
-            .primaryHeading = "Test Orchestrator Options",
+            .programTitle     = "Zahlen Test Orchestrator (ztest)",
+            .usageSuffix      = "[options] [path|file::test ...]",
+            .primaryHeading   = "Test Orchestrator Options",
+            .environmentDocs  = kEnvironmentDocs,
         }
     );
     if (!parsedRes) {
@@ -1129,6 +1224,8 @@ struct ActiveWorker {
     std::string                           currentLog;
     std::string                           unattributedLog;
     std::string                           progressGlyphs;
+    std::string                           crashReport; // raw @@ZTEST STACKTRACE-* block, see RenderWorkerCrashReport
+    bool                                  crashAnnounced = false; // worker closed the case with `... CRASHED` and is exiting
     uint32_t                              localTotal  = 0;
     uint32_t                              localPassed = 0;
     uint32_t                              localFailed = 0;
@@ -1416,9 +1513,224 @@ auto IsNoisyBannerLine(std::string_view line) -> bool {
         || trimmed.find("[ QUARANTINE ] ") != std::string_view::npos || trimmed.find("[ PASS ] ") != std::string_view::npos;
 }
 
-void PrintDiagnosticsBlock(std::string_view text) {
+// ============================================================================
+// Worker Crash Report Parsing & Rendering
+// ============================================================================
+
+auto ParseHexValue(std::string_view sv, uintptr_t& out) noexcept -> bool {
+    std::string_view trimmed = Trim(sv);
+    if (trimmed.starts_with("0x") || trimmed.starts_with("0X")) {
+        trimmed.remove_prefix(2);
+    }
+    if (trimmed.empty()) {
+        return false;
+    }
+    unsigned long long value = 0;
+    const auto [ptr, ec] = std::from_chars(trimmed.data(), trimmed.data() + trimmed.size(), value, 16);
+    if (ec != std::errc {} || ptr != trimmed.data() + trimmed.size()) {
+        return false;
+    }
+    out = static_cast<uintptr_t>(value);
+    return true;
+}
+
+// Folds one `@@ZTEST STACKTRACE-*` / `@@ZTEST NOTE` / `@@ZTEST FRAME` line into
+// `report`. Returns false when the line is not part of the trace grammar.
+auto ConsumeWorkerTraceLine(WorkerCrashReport& report, std::string_view line) -> bool {
+    if (line.starts_with("@@ZTEST STACKTRACE-BEGIN\t")) {
+        const auto cols = SplitChar(line, '\t', true);
+        if (cols.size() < 5) {
+            return true;
+        }
+        report         = WorkerCrashReport {};
+        report.nodeId  = cols[1];
+        uint64_t threadId = 0;
+        if (ParseIntegral(cols[2], threadId)) {
+            report.threadId = threadId;
+        }
+        report.reason = cols[3];
+        uintptr_t fault = 0;
+        if (ParseHexValue(cols[4], fault)) {
+            report.faultAddress = fault;
+        }
+        return true;
+    }
+    if (line.starts_with("@@ZTEST NOTE\t")) {
+        const auto cols = SplitChar(line, '\t', true);
+        for (std::size_t i = 1; i < cols.size(); ++i) {
+            if (!cols[i].empty()) {
+                report.notes.push_back(cols[i]);
+            }
+        }
+        return true;
+    }
+    if (line.starts_with("@@ZTEST FRAME\t")) {
+        const auto cols = SplitChar(line, '\t', true);
+        if (cols.size() < 5) {
+            return true;
+        }
+        WorkerTraceFrame frame {};
+        int index = 0;
+        if (ParseIntegral(cols[1], index)) {
+            frame.index = index;
+        }
+        uintptr_t address = 0;
+        if (ParseHexValue(cols[2], address)) {
+            frame.address = address;
+        }
+        frame.module = cols[3];
+        uintptr_t offset = 0;
+        if (ParseHexValue(cols[4], offset)) {
+            frame.moduleOffset = offset;
+        }
+        report.frames.push_back(std::move(frame));
+        return true;
+    }
+    if (line.starts_with("@@ZTEST STACKTRACE-END\t")) {
+        const auto cols = SplitChar(line, '\t', true);
+        if (cols.size() >= 3) {
+            int declared = 0;
+            if (ParseIntegral(cols[2], declared)) {
+                report.frameCount = declared;
+            }
+        }
+        report.complete = true;
+        return true;
+    }
+    return false;
+}
+
+struct CrashRenderContext {
+    bool        symbolize   = true;
+    uint32_t    frameLimit  = 0;
+    std::string workerBinary;
+};
+
+// `[ CRASH ] <node>` already names the case; the report explains it. The layout
+// deliberately mirrors the "Exception" / "Stack trace" blocks that Python and
+// Java runners print, because that is the shape people scan for.
+void RenderWorkerCrashReport(std::string_view block, const CrashRenderContext& context) {
+    WorkerCrashReport report {};
+    for (const auto& line: SplitChar(block, '\n', false)) {
+        if (!ConsumeWorkerTraceLine(report, line)) {
+            continue;
+        }
+    }
+    if (report.reason.empty() && report.frames.empty()) {
+        return;
+    }
+
+    char addressField[32] {};
+    if (report.faultAddress != 0) {
+        ZHLN::FormatTo(addressField, sizeof(addressField), " at address 0x{:x}", static_cast<unsigned long long>(report.faultAddress));
+    }
+
+    ZHLN::Println(
+        "    {}Exception:{} {}{} on thread {}",
+        ZHLN::Color::Red,
+        ZHLN::Color::Reset,
+        report.reason.empty() ? std::string_view {"fatal signal"} : std::string_view {report.reason},
+        std::string_view {addressField},
+        report.threadId
+    );
+    for (const auto& note: report.notes) {
+        ZHLN::Println("    {}{}{}", ZHLN::Color::Yellow, note, ZHLN::Color::Reset);
+    }
+
+    if (report.frames.empty()) {
+        return;
+    }
+
+    const std::size_t frameTotal = report.frames.size();
+    std::size_t       limit      = frameTotal;
+    if (context.frameLimit > 0) {
+        limit = std::min<std::size_t>(limit, context.frameLimit);
+    }
+
+    std::vector<ZHLN::WorkerStackFrame> toSymbolize;
+    toSymbolize.reserve(limit);
+    for (std::size_t i = 0; i < limit; ++i) {
+        const auto& frame = report.frames[i];
+        toSymbolize.push_back(ZHLN::WorkerStackFrame {
+            .index        = frame.index,
+            .address      = frame.address,
+            .module       = frame.module,
+            .moduleOffset = frame.moduleOffset,
+        });
+    }
+
+    std::vector<ZHLN::SymbolizedFrame> symbolized;
+    if (context.symbolize) {
+        symbolized = ZHLN::SymbolizeWorkerFrames(toSymbolize, context.workerBinary);
+    }
+
+    ZHLN::Println(
+        "    {}Stack trace{} ({} frame{}):",
+        ZHLN::Color::Cyan,
+        ZHLN::Color::Reset,
+        frameTotal,
+        frameTotal == 1 ? "" : "s"
+    );
+
+    for (std::size_t i = 0; i < toSymbolize.size(); ++i) {
+        const bool resolved = i < symbolized.size() && !symbolized[i].primary.empty();
+        if (resolved) {
+            ZHLN::Println("      {:<3} {}", i, symbolized[i].primary);
+            for (const auto& inlined: symbolized[i].inlined) {
+                ZHLN::Println("          {}inlined: {}{}", ZHLN::Color::Gray, inlined, ZHLN::Color::Reset);
+            }
+            continue;
+        }
+
+        // Unresolved on purpose (--no-symbolize, a stripped module, a module
+        // from another container, or no addr2line on PATH). The module + offset
+        // form is what `addr2line -e <module> <offset>` needs, so print the
+        // absolute address for parity with unwinder output and nothing else.
+        char fallback[512] {};
+        ZHLN::FormatTo(
+            fallback,
+            sizeof(fallback),
+            "in {}+0x{:x}  [0x{:x}]",
+            toSymbolize[i].module.empty() ? std::string_view {"<main executable>"} : std::string_view {toSymbolize[i].module},
+            static_cast<unsigned long long>(toSymbolize[i].moduleOffset),
+            static_cast<unsigned long long>(toSymbolize[i].address)
+        );
+        ZHLN::Println("      {:<3} {}{}{}", i, ZHLN::Color::Gray, fallback, ZHLN::Color::Reset);
+    }
+
+    if (limit < frameTotal) {
+        ZHLN::Println(
+            "      {}... {} more frame(s) not shown (--stack-frames 0 prints all){}",
+            ZHLN::Color::Gray,
+            frameTotal - limit,
+            ZHLN::Color::Reset
+        );
+    }
+}
+
+auto StripNoisyBannerLines(std::string_view text) -> std::string {
+    std::string cleaned;
     for (const auto& line: SplitChar(text, '\n', false)) {
         if (IsNoisyBannerLine(line)) {
+            continue;
+        }
+        if (!cleaned.empty()) {
+            cleaned.push_back('\n');
+        }
+        cleaned.append(line);
+    }
+    return cleaned;
+}
+
+// Everything the worker printed while a case was in flight is captured into
+// that outcome's diagnostics, including the `@@ZTEST STACKTRACE-*` block that a
+// crashing worker emits after closing the case. The block is stripped here and
+// rendered separately (see RenderTracesFor) so the readable trace is not mixed
+// into the raw engine log.
+void PrintDiagnosticsBlock(std::string_view text) {
+    const std::string cleaned = StripNoisyBannerLines(text);
+    for (const auto& line: SplitChar(cleaned, '\n', false)) {
+        if (line.starts_with("@@ZTEST STACKTRACE-") || line.starts_with("@@ZTEST NOTE\t") || line.starts_with("@@ZTEST FRAME\t")) {
             continue;
         }
         ZHLN::Println("    {}", line);
@@ -2013,6 +2325,50 @@ auto main(int argc, char** argv) -> int {
     uint32_t hardFailureCount = 0;
     bool     missingBinary    = false;
 
+    CrashRenderContext crashContext {
+        .symbolize    = opts.symbolizeCrashes,
+        .frameLimit   = opts.traceFrameLimit,
+        .workerBinary = {},
+    };
+
+    // Diagnostics keep the raw `@@ZTEST STACKTRACE-*` block so it survives into
+    // --lf caches and copied output; these two lambdas split it back out when
+    // the failure is printed: plain log lines first, then a symbolized trace.
+    auto ContextFor = [&](const CaseOutcome& outcome) -> const CrashRenderContext& {
+        crashContext.workerBinary.clear();
+        for (const auto& target: mf.targets) {
+            if (target.name == outcome.target) {
+                crashContext.workerBinary = target.binaryPath;
+                break;
+            }
+        }
+        return crashContext;
+    };
+
+    auto RenderTracesFor = [&](const CaseOutcome& outcome) {
+        const auto lines = SplitChar(outcome.diagnostics, '\n', false);
+        std::string block;
+        for (const auto& line: lines) {
+            if (line.starts_with("@@ZTEST STACKTRACE-BEGIN\t")) {
+                block.clear();
+            }
+            if (block.empty() && !line.starts_with("@@ZTEST STACKTRACE-BEGIN\t")) {
+                continue;
+            }
+            if (!block.empty()) {
+                block.push_back('\n');
+            }
+            block.append(line);
+            if (line.starts_with("@@ZTEST STACKTRACE-END\t")) {
+                RenderWorkerCrashReport(block, ContextFor(outcome));
+                block.clear();
+            }
+        }
+        if (!block.empty()) {
+            RenderWorkerCrashReport(block, ContextFor(outcome)); // truncated report
+        }
+    };
+
     auto recordOutcome = [&](CaseOutcome outcome) {
         ++completedSoFar;
         const bool isHardFail = outcome.status == CaseStatus::Fail || outcome.status == CaseStatus::Timeout
@@ -2067,11 +2423,13 @@ auto main(int argc, char** argv) -> int {
                 statusLine.Clear();
                 ZHLN::Println("  {}[ TIMEOUT ]{} {}", ZHLN::Color::Red, ZHLN::Color::Reset, outcome.nodeId);
                 PrintDiagnosticsBlock(outcome.diagnostics);
+                RenderTracesFor(outcome);
                 break;
             case CaseStatus::Crash:
                 statusLine.Clear();
                 ZHLN::Println("  {}[ CRASH ]{} {}", ZHLN::Color::Red, ZHLN::Color::Reset, outcome.nodeId);
                 PrintDiagnosticsBlock(outcome.diagnostics);
+                RenderTracesFor(outcome);
                 break;
         }
         outcomes.push_back(std::move(outcome));
@@ -2082,12 +2440,21 @@ auto main(int argc, char** argv) -> int {
         if (!line.empty() && line.back() == '\r') {
             line.remove_suffix(1);
         }
-        if (line.starts_with("@@ZTEST BEGIN\t")) {
+        // A worker built against Signal/StackCapture.hpp closes the killed case
+        // itself with `... CRASHED` before it prints the trace, and stamps its
+        // BEGIN records with a `-NEW` suffix so a pre-crash-report binary stays
+        // distinguishable. Both markers are accepted here; the suffix is only a
+        // protocol version, not a different record.
+        constexpr std::string_view kBeginMarker  = "@@ZTEST BEGIN\t";
+        constexpr std::string_view kBeginV2Marker = "@@ZTEST BEGIN-NEW\t";
+
+        if (line.starts_with(kBeginV2Marker) || line.starts_with(kBeginMarker)) {
             const auto cols = SplitChar(line, '\t', true);
             if (cols.size() >= 3) {
                 w.inFlightFile   = cols[1].empty() ? w.item.shardLabel : cols[1];
                 w.inFlightNodeId = cols[2];
                 w.currentLog.clear();
+                w.crashReport.clear();
             }
             return;
         }
@@ -2099,6 +2466,19 @@ auto main(int argc, char** argv) -> int {
                 const std::string statusStr = cols[3];
                 int64_t           durUs     = 0;
                 ParseIntegral(cols[4], durUs);
+
+                // The crash reporter closes the killed case itself so the trace
+                // that follows is attributed to it. Do NOT record it here: the
+                // worker dies one instruction later, and the exit path below is
+                // what owns crash attribution and respawn (`--skip-until`). Just
+                // remember that it is coming, so that path keeps the case in
+                // flight instead of treating it as an unannounced death.
+                if (statusStr == "CRASHED") {
+                    w.crashAnnounced = true;
+                    w.inFlightFile.assign(relFile);
+                    w.inFlightNodeId.assign(nodeId);
+                    return;
+                }
 
                 CaseStatus st = CaseStatus::Pass;
                 if (statusStr == "PASS") {
@@ -2116,6 +2496,19 @@ auto main(int argc, char** argv) -> int {
                     ++w.localFailed;
                 }
 
+                // The trace of a crash that happened mid-case is reported by the
+                // worker after the synthetic END, so it is still pending here;
+                // carry it into the outcome instead of leaving it stranded on
+                // the worker as unattributed log.
+                std::string diagnostics = std::move(w.currentLog);
+                if (!w.crashReport.empty()) {
+                    if (!diagnostics.empty()) {
+                        diagnostics.push_back('\n');
+                    }
+                    diagnostics.append(w.crashReport);
+                    w.crashReport.clear();
+                }
+
                 ++w.localTotal;
                 AppendGlyphForStatus(w.progressGlyphs, st);
 
@@ -2125,12 +2518,22 @@ auto main(int argc, char** argv) -> int {
                     .nodeId      = nodeId,
                     .status      = st,
                     .durationUs  = durUs,
-                    .diagnostics = std::move(w.currentLog),
+                    .diagnostics = std::move(diagnostics),
                 });
                 w.inFlightFile.clear();
                 w.inFlightNodeId.clear();
                 w.currentLog.clear();
             }
+            return;
+        }
+        if (line.starts_with("@@ZTEST STACKTRACE-") || line.starts_with("@@ZTEST NOTE\t") || line.starts_with("@@ZTEST FRAME\t")) {
+            // Kept verbatim and out of the engine log: RenderTracesFor turns
+            // this into the indented Exception/Stack trace block, so the raw
+            // record never reaches the user unfiltered.
+            if (!w.crashReport.empty()) {
+                w.crashReport.push_back('\n');
+            }
+            w.crashReport.append(line);
             return;
         }
 
@@ -2325,14 +2728,28 @@ auto main(int argc, char** argv) -> int {
                         .count();
 
                 if (!w.inFlightNodeId.empty()) {
-                    const bool  isTimeout = w.timedOut || exitCode == 124 || termSig == SIGALRM;
+                    const bool  isTimeout = !w.crashAnnounced && (w.timedOut || exitCode == 124 || termSig == SIGALRM);
                     const auto  crashSt   = isTimeout ? CaseStatus::Timeout : CaseStatus::Crash;
                     std::string diag      = w.currentLog;
                     if (!isTimeout) {
-                        const std::string reason =
-                            termSig != 0 ? std::format("Worker terminated by {} ({})", FormatPosixSignal(termSig), exitCode)
-                                         : std::format("Worker exited unexpectedly with status {}", exitCode);
+                        // Three shapes, in decreasing order of information: the
+                        // worker reported the fault itself, the kernel killed it,
+                        // or it exited non-zero without saying anything.
+                        std::string reason;
+                        if (w.crashAnnounced) {
+                            reason = std::format("Worker crashed after closing this case (exit status {})", exitCode);
+                        } else if (termSig != 0) {
+                            reason = std::format("Worker terminated by {} ({})", FormatPosixSignal(termSig), exitCode);
+                        } else {
+                            reason = std::format("Worker exited unexpectedly with status {}", exitCode);
+                        }
                         diag = diag.empty() ? reason : std::format("{}\n{}", reason, diag);
+                    }
+                    if (!w.crashReport.empty()) {
+                        if (!diag.empty()) {
+                            diag.push_back('\n');
+                        }
+                        diag.append(w.crashReport);
                     }
 
                     const std::string crashedNodeId = w.inFlightNodeId;
@@ -2378,13 +2795,17 @@ auto main(int argc, char** argv) -> int {
                 } else if (exitCode != 0 && w.localFailed == 0) {
                     const std::string synthNode =
                         std::format("{}::{}", w.item.shardLabel, w.timedOut ? "<watchdog-timeout>" : "<process-exit>");
+                    std::string unattributed = std::format("Exit code {} (signal {})\n{}", exitCode, termSig, w.unattributedLog);
+                    if (!w.crashReport.empty()) {
+                        unattributed.append(w.crashReport);
+                    }
                     recordOutcome(CaseOutcome {
                         .target      = w.item.target->name,
                         .relFile     = w.item.shardLabel,
                         .nodeId      = synthNode,
                         .status      = w.timedOut ? CaseStatus::Timeout : CaseStatus::Crash,
                         .durationUs  = workerMs * 1000,
-                        .diagnostics = std::format("Exit code {} (signal {})\n{}", exitCode, termSig, w.unattributedLog),
+                        .diagnostics = std::move(unattributed),
                     });
                 } else if (!opts.verbose && !opts.quiet && w.localTotal > 0) {
                     statusLine.Clear();
@@ -2436,6 +2857,8 @@ auto main(int argc, char** argv) -> int {
         std::string         inFile;
         std::string         inNodeId;
         std::string         curLog;
+        std::string         crashReport;
+        bool                crashAnnounced = false;
         std::string         glyphs;
         uint32_t            localTotal  = 0;
         uint32_t            localFailed = 0;
@@ -2444,16 +2867,33 @@ auto main(int argc, char** argv) -> int {
             if (!line.empty() && line.back() == '\r') {
                 line.remove_suffix(1);
             }
-            if (line.starts_with("@@ZTEST BEGIN\t")) {
+            if (line.starts_with("@@ZTEST BEGIN\t") || line.starts_with("@@ZTEST BEGIN-NEW\t")) {
                 const auto cols = SplitChar(line, '\t', true);
                 if (cols.size() >= 3) {
                     inFile   = cols[1].empty() ? item.shardLabel : cols[1];
                     inNodeId = cols[2];
                     curLog.clear();
+                    crashReport.clear();
                 }
+            } else if (line.starts_with("@@ZTEST STACKTRACE-") || line.starts_with("@@ZTEST NOTE\t") || line.starts_with("@@ZTEST FRAME\t")) {
+                // Same framing as the POSIX reader: kept verbatim here and
+                // rendered by RenderTracesFor when the outcome is printed.
+                if (!crashReport.empty()) {
+                    crashReport.push_back('\n');
+                }
+                crashReport.append(line);
             } else if (line.starts_with("@@ZTEST END\t")) {
                 const auto cols = SplitChar(line, '\t', true);
                 if (cols.size() >= 5) {
+                    if (cols[3] == "CRASHED") {
+                        // Same as the POSIX reader: the worker is about to die,
+                        // and the crash path below attributes it.
+                        crashAnnounced = true;
+                        inFile.assign(cols[1].empty() ? item.shardLabel : cols[1]);
+                        inNodeId.assign(cols[2]);
+                        curLog.clear();
+                        continue;
+                    }
                     CaseStatus st = CaseStatus::Pass;
                     if (cols[3] == "PASS") {
                         st = CaseStatus::Pass;
@@ -2469,6 +2909,14 @@ auto main(int argc, char** argv) -> int {
                     }
                     int64_t durUs = 0;
                     ParseIntegral(cols[4], durUs);
+                    std::string diagnostics = std::move(curLog);
+                    if (!crashReport.empty()) {
+                        if (!diagnostics.empty()) {
+                            diagnostics.push_back('\n');
+                        }
+                        diagnostics.append(crashReport);
+                        crashReport.clear();
+                    }
                     ++localTotal;
                     AppendGlyphForStatus(glyphs, st);
                     recordOutcome(CaseOutcome {
@@ -2477,7 +2925,7 @@ auto main(int argc, char** argv) -> int {
                         .nodeId      = cols[2],
                         .status      = st,
                         .durationUs  = durUs,
-                        .diagnostics = std::move(curLog),
+                        .diagnostics = std::move(diagnostics),
                     });
                     inFile.clear();
                     inNodeId.clear();
@@ -2491,13 +2939,20 @@ auto main(int argc, char** argv) -> int {
 
         if (!inNodeId.empty()) {
             const std::string crashedId = inNodeId;
+            std::string       diagnostics = std::move(curLog);
+            if (!crashReport.empty()) {
+                if (!diagnostics.empty()) {
+                    diagnostics.push_back('\n');
+                }
+                diagnostics.append(crashReport);
+            }
             recordOutcome(CaseOutcome {
                 .target      = item.target->name,
                 .relFile     = inFile,
                 .nodeId      = crashedId,
-                .status      = (res.timedOut || res.exitCode == 124) ? CaseStatus::Timeout : CaseStatus::Crash,
+                .status      = (!crashAnnounced && (res.timedOut || res.exitCode == 124)) ? CaseStatus::Timeout : CaseStatus::Crash,
                 .durationUs  = 0,
-                .diagnostics = std::move(curLog),
+                .diagnostics = std::move(diagnostics),
             });
             if ((opts.maxFail == 0 || hardFailureCount < opts.maxFail) && item.respawnDepth < 16) {
                 WorkItem resumed      = item;
@@ -2512,7 +2967,7 @@ auto main(int argc, char** argv) -> int {
                 .nodeId      = std::format("{}::<process-exit>", item.shardLabel),
                 .status      = res.timedOut ? CaseStatus::Timeout : CaseStatus::Crash,
                 .durationUs  = 0,
-                .diagnostics = res.rawOutput,
+                .diagnostics = crashReport.empty() ? res.rawOutput : std::format("{}\n{}", res.rawOutput, crashReport),
             });
         } else if (!opts.verbose && !opts.quiet && localTotal > 0) {
             statusLine.Clear();

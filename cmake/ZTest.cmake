@@ -113,6 +113,16 @@ function(zahlen_register_ztest_target TARGET_NAME)
 
     target_link_libraries("${TARGET_NAME}" PRIVATE zahlen_command_line)
 
+    # Every worker includes tests/TestsFramework.hpp, which routes its `@@ZTEST`
+    # BEGIN/END records through <Signal/WorkerCrashReports.hpp> -- including the
+    # crash-reporter symbols behind them. Link that here rather than in each
+    # tests/**/CMakeLists.txt: a target registered as a ztest worker is a target
+    # that must be able to report a crash, and forgetting the link is a link
+    # error in someone else's CMake file.
+    if(TARGET zahlen_signal)
+        target_link_libraries("${TARGET_NAME}" PRIVATE zahlen_signal)
+    endif()
+
     if(NOT ZTEST_POOL)
         set(ZTEST_POOL "cpu")
     endif()
