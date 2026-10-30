@@ -240,9 +240,9 @@ concept ColorClearTarget = std::same_as<std::remove_cvref_t<T>, VkImage> || requ
 template <ColorClearTarget T>
 [[nodiscard]] constexpr auto GetVkImage(const T& target) noexcept -> VkImage;
 
-[[nodiscard]] constexpr auto ToVkClearColor(const Color4& color) noexcept -> VkClearColorValue;
+[[nodiscard]] constexpr auto ToVkClearColor(ZHLN::Vk::Color4 color) noexcept -> VkClearColorValue;
 [[nodiscard]] constexpr auto ToVkClearColor(float scalar) noexcept -> VkClearColorValue;
-[[nodiscard]] constexpr auto ToVkClearColor(const VkClearColorValue& color) noexcept -> VkClearColorValue;
+[[nodiscard]] constexpr auto ToVkClearColor(VkClearColorValue color) noexcept -> VkClearColorValue;
 
 template <typename T>
 concept ClearColorSource =
@@ -271,7 +271,7 @@ template <
     requires(sizeof...(Targets) > 1)
 void ClearColorAndTransition(VkCommandBuffer cmd, const Color& color, const Targets&... targets) noexcept;
 
-void ClearColorImage(VkCommandBuffer cmd, VkImage image, const VkClearColorValue& color, uint32_t layerCount = 1) noexcept;
+void ClearColorImage(VkCommandBuffer cmd, VkImage image, VkClearColorValue color, uint32_t layerCount = 1) noexcept;
 
 template <typename InState, typename OutState, typename T>
 auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE);
@@ -532,7 +532,7 @@ class DynamicPass {
         const TypedImage<Layout, Format>& img,
         VkAttachmentLoadOp                loadOp     = VK_ATTACHMENT_LOAD_OP_LOAD,
         VkAttachmentStoreOp               storeOp    = VK_ATTACHMENT_STORE_OP_STORE,
-        const ZHLN::Color4&               clearColor = {}
+        ZHLN::Vk::Color4                  clearColor = {}
     ) && noexcept -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type>;
 
     template <typename... TypedImages>
@@ -540,7 +540,7 @@ class DynamicPass {
         const std::tuple<TypedImages...>& imageTuple,
         VkAttachmentLoadOp                loadOp     = VK_ATTACHMENT_LOAD_OP_LOAD,
         VkAttachmentStoreOp               storeOp    = VK_ATTACHMENT_STORE_OP_STORE,
-        const ZHLN::Color4&               clearColor = {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 1.0F}
+        ZHLN::Vk::Color4                  clearColor = {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 1.0F}
     ) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type>;
 
     template <VkImageLayout Layout, VkFormat Format>
@@ -665,12 +665,12 @@ struct PassDesc {
 void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes) noexcept;
 
 void ClearAttachment(
-    VkCommandBuffer     cmd,
-    VkImageAspectFlags  aspectMask,
-    VkExtent2D          extent,
-    const VkClearValue& value,
-    uint32_t            baseArrayLayer = 0,
-    uint32_t            layerCount     = 1
+    VkCommandBuffer    cmd,
+    VkImageAspectFlags aspectMask,
+    VkExtent2D         extent,
+    VkClearValue       value,
+    uint32_t           baseArrayLayer = 0,
+    uint32_t           layerCount     = 1
 ) noexcept;
 
 } // namespace ZHLN::Vk

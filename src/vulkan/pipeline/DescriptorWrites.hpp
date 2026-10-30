@@ -16,7 +16,7 @@ struct ImageWrite {
     VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     ImageWrite() = default;
-    explicit ImageWrite(const ImageView& imageView, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
+    explicit ImageWrite(ImageView imageView, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
         view(imageView), layout(imageLayout) {
     }
     explicit ImageWrite(const ImageSlice& source, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:

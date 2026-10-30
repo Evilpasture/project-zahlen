@@ -163,7 +163,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     return std::optional<FrameScope> {FrameScope {*this}};
 }
 
-void RenderContext::SetResolution(const Extent2D& resolution) {
+void RenderContext::SetResolution(Extent2D resolution) {
     if (resolution.width != 0 && resolution.height != 0) {
         _impl->resolution = resolution;
     }
@@ -270,7 +270,7 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->liveTextures = {1, 2, 3};
 }
 
-auto RenderContext::CreateBuffer(const BufferDesc& desc) -> BufferHandle {
+auto RenderContext::CreateBuffer(BufferDesc desc) -> BufferHandle {
     const size_t byteSize = !desc.data.empty() ? desc.data.size_bytes() : desc.size;
     if (byteSize == 0) {
         return BufferHandle::Invalid;
@@ -547,11 +547,11 @@ auto RenderContext::GetSettings() const noexcept -> const GraphicsSettings& {
     return _impl->settings;
 }
 
-void RenderContext::SetGISettings(const GISettings& settings) noexcept {
+void RenderContext::SetGISettings(GISettings settings) noexcept {
     _impl->settings.post = settings;
 }
 
-void RenderContext::SetAAState(const AAState& state) {
+void RenderContext::SetAAState(AAState state) {
     _impl->settings.antiAliasing = state;
 }
 

@@ -130,7 +130,7 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
     return true;
 }
 
-bool ReadBackPixels(const Vk::ImageView& view, uint32_t width, uint32_t height, VkImageLayout srcLayout) noexcept {
+bool ReadBackPixels(Vk::ImageView view, uint32_t width, uint32_t height, VkImageLayout srcLayout) noexcept {
     auto acquired = g.ring.Acquire();
     if (!acquired) { return false; }
     auto slot = *acquired;

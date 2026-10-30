@@ -393,7 +393,7 @@ auto UploadToBuffer(Allocator& allocatorRef, VkCommandBuffer cmd, Buffer& dst, c
     return staging;
 }
 
-auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept -> std::expected<Image, ErrorCode> {
+auto Image::Create(Allocator& allocatorRef, ImageConfig config) noexcept -> std::expected<Image, ErrorCode> {
     using enum ImageCreationError;
     if (!allocatorRef.Valid() || config.format == VK_FORMAT_UNDEFINED || config.extent.width == 0 || config.extent.height == 0 || config.extent.depth == 0 ||
         config.mipLevels == 0 || config.arrayLayers == 0 || config.usage == ImageUsage::None) {
@@ -481,7 +481,7 @@ auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept 
     return result;
 }
 
-auto AttachmentView::Create(VkDevice device, const ImageView& view) -> std::expected<AttachmentView, ErrorCode> {
+auto AttachmentView::Create(VkDevice device, ImageView view) -> std::expected<AttachmentView, ErrorCode> {
     using enum AttachmentViewCreationError;
     if (device == VK_NULL_HANDLE || !view.Valid() || view.Aspect() == VK_IMAGE_ASPECT_NONE) {
         return std::unexpected(InvalidConfiguration);

@@ -22,7 +22,7 @@ constexpr auto GetVkImage(const T& target) noexcept -> VkImage {
     }
 }
 
-constexpr auto ToVkClearColor(const Color4& color) noexcept -> VkClearColorValue {
+constexpr auto ToVkClearColor(ZHLN::Vk::Color4 color) noexcept -> VkClearColorValue {
     return {.float32 = {color.r, color.g, color.b, color.a}};
 }
 
@@ -30,7 +30,7 @@ constexpr auto ToVkClearColor(float scalar) noexcept -> VkClearColorValue {
     return {.float32 = {scalar, scalar, scalar, scalar}};
 }
 
-constexpr auto ToVkClearColor(const VkClearColorValue& color) noexcept -> VkClearColorValue {
+constexpr auto ToVkClearColor(VkClearColorValue color) noexcept -> VkClearColorValue {
     return color;
 }
 
@@ -62,7 +62,7 @@ static_assert(ToVkClearColor(Color4 {.r = 0.25F, .g = 0.5F, .b = 0.75F, .a = 1.0
 static_assert(ToVkClearColor(1.0F).float32[3] == 1.0F);
 static_assert(ToVkClearColor(VkClearColorValue {.float32 = {0.1F, 0.2F, 0.3F, 0.4F}}).float32[1] == 0.2F);
 
-inline void ClearColorImage(const VkCommandBuffer cmd, const VkImage image, const VkClearColorValue& color, const uint32_t layerCount) noexcept {
+inline void ClearColorImage(const VkCommandBuffer cmd, const VkImage image, VkClearColorValue color, const uint32_t layerCount) noexcept {
     const VkImageSubresourceRange range {
         .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
         .baseMipLevel   = 0,
@@ -171,7 +171,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
     const TypedImage<Layout, Format>& img,
     VkAttachmentLoadOp                loadOp,
     VkAttachmentStoreOp               storeOp,
-    const ZHLN::Color4&               clearColor
+    ZHLN::Vk::Color4                  clearColor
 ) && noexcept -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type> {
     static_assert(ColorCount < kMaxColorAttachments, "ZHLN Error: DynamicPass exceeded maximum color attachments (8).");
     static_assert(Layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_GENERAL);
@@ -199,7 +199,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
     const std::tuple<TypedImages...>& imageTuple,
     VkAttachmentLoadOp                loadOp,
     VkAttachmentStoreOp               storeOp,
-    const ZHLN::Color4&               clearColor
+    ZHLN::Vk::Color4                  clearColor
 ) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type> {
     constexpr size_t added_count = sizeof...(TypedImages);
     static_assert(ColorCount + added_count <= kMaxColorAttachments, "ZHLN Error: DynamicPass exceeded maximum color attachments (8).");
@@ -378,12 +378,12 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
 }
 
 inline void ClearAttachment(
-    VkCommandBuffer     cmd,
-    VkImageAspectFlags  aspectMask,
-    VkExtent2D          extent,
-    const VkClearValue& value,
-    uint32_t            baseArrayLayer,
-    uint32_t            layerCount
+    VkCommandBuffer    cmd,
+    VkImageAspectFlags aspectMask,
+    VkExtent2D         extent,
+    VkClearValue       value,
+    uint32_t           baseArrayLayer,
+    uint32_t           layerCount
 ) noexcept {
     const VkClearAttachment attachment = {
         .aspectMask      = aspectMask,

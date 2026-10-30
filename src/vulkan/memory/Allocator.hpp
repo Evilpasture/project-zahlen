@@ -349,7 +349,7 @@ class Image {
     Image(Image&& other) noexcept;
     auto operator=(Image&& other) noexcept -> Image&;
 
-    [[nodiscard]] static auto Create(Allocator& allocator, const ImageConfig& config) noexcept -> std::expected<Image, ErrorCode>;
+    [[nodiscard]] static auto Create(Allocator& allocator, ImageConfig config) noexcept -> std::expected<Image, ErrorCode>;
 
     [[nodiscard]] constexpr auto View(
         VkImageAspectFlags aspect = VK_IMAGE_ASPECT_NONE,

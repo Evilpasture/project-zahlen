@@ -783,7 +783,7 @@ auto HeapManager::RegisterSampler(Sampler sampler) noexcept -> std::expected<Sam
     return handle;
 }
 
-auto HeapManager::RegisterImage(const ImageView& view, VkImageLayout layout) noexcept -> std::expected<TextureHandle, ErrorCode> {
+auto HeapManager::RegisterImage(ImageView view, VkImageLayout layout) noexcept -> std::expected<TextureHandle, ErrorCode> {
     auto handle = ReserveImage();
     if (!handle) [[unlikely]] {
         return handle;
@@ -792,7 +792,7 @@ auto HeapManager::RegisterImage(const ImageView& view, VkImageLayout layout) noe
     return handle;
 }
 
-auto HeapManager::RegisterStorageImage(const ImageView& view, VkImageLayout layout) noexcept -> std::expected<StorageImageHandle, ErrorCode> {
+auto HeapManager::RegisterStorageImage(ImageView view, VkImageLayout layout) noexcept -> std::expected<StorageImageHandle, ErrorCode> {
     auto slot = AllocateStaticResourceSlot();
     if (!slot) [[unlikely]] {
         return std::unexpected(slot.error());
@@ -948,7 +948,7 @@ void HeapManager::Materialize(HeapMappingView mappings, std::span<VkDescriptorSe
     }
 }
 
-void HeapManager::BindImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+void HeapManager::BindImage(TextureHandle handle, ImageView view, VkImageLayout layout) noexcept {
     if (!handle.Valid() || view.Handle() == VK_NULL_HANDLE) {
         return;
     }
@@ -957,7 +957,7 @@ void HeapManager::BindImage(TextureHandle handle, const ImageView& view, VkImage
     _resourceHeap.WriteResource(entry);
 }
 
-void HeapManager::BindStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+void HeapManager::BindStorageImage(StorageImageHandle handle, ImageView view, VkImageLayout layout) noexcept {
     if (!handle.Valid() || view.Handle() == VK_NULL_HANDLE) {
         return;
     }

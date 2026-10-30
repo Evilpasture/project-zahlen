@@ -257,10 +257,9 @@ class AttachmentView {
   private:
     friend class Image;
 
-    [[nodiscard]] static auto Create(VkDevice device, const ImageView& view) -> std::expected<AttachmentView, ErrorCode>;
+    [[nodiscard]] static auto Create(VkDevice device, ImageView view) -> std::expected<AttachmentView, ErrorCode>;
 
-    AttachmentView(VkDevice device, VkImageView handle, const ImageView& view) noexcept:
-        _handle(device, handle), _view(view) {
+    AttachmentView(VkDevice device, VkImageView handle, ImageView view) noexcept: _handle(device, handle), _view(view) {
     }
 
     AttachmentViewHandle _handle;

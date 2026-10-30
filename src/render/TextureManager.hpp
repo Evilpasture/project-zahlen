@@ -120,7 +120,7 @@ class TextureManager {
     };
 
     [[nodiscard]] TextureHandle RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, uint32_t width, uint32_t height);
-    void                        WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept;
+    void                        WriteSlotToHeap(uint32_t bindlessIndex, Vk::ImageView view) noexcept;
     void                        RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept;
     void                        DestroyAllSlots() noexcept;
 

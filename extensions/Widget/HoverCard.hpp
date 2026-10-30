@@ -105,12 +105,12 @@ struct HoverCardOffset {
 // room for it there; under the element where it does not; clamped into the
 // window's margin either way.
 [[nodiscard]] auto HoverCardPlacement(
-    float                            width,
-    float                            height,
-    const GUI::ElementRect&          anchor,
-    const GUI::ElementRect*          panel,
-    const ZHLN::Extent2D&            viewport,
-    const HoverCardStyle&            style
+    float                   width,
+    float                   height,
+    const GUI::ElementRect& anchor,
+    const GUI::ElementRect* panel,
+    ZHLN::Extent2D          viewport,
+    const HoverCardStyle&   style
 ) noexcept -> HoverCardOffset;
 
 // Draws the frame's card, if there is one, floating out of the layout flow.
@@ -120,8 +120,6 @@ struct HoverCardOffset {
 //
 // Call this last, after everything else in the panel, and from inside the panel
 // so the card is clipped and layered with it.
-void DrawHoverCard(
-    GUI::Frame& ui, const HoverState& state, const ZHLN::Extent2D& viewport, const HoverCardStyle& style, std::string_view besideId = {}
-);
+void DrawHoverCard(GUI::Frame& ui, const HoverState& state, ZHLN::Extent2D viewport, const HoverCardStyle& style, std::string_view besideId = {});
 
 } // namespace ZHLN::GUI::Widget

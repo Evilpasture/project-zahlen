@@ -55,8 +55,12 @@ auto HasHover(const HoverState& state) noexcept -> bool {
 }
 
 auto HoverCardPlacement(
-    float width, float height, const GUI::ElementRect& anchor, const GUI::ElementRect* panel, const ZHLN::Extent2D& viewport,
-    const HoverCardStyle& style
+    float                   width,
+    float                   height,
+    const GUI::ElementRect& anchor,
+    const GUI::ElementRect* panel,
+    ZHLN::Extent2D          viewport,
+    const HoverCardStyle&   style
 ) noexcept -> HoverCardOffset {
     const float windowWidth   = static_cast<float>(viewport.width);
     const float windowHeight  = static_cast<float>(viewport.height);
@@ -89,9 +93,7 @@ auto HoverCardPlacement(
     return where;
 }
 
-void DrawHoverCard(
-    GUI::Frame& ui, const HoverState& state, const ZHLN::Extent2D& viewport, const HoverCardStyle& style, std::string_view besideId
-) {
+void DrawHoverCard(GUI::Frame& ui, const HoverState& state, ZHLN::Extent2D viewport, const HoverCardStyle& style, std::string_view besideId) {
     if (!HasHover(state)) {
         return;
     }

@@ -346,7 +346,7 @@ void TextureManager::NameSlots() noexcept {
     }
 }
 
-void TextureManager::WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept {
+void TextureManager::WriteSlotToHeap(uint32_t bindlessIndex, Vk::ImageView view) noexcept {
     _heaps.BindImage(Vk::TextureHandle {_bindlessBaseSlot + bindlessIndex}, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 

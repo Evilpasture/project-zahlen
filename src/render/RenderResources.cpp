@@ -196,7 +196,7 @@ void RenderContext::Impl::ClearEmitterBuffers() noexcept {
     }
 }
 
-auto RenderContext::CreateBuffer(const BufferDesc& desc) -> BufferHandle {
+auto RenderContext::CreateBuffer(BufferDesc desc) -> BufferHandle {
     if (desc.usage == BufferUsage::SkinScratch) {
         const uint32_t vertexCount = desc.stride == 0 ? 0U : static_cast<uint32_t>(desc.size / desc.stride);
         return _impl->geometry.CreateSkinnedScratchBuffer(vertexCount);
@@ -480,7 +480,7 @@ auto RenderContext::GetPresentTiming() const noexcept -> PresentTimingMetrics {
     return _impl->presenter.GetPresentTiming();
 }
 
-void RenderContext::SetResolution(const Extent2D& res) {
+void RenderContext::SetResolution(Extent2D res) {
     if (res.width > 0 && res.height > 0 && _impl->presentationTarget.IsHeadless()) {
         _impl->presentationTarget.SetFramebufferExtent(res.width, res.height);
     }
@@ -933,7 +933,7 @@ const GraphicsSettings& RenderContext::GetSettings() const noexcept {
     return _impl->settings;
 }
 
-void RenderContext::SetAAState(const AAState& state) {
+void RenderContext::SetAAState(AAState state) {
     _impl->settings.antiAliasing = state;
 }
 

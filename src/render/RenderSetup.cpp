@@ -91,7 +91,7 @@ void RenderContext::SetFrameData(
     }
 }
 
-void RenderContext::SetGISettings(const GISettings& settings) noexcept {
+void RenderContext::SetGISettings(GISettings settings) noexcept {
     _impl->settings.post = settings;
 }
 

@@ -22,6 +22,10 @@ struct Color4 {
 
 namespace ZHLN::Vk {
 
+/// Spelling used inside the Vulkan layer while `Color4` still lives in `ZHLN`;
+/// both names denote the same four-float aggregate.
+using Color4 = ZHLN::Color4;
+
 enum class VulkanCallError : uint8_t {
     VulkanCallFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan call failed"> {}) = 1,
 };

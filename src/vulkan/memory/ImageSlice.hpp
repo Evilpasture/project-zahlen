@@ -41,8 +41,7 @@ struct ImageSlice {
         image(img), attachmentView(attachment), extent(ext), format(fmt), aspect(asp) {
     }
 
-    constexpr explicit ImageSlice(const ImageView& view, VkExtent3D ext) noexcept:
-        image(view.Handle()), extent(ext), format(view.Format()), aspect(view.Aspect()) {
+    constexpr explicit ImageSlice(ImageView view, VkExtent3D ext) noexcept: image(view.Handle()), extent(ext), format(view.Format()), aspect(view.Aspect()) {
         const VkImageSubresourceRange range = view.SubresourceRange();
         baseMip                              = range.baseMipLevel;
         mipCount                             = range.levelCount;

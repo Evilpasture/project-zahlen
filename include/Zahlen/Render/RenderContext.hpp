@@ -90,7 +90,7 @@ class ZHLN_API RenderContext {
     // Empty optional = skipped (minimized). A FrameScope = this frame is open.
     [[nodiscard]] FrameOutcome<FrameScope> BeginFrame() noexcept;
 
-    void SetResolution(const Extent2D& resolution);
+    void SetResolution(Extent2D resolution);
 
     using ViewportRect = ZHLN::ViewportRect;
 
@@ -117,7 +117,7 @@ class ZHLN_API RenderContext {
     // Drops mesh lookups (not their caller-owned buffers), materials, and textures.
     void ClearGPUCaches() noexcept;
 
-    [[nodiscard]] auto CreateBuffer(const BufferDesc& desc) -> BufferHandle;
+    [[nodiscard]] auto CreateBuffer(BufferDesc desc) -> BufferHandle;
 
     // Usage is an NTTP so Index can reject non-integer element types at compile time.
     // (A runtime `if (usage == Index) static_assert` would fire for every T.)
@@ -238,8 +238,8 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] const GraphicsSettings& GetSettings() const noexcept;
 
-    void SetGISettings(const GISettings& settings) noexcept;
-    void SetAAState(const AAState& state);
+    void SetGISettings(GISettings settings) noexcept;
+    void SetAAState(AAState state);
     void Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept;
     void DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept;
     void DrawDecal(const DecalParams& params) noexcept;

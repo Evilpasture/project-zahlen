@@ -376,7 +376,7 @@ struct Components {
             mouseWheel += delta;
         }
 
-        void ApplyResize(const Extent2D& extent) noexcept {
+        void ApplyResize(Extent2D extent) noexcept {
             newSize     = extent;
             needsResize = true;
         }

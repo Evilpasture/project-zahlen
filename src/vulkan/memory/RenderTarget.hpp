@@ -185,7 +185,7 @@ struct RenderTarget {
 
   private:
     [[nodiscard]] static auto
-        CreateFromConfig(Allocator& allocator, VkDevice device, RenderTarget rt, const ImageConfig& config) -> std::expected<RenderTarget, ErrorCode> {
+        CreateFromConfig(Allocator& allocator, VkDevice device, RenderTarget rt, ImageConfig config) -> std::expected<RenderTarget, ErrorCode> {
         auto img = Image::Create(allocator, config);
         if (!img)
             return std::unexpected(img.error());

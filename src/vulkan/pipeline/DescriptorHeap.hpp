@@ -170,8 +170,7 @@ struct ResourceWriteEntry {
         }
     } payload {};
 
-    [[nodiscard]] static constexpr auto Image(uint32_t slot, VkDescriptorType type, const ImageView& view, VkImageLayout layout) noexcept
-        -> ResourceWriteEntry {
+    [[nodiscard]] static constexpr auto Image(uint32_t slot, VkDescriptorType type, ImageView view, VkImageLayout layout) noexcept -> ResourceWriteEntry {
         ResourceWriteEntry entry {
             .slot   = slot,
             .type   = type,
@@ -200,13 +199,13 @@ class ResourceWriteBatch {
   public:
     ResourceWriteBatch() noexcept = default;
 
-    void AddImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+    void AddImage(TextureHandle handle, ImageView view, VkImageLayout layout) noexcept {
         if (handle.Valid() && view.Handle() != VK_NULL_HANDLE) {
             _entries.push_back(ResourceWriteEntry::Image(handle.index, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, view, layout));
         }
     }
 
-    void AddStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+    void AddStorageImage(StorageImageHandle handle, ImageView view, VkImageLayout layout) noexcept {
         if (handle.Valid() && view.Handle() != VK_NULL_HANDLE) {
             _entries.push_back(ResourceWriteEntry::Image(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, view, layout));
         }
@@ -494,8 +493,8 @@ class HeapManager {
         return base;
     }
 
-    [[nodiscard]] auto RegisterImage(const ImageView& view, VkImageLayout layout) noexcept -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto RegisterStorageImage(const ImageView& view, VkImageLayout layout) noexcept -> std::expected<StorageImageHandle, ErrorCode>;
+    [[nodiscard]] auto RegisterImage(ImageView view, VkImageLayout layout) noexcept -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] auto RegisterStorageImage(ImageView view, VkImageLayout layout) noexcept -> std::expected<StorageImageHandle, ErrorCode>;
     [[nodiscard]] auto RegisterStorageBuffer(BufferSlice slice) noexcept -> std::expected<StorageBufferHandle, ErrorCode>;
     [[nodiscard]] auto RegisterUniformBuffer(BufferSlice slice) noexcept -> std::expected<UniformBufferHandle, ErrorCode>;
     [[nodiscard]] auto RegisterAccelerationStructure(VkDeviceAddress address) noexcept -> std::expected<AccelerationStructureHandle, ErrorCode>;
@@ -514,8 +513,8 @@ class HeapManager {
     // Binding a payload to a handle, registered or reserved.
     // -------------------------------------------------------------------------
     void BindSampler(SamplerHandle handle, Sampler sampler) noexcept;
-    void BindImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
-    void BindStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
+    void BindImage(TextureHandle handle, ImageView view, VkImageLayout layout) noexcept;
+    void BindStorageImage(StorageImageHandle handle, ImageView view, VkImageLayout layout) noexcept;
     void BindStorageBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
     void BindUniformBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
     void BindAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;

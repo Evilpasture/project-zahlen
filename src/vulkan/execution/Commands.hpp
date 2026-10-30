@@ -320,7 +320,7 @@ class CommandEncoder {
         vkCmdSetViewport(cmd, 0, 1, &viewport);
     }
 
-    void SetScissor(const VkRect2D& scissor) noexcept {
+    void SetScissor(VkRect2D scissor) noexcept {
         vkCmdSetScissor(cmd, 0, 1, &scissor);
     }
 

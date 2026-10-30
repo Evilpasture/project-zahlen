@@ -128,7 +128,7 @@ class ImageBarrier {
 
     /// Automatic layout transition for any ImageView (deduces aspect, subresource range, stages, and accesses).
     template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-    [[nodiscard]] static constexpr auto Transition(const ImageView& view) noexcept -> ImageBarrier {
+    [[nodiscard]] static constexpr auto Transition(ImageView view) noexcept -> ImageBarrier {
         using Src = LayoutTraits<OldLayout>;
         using Dst = LayoutTraits<NewLayout>;
         return FromRange(view.Handle(), view.SubresourceRange(), OldLayout, NewLayout, Src::kStage, Src::kAccess, Dst::kStage, Dst::kAccess);
@@ -149,7 +149,7 @@ class ImageBarrier {
     }
 
     /// Runtime layout transition deriving conservative sync masks from oldLayout / newLayout.
-    [[nodiscard]] static constexpr auto Transition(const ImageView& view, VkImageLayout oldLayout, VkImageLayout newLayout) noexcept -> ImageBarrier {
+    [[nodiscard]] static constexpr auto Transition(ImageView view, VkImageLayout oldLayout, VkImageLayout newLayout) noexcept -> ImageBarrier {
         const LayoutSyncInfo src = GetLayoutSyncInfo(oldLayout, true);
         const LayoutSyncInfo dst = GetLayoutSyncInfo(newLayout, false);
         return FromRange(view.Handle(), view.SubresourceRange(), oldLayout, newLayout, src.stage, src.access, dst.stage, dst.access);
@@ -161,7 +161,7 @@ class ImageBarrier {
 
     /// Transition with explicit stage/access override (e.g. non-default pipeline stages or frame-graph state tables).
     [[nodiscard]] static constexpr auto Transition(
-        const ImageView&      view,
+        ImageView             view,
         VkImageLayout         oldLayout,
         VkImageLayout         newLayout,
         VkPipelineStageFlags2 srcStage,
@@ -215,7 +215,7 @@ class ImageBarrier {
 
     /// Discard existing contents (VK_IMAGE_LAYOUT_UNDEFINED -> TargetLayout).
     template <VkImageLayout TargetLayout>
-    [[nodiscard]] static constexpr auto DiscardTo(const ImageView& view) noexcept -> ImageBarrier {
+    [[nodiscard]] static constexpr auto DiscardTo(ImageView view) noexcept -> ImageBarrier {
         return Transition<VK_IMAGE_LAYOUT_UNDEFINED, TargetLayout>(view);
     }
 
