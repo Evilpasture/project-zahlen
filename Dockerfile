@@ -5,15 +5,21 @@
 # test stages reuse one cached layer set.
 FROM archlinux:latest AS base
 
-# Two toolchain entries the old image carried are gone, and neither had a
-# consumer left:
+# One toolchain entry the old image carried is gone, and it had no consumer
+# left:
 #   blender                    no .blend source exists in this tree, and the
 #                              cooker no longer needs one to configure -- see
 #                              ZHLN_HAS_BLENDER below (385 MiB installed).
-#   directx-shader-compiler    nothing here emits DXIL: every shader cooks to
-#                              SPIR-V through slangc (-target spirv) and the
-#                              vendored Slang is configured with
-#                              SLANG_ENABLE_DXIL=OFF (30 MiB installed).
+#
+# directx-shader-compiler stays, but not for DXIL: every shader in this tree
+# still cooks to SPIR-V through slangc (-target spirv) with SLANG_ENABLE_DXIL=OFF.
+# The package is here because Jolt compiles its own Vulkan compute shaders:
+# Jolt/Shaders/*.hlsl -> *.spv is driven by dxc, and Jolt locates dxc by taking
+# FindVulkan's glslc path and replacing "glslc" with "dxc" -- there is no
+# find_program(dxc) in Jolt. With no LunarG SDK in the image that path is
+# Vulkan_GLSLC_EXECUTABLE-NOTFOUND, so cmake/ThirdParty.cmake seeds it with the
+# dxc found here (see "Jolt Vulkan compute shader compiler" there). Dropping
+# this package makes every Jolt shader rule exit 127.
 #
 # Five of the vendored libraries are provisioned by the distro instead of a git
 # submodule. Each has a probe in cmake/ThirdParty.cmake or ShaderCompilation.cmake
@@ -54,7 +60,7 @@ RUN pacman -Sy --noconfirm && \
     simdjson \
     shader-slang \
     luajit \
-    directx-shader-compiler 
+    directx-shader-compiler
 
 # No LunarG Vulkan SDK: every piece of it this build used is now a distro
 # package -- vulkan-headers, vulkan-icd-loader, vulkan-validation-layers and

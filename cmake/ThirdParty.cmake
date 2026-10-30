@@ -588,6 +588,38 @@ endif()
 add_compile_definitions(JPH_DEBUG_RENDERER)
 
 set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
+
+# --- Jolt Vulkan compute shader compiler ---
+# Jolt compiles its own compute shaders (Jolt/Shaders/*.hlsl -> *.spv) rather than
+# cooking them here, and it does so with dxc. It never searches for dxc: Jolt/Jolt.cmake
+# takes the glslc path that find_package(Vulkan) produced and substitutes the file name,
+#     string(REPLACE "glslc" "dxc" Vulkan_dxc_EXECUTABLE ${Vulkan_GLSLC_EXECUTABLE})
+# so dxc is only ever found next to a glslc. A machine or image with distro packages but
+# no LunarG SDK has dxc (directx-shader-compiler) and no glslc, which leaves the variable
+# at Vulkan_GLSLC_EXECUTABLE-NOTFOUND; "glslc" does not occur in that string, the
+# substitution changes nothing, and every shader rule tries to run a program named
+# Vulkan_GLSLC_EXECUTABLE-NOTFOUND and exits 127. Give Jolt the compiler it expects: if
+# Vulkan was found but glslc was not, put dxc in the variable Jolt reads; the substitution
+# then returns the path unchanged and Jolt invokes dxc itself. A real SDK is never
+# overridden -- this only acts when the variable is empty or *-NOTFOUND.
+if(ZHLN_BUILD_RENDER)
+    find_package(Vulkan QUIET)
+    if(Vulkan_FOUND AND NOT Vulkan_GLSLC_EXECUTABLE)
+        find_program(ZHLN_JOLT_DXC_EXECUTABLE NAMES dxc dxc.exe HINTS "$ENV{DXC_ROOT}" /usr/bin /usr/local/bin)
+        if(ZHLN_JOLT_DXC_EXECUTABLE)
+            set(Vulkan_GLSLC_EXECUTABLE "${ZHLN_JOLT_DXC_EXECUTABLE}" CACHE FILEPATH
+                "Shader compiler path Jolt reads; Jolt replaces 'glslc' with 'dxc' in it to locate dxc" FORCE)
+            message(STATUS "Jolt Vulkan compute: no glslc found, compiling its HLSL shaders with ${ZHLN_JOLT_DXC_EXECUTABLE}.")
+        else()
+            message(WARNING
+                "Jolt's Vulkan compute shaders are compiled with dxc, and neither glslc nor dxc was found (Vulkan_GLSLC_EXECUTABLE is "
+                "\"${Vulkan_GLSLC_EXECUTABLE}\"). Install directx-shader-compiler (dxc) or shaderc (glslc), or configure with "
+                "-DJPH_USE_VK=OFF to build without Jolt's Vulkan compute backend."
+            )
+        endif()
+    endif()
+endif()
+
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
 
 # Force Jolt to export all symbols
