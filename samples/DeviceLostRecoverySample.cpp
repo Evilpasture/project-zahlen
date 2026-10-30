@@ -28,18 +28,18 @@
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Signal/SignalManager.hpp>
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Clock.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Input.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Window.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <FreeCam/FreeCam.hpp>
 

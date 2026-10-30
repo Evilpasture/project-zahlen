@@ -88,23 +88,23 @@
 #include <Animation/AnimationSystem.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
-#include <Zahlen/AssetManager.hpp>
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Clock.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/FramePlan.hpp>
-#include <Zahlen/GraphicsSettings.hpp>
-#include <Zahlen/Input.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/FramePlan.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
+#include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Window.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 
@@ -699,7 +699,7 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
 // RENDER SETTINGS
 // ============================================================================
 
-// The studio look, in the canonical model (include/Zahlen/GraphicsSettings.hpp).
+// The studio look, in the canonical model (include/Zahlen/Render/GraphicsSettings.hpp).
 //
 // The signature fields -- AA mode and feedback, shadow resolution, GI samples,
 // SSR/RTR and the ray-tracing budget -- come from a preset rather than being

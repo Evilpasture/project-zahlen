@@ -9,10 +9,10 @@
 // clang-format on
 #include <Jolt/Core/Factory.h>
 #include <Jolt/RegisterTypes.h>
-#include <Zahlen/Audio.hpp>
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Clock.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Audio/Audio.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Defer.hpp>
@@ -24,10 +24,10 @@
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/FramePlan.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Frame.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/FramePlan.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Threading/Channel.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>

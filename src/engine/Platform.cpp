@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Platform.hpp"
-#include <Zahlen/Window.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <chrono>
 #include <thread>
 

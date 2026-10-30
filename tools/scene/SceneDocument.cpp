@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "SceneDocument.hpp"
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Scene.hpp>
+#include <Zahlen/Engine/Scene.hpp>
 #include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>
 #if defined(ZHLN_SCENE_DOC_HAS_LUA)

@@ -11,7 +11,7 @@
 // The scene types are exercised through the same path, because "scene
 // definition in the type system" only means anything if a scene document is
 // just another reflected struct. Note the direction of that dependency: the
-// core scene model (Zahlen/Scene.hpp) knows nothing about TOML, and it is
+// core scene model (Zahlen/Engine/Scene.hpp) knows nothing about TOML, and it is
 // plugins/toml/SceneTOML.hpp's Jolt vector bindings that make a
 // ZHLN::Scene::Scene a document.
 //
@@ -24,10 +24,10 @@
 // clang-format on
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Scene.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <array>
 #include <cmath>

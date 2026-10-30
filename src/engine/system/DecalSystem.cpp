@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "DecalSystem.hpp"
-#include <Zahlen/Components.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 

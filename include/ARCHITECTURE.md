@@ -375,14 +375,21 @@ Only pervasive definitions stay at the root of `include/Zahlen/`: `Common.h`
 `Format.hpp` (whose formatter specializations span Entity, Jolt, and the
 renderer, so it cannot live under any one of them without inverting an edge).
 
-The move is staged. Every relocated header still has a forwarding shim at its
-old root spelling (`include/Zahlen/FramePlan.hpp` is one line including
-`<Zahlen/Engine/FramePlan.hpp>`), so existing call sites build unchanged while
-they are migrated; delete the shim once the last consumer names the new path.
-The three lower-case directories were re-cased in place (`ecs/` → `ECS/`,
-`gui/` → `GUI/`, `physics/` → `Physics/`) with no shims, because a shim beside a
-case-only-renamed directory collides with its real header on a
+There are no forwarding headers. The relocation was staged with one-line shims
+at the old root spellings and completed by re-pointing every consumer and
+deleting them, so a header is reachable at exactly one path — the one its
+subsystem owns. Three directories were also re-cased in place (`ecs/` → `ECS/`,
+`gui/` → `GUI/`, `physics/` → `Physics/`); that rename never had shims, because
+a shim beside a case-only-renamed directory collides with its real header on a
 case-insensitive filesystem.
+
+An application links `app/` and may therefore use `<Zahlen/Zahlen.hpp>`
+(`app/include/Zahlen/Zahlen.hpp`), which pulls the engine surface an
+application actually compiles against together with the host headers
+(`App.hpp`, `HostRunner.hpp`, `KernelApp.hpp`, `ConfigCli.hpp`,
+`AppOutcome.hpp`). It lives in the application layer on purpose: the engine
+itself still has no engine-wide header, and the umbrella is not visible to
+Core targets.
 
 ---
 

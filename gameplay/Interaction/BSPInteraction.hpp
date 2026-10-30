@@ -20,7 +20,7 @@
 #include <BSP/BSPGeometry.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/Scene.hpp>
+#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <string_view>
 

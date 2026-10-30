@@ -6,7 +6,7 @@
 #include <Zahlen/Math/Camera.hpp>
 #include <optional>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
-#include <Zahlen/Buffer.h>
+#include <Zahlen/Core/Buffer.h>
 // clang-format off
 #include <Jolt/Jolt.h>
 #include <Jolt/Geometry/Plane.h>
@@ -18,7 +18,7 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Physics/PhysicsHandles.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 // clang-format on
 
 #include <cstdint>

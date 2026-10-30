@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GeometryManager.hpp"
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <algorithm>
 #include <cstring>
 #include <format>

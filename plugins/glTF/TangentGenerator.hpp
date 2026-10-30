@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <array>
 #include <cstdint>
 #include <span>

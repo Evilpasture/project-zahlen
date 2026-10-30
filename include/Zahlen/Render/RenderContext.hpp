@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/Camera.hpp>
+#include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Geometry2D.hpp>
-#include <Zahlen/GraphicsSettings.hpp>
-#include <Zahlen/Meshlet.hpp>
-#include <Zahlen/ParticleEmitterDesc.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
+#include <Zahlen/Render/Meshlet.hpp>
+#include <Zahlen/Render/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Render/FrameData.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
@@ -22,7 +22,7 @@
 #include <Zahlen/Render/SceneData.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Render/View.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/GUI/UIData.hpp>
 #include <array>
 #include <concepts>

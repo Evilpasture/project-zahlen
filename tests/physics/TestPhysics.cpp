@@ -10,8 +10,8 @@
 #include <Jolt/Core/Factory.h>
 #include <Jolt/RegisterTypes.h>
 #include <Jolt/Skeleton/Skeleton.h>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/SceneResources.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ECS/ECS.hpp>

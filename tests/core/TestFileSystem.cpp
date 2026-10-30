@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/FileSystem.hpp>
+#include <Zahlen/FileSystem/FileSystem.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
 #include <cstddef>

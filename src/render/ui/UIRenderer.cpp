@@ -10,8 +10,8 @@
 #include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/GUI/UIData.hpp>
 #include <algorithm>
 #include <array>

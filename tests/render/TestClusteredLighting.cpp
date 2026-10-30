@@ -11,7 +11,7 @@
 // and engine fixture live in LightingRTCommon.hpp.
 
 #include "LightingRTCommon.hpp"
-#include <Zahlen/World.hpp>
+#include <Zahlen/Engine/World.hpp>
 
 // ============================================================================
 // Test Suite

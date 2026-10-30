@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/Components.hpp>
-#include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>

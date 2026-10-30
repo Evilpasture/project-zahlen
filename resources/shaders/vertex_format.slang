@@ -3,7 +3,7 @@
 
 module vertex_format;
 
-// Match Zahlen/Vertex.hpp exactly: 8-byte animated tangent frame and
+// Match Zahlen/Render/Vertex.hpp exactly: 8-byte animated tangent frame and
 // 12-byte immutable UV/color stream. Both are indexed independently by vertex.
 public struct VertexTangentFrame {
     public uint normal;

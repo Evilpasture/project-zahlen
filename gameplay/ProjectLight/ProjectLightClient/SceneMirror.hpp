@@ -27,7 +27,7 @@
 
 #include <Replication/ReplicaState.hpp>
 #include <Replication/ReplicationComponents.hpp>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Physics/PhysicsHandles.hpp>
 #include <cstdint>
 #include <unordered_map>

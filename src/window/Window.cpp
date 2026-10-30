@@ -4,9 +4,9 @@
 #include "WindowInternal.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include <Zahlen/Input.hpp>
+#include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Window.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <array>
 #include <cctype>
 #include <filesystem>

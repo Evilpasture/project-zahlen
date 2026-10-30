@@ -10,7 +10,7 @@
 // bytes that do not describe one.
 
 #include "TestsFramework.hpp"
-#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/GUI/Font.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
 #include <cstddef>

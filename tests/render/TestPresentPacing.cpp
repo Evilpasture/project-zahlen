@@ -11,7 +11,7 @@
 // simulate off a fabricated cadence.
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Render/PresentTiming.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <cstdint>

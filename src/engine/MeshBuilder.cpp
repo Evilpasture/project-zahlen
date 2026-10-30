@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Meshlet.hpp>
-#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Render/Meshlet.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <algorithm>
 #include <cmath>

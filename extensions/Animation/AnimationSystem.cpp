@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "AnimationSystem.hpp"
-#include <Zahlen/AssetManager.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/PoseUploads.hpp>
+#include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <algorithm>

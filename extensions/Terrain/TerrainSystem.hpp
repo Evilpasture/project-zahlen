@@ -6,8 +6,8 @@
 
 #include "TerrainComponents.hpp"
 #include <Zahlen/Common.h>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/GameModule.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
 
 namespace ZHLN {

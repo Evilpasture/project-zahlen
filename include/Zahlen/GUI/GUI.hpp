@@ -7,8 +7,8 @@
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Geometry2D.hpp>
-#include <Zahlen/Input.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/GUI/Font.hpp>
 #include <Zahlen/GUI/TextBuffer.hpp>

@@ -4,7 +4,7 @@
 #pragma once
 
 #include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/GUI/Font.hpp>
 #include <Jolt/Math/Vec4.h>
 #include <cstdint>

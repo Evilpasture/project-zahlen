@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/Meshlet.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Meshlet.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <cmath>
 #include <cstddef>
 #include <cstring>

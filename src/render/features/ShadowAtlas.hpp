@@ -5,7 +5,7 @@
 #include "GpuLayout.hpp"
 #include "Rendering.hpp"
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <cstdint>
 #include <span>

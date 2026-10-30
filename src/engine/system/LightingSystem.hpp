@@ -7,7 +7,7 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Math/Vec3.h>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Render/SceneData.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
 #include <utility>

@@ -16,19 +16,19 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Meshlet.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Types.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>

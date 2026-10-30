@@ -1,19 +1,19 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
-#include <Zahlen/Scene.hpp>
+#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>

@@ -10,13 +10,13 @@ module;
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <FreeCam/FreeCam.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>

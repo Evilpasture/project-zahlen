@@ -21,10 +21,10 @@
 // LuaJIT runtime under Lua/) and extensions/net are the same shape.
 #pragma once
 
-#include <Zahlen/Clock.hpp>
+#include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/World.hpp>
+#include <Zahlen/Engine/World.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <memory>

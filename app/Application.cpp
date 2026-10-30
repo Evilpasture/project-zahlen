@@ -4,11 +4,11 @@
 // Application composes the game and its frame plan. CMake generates the
 // optional default-module install pass in DefaultModules.cpp.
 #include <Zahlen/App.hpp>
-#include <Zahlen/Clock.hpp>
+#include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/HostRunner.hpp>
-#include <Zahlen/Kernel.hpp>
+#include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <optional>
 #include <span>

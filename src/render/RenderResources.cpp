@@ -5,11 +5,11 @@
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "Zahlen/Core/AssetID.hpp"
-#include "Zahlen/Geometry2D.hpp"
-#include "Zahlen/GraphicsSettings.hpp"
+#include "Zahlen/Math/Geometry2D.hpp"
+#include "Zahlen/Render/GraphicsSettings.hpp"
 #include "Zahlen/Render/Handles.hpp"
 #include "Zahlen/Render/Types.hpp"
-#include "Zahlen/Vertex.hpp"
+#include "Zahlen/Render/Vertex.hpp"
 #include "passes/forward/ForwardPass.hpp"
 #include "passes/gbuffer/GBufferBasePass.hpp"
 #include <PipelineFormats.hpp>
@@ -18,7 +18,7 @@
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>

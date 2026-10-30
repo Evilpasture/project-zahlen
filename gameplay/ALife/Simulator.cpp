@@ -3,9 +3,9 @@
 
 #include "Simulator.hpp"
 #include "ALifeComponents.hpp"
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Profiler.hpp>
+#include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <cmath>

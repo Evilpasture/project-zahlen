@@ -9,7 +9,7 @@
 #include "GpuLayout.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/Types.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>

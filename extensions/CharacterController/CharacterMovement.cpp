@@ -5,8 +5,8 @@
 #include "CharacterMovement.hpp"
 
 #include "CharacterComponents.hpp"
-#include "Zahlen/Components.hpp"
-#include "Zahlen/Engine.hpp"
+#include "Zahlen/ECS/Components.hpp"
+#include "Zahlen/Engine/Engine.hpp"
 #include "Zahlen/Log.hpp"
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ECS/ECS.hpp>

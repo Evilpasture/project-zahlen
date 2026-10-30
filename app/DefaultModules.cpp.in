@@ -3,7 +3,7 @@
 
 // CMake configures this translation unit from the targets in this build graph.
 // Optional headers/calls do not exist at all when their target is absent.
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 @AUTOLOAD_INCLUDES@
 namespace ZHLN {

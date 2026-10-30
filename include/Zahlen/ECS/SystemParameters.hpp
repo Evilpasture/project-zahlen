@@ -5,7 +5,7 @@
 
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/SoA.hpp>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EventBus.hpp>

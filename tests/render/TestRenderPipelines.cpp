@@ -6,17 +6,17 @@
 #include "helpers/MockTaskScheduler.hpp"
 #include "Zahlen/Render/Render.hpp"
 #include <Zahlen/Render/Types.hpp>
-#include <Zahlen/AssetManager.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/SceneResources.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 // Engine.hpp only forward-declares SystemGraph; the scene-reset test calls

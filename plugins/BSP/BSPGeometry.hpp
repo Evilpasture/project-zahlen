@@ -8,7 +8,7 @@
 // The import step: BSP lumps in, Zahlen-native vertex streams out. The
 // streams are exactly the cooked-mesh payload layout the renderer already
 // consumes -- VertexPosition / VertexTangentFrame / VertexSurface / indices
-// (see <Zahlen/Vertex.hpp>) -- grouped per material the way the glTF importer
+// (see <Zahlen/Render/Vertex.hpp>) -- grouped per material the way the glTF importer
 // groups primitives. Nothing here touches the GPU, the ECS, or an instantiator;
 // the importer adapter uploads these streams and Scene::Instantiate /
 // PrefabFactory::InstantiatePrefab take it from there.
@@ -17,9 +17,9 @@
 
 #include "BSPRead.hpp"
 #include "BSPVradLightmap.hpp"
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <array>
 #include <cstdint>
 #include <span>

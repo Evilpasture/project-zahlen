@@ -3,8 +3,8 @@
 
 #include "RenderInternal.hpp"
 #include "GpuPack.hpp"
-#include "Zahlen/Camera.hpp"
-#include "Zahlen/Math3D.hpp"
+#include "Zahlen/Math/Camera.hpp"
+#include "Zahlen/Math/Math3D.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>

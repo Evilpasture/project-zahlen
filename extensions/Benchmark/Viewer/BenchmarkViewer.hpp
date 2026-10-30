@@ -51,7 +51,7 @@
 #include <Benchmark/Benchmark.hpp>
 #include <Benchmark/Viewer/FrameTelemetry.hpp>
 #include <Zahlen/Common.h>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 #include <cstddef>
 #include <cstdint>

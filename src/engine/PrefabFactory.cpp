@@ -1,17 +1,17 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
 #include <optional>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/SceneResources.hpp>
-#include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>

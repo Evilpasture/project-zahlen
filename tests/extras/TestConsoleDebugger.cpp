@@ -12,8 +12,8 @@
 #include <Console/ConsoleDebugger.hpp>
 #include <Scripting/ScriptBinder.hpp>
 #include <Scripting/ScriptBinderRegistry.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <cstdint>
 #include <expected>

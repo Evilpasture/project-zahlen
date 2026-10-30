@@ -4,9 +4,9 @@
 #pragma once
 #include "Rendering.hpp"
 #include "features/ShadowAtlas.hpp"
-#include <Zahlen/Camera.hpp>
+#include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
 #include <cstdint>
 #include <expected>

@@ -9,10 +9,10 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
-#include <Zahlen/EngineServices.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Engine/EngineServices.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
 #include <algorithm>

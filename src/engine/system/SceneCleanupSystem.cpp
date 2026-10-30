@@ -3,9 +3,9 @@
 
 #include "SceneCleanupSystem.hpp"
 #include "../Hierarchy.hpp"
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/SceneResources.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/Physics/Physics.hpp>

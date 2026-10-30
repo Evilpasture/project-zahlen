@@ -16,18 +16,18 @@ module;
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Input.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/PlatformHost.hpp>
-#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Types.hpp>
-#include <Zahlen/Window.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 

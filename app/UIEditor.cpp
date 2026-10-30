@@ -27,16 +27,16 @@
 
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/Input.hpp>
-#include <Zahlen/Kernel.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/KernelApp.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/View.hpp>
 #include <Widget/TextFit.hpp>
-#include <Zahlen/Window.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <Zahlen/ECS/EventBus.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 #include <UI/UITree.hpp>

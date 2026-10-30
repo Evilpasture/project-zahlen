@@ -4,10 +4,10 @@
 // extensions/Terrain/TerrainSystem.cpp
 #include "TerrainSystem.hpp"
 #include "TerrainFactory.hpp"
-#include <Zahlen/Components.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/GameModule.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/Mutex.hpp>

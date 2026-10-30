@@ -7,8 +7,8 @@
 #include "features/ShadowRenderer.hpp"
 #include "passes/SceneDraw.hpp"
 #include <ShaderBindings.hpp>
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 
 namespace ZHLN::Passes {
 

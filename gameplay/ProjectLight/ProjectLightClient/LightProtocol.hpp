@@ -12,8 +12,8 @@
 #include <Replication/ClassVocabulary.hpp>
 #include <Replication/ReplicaState.hpp>
 #include <Replication/ReplicationComponents.hpp>
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/GameModule.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Physics/PhysicsHandles.hpp>
 #include <array>
 #include <chrono>

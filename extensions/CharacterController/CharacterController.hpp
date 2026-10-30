@@ -13,7 +13,7 @@
 #include "CharacterComponents.hpp"
 #include "CharacterMovement.hpp"
 #include "PlayerInput.hpp"
-#include <Zahlen/GameModule.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
 
 namespace ZHLN {
 

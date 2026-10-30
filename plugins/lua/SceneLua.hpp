@@ -12,7 +12,7 @@
 #include <lua/ReflectLua.hpp>
 
 #include <Zahlen/Physics/Jolt.hpp>
-#include <Zahlen/Scene.hpp>
+#include <Zahlen/Engine/Scene.hpp>
 
 namespace ZHLN::ReflectLua {
 

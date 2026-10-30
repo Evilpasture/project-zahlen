@@ -3,7 +3,7 @@
 
 #include "passes/SceneDraw.hpp"
 #include "Renderer.hpp"
-#include <Zahlen/Profiler.hpp>
+#include <Zahlen/Core/Profiler.hpp>
 
 namespace ZHLN::Passes {
 

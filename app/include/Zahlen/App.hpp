@@ -6,7 +6,7 @@
 // Application facade: unlike Core's Engine.hpp, this host-facing header owns
 // its reflected CLI contract. zahlen_application publishes app/include/.
 #include <Zahlen/ConfigCli.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/AppOutcome.hpp>
 #include <concepts>
 #include <cstddef>

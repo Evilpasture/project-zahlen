@@ -11,7 +11,7 @@
 #include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Core/ArenaAllocator.hpp>
 #include <Zahlen/Core/SoA.hpp>
-#include <Zahlen/PoseUploads.hpp>
+#include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
 #include <cstddef>
 #include <cstdint>

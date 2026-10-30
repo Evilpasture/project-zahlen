@@ -4,7 +4,7 @@
 #pragma once
 
 #include <Zahlen/Common.h>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 
 namespace ZHLN {
 

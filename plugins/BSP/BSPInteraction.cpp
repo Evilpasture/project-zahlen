@@ -11,7 +11,7 @@
 
 #include "BSPScene.hpp" // ConvertDirection / ConvertPosition / EngineEulerAnglesFromSourceAngles
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>

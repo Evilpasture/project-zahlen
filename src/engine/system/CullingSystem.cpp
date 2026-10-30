@@ -4,12 +4,12 @@
 #include "CullingSystem.hpp"
 #include "LightingSystem.hpp"
 #include "Zahlen/Render/Render.hpp"
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Profiler.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 
 namespace ZHLN::Tests { namespace {

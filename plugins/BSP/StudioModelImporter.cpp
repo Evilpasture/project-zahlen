@@ -6,10 +6,10 @@
 #include "StudioModelLoader.hpp"
 #include "VMTParser.hpp"
 #include "VTFDecoder.hpp"
-#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Meshlet.hpp>
+#include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Render/Render.hpp>
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>

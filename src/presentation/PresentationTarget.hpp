@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
 #include <cstdint>
 #include <optional>
 #include <type_traits>

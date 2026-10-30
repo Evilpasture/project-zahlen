@@ -3,7 +3,7 @@
 
 // extensions/Benchmark/Benchmark.cpp
 #include <Benchmark/Benchmark.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>

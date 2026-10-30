@@ -10,7 +10,7 @@
 #include "passes/postprocess/PostProcessResources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/FunctionRef.hpp>
-#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 
 namespace ZHLN::Passes {
 

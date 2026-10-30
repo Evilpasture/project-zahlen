@@ -8,14 +8,14 @@
 // that the transpiler fallback (tools/transpile_reflection.py, which rewrites
 // reflection calls by translation-unit source offset) sees and flattens it.
 
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Input.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 #include <algorithm>

@@ -3,9 +3,9 @@
 
 // extensions/Benchmark/Viewer/BenchmarkViewer.cpp
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
-#include <Zahlen/Clock.hpp>
+#include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/GUI/UIData.hpp>

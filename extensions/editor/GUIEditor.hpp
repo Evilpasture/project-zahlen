@@ -31,8 +31,8 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/EnumFlags.hpp> // EnableEnumFlags, for the editor's own input flag set
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <span>
 #include <string_view>
 

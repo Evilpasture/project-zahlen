@@ -554,7 +554,7 @@ constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilp
 // which is the point.
 //
 // Nothing under include/ names what is in here. The engine authors its own
-// terms (Zahlen/ParticleEmitterDesc.hpp, Zahlen/Render/FrameData.hpp) and
+// terms (Zahlen/Render/ParticleEmitterDesc.hpp, Zahlen/Render/FrameData.hpp) and
 // src/render/GpuPack.cpp packs them into these structs. The enum declarations
 // here are the GPU-side, Slang-derived wire types; packing converts the engine's
 // domain enums explicitly at that boundary.

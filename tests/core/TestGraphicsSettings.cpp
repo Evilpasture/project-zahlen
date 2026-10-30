@@ -12,7 +12,7 @@
 // never touch blit colour style, and ConfigEquals ignores per-frame jitter.
 
 #include "TestsFramework.hpp"
-#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <array>
 #include <cstdint>
 #include <string_view>

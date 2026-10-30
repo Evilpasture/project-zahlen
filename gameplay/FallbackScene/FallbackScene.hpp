@@ -11,8 +11,8 @@
 // and a host that wants none of it simply never calls Install.
 #pragma once
 
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/GameModule.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
 
 namespace ZHLN {
 

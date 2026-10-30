@@ -11,9 +11,9 @@ module;
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Physics/PhysicsHandles.hpp>
 #include <array>

@@ -39,12 +39,12 @@
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <algorithm>
 #include <atomic>
 #include <cstddef>

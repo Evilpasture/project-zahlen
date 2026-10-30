@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/ConfigCli.hpp>
-#include <Zahlen/Clock.hpp>
+#include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/HostRunner.hpp>
-#include <Zahlen/Kernel.hpp>
+#include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/KernelApp.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <cstddef>
 #include <expected>

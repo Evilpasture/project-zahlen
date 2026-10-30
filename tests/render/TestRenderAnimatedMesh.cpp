@@ -4,11 +4,11 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Animation/AnimationSystem.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>

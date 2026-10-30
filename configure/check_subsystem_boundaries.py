@@ -48,9 +48,9 @@ FORBIDDEN_RENDER_PUBLIC_INCLUDES: tuple[str, ...] = (
     # Current spellings.
     "Zahlen/Window/",
     # Legacy spellings kept alive by the forwarding shims.
-    "Zahlen/Window.hpp",
-    "Zahlen/WindowInput.hpp",
-    "Zahlen/PlatformHost.hpp",
+    "Zahlen/Window/Window.hpp",
+    "Zahlen/Window/WindowInput.hpp",
+    "Zahlen/Window/PlatformHost.hpp",
 )
 
 FORBIDDEN_RENDER_CMAKE_TOKENS_RE = re.compile(

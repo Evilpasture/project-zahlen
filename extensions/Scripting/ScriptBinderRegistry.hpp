@@ -31,7 +31,7 @@
 #include <Scripting/ScriptBinder.hpp>
 #include <Scripting/ScriptValueTypes.hpp>
 
-#include <Zahlen/Components.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
 
 #include <cstddef>

@@ -9,12 +9,12 @@
 // clang-format on
 #include <Jolt/Core/Factory.h>
 #include <Jolt/RegisterTypes.h>
-#include <Zahlen/Buffer.h>
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Core/Buffer.h>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <CharacterController/CharacterMovement.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ECS/ECS.hpp>

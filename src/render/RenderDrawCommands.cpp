@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
-#include "Zahlen/Math3D.hpp"
+#include "Zahlen/Math/Math3D.hpp"
 #include <Zahlen/Render/Render.hpp>
 #include <algorithm>
 #include <array>

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/FileSystem/VFS.hpp>
-#include <Zahlen/Sync.hpp>
+#include <Zahlen/Threading/Sync.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <cstring>

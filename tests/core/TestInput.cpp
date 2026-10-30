@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Input.hpp>
-#include <Zahlen/InputContext.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EventBus.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>

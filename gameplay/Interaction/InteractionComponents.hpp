@@ -11,7 +11,7 @@
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>

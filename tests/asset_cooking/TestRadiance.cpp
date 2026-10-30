@@ -7,7 +7,7 @@
 #include <AssetCooking/EnvironmentPreparation.hpp>
 #include <AssetCooking/RadianceDecoder.hpp>
 #include <AssetCooking/RadianceEncoder.hpp>
-#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>

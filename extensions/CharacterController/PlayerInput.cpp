@@ -5,12 +5,12 @@
 #include "PlayerInput.hpp"
 
 #include "CharacterComponents.hpp"
-#include "Zahlen/Camera.hpp"
-#include "Zahlen/Components.hpp"
-#include "Zahlen/Engine.hpp"
-#include "Zahlen/Entity.hpp"
-#include "Zahlen/Input.hpp"
-#include "Zahlen/InputContext.hpp"
+#include "Zahlen/Math/Camera.hpp"
+#include "Zahlen/ECS/Components.hpp"
+#include "Zahlen/Engine/Engine.hpp"
+#include "Zahlen/ECS/Entity.hpp"
+#include "Zahlen/Input/Input.hpp"
+#include "Zahlen/Input/InputContext.hpp"
 #include <FreeCam/FreeCam.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <cmath>

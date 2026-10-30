@@ -5,12 +5,12 @@
 // first Tick; a failure probe runs a UI-only frame without GPU rendering.
 #include "TestsFramework.hpp"
 #include <Zahlen/App.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/FramePlan.hpp>
-#include <Zahlen/GameModule.hpp>
-#include <Zahlen/Kernel.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/FramePlan.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
+#include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/KernelApp.hpp>
-#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <algorithm>

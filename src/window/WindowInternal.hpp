@@ -4,7 +4,7 @@
 #pragma once
 #include "PresentationTarget.hpp"
 #include <GLFW/glfw3.h>
-#include <Zahlen/Window.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <string>
 
 namespace ZHLN {

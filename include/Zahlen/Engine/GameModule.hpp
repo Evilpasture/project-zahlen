@@ -3,7 +3,7 @@
 
 #pragma once
 
-// Zahlen/GameModule.hpp
+// Zahlen/Engine/GameModule.hpp
 //
 // What a module *is*, as a value the application installs.
 //

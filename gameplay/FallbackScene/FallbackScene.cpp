@@ -3,19 +3,19 @@
 
 // gameplay/FallbackScene/FallbackScene.cpp
 #include "FallbackScene.hpp"
-#include <Zahlen/Components.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/FramePlan.hpp>
-#include <Zahlen/GameModule.hpp>
-#include <Zahlen/Input.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/FramePlan.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
+#include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Scene.hpp>
-#include <Zahlen/Window.hpp>
+#include <Zahlen/Engine/Scene.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 
@@ -34,7 +34,7 @@ namespace {
 // express what the fallback needs, that is a gap in the schema and not a
 // reason for this file to reach for PrefabFactory directly. Writing it
 // found two -- a light had no orientation, and the environment defaults did
-// not match the component's -- and both are fixed in Zahlen/Scene.hpp instead
+// not match the component's -- and both are fixed in Zahlen/Engine/Scene.hpp instead
 // of worked around here.
 //
 // Nothing is loaded from disk: this scene belongs to the scene host when no
@@ -42,7 +42,7 @@ namespace {
 // plugins/toml layer can still read and write this description (see
 // tests/extras/TestTOML.cpp); booting it does not require a parser.
 //
-// Only the fields that differ from the struct defaults in Zahlen/Scene.hpp are
+// Only the fields that differ from the struct defaults in Zahlen/Engine/Scene.hpp are
 // set, so the two stay in step by construction -- exactly what a scene document
 // would have said.
 [[nodiscard]] auto MakeFallbackScene() -> Scene::Scene {

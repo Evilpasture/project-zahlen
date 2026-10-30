@@ -7,9 +7,9 @@
 #include <Console/Console.hpp>
 #include <Scripting/ScriptBinder.hpp>
 #include <Scripting/ScriptECSBridge.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 
 #if defined(ZHLN_CONSOLE_HAS_LUA)

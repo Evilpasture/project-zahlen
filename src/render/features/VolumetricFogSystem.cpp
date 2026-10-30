@@ -4,7 +4,7 @@
 #include "features/VolumetricFogSystem.hpp"
 #include "RenderInternal.hpp"
 #include <ShaderBindings.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <algorithm>
 #include <vector>
 

@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "LightingSystem.hpp"
-#include "Zahlen/Camera.hpp"
-#include "Zahlen/Components.hpp"
-#include "Zahlen/Entity.hpp"
+#include "Zahlen/Math/Camera.hpp"
+#include "Zahlen/ECS/Components.hpp"
+#include "Zahlen/ECS/Entity.hpp"
 #include "Zahlen/Log.hpp"
 #include "Zahlen/Render/GpuEnums.hpp"
 #include "Zahlen/Render/Render.hpp"

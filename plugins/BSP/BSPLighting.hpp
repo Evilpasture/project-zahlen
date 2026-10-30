@@ -36,7 +36,7 @@
 #include "BSPGeometry.hpp"
 #include "BSPRead.hpp"
 #include "VMTParser.hpp"
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <array>
 #include <cstdint>
 #include <span>

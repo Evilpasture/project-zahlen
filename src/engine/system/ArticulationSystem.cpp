@@ -7,13 +7,13 @@
 // clang-format on
 #include <Jolt/Skeleton/Skeleton.h>
 #include <Jolt/Skeleton/SkeletonPose.h>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/SceneResources.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/Physics/Physics.hpp>

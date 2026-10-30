@@ -9,7 +9,7 @@
 #include <Zahlen/Core/PageVector.hpp>
 #include <Zahlen/Core/Pages.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Sync.hpp>
+#include <Zahlen/Threading/Sync.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/SharedMutex.hpp>
 #include <Zahlen/Threading/Thread.hpp>

@@ -50,7 +50,7 @@
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>

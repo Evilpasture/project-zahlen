@@ -6,8 +6,8 @@
 #include "InteractionComponents.hpp"
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Common.h>
-#include <Zahlen/GameModule.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
 
 namespace ZHLN {

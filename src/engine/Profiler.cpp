@@ -3,7 +3,7 @@
 
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/SkipList.hpp>
-#include <Zahlen/Profiler.hpp>
+#include <Zahlen/Core/Profiler.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>

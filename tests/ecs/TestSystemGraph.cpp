@@ -3,9 +3,9 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/MockTaskScheduler.hpp"
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Frame.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ECS/ECS.hpp>

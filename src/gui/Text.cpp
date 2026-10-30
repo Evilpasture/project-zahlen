@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Text.hpp"
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/GUI/Font.hpp>
 #include <algorithm>
 #include <string>

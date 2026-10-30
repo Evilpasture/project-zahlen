@@ -6,16 +6,16 @@
 
 #include "engine/system/ArticulationSystem.hpp"
 
-#include <Zahlen/AssetManager.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
-#include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 

@@ -4,7 +4,7 @@
 #pragma once
 
 #include <Zahlen/Common.h>
-#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 
 namespace ZHLN {
 

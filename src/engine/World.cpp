@@ -4,10 +4,10 @@
 #include "ArticulationSystem.hpp"
 #include "Hierarchy.hpp"
 #include "EngineGlobals.hpp"
-#include <Zahlen/Components.hpp>
-#include <Zahlen/InputContext.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/World.hpp>
+#include <Zahlen/Engine/World.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/ECS/EventBus.hpp>

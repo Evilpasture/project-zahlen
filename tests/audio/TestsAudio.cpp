@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/Audio.hpp>
+#include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Defer.hpp>
-#include <Zahlen/SceneResources.hpp>
+#include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <algorithm>

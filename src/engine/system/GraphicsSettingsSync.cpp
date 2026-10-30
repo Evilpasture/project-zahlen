@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GraphicsSettingsSync.hpp"
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/PresentTiming.hpp>
 #include <Zahlen/Render/Render.hpp>

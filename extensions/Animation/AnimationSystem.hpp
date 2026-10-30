@@ -4,9 +4,9 @@
 #pragma once
 
 #include "AnimationContext.hpp"
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Frame.hpp>
-#include <Zahlen/GameModule.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Frame.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemAccess.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>

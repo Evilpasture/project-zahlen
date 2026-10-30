@@ -12,7 +12,7 @@
 #pragma once
 
 #include "TerrainComponents.hpp"
-#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Render/Types.hpp>
 

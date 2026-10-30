@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <string_view>
 
 namespace ZHLN {

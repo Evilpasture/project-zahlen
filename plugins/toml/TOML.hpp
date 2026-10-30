@@ -134,7 +134,7 @@ class Document {
 //
 // where `position = [0.0, 8.0, 0.0]` says the same thing on one line and
 // diffs as one line. Specialise this next to the type that needs it -- see
-// Zahlen/Scene.hpp, which does it for JPH::Float2/Float3/Float4 -- so this
+// Zahlen/Engine/Scene.hpp, which does it for JPH::Float2/Float3/Float4 -- so this
 // header keeps depending on nothing but the reflection layer.
 //
 // Fields are read and written in declaration order through reflection, so a

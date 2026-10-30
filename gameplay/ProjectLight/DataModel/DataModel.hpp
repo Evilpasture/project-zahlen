@@ -14,7 +14,7 @@
 #include <Jolt/Core/Reference.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <cstdint>
 #include <expected>
 #include <functional>

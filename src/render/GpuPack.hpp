@@ -4,8 +4,8 @@
 #pragma once
 
 #include "GpuLayout.hpp"
-#include <Zahlen/Meshlet.hpp>
-#include <Zahlen/ParticleEmitterDesc.hpp>
+#include <Zahlen/Render/Meshlet.hpp>
+#include <Zahlen/Render/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/FrameData.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <cstdint>

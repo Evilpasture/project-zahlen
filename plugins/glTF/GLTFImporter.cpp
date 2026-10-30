@@ -6,12 +6,12 @@
 #include "TangentGenerator.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
-#include <Zahlen/AssetManager.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Meshlet.hpp>
-#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Render/Meshlet.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Physics/Physics.hpp>

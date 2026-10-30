@@ -10,7 +10,7 @@
 #include <Jolt/Math/DVec3.h>
 #include <Jolt/Math/Real.h>
 #include <Jolt/Math/Vec3.h>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <cstdint>
 
 namespace ZHLN::ALife {

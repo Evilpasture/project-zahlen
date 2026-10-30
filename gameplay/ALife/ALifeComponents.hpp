@@ -5,7 +5,7 @@
 #pragma once
 
 #include "Types.hpp"
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on

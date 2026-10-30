@@ -8,13 +8,13 @@
 #include "Transform.hpp"
 #include <AssetCooking/RadianceDecoder.hpp>
 #include <AssetCooking/RadianceEncoder.hpp>
-#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Meshlet.hpp>
+#include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Render/Types.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cstdio>

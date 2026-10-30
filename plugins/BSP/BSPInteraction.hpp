@@ -33,7 +33,7 @@
 
 #include "BSPGeometry.hpp"
 #include "BSPRead.hpp"
-#include <Zahlen/Components.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Jolt/Math/Quat.h>

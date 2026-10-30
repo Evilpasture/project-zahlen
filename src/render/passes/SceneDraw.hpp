@@ -7,7 +7,7 @@
 #include "passes/SceneDrawResources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Meshlet.hpp>
+#include <Zahlen/Render/Meshlet.hpp>
 #include <cstdint>
 
 namespace ZHLN::Passes {

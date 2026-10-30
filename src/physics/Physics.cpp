@@ -7,7 +7,7 @@
 #include "PhysicsWorld.hpp"
 #include "RagdollManager.hpp"
 #include "ShapeCache.hpp"
-#include "Zahlen/Profiler.hpp"
+#include "Zahlen/Core/Profiler.hpp"
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -23,7 +23,7 @@
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Skeleton/SkeletonPose.h>
-#include <Zahlen/Buffer.h>
+#include <Zahlen/Core/Buffer.h>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/Log.hpp>

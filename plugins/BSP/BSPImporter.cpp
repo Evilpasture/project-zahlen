@@ -19,9 +19,9 @@
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
-#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Meshlet.hpp>
+#include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>

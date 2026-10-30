@@ -14,12 +14,12 @@ module;
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Zahlen/Components.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Profiler.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/Physics/Physics.hpp>

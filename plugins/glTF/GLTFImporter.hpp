@@ -18,8 +18,8 @@
 // and no function pointer is installed anywhere.
 
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <array>
 #include <cstdint>
 #include <span>

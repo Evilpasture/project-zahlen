@@ -12,13 +12,13 @@
 #include <Animation/AnimationSystem.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
-#include <Zahlen/Clock.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/FramePlan.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Window.hpp>
+#include <Zahlen/Window/Window.hpp>
 
 #if defined(ZHLN_HAS_FONTS)
 #include <Fonts/Fonts.hpp>

@@ -9,9 +9,9 @@
 #pragma once
 
 #include <Zahlen/Common.h>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/GameModule.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
 
 #include <cstdint>
 #include <expected>

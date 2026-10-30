@@ -5,7 +5,7 @@
 #include <Benchmark/Viewer/FrameTelemetry.hpp>
 #include <optional>
 #include <Zahlen/FileSystem/Paths.hpp>
-#include <Zahlen/Profiler.hpp>
+#include <Zahlen/Core/Profiler.hpp>
 #include <algorithm>
 #include <array>
 #include <cctype>

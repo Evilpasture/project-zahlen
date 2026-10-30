@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "AudioSystem.hpp"
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 
 // clang-format off

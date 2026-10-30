@@ -18,7 +18,7 @@
 // `extent.width * extent.height * BytesPerPixel()`, with no row padding to
 // stride over.
 
-#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <vector>

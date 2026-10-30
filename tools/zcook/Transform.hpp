@@ -4,8 +4,8 @@
 
 #pragma once
 #include "IR.hpp"
-#include "Zahlen/Meshlet.hpp"
-#include "Zahlen/Vertex.hpp"
+#include "Zahlen/Render/Meshlet.hpp"
+#include "Zahlen/Render/Vertex.hpp"
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -22,7 +22,7 @@ struct CompiledMesh {
     std::vector<Compiler::IRPrimitive> primitives;
     std::vector<uint32_t>              originalVertexIndices;
 
-    // VK_EXT_mesh_shader streams (see include/Zahlen/Meshlet.hpp). Empty when
+    // VK_EXT_mesh_shader streams (see include/Zahlen/Render/Meshlet.hpp). Empty when
     // the mesh is degenerate, in which case consumers fall back to the classic
     // indexed draw path.
     MeshletBuildResult meshlets;

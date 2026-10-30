@@ -3,21 +3,8 @@
 
 // The default executable is a statically linked C++ game, not a DLL host.
 // App owns platform setup, modules, input polling, frame pacing and teardown.
-#include <Zahlen/App.hpp>
-#include <Zahlen/Audio.hpp>
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Description.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/Input.hpp>
-#include <Zahlen/Log.hpp>
+#include <Zahlen/Zahlen.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
-#include <Zahlen/PlatformHost.hpp>
-#include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Physics/Physics.hpp>
 #include <cstdint>
 #include <cstdlib>
 

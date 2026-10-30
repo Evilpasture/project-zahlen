@@ -3,9 +3,9 @@
 
 #include "AnimationContext.hpp"
 #include "IK.hpp"
-#include <Zahlen/AssetManager.hpp>
-#include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/PoseUploads.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>

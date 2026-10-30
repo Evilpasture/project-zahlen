@@ -18,7 +18,7 @@
 #include <Replication/ReplicaState.hpp>
 #include <Replication/ReplicationComponents.hpp>
 
-#include <Zahlen/GameModule.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 
 #include <cstdint>

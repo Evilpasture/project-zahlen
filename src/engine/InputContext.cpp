@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include <Zahlen/InputContext.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/ECS/EventBus.hpp>
 #include <algorithm>
 #include <charconv>

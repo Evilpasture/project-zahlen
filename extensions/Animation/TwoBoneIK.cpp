@@ -4,7 +4,7 @@
 #include "IK.hpp"
 #include "AnimationContext.hpp"
 #include "AnimationSystem.hpp"
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>

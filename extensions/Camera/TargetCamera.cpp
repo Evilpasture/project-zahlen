@@ -4,12 +4,12 @@
 // extensions/Camera/TargetCamera.cpp
 #include "TargetCamera.hpp"
 
-#include "Zahlen/Camera.hpp"
-#include "Zahlen/Components.hpp"
-#include "Zahlen/Engine.hpp"
-#include "Zahlen/FramePlan.hpp"
-#include "Zahlen/GameModule.hpp"
-#include "Zahlen/Input.hpp"
+#include "Zahlen/Math/Camera.hpp"
+#include "Zahlen/ECS/Components.hpp"
+#include "Zahlen/Engine/Engine.hpp"
+#include "Zahlen/Engine/FramePlan.hpp"
+#include "Zahlen/Engine/GameModule.hpp"
+#include "Zahlen/Input/Input.hpp"
 #include "Zahlen/Log.hpp"
 #include <FreeCam/FreeCam.hpp>
 #include <Zahlen/ECS/ECS.hpp>

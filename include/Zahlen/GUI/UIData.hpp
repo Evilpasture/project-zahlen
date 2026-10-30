@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/Handles.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>

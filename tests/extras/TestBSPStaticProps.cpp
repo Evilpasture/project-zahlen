@@ -9,8 +9,8 @@
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Scene.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Engine/Scene.hpp>
 #include "helpers/BinaryWriter.hpp"
 #include <cmath>
 #include <cstring>

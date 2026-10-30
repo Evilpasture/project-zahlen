@@ -3,8 +3,8 @@
 
 
 #pragma once
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/Handles.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>

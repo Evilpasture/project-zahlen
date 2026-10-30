@@ -7,7 +7,7 @@
 // simulation graph. The host-runner target owns its CLI and process lifetime.
 #include <Zahlen/AppOutcome.hpp>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/WindowInput.hpp>
+#include <Zahlen/Window/WindowInput.hpp>
 #include <cstdint>
 #include <functional>
 #include <span>

@@ -13,10 +13,10 @@
 #include <Interaction/BSPInteraction.hpp>
 #include <Interaction/InteractionComponents.hpp>
 #include <Interaction/InteractionSystem.hpp>
-#include <Zahlen/Audio.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Scene.hpp>
+#include <Zahlen/Audio/Audio.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <cmath>

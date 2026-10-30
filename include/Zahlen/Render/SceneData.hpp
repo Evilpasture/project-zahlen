@@ -5,15 +5,15 @@
 
 // CPU-side frame description. ECS systems fill this before BeginFrame;
 // FrameScope consumes it after GPU sync. No Vulkan, no RenderContext.
-#include <Zahlen/Camera.hpp>
+#include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/GraphicsSettings.hpp>
-#include <Zahlen/ParticleEmitterDesc.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
+#include <Zahlen/Render/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/FrameData.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/Render/View.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <span>
 
 namespace ZHLN {

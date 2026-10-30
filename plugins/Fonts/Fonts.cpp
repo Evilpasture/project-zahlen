@@ -16,9 +16,9 @@
 #include "Fonts.hpp"
 #include "FontBMParser.hpp"
 
-#include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/AssetManager.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
 #include <json/JSON.hpp>

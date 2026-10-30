@@ -13,10 +13,10 @@
 
 #include "BSPInteraction.hpp"
 #include <BSP/BSPInteraction.hpp>
-#include <Zahlen/Audio.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Audio/Audio.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <cmath>
 #include <string>
 

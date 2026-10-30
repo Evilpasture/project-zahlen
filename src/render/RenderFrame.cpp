@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
-#include "Zahlen/Math3D.hpp"
-#include "Zahlen/Profiler.hpp"
+#include "Zahlen/Math/Math3D.hpp"
+#include "Zahlen/Core/Profiler.hpp"
 #include "diagnostics/GpuProfiler.hpp"
 #include "pipelines/ComputeSimPipeline.hpp"
 #include "pipelines/DeferredPbrPipeline.hpp"
 #include "pipelines/UIPipeline.hpp"
 #include <ShaderBindings.hpp>
-#include <Zahlen/Camera.hpp>
+#include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Log.hpp>

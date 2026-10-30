@@ -3,7 +3,7 @@
 
 #pragma once
 #include "RenderInternal.hpp"
-#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/View.hpp>
 

@@ -6,8 +6,8 @@
 #include "BSPGeometry.hpp"
 #include "StudioModelTypes.hpp"
 #include <Zahlen/Core/ErrorCode.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on

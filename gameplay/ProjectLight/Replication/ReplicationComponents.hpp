@@ -34,7 +34,7 @@
 // once, this becomes a per-connection index rather than a bigger map.
 
 #include <DataModel/DataModel.hpp>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <cstddef>
 #include <cstdint>

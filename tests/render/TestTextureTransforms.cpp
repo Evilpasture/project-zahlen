@@ -8,15 +8,15 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Components.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Defer.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/SceneResources.hpp>
-#include <Zahlen/Vertex.hpp>
+#include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>

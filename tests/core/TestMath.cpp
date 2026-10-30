@@ -4,9 +4,9 @@
 // Core math tests. The two-bone IK solver test moved with its code to
 // tests/extras/TestTwoBoneIK.cpp when IK left core for extensions/Animation.
 #include "TestsFramework.hpp"
-#include <Zahlen/Camera.hpp>
+#include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/Math.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <cstdint>
 
 namespace ZHLN::Test {

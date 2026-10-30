@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/FramePlan.hpp>
+#include <Zahlen/Engine/FramePlan.hpp>
 
 #include <utility>
 

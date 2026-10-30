@@ -7,7 +7,7 @@
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <array>

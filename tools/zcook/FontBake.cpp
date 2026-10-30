@@ -9,14 +9,14 @@
 // could rasterise an SDF atlas at boot. All of that moved here: the runtime
 // engine consumes pre-baked atlases only (see include/Zahlen/gui/FontLoader.hpp),
 // and this tool is what turns a .ttf into one. The output is the cooked 'FNT0'
-// container (CookedFontHeader in <Zahlen/AssetManager.hpp>), which the
+// container (CookedFontHeader in <Zahlen/Engine/AssetManager.hpp>), which the
 // engine decodes through GUI::DecodeCookedFont -- bake it into data/base.pak as
 // `fonts/default.zfont`, or hand it to plugins/Fonts.
 //
 // STB_TRUETYPE_IMPLEMENTATION is defined here and nowhere else in the tree.
 
 #include "Cook.hpp"
-#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/GUI/Font.hpp>
 #include <algorithm>
 #include <cstdint>

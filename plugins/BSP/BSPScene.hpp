@@ -15,7 +15,7 @@
 
 #include "BSPGeometry.hpp"
 #include "BSPRead.hpp"
-#include <Zahlen/Scene.hpp>
+#include <Zahlen/Engine/Scene.hpp>
 #include <cstdint>
 #include <string>
 #include <string_view>

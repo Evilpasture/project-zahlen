@@ -19,8 +19,8 @@
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <cstdint>
 #include <memory>
 #include <span>

@@ -10,11 +10,11 @@
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
-#include <Zahlen/FramePlan.hpp>
-#include <Zahlen/GameModule.hpp>
-#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Engine/FramePlan.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/Render.hpp>

@@ -6,8 +6,8 @@
 #include "BSPGeometry.hpp"
 #include "SourceVFS.hpp"
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <cstddef>
 #include <span>
 #include <string_view>

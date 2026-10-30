@@ -11,6 +11,6 @@
 #include "graph/RenderPassDecl.hpp"
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Math/Math3D.hpp>

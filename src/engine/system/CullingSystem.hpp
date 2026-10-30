@@ -6,12 +6,12 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include <Zahlen/Camera.hpp>
+#include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Common.h>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/EngineServices.hpp>
-#include <Zahlen/Profiler.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/EngineServices.hpp>
+#include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
 #include <array>
 

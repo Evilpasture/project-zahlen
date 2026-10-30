@@ -6,7 +6,7 @@
 #include "BodyTable.hpp"
 #include "CommandMailbox.hpp"
 #include "TransformBuffer.hpp"
-#include "Zahlen/Sync.hpp"
+#include "Zahlen/Threading/Sync.hpp"
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on

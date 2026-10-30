@@ -11,7 +11,7 @@
 // (after the scene exists, or let the frame step seed the boot camera).
 #pragma once
 
-#include <Zahlen/GameModule.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
 
 namespace ZHLN {
 

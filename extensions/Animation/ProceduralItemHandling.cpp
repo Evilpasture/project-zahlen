@@ -10,10 +10,10 @@ module;
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Animation/IK.hpp>
-#include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>

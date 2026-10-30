@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <Zahlen/Input.hpp>
+#include <Zahlen/Input/Input.hpp>
 #include <algorithm>
 #include <cctype>
 #include <concepts>

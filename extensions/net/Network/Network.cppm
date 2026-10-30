@@ -43,8 +43,8 @@ module;
 // be looking at the same header text. Narrow this include only once that crash
 // is understood: it is not a free weight saving.
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <algorithm>
 #include <array>

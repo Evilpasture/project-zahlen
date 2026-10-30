@@ -20,7 +20,7 @@ module;
 
 #include <Socket/Socket.hpp>
 #include <Zahlen/Core/BatchResult.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>

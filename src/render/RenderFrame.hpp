@@ -6,8 +6,8 @@
 #include "FrameResources.hpp"
 #include "GpuLayout.hpp"
 #include "TargetManager.hpp"
-#include <Zahlen/GraphicsSettings.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <cstdint>
 
 namespace ZHLN {

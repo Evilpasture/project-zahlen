@@ -14,9 +14,9 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/GameModule.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/ECS/SystemAccess.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
 #include <algorithm>

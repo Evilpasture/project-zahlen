@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/Buffer.h>
+#include <Zahlen/Core/Buffer.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <Zahlen/Core/Span.hpp>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Sync.hpp>
+#include <Zahlen/Threading/Sync.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <cstddef>
 #include <memory_resource>

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TransformSystem.hpp"
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>

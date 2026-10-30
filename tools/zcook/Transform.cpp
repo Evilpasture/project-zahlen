@@ -7,8 +7,8 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Math/Vec3.h>
-#include <Zahlen/Math3D.hpp>
-#include <Zahlen/Meshlet.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Render/Meshlet.hpp>
 #include <cmath>
 #include <cstdio>
 #include <cstring>

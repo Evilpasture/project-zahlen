@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/SceneResources.hpp>
-#include <Zahlen/Audio.hpp>
+#include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <utility>

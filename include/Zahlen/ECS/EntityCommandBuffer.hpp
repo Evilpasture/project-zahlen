@@ -3,7 +3,7 @@
 #pragma once
 
 #include <Zahlen/Core/Arena.hpp>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <cstddef>
 #include <new>

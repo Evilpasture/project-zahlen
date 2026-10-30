@@ -12,7 +12,7 @@
 // `[position.x]` table. That is what lets a core ZHLN::Scene::Scene -- whose
 // fields are Jolt storage types -- read and write as a document:
 //
-//     #include <Zahlen/Scene.hpp>
+//     #include <Zahlen/Engine/Scene.hpp>
 //     #include <toml/TOML.hpp>
 //     #include <toml/SceneTOML.hpp>
 //
@@ -20,7 +20,7 @@
 //     const auto built = ZHLN::Scene::Instantiate(engine, *scene);
 //
 // The bindings live here, not in toml/TOML.hpp (that header stays free of any
-// dependency on Jolt) and not in Zahlen/Scene.hpp (the core scene model stays
+// dependency on Jolt) and not in Zahlen/Engine/Scene.hpp (the core scene model stays
 // free of any dependency on the document format), and they must be visible
 // wherever ReflectTOML::Parse / SerializeTOML is instantiated over one of
 // these vector types, or the field serialises as a table of members instead
@@ -44,7 +44,7 @@ namespace ZHLN::ReflectTOML {
 // Jolt's storage vectors are structs to C++ and coordinates to a reader, so
 // they are written and parsed as `[x, y, z]` rather than a table of members.
 // Declared here rather than in toml/TOML.hpp to keep that header free of any
-// dependency on Jolt, and rather than in Zahlen/Scene.hpp to keep the core
+// dependency on Jolt, and rather than in Zahlen/Engine/Scene.hpp to keep the core
 // scene model free of any dependency on the document format.
 template <>
 struct TOMLVector<JPH::Float2> : std::true_type {};

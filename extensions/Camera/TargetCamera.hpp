@@ -16,8 +16,8 @@
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Math/Vec3.h>
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/GameModule.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/GameModule.hpp>
 #include <optional>
 
 namespace ZHLN {

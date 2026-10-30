@@ -4,12 +4,12 @@
 // extensions/CharacterController/CharacterController.cpp
 #include "CharacterController.hpp"
 
-#include "Zahlen/Camera.hpp"
-#include "Zahlen/Components.hpp"
-#include "Zahlen/Engine.hpp"
-#include "Zahlen/GameModule.hpp"
+#include "Zahlen/Math/Camera.hpp"
+#include "Zahlen/ECS/Components.hpp"
+#include "Zahlen/Engine/Engine.hpp"
+#include "Zahlen/Engine/GameModule.hpp"
 #include "Zahlen/Log.hpp"
-#include "Zahlen/FramePlan.hpp"
+#include "Zahlen/Engine/FramePlan.hpp"
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <algorithm>
