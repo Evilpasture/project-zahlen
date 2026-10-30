@@ -24,6 +24,17 @@ namespace Ztest::Debugger {
 
 namespace fs = std::filesystem;
 
+auto PromptPolicy::ShouldOffer() const noexcept -> bool {
+    return !m_skipRemaining;
+}
+
+auto PromptPolicy::Accept(PromptChoice choice) noexcept -> bool {
+    if (choice == PromptChoice::SkipRemaining) {
+        m_skipRemaining = true;
+    }
+    return !m_skipRemaining && choice == PromptChoice::Launch;
+}
+
 static auto EqualAsciiNoCase(std::string_view lhs, std::string_view rhs) noexcept -> bool {
     if (lhs.size() != rhs.size()) {
         return false;
@@ -185,20 +196,24 @@ auto IsNo(std::string_view answer) noexcept -> bool {
     return answer.empty() || EqualAsciiNoCase(answer, "n") || EqualAsciiNoCase(answer, "no");
 }
 
+auto IsSkipRemaining(std::string_view answer) noexcept -> bool {
+    return EqualAsciiNoCase(answer, "s") || EqualAsciiNoCase(answer, "skip");
+}
+
 // No redirected stdin (including a pipe with a stray "y") can authorize a
 // debugger. On POSIX the controlling terminal is used for both the question
 // and the debugger even if ztest's stdout/stderr have been redirected.
-auto Prompt() -> bool {
+auto Prompt() -> PromptChoice {
     if (!HasInteractiveTerminal()) {
-        return false;
+        return PromptChoice::SkipOnce;
     }
 #if defined(_WIN32)
     for (;;) {
-        std::fputs("  > Launch debugger for this case? [Y/N]: ", stderr);
+        std::fputs("  > Launch debugger for this case? [Y/N/S=skip remaining]: ", stderr);
         std::fflush(stderr);
         char buffer[128] {};
         if (std::fgets(buffer, sizeof(buffer), stdin) == nullptr) {
-            return false;
+            return PromptChoice::SkipOnce;
         }
         std::string_view reply {buffer};
         if (reply.find('\n') == std::string_view::npos) {
@@ -212,26 +227,29 @@ auto Prompt() -> bool {
             reply.remove_suffix(1);
         }
         if (IsYes(reply)) {
-            return true;
+            return PromptChoice::Launch;
         }
         if (IsNo(reply)) {
-            return false;
+            return PromptChoice::SkipOnce;
         }
-        std::fputs("  Please enter Y or N.\n", stderr);
+        if (IsSkipRemaining(reply)) {
+            return PromptChoice::SkipRemaining;
+        }
+        std::fputs("  Please enter Y, N, or S.\n", stderr);
     }
 #else
     const int fd = ::open("/dev/tty", O_RDWR | O_CLOEXEC);
     if (fd < 0) {
-        return false;
+        return PromptChoice::SkipOnce;
     }
     for (;;) {
-        constexpr std::string_view question = "  > Launch debugger for this case? [Y/N]: ";
+        constexpr std::string_view question = "  > Launch debugger for this case? [Y/N/S=skip remaining]: ";
         std::size_t offset = 0;
         while (offset < question.size()) {
             const ssize_t n = ::write(fd, question.data() + offset, question.size() - offset);
             if (n <= 0) {
                 ::close(fd);
-                return false;
+                return PromptChoice::SkipOnce;
             }
             offset += static_cast<std::size_t>(n);
         }
@@ -242,7 +260,7 @@ auto Prompt() -> bool {
             const ssize_t n = ::read(fd, &ch, 1);
             if (n <= 0) { // EOF or Ctrl-C: decline; ztest's signal handler handles the latter
                 ::close(fd);
-                return false;
+                return PromptChoice::SkipOnce;
             }
             if (ch == '\n' || ch == '\r') {
                 break;
@@ -258,13 +276,17 @@ auto Prompt() -> bool {
             : std::string_view {answer}.substr(first, answer.find_last_not_of(" \t") - first + 1);
         if (!overflow && IsYes(trimmed)) {
             ::close(fd);
-            return true;
+            return PromptChoice::Launch;
         }
         if (!overflow && IsNo(trimmed)) {
             ::close(fd);
-            return false;
+            return PromptChoice::SkipOnce;
         }
-        constexpr std::string_view retry = "  Please enter Y or N.\n";
+        if (!overflow && IsSkipRemaining(trimmed)) {
+            ::close(fd);
+            return PromptChoice::SkipRemaining;
+        }
+        constexpr std::string_view retry = "  Please enter Y, N, or S.\n";
         (void)::write(fd, retry.data(), retry.size());
     }
 #endif

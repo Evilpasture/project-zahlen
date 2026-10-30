@@ -2397,6 +2397,7 @@ auto main(int argc, char** argv) -> int {
     }
 
     const bool debugOnCrash = opts.allowDebugger && Ztest::Debugger::HasInteractiveTerminal();
+    Ztest::Debugger::PromptPolicy debuggerPrompts;
     if (opts.allowDebugger && !debugOnCrash) {
         ZHLN::Println(stderr, "ztest: --allow-debugger needs an interactive terminal; running without debugger prompts.");
     }
@@ -2552,11 +2553,16 @@ auto main(int argc, char** argv) -> int {
     };
 
     auto maybeDebugCase = [&](const WorkItem& crashedShard, std::string_view relFile, std::string_view nodeId) {
-        if (!debugOnCrash || relFile.empty() || nodeId.empty()) {
+        if (!debugOnCrash || !debuggerPrompts.ShouldOffer() || relFile.empty() || nodeId.empty()) {
             return;
         }
         statusLine.Clear();
-        if (!Ztest::Debugger::Prompt()) {
+        const auto choice = Ztest::Debugger::Prompt();
+        if (!debuggerPrompts.Accept(choice)) {
+            if (choice == Ztest::Debugger::PromptChoice::SkipRemaining && !opts.quiet) {
+                ZHLN::Println("  {}[ DEBUG ]{} Skipping debugger prompts for the rest of this run.",
+                              ZHLN::Color::Cyan, ZHLN::Color::Reset);
+            }
             return;
         }
 
@@ -2786,7 +2792,7 @@ auto main(int argc, char** argv) -> int {
             // A debugger may sit at a prompt indefinitely. In this opt-in mode
             // never leave another worker (and its watchdog/pipe) active while
             // we ask the question or wait for the debugger to exit.
-            if (debugOnCrash && !active.empty()) {
+            if (debugOnCrash && debuggerPrompts.ShouldOffer() && !active.empty()) {
                 break;
             }
             const bool isSerial = EqualsIgnoreCase(pending[idx].target->pool, "serial");
@@ -2860,9 +2866,9 @@ auto main(int argc, char** argv) -> int {
             }
             active.push_back(std::move(*spawned));
             spawnedAny = true;
-            if (isSerial || isMeasurement || debugOnCrash) {
-                // Measurements own the machine; in debugger mode every worker
-                // does too, so no sibling watchdog is running during a prompt.
+            if (isSerial || isMeasurement || (debugOnCrash && debuggerPrompts.ShouldOffer())) {
+                // Measurements own the machine; while prompts are enabled,
+                // every worker does too. Choosing S resumes normal sharding.
                 runningSerial = true;
             } else if (isGpu) {
                 ++runningGpu;

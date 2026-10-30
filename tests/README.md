@@ -151,8 +151,10 @@ every `test_*` function in that namespace.
   via `--skip-until`.
 - `./build/current/bin/ztest --lf --allow-debugger` (or use any test selector):
   after an **attributed crash**, prints the normal `[ CRASH ]` diagnostics and
-  asks `> Launch debugger for this case? [Y/N]:`. `N` (or Enter) continues the
-  suite. `Y` opens LLDB on macOS (GDB on Linux, with the other as fallback),
+  asks `> Launch debugger for this case? [Y/N/S=skip remaining]:`. `N` (or
+  Enter) declines this case only; `S` suppresses every further debugger prompt
+  for this run without stopping the tests (normal parallel sharding resumes).
+  `Y` opens LLDB on macOS (GDB on Linux, with the other as fallback),
   automatically runs **only that case**, prints `bt` at the stop, and leaves the
   debugger interactive. Exit the debugger with `quit` to resume the rest of the
   suite; the original crash remains a failure in the summary and `--lf` cache.
@@ -164,10 +166,11 @@ every `test_*` function in that namespace.
   is none, ztest warns and runs normally without prompts (never reading piped
   stdin). In interactive debugger mode it runs one worker at a time so another
   shard's watchdog cannot expire while you are at the debugger prompt; normal
-  runs remain parallel. Timeouts and crashes outside a named case cannot be
-  replayed as an exact case and do not prompt. On Windows, an installed LLDB
-  or GDB executable on PATH is used if present. The standalone PTY/fake-debugger
-  smoke test is `python3 tools/ztest/tests/test_debugger_replay.py`.
+  runs and the remainder of a run after `S` are parallel. Timeouts and crashes
+  outside a named case cannot be replayed as an exact case and do not prompt.
+  On Windows, an installed LLDB or GDB executable on PATH is used if present.
+  The standalone PTY/fake-debugger smoke test is
+  `python3 tools/ztest/tests/test_debugger_replay.py`.
 - Crash stack traces: a worker arms `ZHLN::InstallWorkerCrashReports()`
   (`extensions/Signal/WorkerCrashReports.hpp`) in `--ztest-worker` mode. A fatal signal
   (SIGSEGV/SIGBUS/SIGILL/SIGFPE/SIGABRT) or `std::terminate` makes the worker

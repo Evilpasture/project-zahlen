@@ -124,7 +124,10 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
     }
 
     [[nodiscard]] auto GetMaxConcurrency() const -> int override {
-        return static_cast<int>(ZHLN::TaskSystem::GetWorkerCount());
+        // TaskSystem::Dispatch runs jobs inline when the scheduler is absent.
+        // That is still one executor: Jolt sizes job-handle arrays from this
+        // value and unconditionally accesses their first element later.
+        return std::max(1, static_cast<int>(ZHLN::TaskSystem::GetWorkerCount()));
     }
 
     auto CreateJob(const char* inName, JPH::ColorArg inColor, const JPH::JobSystem::JobFunction& inJobFunction, JPH::uint32 inNumDependencies = 0)

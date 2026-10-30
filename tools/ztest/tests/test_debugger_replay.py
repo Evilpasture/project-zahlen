@@ -18,7 +18,7 @@ import time
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-QUESTION = b"Launch debugger for this case? [Y/N]:"
+QUESTION = b"Launch debugger for this case? [Y/N/S=skip remaining]:"
 
 
 @unittest.skipUnless(os.name == "posix", "PTY test requires POSIX")
@@ -60,20 +60,20 @@ class DebuggerReplaySmoke(unittest.TestCase):
     def setUp(self):
         self.capture.unlink(missing_ok=True)
 
-    def _run_pty(self, reply: bytes, binary=None):
+    def _run_pty(self, reply, binary=None, crashes=1):
         binary = binary or self.binary
+        args = [str(binary), "debugger tools", str(self.work_dir), str(self.capture)]
+        if crashes == 3:
+            args.append("--crashes=3")
         pid, fd = pty.fork()
         if pid == 0:
             env = dict(os.environ)
             env["ZTEST_MARKER"] = "from-parent-env"
-            os.execve(
-                str(binary),
-                [str(binary), "debugger tools", str(self.work_dir), str(self.capture)],
-                env,
-            )
+            os.execve(str(binary), args, env)
 
+        replies = [reply] if isinstance(reply, bytes) else reply
         output = bytearray()
-        answered = False
+        answered = 0
         exit_status = None
         deadline = time.monotonic() + 15
         try:
@@ -89,9 +89,9 @@ class DebuggerReplaySmoke(unittest.TestCase):
                     if not chunk:
                         break
                     output.extend(chunk)
-                    if not answered and QUESTION in output:
-                        os.write(fd, reply)
-                        answered = True
+                    if answered < len(replies) and output.count(QUESTION) > answered:
+                        os.write(fd, replies[answered])
+                        answered += 1
                 if exit_status is None:
                     dead, status = os.waitpid(pid, os.WNOHANG)
                     if dead:
@@ -160,6 +160,27 @@ class DebuggerReplaySmoke(unittest.TestCase):
         exit_code, output = self._run_pty(b"n\n")
         self.assertEqual(exit_code, 0, output)
         self.assertFalse(self.capture.exists())
+
+    def test_no_only_declines_one_crash(self):
+        exit_code, output = self._run_pty([b"n\n", b"n\n", b"n\n"], crashes=3)
+        self.assertEqual(exit_code, 0, output)
+        self.assertEqual(output.count(QUESTION), 3)
+        self.assertEqual(output.count(b"SIMULATED CRASH"), 3)
+        self.assertFalse(self.capture.exists())
+
+    def test_skip_remaining_stops_prompts_but_not_the_run(self):
+        exit_code, output = self._run_pty(b"S\n", crashes=3)
+        self.assertEqual(exit_code, 0, output)
+        self.assertEqual(output.count(QUESTION), 1)
+        self.assertEqual(output.count(b"SIMULATED CRASH"), 3)
+        self.assertFalse(self.capture.exists())
+
+    def test_skip_remaining_after_first_debugger_session(self):
+        exit_code, output = self._run_pty([b"y\n", b"s\n"], crashes=3)
+        self.assertEqual(exit_code, 0, output)
+        self.assertEqual(output.count(QUESTION), 2)
+        self.assertEqual(output.count(b"SIMULATED CRASH"), 3)
+        self.assertIn("ARG=--exact=tests/case with spaces.cpp::test_segfault", self.capture.read_text())
 
     def test_piped_yes_without_terminal_cannot_start_debugger(self):
         result = subprocess.run(

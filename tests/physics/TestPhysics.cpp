@@ -33,7 +33,9 @@ enum class PhysicsTestError : uint32_t {
 namespace ZHLN::Test {
 namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
-        std::expected<void, ZHLN::ErrorCode> test_rigid_body_raycast_and_overlap() {
+        // The explicit fixture parameter guarantees workers and Jolt types
+        // even when an unnamed namespace's ambient mark is not reflected.
+        std::expected<void, ZHLN::ErrorCode> test_rigid_body_raycast_and_overlap(Fixture::TaskSystemAndJoltScope&) {
             ZHLN::PhysicsConfig  cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
@@ -61,7 +63,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> test_dynamic_body_simulation_step() {
+        std::expected<void, ZHLN::ErrorCode> test_dynamic_body_simulation_step(Fixture::TaskSystemAndJoltScope&) {
             ZHLN::PhysicsConfig  cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
@@ -106,7 +108,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> test_explicit_body_detach_and_batched_destruction() {
+        std::expected<void, ZHLN::ErrorCode> test_explicit_body_detach_and_batched_destruction(Fixture::TaskSystemAndJoltScope&) {
             using Body = ZHLN::Components::PhysicsComponent;
             using Handle = ZHLN::Physics::BodyHandle;
             ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
@@ -160,7 +162,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> test_ragdoll_handles_are_released_explicitly() {
+        std::expected<void, ZHLN::ErrorCode> test_ragdoll_handles_are_released_explicitly(Fixture::TaskSystemAndJoltScope&) {
             ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
             ZHLN::ECS::Registry registry;
@@ -198,7 +200,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
         // address and which stays null until a Step's sync pass runs. The
         // handle's generation must also be validated so a stale handle cannot
         // resolve to a slot's new occupant.
-        std::expected<void, ZHLN::ErrorCode> test_is_body_dynamic_reports_motion_type_and_rejects_stale_handles() {
+        std::expected<void, ZHLN::ErrorCode> test_is_body_dynamic_reports_motion_type_and_rejects_stale_handles(Fixture::TaskSystemAndJoltScope&) {
             ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
@@ -234,7 +236,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> test_parallel_characters_and_concurrent_state_queries() {
+        std::expected<void, ZHLN::ErrorCode> test_parallel_characters_and_concurrent_state_queries(Fixture::TaskSystemAndJoltScope&) {
             ZHLN::PhysicsConfig  cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
@@ -285,7 +287,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> test_lock_free_ping_pong_reads_and_concurrent_command_mailbox() {
+        std::expected<void, ZHLN::ErrorCode> test_lock_free_ping_pong_reads_and_concurrent_command_mailbox(Fixture::TaskSystemAndJoltScope&) {
             ZHLN::PhysicsConfig  cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 

@@ -43,6 +43,7 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestGraphicsSettings.cpp
     core/TestInput.cpp
     core/TestMath.cpp
+    core/TestNamespaceFixture.cpp
     core/TestOptional.cpp
     core/TestPlatform.cpp
     core/TestRayTracedNoiseMetrics.cpp
@@ -56,6 +57,7 @@ set(ZHLN_CPU_TEST_SOURCES
     ecs/TestEventBus.cpp
     ecs/TestSystemGraph.cpp
     physics/TestPhysics.cpp
+    physics/TestPhysicsNoTaskSystem.cpp
     threading/TestChannel.cpp
     threading/TestSyncPrim.cpp
     threading/TestTaskSystem.cpp

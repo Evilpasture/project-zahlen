@@ -29,8 +29,17 @@ static auto CheckCommandConstruction() -> int {
     if (!HasSequence(gdb, {"-ex", "run", "-ex", "bt", "--args", replay.argv[0]})
         || !HasSequence(lldb, {"-o", "run", "-o", "bt", "--", replay.argv[0]})
         || !HasSequence(gdb, replay.argv) || !HasSequence(lldb, replay.argv)
-        || !Debug::IsYes("Y") || !Debug::IsYes("yes") || !Debug::IsNo("N") || !Debug::IsNo("")) {
+        || !Debug::IsYes("Y") || !Debug::IsYes("yes") || !Debug::IsNo("N") || !Debug::IsNo("")
+        || !Debug::IsSkipRemaining("S") || !Debug::IsSkipRemaining("skip") || Debug::IsSkipRemaining("N")) {
         return 1;
+    }
+    Debug::PromptPolicy prompts;
+    Debug::PromptPolicy fresh;
+    if (!prompts.ShouldOffer() || prompts.Accept(Debug::PromptChoice::SkipOnce)
+        || !prompts.ShouldOffer() || prompts.Accept(Debug::PromptChoice::SkipRemaining)
+        || prompts.ShouldOffer() || prompts.Accept(Debug::PromptChoice::Launch)
+        || !fresh.Accept(Debug::PromptChoice::Launch) || !fresh.ShouldOffer()) {
+        return 4;
     }
     replay.environment["PATH"] = "/definitely/not/a/debugger";
     if (Debug::FindTool(replay).has_value() || !Debug::Launch(replay).has_value()) {
@@ -45,26 +54,31 @@ static auto CheckCommandConstruction() -> int {
 }
 
 static auto InteractiveReplay(int argc, char** argv) -> int {
-    if (argc != 4 || !Debug::HasInteractiveTerminal()) {
+    if ((argc != 4 && (argc != 5 || std::string_view {argv[4]} != "--crashes=3")) || !Debug::HasInteractiveTerminal()) {
         return 2;
     }
-    if (!Debug::Prompt()) {
-        return 0; // N / EOF: the debugger must not start
-    }
-    Debug::Replay replay {
-        .argv = {"/tmp/fake worker with spaces", "--target-name=mock", "--file=tests/case with spaces.cpp",
-                 "--exact=tests/case with spaces.cpp::test_segfault"},
-        .workingDir = argv[2],
-        .environment = {
-            {"DYLD_LIBRARY_PATH", "/tmp/library path"},
-            {"PATH", std::string {argv[1]} + ":/usr/bin:/bin"},
-            {"ZTEST_CAPTURE", argv[3]},
-            {"ZTEST_MARKER", "from-child-env"},
-        },
-    };
-    if (const auto failure = Debug::Launch(replay)) {
-        std::cerr << *failure << '\n';
-        return 3;
+    Debug::PromptPolicy prompts;
+    const int crashCount = argc == 5 ? 3 : 1;
+    for (int i = 0; i < crashCount; ++i) {
+        std::cout << "SIMULATED CRASH " << i << '\n' << std::flush;
+        if (!prompts.ShouldOffer() || !prompts.Accept(Debug::Prompt())) {
+            continue;
+        }
+        Debug::Replay replay {
+            .argv = {"/tmp/fake worker with spaces", "--target-name=mock", "--file=tests/case with spaces.cpp",
+                     "--exact=tests/case with spaces.cpp::test_segfault"},
+            .workingDir = argv[2],
+            .environment = {
+                {"DYLD_LIBRARY_PATH", "/tmp/library path"},
+                {"PATH", std::string {argv[1]} + ":/usr/bin:/bin"},
+                {"ZTEST_CAPTURE", argv[3]},
+                {"ZTEST_MARKER", "from-child-env"},
+            },
+        };
+        if (const auto failure = Debug::Launch(replay)) {
+            std::cerr << *failure << '\n';
+            return 3;
+        }
     }
     return 0;
 }
@@ -74,7 +88,7 @@ int main(int argc, char** argv) {
         return CheckCommandConstruction();
     }
     if (argc == 2 && std::string_view {argv[1]} == "--no-terminal") {
-        return Debug::Prompt() ? 1 : 0;
+        return Debug::Prompt() == Debug::PromptChoice::SkipOnce ? 0 : 1;
     }
     return InteractiveReplay(argc, argv);
 }
