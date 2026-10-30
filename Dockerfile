@@ -5,13 +5,15 @@
 # test stages reuse one cached layer set.
 FROM archlinux:latest AS base
 
-# Three of the vendored libraries are provisioned by the distro instead of a git
-# submodule. Each has a probe in cmake/ThirdParty.cmake that prefers the system
-# copy and falls back to the pinned tree, so CI never clones or builds:
+# Five of the vendored libraries are provisioned by the distro instead of a git
+# submodule. Each has a probe in cmake/ThirdParty.cmake or ShaderCompilation.cmake
+# that prefers the system copy and falls back to the pinned tree, so CI never
+# clones or builds:
 #   vulkan-headers  extern/Vulkan-Headers (revision macro-checked by the probe)
-#   glfw            extern/glfw            (3.5.1 >= the required 3.4)
-#   simdjson        extern/simdjson        (5.0.5, CMake config + pkg-config)
-# Slang is the fourth, and it comes from the Vulkan SDK below.
+#   glfw            extern/glfw           (3.5.1 >= the required 3.4)
+#   simdjson        extern/simdjson       (5.0.5, CMake config + pkg-config)
+#   shader-slang    extern/slang          (2026.18.2, slang::slang + slangc)
+#   luajit          extern/LuaJIT         (2.1, pkg-config luajit>=2.1)
 #
 # Combine keyring update, full system upgrade, and package installation into ONE RUN
 RUN pacman -Sy --noconfirm && \
@@ -41,31 +43,26 @@ RUN pacman -Sy --noconfirm && \
     curl \
     vulkan-headers \
     glfw \
-    simdjson
+    simdjson \
+    shader-slang \
+    luajit
 
-# Install LunarG Vulkan SDK
-ARG VULKAN_SDK_VER=1.4.357.0
-RUN wget https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VER}/linux/vulkansdk-linux-x86_64-${VULKAN_SDK_VER}.tar.xz -O /tmp/vulkansdk.tar.xz && \
-    mkdir -p /opt/vulkansdk && \
-    tar -xf /tmp/vulkansdk.tar.xz -C /opt/vulkansdk --strip-components=1 && \
-    rm /tmp/vulkansdk.tar.xz
-
-ENV VULKAN_SDK=/opt/vulkansdk/x86_64
-ENV PATH=$VULKAN_SDK/bin:$PATH
-# Neither variable is set by the base image or by anything above, so these are
-# the whole value. (Appending to an unset variable is what the linter reports as
-# UndefinedVar, and it added nothing.)
-ENV LD_LIBRARY_PATH="/opt/vulkansdk/x86_64/lib"
-ENV CMAKE_PREFIX_PATH="/opt/vulkansdk/x86_64"
-
-# The SDK has shipped Slang since 1.3.296.0 -- slangc, libslang, slang.h and its
-# CMake config -- and cmake/ShaderCompilation.cmake looks for exactly those
-# through PATH and CMAKE_PREFIX_PATH. Taking Slang from the SDK is what keeps the
-# pinned extern/slang submodule, the largest from-source dependency in this tree,
-# out of the CI build. Pass --build-arg ZHLN_SLANG_VENDORED=ON with the submodule
-# checked out to compile it instead.
-RUN LD_LIBRARY_PATH="${VULKAN_SDK}/lib" slangc --version 2>/dev/null || \
-    echo "WARNING: no usable slangc in the Vulkan SDK; the build will fall back to extern/slang"
+# No LunarG Vulkan SDK: every piece of it this build used is now a distro
+# package -- vulkan-headers, vulkan-icd-loader, vulkan-validation-layers and
+# shader-slang -- which drops a ~1.4 GB download from the image and leaves one
+# Slang on the box instead of two. extra/shader-slang installs slangc, the
+# slang::slang config at /usr/lib/cmake/slang, the headers cmake derives
+# ZHLN_SLANG_INCLUDE_DIR from (/usr/include/shader-slang) and the versioned
+# libslang-glslang-<version>.so libslang dlopens, so ShaderCompilation.cmake
+# resolves it with no prefix hint at all. Its 2026.18.2 is also outside the
+# known-bad families ShaderCompilation.cmake's gate refuses (2025.24.x and
+# 2026.1.x), and it is the very version this tree already downloads prebuilt on
+# Windows (v2026.18.2).
+#
+# Pass --build-arg ZHLN_SLANG_VENDORED=ON with extern/slang checked out to build
+# the pinned tree instead.
+RUN slangc -version 2>/dev/null || \
+    echo "WARNING: no slangc on PATH; the build will fall back to extern/slang"
 
 # CI deliberately uses the system Lavapipe and validation layer packages.
 # CMake disables the checked-in Arch-built sandbox in ZHLN_IN_DOCKER mode,

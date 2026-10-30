@@ -13,17 +13,17 @@ on:
 permissions:
   contents: read
 
-# Only the libraries with no Arch package and no CMake probe stay vendored.
-# Slang, GLFW, simdjson and Vulkan-Headers are provisioned by the distro and the
-# Vulkan SDK inside the image, so cloning them (slang alone is the largest tree
-# in the repo) is pure overhead. Jolt, VulkanMemoryAllocator, meshoptimizer,
-# SPIRV-Reflect, volk, mimalloc and the header-only cgltf/stb/clay/miniaudio are
-# added with add_subdirectory or included from extern/, so they must be present.
-# LuaJIT stays pinned because the submodule is a fork with CI patches in it.
+# Only the libraries with no Arch package stay vendored. Slang, GLFW, simdjson,
+# Vulkan-Headers and LuaJIT are provisioned by the distro inside the image, so
+# cloning them (slang alone is the largest tree in the repo) is pure overhead:
+# their CMake probes prefer the system copy and every shipped compiler and
+# library they resolve to is a package. Jolt, VulkanMemoryAllocator,
+# meshoptimizer, SPIRV-Reflect, volk, mimalloc and the header-only
+# cgltf/stb/clay/miniaudio are added with add_subdirectory or included straight
+# out of extern/, so they must be present.
 env:
   VENDORED_SUBMODULES: >-
     extern/JoltPhysics
-    extern/LuaJIT
     extern/VulkanMemoryAllocator
     extern/SPIRV-Reflect
     extern/volk
