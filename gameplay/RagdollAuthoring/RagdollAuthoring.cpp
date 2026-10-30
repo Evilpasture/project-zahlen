@@ -16,8 +16,8 @@
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 
 #if defined(ZHLN_RAGDOLL_HAS_LUA)
 #include <lua/ReflectLua.hpp>

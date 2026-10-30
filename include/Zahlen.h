@@ -6,5 +6,5 @@
 
 #pragma once
 
-#include <Zahlen/Buffer.h>
+#include <Zahlen/Core/Buffer.h>
 #include <Zahlen/Common.h>

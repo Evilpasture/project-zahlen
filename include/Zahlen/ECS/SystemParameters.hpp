@@ -7,8 +7,8 @@
 #include <Zahlen/Core/SoA.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/EventBus.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EventBus.hpp>
 #include <algorithm>
 #include <array>
 #include <cstdint>

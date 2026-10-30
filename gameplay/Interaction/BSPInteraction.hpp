@@ -21,7 +21,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Scene.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <string_view>
 
 namespace ZHLN {

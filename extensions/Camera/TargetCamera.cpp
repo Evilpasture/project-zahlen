@@ -12,7 +12,7 @@
 #include "Zahlen/Input.hpp"
 #include "Zahlen/Log.hpp"
 #include <FreeCam/FreeCam.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <cmath>
 #include <string_view>

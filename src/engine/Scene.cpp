@@ -14,7 +14,7 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Scene.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <optional>

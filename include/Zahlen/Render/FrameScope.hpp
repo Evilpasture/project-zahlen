@@ -6,7 +6,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Render/Info.hpp>
-#include <Zahlen/gui/UIData.hpp>
+#include <Zahlen/GUI/UIData.hpp>
 #include <expected>
 
 namespace ZHLN {

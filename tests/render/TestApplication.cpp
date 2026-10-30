@@ -11,8 +11,8 @@
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/KernelApp.hpp>
 #include <Zahlen/PlatformHost.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <algorithm>
 #include <expected>
 #include <memory>

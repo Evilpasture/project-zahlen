@@ -12,7 +12,7 @@
 #include <Fonts/FontBMParser.hpp>
 #include <Fonts/Fonts.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
-#include <Zahlen/gui/FontLoader.hpp>
+#include <Zahlen/GUI/FontLoader.hpp>
 #include <cstdint>
 #include <expected>
 #include <string>

@@ -7,9 +7,9 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Frame.hpp>
 #include <Zahlen/GameModule.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/SystemAccess.hpp>
-#include <Zahlen/ecs/SystemParameters.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemAccess.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 
 namespace ZHLN {
 

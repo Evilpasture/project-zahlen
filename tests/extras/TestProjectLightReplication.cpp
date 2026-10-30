@@ -19,7 +19,7 @@
 #include <Replication/ReplicationComponents.hpp>
 
 #include <Zahlen/GameModule.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 
 #include <cstdint>
 #include <string>

@@ -12,7 +12,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Vertex.hpp>
-#include <Zahlen/gui/UIData.hpp>
+#include <Zahlen/GUI/UIData.hpp>
 #include <algorithm>
 #include <array>
 #include <cstring>

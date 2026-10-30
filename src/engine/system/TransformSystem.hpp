@@ -5,7 +5,7 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/ecs/SystemParameters.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <array>
 #include <cstdint>
 #include <limits>

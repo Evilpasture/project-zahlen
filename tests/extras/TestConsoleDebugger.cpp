@@ -14,7 +14,7 @@
 #include <Scripting/ScriptBinderRegistry.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <cstdint>
 #include <expected>
 #include <format>

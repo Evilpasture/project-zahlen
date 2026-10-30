@@ -10,9 +10,9 @@
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Render/Handles.hpp>
-#include <Zahlen/gui/Font.hpp>
-#include <Zahlen/gui/TextBuffer.hpp>
-#include <Zahlen/gui/UIData.hpp>
+#include <Zahlen/GUI/Font.hpp>
+#include <Zahlen/GUI/TextBuffer.hpp>
+#include <Zahlen/GUI/UIData.hpp>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>

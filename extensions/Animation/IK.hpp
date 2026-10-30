@@ -17,8 +17,8 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GameModule.hpp>
-#include <Zahlen/ecs/SystemAccess.hpp>
-#include <Zahlen/ecs/SystemParameters.hpp>
+#include <Zahlen/ECS/SystemAccess.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>

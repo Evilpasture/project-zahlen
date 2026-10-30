@@ -4,7 +4,7 @@
 #include "Text.hpp"
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Vertex.hpp>
-#include <Zahlen/gui/Font.hpp>
+#include <Zahlen/GUI/Font.hpp>
 #include <algorithm>
 #include <string>
 

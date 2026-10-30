@@ -11,8 +11,8 @@
 //     capability token.
 
 #include "TestsFramework.hpp"
-#include <Zahlen/gui/FontLoader.hpp>
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/GUI/FontLoader.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 
 #include <array>
 #include <expected>

@@ -1,0 +1,56 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#pragma once
+
+#include <Zahlen/Common.h>
+#include <cstddef>
+#include <cstdint>
+#include <source_location>
+#include <string_view>
+#include <utility>
+
+namespace ZHLN {
+
+struct CullingStats {
+    uint32_t TotalObjects      = 0;
+    uint32_t CulledObjects     = 0;
+    bool     EnableCulling     = true;
+    bool     FreezeFrustum     = false;
+    uint32_t TotalTriangles    = 0;
+    uint32_t RenderedTriangles = 0;
+};
+
+class ZHLN_API CPUProfiler {
+  public:
+    static void Record(std::string_view name, float timeMS) noexcept;
+
+    // history holds the metric's most recent samples, oldest first, and
+    // historyCount how many of them are live -- at most 100, the ring's
+    // capacity. sampleCount is how many the metric has taken over its lifetime,
+    // which is the only one of the two that keeps moving for a metric that is
+    // still reporting once the ring is full: a consumer that needs to tell a
+    // metric that has gone quiet from one that is merely steady compares it
+    // between calls (the benchmark viewer's stage table does).
+    using MetricCallback = void (*)(
+        const char* name, float cpuTimeMS, float rollingAverageMS, const float* history, size_t historyCount, uint64_t sampleCount, void* userData
+    );
+    static void IterateMetrics(MetricCallback callback, void* userData) noexcept;
+};
+
+struct ZHLN_API ScopedTimer {
+    const char* name;
+    uint64_t    start;
+
+    explicit ScopedTimer(const char* n = nullptr, std::source_location loc = std::source_location::current()) noexcept;
+
+    ~ScopedTimer() noexcept;
+};
+
+template <typename Func>
+decltype(auto) ProfileScope(const char* name, Func&& func, std::source_location loc = std::source_location::current()) {
+    ScopedTimer timer(name, loc);
+    return std::forward<Func>(func)();
+}
+
+}

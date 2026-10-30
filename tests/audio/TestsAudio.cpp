@@ -7,8 +7,8 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/SceneResources.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>

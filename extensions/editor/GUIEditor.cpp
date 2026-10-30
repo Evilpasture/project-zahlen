@@ -16,8 +16,8 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>

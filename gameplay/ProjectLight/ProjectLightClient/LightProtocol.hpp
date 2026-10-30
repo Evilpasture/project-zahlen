@@ -14,7 +14,7 @@
 #include <Replication/ReplicationComponents.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GameModule.hpp>
-#include <Zahlen/physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsHandles.hpp>
 #include <array>
 #include <chrono>
 #include <cstddef>

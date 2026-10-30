@@ -7,7 +7,7 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Renderer/DebugRendererSimple.h>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 
 namespace ZHLN::Physics {
 

@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 #include <Zahlen/Vertex.hpp>
-#include <Zahlen/gui/Font.hpp>
+#include <Zahlen/GUI/Font.hpp>
 #include <Jolt/Math/Vec4.h>
 #include <cstdint>
 #include <string>

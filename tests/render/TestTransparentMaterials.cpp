@@ -25,7 +25,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <array>

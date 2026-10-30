@@ -10,7 +10,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 
 #if defined(ZHLN_CONSOLE_HAS_LUA)
 #include <lua/ReflectLua.hpp>

@@ -15,7 +15,7 @@ module;
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsHandles.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>

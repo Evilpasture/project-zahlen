@@ -31,8 +31,8 @@
 #include <Jolt/Math/Float4.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/ecs/EventBus.hpp>
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/ECS/EventBus.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 #include <string>
 #include <string_view>
 #include <vector>

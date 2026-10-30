@@ -14,7 +14,7 @@
 #include <Jolt/Physics/Body/MotionType.h>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
-#include <Zahlen/physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsHandles.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>

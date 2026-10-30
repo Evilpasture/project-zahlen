@@ -6,9 +6,9 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/SceneResources.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/EntityCommandBuffer.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <span>
 #include <utility>
 #include <vector>

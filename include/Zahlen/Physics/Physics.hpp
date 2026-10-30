@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "Zahlen/Camera.hpp"
+#include <Zahlen/Math/Camera.hpp>
 #include <optional>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Buffer.h>
@@ -17,7 +17,7 @@
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsHandles.hpp>
 #include <Zahlen/Vertex.hpp>
 // clang-format on
 

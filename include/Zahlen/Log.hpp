@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "Config.hpp"
+#include <Zahlen/Config.hpp>
 #include <Zahlen/Core/LogLevel.hpp>
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection/EnumFormat.hpp>

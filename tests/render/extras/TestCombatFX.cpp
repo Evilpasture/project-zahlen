@@ -8,8 +8,8 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <cmath>
 #include <expected>
 #include <memory>

@@ -5,8 +5,8 @@
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <numbers>
 #include <string_view>
 

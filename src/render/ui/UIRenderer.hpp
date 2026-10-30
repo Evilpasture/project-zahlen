@@ -6,7 +6,7 @@
 #include "Rendering.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/gui/UIData.hpp>
+#include <Zahlen/GUI/UIData.hpp>
 #include <cstdint>
 #include <expected>
 #include <memory>

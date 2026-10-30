@@ -4,7 +4,7 @@
 #include "TestsFramework.hpp"
 #include "helpers/CommonFixtures.hpp"
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 
 // A separate source-file shard deliberately omits TaskSystemScope. Jolt still
 // needs at least one reported executor when TaskSystem::Dispatch runs inline.

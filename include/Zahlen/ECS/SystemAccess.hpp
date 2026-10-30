@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <cstdint>
 #include <limits>
 

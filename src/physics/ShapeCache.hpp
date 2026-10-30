@@ -9,7 +9,7 @@
 #include <Jolt/Core/Array.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Zahlen/Threading/Mutex.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <cstdint>
 #include <type_traits>
 

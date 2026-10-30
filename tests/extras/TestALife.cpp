@@ -7,7 +7,7 @@
 #include <ALife/GOAP.hpp>
 #include <ALife/Graph.hpp>
 #include <ALife/SpatialGrid.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <expected>
 #include <memory_resource>

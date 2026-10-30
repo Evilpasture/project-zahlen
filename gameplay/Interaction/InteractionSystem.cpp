@@ -13,9 +13,9 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/SceneResources.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <cmath>
 #include <string>
 

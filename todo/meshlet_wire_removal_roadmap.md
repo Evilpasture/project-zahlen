@@ -2,7 +2,7 @@
 
 - [x] **Audit & Inventory:** Locate all runtime GPU meshlet uploaders (7 call sites), offline `.zmesh` cooker/tests (`tools/zcook`, `TestCooker`, `TestMeshlets`, `TestMeshShaders`), and ABI/governance hooks (`GpuAbi.cpp`, `check_include_provenance.pl`).
 - [x] **Step 1 — Host Meshlet Contract & Renderer `GpuPack` Boundary:**
-  - Remove `kMeshletPackedBytes`, `PackMeshlets`, and `PackedMeshletWire` from `include/Zahlen/Meshlet.hpp` and `src/engine/Meshlet.cpp`.
+  - Remove `kMeshletPackedBytes`, `PackMeshlets`, and `PackedMeshletWire` from `include/Zahlen/Render/Meshlet.hpp` and `src/engine/Meshlet.cpp`.
   - Add defaulted `operator==` on `MeshletDesc` / `MeshletBuildResult`, pin `sizeof(MeshletDesc) == 60`, and add unindexed `BuildMeshlets(std::span<const VertexPosition>)`.
   - Add `GpuPack::PackMeshlet(const MeshletDesc&) noexcept -> GPUMeshlet` in `src/render/GpuPack.{hpp,cpp}` writing generated `Slang::GPUMeshlet` by field name.
   - Add value-returning `MeshletStreams` (`include/Zahlen/Render/Types.hpp`), `RenderContext::CreateMeshletBuffer`, and `RenderContext::UploadMeshlets(const MeshletBuildResult&) -> MeshletStreams` (`RenderResources.cpp` + `RenderContextNull.cpp`), with atomic rollback on partial allocation failure and zero out-parameters.

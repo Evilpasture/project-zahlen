@@ -4,8 +4,8 @@
 #pragma once
 
 #include <Zahlen/Core/Reflection/Callable.hpp>
-#include <Zahlen/ecs/SystemAccess.hpp>
-#include <Zahlen/ecs/SystemParameters.hpp>
+#include <Zahlen/ECS/SystemAccess.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <algorithm>
 #include <string_view>
 #include <type_traits>

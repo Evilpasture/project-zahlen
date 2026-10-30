@@ -3,7 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/TrackingMemoryResource.hpp"
-#include <Zahlen/ecs/EventBus.hpp>
+#include <Zahlen/ECS/EventBus.hpp>
 #include <array>
 #include <atomic>
 #include <cstddef>

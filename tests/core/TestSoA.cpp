@@ -12,7 +12,7 @@
 #include <Zahlen/Core/ArenaAllocator.hpp>
 #include <Zahlen/Core/SoA.hpp>
 #include <Zahlen/PoseUploads.hpp>
-#include <Zahlen/ecs/SystemParameters.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>

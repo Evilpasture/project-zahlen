@@ -22,9 +22,9 @@ module;
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>

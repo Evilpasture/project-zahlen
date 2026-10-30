@@ -28,7 +28,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Scene.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <array>
 #include <cmath>
 #include <cstdint>

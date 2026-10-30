@@ -16,8 +16,8 @@
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <cstdint>
 #include <cstdlib>
 

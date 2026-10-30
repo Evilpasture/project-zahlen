@@ -54,7 +54,7 @@ target_sources(${TARGET_NAME} PRIVATE ${ZHLN_VFX_SOURCES})
 
 # Core is a public dependency: Lightning.cppm's exported LightningComponent
 # carries BufferHandle, MaterialID and Entity members, and CombatFX.cppm and
-# Explosion.cppm include <Zahlen/Components.hpp> and <Zahlen/Render/Render.hpp>. A
+# Explosion.cppm include <Zahlen/ECS/Components.hpp> and <Zahlen/Render/Render.hpp>. A
 # consumer needs core's include path and its symbols, not just this archive.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
@@ -65,7 +65,7 @@ target_include_directories(${TARGET_NAME} PUBLIC
 )
 
 # CombatFX.cppm, Explosion.cppm and Lightning.cpp all include
-# <Zahlen/Components.hpp>, whose InputStateComponent sizes its key bitset with
+# <Zahlen/ECS/Components.hpp>, whose InputStateComponent sizes its key bitset with
 # Reflect::EnumCount<KeyCode>(). Build without the reflection flags and that
 # count is 0 instead of 72, which shifts every following member.
 if(COMMAND zahlen_enable_reflection)

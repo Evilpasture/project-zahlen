@@ -20,9 +20,9 @@ module;
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <expected>

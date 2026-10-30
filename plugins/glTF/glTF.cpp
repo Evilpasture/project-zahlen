@@ -28,8 +28,8 @@ module;
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 
 // The importer lives beside this file. Note the two spellings: ZHLN::GLTF is
 // the importer's namespace, ZHLN::glTF (below) is this module's.

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <algorithm>
 #include <array>
 #include <span>

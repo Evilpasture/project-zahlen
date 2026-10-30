@@ -13,7 +13,7 @@
 
 #include "TerrainComponents.hpp"
 #include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Render/Types.hpp>
 
 namespace ZHLN {

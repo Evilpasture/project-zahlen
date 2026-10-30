@@ -19,7 +19,7 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>

@@ -13,9 +13,9 @@
 #include <Zahlen/SceneResources.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/FontLoader.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/GUI/FontLoader.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on

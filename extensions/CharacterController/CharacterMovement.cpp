@@ -9,8 +9,8 @@
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Log.hpp"
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
 

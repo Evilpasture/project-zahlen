@@ -7,11 +7,11 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <expected>
 #include <string>
 #include <vector>

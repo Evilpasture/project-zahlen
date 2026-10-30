@@ -13,7 +13,7 @@
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/SharedMutex.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <atomic>
 #include <concepts>

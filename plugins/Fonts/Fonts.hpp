@@ -26,7 +26,7 @@
 
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/gui/FontLoader.hpp>
+#include <Zahlen/GUI/FontLoader.hpp>
 #include <expected>
 #include <string>
 #include <string_view>

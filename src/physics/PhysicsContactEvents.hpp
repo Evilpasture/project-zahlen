@@ -5,8 +5,8 @@
 
 #include "PhysicsWorld.hpp"
 #include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/PhysicsHandles.hpp>
 #include <atomic>
 #include <cmath>
 

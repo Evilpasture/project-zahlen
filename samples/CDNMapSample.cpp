@@ -30,7 +30,7 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <glTF/GLTFImporter.hpp>
 
 #if defined(ZHLN_HAS_FONTS)

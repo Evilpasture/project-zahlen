@@ -10,8 +10,8 @@
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/gui/FontLoader.hpp>
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/GUI/FontLoader.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 #include <algorithm>
 #include <array>
 #include <cassert>

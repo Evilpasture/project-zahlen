@@ -13,8 +13,8 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/ecs/SystemParameters.hpp>
+#include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>

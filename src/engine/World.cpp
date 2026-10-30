@@ -8,11 +8,11 @@
 #include <Zahlen/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/World.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/EntityCommandBuffer.hpp>
-#include <Zahlen/ecs/EventBus.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/EventBus.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <new>
 #include <utility>
 #include <vector>

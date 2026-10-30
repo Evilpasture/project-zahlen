@@ -17,7 +17,7 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/SceneResources.hpp>
 #include <Zahlen/Vertex.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>

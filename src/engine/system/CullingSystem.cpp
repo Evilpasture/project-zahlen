@@ -10,7 +10,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 
 namespace ZHLN::Tests { namespace {
 void VerifyCullingResults(CullingSystem::CullingQuery query, std::span<const Entity> visible, const Frustum& frustum, const CullingStats& stats) noexcept {

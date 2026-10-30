@@ -13,7 +13,7 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <cmath>
 #include <optional>
 

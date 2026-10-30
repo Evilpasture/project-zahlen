@@ -11,8 +11,8 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/AssetManager.hpp>
-#include <Zahlen/gui/Font.hpp>
-#include <Zahlen/gui/FontLoader.hpp>
+#include <Zahlen/GUI/Font.hpp>
+#include <Zahlen/GUI/FontLoader.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

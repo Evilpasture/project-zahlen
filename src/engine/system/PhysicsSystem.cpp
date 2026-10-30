@@ -6,8 +6,8 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <algorithm>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 
 namespace ZHLN {
 

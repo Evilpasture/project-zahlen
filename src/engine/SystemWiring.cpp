@@ -27,9 +27,9 @@
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/EntityCommandBuffer.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <string_view>
 
 namespace ZHLN {

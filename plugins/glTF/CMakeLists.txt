@@ -93,7 +93,7 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/plugins
 )
 
-# glTF.cpp includes <Zahlen/Components.hpp>, whose layout depends on reflection.
+# glTF.cpp includes <Zahlen/ECS/Components.hpp>, whose layout depends on reflection.
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()

@@ -7,7 +7,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/PresentTiming.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <array>
 #include <cstdlib>
 #include <string_view>

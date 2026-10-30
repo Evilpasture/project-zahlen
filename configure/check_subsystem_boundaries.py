@@ -45,6 +45,9 @@ ALLOWED_INTERNAL_HEADER_EXCEPTIONS: frozenset[tuple[str, str, str]] = frozenset(
 # libzahlen_render.a free of zahlen_window and zahlen_filesystem symbol edges.
 FORBIDDEN_RENDER_PUBLIC_INCLUDES: tuple[str, ...] = (
     "Zahlen/FileSystem/",
+    # Current spellings.
+    "Zahlen/Window/",
+    # Legacy spellings kept alive by the forwarding shims.
     "Zahlen/Window.hpp",
     "Zahlen/WindowInput.hpp",
     "Zahlen/PlatformHost.hpp",

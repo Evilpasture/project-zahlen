@@ -23,7 +23,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Meshlet.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <cctype>
 #include <charconv>

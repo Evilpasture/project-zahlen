@@ -26,7 +26,7 @@
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Render/View.hpp>
 #include <Zahlen/Vertex.hpp>
-#include <Zahlen/gui/UIData.hpp>
+#include <Zahlen/GUI/UIData.hpp>
 #include <algorithm>
 #include <array>
 #include <atomic>

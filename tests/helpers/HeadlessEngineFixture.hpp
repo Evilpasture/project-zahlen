@@ -38,7 +38,7 @@
 // not rely on the including translation unit having pulled the definition in
 // first -- that is what made it compile only when a suite happened to include
 // <Zahlen/ecs/ECS.hpp> ahead of this one.
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>

@@ -11,7 +11,7 @@
 #include <Zahlen/Meshlet.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
 #include <span>

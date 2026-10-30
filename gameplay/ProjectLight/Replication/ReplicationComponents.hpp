@@ -35,7 +35,7 @@
 
 #include <DataModel/DataModel.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>

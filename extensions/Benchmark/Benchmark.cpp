@@ -5,8 +5,8 @@
 #include <Benchmark/Benchmark.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>

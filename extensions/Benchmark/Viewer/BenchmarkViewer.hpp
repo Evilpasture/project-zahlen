@@ -52,7 +52,7 @@
 #include <Benchmark/Viewer/FrameTelemetry.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>

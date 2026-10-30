@@ -5,9 +5,9 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/InputContext.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/EventBus.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EventBus.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <cmath>
 #include <limits>
 #include <vector>

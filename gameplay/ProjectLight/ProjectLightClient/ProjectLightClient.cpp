@@ -14,8 +14,8 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/FramePlan.hpp>
 #include <Zahlen/GameModule.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 

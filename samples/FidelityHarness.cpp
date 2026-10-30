@@ -49,7 +49,7 @@
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 
 // The optional layer targets this harness consumes. They remain independent of
 // Core. samples/CMakeLists.txt skips the sample when a required target is absent,

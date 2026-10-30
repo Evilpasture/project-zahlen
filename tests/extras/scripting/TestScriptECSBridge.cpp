@@ -4,7 +4,7 @@
 #include "TestsFramework.hpp"
 #include <Scripting/ScriptBinder.hpp>
 #include <Scripting/ScriptECSBridge.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <expected>
 #include <string>
 #include <vector>

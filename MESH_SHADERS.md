@@ -34,7 +34,7 @@ intent and for binding these as descriptors later.
 The raw position/attribute/index buffers are still uploaded and still used by
 BLAS builds (`ZHLN_CmdBuildBlas`) and by the vertex pipeline.
 
-### Partitioning parameters (`include/Zahlen/Meshlet.hpp`)
+### Partitioning parameters (`include/Zahlen/Render/Meshlet.hpp`)
 
 | Parameter | Value | Why |
 | --- | --- | --- |
@@ -44,7 +44,7 @@ BLAS builds (`ZHLN_CmdBuildBlas`) and by the vertex pipeline.
 | `kMeshletsPerTaskGroup` | 32 | payload slots per task workgroup |
 
 `BuildMeshlets()` is shared by the offline cooker and the runtime glTF importer
-so both emit byte-identical streams. The header (`include/Zahlen/Meshlet.hpp`)
+so both emit byte-identical streams. The header (`include/Zahlen/Render/Meshlet.hpp`)
 is declaration-only; the single implementation lives in `src/render/Meshlet.cpp`
 and is also the tree's only meshoptimizer consumer. It **re-aligns every
 meshlet's micro-index run to 4 bytes**: meshoptimizer packs those runs back to

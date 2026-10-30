@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "Entity.hpp"
+#include <Zahlen/ECS/Entity.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on

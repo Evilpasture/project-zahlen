@@ -4,7 +4,7 @@
 #include "Hierarchy.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <vector>

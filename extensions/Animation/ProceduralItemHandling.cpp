@@ -14,8 +14,8 @@ module;
 #include <Zahlen/Engine.hpp>
 #include <Animation/IK.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
 #include <numbers>

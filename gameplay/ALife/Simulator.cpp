@@ -7,7 +7,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>

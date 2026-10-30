@@ -17,7 +17,7 @@
 
 #include "Cook.hpp"
 #include <Zahlen/AssetManager.hpp>
-#include <Zahlen/gui/Font.hpp>
+#include <Zahlen/GUI/Font.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>

@@ -9,7 +9,7 @@
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Render/SceneData.hpp>
-#include <Zahlen/ecs/SystemParameters.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <utility>
 
 namespace ZHLN {

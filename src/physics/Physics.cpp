@@ -28,7 +28,7 @@
 #include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <array>
 #include <memory>

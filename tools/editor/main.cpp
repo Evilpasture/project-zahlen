@@ -28,9 +28,9 @@
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/GUI.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/GUI/GUI.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <editor/GUIEditor.hpp>
 #include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>

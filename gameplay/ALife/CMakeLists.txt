@@ -8,7 +8,7 @@
 # The plainest target in gameplay/: no module interfaces, no third-party
 # dependency, no serializer. It is simulation over Jolt vectors and the ECS
 # component model -- it names no renderer type, no asset-pipeline type and no
-# document type of its own. (Core's <Zahlen/Engine.hpp> does pull in
+# document type of its own. (Core's <Zahlen/Engine/Engine.hpp> does pull in
 # <Zahlen/Render/Render.hpp>, so the engine link below is unavoidable; what is true is
 # that nothing in this directory asks for any of it.) Splitting it out is what
 # lets a headless simulation harness link the simulator without dragging a glTF

@@ -264,7 +264,7 @@ set_source_files_properties(
 if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_precompile_headers(
       zahlen_engine PRIVATE
-      "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Math3D.hpp>"
+      "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Math/Math3D.hpp>"
       "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Log.hpp>"
       "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Error.hpp>")
 endif()

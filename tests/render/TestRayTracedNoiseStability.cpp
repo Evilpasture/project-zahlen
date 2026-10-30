@@ -35,7 +35,7 @@
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <cstdint>
 #include <expected>
 #include <string_view>

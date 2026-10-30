@@ -6,8 +6,8 @@
 #include "AnimationSystem.hpp"
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <array>
 
 namespace ZHLN::IK {

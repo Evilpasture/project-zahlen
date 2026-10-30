@@ -12,7 +12,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/EngineServices.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/ecs/SystemParameters.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <array>
 
 namespace ZHLN {

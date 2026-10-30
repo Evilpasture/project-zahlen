@@ -8,13 +8,13 @@
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/ecs/ExtensionServices.hpp>
+#include <Zahlen/ECS/ExtensionServices.hpp>
 #include <Zahlen/Frame.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/PoseUploads.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <array>
 #include <cmath>
 #include <expected>

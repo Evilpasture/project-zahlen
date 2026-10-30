@@ -606,7 +606,7 @@ endif()
 
 # --- meshoptimizer (VK_EXT_mesh_shader meshlet generation) ---
 # Used by the offline cooker (zcook) and by the runtime glTF importer through
-# include/Zahlen/Meshlet.hpp, so both produce identical meshlet streams.
+# include/Zahlen/Render/Meshlet.hpp, so both produce identical meshlet streams.
 set(MESHOPT_BUILD_DEMO OFF CACHE BOOL "" FORCE)
 set(MESHOPT_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)

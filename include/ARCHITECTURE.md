@@ -42,7 +42,7 @@ To preserve the engine's data-oriented design (DOD), cache locality, zero-alloca
 * Components store plain generational handles. Physics, audio, articulation and rendering do **not** keep entity-owner ledgers or poll ECS liveness. The registry has no removal observers.
 * In an Engine scene, `DespawnEntity(engine, entity)` marks the hierarchy with `Components::PendingDestroy`; the Engine's main ECB also marks instead of destroying. The `SceneCleanup` scheduler step runs after `MainECBPlayback` and before camera/rendering. It queries intact components, collects physics handles for one `PhysicsContext::DestroyBodies(span)` call under one shadow lock, releases other owned handles (including registered VFX cleanup passes), then calls `Registry::Destroy` on the marked entities. Bodies finish retiring on the next physics step.
 * Raw `Registry::Destroy` and `Registry::Clear` remain **immediate, data-only** primitives. Generic ECBs (including standalone `World` ECBs) likewise destroy immediately; only the Engine opts its ECB into deferred destruction. Never use raw destruction on an Engine scene with external-resource components: use `DespawnEntity` and `Engine::ClearScene` instead. `Engine::ProcessPendingDestroy` allows an explicit synchronous cleanup before the next frame. Standalone registries must explicitly release their owned resources before raw removal/clear (e.g. `PrefabFactory::ReleaseOwnedMeshes` and `TerrainSystem::ReleaseTerrainData`).
-* Use the typed `SceneResources::Attach/Detach` helpers from `<Zahlen/SceneResources.hpp>` for direct replacement/removal of core resource-owning components; optional layers supply their own explicit helpers. A raw `Registry::Add` replacement or `Remove` erases the old handle without releasing its external resource. Systems MUST NOT manually manage raw heap pointers or manage class destructors.
+* Use the typed `SceneResources::Attach/Detach` helpers from `<Zahlen/Engine/SceneResources.hpp>` for direct replacement/removal of core resource-owning components; optional layers supply their own explicit helpers. A raw `Registry::Add` replacement or `Remove` erases the old handle without releasing its external resource. Systems MUST NOT manually manage raw heap pointers or manage class destructors.
 
 #### 5. Environment & Global State Isolation
 * Systems modifying global engine state (e.g., Post-Processing, Exposure, Sky Gradients) MUST NOT overwrite global base values.
@@ -165,8 +165,8 @@ accidents, and a rule against them would fail the existing composition.
 
 A generic layer must be able to invoke domain-provided policy without knowing the
 domain exists, and a gameplay or plugin module must be able to contribute one
-without inverting the DAG. `Zahlen/gui/FontLoader.hpp` (`BakedFontLoader`) and
-`Zahlen/GameModule.hpp` (`Module`) are the canonical seams:
+without inverting the DAG. `Zahlen/GUI/FontLoader.hpp` (`BakedFontLoader`) and
+`Zahlen/Engine/GameModule.hpp` (`Module`) are the canonical seams:
 
 1. **Core declares the shape.** `Module` declares lifecycle hooks, `ModuleStep`
    placements, and `GraphSystemsFn` callbacks; `Engine::InstallModule` composes
@@ -248,7 +248,7 @@ unavailable library skips only the target that needs it.
 
 A few examples illustrate the intended seam:
 
-* **Scenes are Core data; text formats are plugins.** `Zahlen/Scene.hpp` and
+* **Scenes are Core data; text formats are plugins.** `Zahlen/Engine/Scene.hpp` and
   `Scene::Instantiate()` remain Core. `plugins/toml/SceneTOML.hpp` turns a
   scene into TOML and binds Jolt vectors; Core does not parse a document.
 * **Model import is a plugin.** `plugins/glTF/GLTFImporter.cpp` reads a model
@@ -297,20 +297,20 @@ type it spells through its own includes.
 | :--- | :--- | :--- |
 | `EnumFlag`, `EnableEnumFlags<Enum>` | `Zahlen/Core/EnumFlags.hpp` | any header with a flags enum |
 | `AssetID`, `MaterialID`, `HashAssetID`, `InvalidAssetID`, `InvalidMaterialID` | `Zahlen/Core/AssetID.hpp` | asset-facing headers and the components that hold a reference |
-| `ScissorRect`, `ViewportRect` (with `Extent2D`, `Offset2D`) | `Zahlen/Geometry2D.hpp` | GUI, windowing and renderer alike |
-| `VertexPosition`, `VertexTangentFrame`, `VertexSurface`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Vertex.hpp` | the cooker and both consumers of a vertex |
+| `ScissorRect`, `ViewportRect` (with `Extent2D`, `Offset2D`) | `Zahlen/Math/Geometry2D.hpp` | GUI, windowing and renderer alike |
+| `VertexPosition`, `VertexTangentFrame`, `VertexSurface`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Render/Vertex.hpp` | the cooker and both consumers of a vertex |
 | `AudioHandle`, `AudioBus`, `AudioBusId`, `AudioAttenuationModel`, `AudioPlaybackMode`, `AudioReverbPreset`, `AudioAttenuationDesc`, `AudioOcclusionDesc`, `AudioReverbConfig`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
-| `UIBatch`, `UIDrawData` | `Zahlen/gui/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
-| `GlyphMetric`, `FontAtlas` | `Zahlen/gui/Font.hpp` | text layout and the atlas bake |
+| `UIBatch`, `UIDrawData` | `Zahlen/GUI/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
+| `GlyphMetric`, `FontAtlas` | `Zahlen/GUI/Font.hpp` | text layout and the atlas bake |
 | `TextureHandle`, `RenderTextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `FrameTarget` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
 | `Mesh`, `MeshletStreams`, `Material`, `DrawFlags`, `CSGOperation`, `CSGModifier` | `Zahlen/Render/Types.hpp` | the renderer |
-| `MeshletDesc`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Meshlet.hpp` | the meshlet cooker and the renderer |
+| `MeshletDesc`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Render/Meshlet.hpp` | the meshlet cooker and the renderer |
 
 Two consequences are the point of the split. Editing a renderer struct
 recompiles the renderer and its consumers instead of every translation unit that
 wanted an `EnumFlag`; and a subsystem that names no Jolt type never compiles
 `<Jolt/Jolt.h>` — `zahlen_window` carries neither Jolt's headers nor its `JPH_*`
-ABI macros, because `<Zahlen/Window.hpp>` reaches none of its types.
+ABI macros, because `<Zahlen/Window/Window.hpp>` reaches none of its types.
 
 `configure/check_include_provenance.pl` runs at CMake configure time and fails the
 build when a file spells a tracked first-party type, or any `JPH::` type, that no
@@ -334,11 +334,55 @@ struct -- `Particle`, `ParticleEmitterParams`, `MeshParticleEmitterParams`,
 offsets Slang seated them, the `_padN` between them and the `alignas` each lane
 carries, and asserts each struct against the reflection it came from. There is no
 hand-written half of the ABI to keep in sync, and no second spelling per concept.
-The engine authors its own terms (`Zahlen/ParticleEmitterDesc.hpp`,
+The engine authors its own terms (`Zahlen/Render/ParticleEmitterDesc.hpp`,
 `Zahlen/Render/FrameData.hpp`) and the renderer packs them at the submit boundary
 (`src/render/GpuPack.cpp`): a member the shader no longer declares breaks the
 build in that pack function, where the shader's layout is the only thing being
 spoken -- never in a public type.
+
+---
+
+## 1.4 Header Layout Mirrors the Module Layout
+
+`include/Zahlen/` is not a flat bag. Every header lives in the directory named
+after the subsystem that owns it, and that directory is the one its module
+fragment and CMake library are named after:
+
+| Header directory | Module unit | CMake library |
+| :--- | :--- | :--- |
+| `include/Zahlen/Core/` | `modules/zahlen-core.cppm` | header-only; its two sources build into `zahlen_engine` |
+| `include/Zahlen/Math/` | `modules/zahlen-math.cppm` | header-only |
+| `include/Zahlen/Threading/` | `modules/zahlen-threading.cppm` | `zahlen_threading` |
+| `include/Zahlen/ECS/` | `modules/zahlen-ecs.cppm` | `zahlen_ecs` |
+| `include/Zahlen/Physics/` | `modules/zahlen-physics.cppm` | `zahlen_physics` |
+| `include/Zahlen/Render/` | `modules/zahlen-render.cppm` | `zahlen_render` |
+| `include/Zahlen/Audio/` | `modules/zahlen-audio.cppm` | `zahlen_audio` |
+| `include/Zahlen/Window/` | — | `zahlen_window` |
+| `include/Zahlen/Input/` | — | header-only |
+| `include/Zahlen/GUI/` | — | `zahlen_gui` |
+| `include/Zahlen/FileSystem/` | — | `zahlen_filesystem` |
+| `include/Zahlen/Engine/` | `modules/zahlen-engine.cppm` | `zahlen_engine` |
+
+`include/Zahlen/Engine/` holds the composition layer only: lifecycle and kernel
+hosting (`Engine.hpp`, `Kernel.hpp`), frame orchestration (`FramePlan.hpp`,
+`Frame.hpp`, `Clock.hpp`), scene composition (`Scene.hpp`, `SceneResources.hpp`,
+`PrefabFactory.hpp`, `ModelPrefab.hpp`), and the seams that bridge two
+subsystems (`EngineServices.hpp`, `PoseUploads.hpp`, `SystemContext.hpp`,
+`GameModule.hpp`, `AssetManager.hpp`, `World.hpp`).
+
+Only pervasive definitions stay at the root of `include/Zahlen/`: `Common.h`
+(the `ZHLN_API` ABI macros), `Config.hpp`, `Error.hpp`, `Log.hpp`, and
+`Format.hpp` (whose formatter specializations span Entity, Jolt, and the
+renderer, so it cannot live under any one of them without inverting an edge).
+
+The move is staged. Every relocated header still has a forwarding shim at its
+old root spelling (`include/Zahlen/FramePlan.hpp` is one line including
+`<Zahlen/Engine/FramePlan.hpp>`), so existing call sites build unchanged while
+they are migrated; delete the shim once the last consumer names the new path.
+The three lower-case directories were re-cased in place (`ecs/` → `ECS/`,
+`gui/` → `GUI/`, `physics/` → `Physics/`) with no shims, because a shim beside a
+case-only-renamed directory collides with its real header on a
+case-insensitive filesystem.
 
 ---
 
@@ -465,7 +509,7 @@ and applies the supported flag.
 ### 3.2 Graphics Settings Flow
 
 Graphics configuration flows in **one direction** through a single canonical model
-(`include/Zahlen/GraphicsSettings.hpp`):
+(`include/Zahlen/Render/GraphicsSettings.hpp`):
 
 ```
 UI (ImGui) / Lua scripts / quality presets
@@ -585,7 +629,7 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 | **Clip Depth Range** | $[-1, 1]$ (WebGL) | $[0, 1]$ (Vulkan) | ⚠️ **Use `Math::CreatePerspective`** |
 | **Euler Rotation Order** | Default: 'XYZ' | Default: 'YXZ' (Yaw, Pitch, Roll) | Use `MathUtils::EulerYXZ` or `EulerXYZ` |
 
-## 8. Immediate-mode GUI (`Zahlen/gui/GUI.hpp`)
+## 8. Immediate-mode GUI (`Zahlen/GUI/GUI.hpp`)
 
 ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
 persistent `GUI::Context` owns its Clay layout arena and widget interaction

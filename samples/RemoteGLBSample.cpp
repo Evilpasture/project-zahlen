@@ -105,8 +105,8 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 
 // The outer-layer targets this sample is about. All are optional -- no libcurl, no
 // zahlen_http, zahlen_remote_asset or zahlen_github; no optional layers, no

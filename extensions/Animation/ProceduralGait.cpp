@@ -12,7 +12,7 @@ module;
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Engine.hpp>
 #include <Animation/IK.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
 #include <numbers>

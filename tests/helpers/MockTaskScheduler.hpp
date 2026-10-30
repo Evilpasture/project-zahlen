@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <atomic>
 #include <cstddef>
 #include <span>

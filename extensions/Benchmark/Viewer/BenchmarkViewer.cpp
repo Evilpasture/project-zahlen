@@ -7,8 +7,8 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/UIData.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/GUI/UIData.hpp>
 #include <Widget/BarStrip.hpp>
 #include <Widget/HoverCard.hpp>
 #include <Widget/TextFit.hpp>

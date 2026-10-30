@@ -21,7 +21,7 @@ snapshot stream, and the intermediate states are the states that break: a
 half-moved field is a field two systems believe they own.
 
 Landed already, and depended on by everything below: the module/composition
-seam (`Zahlen/GameModule.hpp`, `Zahlen/FramePlan.hpp`). Modules are values the
+seam (`Zahlen/Engine/GameModule.hpp`, `Zahlen/Engine/FramePlan.hpp`). Modules are values the
 application installs, so the client's mirror is now something the composition
 names and can see, instead of a static callback replayed by the engine.
 

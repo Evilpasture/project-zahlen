@@ -59,7 +59,7 @@ target_compile_options(zahlen_physics PRIVATE -fno-exceptions -fno-rtti)
 
 if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_precompile_headers(zahlen_physics PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:${PROJECT_SOURCE_DIR}/include/Zahlen/Math3D.hpp>"
+        "$<$<COMPILE_LANGUAGE:CXX>:${PROJECT_SOURCE_DIR}/include/Zahlen/Math/Math3D.hpp>"
         "$<$<COMPILE_LANGUAGE:CXX>:${PROJECT_SOURCE_DIR}/include/Zahlen/Log.hpp>"
     )
 endif()

@@ -27,7 +27,7 @@ module;
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Vertex.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>

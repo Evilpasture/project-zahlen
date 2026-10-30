@@ -20,10 +20,10 @@
 #include <Zahlen/World.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/EntityCommandBuffer.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Handles.hpp>

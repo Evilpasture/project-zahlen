@@ -3,8 +3,8 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/TrackingMemoryResource.hpp"
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <cstdint>
 #include <expected>
 #include <string>

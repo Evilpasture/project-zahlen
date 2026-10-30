@@ -3,16 +3,6 @@
 
 #pragma once
 
-#include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Threading/Mutex.hpp>
-
-namespace ZHLN {
-struct alignas(64) BufferSync {
-    ZHLN::Atomic<int> viewExportCount;
-    ZHLN::Mutex       shadowLock;
-};
-
-static_assert(std::is_trivially_default_constructible_v<BufferSync>);
-static_assert(std::is_trivially_copyable_v<BufferSync>);
-static_assert(std::is_standard_layout_v<BufferSync>);
-}
+// Forwarding shim: this header now lives at <Zahlen/Threading/Sync.hpp>.
+// Kept only so existing consumers keep building; include the new path instead.
+#include <Zahlen/Threading/Sync.hpp>

@@ -3,7 +3,7 @@
 
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/InputContext.hpp>
-#include <Zahlen/ecs/EventBus.hpp>
+#include <Zahlen/ECS/EventBus.hpp>
 #include <algorithm>
 #include <charconv>
 #include <cmath>

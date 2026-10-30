@@ -12,8 +12,8 @@
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
-#include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/PhysicsHandles.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <span>

@@ -4,7 +4,7 @@
 #include "AudioSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 
 // clang-format off
 #include <Jolt/Jolt.h>

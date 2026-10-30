@@ -4,7 +4,7 @@
 #include <Zahlen/SceneResources.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <utility>
 
 namespace ZHLN::SceneResources {

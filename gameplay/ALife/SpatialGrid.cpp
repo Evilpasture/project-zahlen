@@ -3,7 +3,7 @@
 
 #include "SpatialGrid.hpp"
 #include "ALifeComponents.hpp"
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <cmath>
 

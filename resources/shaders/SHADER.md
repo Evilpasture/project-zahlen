@@ -72,7 +72,7 @@ the sampler and the rasterizer read one definition of a tile. `LightType` and
 `Slang::ParticleAlignment` in the same header. Shader fields and
 comparisons therefore stay enum-typed, while `GpuPack.cpp` converts from the
 host-facing enums in `GpuEnums.hpp` and asserts that their wire values match.
-The engine hands the renderer its own terms (`Zahlen/ParticleEmitterDesc.hpp`,
+The engine hands the renderer its own terms (`Zahlen/Render/ParticleEmitterDesc.hpp`,
 `Zahlen/Render/FrameData.hpp`) and `src/render/GpuPack.cpp` writes these structs
 field by field. A field added, removed, reordered
 or retyped here re-emits the host side on the next build; a Slang kind without a

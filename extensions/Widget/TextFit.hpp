@@ -31,7 +31,7 @@
 // is why the slack is here and not at the call sites.
 // ===========================================================================
 
-#include <Zahlen/gui/Font.hpp>
+#include <Zahlen/GUI/Font.hpp>
 #include <cstddef>
 #include <span>
 #include <string>

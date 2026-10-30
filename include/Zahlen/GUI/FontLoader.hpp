@@ -8,7 +8,7 @@
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
-#include <Zahlen/gui/Font.hpp>
+#include <Zahlen/GUI/Font.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>

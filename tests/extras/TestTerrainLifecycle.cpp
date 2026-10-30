@@ -3,7 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include <Terrain/TerrainSystem.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <expected>
 #include <utility>
 

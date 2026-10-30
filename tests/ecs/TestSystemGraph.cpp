@@ -8,9 +8,9 @@
 #include <Zahlen/Frame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/ecs/SystemParameters.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <atomic>
 #include <expected>
 #include <thread>

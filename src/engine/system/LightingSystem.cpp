@@ -9,7 +9,7 @@
 #include "Zahlen/Render/GpuEnums.hpp"
 #include "Zahlen/Render/Render.hpp"
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <limits>
 #include <span>

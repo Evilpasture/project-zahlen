@@ -10,7 +10,7 @@
 #include <Zahlen/GameModule.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Input.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 
 #include <Jolt/Math/Vec3.h>
 

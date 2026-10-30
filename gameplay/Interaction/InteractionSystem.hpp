@@ -8,7 +8,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/GameModule.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/ecs/SystemParameters.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 
 namespace ZHLN {
 class Engine;

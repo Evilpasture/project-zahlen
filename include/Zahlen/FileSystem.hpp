@@ -1,11 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
-#include <Zahlen/FileSystem/VFS.hpp>
-#include <Zahlen/FileSystem/AssetCache.hpp>
-#include <Zahlen/FileSystem/MappedFile.hpp>
-#include <Zahlen/FileSystem/Paths.hpp>
-#include <Zahlen/FileSystem/FileWatcher.hpp>
+// Forwarding shim: this header now lives at <Zahlen/FileSystem/FileSystem.hpp>.
+// Kept only so existing consumers keep building; include the new path instead.
+#include <Zahlen/FileSystem/FileSystem.hpp>

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 
-#include <Zahlen/gui/FontLoader.hpp>
+#include <Zahlen/GUI/FontLoader.hpp>
 #include <algorithm>
 #include <cstring>
 #include <utility>

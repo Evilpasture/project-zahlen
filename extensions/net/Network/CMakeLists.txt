@@ -73,7 +73,7 @@ target_include_directories(${TARGET_NAME} PUBLIC
 
 # This is the one extra that reflects directly: Wire.cppm reads the field list
 # of every aggregate it is handed and bakes field names and annotations into the
-# schema at compile time. It also includes <Zahlen/Components.hpp>, whose
+# schema at compile time. It also includes <Zahlen/ECS/Components.hpp>, whose
 # layout depends on the same flags.
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})

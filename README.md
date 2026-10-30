@@ -114,7 +114,7 @@ Link the reusable application layer (`target_link_libraries(my_game PRIVATE zahl
 
 ```cpp
 #include <Zahlen/App.hpp>
-#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <cstdlib>
 
 int main(int argc, char* argv[]) {

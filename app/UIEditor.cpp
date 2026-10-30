@@ -37,8 +37,8 @@
 #include <Zahlen/Render/View.hpp>
 #include <Widget/TextFit.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/ecs/EventBus.hpp>
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/ECS/EventBus.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 #include <UI/UITree.hpp>
 #if defined(ZHLN_HAS_FONTS)
 #include <Fonts/Fonts.hpp>
