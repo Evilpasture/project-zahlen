@@ -9,7 +9,7 @@ The GLB is generated entirely with Python and can be inspected or imported into
 Blender:
 
 ```bash
-python3 tools/generate_procedural_base_rig.py
+python3 scripts/generate_procedural_base_rig.py
 ```
 
 ## Running the reference and a project rig

@@ -55,8 +55,9 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
-# First-party trees. tools/ is python and shell; extern/ and third_party/ are
-# vendored, and are not ours to police.
+# First-party trees. utils/ holds the host programs (C++ and Rust), scripts/
+# the python and shell glue; extern/ and third_party/ are vendored, and are not
+# ours to police.
 FIRST_PARTY_ROOTS = ("include", "src", "plugins", "extensions", "gameplay", "app", "modules", "samples", "tests")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".ixx", ".cppm"}
 SKIP_DIR_NAMES = {".git", "build", ".cache", "__pycache__", "node_modules"}

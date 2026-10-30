@@ -35,7 +35,7 @@
 if(ZHLN_USE_CUSTOM_LIBCXX AND ZHLN_HAS_STDLIB_LIBCXX)
     set(_zhln_runtime_dirs "")
 
-    # The prefix as tools/build.sh passes it (LLVM_BLOOMBERG_BUILD points at the
+    # The prefix as scripts/build.sh passes it (LLVM_BLOOMBERG_BUILD points at the
     # build tree, which is where an LLVM build puts the runtimes it has just
     # built), plus the two conventional layouts beside it.
     foreach(_zhln_prefix IN ITEMS "${LLVM_BLOOMBERG_BUILD}" "${LLVM_BLOOMBERG_ROOT}/install" "${LLVM_BLOOMBERG_ROOT}/build")

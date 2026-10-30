@@ -6,7 +6,7 @@
 # The offline asset pipeline: the zcook cooker and the parallel Ninja graph it
 # writes for every asset folder.
 #
-# zcook lives in tools/, not src/: it is the offline asset pipeline, and the
+# zcook lives in utils/, not src/: it is the offline asset pipeline, and the
 # off-line GLB emitter consumes plugins/json's reflection serializer. Core
 # (src/, include/, modules/) must never depend on optional layers -- see
 # configure/check_core_layer_boundary.py -- so the cooker is outside core roots.
@@ -22,12 +22,12 @@
 # file formats into the runtime libraries.
 add_subdirectory(plugins/AssetCooking)
 add_executable(zcook
-    tools/zcook/main.cpp
-    tools/zcook/Transform.cpp
-    tools/zcook/GLB.cpp
-    tools/zcook/Cook.cpp
-    tools/zcook/Ninja.cpp
-    tools/zcook/FontBake.cpp
+    utils/zcook/main.cpp
+    utils/zcook/Transform.cpp
+    utils/zcook/GLB.cpp
+    utils/zcook/Cook.cpp
+    utils/zcook/Ninja.cpp
+    utils/zcook/FontBake.cpp
 )
 target_link_libraries(zcook PRIVATE zahlen_engine zahlen_filesystem zahlen_threading zahlen_asset_cooking)
 zahlen_set_bin_output(zcook)
@@ -36,7 +36,7 @@ target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/cgltf
     ${CMAKE_SOURCE_DIR}/extern/stb
     ${CMAKE_SOURCE_DIR}/plugins
-    ${CMAKE_SOURCE_DIR}/tools/zcook
+    ${CMAKE_SOURCE_DIR}/utils/zcook
 )
 
 set(ZHLN_SHARED_ASSET_DIR "${CMAKE_SOURCE_DIR}/build/shared_assets" CACHE PATH "Shared cooked asset cache")
@@ -80,12 +80,12 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
             COMMAND ${ZHLN_TOOL_ENV_COMMAND} "${ZHLN_TOOL_ENV_ARGUMENT}" "${SHARED_ZCOOK}" ninja
                     --out "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
                     --source "${GAME_SOURCE_DIR}"
-                    --engine-tools "${zahlen_SOURCE_DIR}/tools"
+                    --engine-tools "${zahlen_SOURCE_DIR}/scripts"
                     --self "${SHARED_ZCOOK}"
                     ${ZHLN_BLENDER_ARG}
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             DEPENDS zcook
-                    "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
+                    "${zahlen_SOURCE_DIR}/scripts/export_metadata.py"
             COMMENT "Scanning asset folders and generating assets.ninja..."
         )
     else()
@@ -94,12 +94,12 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
             COMMAND "${SHARED_ZCOOK}" ninja
                     --out "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
                     --source "${GAME_SOURCE_DIR}"
-                    --engine-tools "${zahlen_SOURCE_DIR}/tools"
+                    --engine-tools "${zahlen_SOURCE_DIR}/scripts"
                     --self "${SHARED_ZCOOK}"
                     ${ZHLN_BLENDER_ARG}
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             DEPENDS zcook
-                    "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
+                    "${zahlen_SOURCE_DIR}/scripts/export_metadata.py"
             COMMENT "Scanning asset folders and generating assets.ninja..."
         )
     endif()

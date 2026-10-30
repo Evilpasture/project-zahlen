@@ -69,7 +69,8 @@ SOURCE_ROOTS = (
     ROOT / "extensions",
     ROOT / "gameplay",
     ROOT / "modules",
-    ROOT / "tools",
+    ROOT / "utils",
+    ROOT / "scripts",
 )
 CXX_SUFFIXES = {
     ".c",

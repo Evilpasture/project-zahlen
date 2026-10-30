@@ -42,7 +42,7 @@ ALLOWLIST = ROOT / "configure" / "error_ordinal_allowlist.json"
 
 # The trees a first-party error can be spelled in. configure/ is deliberately
 # absent: the checkers talk about these shapes in their own docstrings.
-SCAN_ROOTS = ("src", "include", "plugins", "extensions", "gameplay", "modules", "app", "samples", "tools", "tests")
+SCAN_ROOTS = ("src", "include", "plugins", "extensions", "gameplay", "modules", "app", "samples", "utils", "scripts", "tests")
 SOURCE_SUFFIXES = {".h", ".hh", ".hpp", ".hxx", ".cpp", ".cc", ".cxx", ".cppm", ".ixx"}
 SKIP_DIR_NAMES = {".git", "build", "target", "__pycache__", ".cache", "node_modules"}
 

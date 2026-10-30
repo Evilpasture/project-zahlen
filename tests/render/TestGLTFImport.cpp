@@ -929,7 +929,7 @@ constexpr float                kEmissiveStrength = 4.0f;
 }
 
 // Geometry-free document carrying only a KHR_lights_punctual light -- the shape zcook
-// emits for a cooked scene light (tools/zcook/GLB.cpp).
+// emits for a cooked scene light (utils/zcook/GLB.cpp).
 [[nodiscard]] auto MakeLightOnlyFixture() -> std::vector<uint8_t> {
     const GltfLightDocument<GltfLightNode, GltfPlainMaterial> document {
         .extensionsUsed = {"KHR_lights_punctual"},
@@ -1269,7 +1269,7 @@ struct GLTFImportTestSuite {
          * import with a 1:1 scale is tested separately below.
          *
          * KHR_lights_punctual in particular is exported by zcook
-         * (tools/zcook/GLB.cpp) but never read back: ModelPrefab has no
+         * (utils/zcook/GLB.cpp) but never read back: ModelPrefab has no
          * light representation at all, so a cooked light survives the round
          * trip only through the cooker's own manifest. What is enforced here is
          * that such a file still imports cleanly instead of failing or

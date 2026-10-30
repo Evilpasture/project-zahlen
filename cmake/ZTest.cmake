@@ -14,8 +14,8 @@
 include_guard(GLOBAL)
 
 add_executable(ztest
-    "${PROJECT_SOURCE_DIR}/tools/ztest/main.cpp"
-    "${PROJECT_SOURCE_DIR}/tools/ztest/DebuggerReplay.cpp"
+    "${PROJECT_SOURCE_DIR}/utils/ztest/main.cpp"
+    "${PROJECT_SOURCE_DIR}/utils/ztest/DebuggerReplay.cpp"
 )
 set_target_properties(ztest PROPERTIES
     CXX_STANDARD 26

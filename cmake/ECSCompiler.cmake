@@ -11,8 +11,8 @@ function(_zhln_ensure_ecsc_binary OUT_VAR)
     endif()
 
     set(ZHLN_ECSC_SEARCH_PATHS
-        "${CMAKE_SOURCE_DIR}/tools/bin"
-        "${CMAKE_SOURCE_DIR}/tools/ecsc/target/release"
+        "${CMAKE_SOURCE_DIR}/utils/bin"
+        "${CMAKE_SOURCE_DIR}/utils/ecsc/target/release"
     )
 
     find_program(FOUND_ECSC_BIN NAMES ecsc ecsc.exe HINTS ${ZHLN_ECSC_SEARCH_PATHS})
@@ -23,7 +23,7 @@ function(_zhln_ensure_ecsc_binary OUT_VAR)
             message(STATUS "ecsc binary not found. Compiling ecsc via Cargo...")
             execute_process(
                 COMMAND ${CARGO_BIN} build --release
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/ecsc"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/utils/ecsc"
                 RESULT_VARIABLE CARGO_RES
             )
             if(NOT CARGO_RES EQUAL 0)

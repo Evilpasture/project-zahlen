@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_ROOTS = ("src", "include", "app", "tests", "samples", "plugins", "extensions", "gameplay", "modules", "tools")
+SOURCE_ROOTS = ("src", "include", "app", "tests", "samples", "plugins", "extensions", "gameplay", "modules", "utils", "scripts")
 SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".cppm", ".ixx", ".inl", ".ipp"}
 APPLICATION_ROOTS = {"app", "samples", "plugins", "extensions", "gameplay"}
 PLATFORM = re.compile(r'^\s*#\s*include\s*[<"]Zahlen/Core/Platform\.hpp[>"]')

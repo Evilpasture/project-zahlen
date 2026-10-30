@@ -28,7 +28,7 @@ if(USE_SANITIZERS)
     # tests/core/TestReflection.cpp and tests/extras/TestJSON.cpp.
     #
     # The engine has no consteval reader left to guard: the GPU ABI is the
-    # generated header (tools/zshader), and no module's bytes are parsed in a
+    # generated header (utils/zshader), and no module's bytes are parsed in a
     # constant expression. A new constexpr reader that null-checks a pointer
     # into a static object will break this build and not the others.
     add_definitions(

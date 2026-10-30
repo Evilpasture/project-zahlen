@@ -13,7 +13,7 @@
 // is a flag.
 //
 // The shader's own structs (FrameUniforms, Light, the particle structs) are generated
-// from the Slang module by tools/zshader and live only behind src/render, which packs
+// from the Slang module by utils/zshader and live only behind src/render, which packs
 // these into them at the submit boundary (src/render/GpuPack.cpp). Nothing under
 // include/ names a generated type, which is what lets the engine build with no shader
 // tool having run: the engine is a producer of scene terms, not a consumer of the ABI.

@@ -12,7 +12,7 @@ namespace ZHLN::Vk {
 // SPIR-V bakes a compute entry point's threadgroup size into
 // `OpExecutionMode %entry_point LocalSize X Y Z` (opcode 16, mode 17). The
 // engine does not decode that, and neither does the generator's output need to
-// be decoded: tools/zshader reflects the [numthreads] attribute in-process and
+// be decoded: utils/zshader reflects the [numthreads] attribute in-process and
 // writes the number into ShaderBindings.hpp as `Module::LocalSize`, which is
 // what LocalSizeOf hands to the dispatch math as a compile-time constant.
 //
@@ -33,7 +33,7 @@ struct WorkgroupSize {
 // The module's workgroup size, as the generator stated it. (`Module::Bytes()`
 // is declaration-only in the header -- the bytes live in ShaderBytecode.cpp
 // alone -- so nothing here could read them even if it wanted to. The
-// ShaderProgram constraint is omitted so tools/zshader can include this header
+// ShaderProgram constraint is omitted so utils/zshader can include this header
 // without pulling the engine's include guard.)
 template <typename Module>
 inline constexpr WorkgroupSize LocalSizeOf = Module::LocalSize;

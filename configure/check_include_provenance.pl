@@ -50,7 +50,7 @@ use File::Basename qw(basename dirname);
 
 my $ROOT = dirname(dirname(abs_path($0)));
 
-my @SOURCE_ROOTS = qw(include src plugins extensions gameplay modules tools tests samples app);
+my @SOURCE_ROOTS = qw(include src plugins extensions gameplay modules utils scripts tests samples app);
 my %SOURCE_SUFFIXES = map { $_ => 1 }
     qw(.h .hh .hpp .hxx .inl .ipp .c .cc .cpp .cxx .ixx .cppm);
 my %HEADER_SUFFIXES = map { $_ => 1 } qw(.h .hh .hpp .hxx .inl .ipp);
@@ -229,7 +229,7 @@ my $INCLUDE_RE = qr/^\s*#\s*include\s*([<"])([^>"]+)[>"]/m;
 # the comment. Stripping comments first and literals second -- the obvious way
 # round -- gets this wrong: it truncates `out.Line("a // b")` at the // and
 # leaves an unterminated literal behind, which is exactly how a generated-code
-# string in tools/zshader became a phantom std::span dependency.
+# string in utils/zshader became a phantom std::span dependency.
 # Deliberately NOT formatted across lines: this regex is not /x, so embedded
 # whitespace would be literal pattern characters and silently match nothing.
 my $SCAN_RE = qr{(?<include>^\s*#\s*include\s*[<"][^>"]+[>"])|(?<raw>R"(?<delim>[^()\s]{0,16})\(.*?\k<delim>")|(?<block>/\*.*?\*/)|(?<line>//[^\n]*)|(?<str>"(?:\\.|[^"\\\n])*")|(?<chr>'(?:\\.|[^'\\\n])*')}ms;
@@ -239,7 +239,7 @@ my $SCAN_RE = qr{(?<include>^\s*#\s*include\s*[<"][^>"]+[>"])|(?<raw>R"(?<delim>
 # comment belongs to the comment. Stripping comments first and literals
 # second -- the obvious way round -- gets this wrong: it truncates
 # `out.Line("a // b")` at the // and leaves an unterminated literal behind,
-# which is exactly how a generated-code string in tools/zshader became a
+# which is exactly how a generated-code string in utils/zshader became a
 # phantom std::span dependency.
 #
 # Includes are collected straight out of the scan (their matched text is the
@@ -248,7 +248,7 @@ my $SCAN_RE = qr{(?<include>^\s*#\s*include\s*[<"][^>"]+[>"])|(?<raw>R"(?<delim>
 # only for files whose body is inspected for symbol use; transitively closed
 # headers (a third-party tree can be thousands of files) skip that work.
 # strings are never kept in either: a header's *text* is not a header --
-# tools/zshader/Emit.cpp carries the text of the files it generates inside
+# utils/zshader/Emit.cpp carries the text of the files it generates inside
 # R"ZHLN(...)" literals, and the #include in there is a line of generated
 # output, not a dependency of Emit.cpp.
 my $DIRECTIVE_RE = qr/^\s*#\s*include\s*([<"])([^>"]+)[>"]/;
@@ -391,7 +391,7 @@ for my $rel (keys %tree_files) {
     $entries{$parent}{$name} = 1;
 }
 my @search_roots = ($ROOT, "$ROOT/include", "$ROOT/src");
-for my $name (qw(src plugins extensions gameplay extern third_party tests modules tools samples app include)) {
+for my $name (qw(src plugins extensions gameplay extern third_party tests modules utils scripts samples app include)) {
     my $base = "$ROOT/$name";
     next unless -d $base;
     push @search_roots, $base;

@@ -8,7 +8,7 @@
 // here either -- everything this file reads was baked offline.
 //
 // Only JSON .fnt is supported (fontbm --data-format json, the default of
-// tools/fontbm.sh). Legacy AngelCode text format is not supported.
+// scripts/fontbm.sh). Legacy AngelCode text format is not supported.
 // JSON is parsed via the existing plugins/json library (simdjson wrapper).
 // Zero globals in this high-level module -- loader state lives on the heap
 // and is owned via core's BakedFontLoader hook user pointer.
@@ -212,7 +212,7 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
     FontBMDescriptor desc;
     // BMFont encodes `size` as a negative number when it means "pixel height of
     // the bake" -- which is what fontbm writes for `--font-size 32`, the flag
-    // tools/fontbm.sh passes: the descriptor says -32. Everything downstream
+    // scripts/fontbm.sh passes: the descriptor says -32. Everything downstream
     // wants the magnitude: BakedFontAsset::fontSize is documented as the
     // positive "pixel height the metrics are relative to", FontAtlas::ScaleFor
     // divides by it (a negative value makes it return 1.0f for every requested

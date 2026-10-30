@@ -128,7 +128,7 @@ every `test_*` function in that namespace.
 
 ## Running & Filtering with `ztest`
 
-`ztest` (`tools/ztest/main.cpp`, built into `<build>/bin/ztest` when
+`ztest` (`utils/ztest/main.cpp`, built into `<build>/bin/ztest` when
 `ZHLN_BUILD_TESTS=ON`) is the project's native pytest-style test orchestrator:
 
 - `./build/bin/ztest` — collects individual `tests/.../File.cpp::test_*` items, shards
@@ -170,7 +170,7 @@ every `test_*` function in that namespace.
   outside a named case cannot be replayed as an exact case and do not prompt.
   On Windows, an installed LLDB or GDB executable on PATH is used if present.
   The standalone PTY/fake-debugger smoke test is
-  `python3 tools/ztest/tests/test_debugger_replay.py`.
+  `python3 utils/ztest/tests/test_debugger_replay.py`.
 - Crash stack traces: a worker arms `ZHLN::InstallWorkerCrashReports()`
   (`extensions/Signal/WorkerCrashReports.hpp`) in `--ztest-worker` mode. A fatal signal
   (SIGSEGV/SIGBUS/SIGILL/SIGFPE/SIGABRT) or `std::terminate` makes the worker

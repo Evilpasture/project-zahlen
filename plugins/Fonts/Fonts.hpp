@@ -52,7 +52,7 @@ struct BakedFontSource {
     // A host that names its own pair has to say so, because zcook always packs a
     // cooked font at `fonts/default.zfont` -- the Font8x8 placeholder, taken from
     // resources/fonts/DefaultFont.zfont when nothing else provides a default
-    // (tools/zcook/Ninja.cpp). That placeholder occupies the exact virtual path
+    // (utils/zcook/Ninja.cpp). That placeholder occupies the exact virtual path
     // this struct defaults to, so a container-first order hands it back instead
     // of the named font, silently: the container step logs nothing on success,
     // and its pixels look like the engine's embedded bake because it *is* the

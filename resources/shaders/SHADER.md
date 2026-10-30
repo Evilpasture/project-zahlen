@@ -43,7 +43,7 @@ array) must stay LAST.
 
 GPU types, cluster math, vertex unpacking, particle state, descriptor-heap
 push-data layout, and IBL / SMAA / BRDF LUT generation are also Slang-owned.
-The host does not carry its own copy of any of it: `tools/zshader` reflects
+The host does not carry its own copy of any of it: `utils/zshader` reflects
 `gpu_abi.slang` into the C++ structs and the scene push layout
 (`GeneratedGpuTypes.hpp`, see `src/render/GpuAbi.hpp`), and the only thing a
 dispatch that writes a payload asserts is that the payload is byte-copyable
@@ -79,7 +79,7 @@ or retyped here re-emits the host side on the next build; a Slang kind without a
 C++ spelling fails that build by name instead. One exception: `ClusterVolume`'s
 generated size (8) is its `StructuredBuffer` stride, not the 16-byte
 `ConstantBuffer`-wrapper rounding SPIR-V reports (documented in
-`tools/zshader/GpuTypes.cpp`). `GPUMeshlet` generates like the rest: its field
+`utils/zshader/GpuTypes.cpp`). `GPUMeshlet` generates like the rest: its field
 order (`coneCutoff` between the `float3`s) seats every member with no implicit
 pad under any layout, so the emitted offsets are asserted in the generated
 header and `fetchMeshlet` is a typed `GPUBuffer` load. Do not reorder the Slang

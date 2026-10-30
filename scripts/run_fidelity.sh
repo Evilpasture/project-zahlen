@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # run_fidelity.sh -- orchestrate the Zahlen glTF-Render-Fidelity suite the Unix
-# way: one C++ tool (tools/fidelity) + one Bash driver + Ninja for scheduling.
+# way: one C++ tool (utils/fidelity) + one Bash driver + Ninja for scheduling.
 #
 #   ./scripts/run_fidelity.sh                 # resolve, list, render, compare, report
 #   ./scripts/run_fidelity.sh --list          # resolve + list scenarios, then exit
@@ -112,7 +112,7 @@ fi
 
 if [[ -z "$TOOL_BIN" ]]; then
     shopt -s nullglob
-    for cand in build/current/bin/fidelity build/*/bin/fidelity build/bin/fidelity build/*/tools/fidelity/fidelity build/tools/fidelity/fidelity tools/fidelity/fidelity; do
+    for cand in build/current/bin/fidelity build/*/bin/fidelity build/bin/fidelity build/*/utils/fidelity/fidelity build/utils/fidelity/fidelity utils/fidelity/fidelity; do
         [[ -f "$cand" && -x "$cand" ]] && { TOOL_BIN="$cand"; break; }
     done
     shopt -u nullglob

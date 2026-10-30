@@ -32,7 +32,7 @@ no `.blend` sources never needs Blender installed. Pass `-DZHLN_HAS_BLENDER=OFF`
 has Blender, or `-DZHLN_HAS_BLENDER=ON` to make a missing Blender a configure error.
 For compiled assets, the build system expects usually in resources/assets/ as an unofficial convention.
 
-Run tools/build.sh and fix every error you go along the way if you're missing dependencies.
+Run scripts/build.sh and fix every error you go along the way if you're missing dependencies.
 
 ### Runtime Directories
 
@@ -196,14 +196,14 @@ The default `zahlen` binary (`app/main.cpp`) is a compiled C++ sandbox: it spawn
 | Executable | Entrypoint | Purpose |
 | :--- | :--- | :--- |
 | `zahlen` | `app/main.cpp` | Ordinary game using `ZHLN::App()`; built even with extras OFF |
-| `zahlen-editor` | `tools/editor/main.cpp` | World editor with its own paused-simulation loop; `--scene <file.toml|file.lua>` imports a document, Ctrl+S saves `scene.toml` |
-| `zahlen-benchmark` | `tools/benchmark/main.cpp` | Headless logic workload; tune with `ZHLN_BENCH_ENTITIES` and `ZHLN_BENCH_TICKS` |
-| `zahlen-scene-host` | `tools/scene/main.cpp` | Scene/document and file-watcher integration; `--scene` and `--graphics-config` (Lua when available), optional Discord presence and a diagnostic scene when no document is selected |
+| `zahlen-editor` | `utils/editor/main.cpp` | World editor with its own paused-simulation loop; `--scene <file.toml|file.lua>` imports a document, Ctrl+S saves `scene.toml` |
+| `zahlen-benchmark` | `utils/benchmark/main.cpp` | Headless logic workload; tune with `ZHLN_BENCH_ENTITIES` and `ZHLN_BENCH_TICKS` |
+| `zahlen-scene-host` | `utils/scene/main.cpp` | Scene/document and file-watcher integration; `--scene` and `--graphics-config` (Lua when available), optional Discord presence and a diagnostic scene when no document is selected |
 | `zahlen_ui_editor` | `app/UIEditor.cpp` | Separate UI-tree editor using the Kernel-only `KernelApp` runner |
 
 Kernel-only tools can link `zahlen_host_runner` and use `<Zahlen/KernelApp.hpp>` rather than creating a 3D/ECS Engine. `KernelApp().Named("Tool").Input(receiver).OnStart(...).OnInputFrame(...).OnUpdate(...).OnRender(...).OnDeviceRestored(...).OnShutdown(...).Run(argc, argv)` owns CLI early exits, `ProcessScope`, input pumping, frame acquisition/presentation, device-loss recovery, and pacing. The UI-tree editor supplies only its document, two-window UI, and font-atlas rebuild policy; Engine games still use `App` and the Engine's own frame graph.
 
-The world editor and scene host share document import in `tools/scene/SceneDocument.cpp`. Only the scene host installs the Lua graphics file watcher; it installs a diagnostic fallback when no scene document was requested, so a loaded document is not overwritten by it. The benchmark does not initialize a window or engine. For interactive benchmark panels, use the existing `zahlen_benchmark_viewer` library in a custom host; the ordinary game has no F3/F4 benchmark overlay. `zahlen --editor` and `zahlen --benchmark` are not engine flags: the game rejects them as unknown arguments. Launch `zahlen-editor` or `zahlen-benchmark` directly. (The independent `ztest --benchmark` test-runner flag is unaffected.)
+The world editor and scene host share document import in `utils/scene/SceneDocument.cpp`. Only the scene host installs the Lua graphics file watcher; it installs a diagnostic fallback when no scene document was requested, so a loaded document is not overwritten by it. The benchmark does not initialize a window or engine. For interactive benchmark panels, use the existing `zahlen_benchmark_viewer` library in a custom host; the ordinary game has no F3/F4 benchmark overlay. `zahlen --editor` and `zahlen --benchmark` are not engine flags: the game rejects them as unknown arguments. Launch `zahlen-editor` or `zahlen-benchmark` directly. (The independent `ztest --benchmark` test-runner flag is unaffected.)
 
 ## Hardware expectations
 
@@ -216,7 +216,7 @@ The project is primarily developed on Linux and macOS and Windows.
 You can compile this project. That is true, if your compiler supports standard C++26 features. Otherwise, tough luck. Compile GCC 16.1.1+ yourself.
 
 The project can also be compiled with Bloomberg Clang with its own libcxx and libunwind and work effectively. 
-However, precompiled headers are buggy due to unknown internal compiler errors. tools/build.sh --p2996 should handle some of the work as long as you have your build ready.
+However, precompiled headers are buggy due to unknown internal compiler errors. scripts/build.sh --p2996 should handle some of the work as long as you have your build ready.
 
 See [here](https://en.cppreference.com/cpp/compiler_support/26) for detailed compiler support information.
 

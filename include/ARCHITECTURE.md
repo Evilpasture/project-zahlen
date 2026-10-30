@@ -178,9 +178,9 @@ without inverting the DAG. `Zahlen/GUI/FontLoader.hpp` (`BakedFontLoader`) and
    `zahlen_application` preset and outer loop for ordinary C++ games;
    `app/main.cpp` is a compiled `App().Run(...)` physics/lighting/audio sandbox.
    Host-specific choices live
-   in dedicated executables: `tools/editor/main.cpp` owns the paused world
-   editor, `tools/benchmark/main.cpp` owns a headless logic workload, and
-   `tools/scene/main.cpp` owns document boot, fallback, Discord and the Lua
+   in dedicated executables: `utils/editor/main.cpp` owns the paused world
+   editor, `utils/benchmark/main.cpp` owns a headless logic workload, and
+   `utils/scene/main.cpp` owns document boot, fallback, Discord and the Lua
    graphics-file watcher. They install their modules before the first scene.
    Core exposes neutral Engine and module contracts and never names optional
    layers; the host-facing `<Zahlen/App.hpp>` belongs to `zahlen_application`
@@ -214,8 +214,8 @@ and optional third-party dependencies stay local to the owning target.
 | `zahlen_host_runner` | `app/` | Shared process/crash/task lifetime and frame pacing; `KernelApp` drives Kernel-only tools with no gameplay links; publishes `app/include/` |
 | `zahlen_application` | `app/` | Game loop, reflected/registered CLI, layers and CMake-generated optional-module wiring; publishes `app/include/` and links the engine-independent `zahlen_command_line` for the `App.hpp` facade |
 | `zahlen_project_light_app` | `app/ProjectLightClientMain.cpp` | Optional ProjectLight entrypoint: App lifecycle with only the client's selected gameplay modules and connection preflight |
-| `zahlen_scene_documents` | `tools/scene/` | TOML/Lua scene import shared only by tools |
-| `zahlen_world_editor`, `zahlen_benchmark_app`, `zahlen_scene_host` | `tools/{editor,benchmark,scene}/` | Separate world-editor, headless-benchmark and scene/file-watcher hosts |
+| `zahlen_scene_documents` | `utils/scene/` | TOML/Lua scene import shared only by tools |
+| `zahlen_world_editor`, `zahlen_benchmark_app`, `zahlen_scene_host` | `utils/{editor,benchmark,scene}/` | Separate world-editor, headless-benchmark and scene/file-watcher hosts |
 
 `ZHLN_BUILD_EXTRAS` remains the existing CMake option for compatibility; it now
 gates the optional `plugins/`, `extensions/`, and `gameplay/` build layers.
@@ -276,7 +276,7 @@ links and calls, in font → character → camera → interaction → terrain �
 FreeCam → ragdoll order. Application code contains no optional-module compiler
 definitions or `#if` wall. `app/main.cpp` links the preset and contains only game
 code. Tool-specific composition roots remain separate executables under
-`tools/`; `zahlen_ui_editor` is a Kernel-only composition root under `app/`.
+`utils/`; `zahlen_ui_editor` is a Kernel-only composition root under `app/`.
 Core remains usable without optional targets and does not register or call
 into an optional implementation unless a Core-owned seam is provided.
 
@@ -328,7 +328,7 @@ which is renderer implementation: nothing under `include/` includes it, names a
 `Slang::` type, or needs the shader tool to have run.
 
 The structs the engine and the shaders share are *generated*, from the same
-reflection that decides their layout: `tools/zshader` emits every GPU-visible
+reflection that decides their layout: `utils/zshader` emits every GPU-visible
 struct -- `Particle`, `ParticleEmitterParams`, `MeshParticleEmitterParams`,
 `Light`, `FrameUniforms` and the renderer-only ones -- with the members at the
 offsets Slang seated them, the `_padN` between them and the `alignas` each lane
@@ -550,7 +550,7 @@ RenderContext state (SetFrameData packs the engine's FrameData into the shader's
   iterations, roughness cutoff, bounce budget).
 * **GPU ABI safety**: every generated GPU type (the buffers and uniform blocks
   the renderer uploads, generated from the compiled `gpu_abi.slang` by
-  `tools/zshader`) stays inside `src/render/`; the types the engine also touches are
+  `utils/zshader`) stays inside `src/render/`; the types the engine also touches are
   its own domain structs (`ParticleEmitterDesc`, `LightDesc`, `FrameData`), which
   the renderer packs into the generated ones at the submit boundary. Each
   generated type is checked against that same module at compile time
@@ -613,7 +613,7 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 ## 6. Asset Cooking & Virtual File System (VFS)
 
 1. **Graph Generation**: `zcook ninja` scans the asset root and writes `assets.ninja` -- the graph of its own invocations. The cooker generates the plan it is about to execute, for the same reason it reads the manifest it cooks from: a rule and the subcommand it names cannot drift when one program owns both. The graph regenerates itself when a source file, an exported manifest, or zcook itself changes.
-2. **Source Models**: Blender `.blend` files in `./blender/` are scanned, and `tools/export_metadata.py` -- run inside Blender by `tools/run_blender.py`, because only Blender's Python can open a `.blend` -- writes the level's manifest.
+2. **Source Models**: Blender `.blend` files in `./blender/` are scanned, and `scripts/export_metadata.py` -- run inside Blender by `scripts/run_blender.py`, because only Blender's Python can open a `.blend` -- writes the level's manifest.
 3. **Intermediate Extraction**: Uncompressed binary metadata (`.bin`) and textures are emitted into `resources/intermediate/<level>/`.
 4. **Ninja Parallel Compilation**: `zcook` compiles meshes (`.zmesh`), animations (`.zanim`), and textures (`.ztex`) in parallel. The virtual-path to cooked-file map is `build_assets/manifest.txt`, written by the generator and read only by `zcook pak`.
 5. **Archive Packing**: `zcook pak` packs all cooked targets into `data/base.pak` (Zstandard compressed archive).
@@ -720,7 +720,7 @@ the same way `SceneTOML.hpp` walks `Scene::Scene`.
 
 The native world editor (Hierarchy + Inspector) implementation is
 `extensions/editor/` (`zahlen_editor`, a library). Its dedicated executable
-is `zahlen_world_editor` (output `zahlen-editor`) at `tools/editor/main.cpp`;
+is `zahlen_world_editor` (output `zahlen-editor`) at `utils/editor/main.cpp`;
 it links FreeCam and scene serialization without imposing those tool concerns
 on `app/main.cpp` or the game binary. The scene host (`zahlen-scene-host`)
 and headless benchmark (`zahlen-benchmark`) are separate executables, too.

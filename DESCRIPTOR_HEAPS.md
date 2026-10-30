@@ -193,7 +193,7 @@ Set-0 bindings map as follows (baked by `BuildSceneHeapMappings`):
 
 `resources/shaders/descriptor_heap_layout.slang` is the layout authority. Its
 `DescriptorHeapPushData` type places the largest ordinary per-pass block first,
-then the six frame addresses and the descriptor index. `tools/zshader` compiles
+then the six frame addresses and the descriptor index. `utils/zshader` compiles
 that type in-process and reflects its field offsets into the generated header as
 `Slang::kScenePushLayout`, which `src/render/GpuAbi.cpp` exports as
 `GpuAbi::kScenePushLayout` -- so an edit to the struct lands in the engine on

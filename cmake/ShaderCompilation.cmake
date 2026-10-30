@@ -179,7 +179,7 @@ endif()
 # puts the SDK's lib/cmake on CMAKE_PREFIX_PATH) when one is visible, else the
 # vendored tree. A tree the compiler search above already added wins without a
 # second lookup, so the library always matches the slangc that cooks the passes.
-# Either way ZHLN_SLANG_TARGET names the target tools/zshader links.
+# Either way ZHLN_SLANG_TARGET names the target utils/zshader links.
 if(TARGET slang::slang)
     set(ZHLN_SLANG_TARGET slang::slang)
 elseif(TARGET slang)
@@ -226,7 +226,7 @@ else()
 endif()
 
 # The directory that actually resolves Slang's public headers, stated once so
-# the consumer (tools/zshader) does not re-derive the layout. A config package
+# the consumer (utils/zshader) does not re-derive the layout. A config package
 # is allowed to advertise the parent of the real location -- the Vulkan SDK
 # ships its headers one level down (include/slang/) while naming include/ --
 # and a moved or partial install is a class of failure this probe turns from a
@@ -401,7 +401,7 @@ if(ZHLN_SLANGC_PROBEABLE OR ZHLN_SLANG_IMPORTED)
   3. Build the pinned Slang this engine is developed against (verified against #9500):
        git submodule update --init --recursive
        rm -rf build/<your tag>
-       tools/build.sh -DZHLN_SLANG_VENDORED=ON
+       scripts/build.sh -DZHLN_SLANG_VENDORED=ON
   If this exact build of Slang is actually fine for you, override with "
   "-DZHLN_SLANG_ALLOW_KNOWN_BAD=ON.")
         endif()
@@ -463,7 +463,7 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
 
     # The reflection replay of this cook: the catalog generator compiles the
     # same entry point, with the same defines, in-process (see the catalog
-    # command below and tools/zshader/Reflect.cpp). Reported the way the
+    # command below and utils/zshader/Reflect.cpp). Reported the way the
     # cooked path is -- one record per call for the caller to accumulate --
     # because OUTPUT_VAR is the macro name, so the records key themselves.
     # Every flag the callers can pass today is a -D -- per-target EXTRA_ARGS
@@ -983,13 +983,13 @@ set(ZHLN_SHADER_CATALOG_SETS
     "Reflection=ReflectionPS,ReflectionNortPS"
 )
 
-# The generator itself: tools/zshader/CMakeLists.txt. It is a directory of its
+# The generator itself: utils/zshader/CMakeLists.txt. It is a directory of its
 # own because its sources are transpiled like the engine's are, and the
 # transpiler registers source directories with include_directories() -- a scope
 # of its own keeps that out of the rest of the build. Everything above this
 # point in this file describes what the tool is *run with*, everything below it
 # what it is run on.
-add_subdirectory("${CMAKE_SOURCE_DIR}/tools/zshader" "${CMAKE_BINARY_DIR}/tools/zshader")
+add_subdirectory("${CMAKE_SOURCE_DIR}/utils/zshader" "${CMAKE_BINARY_DIR}/utils/zshader")
 
 # The blue-noise tile is decoded here, at build time, rather than by the
 # renderer at startup. It cannot come through the VFS: RenderContext::Create
@@ -1000,7 +1000,7 @@ add_subdirectory("${CMAKE_SOURCE_DIR}/tools/zshader" "${CMAKE_BINARY_DIR}/tools/
 # tile that is cheaper at both ends -- 1024x1024 of noise compresses to within
 # 8KB of its own raw size, and the decode disappears.
 #
-# Decoded by zshader (--cook-rgba / --out-rgba, tools/zshader/ImageCook.cpp) so
+# Decoded by zshader (--cook-rgba / --out-rgba, utils/zshader/ImageCook.cpp) so
 # the shader catalog build has zero host Python requirement.
 set(ZHLN_BLUE_NOISE_SOURCE "${CMAKE_SOURCE_DIR}/src/render/LDR_RGBA_0.png")
 set(ZHLN_BLUE_NOISE_COOKED "${GEN_INCLUDE_DIR}/blue_noise.rgba")
@@ -1019,7 +1019,7 @@ add_custom_command(
         --out-rgba "${ZHLN_BLUE_NOISE_COOKED}"
     DEPENDS
         "${ZHLN_BLUE_NOISE_SOURCE}"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/ImageCook.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/ImageCook.cpp"
     COMMENT "zshader: decoding the blue-noise tile to raw RGBA"
     VERBATIM
 )
@@ -1089,14 +1089,14 @@ add_custom_command(
         "${CMAKE_SOURCE_DIR}/src/render/ltc_mat.dds"
         "${CMAKE_SOURCE_DIR}/src/render/ltc_amp.dds"
         "${ZHLN_BLUE_NOISE_COOKED}"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/main.cpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.cpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.hpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/Reflect.cpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.cpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.hpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/Emit.cpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/GpuTypes.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/main.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/ZShader.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/ZShader.hpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/Reflect.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/SlangReflect.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/SlangReflect.hpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/Emit.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/GpuTypes.cpp"
     COMMENT "zshader: reflecting Slang shaders into the catalog"
     VERBATIM
 )
@@ -1117,7 +1117,7 @@ add_custom_target(zahlen_shaders_spv
 # renderer-internal, and nothing under include/ reaches it.
 #
 # One definition per concept, and it is the generated one: the reflection is the
-# ABI, so tools/zshader emits every GPU-visible struct from it -- Particle,
+# ABI, so utils/zshader emits every GPU-visible struct from it -- Particle,
 # ParticleEmitterParams, MeshParticleEmitterParams, Light and FrameUniforms
 # included -- with the members at the offsets Slang seated them, every gap
 # spelled as an explicit padding member and every lane carrying Slang's
@@ -1163,12 +1163,12 @@ add_custom_command(
         "${SHADER_SRC_DIR}/uniforms.slang"
         "${SHADER_SRC_DIR}/gpu_push_constants.slang"
         "${SHADER_SRC_DIR}/vertex_format.slang"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/main.cpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.cpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.hpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/GpuTypes.cpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.cpp"
-        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.hpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/main.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/ZShader.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/ZShader.hpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/GpuTypes.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/SlangReflect.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/zshader/SlangReflect.hpp"
     COMMENT "zshader: compiling the ABI module into host types and SPIR-V"
     VERBATIM
 )

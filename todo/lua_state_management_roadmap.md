@@ -159,7 +159,7 @@ template <typename T>
   - Removed `include/Zahlen/ScriptCommandRegistry.hpp` and `src/engine/ScriptCommandRegistry.cpp`.
   - Removed `include/Zahlen/IScriptRuntime.hpp`, `include/Zahlen/Scripting.hpp`, `modules/zahlen-scripting.cppm`, and `src/engine/ScriptRunner.cpp`.
   - Removed per-frame `ScriptRunner::CallUpdate` branches from `src/engine/SystemWiring.cpp` (renaming `"ScriptAndShaderReload"` -> `"StateAndShaderReload"`) and `bootScriptWatches` from `src/engine/Engine.cpp`, leaving C++ gameplay in the application executable (`CommandLineTestSuite`: `3/3` passed).
-- [x] Cleaned up build & repo references across `CMakeLists.txt`, `cmake/ThirdParty.cmake`, `Dockerfile`, `README.md`, `include/ARCHITECTURE.md`, `gameplay/FallbackScene/`, `tools/snapshot.py`, `tools/ecsc/src/codegen.rs`, `configure/error_ordinal_allowlist.json`, and `configure/check_layer_dag.py`.
+- [x] Cleaned up build & repo references across `CMakeLists.txt`, `cmake/ThirdParty.cmake`, `Dockerfile`, `README.md`, `include/ARCHITECTURE.md`, `gameplay/FallbackScene/`, `scripts/snapshot.py`, `utils/ecsc/src/codegen.rs`, `configure/error_ordinal_allowlist.json`, and `configure/check_layer_dag.py`.
 
 ### Phase 4: Wire State-Only Lua Domains
 - [x] **1. Hardware-Adaptive Graphics Profile (`config/graphics.lua`):**

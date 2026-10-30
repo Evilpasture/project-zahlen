@@ -11,7 +11,7 @@
 // functions that turn (descriptor JSON, RGBA page) into core's BakedFontAsset.
 //
 // Only JSON .fnt is supported (fontbm --data-format json, the default of
-// tools/fontbm.sh). Legacy AngelCode text format is not supported.
+// scripts/fontbm.sh). Legacy AngelCode text format is not supported.
 // Parsing uses the existing plugins/json reflection library (simdjson), not
 // manual flag/state C-style scanning.
 

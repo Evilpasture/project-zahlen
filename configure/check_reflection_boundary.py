@@ -80,7 +80,7 @@ FEATURE_PROBE = REFLECTION_DIRS[0] / "Core.hpp"
 # Module interface units (checked for detail namespace declarations).
 MODULE_ROOTS = (ROOT / "modules", ROOT / "plugins", ROOT / "extensions", ROOT / "gameplay")
 # C++ source trees that must contain no raw reflection tokens.
-SOURCE_ROOTS = (ROOT / "modules", ROOT / "plugins", ROOT / "extensions", ROOT / "gameplay", ROOT / "src", ROOT / "include", ROOT / "app", ROOT / "tools", ROOT / "tests")
+SOURCE_ROOTS = (ROOT / "modules", ROOT / "plugins", ROOT / "extensions", ROOT / "gameplay", ROOT / "src", ROOT / "include", ROOT / "app", ROOT / "utils", ROOT / "scripts", ROOT / "tests")
 CXX_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".cppm", ".ixx", ".inl", ".ipp"}
 MODULE_SUFFIXES = {".cppm", ".ixx"}
 SKIP_DIR_NAMES = {".git", "build", "target", "__pycache__", ".cache", "node_modules"}

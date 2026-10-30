@@ -18,7 +18,7 @@
 # Pass `-DZHLN_HAS_BLENDER=OFF` to take the Blender-free graph on a host that
 # has Blender installed, or `-DZHLN_HAS_BLENDER=ON` to require it.
 #
-# Discovery order matches FindBlenderExecutable() in tools/zcook/Ninja.cpp --
+# Discovery order matches FindBlenderExecutable() in utils/zcook/Ninja.cpp --
 # BLENDER_PATH, then PATH, then the platform's own install locations -- so
 # configure and cook cannot disagree about which Blender, or whether there is
 # one. The path this settles on is passed to the generator (cmake/

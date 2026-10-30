@@ -38,7 +38,7 @@ function(zahlen_apply_syntax_only)
     set(_extern_prefix "${PROJECT_SOURCE_DIR}/extern/")
     set(_luajit_prefix "${PROJECT_SOURCE_DIR}/extern/LuaJIT")
     set(_slang_prefix  "${PROJECT_SOURCE_DIR}/extern/slang")
-    set(_zshader_dir   "${PROJECT_SOURCE_DIR}/tools/zshader")
+    set(_zshader_dir   "${PROJECT_SOURCE_DIR}/utils/zshader")
 
     foreach(_dir IN LISTS _all_dirs)
         get_property(_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)

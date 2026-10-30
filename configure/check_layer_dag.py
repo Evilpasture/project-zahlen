@@ -40,7 +40,7 @@ accident, and inventing a rule against them would mean failing the build on the
 existing composition. gameplay/ is the only layer with a direction that is not
 negotiable.
 
-Composition is not checked: app/, samples/, tests/, tools/ and the root
+Composition is not checked: app/, samples/, tests/, utils/, scripts/ and the root
 CMakeLists may select any layer, and are expected to. The rule is about what a
 layer may assume about another, not about who may assemble them.
 """

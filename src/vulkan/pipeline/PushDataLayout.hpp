@@ -20,7 +20,7 @@ enum class SpirvLayoutError : uint8_t {
 // addresses sit, which word carries the descriptor index, and how far a push
 // reaches. The RHI supplies the container and writes what it is handed; the
 // numbers come from Slang's own reflection of DescriptorHeapPushData
-// (tools/zshader emits them as Slang::kScenePushLayout, and
+// (utils/zshader emits them as Slang::kScenePushLayout, and
 // src/render/GpuAbi.cpp exports that constant under this type).
 struct HeapPushDataLayout {
     static constexpr size_t kMaxAddresses = 16;

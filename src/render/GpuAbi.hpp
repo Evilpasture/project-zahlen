@@ -17,7 +17,7 @@ inline constexpr uint32_t kFrameAddressCount = Slang::kFrameAddressCount;
 // addresses every heap pass reads.
 inline constexpr uint32_t kScenePassPayloadBytes = sizeof(ZHLN::Slang::ScenePassPushConstants);
 
-// Written by tools/zshader from the same reflection as the structs above and
+// Written by utils/zshader from the same reflection as the structs above and
 // exported by GpuAbi.cpp; nothing re-reads the module's bytes to derive it.
 extern const ZHLN::Vk::HeapPushDataLayout kScenePushLayout;
 

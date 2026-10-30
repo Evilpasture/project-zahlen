@@ -13,10 +13,10 @@ STELLAR, `<model-viewer>`, Babylon).
 ```
 
 The whole suite is driven by `scripts/run_fidelity.sh`, which clones the two
-Khronos repositories, resolves every scenario through `tools/fidelity list`
+Khronos repositories, resolves every scenario through `utils/fidelity list`
 (the generator's partial-override + default merge is reproduced exactly),
 renders via this harness, and compares against the goldens through
-`tools/fidelity compare` with the generator's own pixelmatch YIQ
+`utils/fidelity compare` with the generator's own pixelmatch YIQ
 `rmsDistanceRatio` (dB) metric. The driver emits a Ninja graph, so scenario
 re-renders are parallel (`-j`) and mtime-cached (a scenario whose model, JSON
 and harness binary are unchanged is skipped). See that file's header comment for

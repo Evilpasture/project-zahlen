@@ -52,7 +52,7 @@
 
 namespace ZHLN {
 
-// Markers `tools/ztest/main.cpp` matches on; kept here so the producer and the
+// Markers `utils/ztest/main.cpp` matches on; kept here so the producer and the
 // consumer cannot drift apart.
 inline constexpr std::string_view kWorkerCaseBeginMarker  = "@@ZTEST BEGIN-NEW\t";
 inline constexpr std::string_view kWorkerCaseEndMarker    = "@@ZTEST END\t";

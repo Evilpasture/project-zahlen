@@ -281,7 +281,7 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
   logical counts. Both paths reflect SPIR-V `LocalSize` from `[numthreads]` and
   derive Vulkan workgroup counts; raw groups require `DispatchGroups`.
 * Named UBO / SSBO bindings are reflected from compiled SPIR-V
-  (`ReflectedLayout.hpp`); push payloads are the types `tools/zshader` emits
+  (`ReflectedLayout.hpp`); push payloads are the types `utils/zshader` emits
   from Slang's reflection of `gpu_abi.slang`, and the only thing a submission
   site asserts about one is that it is byte-copyable
   (`PushConstantLayoutMatchesAll`, ShaderProgram.hpp). This leaf never sees
@@ -290,7 +290,7 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
 * Per-draw device addresses travel through
   `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`. Offsets come from
   `GpuAbi::kScenePushLayout` -- `Slang::kScenePushLayout` from the generated
-  header, which `tools/zshader` derived from its reflection of
+  header, which `utils/zshader` derived from its reflection of
   `DescriptorHeapPushData` -- handed to the RHI's generic
   `Vk::HeapPushDataLayout` container as data.
 * The bindless `globalTextures[]` array is a contiguous region of the resource
@@ -338,7 +338,7 @@ A name that matches nothing is skipped at runtime, which is right for a binding
 a configuration dropped and wrong for a typo -- so the names are also checked
 before the code links. A pass declares the modules it runs as types
 (`<ShaderBindings.hpp>`: one type per cooked module, generated from the modules
-by `tools/zshader` and grouped into `Vk::ShaderSet<...>` per descriptor block),
+by `utils/zshader` and grouped into `Vk::ShaderSet<...>` per descriptor block),
 the write and sampler-init sites name
 that set (`WriteHeapParameters<Shaders::Lighting>`,
 `InitHeapPassSamplers<Shaders::Culling>`, `ComputeChain::Step<Shaders::BloomDown>`),
@@ -347,7 +347,7 @@ compare the names against the modules themselves at compile time in both
 directions: a name no module of the set declares is a misspelling the compiler
 prints with the name in it, and a declared binding the call does not spell is a
 descriptor nothing writes. The generated lists are read out of the modules by
-Slang's own reflection at build time (`tools/zshader` compiles each module
+Slang's own reflection at build time (`utils/zshader` compiles each module
 in-process, with the cooks' flags), and the generated `ShaderBytecode.cpp` -- the
 one translation unit that `#embed`s the modules -- is bytes and `Bytes()`
 accessors only: nothing decodes a cooked module to check what the generator wrote

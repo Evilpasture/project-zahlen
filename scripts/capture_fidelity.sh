@@ -12,7 +12,7 @@
 # The Khronos repos land under build/fidelity/ on first use (git-ignored,
 # outside workspace snapshots). Override with ZHLN_FIDELITY_REPO and
 # ZHLN_SAMPLE_ASSETS to use trees you already have. Scenario resolution comes
-# from `fidelity list` (tools/fidelity), not an inline Python merge.
+# from `fidelity list` (utils/fidelity), not an inline Python merge.
 
 set -euo pipefail
 
@@ -51,7 +51,7 @@ fi
 TOOL_BIN="${ZHLN_FIDELITY_TOOL:-}"
 if [[ -z "$TOOL_BIN" || ! -x "$TOOL_BIN" ]]; then
     shopt -s nullglob
-    for cand in build/current/bin/fidelity build/*/bin/fidelity build/bin/fidelity build/*/tools/fidelity/fidelity build/tools/fidelity/fidelity tools/fidelity/fidelity; do
+    for cand in build/current/bin/fidelity build/*/bin/fidelity build/bin/fidelity build/*/utils/fidelity/fidelity build/utils/fidelity/fidelity utils/fidelity/fidelity; do
         [[ -f "$cand" && -x "$cand" ]] && { TOOL_BIN="$cand"; break; }
     done
     shopt -u nullglob

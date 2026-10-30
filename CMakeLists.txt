@@ -363,7 +363,7 @@ endforeach()
 #              header instantiation lands in the consumers' own objects: the
 #              engine's Log.cpp, CommandLine.cpp, RenderCore.cpp, Mutex.cpp and
 #              RenderDocInit.cpp all print to a FILE*, and so do the tools,
-#              tests and samples that link this library. tools/zshader carries
+#              tests and samples that link this library. utils/zshader carries
 #              the same expression for libslang's in-process passes.
 #   dbghelp    the symbol resolver in src/engine/diagnostics/StackTrace.cpp; its
 #              #pragma comment(lib, "dbghelp.lib") is MSVC-only, so MinGW needs
@@ -606,13 +606,13 @@ target_link_libraries(zahlen_cube PRIVATE zahlen_application)
 # windowless benchmark executables instead of bloating app/main.cpp.
 if(ZHLN_BUILD_EXTRAS)
     if(TARGET zahlen_serialization)
-        add_subdirectory(tools/scene)
+        add_subdirectory(utils/scene)
     endif()
     if(TARGET zahlen_editor AND TARGET zahlen_freecam AND TARGET zahlen_scene_documents)
-        add_subdirectory(tools/editor)
+        add_subdirectory(utils/editor)
     endif()
     if(TARGET zahlen_benchmark)
-        add_subdirectory(tools/benchmark)
+        add_subdirectory(utils/benchmark)
     endif()
 endif()
 
@@ -627,8 +627,8 @@ if(ZHLN_BUILD_SAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/samples")
 endif()
 
 if(TARGET zahlen_serialization AND EXISTS
-                                   "${CMAKE_CURRENT_SOURCE_DIR}/tools/fidelity")
-    add_subdirectory(tools/fidelity tools/fidelity)
+                                   "${CMAKE_CURRENT_SOURCE_DIR}/utils/fidelity")
+    add_subdirectory(utils/fidelity utils/fidelity)
 endif()
 
 if(ZHLN_SYNTAX_ONLY)

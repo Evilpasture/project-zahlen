@@ -3,7 +3,7 @@
 
 // ZHLN::Test::WaitIdle: what the annotation promises, and what it must not change.
 //
-// The scheduling itself lives in tools/ztest/main.cpp -- a worker cannot observe
+// The scheduling itself lives in utils/ztest/main.cpp -- a worker cannot observe
 // how the orchestrator sequenced its shards. What *is* testable here is the
 // contract the framework side has to hold up: the mark is discovered from a
 // suite, it does not alter a case's result, and it composes with the existing

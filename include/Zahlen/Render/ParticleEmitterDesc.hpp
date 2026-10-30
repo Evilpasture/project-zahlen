@@ -12,7 +12,7 @@
 // blend mode and the storage layout are not emitter physics.
 //
 // The shader reads its own struct (ParticleEmitterParams, emitted from the Slang
-// module by tools/zshader), and src/render/GpuPack.cpp writes that struct from these
+// module by utils/zshader), and src/render/GpuPack.cpp writes that struct from these
 // fields at the submit boundary. So a host never sees an offset, a stub, or a texture
 // index it had to resolve itself: Components.hpp used to hold that ABI struct by
 // value, which put the GPU layout inside every system that includes a component.

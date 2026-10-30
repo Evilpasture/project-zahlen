@@ -5,7 +5,7 @@
 //
 // Native editor panels (Hierarchy + Inspector). See extensions/editor/GUIEditor.hpp
 // for the design notes; this file is where the reflection iteration lives, so
-// that the transpiler fallback (tools/transpile_reflection.py, which rewrites
+// that the transpiler fallback (scripts/transpile_reflection.py, which rewrites
 // reflection calls by translation-unit source offset) sees and flattens it.
 
 #include <Zahlen/Math/Camera.hpp>
