@@ -413,6 +413,7 @@ add_subdirectory(extensions/Signal)
 add_subdirectory(extensions/CommandLine)
 
 add_executable(zahlen app/main.cpp)
+
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
 # The engine's DLL is written next to it; Jolt's is not, and PE has no rpath to
@@ -422,6 +423,12 @@ zahlen_add_runtime_dlls(zahlen)
 set_target_properties(zahlen PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON
                                                         CXX_EXTENSIONS OFF)
 zahlen_set_bin_output(zahlen)
+
+add_executable(zahlen_cube app/cube.cpp)
+zahlen_add_runtime_dlls(zahlen_cube)
+set_target_properties(zahlen_cube PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON
+                                                        CXX_EXTENSIONS OFF)
+zahlen_set_bin_output(zahlen_cube)
 
 if(ZHLN_BUILD_EXTRAS)
     add_executable(zahlen_ui_editor app/UIEditor.cpp)
@@ -480,6 +487,7 @@ zahlen_enable_reflection(zahlen_gui)
 zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen_filesystem)
 zahlen_enable_reflection(zahlen)
+zahlen_enable_reflection(zahlen_cube)
 if(TARGET zahlen_ui_editor)
     zahlen_enable_reflection(zahlen_ui_editor)
 endif()
@@ -591,6 +599,7 @@ if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_project_light_client)
 endif()
 
 target_link_libraries(zahlen PRIVATE zahlen_application)
+target_link_libraries(zahlen_cube PRIVATE zahlen_application)
 
 # Tool-specific dependencies stay on tool targets. The core-only build still
 # produces a callable-driven game; extras add standalone editor, scene host and
