@@ -36,11 +36,10 @@ concept LaunchOnly = !requires(T value) { value.onFrameEvents; } &&
                      !requires(T value) { value.onConfigure; } &&
                      !requires(T value) { value.onStart; } &&
                      !requires(T value) { value.onUpdate; };
-static_assert(std::is_trivially_copyable_v<EngineRunConfig>);
-static_assert(LaunchOnly<EngineRunConfig>);
+static_assert(std::is_copy_constructible_v<EngineConfig>);
+static_assert(LaunchOnly<EngineConfig>);
 template <typename T>
 concept HasNativeGameplayToggle = requires(T config) { config.enableNativeGameplay; };
-static_assert(!HasNativeGameplayToggle<EngineRunConfig>);
 static_assert(!HasNativeGameplayToggle<EngineConfig>);
 
 enum class PreparationFailure : uint8_t { Refused = 1 };
@@ -53,16 +52,12 @@ struct LaunchOptions {
 enum class QualitySetting { Low, Medium, Ultra };
 struct RichLaunchOptions {
     bool           godMode ZHLN_ANNOTATION(Description<"Enable invincibility"> {}, = CliShort<'g'> {}) = false;
-    bool           headless   = false; // engine option and reflected field both change
-    bool           fullscreen = false;
-    bool           vsync      = true;
     float          gamma ZHLN_ANNOTATION(CliRange<0.5f, 2.0f> {}) = 1.0f;
     double         threshold ZHLN_ANNOTATION(CliRange<-1.0, 1.0> {}) = 0.0;
     std::string    scene  = "original.scene";
     String32       name   {"Original"};
     String64       server {"localhost"};
     QualitySetting quality ZHLN_ANNOTATION(Description<"Quality preset"> {}, = CliShort<'q'> {}) = QualitySetting::Low;
-    uint32_t       fpsLimit ZHLN_ANNOTATION(CliRange<0, 144> {}) = 0;
 };
 struct StartOnlyLayer { void Start(Engine&) {} };
 struct TickOnlyLayer { void Tick(Engine&, float) {} };
@@ -171,10 +166,10 @@ void test_app_preparation_preserves_typed_failure_and_skips_cli_early_exits() {
     bool started = false;
     int  cliActions = 0;
     auto app = App();
-    app.AddCliOption("--scene", "<name>", "Scene to prepare", [&](CommandLineOptions&, std::string_view value) {
+    app.AddCliOption("--scene", "<name>", "Scene to prepare", [&](std::string_view value) {
         Expect(value == "ready");
         ++cliActions;
-        return std::expected<void, ErrorCode> {};
+        return std::expected<void, CommandLineError> {};
     });
     app.BeforeEngineCreate([&]() -> std::expected<void, ErrorCode> {
         prepared = true;
@@ -219,11 +214,11 @@ void test_app_custom_flags_bulk_registration_and_help_via_span() {
     bool             dryRun = false;
     bool             ran    = false;
     const std::array bulkHandlers = {
-        CommandHandler {
+        CliFlag {
             .key         = "--seed",
             .placeholder = "<integer>",
             .description = "Sandbox seed",
-            .action      = [&](CommandLineOptions&, std::string_view v) -> std::expected<void, ErrorCode> {
+            .action      = [&](std::string_view v) -> std::expected<void, CommandLineError> {
                 if (v != "19") return std::unexpected(CommandLineError::InvalidValue);
                 seed = 19;
                 return {};
@@ -233,18 +228,18 @@ void test_app_custom_flags_bulk_registration_and_help_via_span() {
     auto app = App();
     app.AddCliOption(
         "--level", "<name>", "Initial level",
-        [&](CommandLineOptions&, std::string_view v) -> std::expected<void, ErrorCode> {
+        [&](std::string_view v) -> std::expected<void, CommandLineError> {
             if (v.empty()) return std::unexpected(CommandLineError::MissingValue);
             level = v;
             return {};
         },
         "-l"
     );
-    app.WithCliOptions(std::span<const CommandHandler>(bulkHandlers));
-    app.AddCliOption(CommandHandler {
+    app.WithCliOptions(std::span<const CliFlag>(bulkHandlers));
+    app.AddCliOption(CliFlag {
         .key         = "--dry-run",
         .description = "Only show registered flags",
-        .action      = [&](CommandLineOptions&, std::string_view) -> std::expected<void, ErrorCode> {
+        .action      = [&](std::string_view) -> std::expected<void, CommandLineError> {
             dryRun = true;
             return {};
         },
@@ -319,67 +314,86 @@ void test_reflected_cli_config_keeps_owned_keys_and_validates_atomically() {
 void test_reflected_config_supports_bool_floats_text_and_enum_choices() {
     RichLaunchOptions options;
     Application       app;
-    bool              manualHeadlessCalled = false;
     {
         auto source = App();
-        source.AddCliOption("--headless", "", "Ordinary colliding handler", [&](CommandLineOptions&, std::string_view) {
-            manualHeadlessCalled = true;
-            return std::expected<void, ErrorCode> {};
-        });
         source.WithConfig(options);
-        app = source; // source dies: keys, short aliases, and enum help must survive
+        app = source; // generated keys and enum-choice text survive the source
     }
 
+    ConfigCli metadata;
+    metadata.WithConfig(options);
     bool sawChoice = false;
     bool sawBool = false;
-    bool engineMatchesFields = false;
-    app.AddCliOption("--inspect-config", "", "Inspect reflected metadata", [&](CommandLineOptions& cli, std::string_view) {
-        for (const auto& handler: cli.appHandlers) {
-            if (handler.key == "--quality") {
-                sawChoice = handler.placeholder == "<Low|Medium|Ultra>" && handler.shortKey == "-q" &&
-                            handler.description == "Quality preset";
-            }
-            if (handler.key == "--god-mode") {
-                sawBool = handler.placeholder == "[on|off|true|false]" && handler.shortKey == "-g";
-            }
+    for (const auto& flag: metadata.Flags()) {
+        if (flag.key == "--quality") {
+            sawChoice = flag.placeholder == "<Low|Medium|Ultra>" && flag.shortKey == "-q" &&
+                        flag.description == "Quality preset";
         }
-        engineMatchesFields = cli.headless == options.headless && cli.fullscreen == options.fullscreen &&
-                              cli.vsync == options.vsync && cli.fpsLimit == options.fpsLimit;
-        return std::expected<void, ErrorCode> {};
-    });
+        if (flag.key == "--god-mode") {
+            sawBool = flag.placeholder == "[on|off|true|false]" && flag.shortKey == "-g";
+        }
+    }
+    Expect(sawChoice && sawBool);
 
-    // Bare bool, explicit on/off/true/false, separated and = values, general
-    // floating-point notation, a spaced scene name, fixed strings, and enums.
     ExpectExit(
-        RunConfigCli(app, {"--god-mode", "--headless=on", "--fullscreen=false", "--vsync=off", "--gamma=1.25",
-                           "--threshold=-1.25e-1", "--scene", "mountain level.scene", "--name=Hero",
-                           "--server", "example.test", "-q=Ultra", "--fps-limit=120", "--inspect-config"}, true),
+        RunConfigCli(app, {"--god-mode", "--gamma=1.25", "--threshold=-1.25e-1", "--scene", "mountain level.scene",
+                           "--name=Hero", "--server", "example.test", "-q=Ultra"}, true),
         AppExitReason::CliHelpRequested
     );
-    Expect(options.godMode && options.headless && !options.fullscreen && !options.vsync);
-    Expect(options.gamma == 1.25f && options.threshold == -0.125);
+    Expect(options.godMode && options.gamma == 1.25f && options.threshold == -0.125);
     Expect(options.scene == "mountain level.scene" && std::string_view(options.name) == "Hero");
     Expect(std::string_view(options.server) == "example.test" && options.quality == QualitySetting::Ultra);
-    Expect(options.fpsLimit == 120u && sawChoice && sawBool && engineMatchesFields);
-    Expect(!manualHeadlessCalled); // even an earlier manual collision must not hide the reflected field
 
     ExpectExit(
-        RunConfigCli(app, {"-g=off", "--headless", "off", "--fullscreen", "--vsync", "--gamma", "0.75",
-                           "--threshold=1e-2", "--quality", "Medium", "--fps-limit=0", "--inspect-config"}, true),
+        RunConfigCli(app, {"-g=off", "--gamma", "0.75", "--threshold=1e-2", "--quality", "Medium"}, true),
         AppExitReason::CliHelpRequested
     );
-    Expect(!options.godMode && !options.headless && options.fullscreen && options.vsync);
-    Expect(options.gamma == 0.75f && options.threshold == 0.01 && options.quality == QualitySetting::Medium);
-    Expect(options.fpsLimit == 0u && engineMatchesFields);
+    Expect(!options.godMode && options.gamma == 0.75f && options.threshold == 0.01);
+    Expect(options.quality == QualitySetting::Medium);
 
-    // std::string has no fixed capacity; FixedString<N> accepts exactly N-1
-    // bytes, rejects N bytes rather than silently truncating an existing value.
     const std::string longScene(300, 's');
     const std::string nameLimit(31, 'N');
-    const std::string sceneArg = "--scene=" + longScene;
-    const std::string nameArg = "--name=" + nameLimit;
-    ExpectExit(RunConfigCli(app, {sceneArg, nameArg}, true), AppExitReason::CliHelpRequested);
+    ExpectExit(RunConfigCli(app, {"--scene=" + longScene, "--name=" + nameLimit}, true), AppExitReason::CliHelpRequested);
     Expect(options.scene == longScene && std::string_view(options.name) == nameLimit);
+}
+
+void test_engine_config_is_reflected_including_nested_physics_and_rejects_collisions() {
+    EngineConfig config;
+    char program[] = "test-application";
+    char resolution[] = "--width=640";
+    char validation[] = "--validation-mode=GPU";
+    char bodies[] = "--physics-max-bodies=4096";
+    char limit[] = "--fps-limit=120";
+    char verbose[] = "--log-level=Verbose";
+    char mesh[] = "--enable-mesh-shading=off";
+    char* args[] = {program, resolution, validation, bodies, limit, verbose, mesh};
+    auto parsed = ParseEngineConfig(std::span<char* const>(args), config);
+    Expect(parsed.has_value());
+    Expect(config.width == 640u && config.validationMode == ValidationMode::GPU);
+    Expect(config.physics.maxBodies == 4096u && config.fpsLimit == 120u);
+    Expect(config.logLevel == LogLevel::Verbose && !config.enableMeshShading);
+
+    char invalid[] = "--physics-max-bodies=bad";
+    char* bad[] = {program, invalid};
+    auto failed = ParseEngineConfig(std::span<char* const>(bad), config);
+    Expect(!failed.has_value());
+    if (!failed) Expect(failed.error().Is(CommandLineError::InvalidValue));
+    Expect(config.physics.maxBodies == 4096u);
+
+    const std::array colliding = {CliFlag {.key = "--width", .action = [](std::string_view) -> std::expected<void, CommandLineError> { return {}; }}};
+    auto duplicate = ParseEngineConfig(std::span<char* const>(args), config, colliding);
+    Expect(!duplicate.has_value());
+    if (!duplicate) Expect(duplicate.error().Is(CommandLineError::DuplicateFlag));
+}
+
+struct ConflictingGameConfig { bool headless = false; };
+
+void test_reflected_game_keys_must_not_duplicate_engine_flags() {
+    ConflictingGameConfig game;
+    auto app = App();
+    app.WithConfig(game);
+    ExpectError(RunConfigCli(app, {"--help"}), CommandLineError::DuplicateFlag);
+    Expect(!game.headless); // schema conflicts fail before any action runs
 }
 
 void test_reflected_config_invalid_values_preserve_fields_and_typed_errors() {
@@ -390,7 +404,6 @@ void test_reflected_config_invalid_values_preserve_fields_and_typed_errors() {
     struct Case { std::string_view token; CommandLineError error; };
     for (const Case c: {
         Case {"--god-mode=perhaps", CommandLineError::InvalidValue},
-        Case {"--headless=perhaps", CommandLineError::InvalidValue}, // engine must validate first
         Case {"--gamma=bad", CommandLineError::InvalidValue},
         Case {"--gamma=1.25bad", CommandLineError::InvalidValue},
         Case {"--gamma=1e999", CommandLineError::InvalidValue},
@@ -400,7 +413,6 @@ void test_reflected_config_invalid_values_preserve_fields_and_typed_errors() {
         Case {"--threshold=not-a-number", CommandLineError::InvalidValue},
         Case {"--quality=ultra", CommandLineError::InvalidValue}, // enum names are exact
         Case {"--quality=Unknown", CommandLineError::InvalidValue},
-        Case {"--fps-limit=145", CommandLineError::InvalidValue}, // numeric range on mirrored field
         Case {tooLongName, CommandLineError::InvalidValue},
         Case {"--gamma", CommandLineError::MissingValue},
         Case {"--threshold", CommandLineError::MissingValue},
@@ -409,8 +421,8 @@ void test_reflected_config_invalid_values_preserve_fields_and_typed_errors() {
         Case {"--quality", CommandLineError::MissingValue},
     }) {
         ExpectError(RunConfigCli(app, {c.token}), c.error);
-        Expect(!options.godMode && !options.headless && !options.fullscreen && options.vsync);
-        Expect(options.gamma == 1.0f && options.threshold == 0.0 && options.fpsLimit == 0u);
+        Expect(!options.godMode);
+        Expect(options.gamma == 1.0f && options.threshold == 0.0);
         Expect(options.scene == "original.scene" && std::string_view(options.name) == "Original");
         Expect(std::string_view(options.server) == "localhost" && options.quality == QualitySetting::Low);
     }

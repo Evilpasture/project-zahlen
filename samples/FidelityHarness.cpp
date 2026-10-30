@@ -33,7 +33,7 @@
 // error. See scripts/run_fidelity.sh for the driver that feeds it the Khronos
 // scenario set and compares the frames against the reference goldens.
 
-#include <CommandLine/EngineCommandLine.hpp>
+#include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
@@ -622,8 +622,8 @@ enum class DiagnosticCapture {
 // COMMAND LINE
 // ============================================================================
 
-// This harness's own flags, parsed by core's HandleCommandLine alongside the
-// engine's --help/--version/--headless/--validation and friends. Both
+// Harness-only flags accompany the reflected EngineConfig flags in one
+// host parse, without a second engine CLI preset. Both
 // spellings are accepted: `--flag value` and `--flag=value`.
 struct HarnessConfig {
     std::string scenarioPath;
@@ -639,45 +639,52 @@ struct HarnessConfig {
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
+    ZHLN::EngineConfig engineConfig {
+        .physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
+        .appName = "Zahlen :: Fidelity Harness",
+        .vsync = false,
+        .enableFallbackScene = false,
+    };
+
     HarnessConfig config;
     const std::array appHandlers = {
-        ZHLN::CommandHandler {
+        ZHLN::CliFlag {
             .key         = "--scenario",
             .placeholder = "<file.json>",
             .description = "Path to the Khronos fidelity scenario (required)",
             .action =
-                [&](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                [&](std::string_view v) -> std::expected<void, ZHLN::CommandLineError> {
                     config.scenarioPath = v;
                     return {};
                 },
         },
-        ZHLN::CommandHandler {
+        ZHLN::CliFlag {
             .key         = "--output",
             .placeholder = "<file.pam>",
             .description = "Where to write the capture (required)",
             .action =
-                [&](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                [&](std::string_view v) -> std::expected<void, ZHLN::CommandLineError> {
                     config.outputPath = v;
                     return {};
                 },
         },
-        ZHLN::CommandHandler {
+        ZHLN::CliFlag {
             .key         = "--diagnostic",
             .placeholder = "<mode>",
             .description = "Diagnostic capture: opaque-only, dielectric-specular, transmission-coverage, transmission-no-iridescence",
             .action =
-                [&](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                [&](std::string_view v) -> std::expected<void, ZHLN::CommandLineError> {
                     config.diagnosticFlagPresent = true;
                     config.diagnosticName        = v;
                     return {};
                 },
         },
-        ZHLN::CommandHandler {
+        ZHLN::CliFlag {
             .key         = "--ambient-scale",
             .placeholder = "<f>",
             .description = "IBL ambient scale (default 1.0)",
             .action =
-                [&](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                [&](std::string_view v) -> std::expected<void, ZHLN::CommandLineError> {
                     if (v.empty()) {
                         return {};
                     }
@@ -691,23 +698,23 @@ auto main(int argc, char* argv[]) -> int {
                     return {};
                 },
         },
-        ZHLN::CommandHandler {
+        ZHLN::CliFlag {
             .key         = "--no-aa",
             .description = "Disable anti-aliasing for the capture",
             .action =
-                [&](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
+                [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
                     config.noAA = true;
                     return {};
                 },
         },
     };
 
-    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)), appHandlers);
+    auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig, appHandlers);
     if (!optionsRes) {
+        ZHLN::LogError("[Sample] command line: {}", optionsRes.error());
         return EXIT_FAILURE;
     }
-    const auto& options = optionsRes.value();
-    if (options.helpRequested || options.versionRequested) {
+    if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
         return EXIT_SUCCESS;
     }
 
@@ -721,7 +728,7 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
 
-    ZHLN::SetLogLevel(options.logLevel);
+    ZHLN::SetLogLevel(engineConfig.logLevel);
 
     // Crash diagnostics keep their state in a caller-owned struct; static
     // storage duration is required because its address is copied into the
@@ -743,24 +750,14 @@ auto main(int argc, char* argv[]) -> int {
 
     ZHLN::SetLogObserver(&OnFidelityLog);
 
-    auto engineRes = ZHLN::Engine::Create(
-        {.physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
-         .render  = {
-              .appName        = "Zahlen :: Fidelity Harness",
-              .vsync          = false,
-              .fullscreen     = false,
-              .validationMode = options.validationMode,
-              .headless       = options.headless,
-          },
-         .enableFallbackScene = false}
-    );
+    auto engineRes = ZHLN::Engine::Create(engineConfig);
     if (!engineRes) {
         ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
     auto engine = std::move(engineRes.value());
-    if (!options.headless) {
+    if (!engineConfig.headless) {
         engine->GetPlatformHost().Focus();
     }
 

@@ -11,7 +11,7 @@
 
 #include <Animation/AnimationSystem.hpp>
 #include <CDN/CDN.hpp>
-#include <CommandLine/EngineCommandLine.hpp>
+#include <Zahlen/ConfigCli.hpp>
 #include <FreeCam/FreeCam.hpp>
 #include <RemoteAsset/DiskCache.hpp>
 #include <Signal/CrashHandler.hpp>
@@ -90,40 +90,35 @@ void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outMin, JPH::Vec3
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
-    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)));
+    ZHLN::EngineConfig engineConfig {
+        .physics = {.maxBodies = 4096, .maxBodyPairs = 8192, .maxContactConstraints = 8192},
+        .appName = "Zahlen :: CDN Map",
+        .enableFallbackScene = false,
+    };
+
+    auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
     if (!optionsRes) {
+        ZHLN::LogError("[Sample] command line: {}", optionsRes.error());
         return EXIT_FAILURE;
     }
-    const auto& options = optionsRes.value();
-    if (options.helpRequested || options.versionRequested) {
+    if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
         return EXIT_SUCCESS;
     }
 
-    ZHLN::SetLogLevel(options.logLevel);
+    ZHLN::SetLogLevel(engineConfig.logLevel);
 
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
 
-    auto engineRes = ZHLN::Engine::Create(
-        {.physics = {.maxBodies = 4096, .maxBodyPairs = 8192, .maxContactConstraints = 8192},
-         .render =
-             {
-                 .appName        = "Zahlen :: CDN Map",
-                 .vsync          = options.vsync,
-                 .fullscreen     = options.fullscreen,
-                 .validationMode = options.validationMode,
-                 .headless       = options.headless,
-             },
-         .enableFallbackScene = false}
-    );
+    auto engineRes = ZHLN::Engine::Create(engineConfig);
     if (!engineRes) {
         ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
     auto engine = std::move(engineRes.value());
-    if (!options.headless) {
+    if (!engineConfig.headless) {
         engine->GetPlatformHost().Focus();
     }
 

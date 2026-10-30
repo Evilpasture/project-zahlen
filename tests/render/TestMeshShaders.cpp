@@ -53,7 +53,7 @@ enum class MeshShaderTestError : uint8_t {
     RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or could not be captured.">{}),
     PathDivergence ZHLN_ANNOTATION(ZHLN::Description<"The mesh-shader path and the vertex path produced different images.">{}),
     ValidationErrorsRaised ZHLN_ANNOTATION(ZHLN::Description<"The validation layer reported errors while rendering the comparison frames.">{}),
-    ConfigDidNotSelectPath ZHLN_ANNOTATION(ZHLN::Description<"RenderConfig::enableMeshShading did not select the expected geometry path.">{}),
+    ConfigDidNotSelectPath ZHLN_ANNOTATION(ZHLN::Description<"EngineConfig::enableMeshShading did not select the expected geometry path.">{}),
     MeshletBlackHoleDetected
     ZHLN_ANNOTATION(ZHLN::Description<"Close-up render produced a black square where a meshlet should be: a front-facing meshlet was culled.">{}) = 8,
     DoubleSidedSetupFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not prepare a double-sided, back-facing meshlet for the GPU regression.">{}) = 9,
@@ -387,7 +387,7 @@ struct MeshShaderTestSuite {
         // ====================================================================
         // 3. Create-time config actually selects the geometry path
         // ====================================================================
-        std::expected<void, ZHLN::ErrorCode> mesh_shading_follows_render_config() {
+        std::expected<void, ZHLN::ErrorCode> mesh_shading_follows_engine_config() {
             auto enabledEngine = ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
                 .appName           = "Headless Mesh Shader Test",
                 .width             = 320,

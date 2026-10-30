@@ -44,15 +44,13 @@ struct LightningTestSuite {
 
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
-                .render  = {
-                    .appName        = "Headless Lightning Lifecycle Test",
-                    .width          = 640,
-                    .height         = 480,
-                    .vsync          = false,
-                    .fullscreen     = false,
-                    .validationMode = ZHLN::ValidationMode::On,
-                    .headless       = true,
-                },
+                .appName        = "Headless Lightning Lifecycle Test",
+                .width          = 640,
+                .height         = 480,
+                .vsync          = false,
+                .fullscreen     = false,
+                .validationMode = ZHLN::ValidationMode::On,
+                .headless       = true,
                 .enableFallbackScene = false,
             };
 
@@ -157,15 +155,13 @@ struct LightningTestSuite {
 
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
-                .render  = {
-                    .appName        = "Headless Overlapping Lightning Test",
-                    .width          = 640,
-                    .height         = 480,
-                    .vsync          = false,
-                    .fullscreen     = false,
-                    .validationMode = ZHLN::ValidationMode::On,
-                    .headless       = true,
-                },
+                .appName        = "Headless Overlapping Lightning Test",
+                .width          = 640,
+                .height         = 480,
+                .vsync          = false,
+                .fullscreen     = false,
+                .validationMode = ZHLN::ValidationMode::On,
+                .headless       = true,
                 .enableFallbackScene = false,
             };
 
@@ -228,9 +224,8 @@ struct LightningTestSuite {
         std::expected<void, ZHLN::ErrorCode> lightning_resources_release_on_component_removal() {
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
-                .render  = {.appName = "Lightning Component Resource Test", .width = 320, .height = 240, .vsync = false,
-                            .fullscreen = false, .validationMode = ZHLN::ValidationMode::On, .headless = true,
-                },
+                .appName = "Lightning Component Resource Test", .width = 320, .height = 240, .vsync = false,
+                .fullscreen = false, .validationMode = ZHLN::ValidationMode::On, .headless = true,
                 .enableFallbackScene = false,
             };
 

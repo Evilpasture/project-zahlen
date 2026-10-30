@@ -77,7 +77,7 @@ struct RenderContext::Impl {
     std::unordered_map<MaterialID, Material>  gpuMaterials;
     std::unordered_map<uintptr_t, FrameTarget> acquiredTargets;
 
-    Impl(PresentationTarget& target, const RenderConfig& cfg) noexcept:
+    Impl(PresentationTarget& target, const EngineConfig& cfg) noexcept:
         primaryTarget(target),
         resolution {.width = cfg.width != 0 ? cfg.width : 1280u, .height = cfg.height != 0 ? cfg.height : 720u} {
         const Extent2D targetExtent = target.GetFramebufferExtent();
@@ -130,7 +130,7 @@ auto RenderContext::GetPipelineBinaryData() const noexcept -> std::vector<uint8_
     return {};
 }
 
-auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
+auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl = std::make_unique<Impl>(target, cfg);
     return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl));
 }

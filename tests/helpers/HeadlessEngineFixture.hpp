@@ -76,18 +76,15 @@ struct EngineOptions {
             .maxContactConstraints = opts.maxContactConstraints,
             .tempAllocatorSize     = opts.tempAllocatorSize
         },
-        .render = {
-            // String64 is a FixedString<64>: it converts from string_view but
-            // not from std::string (that would chain two user conversions).
-            .appName        = opts.appName,
-            .width          = opts.width,
-            .height         = opts.height,
-            .vsync          = false,
-            .fullscreen     = false,
-            .validationMode    = ZHLN::ValidationMode::On,
-            .headless          = true,
-            .enableMeshShading = opts.enableMeshShading,
-        },
+        // String64 accepts string_view directly, unlike std::string.
+        .appName        = opts.appName,
+        .width          = opts.width,
+        .height         = opts.height,
+        .vsync          = false,
+        .fullscreen     = false,
+        .validationMode = ZHLN::ValidationMode::On,
+        .headless       = true,
+        .enableMeshShading = opts.enableMeshShading,
         .enableFallbackScene = false,
     };
 

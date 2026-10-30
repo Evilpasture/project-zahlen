@@ -31,7 +31,7 @@ using FileSystemWatcher = FS::FileSystemWatcher;
 
 class ZHLN_API Kernel {
   public:
-    static auto Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode>;
+    static auto Create(const EngineConfig& config, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode>;
     ~Kernel();
 
     Kernel(const Kernel&)                    = delete;
@@ -60,7 +60,7 @@ class ZHLN_API Kernel {
     auto GetAssetManager() -> AssetManager&;
     auto GetFileSystemWatcher() -> FileSystemWatcher&;
 
-    [[nodiscard]] auto GetRenderConfig() const noexcept -> const RenderConfig&;
+    [[nodiscard]] auto GetConfig() const noexcept -> const EngineConfig&;
 
     auto HandleDeviceLost() noexcept -> std::expected<void, ErrorCode>;
     void ProvokeDeviceLost();
@@ -68,7 +68,7 @@ class ZHLN_API Kernel {
   private:
     Kernel() = default;
 
-    auto InitInternal(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode>;
+    auto InitInternal(const EngineConfig& config, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode>;
 
     struct Impl;
     std::unique_ptr<Impl> _impl;

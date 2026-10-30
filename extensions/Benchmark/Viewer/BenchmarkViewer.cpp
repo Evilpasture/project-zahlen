@@ -1060,7 +1060,7 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
     // viewer only has to be the thing its UI phase calls. The options are the
     // defaults (windowed, vsync, validation on) because the CLI is the host's
     // to parse, not the tool's -- see the header.
-    const ZHLN::Engine::RunConfig runConfig {
+    const ZHLN::EngineConfig runConfig {
         .appName = "Zahlen Benchmark Viewer",
     };
 

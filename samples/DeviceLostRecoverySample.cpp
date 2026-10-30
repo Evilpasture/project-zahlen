@@ -25,7 +25,7 @@
 //   ./build/samples/DeviceLostRecoverySample --headless
 //   ZHLN_PROVOKE_DEVICE_LOST_FRAME=60 ./build/samples/DeviceLostRecoverySample --headless
 
-#include <CommandLine/EngineCommandLine.hpp>
+#include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Signal/SignalManager.hpp>
 #include <Zahlen/Camera.hpp>
@@ -156,16 +156,22 @@ void ClearArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> entities) {
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
-    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)));
+    ZHLN::EngineConfig engineConfig {
+        .physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
+        .appName = "Zahlen :: Device Lost Recovery",
+        .enableFallbackScene = false,
+    };
+
+    auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
     if (!optionsRes) {
+        ZHLN::LogError("[Sample] command line: {}", optionsRes.error());
         return EXIT_FAILURE;
     }
-    const auto& options = optionsRes.value();
-    if (options.helpRequested || options.versionRequested) {
+    if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
         return EXIT_SUCCESS;
     }
 
-    ZHLN::SetLogLevel(options.logLevel);
+    ZHLN::SetLogLevel(engineConfig.logLevel);
 
     // Crash diagnostics keep their state in a caller-owned struct; static
     // storage duration is required because its address is copied into the
@@ -174,24 +180,14 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::SetupSignalHandler(crashState);
     InstallProvokeSignal();
     ZHLN::TaskSystem::Scope taskScope;
-    auto engineRes = ZHLN::Engine::Create(
-        {.physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
-         .render  = {
-              .appName        = "Zahlen :: Device Lost Recovery",
-              .vsync          = options.vsync,
-              .fullscreen     = options.fullscreen,
-              .validationMode = options.validationMode,
-              .headless       = options.headless,
-          },
-          .enableFallbackScene = false}
-    );
+    auto engineRes = ZHLN::Engine::Create(engineConfig);
     if (!engineRes) {
         ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
     auto engine = std::move(engineRes.value());
-    if (!options.headless) {
+    if (!engineConfig.headless) {
         engine->GetPlatformHost().Focus();
     }
 #if defined(ZHLN_HAS_FONTS)
@@ -219,7 +215,7 @@ auto main(int argc, char* argv[]) -> int {
     const uint32_t autoProvokeFrame = EnvironmentU32("ZHLN_PROVOKE_DEVICE_LOST_FRAME");
     ZHLN::Log(
         "[DeviceLostRecoverySample] Ready (pid={}, {}, gpu={}). F9, Ctrl+\\, or kill -USR1 {}.", ZHLN::GetPID(),
-        options.headless ? "headless" : "windowed", engine->GetRenderContext().GetInfo().gpuName,
+        engineConfig.headless ? "headless" : "windowed", engine->GetRenderContext().GetInfo().gpuName,
         engine->GetRenderContext().GetInfo().deviceType == ZHLN::PhysicalDeviceType::CPU ? "simulates device-lost recovery" : "hangs the GPU"
     );
     if (autoProvokeFrame != 0) {

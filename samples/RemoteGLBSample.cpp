@@ -86,7 +86,7 @@
 // reflections, R re-download, C re-crawl the model list.
 
 #include <Animation/AnimationSystem.hpp>
-#include <CommandLine/EngineCommandLine.hpp>
+#include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
@@ -1467,16 +1467,22 @@ void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
-    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)));
+    ZHLN::EngineConfig engineConfig {
+        .physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
+        .appName = "Zahlen :: Remote glTF",
+        .enableFallbackScene = false,
+    };
+
+    auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
     if (!optionsRes) {
+        ZHLN::LogError("[Sample] command line: {}", optionsRes.error());
         return EXIT_FAILURE;
     }
-    const auto& options = optionsRes.value();
-    if (options.helpRequested || options.versionRequested) {
+    if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
         return EXIT_SUCCESS;
     }
 
-    ZHLN::SetLogLevel(options.logLevel);
+    ZHLN::SetLogLevel(engineConfig.logLevel);
 
     // Crash diagnostics keep their state in a caller-owned struct; static storage
     // duration is required because its address is copied into the signal handler
@@ -1485,24 +1491,14 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
 
-    auto engineRes = ZHLN::Engine::Create(
-        {.physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
-         .render  = {
-              .appName        = "Zahlen :: Remote glTF",
-              .vsync          = options.vsync,
-              .fullscreen     = options.fullscreen,
-              .validationMode = options.validationMode,
-              .headless       = options.headless,
-          },
-         .enableFallbackScene = false}
-    );
+    auto engineRes = ZHLN::Engine::Create(engineConfig);
     if (!engineRes) {
         ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
     auto engine = std::move(engineRes.value());
-    if (!options.headless) {
+    if (!engineConfig.headless) {
         engine->GetPlatformHost().Focus();
     }
 

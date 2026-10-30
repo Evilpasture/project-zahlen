@@ -119,7 +119,7 @@ RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept:
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg) noexcept
+auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) noexcept
     -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl               = std::make_unique<Impl>(target);
     impl->appName           = cfg.appName;

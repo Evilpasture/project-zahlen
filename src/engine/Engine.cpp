@@ -304,7 +304,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         .onGamepadState      = onGamepadState,
     };
 
-    auto kernel_res = Kernel::Create(cfg.render, receiver);
+    auto kernel_res = Kernel::Create(cfg, receiver);
     if (!kernel_res) {
         return std::unexpected(kernel_res.error());
     }
@@ -802,31 +802,13 @@ auto Engine::Tick(float dt) -> FrameStatus {
     return ctx.status;
 }
 
-auto Engine::MakeConfig(const RunConfig& runConfig) -> EngineConfig {
-    const uint32_t w = runConfig.fullscreen ? 0 : 1280;
-    const uint32_t h = runConfig.fullscreen ? 0 : 720;
-    return EngineConfig {
-        .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
-        .render =
-            {
-                .appName        = String64(runConfig.appName),
-                .width          = w,
-                .height         = h,
-                .vsync          = runConfig.vsync,
-                .fullscreen     = runConfig.fullscreen,
-                .validationMode = runConfig.validationMode,
-                .headless       = runConfig.headless,
-            },
-    };
-}
-
-auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstaller installModules, EventPoller pollEvents)
+auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstaller installModules, EventPoller pollEvents)
     -> std::expected<void, ErrorCode> {
     Platform::Init();
+    SetLogLevel(config.logLevel);
     // Construct before the engine so its destructor (and any cleanup tasks)
     // finishes before the worker threads and fibers are retired.
     TaskSystem::Scope tasks;
-    EngineConfig config = MakeConfig(runConfig);
 
     auto engine_res = Engine::Create(config);
     if (!engine_res) {
@@ -849,7 +831,7 @@ auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstal
     if (uiCallback) {
         engine->SetUICallback(std::move(uiCallback));
     }
-    const double targetFrameTime = runConfig.fpsLimit > 0 ? 1.0 / static_cast<double>(runConfig.fpsLimit) : 0.0;
+    const double targetFrameTime = config.fpsLimit > 0 ? 1.0 / static_cast<double>(config.fpsLimit) : 0.0;
     Clock        runClock({.maxDeltaTime = 0.1f});
 
     while (engine->IsRunning()) {
@@ -868,13 +850,13 @@ auto Engine::Run(const RunConfig& runConfig, UICallback uiCallback, ModuleInstal
         constexpr double           kFpsCapSlack  = 1.05;
         const std::optional<float> pacedDt       = engine->GetRenderContext().GetPacedDeltaTime();
         const bool                 displayPaced  = pacedDt.has_value() &&
-                                  (runConfig.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
+                                  (config.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
         const float tickDt = displayPaced ? *pacedDt : rawDt;
         if (engine->Tick(tickDt) == FrameStatus::Error) {
             return std::unexpected(EngineRunError::FrameFailed);
         }
 
-        if (runConfig.fpsLimit > 0 && !displayPaced) {
+        if (config.fpsLimit > 0 && !displayPaced) {
             auto   now          = Clock::SteadyClock::now();
             double frameElapsed = std::chrono::duration<double>(now - frameStart).count();
             if (frameElapsed < targetFrameTime) {

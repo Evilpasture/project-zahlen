@@ -4,6 +4,7 @@
 #pragma once
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/Core/LogLevel.hpp>
 #include <bit>
 #include <cstdint>
 #include <span>
@@ -170,28 +171,26 @@ struct PhysicsConfig {
 
 enum class ValidationMode : uint8_t { Off = 0, On = 1, GPU = 2 };
 
-struct RenderConfig {
-    String64       appName;
+// The one value that configures an engine and its kernel/renderer. Hosts own
+// their callback composition separately; no CLI or process commands live here.
+struct EngineConfig {
+    PhysicsConfig physics {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000,
+                           .tempAllocatorSize = 64 * 1024 * 1024};
+    String64       appName {"Zahlen Engine"};
     uint32_t       width          = 1280;
     uint32_t       height         = 720;
     bool           vsync          = true;
     bool           fullscreen     = false;
     ValidationMode validationMode = ValidationMode::On;
     bool           headless       = false;
-    bool enableMeshShading = true;
-    // Non-owning: pipeline-binary bytes the host already loaded from
-    // wherever it keeps them. Must outlive RenderContext::Create (the
-    // renderer consumes them synchronously during startup). Extract the
-    // updated set with RenderContext::GetPipelineBinaryData() before
-    // teardown.
+    bool           enableMeshShading = true;
+    // Non-owning input: Kernel copies these bytes into its own storage before
+    // creating a renderer, including for later device-lost recovery.
     std::span<const uint8_t> initialPipelineBinaryData;
     std::string crashDumpPath;
-};
-
-struct EngineConfig {
-    PhysicsConfig physics;
-    RenderConfig  render;
-    bool          enableFallbackScene = true;
+    uint32_t fpsLimit = 0;
+    LogLevel logLevel = LogLevel::Moderate;
+    bool enableFallbackScene = true;
 };
 
 }

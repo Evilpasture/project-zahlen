@@ -21,7 +21,7 @@ class FrameScope;
 
 class KernelApp {
   public:
-    explicit KernelApp(RenderConfig config = {}): _config(std::move(config)) {}
+    explicit KernelApp(EngineConfig config = {}): _config(std::move(config)) {}
 
     auto Named(std::string_view name) -> KernelApp& {
         _config.appName.assign(name);
@@ -69,9 +69,9 @@ class KernelApp {
     [[nodiscard]] auto Run(int argc, char* argv[]) const -> AppRunResult;
 
   private:
-    auto RunConfigured(RenderConfig config, uint32_t fpsLimit) const -> AppRunResult;
+    auto RunConfigured(EngineConfig config) const -> AppRunResult;
 
-    RenderConfig                              _config;
+    EngineConfig                              _config;
     WindowInputReceiver                      _receiver {};
     std::function<void(Kernel&, float)>      _onInputFrame;
     std::function<void(Kernel&)>             _onStart;

@@ -122,7 +122,7 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
 
     target_link_libraries(${SAMPLE_NAME} PRIVATE
         zahlen_engine
-        zahlen_engine_cli
+        zahlen_host_runner
         zahlen_signal
         Jolt
         zahlen_warnings

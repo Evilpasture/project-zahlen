@@ -1,13 +1,8 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# extensions/CommandLine -- frontend CLI argument parsing, help, and engine-host preset.
-#
-# Split into two targets so standalone host tools (`ztest`, offline utilities,
-# and worker runners) link only `zahlen_command_line` without pulling in
-# `zahlen_engine` or window/renderer flags, while engine frontends (`zahlen`,
-# `zahlen_ui_editor`, `zahlen_project_light_app`, and `samples/`) link
-# `zahlen_engine_cli` to compose the engine-host flag preset on top.
+# extensions/CommandLine -- engine-independent argument parsing, help and
+# version printing. EngineConfig binding and process commands live in app/.
 
 if(TARGET zahlen_command_line)
     return()
@@ -57,38 +52,4 @@ target_link_libraries(
 
 if(TARGET zahlen_warnings)
     target_link_libraries(zahlen_command_line PRIVATE zahlen_warnings)
-endif()
-
-# Engine-host CLI preset (--vsync, --validation, --renderdoc,
-# --print-graph, ...). Built alongside zahlen_command_line whenever
-# zahlen_engine is part of the build.
-if(TARGET zahlen_engine)
-    add_library(zahlen_engine_cli STATIC
-        EngineCommandLine.cpp
-    )
-
-    set_target_properties(zahlen_engine_cli PROPERTIES
-        CXX_STANDARD 26
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-        POSITION_INDEPENDENT_CODE ON
-    )
-
-    target_include_directories(zahlen_engine_cli PUBLIC
-        ${PROJECT_SOURCE_DIR}/extensions
-        ${PROJECT_SOURCE_DIR}/include
-    )
-
-    target_link_libraries(zahlen_engine_cli PUBLIC
-        zahlen_command_line
-        zahlen_engine
-    )
-
-    if(COMMAND zahlen_enable_reflection)
-        zahlen_enable_reflection(zahlen_engine_cli)
-    endif()
-
-    if(TARGET zahlen_warnings)
-        target_link_libraries(zahlen_engine_cli PRIVATE zahlen_warnings)
-    endif()
 endif()

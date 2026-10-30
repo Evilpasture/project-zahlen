@@ -100,7 +100,7 @@ int main(int argc, char* argv[]) {
     }
 
     ZHLN::ProjectLight::ClientSession session; // outlives Engine and its teardown hooks
-    auto app = ZHLN::App(ZHLN::EngineRunConfig {.appName = "Project Light Client"});
+    auto app = ZHLN::App(ZHLN::EngineConfig {.appName = "Project Light Client"});
     app.WithDefaultModules(false)
         .BeforeEngineCreate([&] { return PrepareClient(*settings, session); })
         .Install([&session](ZHLN::Engine& engine) {

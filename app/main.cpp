@@ -34,8 +34,8 @@ struct SandboxGame {
     float             elapsed = 0.0f;
 
     void Start(ZHLN::Engine& engine) {
-        if (auto cli = engine.Service<ZHLN::CommandLineOptions>()) {
-            ZHLN::Log("[Sandbox] {} CLI arguments; headless={}", cli->args.size(), cli->headless);
+        if (auto config = engine.Service<ZHLN::EngineConfig>()) {
+            ZHLN::Log("[Sandbox] headless={}, vsync={}", config->headless, config->vsync);
         }
         auto& reg = engine.GetRegistry();
         if (auto camera = reg.GetSingleton<ZHLN::Components::CameraComponent>()) {

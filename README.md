@@ -35,8 +35,7 @@ A dev tree keeps its caches and data under `build/`, while a distributed or
 hand-launched copy writes to the per-user cache directory
 (`~/Library/Caches/Zahlen`, `$XDG_CACHE_HOME/zahlen`, `%LOCALAPPDATA%\Zahlen\Cache`)
 and looks for `data/base.pak` next to the executable. `ZHLN_CACHE_DIR` and
-`ZHLN_DATA_DIR` override that, as do `RenderConfig::pipelineCachePath` and
-`RenderConfig::crashDumpPath` in code. See
+`ZHLN_DATA_DIR` override that, and `EngineConfig::crashDumpPath` overrides the crash-dump path in code. See
 [include/ARCHITECTURE.md](include/ARCHITECTURE.md) section 9.
 
 CDN and remote-download caches manage freshness, integrity, and retention:
@@ -139,7 +138,7 @@ std::string level = "courtyard";
 auto app = ZHLN::App();
 app.AddCliOption(
     "--level", "<name>", "Initial level",
-    [&](ZHLN::CommandLineOptions&, std::string_view name) -> std::expected<void, ZHLN::ErrorCode> {
+    [&](std::string_view name) -> std::expected<void, ZHLN::CommandLineError> {
         if (name.empty()) return std::unexpected(ZHLN::CommandLineError::MissingValue);
         level.assign(name);
         return {};
@@ -147,9 +146,9 @@ app.AddCliOption(
     "-l"
 );
 app.Install([&](ZHLN::Engine& engine) {
-    // Parsed flags are already available to module installers and OnStart.
-    auto cli = engine.Service<ZHLN::CommandLineOptions>();
-    if (cli) { /* use cli->headless, cli->args, and level here */ }
+    // The exact config used to create the engine is available on all Run paths.
+    auto config = engine.Service<ZHLN::EngineConfig>();
+    if (config) { /* use config->headless, config->vsync, and level here */ }
 });
 const auto result = app.Run(argc, argv); // --level=courtyard and -l courtyard both work
 return result ? EXIT_SUCCESS : EXIT_FAILURE; // in main() only
@@ -157,7 +156,7 @@ return result ? EXIT_SUCCESS : EXIT_FAILURE; // in main() only
 
 `Run` returns `ZHLN::AppRunResult` (`std::expected<AppExitReason, ErrorCode>`), not an OS status. Successful reasons distinguish `UserClosed` (including an application-requested primary-window close), `CliHelpRequested`, `CliVersionRequested`, and `CliGraphRequested`. CLI errors keep the exact `CommandLineError` (e.g. `result.error().Is(CommandLineError::InvalidValue)`), and engine creation errors preserve the underlying `ErrorCode`. `AppError::InvalidArguments`, `SceneInitFailed`, and `FrameTickFailed` cover failures that have no lower-level error code. Only executable `main()` translates the result to `EXIT_SUCCESS` or `EXIT_FAILURE`. `KernelApp` uses the same result type and preserves Kernel/render/device-recovery error codes. Typed results allow embedding and precise assertions; process-wide platform/task/signal ownership still requires callers to coordinate simultaneous runs.
 
-`.AddCliOption(ZHLN::CommandHandler{...})` and `.WithCliOptions(std::span<const ZHLN::CommandHandler>)` are also available. Registered flags appear under **Application Options** in `--help`; actions run during parsing, and errors stop before engine creation. Handlers own neither their `string_view` metadata nor captured state, and `CommandLineOptions::args` / `appHandlers` borrow argv and the application's handlers: keep those alive through synchronous `Run`. The parsed options are copied into the Engine's extension services before default modules, installers and initial-scene setup, so gameplay systems may request `ZHLN::ECS::Res<ZHLN::CommandLineOptions>` as well. No-CLI `Run()` / `Run(callback)` do not create that service.
+`.AddCliOption(ZHLN::CliFlag{...})` and `.WithCliOptions(std::span<const ZHLN::CliFlag>)` are also available. Actions run during parsing, return `CommandLineError` on failure, and may borrow application state during synchronous `Run`. The generic `zahlen_command_line` parser knows nothing about the engine. In `zahlen_application` (and `zahlen_host_runner` for Kernel-only tools), `ParseEngineConfig` reflects `EngineConfig`, adds host-only `--print-graph` / `--debug-attach`, and then adds game flags. Help and version are generic parser stops. There is no engine CLI preset or raw argv service. Installers, gameplay systems and `OnStart` can read `Engine::Service<EngineConfig>()` or `ECS::Res<EngineConfig>` on **both** CLI and no-CLI runs.
 
 `.WithConfig(launch)` binds reflected fields to flags, converting `godMode` to `--god-mode` (and `fpsLimit` to `--fps-limit`). It supports non-bool integrals, `bool`, `float`, `double`, `std::string`, `ZHLN::FixedString<N>` (including `String32` / `String64` / `String128` / `String256`), and enums. For example:
 
@@ -177,7 +176,7 @@ app.WithConfig(launch); // --god-mode, --gamma, --scene, --server, --quality
 
 A bare bool flag sets `true`; `--god-mode=off` / `--god-mode=false` set `false` (also `on`, `true`, `1` / `0`, `yes` / `no`). Non-bool flags require a nonempty value; floats use `std::from_chars` in general format, reject non-finite values, and may use `CliRange<Min, Max>` just like integers. Enums accept exact `Reflect::StringToEnum<E>()` names and show the `Reflect::EnumNames<E>()` choices in `--help` (e.g. `--quality <Low|High>`). `ZHLN::Description<"...">` supplies help text and `ZHLN::CliShort<'c'>` supplies a short alias; the sandbox demonstrates both for `--cubes` in `app/main.cpp`. Generated flag names, aliases and enum-help text are owned by the application, including after a copy. Fixed-capacity strings reject overlong inputs rather than truncating them, and each field changes only after its input is valid. Keep the borrowed `launch` alive through synchronous `Run`. Because the tokenizer treats a leading `-` as another flag, spell negative numbers as `--threshold=-0.125`.
 
-Engine flags run first. When a reflected field matches one (such as `headless`, `fullscreen`, `vsync`, or `fpsLimit`), the same value then reaches that field; a failed engine action never reaches it, and field validation can still reject it. Ordinary `.AddCliOption(...)` handlers with matching keys remain engine-shadowed, even when registered before the reflected field. CLI failures remain inspectable `CommandLineError` values, including errors from a reflected field.
+`EngineConfig` is the single configuration value for launch, physics, renderer and frame pacing. Every supported scalar field binds automatically (e.g. `--width=640`, `--headless=on`, `--fps-limit=120`, `--validation-mode=GPU`, `--log-level=Verbose`); nested aggregates use prefixes (`--physics-max-bodies=4096`). The non-owning `initialPipelineBinaryData` span is intentionally C++-only. Duplicate keys or aliases between engine, game and custom flags fail with `CommandLineError::DuplicateFlag` rather than shadowing or mirroring another value. Invalid values retain typed errors without committing a partial field. Former spellings such as `--validation=gpu` and `--renderdoc` are not aliases; update scripts to the reflected flags.
 
 For applications that must validate settings or acquire resources before an engine exists, `.BeforeEngineCreate([&]() -> std::expected<void, ZHLN::ErrorCode> { /* prepare */ return {}; })` runs after successful CLI parsing (but not for help/version/graph early exits) and before process/engine creation. A failure is returned unchanged as a typed `AppRunResult` error. For example, the optional ProjectLight client uses it to validate its launch settings and connect only after CLI validation, without creating an engine on failure.
 
@@ -185,7 +184,7 @@ Games may also use `.AddLayer(layer)` for a move-only or copyable object impleme
 
 The default `zahlen` binary (`app/main.cpp`) is a compiled C++ sandbox: it spawns a physics ground and falling boxes, lights them with a sun and moving point light, fires impulse-driven cubes with **F**, and plays a short procedural sound. `--cubes=<0..64>` (`-c`) selects the initial box count and `--seed=<integer>` reproducibly jitters their positions; both appear in `zahlen --help`. **R** resets the view; **Esc** quits. When extras are built, FreeCam provides WASD movement, right-mouse look and Shift sprint. The sandbox needs no scene-document parser or optional-extension `#ifdef`s; the optional CharacterController module is installed by `App` but this fly-camera demo does not spawn a character. Move larger projects into their own `GameSession` and ECS systems rather than growing `main.cpp` indefinitely.
 
-`App` owns the outer frame loop: the shared `ProcessScope` initializes Platform/TaskSystem, then App creates an Engine, installs the available baked default font and CharacterController, target camera, Interaction, Terrain, Animation/IK, FreeCam and RagdollAuthoring, builds the scene, polls events, calls your game logic, then `Engine::Tick(dt)` and tears down in order. CMake generates the ordered default-module calls from targets actually present in the build; `app/Application.cpp` contains no optional-module preprocessor guards. `Kernel::ProcessEvents` handles primary renderer resizing and `Engine::ProcessEvents` consumes the corresponding ECS input notification before gameplay; there is no resize/skip branch in App's loop. `FramePacer` owns App's optional FPS cap. It does **not** install the scene-host diagnostic fallback (which would replace a compiled game's scene). A `ZHLN_BUILD_EXTRAS=OFF` build uses just Core. Override the preset with `.WithDefaultModules(false)`, add project modules with `.Install([](ZHLN::Engine& engine) { /* install */ })` before the first scene, implement `UI(Engine&)` on each layer that draws an overlay, and pass `ZHLN::EngineRunConfig{...}` to `App(config)` for launch settings. `.OnStart(...)` and `.Install(...)` are application methods, not config delegates. `Engine::Run` remains available for bespoke hosts; its fourth `EventPoller` argument is an explicit low-level frame seam.
+`App` owns the outer frame loop: the shared `ProcessScope` initializes Platform/TaskSystem, then App creates an Engine, installs the available baked default font and CharacterController, target camera, Interaction, Terrain, Animation/IK, FreeCam and RagdollAuthoring, builds the scene, polls events, calls your game logic, then `Engine::Tick(dt)` and tears down in order. CMake generates the ordered default-module calls from targets actually present in the build; `app/Application.cpp` contains no optional-module preprocessor guards. `Kernel::ProcessEvents` handles primary renderer resizing and `Engine::ProcessEvents` consumes the corresponding ECS input notification before gameplay; there is no resize/skip branch in App's loop. `FramePacer` owns App's optional FPS cap. It does **not** install the scene-host diagnostic fallback (which would replace a compiled game's scene). A `ZHLN_BUILD_EXTRAS=OFF` build uses just Core. Override the preset with `.WithDefaultModules(false)`, add project modules with `.Install([](ZHLN::Engine& engine) { /* install */ })` before the first scene, implement `UI(Engine&)` on each layer that draws an overlay, and pass `ZHLN::EngineConfig{...}` to `App(config)` for launch settings. `.OnStart(...)` and `.Install(...)` are application methods, not config delegates. `Engine::Run` remains available for bespoke hosts; its fourth `EventPoller` argument is an explicit low-level frame seam.
 
 ### Standalone tools (with `ZHLN_BUILD_EXTRAS=ON`)
 

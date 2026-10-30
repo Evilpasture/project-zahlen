@@ -11,7 +11,7 @@ set_target_properties(zahlen_host_runner PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 target_link_libraries(zahlen_host_runner
-    PUBLIC zahlen_engine_cli
+    PUBLIC zahlen_engine zahlen_command_line
     PRIVATE zahlen_signal zahlen_warnings
 )
 # Only app-owned targets publish the host-facing headers under app/include/.
@@ -32,10 +32,10 @@ set_target_properties(zahlen_application PROPERTIES
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON
 )
-# App.hpp exposes CommandHandler/CommandLineOptions, so its CLI include root
-# must reach ordinary games through the application target's public interface.
+# App.hpp exposes ConfigCli/CliFlag. Publish the generic CLI include root
+# through the application target; no engine-specific CLI target exists.
 target_link_libraries(zahlen_application
-    PUBLIC zahlen_engine zahlen_engine_cli
+    PUBLIC zahlen_engine zahlen_command_line
     PRIVATE zahlen_host_runner zahlen_warnings
 )
 target_include_directories(zahlen_application

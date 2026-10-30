@@ -32,7 +32,7 @@
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
-#include <CommandLine/EngineCommandLine.hpp>
+#include <Zahlen/ConfigCli.hpp>
 #include <FreeCam/FreeCam.hpp>
 #include <Interaction/BSPInteraction.hpp>
 #include <Interaction/InteractionSystem.hpp>
@@ -1375,48 +1375,55 @@ JPH::BodyID                 g_voidCatcher {};
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
+    ZHLN::EngineConfig engineConfig {
+        .physics = {.maxBodies = 16384, .maxBodyPairs = 32768, .maxContactConstraints = 16384},
+        .appName = "Zahlen :: gm_murder_drones",
+        .enableFallbackScene = false,
+    };
+    std::filesystem::path mapPath = kDefaultMapPath;
+
     // The map's 3D skybox is background scenery the importer has to place into
     // the level's own world; ImportOptions::importSkybox is off by default and
     // this switch is what turns it back on.
     bool importSkybox = false;
     const std::array skyboxHandlers {
-        ZHLN::CommandHandler {
+        ZHLN::CliFlag {
             .key         = "--skybox",
             .description = "Import the map's 3D skybox (background scenery; default: off)",
             .action =
-                [&](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
+                [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
                     importSkybox = true;
                     return {};
                 },
         },
+        ZHLN::CliFlag {
+            .key = "--map", .placeholder = "<file.bsp>",
+            .description = "Load a BSP map other than the default gm_murder_drones.bsp",
+            .action = [&](std::string_view value) -> std::expected<void, ZHLN::CommandLineError> {
+                if (value.empty()) return std::unexpected(ZHLN::CommandLineError::MissingValue);
+                mapPath = value;
+                return {};
+            },
+        },
     };
 
-    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)), skyboxHandlers);
+    auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig, skyboxHandlers);
     if (!optionsRes) {
+        ZHLN::LogError("[Sample] command line: {}", optionsRes.error());
         return EXIT_FAILURE;
     }
-    const auto& cmdOptions = optionsRes.value();
-    if (cmdOptions.helpRequested || cmdOptions.versionRequested) {
+    if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
         return EXIT_SUCCESS;
     }
 
-    ZHLN::SetLogLevel(cmdOptions.logLevel);
+    ZHLN::SetLogLevel(engineConfig.logLevel);
 
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
 
-    // 1. Resolve map path and companion directories
-    std::filesystem::path mapPath = kDefaultMapPath;
-    for (int i = 1; i < argc; ++i) {
-        std::string_view arg(argv[i]);
-        if (!arg.starts_with("-") && arg.ends_with(".bsp")) {
-            mapPath = arg;
-            break;
-        }
-    }
-
-    // Check candidate locations if default not found directly in CWD
+    // 1. Resolve the selected map path and companion directories.
+    // Check candidate locations if the selected path is not found in CWD.
     if (!std::filesystem::exists(mapPath)) {
         const std::filesystem::path altCandidate = std::filesystem::path("..") / mapPath;
         if (std::filesystem::exists(altCandidate)) {
@@ -1464,25 +1471,14 @@ auto main(int argc, char* argv[]) -> int {
     );
 
     // 4. Initialize Engine
-    auto engineRes = ZHLN::Engine::Create(
-        {.physics = {.maxBodies = 16384, .maxBodyPairs = 32768, .maxContactConstraints = 16384},
-         .render =
-             {
-                 .appName        = "Zahlen :: gm_murder_drones",
-                 .vsync          = cmdOptions.vsync,
-                 .fullscreen     = cmdOptions.fullscreen,
-                 .validationMode = cmdOptions.validationMode,
-                 .headless       = cmdOptions.headless,
-             },
-         .enableFallbackScene = false}
-    );
+    auto engineRes = ZHLN::Engine::Create(engineConfig);
     if (!engineRes) {
         ZHLN::LogError("[BSPSample] Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
     auto engine = std::move(engineRes.value());
-    if (!cmdOptions.headless) {
+    if (!engineConfig.headless) {
         engine->GetPlatformHost().Focus();
     }
 
@@ -1544,7 +1540,7 @@ auto main(int argc, char* argv[]) -> int {
 
     // Captured mouse and the crosshair HUD. Both are no-ops under --headless,
     // where there is no window to capture and nothing to draw into.
-    if (!cmdOptions.headless) {
+    if (!engineConfig.headless) {
         SetMouseCaptured(*engine, true);
         ZHLN::Log("[BSPSample] Mouse captured: move to look, no button held. M releases the cursor.");
     }

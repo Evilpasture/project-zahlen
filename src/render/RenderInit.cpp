@@ -89,7 +89,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
     return {};
 }
 
-std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
+std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const EngineConfig& cfg, int width, int height) {
     pipelineBinaries.Init(ctx.Device(), ctx.PipelineBinariesSupported(), cfg.initialPipelineBinaryData);
 
     return allocator.Init(ctx)

@@ -41,15 +41,13 @@ struct CombatFXTestSuite {
 
         const ZHLN::EngineConfig cfg {
             .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
-            .render  = {
-                .appName        = "Headless CombatFX Test",
-                .width          = 640,
-                .height         = 480,
-                .vsync          = false,
-                .fullscreen     = false,
-                .validationMode = ZHLN::ValidationMode::On,
-                .headless       = true,
-            },
+            .appName        = "Headless CombatFX Test",
+            .width          = 640,
+            .height         = 480,
+            .vsync          = false,
+            .fullscreen     = false,
+            .validationMode = ZHLN::ValidationMode::On,
+            .headless       = true,
             .enableFallbackScene = false,
         };
 

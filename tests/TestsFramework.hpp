@@ -492,7 +492,7 @@ template <typename... Us>
 Param(Us&&...) -> Param<typename TemplatedDetail::StructuralParamDecay<Us>::Type...>;
 
 // Telemetry counters populated via ZHLN::SetLogObserver without plumbing test
-// sinks through RenderConfig, RenderContext, or RHI instance internals.
+// sinks through EngineConfig, RenderContext, or RHI instance internals.
 inline std::atomic<uint32_t> g_validationErrors {0};
 inline std::atomic<uint32_t> g_deviceLost {0};
 

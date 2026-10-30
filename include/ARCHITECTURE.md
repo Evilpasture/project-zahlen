@@ -108,10 +108,10 @@ void   Update(Engine& engine, float dt);
 ## 1.2 Core and Optional-Layer Boundaries
 
 `src/`, `include/`, and the existing top-level `modules/` directory
-form the **Core Engine**. The public `app/include/Zahlen/{App,AppOutcome,HostRunner,KernelApp}.hpp`
+form the **Core Engine**. The public `app/include/Zahlen/{App,AppOutcome,ConfigCli,HostRunner,KernelApp}.hpp`
 headers are owned and published by `zahlen_application` / `zahlen_host_runner`,
 not `zahlen_engine`; their `#include <Zahlen/...>` spellings stay the same.
-Only `App.hpp` consumes the optional CLI layer. The `modules/` directory
+Only the host-facing `ConfigCli.hpp` and `App.hpp` consume CLI bindings. The `modules/` directory
 is reserved for the engine's C++ module interfaces; it is not a catch-all for
 additional subsystems. Optional code is organized by architectural role instead:
 
@@ -130,7 +130,7 @@ not in the reusable Zahlen wire-protocol extension.
 > gameplay and the application host may consume Core; code under `src/`,
 > `include/`, or `modules/` must never include, import, or link an outer-layer
 > target. Core may not include the app-owned public headers
-> `<Zahlen/{App,AppOutcome,HostRunner,KernelApp}.hpp>`.
+> `<Zahlen/{App,AppOutcome,ConfigCli,HostRunner,KernelApp}.hpp>`.
 
 `configure/check_core_layer_boundary.py` enforces the source/header half of this
 rule during CMake configuration. It scans module imports and resolves headers
@@ -140,8 +140,8 @@ a spelled path and a short include such as `#include <Zahlen/App.hpp>` or
 Only `zahlen_application` and `zahlen_host_runner` publish `app/include/` to
 their consumers; Core targets never receive that include root. Thus a Core
 source including `<Zahlen/App.hpp>` also fails at compilation, independently of
-the Python check. `App.hpp` can consume the CLI contract because
-`zahlen_application` publicly links `zahlen_engine_cli`; Core does not. CMake
+the Python check. `ConfigCli.hpp` can consume the generic CLI contract because the application
+and host-runner targets link `zahlen_command_line`; Core does not link app/. CMake
 links remain explicit: the composition roots in `app/`, samples, tests, and
 host tools may select the targets they use, while Core targets must not depend
 on them.
@@ -184,7 +184,7 @@ without inverting the DAG. `Zahlen/gui/FontLoader.hpp` (`BakedFontLoader`) and
    graphics-file watcher. They install their modules before the first scene.
    Core exposes neutral Engine and module contracts and never names optional
    layers; the host-facing `<Zahlen/App.hpp>` belongs to `zahlen_application`
-   and consumes its CLI preset. `EngineRunConfig` contains launch settings only;
+   and binds `EngineConfig` through reflection in the host layer. `EngineConfig` is the canonical engine, physics and renderer configuration;
    App's lifecycle callbacks live on `Application`, while the low-level
    `Engine::Run` accepts an explicit `EventPoller` for hosts that need one.
 
@@ -212,7 +212,7 @@ and optional third-party dependencies stay local to the owning target.
 | `zahlen_alife`, `zahlen_interaction`, `zahlen_fallback_scene` | `gameplay/` | Domain-specific simulation, interaction rules, and fallback game scene |
 | `zahlen_datamodel`, `zahlen_project_light_client` | `gameplay/ProjectLight/` | ProjectLight's stable-ID object graph and optional native client |
 | `zahlen_host_runner` | `app/` | Shared process/crash/task lifetime and frame pacing; `KernelApp` drives Kernel-only tools with no gameplay links; publishes `app/include/` |
-| `zahlen_application` | `app/` | Game loop, reflected/registered CLI, layers and CMake-generated optional-module wiring; publishes `app/include/` and publicly links `zahlen_engine_cli` for the `App.hpp` facade |
+| `zahlen_application` | `app/` | Game loop, reflected/registered CLI, layers and CMake-generated optional-module wiring; publishes `app/include/` and links the engine-independent `zahlen_command_line` for the `App.hpp` facade |
 | `zahlen_project_light_app` | `app/ProjectLightClientMain.cpp` | Optional ProjectLight entrypoint: App lifecycle with only the client's selected gameplay modules and connection preflight |
 | `zahlen_scene_documents` | `tools/scene/` | TOML/Lua scene import shared only by tools |
 | `zahlen_world_editor`, `zahlen_benchmark_app`, `zahlen_scene_host` | `tools/{editor,benchmark,scene}/` | Separate world-editor, headless-benchmark and scene/file-watcher hosts |
@@ -420,8 +420,8 @@ Exit: layers.Stop (reverse registration order) → Engine destroyed
 
 1. **Input & OS Events**: `Application` calls `Engine::ProcessEvents` before layers/gameplay. `Kernel::ProcessEvents` detects a changed primary framebuffer extent and notifies the renderer; Engine consumes the WindowInputReceiver's `InputStateComponent::needsResize` notification during the same pump (including headless/TTY synthetic sizes) and clears it. Neither `Application::RunConfigured` nor the low-level `Engine::Run` reads the singleton or skips a gameplay frame for resize.
 2. **Compiled gameplay**: `App().Run(callback)` owns the per-frame game update; `App().Install(...)` composes systems and frame steps before the first scene. `App().AddLayer(...)` owns heterogeneously typed Start/Tick/UI/Stop layers (including UI-only, Stop-only and move-only ones) using a one-time state allocation and four plain function pointers, no virtual call per frame. Start runs after the scene, Tick runs before the optional `Run(callback)`, and UI runs inside Core's HostUICallback step during `Engine::Tick`; these phases follow registration order. Stop runs once in reverse registration order while Engine resources still exist, whether the loop closes normally or a frame fails; CLI early exits and failed initialization do not start/stop layers. `Engine::Run` remains a low-level Core entry for bespoke hosts with their own composition and event poller.
-   `Application::Run(std::span<char* const> args, callback)` parses engine flags and registered `.AddCliOption(...)` / `.WithCliOptions(...)` handlers together; the `Run(argc, argv, callback)` adapter checks the C arguments first. App handlers appear under **Application Options** in `--help`. After a successful parse (and before default modules, installers and scene initialization), the application emplaces a copy of `CommandLineOptions` in `Engine::Services()`. Installers and `OnStart` use `Engine::Service<CommandLineOptions>()`; simulation and render graph systems may resolve `ECS::Res<CommandLineOptions>` through `ExtensionServices`. CLI args and handler metadata are borrowed for the synchronous `Run` lifetime. Bare `Run()` / `Run(callback)` skip parsing and do not publish a CLI service.
-   `.WithConfig(launch)` reflects each integral, non-bool member into a `--member` handler, uses its `Description` annotation for help and optional `CliRange<Min, Max>` bounds and `CliShort<'c'>` aliases. It checks the entire `from_chars` result and only commits a validated value; generated flag strings are owned by the application and survive copying it, while the launch config itself must outlive `Run`. `app/main.cpp` registers `SandboxGame` with `.AddLayer(...)` and uses this typed binding for `--cubes`/`--seed`.
+   `Application::Run(std::span<char* const> args, callback)` reflects its `EngineConfig` and combines it with optional `.WithConfig(gameLaunch)`, `.AddCliOption(...)` and `.WithCliOptions(...)` bindings; the `Run(argc, argv, callback)` adapter checks C arguments first. `ConfigCli` owns generated flag keys, aliases and enum choices across copies, while config targets and custom handler captures are borrowed through the synchronous parse. It walks nested aggregates with prefixed keys (e.g. `physics.maxBodies` -> `--physics-max-bodies`); the non-owning pipeline binary span is intentionally C++-only. Duplicate engine/game/custom keys are rejected, never shadowed or mirrored. The independent `zahlen_command_line` library only tokenizes, dispatches, and handles help/version. Host-owned `ParseEngineConfig` handles graph/debugger commands and environmental defaults without adding process state to EngineConfig.
+   Before module installers, `OnStart` and graph construction, Application publishes a **copy of the actual `EngineConfig`** in `Engine::Services()`. Systems may resolve `ECS::Res<EngineConfig>` from `ExtensionServices`. This service exists on CLI and no-CLI runs; neither argv nor CLI handlers enter Engine services. `KernelApp` binds the same canonical value and returns the same typed early-exit reasons.
    `Application::Run` and `KernelApp::Run` return `AppRunResult = std::expected<AppExitReason, ErrorCode>` rather than an OS exit integer. CLI help/version/graph requests and normal host closure are distinct `AppExitReason` values; the parser's `CommandLineError` and the underlying Engine/Kernel/render/recovery errors are propagated unchanged. `AppError` represents invalid C argument vectors or scene/tick failures without a lower-layer error code. `app/main.cpp` and `app/UIEditor.cpp` map success/failure to process status **only inside main**; tests inspect typed outcomes. This does not make process-wide `ProcessScope` state safe for uncoordinated concurrent runners.
 3. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
 4. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching modules are installed, Interaction and Terrain nodes contributed through the `Module` the application installed; `BuildSystemGraphs` walks `Engine::GetInstalledModules()` and asks each one for its systems). `VisualInterpolationSystem` reads PhysicsWorld pose history and writes interpolated transforms; static bodies are skipped.
@@ -729,7 +729,7 @@ This is policy, so it stays private to the layer that owns the process: it has
 no installed header, no umbrella entry and no `ZHLN_API`, and no other layer
 includes it. Pipeline binaries cross into the renderer as data, never as a
 path: the kernel reads `pipeline_cache.bin` itself and hands the bytes in via
-`RenderConfig::initialPipelineBinaryData`, then extracts the updated set
+`EngineConfig::initialPipelineBinaryData`, then extracts the updated set
 with `RenderContext::GetPipelineBinaryData()` before teardown and writes it
 back, so the RHI works unchanged on hosts with no file system at all. There
 is no `VkPipelineCache` anywhere in the renderer: `VK_KHR_pipeline_binary`
@@ -738,7 +738,7 @@ supplies per-pipeline blobs keyed by the driver's own pipeline keys, held in
 builders; hosts without the extension compile from scratch. A caller
 that supplies its own cache bytes keeps persistence for itself; only when it
 supplies none does the kernel fill in the on-disk cache and take on writing it
-back. `RenderConfig::crashDumpPath` is still a path, forwarded into
+back. `EngineConfig::crashDumpPath` is still a path, forwarded into
 `Vk::DiagnosticConfig::crashDumpPath`; an empty path is what the engine fills
 in, and a path set by the caller is used as given.
 

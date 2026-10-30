@@ -115,15 +115,13 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
 
     const ZHLN::EngineConfig cfg {
         .physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096, .tempAllocatorSize = 16 * 1024 * 1024},
-        .render  = {
-            .appName        = (mode == ZHLN::ValidationMode::On) ? "Render Performance [Validation ON]" : "Render Performance [Raw Throughput]",
-            .width          = width,
-            .height         = height,
-            .vsync          = false,
-            .fullscreen     = false,
-            .validationMode = mode,
-            .headless       = true,
-        },
+        .appName        = (mode == ZHLN::ValidationMode::On) ? "Render Performance [Validation ON]" : "Render Performance [Raw Throughput]",
+        .width          = width,
+        .height         = height,
+        .vsync          = false,
+        .fullscreen     = false,
+        .validationMode = mode,
+        .headless       = true,
         .enableFallbackScene = false,
     };
 

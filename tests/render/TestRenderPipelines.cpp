@@ -53,15 +53,13 @@ struct RenderPipelinesTestSuite {
 
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 16 * 1024 * 1024},
-                .render  = {
-                    .appName        = "LocalGPUPipelineTest",
-                    .width          = 1280,
-                    .height         = 720,
-                    .vsync          = false,
-                    .fullscreen     = false,
-                    .validationMode = ZHLN::ValidationMode::On,
-                    .headless       = true,
-                },
+                .appName        = "LocalGPUPipelineTest",
+                .width          = 1280,
+                .height         = 720,
+                .vsync          = false,
+                .fullscreen     = false,
+                .validationMode = ZHLN::ValidationMode::On,
+                .headless       = true,
                 .enableFallbackScene = false,
             };
 
@@ -157,15 +155,13 @@ struct RenderPipelinesTestSuite {
 
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
-                .render  = {
-                    .appName        = "LocalGPUExplicitEngineTest",
-                    .width          = 320,
-                    .height         = 240,
-                    .vsync          = false,
-                    .fullscreen     = false,
-                    .validationMode = ZHLN::ValidationMode::On,
-                    .headless       = true,
-                },
+                .appName        = "LocalGPUExplicitEngineTest",
+                .width          = 320,
+                .height         = 240,
+                .vsync          = false,
+                .fullscreen     = false,
+                .validationMode = ZHLN::ValidationMode::On,
+                .headless       = true,
                 .enableFallbackScene = false,
             };
 
@@ -538,7 +534,7 @@ struct RenderPipelinesTestSuite {
         // process-global tables (volkLoadInstance / volkLoadDevice), so a second
         // live Vulkan instance can rebind functions used by the first. A small
         // dispatch lease preserves the existing single-instance limit while
-        // diagnostics now flow explicitly through each RenderConfig and
+        // diagnostics now flow explicitly through each EngineConfig and
         // InstanceView. Lifting the restriction requires the deferred per-device
         // Volk tables, not removing the lease.
         //
@@ -551,15 +547,13 @@ struct RenderPipelinesTestSuite {
             const auto smallCfg = [](const char* name) -> ZHLN::EngineConfig {
                 return ZHLN::EngineConfig {
                     .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
-                    .render  = {
-                        .appName        = name,
-                        .width          = 320,
-                        .height         = 240,
-                        .vsync          = false,
-                        .fullscreen     = false,
-                        .validationMode = ZHLN::ValidationMode::On,
-                        .headless       = true,
-                    },
+                    .appName        = name,
+                    .width          = 320,
+                    .height         = 240,
+                    .vsync          = false,
+                    .fullscreen     = false,
+                    .validationMode = ZHLN::ValidationMode::On,
+                    .headless       = true,
                     .enableFallbackScene = false,
                 };
             };

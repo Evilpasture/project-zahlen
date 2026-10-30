@@ -479,19 +479,17 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
 
         const ZHLN::EngineConfig cfg {
             .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
-            .render  = {
-                .appName        = "Headless Distance Stability Test",
-                .width          = kWidth,
-                .height         = kHeight,
-                .vsync          = false,
-                .fullscreen     = false,
-                .validationMode    = ZHLN::ValidationMode::On, // Robustness test: VUIDs ARE failures.
-                .headless          = true,
+            .appName        = "Headless Distance Stability Test",
+            .width          = kWidth,
+            .height         = kHeight,
+            .vsync          = false,
+            .fullscreen     = false,
+            .validationMode    = ZHLN::ValidationMode::On, // Robustness test: VUIDs ARE failures.
+            .headless          = true,
                 // The GPU-indirect switch does not disable mesh/task shaders.
                 // Keep the default path, but allow an isolated vertex-path
                 // run to distinguish task-stage culling from a hue failure.
-                .enableMeshShading = std::getenv("ZHLN_TEST_NO_MESH_SHADING") == nullptr,
-            },
+            .enableMeshShading = std::getenv("ZHLN_TEST_NO_MESH_SHADING") == nullptr,
             .enableFallbackScene = false,
         };
 

@@ -8,7 +8,7 @@
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <CommandLine/EngineCommandLine.hpp>
+#include <Zahlen/ConfigCli.hpp>
 #include <FreeCam/FreeCam.hpp>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Signal/CrashHandler.hpp>
@@ -222,13 +222,14 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
     engine.SubmitUI(std::move(ui).End());
 }
 
-int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options, ZHLN::CrashState& crashState) {
+auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHLN::CrashState& crashState)
+    -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Clock clock;
     // The editor poses the world's camera: a world with no main camera entity has
     // none to pose.
     auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
     if (!cameraComp) {
-        return EXIT_FAILURE;
+        return std::unexpected(ZHLN::AppError::SceneInitFailed);
     }
     ZHLN::Camera& cam = cameraComp->camera;
 
@@ -432,7 +433,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         if (s_EditorState.simulationRunning) {
             if (engine.Tick(frameTime) == ZHLN::FrameStatus::Error) {
                 ZHLN::LogError("[WorldEditor] engine frame failed");
-                return EXIT_FAILURE;
+                return std::unexpected(ZHLN::AppError::FrameTickFailed);
             }
         } else {
             if (!transformActive) {
@@ -440,7 +441,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             }
             if (engine.Tick(0.0f) == ZHLN::FrameStatus::Error) {
                 ZHLN::LogError("[WorldEditor] engine frame failed");
-                return EXIT_FAILURE;
+                return std::unexpected(ZHLN::AppError::FrameTickFailed);
             }
         }
 
@@ -461,53 +462,44 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
     }
 
     ZHLN::Log("[WorldEditor] Editor session closed.");
-    return EXIT_SUCCESS;
+    return {};
 }
 
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
     static ZHLN::CrashState crashState;
+    ZHLN::EngineConfig config {.appName = "Zahlen World Editor", .enableFallbackScene = false};
     std::filesystem::path scenePath;
     const std::array appHandlers = {
-        ZHLN::CommandHandler {
+        ZHLN::CliFlag {
             .key         = "--scene",
             .placeholder = "<file.toml|file.lua>",
             .description = "Open a TOML or Lua scene document in the world editor",
-            .action      = [&](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+            .action      = [&](std::string_view v) -> std::expected<void, ZHLN::CommandLineError> {
                 if (v.empty()) return std::unexpected(ZHLN::CommandLineError::MissingValue);
                 scenePath = std::filesystem::path(v);
                 return {};
             },
         },
     };
-    const auto parsed = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)), appHandlers);
+    const auto parsed = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), config, appHandlers);
     if (!parsed) {
         ZHLN::LogError("[WorldEditor] command line: {}", parsed.error());
         return EXIT_FAILURE;
     }
-    if (parsed->helpRequested || parsed->versionRequested || parsed->printGraphRequested) return EXIT_SUCCESS;
-    if (parsed->headless) {
+    if (parsed->helpRequested || parsed->versionRequested || parsed->graphRequested) return EXIT_SUCCESS;
+    if (config.headless) {
         ZHLN::LogError("[WorldEditor] this editor requires a window");
         return EXIT_FAILURE;
     }
-    ZHLN::SetLogLevel(parsed->logLevel);
+    ZHLN::SetLogLevel(config.logLevel);
 
     // Unlike App's ordinary-game loop, the editor pauses simulation and still
     // renders/picks/edits. Keep this bespoke loop in its own executable.
     ZHLN::Platform::Init();
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope tasks;
-    const ZHLN::EngineRunConfig launch {
-        .appName        = "Zahlen World Editor",
-        .vsync          = parsed->vsync,
-        .fullscreen     = parsed->fullscreen,
-        .validationMode = parsed->validationMode,
-        .headless       = false,
-        .fpsLimit       = parsed->fpsLimit,
-    };
-    ZHLN::EngineConfig config = ZHLN::Engine::MakeConfig(launch);
-    config.enableFallbackScene = false;
     auto created = ZHLN::Engine::Create(config);
     if (!created) {
         ZHLN::LogError("[WorldEditor] engine creation failed: {}", created.error());
@@ -523,5 +515,7 @@ auto main(int argc, char* argv[]) -> int {
     if (!scenePath.empty() && !ZHLN::Tools::LoadSceneDocument(*engine, scenePath)) {
         return EXIT_FAILURE;
     }
-    return RunWorldEditor(*engine, *parsed, crashState);
+    const auto ran = RunWorldEditor(*engine, config, crashState);
+    if (!ran) ZHLN::LogError("[WorldEditor] run failed: {}", ran.error());
+    return ran ? EXIT_SUCCESS : EXIT_FAILURE;
 }

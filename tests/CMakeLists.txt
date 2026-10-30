@@ -83,7 +83,7 @@ set_target_properties(ztest_cpu PROPERTIES
 
 target_link_libraries(ztest_cpu PRIVATE
     zahlen_engine
-    zahlen_engine_cli
+    zahlen_command_line
     zahlen_signal
     zahlen_asset_cooking
 )

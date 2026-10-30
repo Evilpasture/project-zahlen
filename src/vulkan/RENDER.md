@@ -37,7 +37,7 @@ Volk's dispatch tables are process-global in this build. The supported Engine pa
 `Vk::Instance` owns only its `VkInstance` handle and optional validation messenger, forwarding validation diagnostics directly to `ZHLN::LogError` / `ZHLN::LogWarning` with zero heap-allocated callback state or test-sink plumbing.
 
 * `Vk::GPUDiagnostics` owns `GPUAddressTracker` directly in-place and manages the `VK_EXT_device_address_binding_report` messenger for the logical device's lifetime, detaching before device/instance teardown.
-* Observers (such as automated tests or fidelity harnesses) intercept `ZHLN::LogError` via `ZHLN::SetLogObserver()` rather than plumbing test counters through `RenderConfig`, `RenderContext`, or `Vk::Instance`.
+* Observers (such as automated tests or fidelity harnesses) intercept `ZHLN::LogError` via `ZHLN::SetLogObserver()` rather than plumbing test counters through `EngineConfig`, `RenderContext`, or `Vk::Instance`.
 
 ### One dispatch table per image
 

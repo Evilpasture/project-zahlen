@@ -553,7 +553,6 @@ using ZHLN::PhysicsConfig;
 using ZHLN::PlatformHost;
 using ZHLN::PlayerSeat;
 using ZHLN::ProfileScope;
-using ZHLN::RenderConfig;
 using ZHLN::ScopedTimer;
 using ZHLN::SeatRoutingPolicy;
 using ZHLN::StickSample;

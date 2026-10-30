@@ -22,10 +22,10 @@
 
 namespace ZHLN::Test {
 
-// Both the simulation and render graphs can resolve application CLI options
+// Both the simulation and render graphs can resolve canonical engine configuration
 // through their existing extension-service slots (without an Engine field).
-static_assert(ECS::ResolvableFrom<SystemContext, ECS::Res<CommandLineOptions>>);
-static_assert(ECS::ResolvableFrom<ECS::Carrier<RenderServices>, ECS::Res<CommandLineOptions>>);
+static_assert(ECS::ResolvableFrom<SystemContext, ECS::Res<EngineConfig>>);
+static_assert(ECS::ResolvableFrom<ECS::Carrier<RenderServices>, ECS::Res<EngineConfig>>);
 
 void ExpectUserClosed(const AppRunResult& result) {
     Expect(result.has_value());
@@ -59,7 +59,7 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
     std::vector<std::string_view> calls;
     int                           updates = 0;
 
-    EngineRunConfig config {
+    EngineConfig config {
         .appName        = "ApplicationTest",
         .validationMode = ValidationMode::Off,
         .headless       = true,
@@ -70,7 +70,7 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
     application.AddLayer(TickPhaseLayer {.calls = &calls});
     application.Install([&](Engine& engine) {
         calls.push_back("install");
-        Expect(!engine.Service<CommandLineOptions>()); // no-CLI Run stays service-free
+        Expect(engine.Service<EngineConfig>().has_value()); // no-CLI uses the same canonical service
         Expect(!engine.GetRegistry().GetSingleton<Components::CameraComponent>());
         const auto installed = engine.InstallModule(Module {.name = "AppTestModule"});
         Expect(installed.has_value());
@@ -174,7 +174,7 @@ void RunHostUIPhaseForTest(Engine& engine) {
 
 void test_app_ui_only_layer_uses_engine_ui_phase() {
     std::vector<std::string_view> calls;
-    auto app = App(EngineRunConfig {
+    auto app = App(EngineConfig {
         .appName        = "UIOnlyAppLayerTest",
         .validationMode = ValidationMode::Off,
         .headless       = true,
@@ -190,7 +190,7 @@ void test_app_ui_only_layer_uses_engine_ui_phase() {
 
 void test_app_layers_render_ui_in_order_and_stop_before_engine_teardown() {
     std::vector<std::string_view> calls;
-    auto app = App(EngineRunConfig {
+    auto app = App(EngineConfig {
         .appName        = "AppLayerLifecycleTest",
         .validationMode = ValidationMode::Off,
         .headless       = true,
@@ -215,7 +215,7 @@ void test_app_layers_render_ui_in_order_and_stop_before_engine_teardown() {
 
 void test_app_stops_layers_on_typed_frame_failure() {
     std::vector<std::string_view> calls;
-    auto app = App(EngineRunConfig {
+    auto app = App(EngineConfig {
         .appName        = "AppLayerFrameFailureTest",
         .validationMode = ValidationMode::Off,
         .headless       = true,
@@ -240,8 +240,8 @@ void test_app_stops_layers_on_typed_frame_failure() {
     Expect(calls == std::vector<std::string_view> {"layer-start", "layer-tick", "update", "layer-ui", "layer-stop"});
 }
 
-void test_app_cli_options_service_is_available_before_install_and_scene_start() {
-    EngineRunConfig config {
+void test_app_engine_config_service_is_available_before_install_and_scene_start() {
+    EngineConfig config {
         .appName        = "ApplicationCliTest",
         .validationMode = ValidationMode::Off,
         .headless       = true,
@@ -256,7 +256,7 @@ void test_app_cli_options_service_is_available_before_install_and_scene_start() 
     auto app = App(config);
     app.AddCliOption(
         "--region", "<name>", "Initial region",
-        [&](CommandLineOptions&, std::string_view value) -> std::expected<void, ErrorCode> {
+        [&](std::string_view value) -> std::expected<void, CommandLineError> {
             region    = value;
             actionRan = true;
             return {};
@@ -270,12 +270,12 @@ void test_app_cli_options_service_is_available_before_install_and_scene_start() 
     });
     app.Install([&](Engine& engine) {
         Expect(prepared);
-        auto parsed = engine.Service<CommandLineOptions>();
-        Expect(parsed.has_value());
-        if (parsed) {
-            Expect(parsed->appHandlers.size() == 1);
-            Expect(parsed->args.size() == 3);
-            Expect(!parsed->vsync);
+        auto engineConfig = engine.Service<EngineConfig>();
+        Expect(engineConfig.has_value());
+        if (engineConfig) {
+            Expect(!engineConfig->vsync);
+            Expect(engineConfig->headless);
+            Expect(engineConfig->appName == config.appName);
         }
         Expect(actionRan);
         Expect(region == "atrium");
@@ -283,7 +283,7 @@ void test_app_cli_options_service_is_available_before_install_and_scene_start() 
     });
     app.OnStart([&](Engine& engine) {
         Expect(installed);
-        Expect(engine.Service<CommandLineOptions>().has_value());
+        Expect(engine.Service<EngineConfig>().has_value());
         started = true;
     });
 
@@ -293,7 +293,7 @@ void test_app_cli_options_service_is_available_before_install_and_scene_start() 
     char* args[]   = {program, option, vsync};
     const auto result = app.Run(std::span<char* const>(args), [&](Engine& engine) {
         Expect(started);
-        Expect(engine.Service<CommandLineOptions>().has_value());
+        Expect(engine.Service<EngineConfig>().has_value());
         updated = true;
         engine.GetPlatformHost().Close();
     });
@@ -307,7 +307,7 @@ void test_kernel_app_owns_process_input_and_shutdown_without_an_ecs_world() {
     bool updated = false;
     bool rendered = false;
     bool shutdown = false;
-    const auto result = KernelApp(RenderConfig {
+    const auto result = KernelApp(EngineConfig {
         .appName        = "KernelApplicationTest",
         .width          = 320,
         .height         = 180,

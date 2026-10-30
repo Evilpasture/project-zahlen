@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <CommandLine/EngineCommandLine.hpp>
+#include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Kernel.hpp>
@@ -18,7 +18,7 @@
 namespace ZHLN {
 
 auto KernelApp::Run() const -> AppRunResult {
-    return RunConfigured(_config, 0);
+    return RunConfigured(_config);
 }
 
 auto KernelApp::Run(int argc, char* argv[]) const -> AppRunResult {
@@ -29,41 +29,20 @@ auto KernelApp::Run(int argc, char* argv[]) const -> AppRunResult {
 }
 
 auto KernelApp::Run(std::span<char* const> args) const -> AppRunResult {
-    const CommandLineOptions defaults {
-        .validationMode = _config.validationMode,
-        .vsync          = _config.vsync,
-        .fullscreen     = _config.fullscreen,
-        .headless       = _config.headless,
-    };
-    auto parsed = HandleCommandLine(args, {}, defaults);
+    EngineConfig config = _config;
+    auto parsed = ParseEngineConfig(args, config);
     if (!parsed) {
         LogError("[KernelApp] command line: {}", parsed.error());
         return std::unexpected(parsed.error());
     }
-    if (parsed->helpRequested) {
-        return AppExitReason::CliHelpRequested;
-    }
-    if (parsed->versionRequested) {
-        return AppExitReason::CliVersionRequested;
-    }
-    if (parsed->printGraphRequested) {
-        return AppExitReason::CliGraphRequested;
-    }
-    SetLogLevel(parsed->logLevel);
-
-    RenderConfig config = _config;
-    config.vsync          = parsed->vsync;
-    config.fullscreen     = parsed->fullscreen;
-    config.validationMode = parsed->validationMode;
-    config.headless       = parsed->headless;
-    if (parsed->fullscreen) {
-        config.width  = 0;
-        config.height = 0;
-    }
-    return RunConfigured(std::move(config), parsed->fpsLimit);
+    if (parsed->helpRequested) return AppExitReason::CliHelpRequested;
+    if (parsed->versionRequested) return AppExitReason::CliVersionRequested;
+    if (parsed->graphRequested) return AppExitReason::CliGraphRequested;
+    return RunConfigured(std::move(config));
 }
 
-auto KernelApp::RunConfigured(RenderConfig config, uint32_t fpsLimit) const -> AppRunResult {
+auto KernelApp::RunConfigured(EngineConfig config) const -> AppRunResult {
+    SetLogLevel(config.logLevel);
     // Both the renderer and all application-owned GPU state die before workers.
     ProcessScope process;
     auto created = Kernel::Create(config, _receiver);
@@ -89,7 +68,7 @@ auto KernelApp::RunConfigured(RenderConfig config, uint32_t fpsLimit) const -> A
         return {};
     };
 
-    FramePacer pacer(fpsLimit);
+    FramePacer pacer(config.fpsLimit);
     Clock      clock({.maxDeltaTime = 0.1f});
     std::optional<ErrorCode> failure;
     while (kernel->IsRunning()) {

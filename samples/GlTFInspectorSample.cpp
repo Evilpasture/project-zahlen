@@ -10,7 +10,7 @@
 // Drop a .glb / .gltf file onto the window to load and orbit it.
 
 #include <Animation/AnimationSystem.hpp>
-#include <CommandLine/EngineCommandLine.hpp>
+#include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/Engine.hpp>
@@ -30,17 +30,23 @@ import ZHLN.glTF;
 #include <span>
 
 auto main(int argc, char* argv[]) -> int {
-    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)));
+    ZHLN::EngineConfig engineConfig {
+        .physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
+        .appName = "Zahlen :: glTF Inspector",
+        .enableFallbackScene = false,
+    };
+
+    auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
     if (!optionsRes) {
+        ZHLN::LogError("[Sample] command line: {}", optionsRes.error());
         return EXIT_FAILURE;
     }
-    const auto& options = optionsRes.value();
 
-    if (options.helpRequested || options.versionRequested) {
+    if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
         return EXIT_SUCCESS;
     }
 
-    ZHLN::SetLogLevel(options.logLevel);
+    ZHLN::SetLogLevel(engineConfig.logLevel);
 
     // Crash diagnostics keep their state in a caller-owned struct; static
     // storage duration is required because its address is copied into the
@@ -49,11 +55,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
 
-    auto engineRes = ZHLN::Engine::Create(
-        {.physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
-         .render  = {.appName = "Zahlen :: glTF Inspector", .vsync = options.vsync, .fullscreen = options.fullscreen},
-         .enableFallbackScene = false}
-    );
+    auto engineRes = ZHLN::Engine::Create(engineConfig);
 
     if (!engineRes) {
         ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
@@ -61,7 +63,9 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     auto engine = std::move(engineRes.value());
-    engine->GetPlatformHost().Focus();
+    if (!engineConfig.headless) {
+        engine->GetPlatformHost().Focus();
+    }
     ZHLN::Animation::Install(*engine);
 
 #if defined(ZHLN_HAS_FONTS)

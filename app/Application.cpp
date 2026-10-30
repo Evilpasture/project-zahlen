@@ -3,10 +3,10 @@
 
 // Application composes the game and its frame plan. CMake generates the
 // optional default-module install pass in DefaultModules.cpp.
-#include <CommandLine/EngineCommandLine.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/HostRunner.hpp>
+#include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -17,38 +17,20 @@
 
 namespace ZHLN {
 
-auto Application::RunFromCLI(EngineRunConfig config, std::span<char* const> args, const Update& update) const -> AppRunResult {
-    const CommandLineOptions defaults {
-        .validationMode = config.validationMode,
-        .vsync          = config.vsync,
-        .fullscreen     = config.fullscreen,
-        .headless       = config.headless,
-        .fpsLimit       = config.fpsLimit,
-    };
-    auto parsed = HandleCommandLine(args, _cliHandlers, defaults);
+auto Application::RunFromCLI(EngineConfig config, std::span<char* const> args, const Update& update) const -> AppRunResult {
+    auto parsed = ParseEngineConfig(args, config, _cli.Flags());
     if (!parsed) {
         LogError("[Application] command line: {}", parsed.error());
-        return std::unexpected(parsed.error()); // keep the original CLI error category
+        return std::unexpected(parsed.error());
     }
-    if (parsed->helpRequested) {
-        return AppExitReason::CliHelpRequested;
-    }
-    if (parsed->versionRequested) {
-        return AppExitReason::CliVersionRequested;
-    }
-    if (parsed->printGraphRequested) {
-        return AppExitReason::CliGraphRequested;
-    }
-    SetLogLevel(parsed->logLevel);
-    config.vsync          = parsed->vsync;
-    config.fullscreen     = parsed->fullscreen;
-    config.validationMode = parsed->validationMode;
-    config.headless       = parsed->headless;
-    config.fpsLimit       = parsed->fpsLimit;
-    return RunConfigured(config, update, &*parsed);
+    if (parsed->helpRequested) return AppExitReason::CliHelpRequested;
+    if (parsed->versionRequested) return AppExitReason::CliVersionRequested;
+    if (parsed->graphRequested) return AppExitReason::CliGraphRequested;
+    return RunConfigured(config, update);
 }
 
-auto Application::RunConfigured(const EngineRunConfig& config, const Update& update, const CommandLineOptions* options) const -> AppRunResult {
+auto Application::RunConfigured(const EngineConfig& config, const Update& update) const -> AppRunResult {
+    SetLogLevel(config.logLevel);
     if (_prepare) {
         if (auto prepared = _prepare(); !prepared) {
             return std::unexpected(prepared.error());
@@ -58,7 +40,7 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
     // nest Engine::Run here: it creates another TaskSystem::Scope.
     ProcessScope process;
 
-    auto created = Engine::Create(Engine::MakeConfig(config));
+    auto created = Engine::Create(config);
     if (!created) {
         LogError("[Application] engine creation failed: {}", created.error());
         return std::unexpected(created.error()); // preserve the underlying init error
@@ -66,11 +48,11 @@ auto Application::RunConfigured(const EngineRunConfig& config, const Update& upd
     auto engine = std::move(*created);
     engine->GetPlatformHost().Focus();
 
-    // The copy owns the parsed flags; its spans borrow args and _cliHandlers.
-    // Both outlive this Engine because RunConfigured completes synchronously.
-    if (options != nullptr) {
-        engine->EmplaceService<CommandLineOptions>(*options);
-    }
+    // Publish the effective kernel-owned value before installers and graph
+    // construction. Its pipeline byte span now points into Kernel-owned storage
+    // (including on device recovery), never a caller-owned temporary. No argv
+    // or handler borrows enter services, including on no-CLI Run.
+    engine->EmplaceService<EngineConfig>(engine->GetKernel().GetConfig());
 
     if (_defaultModules) {
         InstallApplicationDefaults(*engine);

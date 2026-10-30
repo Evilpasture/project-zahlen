@@ -367,7 +367,7 @@ struct RenderContext::Impl: RenderFrameContext {
         diagnostics.gpuDiagnostics.Shutdown();
     }
 
-    [[nodiscard]] std::expected<void, ErrorCode> InitSubsystems(const RenderConfig& cfg, int width, int height);
+    [[nodiscard]] std::expected<void, ErrorCode> InitSubsystems(const EngineConfig& cfg, int width, int height);
     [[nodiscard]] std::expected<void, ErrorCode> InitDiagnosticsAndProfiling();
     [[nodiscard]] std::expected<void, ErrorCode> InitCorePipelines();
     [[nodiscard]] std::expected<void, ErrorCode> InitParallelRecorders();

@@ -6,7 +6,7 @@ remains separate from `ZHLN.Network` / `ZHLN.Wire`. It is an optional extra and
 requires zlib development files plus the the CharacterController and Camera extensions.
 
 The app lives in `app/ProjectLightClientMain.cpp`, as a separate optional
-`project-light-client` executable. It uses `ZHLN::App` for the engine CLI, crash
+`project-light-client` executable. It uses `ZHLN::App` for the reflected engine configuration CLI, crash
 polling, frame loop, and typed results. It opts out of App's default gameplay
 modules and installs only CharacterController, Camera, and the client bridge.
 The session outlives the engine, so the engine's teardown hook can disconnect

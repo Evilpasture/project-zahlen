@@ -5,7 +5,7 @@
 // presence live in this diagnostic host, not in the ordinary game binary.
 #include "SceneDocument.hpp"
 #include "engine/system/GraphicsSettingsSync.hpp"
-#include <CommandLine/EngineCommandLine.hpp>
+#include <Zahlen/ConfigCli.hpp>
 #include <FallbackScene/FallbackScene.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/App.hpp>
@@ -181,38 +181,39 @@ void InstallHostWithState(ZHLN::Engine& engine) {
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
+    ZHLN::EngineConfig config {.appName = "Zahlen Scene Host"};
     static ZHLN::CrashState crashState;
     s_HostLaunchConfig = {};
 
     const std::array appHandlers = {
-        ZHLN::CommandHandler {
+        ZHLN::CliFlag {
             .key         = "--scene",
             .placeholder = "<file.toml|file.lua>",
             .description = "Instantiate a TOML or Lua scene recipe on boot",
-            .action      = [](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+            .action      = [](std::string_view v) -> std::expected<void, ZHLN::CommandLineError> {
                 if (v.empty()) return std::unexpected(ZHLN::CommandLineError::MissingValue);
                 s_HostLaunchConfig.scenePath = std::filesystem::path(v);
                 return {};
             },
         },
-        ZHLN::CommandHandler {
+        ZHLN::CliFlag {
             .key         = "--graphics-config",
             .placeholder = "<file.lua>",
             .description = "Lua graphics profile to watch (default: config/graphics.lua)",
-            .action      = [](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+            .action      = [](std::string_view v) -> std::expected<void, ZHLN::CommandLineError> {
                 if (v.empty()) return std::unexpected(ZHLN::CommandLineError::MissingValue);
                 s_HostLaunchConfig.graphicsConfigPath = std::filesystem::path(v);
                 return {};
             },
         },
     };
-    const auto parsed = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)), appHandlers);
+    const auto parsed = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), config, appHandlers);
     if (!parsed) {
         ZHLN::LogError("[SceneHost] command line: {}", parsed.error());
         return EXIT_FAILURE;
     }
-    if (parsed->helpRequested || parsed->versionRequested || parsed->printGraphRequested) return EXIT_SUCCESS;
-    ZHLN::SetLogLevel(parsed->logLevel);
+    if (parsed->helpRequested || parsed->versionRequested || parsed->graphRequested) return EXIT_SUCCESS;
+    ZHLN::SetLogLevel(config.logLevel);
 #if !defined(ZHLN_SCENE_HOST_HAS_LUA)
     if (s_HostLaunchConfig.graphicsConfigPath != "config/graphics.lua") {
         ZHLN::LogError("[SceneHost] --graphics-config requires the Lua extension");
@@ -221,14 +222,6 @@ auto main(int argc, char* argv[]) -> int {
 #endif
     ZHLN::SetupSignalHandler(crashState);
     const auto pollCrashes = [](ZHLN::Engine& engine) { ZHLN::CheckForCrashes(crashState, &engine); };
-    const ZHLN::EngineRunConfig config {
-        .appName        = "Zahlen Scene Host",
-        .vsync          = parsed->vsync,
-        .fullscreen     = parsed->fullscreen,
-        .validationMode = parsed->validationMode,
-        .headless       = parsed->headless,
-        .fpsLimit       = parsed->fpsLimit,
-    };
     auto result = ZHLN::Engine::Run(config, nullptr, &InstallHostWithState, pollCrashes);
     if (!result) {
         ZHLN::LogError("[SceneHost] run failed: {}", result.error());

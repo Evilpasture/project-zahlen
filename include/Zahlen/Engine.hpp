@@ -61,17 +61,6 @@ struct UIInput;
 class ArticulationSystem;
 class Engine;
 
-// Launch settings only. The application owns its callbacks and composition;
-// neither belongs in the configuration used to create an engine.
-struct EngineRunConfig {
-    std::string_view appName        = "Zahlen Engine";
-    bool             vsync          = true;
-    bool             fullscreen     = false;
-    ValidationMode   validationMode = ValidationMode::On;
-    bool             headless       = false;
-    uint32_t         fpsLimit       = 0;
-};
-
 class ZHLN_API Engine {
   public:
     using UICallback = std::function<void(Engine&)>;
@@ -264,14 +253,9 @@ class ZHLN_API Engine {
     // cannot name them itself (ARCHITECTURE.md 1.2).
     using ModuleInstaller = void (*)(Engine&);
     using EventPoller     = void (*)(Engine&);
-    using RunConfig       = EngineRunConfig;
-
-    // Translation of launch settings for programs that own their frame loop.
-    [[nodiscard]] static auto MakeConfig(const RunConfig& runConfig) -> EngineConfig;
-
     // Low-level runner for custom hosts. The optional event poller is an
-    // explicit frame seam (not a lifecycle hook smuggled through RunConfig).
-    static auto Run(const RunConfig& runConfig = {}, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr,
+    // explicit frame seam (not a lifecycle hook smuggled through EngineConfig).
+    static auto Run(const EngineConfig& config = {}, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr,
                     EventPoller pollEvents = nullptr) -> std::expected<void, ErrorCode>;
 
   private:

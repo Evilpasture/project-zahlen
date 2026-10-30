@@ -94,11 +94,9 @@ struct Kernel::Impl {
 
     std::vector<std::unique_ptr<Window>> secondaryWindows;
 
-    RenderConfig renderConfig;
-    // Owned storage backing renderConfig.initialPipelineBinaryData (the span
-    // in the config is non-owning). Loaded from the on-disk cache when the
-    // caller did not provide bytes; persistPipelineBinaries records that the
-    // kernel took on writing the updated cache back at shutdown.
+    EngineConfig config;
+    // Own the bytes backing config.initialPipelineBinaryData across renderer
+    // recreation. Only persist cache data loaded by the kernel itself.
     std::vector<uint8_t> pipelineBinaryData;
     FS::FileWatchHandle  shaderDirectoryWatch    = 0;
     bool                 persistPipelineBinaries = false;
@@ -130,29 +128,33 @@ struct Kernel::Impl {
     }
 };
 
-auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode> {
+auto Kernel::Create(const EngineConfig& config, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode> {
     auto instance = std::unique_ptr<Kernel>(new (std::nothrow) Kernel());
     if (!instance) {
         return std::unexpected(KernelInitError::KernelAllocationFailed);
     }
-    if (auto result = instance->InitInternal(renderConfig, inputReceiver); !result) {
+    if (auto result = instance->InitInternal(config, inputReceiver); !result) {
         return std::unexpected(result.error());
     }
     return instance;
 }
 
-auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode> {
+auto Kernel::InitInternal(const EngineConfig& cfg, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode> {
     _impl                    = std::make_unique<Impl>();
-    _impl->renderConfig      = cfg;
+    _impl->config            = cfg;
     _impl->fileSystemWatcher = std::make_unique<FS::FileSystemWatcher>();
 
-    if (_impl->renderConfig.initialPipelineBinaryData.empty()) {
-        _impl->pipelineBinaryData                    = LoadPipelineBinaryBytes(FS::Paths::PipelineCacheFile());
-        _impl->renderConfig.initialPipelineBinaryData = _impl->pipelineBinaryData;
-        _impl->persistPipelineBinaries                  = true;
+    // Own caller-supplied bytes as well as on-disk bytes: the config's span
+    // must remain valid if a device is recreated after the caller returns.
+    if (_impl->config.initialPipelineBinaryData.empty()) {
+        _impl->pipelineBinaryData = LoadPipelineBinaryBytes(FS::Paths::PipelineCacheFile());
+        _impl->persistPipelineBinaries = true;
+    } else {
+        _impl->pipelineBinaryData.assign(cfg.initialPipelineBinaryData.begin(), cfg.initialPipelineBinaryData.end());
     }
-    if (_impl->renderConfig.crashDumpPath.empty()) {
-        _impl->renderConfig.crashDumpPath = FS::Paths::CrashDumpFile().string();
+    _impl->config.initialPipelineBinaryData = _impl->pipelineBinaryData;
+    if (_impl->config.crashDumpPath.empty()) {
+        _impl->config.crashDumpPath = FS::Paths::CrashDumpFile().string();
     }
 
     if (cfg.headless) {
@@ -176,7 +178,7 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
 
     InitRenderDocAPI();
 
-    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig);
+    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->config);
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
@@ -326,8 +328,8 @@ auto Kernel::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
     return *_impl->fileSystemWatcher;
 }
 
-auto Kernel::GetRenderConfig() const noexcept -> const RenderConfig& {
-    return _impl->renderConfig;
+auto Kernel::GetConfig() const noexcept -> const EngineConfig& {
+    return _impl->config;
 }
 
 auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
@@ -335,7 +337,7 @@ auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     _impl->StopShaderObservation();
     _impl->renderContext.reset();
 
-    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig);
+    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->config);
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }

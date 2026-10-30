@@ -79,7 +79,7 @@ before using them with the version-6 shaders.
   `Vk::Context` records whether the required mesh commands resolved, and
   `Context::MeshShadersSupported()` is the single source of truth.
 
-`RenderConfig::enableMeshShading` (default true) is the create-time request.
+`EngineConfig::enableMeshShading` (default true) is the create-time request.
 `ZHLN_NO_MESH_SHADING=1` forces the vertex path at `RenderContext::Create`
 (mirrors `ZHLN_NO_GPU_CULLING` as an env latch). There is no mid-run toggle:
 both pipelines are still built, but which path is bound is fixed for the
@@ -234,7 +234,7 @@ and quietly stay on the vertex pipeline forever — the feature would look
 | --- | --- |
 | `meshlet_partitioning_invariants` | CPU only. Degenerate input falls back; one triangle → one meshlet; on a 48×48 grid no primitive is lost or duplicated, every micro index resolves inside its cluster, every referenced vertex lies inside the baked bounding sphere (cluster culling is only sound if it does), every `triangleOffset` is 4-byte aligned. |
 | `procedural_meshes_carry_meshlet_streams` | Box/plane/tetrahedron all upload the three meshlet streams **and** keep their raw vertex pool intact (BLAS + vertex fallback). Regression guard for the "feature silently never runs" failure mode. |
-| `mesh_shading_follows_render_config` | `RenderConfig::enableMeshShading` selects the active path; unsupported devices never report the path as active. |
+| `mesh_shading_follows_engine_config` | `EngineConfig::enableMeshShading` selects the active path; unsupported devices never report the path as active. |
 | `mesh_and_vertex_paths_render_identically` | Renders the same scene twice in one process — once through task/mesh, once through the vertex pipeline — and compares the framebuffers. |
 
 The parity test controls for engine nondeterminism explicitly:

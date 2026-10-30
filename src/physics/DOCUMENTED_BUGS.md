@@ -145,6 +145,6 @@ Stack Trace:
     ZHLN::Engine&, float, float&, ZHLN::ScriptRunner&, /* file-change service */,
     ZHLN::InputSystem&, ZHLN::AnimationSystem&, ZHLN::ArticulationSystem&, ZHLN::TransformSystem
 ) + 328
-7   zahlen                              0x0000000102370434 RunGame(ZHLN::CommandLineOptions const&) + 1480
+7   zahlen                              0x0000000102370434 RunGame(...) + 1480
 8   zahlen                              0x000000010235fc14 main + 340
 9   dyld                                0x0000000186cbab4c start + 6000

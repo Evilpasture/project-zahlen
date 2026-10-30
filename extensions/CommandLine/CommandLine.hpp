@@ -8,8 +8,7 @@
 // Generic, engine-independent command-line tokenizer, flag dispatcher, and
 // formatted `--help` / `--version` printer. Links zero engine runtime symbols,
 // allowing CLI tools (`ztest`, test workers, offline utilities) to expose only
-// their own flags while engine frontends layer <CommandLine/EngineCommandLine.hpp>
-// on top.
+// their own flags while host layers bind their own configuration through reflection.
 
 #include <cstdint>
 #include <expected>
@@ -24,6 +23,7 @@ enum class CommandLineError : uint8_t {
     InvalidValue = 1,
     MissingValue,
     UnknownArgument,
+    DuplicateFlag,
 };
 
 struct CliToken {
