@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/TrackingMemoryResource.hpp"
 #include <Zahlen/ecs/EventBus.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -59,8 +60,9 @@ struct TrackedPayloadEvent {
 
 void test_event_bus_repeated_drains_and_destructor_accounting() {
     TrackedPayloadEvent::liveInstances = 0;
+    TrackingMemoryResource pages;
     {
-        ECS::EventBus bus;
+        ECS::EventBus bus {&pages};
         Expect(bus.ChannelCount()) == 0u;
         Expect(bus.Empty<DamageEvent>());
 
@@ -70,8 +72,10 @@ void test_event_bus_repeated_drains_and_destructor_accounting() {
         Expect(bus.Count<TrackedPayloadEvent>()) == 2u;
         Expect(TrackedPayloadEvent::liveInstances) == 2;
 
-        // Repeated drain/push cycles deliver each event exactly once, regardless
-        // of how the bus stores or reuses its backing memory.
+        // Repeated drain/push cycles deliver each event exactly once. After
+        // the first two cycles have warmed both buffers, no more pages should
+        // be requested from the injected provider.
+        size_t warmedAllocations = 0;
         for (uint32_t frame = 0; frame < 64; ++frame) {
             bus.Push(DamageEvent {.entityIndex = frame, .amount = static_cast<int32_t>(frame * 3)});
             const size_t drained = bus.Drain<DamageEvent>([&](const DamageEvent& ev) {
@@ -80,7 +84,13 @@ void test_event_bus_repeated_drains_and_destructor_accounting() {
             });
             Expect(drained) == 1u;
             Expect(bus.Empty<DamageEvent>());
+            if (frame == 1) {
+                warmedAllocations = pages.Allocations();
+            } else if (frame > 1) {
+                Expect(pages.Allocations()) == warmedAllocations;
+            }
         }
+        ExpectGt(warmedAllocations, 0u);
 
         // Draining TrackedPayloadEvent destroys every visited object.
         std::vector<int> codes;
@@ -106,12 +116,17 @@ void test_event_bus_repeated_drains_and_destructor_accounting() {
         bus.Clear();
         Expect(TrackedPayloadEvent::liveInstances) == 0;
         Expect(bus.ChannelCount()) == 0u;
+        Expect(pages.LiveBlocks()) == 0u;
     }
     Expect(TrackedPayloadEvent::liveInstances) == 0;
+    Expect(pages.LiveBlocks()) == 0u;
+    Expect(pages.LiveBytes()) == 0u;
+    Expect(pages.Deallocations()) == pages.Allocations();
 }
 
 void test_event_bus_reentrant_push_multi_page_growth_and_move() {
-    ECS::EventBus bus;
+    TrackingMemoryResource pages;
+    ECS::EventBus          bus {&pages};
 
     // Over-aligned 64-byte event type + multi-page growth (2048 events = 128 KiB).
     for (uint64_t i = 0; i < 2048; ++i) {
@@ -149,6 +164,35 @@ void test_event_bus_reentrant_push_multi_page_growth_and_move() {
     Expect(reader.Size()) == 1u;
     Expect(reader[0].entityIndex) == 99u;
     Expect(reader[0].amount) == 100;
+
+    // A nested drain owns its temporary page through the same injected
+    // provider, even after the channel and bus have moved.
+    const size_t freesBeforeNested = pages.Deallocations();
+    size_t       nestedCount       = 0;
+    Expect(movedBus.Drain<DamageEvent>([&](const DamageEvent& ev) {
+        Expect(ev.entityIndex) == 99u;
+        movedBus.Push(DamageEvent {.entityIndex = 100, .amount = 200});
+        nestedCount += movedBus.Drain<DamageEvent>([&](const DamageEvent& inner) {
+            Expect(inner.entityIndex) == 100u;
+        });
+    })) == 1u;
+    Expect(nestedCount) == 1u;
+    ExpectGt(pages.Deallocations(), freesBeforeNested);
+
+    // Move assignment releases the destination's old resource before adopting
+    // the source's; neither allocator is read through EventBus internals.
+    TrackingMemoryResource destinationPages;
+    ECS::EventBus          destination {&destinationPages};
+    destination.Push(DamageEvent {.entityIndex = 5});
+    ExpectGt(destinationPages.LiveBlocks(), 0u);
+    destination = std::move(movedBus);
+    Expect(destinationPages.LiveBlocks()) == 0u;
+    ExpectGt(pages.LiveBlocks(), 0u);
+    destination.Clear();
+    Expect(pages.LiveBlocks()) == 0u;
+    Expect(pages.LiveBytes()) == 0u;
+    Expect(pages.Deallocations()) == pages.Allocations();
+    Expect(destinationPages.Deallocations()) == destinationPages.Allocations();
 }
 
 } // namespace ZHLN::Test

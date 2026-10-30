@@ -141,6 +141,22 @@ void SystemGraphCore::Compile() {
     }
 }
 
+void SystemGraphCore::DispatchTasks(std::span<const TaskSystem::Task> tasks) {
+    if (_taskScheduler != nullptr) {
+        _taskScheduler->Dispatch(tasks);
+    } else {
+        TaskSystem::Dispatch(tasks, nullptr);
+    }
+}
+
+void SystemGraphCore::WaitForTasks(TaskSystem::Counter& completion) {
+    if (_taskScheduler != nullptr) {
+        _taskScheduler->Wait(completion);
+    } else {
+        TaskSystem::Wait(&completion);
+    }
+}
+
 void SystemGraphCore::Execute(void* carrier) {
     if (_nodes.empty()) {
         return;
@@ -231,14 +247,14 @@ void SystemGraphCore::Execute(void* carrier) {
                 tasksSpan[i] = {.func = TaskThunk, .arg = &ctx.payloads[readyNodes[i + 1]]};
             }
 
-            TaskSystem::Dispatch(tasksSpan, nullptr);
+            DispatchTasks(tasksSpan);
         }
 
         // Run the first ready branch inline on the calling thread while worker
         // fibers steal the remaining sibling branches.
         DispatchNode(ctx, readyNodes[0]);
 
-        TaskSystem::Wait(&ctx.completionCounter);
+        WaitForTasks(ctx.completionCounter);
     }
 
     for (auto& node: _nodes) {
@@ -334,7 +350,7 @@ void SystemGraphCore::DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx) {
                 taskBuffer[i] = {.func = TaskThunk, .arg = &ctx.payloads[unlocked[i + 1]]};
             }
 
-            TaskSystem::Dispatch(std::span<const TaskSystem::Task>(taskBuffer, forkCount), nullptr);
+            DispatchTasks(std::span<const TaskSystem::Task>(taskBuffer, forkCount));
         }
 
         // Tail-continue into unlocked[0] on the current fiber/thread, transferring

@@ -3,6 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
+#include "helpers/MockTaskScheduler.hpp"
 #include "Zahlen/Render/Render.hpp"
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/AssetManager.hpp>
@@ -469,7 +470,23 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectTrue(font.texture == atlas);
                 ZHLN::Test::ExpectTrue(font.GlyphFor('A').x1 == glyphA.x1);
 
-                // And the rebuilt frame still runs.
+                // On the first rebuilt frame, observe scheduling through the
+                // public Engine::GetRenderGraph() rather than its internal
+                // graph or the unrelated Vulkan frame graph. Keep the mock
+                // alive until Execute and its Wait have completed.
+                if (pass == 0) {
+                    ZHLN::Test::MockTaskScheduler scheduler;
+                    auto& renderGraph = engine->GetRenderGraph();
+                    renderGraph.SetTaskScheduler(&scheduler);
+                    ZHLN::Test::Headless::TickFrames(*engine, 1);
+                    renderGraph.SetTaskScheduler(nullptr);
+                    ZHLN::Test::ExpectGt(scheduler.Dispatches(), 0u);
+                    ZHLN::Test::ExpectGt(scheduler.Submitted(), 0u);
+                    ZHLN::Test::ExpectGt(scheduler.Waits(), 0u);
+                    ZHLN::Test::ExpectEq(scheduler.IncompleteWaits(), 0u);
+                }
+
+                // And the rebuilt frame still runs with the default scheduler.
                 ZHLN::Test::Headless::TickFrames(*engine, 2);
             }
 

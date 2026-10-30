@@ -24,6 +24,7 @@
 #include <memory>
 #include <new>
 #include <ranges>
+#include <span>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -642,6 +643,18 @@ class LocalBlock {
     TemplatedDetail::LocalLayout _layout {};
 };
 
+// Optional scheduling dependency for an ECS graph. Task argument storage and
+// the completion counter belong to Execute(), so a scheduler must finish every
+// submitted task before Wait returns. Graph tasks update the counter themselves;
+// Dispatch must not alter it. Calls may be re-entrant or arrive from workers.
+// The scheduler is caller-owned and must outlive any graph execution using it.
+class ZHLN_API GraphTaskScheduler {
+  public:
+    virtual ~GraphTaskScheduler() = default;
+    virtual void Dispatch(std::span<const TaskSystem::Task> tasks) = 0;
+    virtual void Wait(TaskSystem::Counter& completion) = 0;
+};
+
 // The mechanism of a graph: nodes, conflict analysis, parallel dispatch. It
 // knows nothing about services or frames -- what a system is invoked with is
 // whatever carrier the derived, typed graph hands it, erased to void* here.
@@ -665,6 +678,10 @@ class ZHLN_API SystemGraphCore {
 
     void Compile();
     void Execute(void* carrier);
+
+    // Inherited by SimGraph and the Engine::GetRenderGraph() RenderGraph.
+    // Set only while Execute is idle; nullptr restores TaskSystem dispatch.
+    void SetTaskScheduler(GraphTaskScheduler* scheduler) noexcept { _taskScheduler = scheduler; }
 
     void               SetSystemEnabled(std::string_view name, bool enabled) noexcept;
     [[nodiscard]] auto IsSystemEnabled(std::string_view name) const noexcept -> bool;
@@ -697,6 +714,8 @@ class ZHLN_API SystemGraphCore {
 
     static void TaskThunk(void* arg);
     void        DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx);
+    void        DispatchTasks(std::span<const TaskSystem::Task> tasks);
+    void        WaitForTasks(TaskSystem::Counter& completion);
 
     // Allocate this node's Local<T> storage and optional private command buffer
     // from the layout its signature produced. Every path that adds a node goes
@@ -705,6 +724,7 @@ class ZHLN_API SystemGraphCore {
 
     Registry*                      _commandRegistry = nullptr;
     EntityCommandBuffer::DestroyFn _commandDestroy  = nullptr;
+    GraphTaskScheduler*            _taskScheduler   = nullptr;
     std::vector<Node>              _nodes;
     std::vector<uint32_t>          _entryNodes;
 };

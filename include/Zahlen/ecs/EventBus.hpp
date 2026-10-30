@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <memory_resource>
 #include <new>
 #include <span>
 #include <type_traits>
@@ -32,10 +33,11 @@ class EventWriter;
 // Page-slab-backed typed ECS event bus.
 //
 // Design:
-//   * Zero `operator new` / `std::vector` / `std::unique_ptr`: channel descriptors
-//     are bump-allocated from OS page slabs (`AllocatePages` / `FreePages`), and
-//     each typed channel owns a pair of contiguous page-backed buffers (`primary`
-//     and `scratch`).
+//   * Channel descriptors are bump-allocated from page-aligned slabs, and each
+//     typed channel owns a pair of contiguous buffers (`primary` and `scratch`).
+//     The default memory resource maps OS pages; callers can supply a resource
+//     to observe or customize all bus-owned allocations without examining the
+//     buffers or changing the event API.
 //   * Zero steady-state allocation across frames and `Drain<T>()`: draining swaps
 //     `primary` with `scratch`, visits the captured events while allowing re-entrant
 //     `Push<T>()` calls to land cleanly in the fresh `primary` buffer, destroys the
@@ -47,7 +49,15 @@ class EventWriter;
 //     multiple `EventReader<A>`s) concurrently across worker fibers.
 class EventBus {
   public:
-    EventBus() noexcept = default;
+    // The supplied resource must return memory aligned to GetPageSize() for
+    // allocations of page-rounded byte counts. It remains caller-owned and must
+    // outlive this bus (including any bus the contents are moved into). A null
+    // resource uses the OS-page-backed default.
+    EventBus() noexcept: EventBus(nullptr) {
+    }
+    explicit EventBus(std::pmr::memory_resource* pages) noexcept:
+        _pages(pages != nullptr ? pages : DefaultPageResource()) {
+    }
     ~EventBus() noexcept {
         Clear();
     }
@@ -56,7 +66,8 @@ class EventBus {
     auto operator=(const EventBus&) -> EventBus& = delete;
 
     EventBus(EventBus&& other) noexcept
-        : _head(other._head.exchange(nullptr, std::memory_order::acq_rel)),
+        : _pages(other._pages),
+          _head(other._head.exchange(nullptr, std::memory_order::acq_rel)),
           _slab(std::exchange(other._slab, nullptr)),
           _channelCount(other._channelCount.exchange(0, std::memory_order::acq_rel)) {
     }
@@ -64,6 +75,7 @@ class EventBus {
     auto operator=(EventBus&& other) noexcept -> EventBus& {
         if (this != &other) {
             Clear();
+            _pages = other._pages;
             _head.store(other._head.exchange(nullptr, std::memory_order::acq_rel), std::memory_order::release);
             _slab = std::exchange(other._slab, nullptr);
             _channelCount.store(other._channelCount.exchange(0, std::memory_order::acq_rel), std::memory_order::release);
@@ -178,7 +190,7 @@ class EventBus {
             SlabChunk*   prev  = chunk->prev;
             const size_t bytes = chunk->mappedBytes;
             std::destroy_at(chunk);
-            FreePages(chunk, bytes);
+            _pages->deallocate(chunk, bytes, GetPageSize());
             chunk = prev;
         }
     }
@@ -190,6 +202,30 @@ class EventBus {
   private:
     template <typename T>
     friend class EventWriter;
+
+    class OsPageResource final : public std::pmr::memory_resource {
+        auto do_allocate(size_t bytes, size_t alignment) -> void* override {
+            Assert(alignment <= GetPageSize(), "EventBus page alignment exceeds the OS page size");
+            void* const memory = AllocatePages(bytes);
+            if (memory == nullptr) {
+                Panic("EventBus could not map {} bytes of backing pages", bytes);
+            }
+            return memory;
+        }
+
+        void do_deallocate(void* memory, size_t bytes, size_t) override {
+            FreePages(memory, bytes);
+        }
+
+        [[nodiscard]] auto do_is_equal(const std::pmr::memory_resource& other) const noexcept -> bool override {
+            return this == &other;
+        }
+    };
+
+    [[nodiscard]] static auto DefaultPageResource() noexcept -> std::pmr::memory_resource* {
+        static OsPageResource pages;
+        return &pages;
+    }
 
     struct SlabChunk {
         SlabChunk* prev        = nullptr;
@@ -206,12 +242,14 @@ class EventBus {
 
     template <typename T>
     struct PageBuffer {
-        T*     data        = nullptr;
-        size_t count       = 0;
-        size_t capacity    = 0;
-        size_t mappedBytes = 0;
+        std::pmr::memory_resource* pages       = nullptr;
+        T*                         data        = nullptr;
+        size_t                     count       = 0;
+        size_t                     capacity    = 0;
+        size_t                     mappedBytes = 0;
 
-        PageBuffer() noexcept = default;
+        explicit PageBuffer(std::pmr::memory_resource* resource) noexcept: pages(resource) {
+        }
         ~PageBuffer() noexcept {
             ReleasePages();
         }
@@ -220,7 +258,8 @@ class EventBus {
         auto operator=(const PageBuffer&) -> PageBuffer& = delete;
 
         PageBuffer(PageBuffer&& other) noexcept
-            : data(std::exchange(other.data, nullptr)),
+            : pages(other.pages),
+              data(std::exchange(other.data, nullptr)),
               count(std::exchange(other.count, 0)),
               capacity(std::exchange(other.capacity, 0)),
               mappedBytes(std::exchange(other.mappedBytes, 0)) {
@@ -229,6 +268,7 @@ class EventBus {
         auto operator=(PageBuffer&& other) noexcept -> PageBuffer& {
             if (this != &other) {
                 ReleasePages();
+                pages       = other.pages;
                 data        = std::exchange(other.data, nullptr);
                 count       = std::exchange(other.count, 0);
                 capacity    = std::exchange(other.capacity, 0);
@@ -238,6 +278,7 @@ class EventBus {
         }
 
         void Swap(PageBuffer& other) noexcept {
+            std::swap(pages, other.pages);
             std::swap(data, other.data);
             std::swap(count, other.count);
             std::swap(capacity, other.capacity);
@@ -252,7 +293,7 @@ class EventBus {
 
             const size_t minBytes  = std::max(GetPageSize(), needed * sizeof(T));
             const size_t nextBytes = AlignUpToPage(std::max(minBytes, mappedBytes * 2));
-            void*        raw       = AllocatePages(nextBytes);
+            void*        raw       = pages->allocate(nextBytes, GetPageSize());
             if (raw == nullptr) {
                 Panic("EventBus could not map {} bytes of backing pages", nextBytes);
             }
@@ -269,7 +310,7 @@ class EventBus {
                 }
             }
             if (data != nullptr) {
-                FreePages(data, mappedBytes);
+                pages->deallocate(data, mappedBytes, GetPageSize());
             }
 
             data        = nextData;
@@ -305,7 +346,7 @@ class EventBus {
         void ReleasePages() noexcept {
             ClearRetainingPages();
             if (data != nullptr) {
-                FreePages(data, mappedBytes);
+                pages->deallocate(data, mappedBytes, GetPageSize());
                 data        = nullptr;
                 capacity    = 0;
                 mappedBytes = 0;
@@ -315,11 +356,11 @@ class EventBus {
 
     template <typename T>
     struct TypedChannel final : ChannelNode {
-        PageBuffer<T> primary {};
-        PageBuffer<T> scratch {};
+        PageBuffer<T> primary;
+        PageBuffer<T> scratch;
         bool          draining = false;
 
-        explicit TypedChannel(uint32_t typeHash) noexcept {
+        explicit TypedChannel(uint32_t typeHash, std::pmr::memory_resource* pages) noexcept: primary(pages), scratch(pages) {
             hash          = typeHash;
             destroyFn     = &DestroySelf;
             clearEventsFn = &ClearSelf;
@@ -366,7 +407,7 @@ class EventBus {
 
             // Re-entrant `Drain<T>` inside a `Drain<T>` callback: isolate into a
             // temporary page buffer so the outer walk's `scratch` stays intact.
-            PageBuffer<T> nested {};
+            PageBuffer<T> nested {primary.pages};
             primary.Swap(nested);
             const size_t drained = nested.count;
             for (size_t i = 0; i < drained; ++i) {
@@ -397,7 +438,7 @@ class EventBus {
 
         const size_t headerEnd  = Math::AlignUp(sizeof(SlabChunk), alignment);
         const size_t chunkBytes = AlignUpToPage(std::max(GetPageSize(), headerEnd + bytes));
-        void*        raw        = AllocatePages(chunkBytes);
+        void*        raw        = _pages->allocate(chunkBytes, GetPageSize());
         if (raw == nullptr) {
             Panic("EventBus could not map {} bytes for channel slab", chunkBytes);
         }
@@ -441,7 +482,7 @@ class EventBus {
                 return existing;
             }
             void* memory  = AllocateInSlabLocked(sizeof(TypedChannel<T>), alignof(TypedChannel<T>));
-            auto* channel = std::construct_at(static_cast<TypedChannel<T>*>(memory), GetTypeHash<T>());
+            auto* channel = std::construct_at(static_cast<TypedChannel<T>*>(memory), GetTypeHash<T>(), _pages);
             channel->next.store(_head.load(std::memory_order::relaxed), std::memory_order::relaxed);
             _head.store(channel, std::memory_order::release);
             _channelCount.fetch_add(1, std::memory_order::release);
@@ -449,10 +490,11 @@ class EventBus {
         });
     }
 
-    Atomic<ChannelNode*> _head {nullptr};
-    SlabChunk*           _slab = nullptr;
-    Atomic<size_t>       _channelCount {0};
-    mutable Mutex        _channelCreateMutex;
+    std::pmr::memory_resource* _pages        = nullptr;
+    Atomic<ChannelNode*>      _head         {nullptr};
+    SlabChunk*                 _slab         = nullptr;
+    Atomic<size_t>             _channelCount {0};
+    mutable Mutex              _channelCreateMutex;
 };
 
 // Read-only view of pending events of type `T` for ECS systems (`SystemGraph`).

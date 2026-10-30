@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/MockTaskScheduler.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Frame.hpp>
@@ -23,6 +24,7 @@ enum class SystemGraphTestError : uint8_t {
     DeclarativeSignatureFailed ZHLN_ANNOTATION(ZHLN::Description<"Reflected system name or derived access pattern was incorrect."> {}),
     QueryIterationFailed ZHLN_ANNOTATION(ZHLN::Description<"A typed query did not preserve component access or intersection semantics."> {}),
     ParameterResolutionFailed ZHLN_ANNOTATION(ZHLN::Description<"A signature-driven system received the wrong context value."> {}),
+    SchedulingObserverFailed ZHLN_ANNOTATION(ZHLN::Description<"The injected scheduler did not observe graph dispatch and completion."> {}),
 };
 
 // Mock components for access hazard tracking
@@ -48,6 +50,11 @@ template <typename Q>
 concept CanProjectWriteA = requires(Q q) { q.template Select<TestCompA&>(); };
 static_assert(!CanReadB<WriteQuery>);
 static_assert(!CanProjectWriteA<ReadQuery>);
+// Engine::GetRenderGraph returns this ECS graph, not the Vulkan frame graph.
+static_assert(std::is_same_v<decltype(std::declval<ZHLN::Engine&>().GetRenderGraph()), ZHLN::RenderGraph&>);
+static_assert(requires(ZHLN::RenderGraph& graph, ZHLN::ECS::GraphTaskScheduler* scheduler) {
+    graph.SetTaskScheduler(scheduler);
+});
 
 namespace {
 std::atomic<int> typedOrder {0};
@@ -258,9 +265,29 @@ struct SystemGraphTestSuite {
             const ZHLN::Frame frame {.dt = TestDeltaTime};
             graph.Execute(frame);
 
-            // SysC MUST execute after both SysA and SysB complete
+            // SysC MUST execute after both SysA and SysB complete.
             if (!(ZHLN::Test::ExpectGt(orderC.load(), orderA.load()) && ZHLN::Test::ExpectGt(orderC.load(), orderB.load()))) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
+            }
+
+            // The same public graph API used by Engine::GetRenderGraph accepts
+            // a caller-owned scheduler. Inspect its dispatch/Wait observations,
+            // not the graph's private task arrays or completion storage.
+            ZHLN::Test::MockTaskScheduler scheduler;
+            graph.SetTaskScheduler(&scheduler);
+            executionCounter.store(1);
+            orderA.store(0);
+            orderB.store(0);
+            orderC.store(0);
+            graph.Execute(frame);
+            graph.SetTaskScheduler(nullptr);
+
+            if (!(ZHLN::Test::ExpectGt(orderC.load(), orderA.load()) && ZHLN::Test::ExpectGt(orderC.load(), orderB.load()))) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
+            }
+            if (!(ZHLN::Test::ExpectGt(scheduler.Dispatches(), 0u) && ZHLN::Test::ExpectGt(scheduler.Submitted(), 0u) &&
+                  ZHLN::Test::ExpectEq(scheduler.Waits(), 1u) && ZHLN::Test::ExpectEq(scheduler.IncompleteWaits(), 0u))) {
+                return std::unexpected(SystemGraphTestError::SchedulingObserverFailed);
             }
 
             return {};

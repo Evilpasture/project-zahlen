@@ -14,6 +14,7 @@
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <cstddef>
+#include <memory_resource>
 #include <source_location>
 #include <span>
 #include <string>
@@ -68,6 +69,8 @@ class ZHLN_API SparseSet {
   public:
     using DestructorFn = void (*)(void*);
     SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor = nullptr);
+    SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor,
+              std::pmr::memory_resource* memory);
     ~SparseSet();
 
     SparseSet(const SparseSet&)                    = delete;
@@ -100,11 +103,12 @@ class ZHLN_API SparseSet {
     Entity*    _dense  = nullptr;
     std::byte* _data   = nullptr;
 
-    size_t _elementSize;
-    size_t _alignment;
-    size_t _count          = 0;
-    size_t _denseCapacity  = 0;
-    size_t _sparseCapacity = 0;
+    std::pmr::memory_resource* _memory;
+    size_t                     _elementSize;
+    size_t                     _alignment;
+    size_t                     _count          = 0;
+    size_t                     _denseCapacity  = 0;
+    size_t                     _sparseCapacity = 0;
 
     BufferSync*  _sync;
     DestructorFn _destructor = nullptr;
@@ -131,7 +135,12 @@ class ZHLN_API Registry {
   public:
     mutable BufferSync sync {};
 
+    // All registry-owned storage (entity tables, component sets, metadata)
+    // uses this caller-owned resource. Null selects the standard resource;
+    // the resource must outlive the registry. Process-wide component-family
+    // lookup tables are not registry-owned and do not use it.
     Registry();
+    explicit Registry(std::pmr::memory_resource* memory);
     ~Registry();
 
     auto Create() -> Entity;
@@ -238,7 +247,7 @@ class ZHLN_API Registry {
             if constexpr (!std::is_trivially_destructible_v<DecayedT>) {
                 dt = [](void* ptr) -> auto { static_cast<DecayedT*>(ptr)->~DecayedT(); };
             }
-            _components[id] = new SparseSet(sizeof(DecayedT), alignof(DecayedT), &this->sync, dt);
+            _components[id] = CreateSparseSet(sizeof(DecayedT), alignof(DecayedT), dt);
         }
 
         if constexpr (std::is_trivially_copyable_v<DecayedT>) {
@@ -399,7 +408,7 @@ class ZHLN_API Registry {
             if constexpr (!std::is_trivially_destructible_v<T>) {
                 dt = [](void* ptr) -> auto { static_cast<T*>(ptr)->~T(); };
             }
-            _components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync, dt);
+            _components[id] = CreateSparseSet(sizeof(T), alignof(T), dt);
         }
 
         _typeInfo[id] = {
@@ -495,16 +504,18 @@ class ZHLN_API Registry {
     }
 
   private:
-    uint32_t* _generations    = nullptr;
-    uint32_t* _freeIndices    = nullptr;
-    size_t    _entityCount    = 0;
-    size_t    _entityCapacity = 0;
-    size_t    _freeCount      = 0;
+    std::pmr::memory_resource* _memory         = nullptr;
+    uint32_t*                  _generations    = nullptr;
+    uint32_t*                  _freeIndices    = nullptr;
+    size_t                     _entityCount    = 0;
+    size_t                     _entityCapacity = 0;
+    size_t                     _freeCount      = 0;
 
-    SparseSet**                    _components   = nullptr;
-    size_t                         _compCapacity = 0;
-    std::vector<ComponentTypeInfo> _typeInfo;
+    SparseSet**                         _components   = nullptr;
+    size_t                              _compCapacity = 0;
+    std::pmr::vector<ComponentTypeInfo> _typeInfo;
 
+    [[nodiscard]] auto CreateSparseSet(size_t elementSize, size_t alignment, SparseSet::DestructorFn destructor = nullptr) -> SparseSet*;
     void EnsureEntityCapacity(uint32_t index);
     void EnsureComponentCapacity(uint32_t id);
 };

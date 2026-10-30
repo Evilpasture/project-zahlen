@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/TrackingMemoryResource.hpp"
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <cstdint>
@@ -220,14 +221,34 @@ namespace ZHLN_ANNOTATION(UseFixtures<EcsComponentRegistration> {}) {
         }
 
         std::expected<void, ZHLN::ErrorCode> test_registry_teardown_runs_component_destructors() {
-            uint32_t destructions = 0;
-            uint32_t beforeTeardown = 0;
+            ZHLN::Test::TrackingMemoryResource storage;
+            uint32_t                           destructions   = 0;
+            uint32_t                           beforeTeardown = 0;
             {
-                ZHLN::ECS::Registry reg;
+                ZHLN::ECS::Registry reg {&storage};
+                reg.RegisterComponent<PositionComponent>("PositionComponent");
+                // Grow both the entity tables and component storage; register
+                // metadata and a second set through the public component API.
+                for (uint32_t i = 0; i < 1100; ++i) {
+                    reg.Create(PayloadComponent {.resource = i});
+                }
+                reg.Create(CountedComponent {.destructions = &destructions}, PositionComponent {});
+                ZHLN::Test::ExpectGt(storage.Allocations(), 0u);
+                ZHLN::Test::ExpectGt(storage.LiveBlocks(), 0u);
+
+                const size_t warmedAllocations = storage.Allocations();
+                reg.Clear();
                 reg.Create(CountedComponent {.destructions = &destructions});
+                reg.Create(PayloadComponent {.resource = 7});
+                // Reusing the warmed registry must not grow its storage.
+                ZHLN::Test::Expect(storage.Allocations()) == warmedAllocations;
                 beforeTeardown = destructions; // Account for the Add temporary.
             }
             ZHLN::Test::Expect(destructions) == beforeTeardown + 1;
+            ZHLN::Test::ExpectGt(storage.Allocations(), 0u);
+            ZHLN::Test::Expect(storage.LiveBlocks()) == 0u;
+            ZHLN::Test::Expect(storage.LiveBytes()) == 0u;
+            ZHLN::Test::Expect(storage.Deallocations()) == storage.Allocations();
             return {};
         }
 

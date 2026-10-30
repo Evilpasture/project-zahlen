@@ -3,8 +3,8 @@
 
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <cstdlib>
 #include <cstring>
+#include <memory>
 
 namespace ZHLN::ECS {
 
@@ -15,11 +15,13 @@ uint32_t                            s_TypeCounter = 0;
 HashMap<uint32_t, uint32_t>         s_HashToDense;
 HashMap<std::string_view, uint32_t> s_NameToFamilyID;
 
-auto ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t alignment) -> void* {
-    void* newPtr = ::operator new[](newSize, std::align_val_t {alignment});
+// Keep the old allocation sizes as well as their resource: a memory_resource
+// requires the exact size and alignment supplied at allocation on deallocation.
+auto ReallocAligned(std::pmr::memory_resource* memory, void* oldPtr, size_t oldSize, size_t newSize, size_t alignment) -> void* {
+    void* const newPtr = memory->allocate(newSize, alignment);
     if (oldPtr != nullptr) {
         std::memcpy(newPtr, oldPtr, oldSize);
-        ::operator delete[](oldPtr, std::align_val_t {alignment});
+        memory->deallocate(oldPtr, oldSize, alignment);
     }
     return newPtr;
 }
@@ -49,6 +51,12 @@ auto Registry::GetFamilyIDFromName(std::string_view name) noexcept -> uint32_t {
 
 
 SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor):
+    SparseSet(elementSize, alignment, syncPtr, destructor, nullptr) {
+}
+
+SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor,
+                     std::pmr::memory_resource* memory):
+    _memory(memory != nullptr ? memory : std::pmr::get_default_resource()),
     _elementSize(elementSize), _alignment(alignment), _sync(syncPtr), _destructor(destructor) {
 }
 
@@ -62,13 +70,13 @@ SparseSet::~SparseSet() {
         }
     }
     if (_sparse != nullptr) {
-        ::operator delete[](_sparse, std::align_val_t {alignof(uint32_t)});
+        _memory->deallocate(_sparse, _sparseCapacity * sizeof(uint32_t), alignof(uint32_t));
     }
     if (_dense != nullptr) {
-        ::operator delete[](_dense, std::align_val_t {alignof(Entity)});
+        _memory->deallocate(_dense, _denseCapacity * sizeof(Entity), alignof(Entity));
     }
     if (_data != nullptr) {
-        ::operator delete[](_data, std::align_val_t {_alignment});
+        _memory->deallocate(_data, _denseCapacity * _elementSize, _alignment);
     }
 }
 
@@ -83,7 +91,7 @@ void SparseSet::ResizeSparse(uint32_t required) {
         _sparseCapacity *= 2;
     }
 
-    _sparse = static_cast<uint32_t*>(ReallocAligned(_sparse, oldCap * sizeof(uint32_t), _sparseCapacity * sizeof(uint32_t), alignof(uint32_t)));
+    _sparse = static_cast<uint32_t*>(ReallocAligned(_memory, _sparse, oldCap * sizeof(uint32_t), _sparseCapacity * sizeof(uint32_t), alignof(uint32_t)));
 
     for (size_t i = oldCap; i < _sparseCapacity; ++i) {
         _sparse[i] = INVALID_DENSE;
@@ -98,8 +106,8 @@ void SparseSet::ResizeDense() {
     size_t oldCap  = _denseCapacity;
     _denseCapacity = oldCap == 0 ? 64 : oldCap * 2;
 
-    _dense = static_cast<Entity*>(ReallocAligned(_dense, oldCap * sizeof(Entity), _denseCapacity * sizeof(Entity), alignof(Entity)));
-    _data  = static_cast<std::byte*>(ReallocAligned(_data, oldCap * _elementSize, _denseCapacity * _elementSize, _alignment));
+    _dense = static_cast<Entity*>(ReallocAligned(_memory, _dense, oldCap * sizeof(Entity), _denseCapacity * sizeof(Entity), alignof(Entity)));
+    _data  = static_cast<std::byte*>(ReallocAligned(_memory, _data, oldCap * _elementSize, _denseCapacity * _elementSize, _alignment));
 }
 
 void SparseSet::Insert(Entity entity, const void* data) {
@@ -229,9 +237,19 @@ auto SparseSet::GetEntityView(const void* owner) const noexcept -> BufferView {
 }
 
 
-Registry::Registry() {
+Registry::Registry(): Registry(nullptr) {
+}
+
+Registry::Registry(std::pmr::memory_resource* memory):
+    _memory(memory != nullptr ? memory : std::pmr::get_default_resource()), _typeInfo(_memory) {
     sync.viewExportCount.store(0, std::memory_order::relaxed);
     std::memset(&sync.shadowLock, 0, sizeof(sync.shadowLock));
+}
+
+// Component sets live in the same resource as all of their backing buffers.
+auto Registry::CreateSparseSet(size_t elementSize, size_t alignment, SparseSet::DestructorFn destructor) -> SparseSet* {
+    void* const storage = _memory->allocate(sizeof(SparseSet), alignof(SparseSet));
+    return std::construct_at(static_cast<SparseSet*>(storage), elementSize, alignment, &sync, destructor, _memory);
 }
 
 Registry::~Registry() {
@@ -240,16 +258,19 @@ Registry::~Registry() {
     for (size_t i = 0; i < _compCapacity; ++i) {
         SparseSet* set = _components[i];
         _components[i] = nullptr;
-        delete set;
+        if (set != nullptr) {
+            std::destroy_at(set);
+            _memory->deallocate(set, sizeof(SparseSet), alignof(SparseSet));
+        }
     }
     if (_components != nullptr) {
-        std::free(static_cast<void*>(_components));
+        _memory->deallocate(_components, _compCapacity * sizeof(SparseSet*), alignof(SparseSet*));
     }
     if (_generations != nullptr) {
-        std::free(_generations);
+        _memory->deallocate(_generations, _entityCapacity * sizeof(uint32_t), alignof(uint32_t));
     }
     if (_freeIndices != nullptr) {
-        std::free(_freeIndices);
+        _memory->deallocate(_freeIndices, _entityCapacity * sizeof(uint32_t), alignof(uint32_t));
     }
 }
 
@@ -264,8 +285,10 @@ void Registry::EnsureEntityCapacity(uint32_t index) {
         _entityCapacity *= 2;
     }
 
-    _generations = static_cast<uint32_t*>(std::realloc(_generations, _entityCapacity * sizeof(uint32_t)));
-    _freeIndices = static_cast<uint32_t*>(std::realloc(_freeIndices, _entityCapacity * sizeof(uint32_t)));
+    _generations = static_cast<uint32_t*>(ReallocAligned(_memory, _generations, oldCap * sizeof(uint32_t),
+                                                         _entityCapacity * sizeof(uint32_t), alignof(uint32_t)));
+    _freeIndices = static_cast<uint32_t*>(ReallocAligned(_memory, _freeIndices, oldCap * sizeof(uint32_t),
+                                                         _entityCapacity * sizeof(uint32_t), alignof(uint32_t)));
 
     for (size_t i = oldCap; i < _entityCapacity; ++i) {
         _generations[i]            = 1;
@@ -279,7 +302,8 @@ void Registry::EnsureComponentCapacity(uint32_t id) {
     }
     size_t oldCap = _compCapacity;
     _compCapacity = id + 8;
-    _components   = static_cast<SparseSet**>(std::realloc(static_cast<void*>(_components), _compCapacity * sizeof(SparseSet*)));
+    _components   = static_cast<SparseSet**>(ReallocAligned(_memory, _components, oldCap * sizeof(SparseSet*),
+                                                            _compCapacity * sizeof(SparseSet*), alignof(SparseSet*)));
     for (size_t i = oldCap; i < _compCapacity; ++i) {
         _components[i] = nullptr;
     }
@@ -349,7 +373,7 @@ auto Registry::RegisterComponentDynamic(std::string_view name, size_t size, size
             return;
         }
         MapNameToFamilyID(name, id);
-        _components[id] = new SparseSet(size, alignment, &this->sync);
+        _components[id] = CreateSparseSet(size, alignment);
         _typeInfo[id] = {
             .name      = name,
             .size      = size,
