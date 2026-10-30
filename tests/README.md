@@ -149,6 +149,25 @@ every `test_*` function in that namespace.
   `Timeout<Seconds>` / watchdog deadline, `ztest` attributes the failure to that
   exact node ID and automatically respawns the remaining items in that file/group
   via `--skip-until`.
+- `./build/current/bin/ztest --lf --allow-debugger` (or use any test selector):
+  after an **attributed crash**, prints the normal `[ CRASH ]` diagnostics and
+  asks `> Launch debugger for this case? [Y/N]:`. `N` (or Enter) continues the
+  suite. `Y` opens LLDB on macOS (GDB on Linux, with the other as fallback),
+  automatically runs **only that case**, prints `bt` at the stop, and leaves the
+  debugger interactive. Exit the debugger with `quit` to resume the rest of the
+  suite; the original crash remains a failure in the summary and `--lf` cache.
+  The replay uses the same worker binary, working directory, target labels,
+  filter/mark/strict settings, manifest and sandbox environment, validation
+  override, and PATH prepends. It removes `--ztest-worker` (whose crash handler
+  would hide the fault) and any `--skip-until` from a restarted shard, then
+  selects the crashed file and exact node ID. A terminal is required: if there
+  is none, ztest warns and runs normally without prompts (never reading piped
+  stdin). In interactive debugger mode it runs one worker at a time so another
+  shard's watchdog cannot expire while you are at the debugger prompt; normal
+  runs remain parallel. Timeouts and crashes outside a named case cannot be
+  replayed as an exact case and do not prompt. On Windows, an installed LLDB
+  or GDB executable on PATH is used if present. The standalone PTY/fake-debugger
+  smoke test is `python3 tools/ztest/tests/test_debugger_replay.py`.
 - Crash stack traces: a worker arms `ZHLN::InstallWorkerCrashReports()`
   (`extensions/Signal/WorkerCrashReports.hpp`) in `--ztest-worker` mode. A fatal signal
   (SIGSEGV/SIGBUS/SIGILL/SIGFPE/SIGABRT) or `std::terminate` makes the worker

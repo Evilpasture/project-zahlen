@@ -59,7 +59,11 @@ auto ScratchDir(std::string_view name) -> std::filesystem::path {
     std::error_code             ec;
     std::filesystem::remove_all(dir, ec);
     std::filesystem::create_directories(dir, ec);
-    return dir;
+    // DiskCache resolves its root through weakly_canonical(). On macOS TMPDIR
+    // commonly starts with /var, a symlink to /private/var; compare paths to
+    // the same file using the same canonical root spelling in these tests.
+    const auto canonical = std::filesystem::weakly_canonical(dir, ec);
+    return ec ? dir : canonical;
 }
 
 // Backdate persisted metadata instead of sleeping: expiry tests are deterministic.

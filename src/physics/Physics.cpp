@@ -133,7 +133,16 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
         if (index == JPH::FixedSizeFreeList<JPH::JobSystem::Job>::cInvalidObjectIndex) {
             ZHLN::Panic("Jolt: JobSystemFiber exceeded the maximum number of jobs!");
         }
-        return JPH::JobSystem::JobHandle(&mJobs.Get(index));
+        auto* job = &mJobs.Get(index);
+        // Keep the handle alive before dispatch: a zero-dependency job can
+        // finish on another worker before CreateJob returns. Jolt starts such
+        // jobs immediately; merely constructing their handles leaves the
+        // initial graph idle until a barrier happens to execute it.
+        JPH::JobSystem::JobHandle handle(job);
+        if (inNumDependencies == 0) {
+            QueueJob(job);
+        }
+        return handle;
     }
 
   protected:

@@ -30,6 +30,8 @@
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 
+#include "DebuggerReplay.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -428,6 +430,7 @@ struct ZtestOptions {
     bool                     onlyCpu          = false;
     bool                     onlyGpu          = false;
     bool                     earlyExitOk      = false;
+    bool                     allowDebugger    = false; // --allow-debugger (interactive crash replay)
     bool                     symbolizeCrashes = true;  // --no-symbolize
     uint32_t                 traceFrameLimit  = 0;     // 0 = every frame the worker captured
 };
@@ -795,6 +798,14 @@ auto ParseCommandLine(int argc, char** argv) -> std::optional<ZtestOptions> {
                     return std::unexpected(ZHLN::CommandLineError::InvalidValue);
                 }
                 opts.traceFrameLimit = parsed;
+                return {};
+            },
+        },
+        ZHLN::CliFlag {
+            .key         = "--allow-debugger",
+            .description = "On a case crash, ask to replay that case under LLDB/GDB (requires a terminal; runs one shard at a time)",
+            .action      = [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
+                opts.allowDebugger = true;
                 return {};
             },
         },
@@ -1174,7 +1185,9 @@ struct ProcessResult {
     std::string rawOutput;
 };
 
-auto BuildWorkerArgv(const WorkItem& item, const ZtestOptions& opts, bool listMode) -> std::vector<std::string> {
+enum class WorkerInvocation : uint8_t { List, Orchestrated, DebugReplay };
+
+auto BuildWorkerArgv(const WorkItem& item, const ZtestOptions& opts, WorkerInvocation mode) -> std::vector<std::string> {
     const TargetSpec&        target = *item.target;
     std::vector<std::string> args;
     args.reserve(10 + item.sourceFiles.size() + item.exactCases.size());
@@ -1183,10 +1196,14 @@ auto BuildWorkerArgv(const WorkItem& item, const ZtestOptions& opts, bool listMo
     if (!target.labels.empty()) {
         args.push_back(std::format("--target-tags={}", JoinDelimited(target.labels, ',')));
     }
-    if (listMode) {
+    if (mode == WorkerInvocation::List) {
         args.emplace_back("--ztest-list");
     } else {
-        args.emplace_back("--ztest-worker");
+        if (mode == WorkerInvocation::Orchestrated) {
+            args.emplace_back("--ztest-worker");
+        }
+        // A debugger replay deliberately omits --ztest-worker: its fatal-signal
+        // handler would consume the fault before LLDB/GDB could stop on it.
         if (opts.streamEngineLogs) {
             args.emplace_back("--verbose");
         }
@@ -1209,7 +1226,7 @@ auto BuildWorkerArgv(const WorkItem& item, const ZtestOptions& opts, bool listMo
     for (const auto& exact: item.exactCases) {
         args.push_back(std::format("--exact={}", exact));
     }
-    if (!item.skipUntilCase.empty()) {
+    if (mode != WorkerInvocation::DebugReplay && !item.skipUntilCase.empty()) {
         args.push_back(std::format("--skip-until={}", item.skipUntilCase));
     }
     if (item.suppressWaitIdle) {
@@ -1305,7 +1322,7 @@ auto SpawnWorkerPosix(
         return std::nullopt;
     }
 
-    const auto               args   = BuildWorkerArgv(item, opts, listMode);
+    const auto               args   = BuildWorkerArgv(item, opts, listMode ? WorkerInvocation::List : WorkerInvocation::Orchestrated);
     const auto               envMap = BuildChildEnvMap(mf, target, opts);
     std::vector<std::string> envStorage;
     envStorage.reserve(envMap.size());
@@ -1397,7 +1414,7 @@ auto RunWorkerSyncWin32(const Manifest& mf, const WorkItem& item, const ZtestOpt
         return res;
     }
 
-    const auto  args = BuildWorkerArgv(item, opts, listMode);
+    const auto  args = BuildWorkerArgv(item, opts, listMode ? WorkerInvocation::List : WorkerInvocation::Orchestrated);
     std::string cmdLine;
     for (std::size_t i = 0; i < args.size(); ++i) {
         if (i > 0) {
@@ -2379,6 +2396,11 @@ auto main(int argc, char** argv) -> int {
         return 0;
     }
 
+    const bool debugOnCrash = opts.allowDebugger && Ztest::Debugger::HasInteractiveTerminal();
+    if (opts.allowDebugger && !debugOnCrash) {
+        ZHLN::Println(stderr, "ztest: --allow-debugger needs an interactive terminal; running without debugger prompts.");
+    }
+
     std::vector<WorkItem> pending        = BuildShardedExecutionQueue(discovered, discoveryItems);
     const std::size_t     totalExpected  = discovered.size();
     const std::size_t     totalShards    = pending.size();
@@ -2527,6 +2549,35 @@ auto main(int argc, char** argv) -> int {
                 break;
         }
         outcomes.push_back(std::move(outcome));
+    };
+
+    auto maybeDebugCase = [&](const WorkItem& crashedShard, std::string_view relFile, std::string_view nodeId) {
+        if (!debugOnCrash || relFile.empty() || nodeId.empty()) {
+            return;
+        }
+        statusLine.Clear();
+        if (!Ztest::Debugger::Prompt()) {
+            return;
+        }
+
+        // Replay only this case, even when the crashed worker was a multi-file
+        // GPU shard or a --lf respawn with --skip-until. All selection flags,
+        // target labels, sandbox/validation overrides and path prepends are
+        // derived from the same inputs as the original worker process.
+        WorkItem replayItem = crashedShard;
+        replayItem.sourceFiles = {std::string {relFile}};
+        replayItem.exactCases  = {std::string {nodeId}};
+        replayItem.skipUntilCase.clear();
+        Ztest::Debugger::Replay replay {
+            .argv        = BuildWorkerArgv(replayItem, opts, WorkerInvocation::DebugReplay),
+            .workingDir  = crashedShard.target->workingDir,
+            .environment = BuildChildEnvMap(mf, *crashedShard.target, opts),
+        };
+        ZHLN::Println("  {}[ DEBUG ]{} Replaying {} (quit the debugger to resume ztest).",
+                      ZHLN::Color::Cyan, ZHLN::Color::Reset, nodeId);
+        if (const auto error = Ztest::Debugger::Launch(replay)) {
+            ZHLN::Println(stderr, "ztest: could not debug {}: {}", nodeId, *error);
+        }
     };
 
 #if !defined(_WIN32)
@@ -2732,6 +2783,12 @@ auto main(int argc, char** argv) -> int {
 
         bool spawnedAny = false;
         for (std::size_t idx = 0; !runningSerial && idx < pending.size();) {
+            // A debugger may sit at a prompt indefinitely. In this opt-in mode
+            // never leave another worker (and its watchdog/pipe) active while
+            // we ask the question or wait for the debugger to exit.
+            if (debugOnCrash && !active.empty()) {
+                break;
+            }
             const bool isSerial = EqualsIgnoreCase(pending[idx].target->pool, "serial");
             const bool isGpu    = EqualsIgnoreCase(pending[idx].target->pool, "gpu");
 
@@ -2803,11 +2860,9 @@ auto main(int argc, char** argv) -> int {
             }
             active.push_back(std::move(*spawned));
             spawnedAny = true;
-            if (isSerial || isMeasurement) {
-                // Stop this pass immediately: a measurement owns the machine
-                // until it exits, so nothing else may be launched beside it.
-                // (Reading the item rather than only the pool is what makes a
-                // WaitIdle case in an ordinary "cpu" target isolate correctly.)
+            if (isSerial || isMeasurement || debugOnCrash) {
+                // Measurements own the machine; in debugger mode every worker
+                // does too, so no sibling watchdog is running during a prompt.
                 runningSerial = true;
             } else if (isGpu) {
                 ++runningGpu;
@@ -2921,6 +2976,9 @@ auto main(int argc, char** argv) -> int {
                         .durationUs  = workerMs * 1000,
                         .diagnostics = std::move(diag),
                     });
+                    if (crashSt == CaseStatus::Crash) {
+                        maybeDebugCase(w.item, w.inFlightFile, crashedNodeId);
+                    }
 
                     if (!opts.verbose && !opts.quiet && !w.progressGlyphs.empty()) {
                         statusLine.Clear();
@@ -3109,6 +3167,8 @@ auto main(int argc, char** argv) -> int {
 
         if (!inNodeId.empty()) {
             const std::string crashedId = inNodeId;
+            const CaseStatus  crashSt   = (!crashAnnounced && (res.timedOut || res.exitCode == 124))
+                ? CaseStatus::Timeout : CaseStatus::Crash;
             std::string       diagnostics = std::move(curLog);
             if (!crashReport.empty()) {
                 if (!diagnostics.empty()) {
@@ -3120,10 +3180,13 @@ auto main(int argc, char** argv) -> int {
                 .target      = item.target->name,
                 .relFile     = inFile,
                 .nodeId      = crashedId,
-                .status      = (!crashAnnounced && (res.timedOut || res.exitCode == 124)) ? CaseStatus::Timeout : CaseStatus::Crash,
+                .status      = crashSt,
                 .durationUs  = 0,
                 .diagnostics = std::move(diagnostics),
             });
+            if (crashSt == CaseStatus::Crash) {
+                maybeDebugCase(item, inFile, crashedId);
+            }
             if ((opts.maxFail == 0 || hardFailureCount < opts.maxFail) && item.respawnDepth < 16) {
                 WorkItem resumed      = item;
                 resumed.skipUntilCase = crashedId;
