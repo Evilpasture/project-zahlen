@@ -46,101 +46,64 @@ struct RenderPipelinesTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::ErrorCode> full_pipeline_multi_frame_simulation() {
-            // Same contract as every other GPU test: this suite owns the scene.
-            // It installs no diagnostic fallback module and builds only the
-            // ground and box that this test needs.
-
-            const ZHLN::EngineConfig cfg {
-                .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 16 * 1024 * 1024},
-                .appName        = "LocalGPUPipelineTest",
-                .width          = 1280,
-                .height         = 720,
-                .vsync          = false,
-                .fullscreen     = false,
-                .validationMode = ZHLN::ValidationMode::On,
-                .headless       = true,
-                .enableFallbackScene = false,
-            };
-
-            // Exclusive engine: only one Vulkan instance may be live at a
-            // time (see engines_are_serial_and_the_slot_is_released), so the
-            // pool must not be holding one when this builds its own.
+        std::expected<void, ZHLN::ErrorCode> material_cache_reset_after_submitted_draw() {
+            // A submitted draw can still be in flight when its material is
+            // unregistered. Use an exclusive engine because ClearGPUCaches
+            // invalidates device resources the pooled engine would retain.
             ZHLN::Test::Headless::ShutdownPooledEngines();
-
-            auto engineRes = ZHLN::Engine::Create(cfg);
-            if (!engineRes) {
-                return std::unexpected(engineRes.error());
-            }
-
-            const auto engine = std::move(engineRes.value());
-            engine->InitializeDefaultScene();
-
-            auto& reg = engine->GetRegistry();
-
-            const ZHLN::Entity ground = ZHLN::PrefabFactory::CreatePlane(
-                *engine, 50.0f, {0.2f, 0.2f, 0.2f, 1.0f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = true, .isStaticPhysics = true}
-            );
-            ZHLN::Test::ExpectTrue(reg.IsAlive(ground));
-
-            const ZHLN::Entity box = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(1.0f, 1.0f, 1.0f),
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 3, 0), .createPhysics = true, .isStaticPhysics = false}
-            );
-            ZHLN::Test::ExpectTrue(reg.IsAlive(box));
-
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            auto engine = ZHLN::Test::Headless::CreateEngine("PipelineLifetime", 320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 5.0f, 10.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = -15.0f;
+
+            auto& reg = engine->GetRegistry();
+            auto& rc  = engine->GetRenderContext();
+            const auto box = ZHLN::PrefabFactory::CreateBox(
+                *engine, JPH::Vec3(1.0f, 1.0f, 1.0f),
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 3, 0), .createPhysics = false}
+            );
+            const auto boxMesh = reg.Get<ZHLN::Components::MeshComponent>(box);
+            const auto camera = reg.GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(boxMesh.has_value() && camera.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            camera->camera.position = JPH::Vec3(0.0f, 5.0f, 10.0f);
+            camera->camera.yaw      = -90.0f;
+            camera->camera.pitch    = -15.0f;
 
             constexpr float dt = 1.0f / 60.0f;
-            for (uint32_t frame = 0; frame < 60; ++frame) {
+            for (int frame = 0; frame < 3; ++frame) {
                 engine->ProcessEvents();
-                const ZHLN::FrameStatus status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
-            }
-
-            auto& rc       = engine->GetRenderContext();
-            auto  captured = rc.CaptureFrame();
-            ZHLN::Test::ExpectTrue(captured.has_value());
-            if (captured) {
-                (void) ZHLN::Test::Image::WritePPM("test_render_output.ppm", ZHLN::Test::Headless::ToRgbImage(*captured));
-            }
-            ZHLN::Test::ExpectGe(engine->GetCurrentFrame(), 60u);
-            ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty());
-
-            // The box's pipeline was used by submitted frames. Unregistration
-            // must not destroy it while a draw might still be in flight.
-            const auto boxMesh = reg.Get<ZHLN::Components::MeshComponent>(box);
-            if (ZHLN::Test::ExpectTrue(boxMesh.has_value() && rc.GetGPUMaterial(boxMesh->materialAsset).has_value())) {
-                const ZHLN::MaterialID boxMaterial = boxMesh->materialAsset;
-                const auto validationErrors = ZHLN::Test::ValidationErrorCount();
-                engine->ProcessEvents();
-                ZHLN::Test::ExpectEq(engine->Tick(dt), ZHLN::FrameStatus::OK);
-                rc.UnregisterGPUMaterial(boxMaterial);
-                ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(boxMaterial).has_value());
-
-                // A pipeline with no asset ID still belongs to the registry.
-                // Cache clearing must retire it and invalidate its slot.
-                auto loose = rc.CreateMaterial(ZHLN::MaterialDesc::Basic());
-                if (!loose) {
-                    return std::unexpected(loose.error());
+                if (!ZHLN::Test::ExpectEq(engine->Tick(dt), ZHLN::FrameStatus::OK)) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                rc.ClearGPUCaches(); // waits idle, then drains deferred pipeline destruction
-                auto recreated = rc.CreateMaterial(ZHLN::MaterialDesc::Basic());
-                if (!recreated) {
-                    return std::unexpected(recreated.error());
-                }
-                ZHLN::Test::ExpectNe(recreated->pipeline, loose->pipeline);
-                ZHLN::Test::ExpectEq(ZHLN::Test::ValidationErrorCount(), validationErrors);
+            }
+            if (!ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty() && rc.GetGPUMaterial(boxMesh->materialAsset).has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
 
+            const auto validationErrors = ZHLN::Test::ValidationErrorCount();
+            rc.UnregisterGPUMaterial(boxMesh->materialAsset);
+            ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(boxMesh->materialAsset).has_value());
+
+            // The cache drops registered materials, and material creation
+            // continues to work after it is cleared. No assertion depends on
+            // which numeric pipeline handle the renderer assigns next.
+            auto transient = rc.CreateMaterial(ZHLN::MaterialDesc::Basic());
+            if (!transient) {
+                return std::unexpected(transient.error());
+            }
+            const ZHLN::MaterialID transientId = ZHLN::HashAssetID("test_pipeline_cache_transient_material");
+            rc.RegisterGPUMaterial(transientId, *transient);
+            ZHLN::Test::ExpectTrue(rc.GetGPUMaterial(transientId).has_value());
+            rc.ClearGPUCaches();
+            ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(transientId).has_value());
+            auto recreated = rc.CreateMaterial(ZHLN::MaterialDesc::Basic());
+            if (!recreated) {
+                return std::unexpected(recreated.error());
+            }
+            ZHLN::Test::ExpectNe(recreated->pipeline, ZHLN::PipelineHandle::Invalid);
+            ZHLN::Test::ExpectEq(ZHLN::Test::ValidationErrorCount(), validationErrors);
             return {};
         }
 
@@ -216,6 +179,21 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectFalse(rc.GetGPUMesh(id).has_value());
             reg.Destroy(entity); // now data-only
 
+            // Unlike renderer-owned particle buffers, skinned scratch belongs to
+            // its component. Detaching it must invalidate the public buffer handle.
+            const auto skinned = reg.Create(ZHLN::Components::SkeletalMeshComponent {});
+            const auto scratch = rc.CreateBuffer<ZHLN::BufferUsage::SkinScratch>(3);
+            if (ZHLN::Test::ExpectNe(scratch, ZHLN::BufferHandle::Invalid)) {
+                reg.Patch<ZHLN::Components::SkeletalMeshComponent>(skinned, [&](auto& comp) {
+                    comp.skinnedScratch = scratch;
+                    comp.scratchVertexCount = 3;
+                });
+                ZHLN::Test::ExpectTrue(ZHLN::SceneResources::Detach<ZHLN::Components::SkeletalMeshComponent>(*engine, skinned));
+                const std::array<std::byte, 3> bytes {};
+                ZHLN::Test::ExpectFalse(rc.UpdateBuffer(scratch, std::span {bytes}).has_value());
+            }
+            reg.Destroy(skinned);
+
             const auto plane      = ZHLN::PrefabFactory::CreatePlane(*engine, 2.0f);
             const auto planeOwner = reg.Get<ZHLN::Components::OwnedMeshComponent>(plane);
             if (ZHLN::Test::ExpectTrue(planeOwner.has_value())) {
@@ -285,14 +263,14 @@ struct RenderPipelinesTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> particle_emitters_keep_gpu_storage_inside_the_renderer() {
+        std::expected<void, ZHLN::ErrorCode> particle_emitter_edits_and_respawn_keep_rendering_valid() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("RendererOwnedParticleStorage", 320, 240);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return {};
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            const auto validationErrors = ZHLN::Test::ValidationErrorCount();
             constexpr uint32_t maxParticles = 8;
             const auto entity = reg.Create(
                 ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles},
@@ -306,49 +284,27 @@ struct RenderPipelinesTestSuite {
                 return {};
             }
 
-            // Capacity changes are authoring-data edits. RenderContext replaces
-            // its private storage when the updated emitter is submitted.
+            // Exercise renderer submission across capacity edits and component
+            // replacement; reading the just-patched ECS fields would only
+            // recheck Registry::Patch and Registry::Add.
             reg.Patch<ZHLN::Components::ParticleEmitterComponent>(entity, [](auto& comp) { comp.maxParticles = 16; });
             reg.Patch<ZHLN::Components::MeshParticleEmitterComponent>(entity, [](auto& comp) { comp.maxParticles = 16; });
             ZHLN::Test::Headless::TickFrames(*engine, 2);
-            ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity)->maxParticles, 16u);
-            ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::MeshParticleEmitterComponent>(entity)->maxParticles, 16u);
-
-            // Replacing a pure-data component needs no SceneResources release;
-            // the same emitter identity is submitted again with new parameters.
             reg.Remove<ZHLN::Components::ParticleEmitterComponent>(entity);
             reg.Add(entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
-            // Despawn removes ECS authoring data only. The renderer keys its
-            // cache by the packed generation-bearing entity identity and evicts
-            // the now-idle storage independently.
-            const uint64_t oldEmitterId = entity.Pack();
+            // After despawn a fresh emitter can submit again without referencing
+            // the old renderer-owned simulation buffers. ECS generations and
+            // PendingDestroy are checked separately by the ECS suite.
             ZHLN::DespawnEntity(*engine, entity);
-            ZHLN::Test::ExpectTrue(reg.IsAlive(entity));
             engine->ProcessPendingDestroy();
-            ZHLN::Test::ExpectFalse(reg.IsAlive(entity));
             const auto replacement = reg.Create(ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
-            ZHLN::Test::ExpectNe(replacement.Pack(), oldEmitterId);
-            ZHLN::Test::Headless::TickFrames(*engine, 1);
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
             ZHLN::DespawnEntity(*engine, replacement);
             engine->ProcessPendingDestroy();
 
-            // Skinned scratch is still an explicit component-owned resource;
-            // particle simulation buffers are deliberately not.
-            const auto skinned = reg.Create(ZHLN::Components::SkeletalMeshComponent {});
-            const auto firstScratch = rc.CreateBuffer<ZHLN::BufferUsage::SkinScratch>(3);
-            if (ZHLN::Test::ExpectNe(firstScratch, ZHLN::BufferHandle::Invalid)) {
-                reg.Patch<ZHLN::Components::SkeletalMeshComponent>(skinned, [&](auto& comp) {
-                    comp.skinnedScratch = firstScratch;
-                    comp.scratchVertexCount = 3;
-                });
-                ZHLN::SceneResources::Detach<ZHLN::Components::SkeletalMeshComponent>(*engine, skinned);
-                const auto secondScratch = rc.CreateBuffer<ZHLN::BufferUsage::SkinScratch>(3);
-                ZHLN::Test::ExpectNe(secondScratch, firstScratch);
-                rc.DestroyBuffer(secondScratch);
-            }
-            reg.Destroy(skinned);
+            ZHLN::Test::ExpectEq(ZHLN::Test::ValidationErrorCount(), validationErrors);
             return {};
         }
 

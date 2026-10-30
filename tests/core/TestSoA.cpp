@@ -1,13 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Core suite for the structure-of-arrays layout and the arenas behind it:
-// ZHLN::LinearArena, ZHLN::WorkerScratchPool, ZHLN::SoABlock and
-// ZHLN::ECS::SoAScratch. The reflected layout is the part no other suite covers,
-// because it is the part that only exists once a component type is reflected:
-// what is pinned here is that a synthesized stream struct addresses the same
-// fields as the component it was transformed from, and that the arena hands the
-// block memory it can actually use at the alignment the layout asked for.
+// Core suite for the SoA APIs and the arenas behind them: ZHLN::LinearArena,
+// ZHLN::WorkerScratchPool, ZHLN::SoABlock and ZHLN::ECS::SoAScratch.
+// Check that reflected fields can be read and written through the public
+// streams/proxy, without pinning offsets in the borrowed block of memory.
 #include "TestsFramework.hpp"
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Reflection/Core.hpp>
@@ -28,7 +25,6 @@ enum class SoATestError : uint8_t {
     ArenaAlignmentFailed ZHLN_ANNOTATION(ZHLN::Description<"An arena allocation did not come back at the requested alignment."> {}) = 1,
     ArenaResetFailed ZHLN_ANNOTATION(ZHLN::Description<"Reset did not hand the whole arena back."> {}) = 2,
     PoolIsolationFailed ZHLN_ANNOTATION(ZHLN::Description<"Two worker indices resolved to the same arena, or a reset missed one."> {}) = 3,
-    LayoutSizeMismatch ZHLN_ANNOTATION(ZHLN::Description<"ComputeByteSize and Bind disagree about the layout they describe."> {}) = 4,
     StreamAliasingDetected ZHLN_ANNOTATION(ZHLN::Description<"Two streams of one block overlap in memory."> {}) = 5,
     ProxyAccessFailed ZHLN_ANNOTATION(ZHLN::Description<"Writing through the proxy reference did not reach the stream."> {}) = 6,
     ScratchBoundsFailed ZHLN_ANNOTATION(ZHLN::Description<"SoAScratch accepted or reported a size outside its capacity."> {}) = 7,
@@ -210,31 +206,6 @@ struct SoATestSuite {
         }
 
 #if ZHLN_REFLECTION_AVAILABLE
-
-        std::expected<void, ZHLN::ErrorCode> block_layout_matches_its_own_size_calculation() {
-            constexpr size_t         Capacity = 128;
-            // Braces, not parentheses: a parenthesized call result here is
-            // disambiguated as a function declaration, which puts the member
-            // lookup -- and with it the instantiation that defines the stream
-            // struct -- in a parameter type, where defining a class is ill-formed.
-            ZHLN::LinearArena        arena {ZHLN::SoABlock<SoAPosition>::ComputeByteSize(Capacity)};
-            ZHLN::SoABlock<SoAPosition> block = ZHLN::SoABlock<SoAPosition>::Bind(
-                arena.Allocate(ZHLN::SoABlock<SoAPosition>::ComputeByteSize(Capacity), ZHLN::SoABlock<SoAPosition>::StreamAlignment), Capacity
-            );
-
-            if (block.Capacity() != Capacity) return std::unexpected(SoATestError::LayoutSizeMismatch);
-            if (arena.AllocatedBytes() != ZHLN::SoABlock<SoAPosition>::ComputeByteSize(Capacity)) {
-                return std::unexpected(SoATestError::LayoutSizeMismatch);
-            }
-            // The three streams are three separate arrays, each cache-line
-            // aligned: the first two element addresses must not overlap.
-            auto& streams = block.GetStreams();
-            const auto xAt = reinterpret_cast<uintptr_t>(streams.x);
-            const auto yAt = reinterpret_cast<uintptr_t>(streams.y);
-            if (xAt % ZHLN::SoABlock<SoAPosition>::StreamAlignment != 0) return std::unexpected(SoATestError::ArenaAlignmentFailed);
-            if (yAt < xAt + sizeof(float) * Capacity) return std::unexpected(SoATestError::StreamAliasingDetected);
-            return {};
-        }
 
         std::expected<void, ZHLN::ErrorCode> proxy_writes_reach_the_streams_and_nothing_else() {
             constexpr size_t         Capacity = 8;

@@ -57,7 +57,7 @@ struct TrackedPayloadEvent {
 
 } // namespace
 
-void test_event_bus_page_reuse_and_destructor_accounting() {
+void test_event_bus_repeated_drains_and_destructor_accounting() {
     TrackedPayloadEvent::liveInstances = 0;
     {
         ECS::EventBus bus;
@@ -70,29 +70,19 @@ void test_event_bus_page_reuse_and_destructor_accounting() {
         Expect(bus.Count<TrackedPayloadEvent>()) == 2u;
         Expect(TrackedPayloadEvent::liveInstances) == 2;
 
-        // Capture the first two page buffer addresses across Drain cycles and verify
-        // steady-state Drain + Push never allocates a third backing page buffer!
-        bus.Push(DamageEvent {.entityIndex = 1, .amount = 10});
-        const DamageEvent* bufferA = bus.View<DamageEvent>().data();
-        Expect(bufferA != nullptr);
-        bus.Drain<DamageEvent>([](const DamageEvent&) {});
-
-        bus.Push(DamageEvent {.entityIndex = 2, .amount = 20});
-        const DamageEvent* bufferB = bus.View<DamageEvent>().data();
-        Expect(bufferB != nullptr);
-        bus.Drain<DamageEvent>([](const DamageEvent&) {});
-
+        // Repeated drain/push cycles deliver each event exactly once, regardless
+        // of how the bus stores or reuses its backing memory.
         for (uint32_t frame = 0; frame < 64; ++frame) {
             bus.Push(DamageEvent {.entityIndex = frame, .amount = static_cast<int32_t>(frame * 3)});
-            const DamageEvent* current = bus.View<DamageEvent>().data();
-            Expect(current == bufferA || current == bufferB);
             const size_t drained = bus.Drain<DamageEvent>([&](const DamageEvent& ev) {
                 Expect(ev.entityIndex) == frame;
+                Expect(ev.amount) == static_cast<int32_t>(frame * 3);
             });
             Expect(drained) == 1u;
+            Expect(bus.Empty<DamageEvent>());
         }
 
-        // Draining TrackedPayloadEvent destroys every visited object while keeping pages warm.
+        // Draining TrackedPayloadEvent destroys every visited object.
         std::vector<int> codes;
         const size_t     drainedTracked = bus.Drain<TrackedPayloadEvent>([&](const TrackedPayloadEvent& ev) {
             codes.push_back(ev.code);

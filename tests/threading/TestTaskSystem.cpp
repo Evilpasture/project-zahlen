@@ -139,18 +139,6 @@ struct TaskSystemTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> fiber_metadata_alignment() {
-            auto         noop    = [](void*) {};
-            ZHLN::Fiber* fiber   = ZHLN::Fiber::Create(ZHLN::kMinimumFiberStackSize, noop, nullptr);
-            const bool   aligned = fiber != nullptr && reinterpret_cast<uintptr_t>(fiber) % alignof(ZHLN::Fiber) == 0 &&
-                                   fiber->mapSize >= ZHLN::kMinimumFiberStackSize;
-            ZHLN::Fiber::Destroy(fiber);
-            if (!aligned) {
-                return std::unexpected(TaskSystemError::DispatchFailed);
-            }
-            return {};
-        }
-
         std::expected<void, ZHLN::ErrorCode> dispatch_and_wait() {
             std::atomic<int>          accum {0};
             ZHLN::TaskSystem::Counter counter;

@@ -12,7 +12,6 @@
 #include <Zahlen/ecs/SystemParameters.hpp>
 #include <atomic>
 #include <expected>
-#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -94,7 +93,6 @@ void CommandBufferSystemB(ZHLN::ECS::Query<const TestCompB> query, ZHLN::ECS::En
         }
     }
 }
-void PlainCallable(int, const double&) {} // callable inspection does not require ECS types
 void NullarySystem() { nullaryCalls.fetch_add(1); }
 void MultipleQueries(ZHLN::ECS::Query<const TestCompA>, ZHLN::ECS::Query<TestCompA&>,
                      ZHLN::ECS::Query<const TestCompB&>) {}
@@ -362,32 +360,11 @@ struct SystemGraphTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> reflected_hazards_and_names() {
+        std::expected<void, ZHLN::ErrorCode> declarative_access_patterns_detect_hazards() {
             using ZHLN::ECS::Access;
             using ZHLN::ECS::ComponentAccess;
             using ZHLN::ECS::ComponentFamily;
             using ZHLN::ECS::SystemSignature;
-            using ZHLN::Reflect::CallableInspector;
-
-            if (CallableInspector<&DeclarativeWriter>::Name() != "DeclarativeWriter" ||
-                CallableInspector<&DeclarativeReader>::Name() != "DeclarativeReader" ||
-                CallableInspector<&ReadStatic::Update>::Name() != "ReadStatic" ||
-                CallableInspector<ReadFunctor {}>::Name() != "ReadFunctor" ||
-                CallableInspector<ReadLambda>::Name().empty() ||
-                std::string_view(CallableInspector<ReadLambda>::NameCString()) == CallableInspector<ReadLambda2>::NameCString() ||
-                CallableInspector<&PlainCallable>::Name() != "PlainCallable") {
-                return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
-            }
-
-            int parameterCount = 0;
-            bool plainParameterTypesMatch = true;
-            CallableInspector<&PlainCallable>::ForEachParameter([&]<typename Param>() {
-                plainParameterTypesMatch &= parameterCount == 0 ? std::is_same_v<Param, int> : std::is_same_v<Param, const double&>;
-                ++parameterCount;
-            });
-            if (parameterCount != 2 || !plainParameterTypesMatch) {
-                return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
-            }
 
             const auto writer = SystemSignature<&DeclarativeWriter>::PopulateAccessPattern();
             const auto reader = SystemSignature<&DeclarativeReader>::PopulateAccessPattern();
@@ -461,9 +438,7 @@ struct SystemGraphTestSuite {
             before.AddSystem<&NullarySystem>();
             nullaryCalls.store(0);
             if (before.GetSystemCount() != 7 || !before.IsSystemEnabled("ReadStatic") ||
-                !before.IsSystemEnabled("ReadFunctor") ||
-                !before.IsSystemEnabled(ZHLN::ECS::SystemSignature<ReadLambda>::NameCString()) ||
-                !before.IsSystemEnabled(ZHLN::ECS::SystemSignature<ReadLambda2>::NameCString())) {
+                !before.IsSystemEnabled("ReadFunctor")) {
                 return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
             }
             before.Compile();

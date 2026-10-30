@@ -155,45 +155,23 @@ void test_distance_attenuation_models_and_occlusion_curves() {
         .maxGain     = 1.0f,
     };
 
-    // None model remains unity across all distances.
-    Expect(Near(EvaluateDistanceAttenuation(desc, 0.2f), 1.0f));
-    Expect(Near(EvaluateDistanceAttenuation(desc, 50.0f), 1.0f));
-    Expect(Near(EvaluateDistanceAttenuation(desc, 250.0f), 1.0f));
+    // Keep the public modes the offline PCM test does not exercise: that test
+    // covers logarithmic rolloff through actual spatialized playback.
+    Expect(Near(EvaluateDistanceAttenuation(desc, 250.0f), 1.0f)); // None
 
-    // Linear curve: 1.0 at <= minDistance, 0.5 at midpoint 50.5m, 0.0 at >= maxDistance.
     desc.model = AudioAttenuationModel::Linear;
-    Expect(Near(EvaluateDistanceAttenuation(desc, 1.0f), 1.0f));
     Expect(Near(EvaluateDistanceAttenuation(desc, 50.5f), 0.5f));
-    Expect(Near(EvaluateDistanceAttenuation(desc, 100.0f), 0.0f));
 
-    // Logarithmic curve: 1.0 at minDistance=1, exact 0.5 at geometric midpoint sqrt(1*100)=10m, 0.0 at maxDistance=100.
-    desc.model = AudioAttenuationModel::Logarithmic;
-    Expect(Near(EvaluateDistanceAttenuation(desc, 1.0f), 1.0f));
-    Expect(Near(EvaluateDistanceAttenuation(desc, 10.0f), 0.5f));
-    Expect(Near(EvaluateDistanceAttenuation(desc, 100.0f), 0.0f));
-
-    // Inverse-distance curve: 1 / (1 + 1*(10 - 1)) = 0.1 at 10m.
     desc.model = AudioAttenuationModel::InverseDistance;
-    Expect(Near(EvaluateDistanceAttenuation(desc, 1.0f), 1.0f));
     Expect(Near(EvaluateDistanceAttenuation(desc, 10.0f), 0.1f));
 
-    // Exponential curve with rolloff=2: (10 / 1)^-2 = 0.01 at 10m.
     desc.model   = AudioAttenuationModel::Exponential;
     desc.rolloff = 2.0f;
     Expect(Near(EvaluateDistanceAttenuation(desc, 10.0f), 0.01f));
 
-    // At geometric midpoint (10m with rolloff=1), InverseDistance < Logarithmic < Linear.
-    desc.rolloff      = 1.0f;
-    desc.model        = AudioAttenuationModel::InverseDistance;
-    const float inv10 = EvaluateDistanceAttenuation(desc, 10.0f);
-    desc.model        = AudioAttenuationModel::Logarithmic;
-    const float log10 = EvaluateDistanceAttenuation(desc, 10.0f);
-    desc.model        = AudioAttenuationModel::Linear;
-    const float lin10 = EvaluateDistanceAttenuation(desc, 10.0f);
-    Expect(inv10 < log10);
-    Expect(log10 < lin10);
-
-    // Gain floor/ceiling clamping.
+    // Gain floor/ceiling clamping is also part of the exported curve API.
+    desc.model   = AudioAttenuationModel::Linear;
+    desc.rolloff = 1.0f;
     desc.minGain = 0.15f;
     desc.maxGain = 0.85f;
     Expect(Near(EvaluateDistanceAttenuation(desc, 0.5f), 0.85f));

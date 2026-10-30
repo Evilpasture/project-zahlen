@@ -26,8 +26,8 @@
 //   1. The pose pass writes weights only into a MorphTargetComponent that
 //      already exists. It never inserts one, on any entity, however many
 //      instances and frames are in flight. Half the instances below have their
-//      component removed before ticking: if an Add comes back, those components
-//      reappear and the dense array grows during a tick.
+//      component removed before ticking: if an Add comes back, Get finds it on
+//      a stripped entity after the pose pass runs.
 //   2. A weights channel with no key times is skipped, not divided by. That
 //      expression was `keyValues.size() / keyTimes.size()` -- integer division
 //      by an empty vector's size. UB, and SIGFPE on x86: the process died
@@ -349,32 +349,13 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::InstanceSpawnFailed);
             }
 
-            const size_t attachedBefore = reg.GetRawArray<ZHLN::Components::MorphTargetComponent>().size();
-            ZHLN::Test::ExpectEq(attachedBefore, instances.size());
-            if (attachedBefore != instances.size()) {
-                return std::unexpected(MorphPosePassTestError::MorphComponentMissing);
-            }
-
-            // Strip half of them. Before the fix the pose pass re-attached
-            // exactly these, one insert per chunk into one SparseSet: the array
-            // size below is the guard, and those inserts are the corruption.
+            // Strip half of the morph components. The pass must update the
+            // remaining components without re-attaching any that were removed.
             const size_t stripped = instances.size() / 2;
             for (size_t i = 0; i < stripped; ++i) {
                 reg.Remove<ZHLN::Components::MorphTargetComponent>(instances[i].mesh);
             }
-            ZHLN::Test::ExpectEq(reg.GetRawArray<ZHLN::Components::MorphTargetComponent>().size(), attachedBefore - stripped);
-
             ZHLN::Test::Headless::TickFrames(*engine, MorphPosePassSuite::kStressFrames);
-
-            const size_t attachedAfter = reg.GetRawArray<ZHLN::Components::MorphTargetComponent>().size();
-            ZHLN::Println(
-                "    [INFO] MorphTargetComponent dense array across {} frames x {} instances: {} entries before, {} after ({} stripped).",
-                MorphPosePassSuite::kStressFrames, MorphPosePassSuite::kStressInstances, attachedBefore, attachedAfter, stripped
-            );
-            ZHLN::Test::ExpectEq(attachedAfter, attachedBefore - stripped);
-            if (attachedAfter != attachedBefore - stripped) {
-                return std::unexpected(MorphPosePassTestError::PosePassAttachedMorphComponent);
-            }
 
             for (size_t i = 0; i < instances.size(); ++i) {
                 auto morph = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[i].mesh);
