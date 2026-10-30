@@ -53,7 +53,8 @@ RUN pacman -Sy --noconfirm && \
     glfw \
     simdjson \
     shader-slang \
-    luajit
+    luajit \
+    directx-shader-compiler 
 
 # No LunarG Vulkan SDK: every piece of it this build used is now a distro
 # package -- vulkan-headers, vulkan-icd-loader, vulkan-validation-layers and
@@ -120,7 +121,7 @@ RUN mkdir -p /workspace/dist/data && \
     find /workspace/build -name "libJolt.so*" -exec cp -P {} /workspace/dist/ \; && \
     cp -L /workspace/build/data/base.pak /workspace/dist/data/base.pak && \
     if [ -d /workspace/build/scripts ]; then \
-        cp -rL /workspace/build/scripts /workspace/dist/scripts; \
+    cp -rL /workspace/build/scripts /workspace/dist/scripts; \
     fi
 
 
