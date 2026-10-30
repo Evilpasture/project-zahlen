@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/TrackingMemoryResource.hpp"
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Loop.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
+#include <Zahlen/Core/PageVector.hpp>
 #include <Zahlen/Core/Queue.hpp>
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Core/Ranges.hpp>
@@ -143,6 +145,8 @@ static_assert(ZHLN::DefaultInlineCapacity<std::array<std::byte, 24>>() == 4);
 static_assert(ZHLN::DefaultInlineCapacity<std::array<std::byte, 48>>() == 2);
 static_assert(ZHLN::DefaultInlineCapacity<std::array<std::byte, 65>>() == 1);
 static_assert(CanExtendUninitialized<int> && !CanExtendUninitialized<std::string> && !CanExtendUninitialized<LifetimeTracker>);
+static_assert(std::is_nothrow_move_constructible_v<ZHLN::PageVector<LifetimeTracker>>);
+static_assert(std::is_nothrow_move_assignable_v<ZHLN::PageVector<LifetimeTracker>>);
 
 } // namespace
 
@@ -224,6 +228,57 @@ struct ContainersTestSuite {
             if (LifetimeTracker::activeInstances != 0) {
                 return std::unexpected(CoreContainersTestError::MemoryLeakDetected);
             }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> page_vector_reuses_pages_and_moves_its_resource() {
+            ZHLN::Test::TrackingMemoryResource firstPages;
+            ZHLN::Test::TrackingMemoryResource secondPages;
+            const size_t count = (ZHLN::GetPageSize() / sizeof(LifetimeTracker)) + 32;
+            LifetimeTracker::activeInstances = 0;
+            {
+                ZHLN::PageVector<LifetimeTracker> first {&firstPages};
+                for (size_t i = 0; i < count; ++i) {
+                    first.emplace_back(static_cast<int>(i));
+                }
+                const size_t warmedAllocations = firstPages.Allocations();
+                ZHLN::Test::ExpectGt(warmedAllocations, 1u);
+
+                first.clear();
+                ZHLN::Test::ExpectEq(LifetimeTracker::activeInstances, 0);
+                for (size_t i = 0; i < count; ++i) {
+                    first.emplace_back(static_cast<int>(i));
+                }
+                ZHLN::Test::ExpectEq(firstPages.Allocations(), warmedAllocations);
+                ZHLN::Test::ExpectEq(first[count - 1].id, static_cast<int>(count - 1));
+
+                auto copy = first;
+                ZHLN::Test::ExpectEq(copy.size(), first.size());
+                ZHLN::Test::ExpectEq(copy[0].id, 0);
+
+                ZHLN::PageVector<LifetimeTracker> second {&secondPages};
+                second.emplace_back(777);
+                first.swap(second);
+                ZHLN::Test::ExpectEq(first[0].id, 777);
+                ZHLN::Test::ExpectEq(second.size(), count);
+                first = std::move(second);
+                ZHLN::Test::ExpectEq(first[count - 1].id, static_cast<int>(count - 1));
+                ZHLN::Test::ExpectEq(secondPages.LiveBlocks(), 0u);
+
+                first.clear();
+                ZHLN::Test::ExpectEq(LifetimeTracker::activeInstances, static_cast<int>(count)); // Only the copy remains.
+            }
+            ZHLN::Test::ExpectEq(LifetimeTracker::activeInstances, 0);
+            {
+                ZHLN::PageVector<MoveOnlyNoAssign> moveOnly {&firstPages};
+                moveOnly.emplace_back(1);
+                moveOnly.emplace_back(2);
+                ZHLN::Test::ExpectEq(*moveOnly[1].value, 2);
+            }
+            ZHLN::Test::ExpectEq(firstPages.LiveBlocks(), 0u);
+            ZHLN::Test::ExpectEq(firstPages.LiveBytes(), 0u);
+            ZHLN::Test::ExpectEq(firstPages.Deallocations(), firstPages.Allocations());
+            ZHLN::Test::ExpectEq(secondPages.Deallocations(), secondPages.Allocations());
             return {};
         }
 

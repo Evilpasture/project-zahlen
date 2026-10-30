@@ -6,6 +6,7 @@
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/Math.hpp>
+#include <Zahlen/Core/PageVector.hpp>
 #include <Zahlen/Core/Pages.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Sync.hpp>
@@ -33,8 +34,9 @@ class EventWriter;
 // Page-slab-backed typed ECS event bus.
 //
 // Design:
-//   * Channel descriptors are bump-allocated from page-aligned slabs, and each
-//     typed channel owns a pair of contiguous buffers (`primary` and `scratch`).
+//   * Channel descriptors are bump-allocated from page-aligned slabs. Each
+//     typed channel owns two PageVectors (`primary` and `scratch`); vector
+//     lifetime/move semantics live in that reusable core primitive, not here.
 //     The default memory resource maps OS pages; callers can supply a resource
 //     to observe or customize all bus-owned allocations without examining the
 //     buffers or changing the event API.
@@ -56,7 +58,7 @@ class EventBus {
     EventBus() noexcept: EventBus(nullptr) {
     }
     explicit EventBus(std::pmr::memory_resource* pages) noexcept:
-        _pages(pages != nullptr ? pages : DefaultPageResource()) {
+        _pages(pages != nullptr ? pages : OsPageMemoryResource()) {
     }
     ~EventBus() noexcept {
         Clear();
@@ -203,30 +205,6 @@ class EventBus {
     template <typename T>
     friend class EventWriter;
 
-    class OsPageResource final : public std::pmr::memory_resource {
-        auto do_allocate(size_t bytes, size_t alignment) -> void* override {
-            Assert(alignment <= GetPageSize(), "EventBus page alignment exceeds the OS page size");
-            void* const memory = AllocatePages(bytes);
-            if (memory == nullptr) {
-                Panic("EventBus could not map {} bytes of backing pages", bytes);
-            }
-            return memory;
-        }
-
-        void do_deallocate(void* memory, size_t bytes, size_t) override {
-            FreePages(memory, bytes);
-        }
-
-        [[nodiscard]] auto do_is_equal(const std::pmr::memory_resource& other) const noexcept -> bool override {
-            return this == &other;
-        }
-    };
-
-    [[nodiscard]] static auto DefaultPageResource() noexcept -> std::pmr::memory_resource* {
-        static OsPageResource pages;
-        return &pages;
-    }
-
     struct SlabChunk {
         SlabChunk* prev        = nullptr;
         size_t     mappedBytes = 0;
@@ -241,123 +219,9 @@ class EventBus {
     };
 
     template <typename T>
-    struct PageBuffer {
-        std::pmr::memory_resource* pages       = nullptr;
-        T*                         data        = nullptr;
-        size_t                     count       = 0;
-        size_t                     capacity    = 0;
-        size_t                     mappedBytes = 0;
-
-        explicit PageBuffer(std::pmr::memory_resource* resource) noexcept: pages(resource) {
-        }
-        ~PageBuffer() noexcept {
-            ReleasePages();
-        }
-
-        PageBuffer(const PageBuffer&)                    = delete;
-        auto operator=(const PageBuffer&) -> PageBuffer& = delete;
-
-        PageBuffer(PageBuffer&& other) noexcept
-            : pages(other.pages),
-              data(std::exchange(other.data, nullptr)),
-              count(std::exchange(other.count, 0)),
-              capacity(std::exchange(other.capacity, 0)),
-              mappedBytes(std::exchange(other.mappedBytes, 0)) {
-        }
-
-        auto operator=(PageBuffer&& other) noexcept -> PageBuffer& {
-            if (this != &other) {
-                ReleasePages();
-                pages       = other.pages;
-                data        = std::exchange(other.data, nullptr);
-                count       = std::exchange(other.count, 0);
-                capacity    = std::exchange(other.capacity, 0);
-                mappedBytes = std::exchange(other.mappedBytes, 0);
-            }
-            return *this;
-        }
-
-        void Swap(PageBuffer& other) noexcept {
-            std::swap(pages, other.pages);
-            std::swap(data, other.data);
-            std::swap(count, other.count);
-            std::swap(capacity, other.capacity);
-            std::swap(mappedBytes, other.mappedBytes);
-        }
-
-        void EnsureCapacity(size_t needed) {
-            if (needed <= capacity) {
-                return;
-            }
-            Assert(alignof(T) <= GetPageSize(), "EventBus::PageBuffer requires event alignment <= OS page size");
-
-            const size_t minBytes  = std::max(GetPageSize(), needed * sizeof(T));
-            const size_t nextBytes = AlignUpToPage(std::max(minBytes, mappedBytes * 2));
-            void*        raw       = pages->allocate(nextBytes, GetPageSize());
-            if (raw == nullptr) {
-                Panic("EventBus could not map {} bytes of backing pages", nextBytes);
-            }
-
-            T* nextData = static_cast<T*>(raw);
-            if (count > 0) {
-                if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
-                    std::uninitialized_move_n(data, count, nextData);
-                } else {
-                    std::uninitialized_copy_n(data, count, nextData);
-                }
-                if constexpr (!std::is_trivially_destructible_v<T>) {
-                    std::destroy_n(data, count);
-                }
-            }
-            if (data != nullptr) {
-                pages->deallocate(data, mappedBytes, GetPageSize());
-            }
-
-            data        = nextData;
-            mappedBytes = nextBytes;
-            capacity    = nextBytes / sizeof(T);
-        }
-
-        template <typename... Args>
-        auto EmplaceBack(Args&&... args) -> T& {
-            EnsureCapacity(count + 1);
-            T* slot = std::construct_at(data + count, std::forward<Args>(args)...);
-            ++count;
-            return *slot;
-        }
-
-        void AppendRange(std::span<const T> items)
-            requires std::copy_constructible<T>
-        {
-            EnsureCapacity(count + items.size());
-            std::uninitialized_copy_n(items.data(), items.size(), data + count);
-            count += items.size();
-        }
-
-        void ClearRetainingPages() noexcept {
-            if (count > 0) {
-                if constexpr (!std::is_trivially_destructible_v<T>) {
-                    std::destroy_n(data, count);
-                }
-                count = 0;
-            }
-        }
-
-        void ReleasePages() noexcept {
-            ClearRetainingPages();
-            if (data != nullptr) {
-                pages->deallocate(data, mappedBytes, GetPageSize());
-                data        = nullptr;
-                capacity    = 0;
-                mappedBytes = 0;
-            }
-        }
-    };
-
-    template <typename T>
     struct TypedChannel final : ChannelNode {
-        PageBuffer<T> primary;
-        PageBuffer<T> scratch;
+        PageVector<T> primary;
+        PageVector<T> scratch;
         bool          draining = false;
 
         explicit TypedChannel(uint32_t typeHash, std::pmr::memory_resource* pages) noexcept: primary(pages), scratch(pages) {
@@ -368,50 +232,50 @@ class EventBus {
 
         template <typename... Args>
         auto Emplace(Args&&... args) -> T& {
-            return primary.EmplaceBack(std::forward<Args>(args)...);
+            return primary.emplace_back(std::forward<Args>(args)...);
         }
 
         void AppendRange(std::span<const T> events)
             requires std::copy_constructible<T>
         {
-            primary.AppendRange(events);
+            primary.append(events);
         }
 
         [[nodiscard]] auto View() const noexcept -> std::span<const T> {
-            return primary.count > 0 ? std::span<const T>(primary.data, primary.count) : std::span<const T> {};
+            return primary.empty() ? std::span<const T> {} : primary.view();
         }
 
         void ClearEvents() noexcept {
-            primary.ClearRetainingPages();
+            primary.clear();
         }
 
         template <typename Fn>
         auto Drain(Fn&& fn) -> size_t {
-            if (primary.count == 0) {
+            if (primary.empty()) {
                 return 0;
             }
 
             if (!draining) {
                 draining = true;
                 ZHLN::defer _([&]() noexcept {
-                    scratch.ClearRetainingPages();
+                    scratch.clear();
                     draining = false;
                 });
-                primary.Swap(scratch);
-                const size_t drained = scratch.count;
+                primary.swap(scratch);
+                const size_t drained = scratch.size();
                 for (size_t i = 0; i < drained; ++i) {
-                    fn(scratch.data[i]);
+                    fn(scratch[i]);
                 }
                 return drained;
             }
 
             // Re-entrant `Drain<T>` inside a `Drain<T>` callback: isolate into a
             // temporary page buffer so the outer walk's `scratch` stays intact.
-            PageBuffer<T> nested {primary.pages};
-            primary.Swap(nested);
-            const size_t drained = nested.count;
+            PageVector<T> nested {primary.resource()};
+            primary.swap(nested);
+            const size_t drained = nested.size();
             for (size_t i = 0; i < drained; ++i) {
-                fn(nested.data[i]);
+                fn(nested[i]);
             }
             return drained;
         }

@@ -4,6 +4,7 @@
 #include "TestsFramework.hpp"
 #include "helpers/TrackingMemoryResource.hpp"
 #include <Zahlen/ecs/EventBus.hpp>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -91,6 +92,21 @@ void test_event_bus_repeated_drains_and_destructor_accounting() {
             }
         }
         ExpectGt(warmedAllocations, 0u);
+        const std::array<DamageEvent, 3> batch {
+            DamageEvent {.entityIndex = 101, .amount = 1},
+            DamageEvent {.entityIndex = 102, .amount = 2},
+            DamageEvent {.entityIndex = 103, .amount = 3},
+        };
+        bus.PushRange<DamageEvent>(batch);
+        Expect(bus.Count<DamageEvent>()) == batch.size();
+        Expect(pages.Allocations()) == warmedAllocations;
+        size_t batchIndex = 0;
+        Expect(bus.Drain<DamageEvent>([&](const DamageEvent& event) {
+            Expect(event.entityIndex) == batch[batchIndex].entityIndex;
+            Expect(event.amount) == batch[batchIndex].amount;
+            ++batchIndex;
+        })) == batch.size();
+        Expect(batchIndex) == batch.size();
 
         // Draining TrackedPayloadEvent destroys every visited object.
         std::vector<int> codes;

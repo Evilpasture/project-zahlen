@@ -204,6 +204,7 @@ string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
 
 add_library(zahlen_engine SHARED)
 
+add_subdirectory(src/core)
 add_subdirectory(src/engine)
 
 if(ZHLN_BUILD_RENDER)

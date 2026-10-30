@@ -136,6 +136,7 @@ module;
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/Optional.hpp>
+#include <Zahlen/Core/PageVector.hpp>
 #include <Zahlen/Core/Pages.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Prefetch.hpp>
@@ -244,6 +245,8 @@ using ZHLN::LogSeverity;
 using ZHLN::LogWarning;
 using ZHLN::ObjectPool;
 using ZHLN::Optional;
+using ZHLN::PageAllocator;
+using ZHLN::PageVector;
 using ZHLN::Panic;
 using ZHLN::Print;
 using ZHLN::Println;
