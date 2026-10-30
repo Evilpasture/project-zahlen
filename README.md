@@ -25,6 +25,11 @@ Besides that, it's kinda like Bevy but C++26 and Vulkan.
 ## Build Instructions
 
 For creative works, the build system expects Blender files in `./blender/` depending on your CMakeLists.txt.
+Blender itself is optional: `cmake/BlenderProbe.cmake` resolves it from `BLENDER_PATH`, then `PATH`, then the
+platform's own install locations, and reports the answer as `ZHLN_HAS_BLENDER`. Without it the cook graph
+carries no `.blend` extraction edge at all -- textures, fonts, glTF and the pak still cook -- so a tree with
+no `.blend` sources never needs Blender installed. Pass `-DZHLN_HAS_BLENDER=OFF` to skip them on a host that
+has Blender, or `-DZHLN_HAS_BLENDER=ON` to make a missing Blender a configure error.
 For compiled assets, the build system expects usually in resources/assets/ as an unofficial convention.
 
 Run tools/build.sh and fix every error you go along the way if you're missing dependencies.

@@ -46,6 +46,17 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
 
     set(SHARED_ZCOOK "${ZHLN_SHARED_ASSET_DIR}/zcook${CMAKE_EXECUTABLE_SUFFIX}")
 
+    # Blender is optional (cmake/BlenderProbe.cmake): without it the graph has no
+    # blender_extract edge at all, rather than an edge per .blend source that no
+    # machine here could run. Either answer goes to the generator, which writes
+    # it into the file and into the regeneration rule inside that file, so the
+    # next build carries the same decision forward.
+    if(ZHLN_HAS_BLENDER)
+        set(ZHLN_BLENDER_ARG --blender "${ZHLN_BLENDER_EXECUTABLE}")
+    else()
+        set(ZHLN_BLENDER_ARG --no-blender)
+    endif()
+
     # 1. Symlink the current build's zcook to a STABLE shared location
     add_custom_command(
         TARGET zcook POST_BUILD
@@ -71,6 +82,7 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
                     --source "${GAME_SOURCE_DIR}"
                     --engine-tools "${zahlen_SOURCE_DIR}/tools"
                     --self "${SHARED_ZCOOK}"
+                    ${ZHLN_BLENDER_ARG}
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             DEPENDS zcook
                     "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
@@ -84,6 +96,7 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
                     --source "${GAME_SOURCE_DIR}"
                     --engine-tools "${zahlen_SOURCE_DIR}/tools"
                     --self "${SHARED_ZCOOK}"
+                    ${ZHLN_BLENDER_ARG}
             WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
             DEPENDS zcook
                     "${zahlen_SOURCE_DIR}/tools/export_metadata.py"

@@ -5,6 +5,16 @@
 # test stages reuse one cached layer set.
 FROM archlinux:latest AS base
 
+# Two toolchain entries the old image carried are gone, and neither had a
+# consumer left:
+#   blender                    no .blend source exists in this tree, and the
+#                              cooker no longer needs one to configure -- see
+#                              ZHLN_HAS_BLENDER below (385 MiB installed).
+#   directx-shader-compiler    nothing here emits DXIL: every shader cooks to
+#                              SPIR-V through slangc (-target spirv) and the
+#                              vendored Slang is configured with
+#                              SLANG_ENABLE_DXIL=OFF (30 MiB installed).
+#
 # Five of the vendored libraries are provisioned by the distro instead of a git
 # submodule. Each has a probe in cmake/ThirdParty.cmake or ShaderCompilation.cmake
 # that prefers the system copy and falls back to the pinned tree, so CI never
@@ -28,8 +38,6 @@ RUN pacman -Sy --noconfirm && \
     ninja \
     git \
     python \
-    blender \
-    directx-shader-compiler \
     vulkan-icd-loader \
     vulkan-swrast \
     vulkan-validation-layers \
@@ -86,11 +94,16 @@ FROM base AS builder
 ARG ZHLN_SLANG_VENDORED=OFF
 
 # 1. Configure CMake with Tests & ASan/UBSan enabled
+# ZHLN_HAS_BLENDER=OFF is what keeps a .blend source in a game tree from
+# turning into an extraction rule this image could not run. The probe
+# (cmake/BlenderProbe.cmake) finds no Blender here either way; pinning the
+# answer keeps a locally added Blender from silently changing what CI cooks.
 RUN cmake -B build -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DZHLN_BUILD_TESTS=ON \
     -DUSE_SANITIZERS=ON \
     -DZHLN_IN_DOCKER=ON \
+    -DZHLN_HAS_BLENDER=OFF \
     -DZHLN_SLANG_VENDORED=${ZHLN_SLANG_VENDORED}
 
 # 2. Build everything (Engine, Asset Cooker, ztest, and Test Executables)

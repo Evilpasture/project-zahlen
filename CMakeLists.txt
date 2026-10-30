@@ -121,6 +121,7 @@ include(LinkerConfig)
 include(Sanitizers)
 include(VulkanSandbox)
 include(PythonProbe)
+include(BlenderProbe)
 include(GovernanceChecks)
 include(ReflectionConfig)
 

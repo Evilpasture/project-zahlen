@@ -19,7 +19,7 @@ namespace ZHLN {
 //
 // Usage:
 //   zcook ninja --out <assets.ninja> --source <asset-root> --engine-tools <dir>
-//               [--self <zcook executable>]
+//               [--self <zcook executable>] [--blender <executable> | --no-blender]
 //
 //   --out           the ninja file to write (kept where the .ninja_log lives)
 //   --source        the asset root to scan: <root>/blender for .blend sources,
@@ -33,6 +33,13 @@ namespace ZHLN {
 //                   to argv[0], which is what the build passes. Keep it the
 //                   stable path (the shared symlink) rather than a build-dir
 //                   path: the file it writes is shared between build trees.
+//   --blender       the Blender executable the extraction rule launches, so the
+//                   cook cannot resolve a different one than configure did.
+//                   cmake/BlenderProbe.cmake is where the build gets it.
+//   --no-blender    write a graph with no blender_extract edge at all: .blend
+//                   sources are skipped and everything else still cooks. Blender
+//                   is optional -- cmake/BlenderProbe.cmake passes this when the
+//                   host has none, or when ZHLN_HAS_BLENDER=OFF.
 int GenerateAssetNinja(int argc, char** argv);
 
 // zcook blender -- locate Blender, scrub host Python environment variables so
