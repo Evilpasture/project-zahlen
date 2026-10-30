@@ -7,7 +7,6 @@
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Core/Reflection/Core.hpp>
-
 #include <algorithm>
 #include <cstddef>
 #include <span>
@@ -16,15 +15,13 @@
 #include <utility>
 
 #if ZHLN_REFLECTION_AVAILABLE
-    #include <meta>
-    #include <vector>
+#include <meta>
+#include <vector>
 #endif
 
 namespace ZHLN::Reflect {
 
-inline constexpr auto AcceptAnyIdentifier = [](std::string_view) constexpr noexcept -> bool {
-    return true;
-};
+inline constexpr auto AcceptAnyIdentifier = [](std::string_view) constexpr noexcept -> bool { return true; };
 
 #if ZHLN_REFLECTION_AVAILABLE
 
@@ -103,17 +100,15 @@ consteval void WalkNamespaceFunctions(
     const auto ctx = std::meta::access_context::current();
     for (const std::meta::info m: std::meta::members_of(ns, ctx)) {
         if (std::meta::is_function(m)) {
-            if (!std::meta::is_function_template(m) && !std::meta::is_deleted(m)
-                && MatchesSourceLocationFile(std::meta::source_location_of(m).file_name(), sourceFile)
-                && std::meta::has_identifier(m) && IdentifierFilter(std::meta::identifier_of(m))) {
+            if (!std::meta::is_function_template(m) && !std::meta::is_deleted(m) &&
+                MatchesSourceLocationFile(std::meta::source_location_of(m).file_name(), sourceFile) && std::meta::has_identifier(m) &&
+                IdentifierFilter(std::meta::identifier_of(m))) {
                 out.push_back(m);
             }
         } else if (std::meta::is_namespace(m) && !std::meta::is_namespace_alias(m)) {
             const bool hasId = std::meta::has_identifier(m);
             if ((hasId && recurseNamedSubnamespaces) || (!hasId && includeUnnamedSubnamespaces)) {
-                WalkNamespaceFunctions<IdentifierFilter>(
-                    m, sourceFile, recurseNamedSubnamespaces, includeUnnamedSubnamespaces, out
-                );
+                WalkNamespaceFunctions<IdentifierFilter>(m, sourceFile, recurseNamedSubnamespaces, includeUnnamedSubnamespaces, out);
             }
         }
     }
@@ -130,10 +125,9 @@ consteval void WalkNamespaceClasses(
     const auto ctx = std::meta::access_context::current();
     for (const std::meta::info m: std::meta::members_of(ns, ctx)) {
         if (std::meta::is_type(m)) {
-            if (!std::meta::is_type_alias(m)
-                && MatchesSourceLocationFile(std::meta::source_location_of(m).file_name(), sourceFile)
-                && std::meta::is_class_type(m) && std::meta::is_complete_type(m) && std::meta::has_identifier(m)
-                && IdentifierFilter(std::meta::identifier_of(m))) {
+            if (!std::meta::is_type_alias(m) && MatchesSourceLocationFile(std::meta::source_location_of(m).file_name(), sourceFile) &&
+                std::meta::is_class_type(m) && std::meta::is_complete_type(m) && std::meta::has_identifier(m) &&
+                IdentifierFilter(std::meta::identifier_of(m))) {
                 if (std::find(out.begin(), out.end(), m) == out.end()) {
                     out.push_back(m);
                 }
@@ -141,47 +135,23 @@ consteval void WalkNamespaceClasses(
         } else if (std::meta::is_namespace(m) && !std::meta::is_namespace_alias(m)) {
             const bool hasId = std::meta::has_identifier(m);
             if ((hasId && recurseNamedSubnamespaces) || (!hasId && includeUnnamedSubnamespaces)) {
-                WalkNamespaceClasses<IdentifierFilter>(
-                    m, sourceFile, recurseNamedSubnamespaces, includeUnnamedSubnamespaces, out
-                );
+                WalkNamespaceClasses<IdentifierFilter>(m, sourceFile, recurseNamedSubnamespaces, includeUnnamedSubnamespaces, out);
             }
         }
     }
 }
 
-template <
-    typename ScopeAnchor,
-    ZHLN::StringLiteral SourceFile,
-    auto                IdentifierFilter,
-    bool                RecurseNamedSubnamespaces,
-    bool                IncludeUnnamedSubnamespaces>
+template <typename ScopeAnchor, ZHLN::StringLiteral SourceFile, auto IdentifierFilter, bool RecurseNamedSubnamespaces, bool IncludeUnnamedSubnamespaces>
 consteval auto CollectNamespaceFunctions() -> std::span<const std::meta::info> {
     std::vector<std::meta::info> fns;
-    WalkNamespaceFunctions<IdentifierFilter>(
-        ScopeNamespaceOf<ScopeAnchor>(),
-        SourceFile,
-        RecurseNamedSubnamespaces,
-        IncludeUnnamedSubnamespaces,
-        fns
-    );
+    WalkNamespaceFunctions<IdentifierFilter>(ScopeNamespaceOf<ScopeAnchor>(), SourceFile, RecurseNamedSubnamespaces, IncludeUnnamedSubnamespaces, fns);
     return std::define_static_array(fns);
 }
 
-template <
-    typename ScopeAnchor,
-    ZHLN::StringLiteral SourceFile,
-    auto                IdentifierFilter,
-    bool                RecurseNamedSubnamespaces,
-    bool                IncludeUnnamedSubnamespaces>
+template <typename ScopeAnchor, ZHLN::StringLiteral SourceFile, auto IdentifierFilter, bool RecurseNamedSubnamespaces, bool IncludeUnnamedSubnamespaces>
 consteval auto CollectNamespaceClasses() -> std::span<const std::meta::info> {
     std::vector<std::meta::info> classes;
-    WalkNamespaceClasses<IdentifierFilter>(
-        ScopeNamespaceOf<ScopeAnchor>(),
-        SourceFile,
-        RecurseNamedSubnamespaces,
-        IncludeUnnamedSubnamespaces,
-        classes
-    );
+    WalkNamespaceClasses<IdentifierFilter>(ScopeNamespaceOf<ScopeAnchor>(), SourceFile, RecurseNamedSubnamespaces, IncludeUnnamedSubnamespaces, classes);
     return std::define_static_array(classes);
 }
 
@@ -203,14 +173,12 @@ struct ReflectedFreeFunction {
 
     template <typename F>
     static consteval void ForEachAnnotationType(F&& f) {
-        ::ZHLN::Reflect::ForEachAnnotationType<FnInfo>(std::forward<F>(f));
+        Reflect::ForEachAnnotationType<FnInfo>(std::forward<F>(f));
     }
 
     template <typename StopScopeAnchor = void, typename F>
     static consteval void ForEachEnclosingNamespaceAnnotationType(F&& f) {
-        [:Expand(TemplatedDetail::EnclosingNamespacesOf<FnInfo, StopScopeAnchor>()):] >> [&]<auto ns>() {
-            ::ZHLN::Reflect::ForEachAnnotationType<ns>(f);
-        };
+        [:Expand(TemplatedDetail::EnclosingNamespacesOf<FnInfo, StopScopeAnchor>()):] >> [&]<auto ns>() { Reflect::ForEachAnnotationType<ns>(f); };
     }
 
     static constexpr std::size_t annotationCount = TemplatedDetail::EntityAnnotationCount<FnInfo>();
@@ -239,61 +207,55 @@ struct ReflectedFreeFunction {
 };
 
 template <
-    typename ScopeAnchor                        = void,
-    ZHLN::StringLiteral SourceFile              = "",
-    auto                IdentifierFilter        = AcceptAnyIdentifier,
+    typename ScopeAnchor                            = void,
+    ZHLN::StringLiteral SourceFile                  = "",
+    auto                IdentifierFilter            = AcceptAnyIdentifier,
     bool                RecurseNamedSubnamespaces   = true,
     bool                IncludeUnnamedSubnamespaces = true,
     typename F>
 constexpr void ForEachNamespaceFunction(F&& f) {
-    [:Expand(TemplatedDetail::CollectNamespaceFunctions<
-         ScopeAnchor,
-         SourceFile,
-         IdentifierFilter,
-         RecurseNamedSubnamespaces,
-         IncludeUnnamedSubnamespaces>()):]
-        >> [&]<auto fn>() { f.template operator()<ReflectedFreeFunction<fn>>(); };
+    [:Expand(
+          TemplatedDetail::CollectNamespaceFunctions<ScopeAnchor, SourceFile, IdentifierFilter, RecurseNamedSubnamespaces, IncludeUnnamedSubnamespaces>()
+      ):] >> [&]<auto fn>() { f.template operator()<ReflectedFreeFunction<fn>>(); };
 }
 
 template <
-    typename ScopeAnchor                        = void,
-    ZHLN::StringLiteral SourceFile              = "",
-    auto                IdentifierFilter        = AcceptAnyIdentifier,
+    typename ScopeAnchor                            = void,
+    ZHLN::StringLiteral SourceFile                  = "",
+    auto                IdentifierFilter            = AcceptAnyIdentifier,
     bool                RecurseNamedSubnamespaces   = true,
     bool                IncludeUnnamedSubnamespaces = true,
     typename F>
 constexpr void ForEachNamespaceClass(F&& f) {
-    [:Expand(TemplatedDetail::CollectNamespaceClasses<
-         ScopeAnchor,
-         SourceFile,
-         IdentifierFilter,
-         RecurseNamedSubnamespaces,
-         IncludeUnnamedSubnamespaces>()):]
-        >> [&]<auto cls>() {
-               using ClassType = typename[:cls:];
-               f.template operator()<ClassType>();
-           };
+    [:Expand(
+          TemplatedDetail::CollectNamespaceClasses<ScopeAnchor, SourceFile, IdentifierFilter, RecurseNamedSubnamespaces, IncludeUnnamedSubnamespaces>()
+      ):] >> [&]<auto cls>() {
+        using ClassType = typename[:cls:];
+        f.template operator()<ClassType>();
+    };
 }
 
 #else
 
 template <
-    typename ScopeAnchor                        = void,
-    ZHLN::StringLiteral SourceFile              = "",
-    auto                IdentifierFilter        = AcceptAnyIdentifier,
+    typename ScopeAnchor                            = void,
+    ZHLN::StringLiteral SourceFile                  = "",
+    auto                IdentifierFilter            = AcceptAnyIdentifier,
     bool                RecurseNamedSubnamespaces   = true,
     bool                IncludeUnnamedSubnamespaces = true,
     typename F>
-constexpr void ForEachNamespaceFunction(F&&) {}
+constexpr void ForEachNamespaceFunction(F&&) {
+}
 
 template <
-    typename ScopeAnchor                        = void,
-    ZHLN::StringLiteral SourceFile              = "",
-    auto                IdentifierFilter        = AcceptAnyIdentifier,
+    typename ScopeAnchor                            = void,
+    ZHLN::StringLiteral SourceFile                  = "",
+    auto                IdentifierFilter            = AcceptAnyIdentifier,
     bool                RecurseNamedSubnamespaces   = true,
     bool                IncludeUnnamedSubnamespaces = true,
     typename F>
-constexpr void ForEachNamespaceClass(F&&) {}
+constexpr void ForEachNamespaceClass(F&&) {
+}
 
 #endif
 

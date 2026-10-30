@@ -525,14 +525,14 @@ struct ZHLN::Vk::FormatOf<float[3]> {
     static constexpr auto value = VK_FORMAT_R32G32B32_SFLOAT;
 };
 template <>
-struct ZHLN::Vk::FormatOf<::ZHLN::Packed1010102> {
+struct ZHLN::Vk::FormatOf<ZHLN::Packed1010102> {
     static constexpr auto value = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
 };
 template <>
-struct ZHLN::Vk::FormatOf<::ZHLN::PackedHalf2> {
+struct ZHLN::Vk::FormatOf<ZHLN::PackedHalf2> {
     static constexpr auto value = VK_FORMAT_R16G16_SFLOAT;
 };
 template <>
-struct ZHLN::Vk::FormatOf<::ZHLN::PackedRGBA8> {
+struct ZHLN::Vk::FormatOf<ZHLN::PackedRGBA8> {
     static constexpr auto value = VK_FORMAT_R8G8B8A8_UNORM;
 };

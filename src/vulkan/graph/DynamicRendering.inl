@@ -35,11 +35,12 @@ constexpr auto ToVkClearColor(const VkClearColorValue& color) noexcept -> VkClea
 }
 
 template <VkImageLayout InitialLayout, VkImageLayout FinalLayout, ColorClearTarget Target, ClearColorSource Color>
-inline void ClearColorAndTransition(VkCommandBuffer cmd, const Target& target, const Color& color, const VkImageSubresourceRange& range) noexcept {
+inline void ClearColorAndTransition(VkCommandBuffer cmd, const Target& target, const Color& color, const VkImageSubresourceRange range) noexcept {
     static_assert(FinalLayout != VK_IMAGE_LAYOUT_UNDEFINED, "A cleared image cannot finish in UNDEFINED layout.");
     const VkImage image = GetVkImage(target);
-    if (image == VK_NULL_HANDLE)
+    if (image == VK_NULL_HANDLE) {
         return;
+    }
 
     const VkClearColorValue clear = ToVkClearColor(color);
     ImageBarrier::Transition<InitialLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(image, range).Record(cmd);
@@ -57,9 +58,9 @@ static_assert(ColorClearTarget<VkImage> && ColorClearTarget<ImageSlice> && !Colo
 
 static_assert(std::same_as<VkImage, VkImageView> || !ColorClearTarget<VkImageView>);
 static_assert(std::same_as<VkImage, VkBuffer> || !ColorClearTarget<VkBuffer>);
-static_assert(ToVkClearColor(Color4 {0.25f, 0.5f, 0.75f, 1.0f}).float32[2] == 0.75f);
-static_assert(ToVkClearColor(1.0f).float32[3] == 1.0f);
-static_assert(ToVkClearColor(VkClearColorValue {.float32 = {0.1f, 0.2f, 0.3f, 0.4f}}).float32[1] == 0.2f);
+static_assert(ToVkClearColor(Color4 {.r = 0.25F, .g = 0.5F, .b = 0.75F, .a = 1.0F}).float32[2] == 0.75F);
+static_assert(ToVkClearColor(1.0F).float32[3] == 1.0F);
+static_assert(ToVkClearColor(VkClearColorValue {.float32 = {0.1F, 0.2F, 0.3F, 0.4F}}).float32[1] == 0.2F);
 
 inline void ClearColorImage(const VkCommandBuffer cmd, const VkImage image, const VkClearColorValue& color, const uint32_t layerCount) noexcept {
     const VkImageSubresourceRange range {
@@ -160,7 +161,7 @@ inline auto
 }
 
 template <VkImageLayout TargetLayout, VkImageLayout OldLayout, VkFormat Format>
-constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, Tag<TargetLayout>) noexcept {
+constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, Tag<TargetLayout> /*unused*/) noexcept {
     return Transition<TargetLayout>(cmd, img);
 }
 
@@ -210,16 +211,16 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
                 const size_t index   = offset++;
                 _colorFormats[index] = image.GetFormat();
                 _colors[index]       = {
-                             .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                             .pNext              = nullptr,
-                             .imageView          = image.AttachmentView(),
-                             .imageLayout        = std::remove_cvref_t<decltype(image)>::layout,
-                             .resolveMode        = VK_RESOLVE_MODE_NONE,
-                             .resolveImageView   = VK_NULL_HANDLE,
-                             .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                             .loadOp             = loadOp,
-                             .storeOp            = storeOp,
-                             .clearValue         = {.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b, clearColor.a}}}
+                    .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                    .pNext              = nullptr,
+                    .imageView          = image.AttachmentView(),
+                    .imageLayout        = std::remove_cvref_t<decltype(image)>::layout,
+                    .resolveMode        = VK_RESOLVE_MODE_NONE,
+                    .resolveImageView   = VK_NULL_HANDLE,
+                    .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                    .loadOp             = loadOp,
+                    .storeOp            = storeOp,
+                    .clearValue         = {.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b, clearColor.a}}}
                 };
             };
             (add(img), ...);
@@ -265,28 +266,22 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
 template <VkImageLayout Layout, VkFormat Format>
-constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
-    const TypedImage<Layout, Format>& img,
-    ColorOp                           op
-) && noexcept -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type> {
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(const TypedImage<Layout, Format>& img, ColorOp op) && noexcept
+    -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type> {
     return std::move(*this).AddColor(img, op.loadOp, op.storeOp, op.clearColor);
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
 template <typename... TypedImages>
-constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
-    const std::tuple<TypedImages...>& imageTuple,
-    ColorOp                           op
-) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type> {
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(const std::tuple<TypedImages...>& imageTuple, ColorOp op) && noexcept
+    -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type> {
     return std::move(*this).AddColorGroup(imageTuple, op.loadOp, op.storeOp, op.clearColor);
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
 template <VkImageLayout Layout, VkFormat Format>
-constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
-    const TypedImage<Layout, Format>& img,
-    DepthOp                           op
-) && noexcept -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type> {
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(const TypedImage<Layout, Format>& img, DepthOp op) && noexcept
+    -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type> {
     return std::move(*this).AddDepth(img, op.loadOp, op.storeOp, op.clearVal);
 }
 
@@ -320,12 +315,12 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetInheritance() cons
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
 constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::EffectiveViewport() const noexcept -> VkViewport {
-    const bool useVp = _vpW > 1.0F && _vpH > 1.0F;
+    const bool use_vp = _vpW > 1.0F && _vpH > 1.0F;
     return {
-        .x        = useVp ? _vpX : 0.0F,
-        .y        = useVp ? _vpY : 0.0F,
-        .width    = useVp ? _vpW : static_cast<float>(_extent.width),
-        .height   = useVp ? _vpH : static_cast<float>(_extent.height),
+        .x        = use_vp ? _vpX : 0.0F,
+        .y        = use_vp ? _vpY : 0.0F,
+        .width    = use_vp ? _vpW : static_cast<float>(_extent.width),
+        .height   = use_vp ? _vpH : static_cast<float>(_extent.height),
         .minDepth = 0.0F,
         .maxDepth = 1.0F,
     };
@@ -404,7 +399,7 @@ inline void ClearAttachment(
 }
 
 inline void ClearStencilAttachment(VkCommandBuffer cmd, VkExtent2D extent, uint32_t stencil = 0) noexcept {
-    ClearAttachment(cmd, VK_IMAGE_ASPECT_STENCIL_BIT, extent, {.depthStencil = {.depth = 1.0f, .stencil = stencil}});
+    ClearAttachment(cmd, VK_IMAGE_ASPECT_STENCIL_BIT, extent, {.depthStencil = {.depth = 1.0F, .stencil = stencil}});
 }
 
 } // namespace ZHLN::Vk

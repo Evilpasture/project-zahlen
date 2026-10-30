@@ -258,12 +258,12 @@ auto VirtualFileSystem::MountPak(std::string_view pakFilePath) -> bool {
     return true;
 }
 
-void VirtualFileSystem::LoadAsync(RestrictSpan<LoadRequest> requests, ::ZHLN::TaskSystem::Counter* counter) {
+void VirtualFileSystem::LoadAsync(RestrictSpan<LoadRequest> requests, TaskSystem::Counter* counter) {
     if (requests.empty()) {
         return;
     }
 
-    std::vector<::ZHLN::TaskSystem::Task> tasks;
+    std::vector<TaskSystem::Task> tasks;
     tasks.reserve(requests.size());
 
     for (auto& request: requests) {
@@ -279,7 +279,7 @@ void VirtualFileSystem::LoadAsync(RestrictSpan<LoadRequest> requests, ::ZHLN::Ta
         );
     }
 
-    ::ZHLN::TaskSystem::Dispatch(tasks, counter);
+    TaskSystem::Dispatch(tasks, counter);
 }
 
 auto VirtualFileSystem::LoadSync(LoadRequest& request) -> bool {
@@ -396,8 +396,8 @@ void VirtualFileSystem::ExecuteLoad(LoadRequest* req) {
         return;
     }
 
-    req->outSize            = static_cast<size_t>(entry.uncompressedSize);
-    const char* payloadRaw  = archive->mapped.Chars().data() + entry.offset;
+    req->outSize           = static_cast<size_t>(entry.uncompressedSize);
+    const char* payloadRaw = archive->mapped.Chars().data() + entry.offset;
 
     if (entry.compression == 0) {
         req->outData    = const_cast<char*>(payloadRaw);

@@ -95,8 +95,8 @@ class ZHLN_API VirtualFileSystem {
 
     [[nodiscard]] auto MountedDirectoryCount() const noexcept -> size_t;
 
-    void LoadAsync(RestrictSpan<LoadRequest> requests, ::ZHLN::TaskSystem::Counter* counter);
-    auto LoadSync(LoadRequest& request) -> bool;
+    void        LoadAsync(RestrictSpan<LoadRequest> requests, TaskSystem::Counter* counter);
+    auto        LoadSync(LoadRequest& request) -> bool;
     static void FreeMemory(LoadRequest& req);
 
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool;

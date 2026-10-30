@@ -261,12 +261,7 @@ template <
     VkImageLayout    FinalLayout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     ColorClearTarget Target,
     ClearColorSource Color>
-void ClearColorAndTransition(
-    VkCommandBuffer                cmd,
-    const Target&                  target,
-    const Color&                   color,
-    const VkImageSubresourceRange& range = kAllColorSubresources
-) noexcept;
+void ClearColorAndTransition(VkCommandBuffer cmd, const Target& target, const Color& color, VkImageSubresourceRange range = kAllColorSubresources) noexcept;
 
 template <
     VkImageLayout    InitialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
@@ -355,11 +350,9 @@ class RenderingInheritance {
   public:
     constexpr RenderingInheritance() noexcept = default;
 
-    constexpr RenderingInheritance(
-        std::span<const VkFormat> colorFormats, VkFormat depth, VkFormat stencil, uint32_t viewMask, VkViewport viewport
-    ) noexcept:
-        _colorFormatCount(static_cast<uint32_t>(std::min(colorFormats.size(), _colorFormats.size()))), _depthFormat(depth),
-        _stencilFormat(stencil), _viewMask(viewMask), _viewport(viewport), _active(true) {
+    constexpr RenderingInheritance(std::span<const VkFormat> colorFormats, VkFormat depth, VkFormat stencil, uint32_t viewMask, VkViewport viewport) noexcept:
+        _colorFormatCount(static_cast<uint32_t>(std::min(colorFormats.size(), _colorFormats.size()))), _depthFormat(depth), _stencilFormat(stencil),
+        _viewMask(viewMask), _viewport(viewport), _active(true) {
         for (size_t i = 0; i < _colorFormatCount; ++i) {
             _colorFormats[i] = colorFormats[i];
         }
@@ -397,7 +390,7 @@ class RenderingInheritance {
     /// renders at; a non-raster inheritance has none to give.
     void ApplyViewportAndScissor(VkCommandBuffer cmd) const noexcept {
         if (_active) {
-            ::ZHLN::Vk::ApplyViewportAndScissor(cmd, _viewport);
+            Vk::ApplyViewportAndScissor(cmd, _viewport);
         }
     }
 
@@ -454,8 +447,8 @@ ScopedTransition(VkCommandBuffer, ImageT&, Vk::Tag<Final>) -> ScopedTransition<I
 /// The load/store pair, plus the value only a clear consumes, packaged with the
 /// intent that produced it. A pass can no longer hand a clear color to a load.
 struct ColorOp {
-    VkAttachmentLoadOp  loadOp     = VK_ATTACHMENT_LOAD_OP_LOAD;
-    VkAttachmentStoreOp storeOp    = VK_ATTACHMENT_STORE_OP_STORE;
+    VkAttachmentLoadOp  loadOp  = VK_ATTACHMENT_LOAD_OP_LOAD;
+    VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     ZHLN::Color4        clearColor {};
 
     /// Clear the attachment with a color, then preserve results.
@@ -663,10 +656,10 @@ DynamicPass(VkExtent2D) -> DynamicPass<0, false>;
 using PassRecordFn = void (*)(VkCommandBuffer, const void* userData);
 
 struct PassDesc {
-    const char*                    name = "Unnamed Pass";
-    std::span<const ImageBarrier>  transitions;
-    PassRecordFn                   record    = nullptr;
-    const void*                    pUserData = nullptr;
+    const char*                   name = "Unnamed Pass";
+    std::span<const ImageBarrier> transitions;
+    PassRecordFn                  record    = nullptr;
+    const void*                   pUserData = nullptr;
 };
 
 void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes) noexcept;

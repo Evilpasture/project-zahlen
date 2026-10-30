@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <Zahlen/Core/Reflection/Annotations.hpp>
@@ -90,7 +89,7 @@ consteval auto ExtractTypeAnnotationConstantAt() {
     return ExtractAnnotationConstantAt<entity, Index>();
 }
 
-}
+} // namespace TemplatedDetail
 
 template <typename T, typename F>
 constexpr void ForEachTypeAnnotationConstant(F&& f) {
@@ -200,7 +199,7 @@ struct ReflectedMethod {
 
     template <typename F>
     static consteval void ForEachAnnotationType(F&& f) {
-        ::ZHLN::Reflect::ForEachAnnotationType<MemberInfo>(std::forward<F>(f));
+        Reflect::ForEachAnnotationType<MemberInfo>(std::forward<F>(f));
     }
 
     static constexpr std::size_t annotationCount = TemplatedDetail::EntityAnnotationCount<MemberInfo>();
@@ -238,11 +237,10 @@ constexpr void ForEachReflectedConstructor(F&& f) {
 template <typename T, typename F>
 constexpr void ForEachReflectedMethod(F&& f) {
     [:Expand(TemplatedDetail::MembersOf<T>()):] >> [&]<auto member>() -> auto {
-        if constexpr (std::meta::is_function(member)
-                      && std::meta::has_identifier(member)
-                      && !std::meta::is_static_member(member)
-                      && !std::meta::is_special_member_function(member)
-                      && !std::meta::is_operator_function(member)) {
+        if constexpr (
+            std::meta::is_function(member) && std::meta::has_identifier(member) && !std::meta::is_static_member(member) &&
+            !std::meta::is_special_member_function(member) && !std::meta::is_operator_function(member)
+        ) {
             f.template operator()<ReflectedMethod<T, member>>();
         }
     };
@@ -263,4 +261,4 @@ constexpr auto HasBases() -> bool {
     return !BaseClasses<T>().empty();
 }
 
-}
+} // namespace ZHLN::Reflect
