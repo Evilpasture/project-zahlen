@@ -74,10 +74,10 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
     return finalMesh;
 }
 
-auto CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) -> Mesh {
+auto CreatePlaneMesh(RenderContext& ctx, float extent, JPH::Float4 color) -> Mesh {
     Packed1010102 n = Math::PackNormal(0.0f, 1.0f, 0.0f);
     Packed1010102 t = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
-    PackedRGBA8   c = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
+    PackedRGBA8   c = Math::PackColor(color.x, color.y, color.z, color.w);
 
     std::vector<VertexPosition> positions = {{{-extent, 0.0f, extent}}, {{extent, 0.0f, extent}},   {{extent, 0.0f, -extent}},
                                              {{extent, 0.0f, -extent}}, {{-extent, 0.0f, -extent}}, {{-extent, 0.0f, extent}}};
@@ -118,11 +118,11 @@ auto CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) -
     return finalMesh;
 }
 
-auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color) -> Mesh {
-    const float x = halfExtents.GetX();
-    const float y = halfExtents.GetY();
-    const float z = halfExtents.GetZ();
-    PackedRGBA8 c = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
+auto CreateBoxMesh(RenderContext& ctx, JPH::Float3 halfExtents, JPH::Float4 color) -> Mesh {
+    const float x = halfExtents.x;
+    const float y = halfExtents.y;
+    const float z = halfExtents.z;
+    PackedRGBA8 c = Math::PackColor(color.x, color.y, color.z, color.w);
 
     Packed1010102 nZ  = Math::PackNormal(0, 0, 1);
     Packed1010102 tZ  = Math::PackNormal(1, 0, 0, 1);
@@ -215,11 +215,11 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
     return finalMesh;
 }
 
-auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) -> Mesh {
+auto CreateSphereMesh(RenderContext& ctx, float radius, JPH::Float4 color) -> Mesh {
     constexpr int kRings    = 12;
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
-    PackedRGBA8   c         = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
+    PackedRGBA8   c         = Math::PackColor(color.x, color.y, color.z, color.w);
 
     std::vector<VertexPosition> positions;
     VertexStreams               streams;
@@ -283,11 +283,11 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
     return finalMesh;
 }
 
-auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color) -> Mesh {
+auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, JPH::Float4 color) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   hy        = (height > 1e-4f ? height : 1e-4f) * 0.5f;
-    PackedRGBA8   c         = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
+    PackedRGBA8   c         = Math::PackColor(color.x, color.y, color.z, color.w);
 
     std::vector<VertexPosition> positions;
     VertexStreams               streams;
@@ -359,12 +359,12 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
     return finalMesh;
 }
 
-auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color) -> Mesh {
+auto CreateConeMesh(RenderContext& ctx, float radius, float height, JPH::Float4 color) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   h         = height > 1e-4f ? height : 1e-4f;
     const float   hy        = h * 0.5f;
-    PackedRGBA8   c         = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
+    PackedRGBA8   c         = Math::PackColor(color.x, color.y, color.z, color.w);
 
     const float slant = std::atan2(r, h);
     const float ny    = std::sin(slant);

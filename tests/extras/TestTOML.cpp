@@ -609,12 +609,11 @@ onClickAction = "editor.save_scene"
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedBox"}},
                 ZHLN::Components::TransformComponent {
                     .position = JPH::Vec3(1.0f, 2.0f, 3.0f),
-                    .rotation = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(0.0f, 45.0f, 0.0f)),
+                    .rotation = ZHLN::Math::EulerDegreesToQuat({0.0f, 45.0f, 0.0f}),
                     .scale    = JPH::Vec3(2.0f, 2.0f, 2.0f)
                 },
                 ZHLN::Components::MeshComponent {.meshAsset = 1, .materialAsset = 2, .cullRadius = 2.0f},
-                ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f},
-                ZHLN::Components::PhysicsComponent {.isStatic = false},
+                ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f}, ZHLN::Components::PhysicsComponent {.isStatic = false},
                 ZHLN::Components::SceneSourceComponent {
                     .shape = ZHLN::Scene::ShapeKind::Box, .halfExtents = {1.5f, 0.5f, 2.5f}, .extent = 10.0f, .emissiveVirtualLights = true
                 }
@@ -639,7 +638,7 @@ onClickAction = "editor.save_scene"
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedSun"}},
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(4.0f, 5.0f, 6.0f), .rotation = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(50.0f, -35.0f, 0.0f))
+                    .position = JPH::Vec3(4.0f, 5.0f, 6.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f})
                 },
                 ZHLN::Components::LightComponent {
                     .type        = ZHLN::LightType::Sun,

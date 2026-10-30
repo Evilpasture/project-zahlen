@@ -79,8 +79,8 @@ void TeleportPlayer(
     // The destination origin is at floor level while the character body origin
     // sits at the capsule centre, so lift by the shape's own ground offset.
     const JPH::Vec3 center = destTrans->position + JPH::Vec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsHandle) + 0.05f, 0.0f);
-    physics->SetCharacterPosition(playerPhys->physicsHandle, JPH::RVec3(center));
-    physics->SetCharacterVelocity(playerPhys->physicsHandle, JPH::Vec3::sZero());
+    physics->SetCharacterPosition(playerPhys->physicsHandle, ToDouble3(center));
+    physics->SetCharacterVelocity(playerPhys->physicsHandle, {0.0f, 0.0f, 0.0f});
 
     if (const auto playerTrans = registry.Get<Components::TransformComponent>(playerEnt)) {
         playerTrans->position = center;
@@ -402,7 +402,7 @@ void DoorMovementSystem::Update(
         if (physics) {
             if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
                 if (phys->physicsHandle.Pack() != 0) {
-                    physics->SetKinematicPose(phys->physicsHandle, JPH::RVec3(trans->position), trans->rotation);
+                    physics->SetKinematicPose(phys->physicsHandle, ToDouble3(trans->position), ToFloat4(trans->rotation));
                 }
             }
         }
@@ -471,7 +471,7 @@ void ButtonMovementSystem::Update(
             if (physics) {
                 if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
                     if (phys->physicsHandle.Pack() != 0) {
-                        physics->SetKinematicPose(phys->physicsHandle, JPH::RVec3(trans->position), trans->rotation);
+                        physics->SetKinematicPose(phys->physicsHandle, ToDouble3(trans->position), ToFloat4(trans->rotation));
                     }
                 }
             }

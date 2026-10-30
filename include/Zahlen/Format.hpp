@@ -7,6 +7,9 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Core/Reference.h>
+#include <Jolt/Math/Double3.h>
+#include <Jolt/Math/Float3.h>
+#include <Jolt/Math/Float4.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
@@ -32,6 +35,29 @@ template <>
 struct CustomFormatter<JPH::DVec3> {
     static void format(const JPH::DVec3& v, std::string& out) {
         out += std::format("({}, {}, {})", v.GetX(), v.GetY(), v.GetZ());
+    }
+};
+
+// The value-based spellings the public API takes. A rotation formats as its
+// four lanes, which is the only reading that does not imply a maths type.
+template <>
+struct CustomFormatter<JPH::Float3> {
+    static void format(const JPH::Float3& v, std::string& out) {
+        out += std::format("({}, {}, {})", v.x, v.y, v.z);
+    }
+};
+
+template <>
+struct CustomFormatter<JPH::Float4> {
+    static void format(const JPH::Float4& v, std::string& out) {
+        out += std::format("({}, {}, {}, {})", v.x, v.y, v.z, v.w);
+    }
+};
+
+template <>
+struct CustomFormatter<JPH::Double3> {
+    static void format(const JPH::Double3& v, std::string& out) {
+        out += std::format("({}, {}, {})", v.x, v.y, v.z);
     }
 };
 

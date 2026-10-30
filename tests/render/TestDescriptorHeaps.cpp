@@ -199,7 +199,7 @@ struct DescriptorHeapsSuite {
                 const JPH::Vec3 pos(firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f);
 
                 ZHLN::PrefabFactory::CreateBox(
-                    *engine, JPH::Vec3(halfExtent, halfExtent, halfExtent),
+                    *engine, {halfExtent, halfExtent, halfExtent},
                     ZHLN::PrefabFactory::SpawnParams {
                         .position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = mat
                     }
@@ -474,7 +474,7 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
             }
             ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
+                *engine, {0.8f, 0.8f, 0.8f},
                 ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-2.5, 1.5, 0.0), .createPhysics = false, .materialOverride = *redMatRes}
             );
 
@@ -483,7 +483,7 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
             }
             ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
+                *engine, {0.8f, 0.8f, 0.8f},
                 ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(2.5, 1.5, 0.0), .createPhysics = false, .materialOverride = *greenMatRes}
             );
 

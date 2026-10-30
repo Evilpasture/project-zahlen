@@ -5,6 +5,7 @@
 #include "RenderInternal.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -187,7 +188,7 @@ auto ShadowRenderer::ComputeCascadeLightSpaceMatrix(
     }
 
     const JPH::Vec3  cascadeLightPos  = center + sunDir * offset;
-    const JPH::Mat44 cascadeLightView = Math::CreateLookAt(cascadeLightPos, center, JPH::Vec3::sAxisY());
+    const JPH::Mat44 cascadeLightView = Math::CreateLookAt(ToFloat3(cascadeLightPos), ToFloat3(center), {0.0f, 1.0f, 0.0f});
     const JPH::Mat44 cascadeLightProj = Math::CreateOrtho(-radius, radius, -radius, radius, Shadows::NearClip, farClip);
 
     return cascadeLightProj * cascadeLightView;

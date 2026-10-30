@@ -59,7 +59,7 @@ export struct LightningComponent {
 
 namespace Lightning {
 
-export auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, const LightningConfig& cfg = {}) -> Entity;
+export auto Spawn(Engine& engine, JPH::Double3 cloudPos, JPH::Double3 groundPos, const LightningConfig& cfg = {}) -> Entity;
 
 export auto Update(Engine& engine, float dt) -> void;
 

@@ -31,8 +31,6 @@ struct VolumetricFogInjectDesc {
     }
 
     [[nodiscard]] static auto Prepare(RenderFrame& frame, const Slang::ScenePassPushConstants&) noexcept {
-        const uint32_t fIdx = frame.inFlight;
-
         const VolumetricFogPushConstants fogPC = {};
         return MakeComputePassArgs(
             fogPC, frame.renderer.fog.VoxelDispatchExtent(),
@@ -54,8 +52,6 @@ struct VolumetricLightInjectDesc {
     }
 
     [[nodiscard]] static auto Prepare(RenderFrame& frame, const Slang::ScenePassPushConstants&) noexcept {
-        const uint32_t fIdx = frame.inFlight;
-
         const VolumetricLightInjectPushConstants lightInjectPC = {};
         return MakeComputePassArgs(
             lightInjectPC, frame.renderer.fog.VoxelDispatchExtent(),
@@ -80,8 +76,6 @@ struct VolumetricIntegrationDesc {
     }
 
     [[nodiscard]] static auto Prepare(RenderFrame& frame, const Slang::ScenePassPushConstants&) noexcept {
-        const uint32_t fIdx = frame.inFlight;
-
         return MakeComputePassArgs(
             frame.renderer.fog.VoxelDispatchExtent(),
             Vk::Slot<"inVoxelLight">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(frame.graphResources.voxelLight)),
@@ -103,8 +97,6 @@ struct VolumetricTemporalDesc {
     }
 
     [[nodiscard]] static auto Prepare(RenderFrame& frame, const Slang::ScenePassPushConstants&) noexcept {
-        const uint32_t fIdx = frame.inFlight;
-
         const VolumetricTemporalPushConstants temporalPC = {};
         return MakeComputePassArgs(
             temporalPC, frame.renderer.fog.VoxelDispatchExtent(),

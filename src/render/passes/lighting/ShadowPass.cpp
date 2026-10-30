@@ -67,7 +67,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
 
         bool inAnyCascade = false;
         for (uint32_t c = 0; c < TargetManager::kCascades; ++c) {
-            if (cascadeFrustums[c].IsSphereVisible(meshPos, radius)) {
+            if (cascadeFrustums[c].IsSphereVisible(ToFloat3(meshPos), radius)) {
                 inAnyCascade = true;
                 break;
             }

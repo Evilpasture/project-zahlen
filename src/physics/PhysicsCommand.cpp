@@ -163,7 +163,7 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                 const JPH::BodyID id = GetBodyID(*this, c.handle);
                 if (!id.IsInvalid()) {
                     bodyInterface->ActivateBody(id);
-                    bodyInterface->SetLinearVelocity(id, JPH::Vec3(c.vx, c.vy, c.vz));
+                    bodyInterface->SetLinearVelocity(id, {c.vx, c.vy, c.vz});
                 }
                 break;
             }
@@ -199,7 +199,7 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                 const auto&       c  = cmd.payload.setVelocity;
                 const JPH::BodyID id = GetBodyID(*this, c.handle);
                 if (!id.IsInvalid()) {
-                    bodyInterface->AddImpulse(id, JPH::Vec3(c.vx, c.vy, c.vz));
+                    bodyInterface->AddImpulse(id, {c.vx, c.vy, c.vz});
                     bodyInterface->ActivateBody(id);
                 }
                 break;

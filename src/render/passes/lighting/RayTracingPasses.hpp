@@ -43,8 +43,6 @@ struct GtaoDesc {
     }
 
     [[nodiscard]] static auto Prepare(RenderFrame& frame, const Slang::ScenePassPushConstants& pc) noexcept {
-        const uint32_t fIdx = frame.inFlight;
-
         const auto& fullExt = frame.ActiveDepthTarget().extent;
         const auto  push    = GtaoPushConstants {
                .halfRes     = {frame.graphResources.ao.extent.width, frame.graphResources.ao.extent.height},
@@ -84,8 +82,7 @@ struct RcgiCascadePass:
     RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept {
-        const uint32_t fIdx = frame.inFlight;
-        const bool active   = frame.renderer.ctx.RayTracingSupported() && frame.settings.rayTracing.enableDiffuseGI && frame.settings.post.giIntensity > 0.0f &&
+        const bool active = frame.renderer.ctx.RayTracingSupported() && frame.settings.rayTracing.enableDiffuseGI && frame.settings.post.giIntensity > 0.0f &&
                             frame.settings.environment.fullBright == 0 && frame.tlasAddresses != nullptr;
         if (!active) {
             return;

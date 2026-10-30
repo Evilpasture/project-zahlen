@@ -462,14 +462,14 @@ struct PerformanceTestSuite {
 
             // Create Large Ground Plane
             auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 200.0f, 1.0f, 200.0f);
-            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -1.0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            pc.CreateRigidBody(groundShape, {0, -1.0, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
             // Populate 256 Dynamic Physics Bodies
             auto sphereShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.5f);
             for (int x = -8; x < 8; ++x) {
                 for (int z = -8; z < 8; ++z) {
                     pc.CreateRigidBody(
-                        sphereShape, JPH::RVec3(x * 2.5, 5.0 + (x + z) * 0.2, z * 2.5), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING
+                        sphereShape, {x * 2.5, 5.0 + (x + z) * 0.2, z * 2.5}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING
                     );
                 }
             }
@@ -502,7 +502,7 @@ struct PerformanceTestSuite {
                                         for (uint32_t i = start; i < end; ++i) {
                                             float      posX = -20.0f + static_cast<float>(i % 100) * 0.4f;
                                             float      posZ = -20.0f + static_cast<float>(i / 100) * 0.8f;
-                                            const auto hit  = pc.Raycast(JPH::RVec3(posX, 20.0, posZ), JPH::Vec3(0.0f, -1.0f, 0.0f), 40.0f);
+                                            const auto hit  = pc.Raycast({posX, 20.0, posZ}, {0.0f, -1.0f, 0.0f}, 40.0f);
                                             if (hit.hasHit) {
                                                 localHits++;
                                             }
@@ -647,7 +647,7 @@ struct PerformanceTestSuite {
 
             // 2. Setup Static Physics World Boundary
             auto groundShape = physicsContext.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 150.0f, 1.0f, 150.0f);
-            physicsContext.CreateRigidBody(groundShape, JPH::RVec3(0, -1.0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            physicsContext.CreateRigidBody(groundShape, {0, -1.0, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
             // 3. Spawn 1,000 Active Dynamic Agents with Full Component State
             constexpr size_t          kAgentCount = 1000;
@@ -664,8 +664,9 @@ struct PerformanceTestSuite {
                 float      spawnZ = posDist(rng);
                 JPH::RVec3 spawnPos(spawnX, 1.5, spawnZ);
 
-                ZHLN::Physics::BodyHandle bodyHandle =
-                    physicsContext.CreateRigidBody(agentShape, spawnPos, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+                ZHLN::Physics::BodyHandle bodyHandle = physicsContext.CreateRigidBody(
+                    agentShape, ZHLN::ToDouble3(spawnPos), {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING
+                );
 
                 ZHLN::Entity agent = registry.Create(
                     ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)},
@@ -740,8 +741,9 @@ struct PerformanceTestSuite {
 
                                          // Raycast to probe surrounding terrain & dynamic obstacles
                                          JPH::Vec3  forward(std::sin(static_cast<float>(frame + i) * 0.05f), 0.0f, std::cos(static_cast<float>(frame + i) * 0.05f));
-                                         const auto rayHit =
-                                             physicsContext.Raycast(JPH::RVec3(trans->position + JPH::Vec3(0, 0.5f, 0)), forward, 10.0f, phys->physicsHandle);
+                                         const auto rayHit = physicsContext.Raycast(
+                                             ZHLN::ToDouble3(trans->position + JPH::Vec3(0, 0.5f, 0)), ZHLN::ToFloat3(forward), 10.0f, phys->physicsHandle
+                                         );
                                          totalRaysCast.fetch_add(1, std::memory_order::relaxed);
 
                                          if (rayHit.hasHit) {
@@ -750,7 +752,7 @@ struct PerformanceTestSuite {
                                          }
 
                                          // Apply movement impulse based on perception
-                                         physicsContext.SetLinearVelocity(phys->physicsHandle, forward * 4.0f);
+                                         physicsContext.SetLinearVelocity(phys->physicsHandle, ZHLN::ToFloat3(forward * 4.0f));
                                      }
                                  });
 

@@ -602,10 +602,10 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 }
 
                 ringEntities[i] = ZHLN::PrefabFactory::CreateBox(
-                    *engine, JPH::Vec3(rings[i].size, rings[i].size, rings[i].size),
+                    *engine, {rings[i].size, rings[i].size, rings[i].size},
                     ZHLN::PrefabFactory::SpawnParams {
-                        .position        = JPH::RVec3(static_cast<double>(rings[i].x), kEyeHeight, static_cast<double>(rings[i].distance)),
-                        .createPhysics   = false,
+                        .position         = JPH::RVec3(static_cast<double>(rings[i].x), kEyeHeight, static_cast<double>(rings[i].distance)),
+                        .createPhysics    = false,
                         .materialOverride = *mat
                     }
                 );

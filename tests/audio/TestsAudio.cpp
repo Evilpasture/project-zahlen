@@ -4,11 +4,12 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Defer.hpp>
-#include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -132,7 +133,7 @@ inline void SyncTestAudioSourcesSystem(
         if (!src) continue;
         if (src->voiceHandle != AudioHandle::Invalid && audio->IsVoiceValid(src->voiceHandle)) {
             if (auto t = query.Get<Components::TransformComponent>(e)) {
-                audio->SetVoicePosition(src->voiceHandle, t->position);
+                audio->SetVoicePosition(src->voiceHandle, ToFloat3(t->position));
             }
             audio->SetVoiceBus(src->voiceHandle, src->bus);
             audio->SetVoiceOcclusion(src->voiceHandle, src->occlusion);
@@ -351,7 +352,7 @@ void test_streaming_voices_pause_seek_and_generational_handles() {
 
 void test_spatial_panning_logarithmic_rolloff_and_occlusion_lowpass_dsp() {
     AudioContext audio(AudioConfig {.sampleRate = 48000, .channels = 2, .headless = true});
-    audio.UpdateListener(JPH::Vec3::sZero(), JPH::Vec3(0.0f, 0.0f, -1.0f), JPH::Vec3::sAxisY());
+    audio.UpdateListener({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f});
 
     // 1. 3D stereo panning + Logarithmic distance attenuation.
     const auto toneBytes = BuildSineWavBytes(48000, 1.0f, 440.0f, 0.8f);
@@ -382,7 +383,7 @@ void test_spatial_panning_logarithmic_rolloff_and_occlusion_lowpass_dsp() {
     Expect(nearRms.right > nearRms.left * 1.25f);
 
     // Move to 10m (Logarithmic midpoint -> 0.5x amplitude) and let smoothing settle.
-    audio.SetVoicePosition(spatialVoice, JPH::Vec3(10.0f, 0.0f, 0.0f));
+    audio.SetVoicePosition(spatialVoice, {10.0f, 0.0f, 0.0f});
     ExpectEq(audio.RenderOfflineFrames(pcmNear), 4800u); // settle smoothing
     std::vector<float> pcmMid(4800 * 2, 0.0f);
     ExpectEq(audio.RenderOfflineFrames(pcmMid), 4800u);

@@ -111,8 +111,8 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     auto& reg = engine.GetRegistry();
 
     const JPH::Vec3  sunPos   = JPH::Vec3(15.0f, 30.0f, 15.0f);
-    const JPH::Quat  sunRot   = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(50.0f, -35.0f, 0.0f));
-    const JPH::Mat44 sunWorld = ZHLN::Math::CreateTransform(sunPos, sunRot);
+    const JPH::Quat  sunRot   = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f});
+    const JPH::Mat44 sunWorld = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(sunPos), ZHLN::ToFloat4(sunRot));
     reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("glTFInspectorSun")},
         ZHLN::Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = JPH::Vec3::sReplicate(1.0f)},
@@ -123,7 +123,7 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     );
 
     const ZHLN::Entity ground = ZHLN::PrefabFactory::CreatePlane(
-        engine, 40.0f, JPH::Vec4(0.12f, 0.14f, 0.18f, 1.0f),
+        engine, 40.0f, {0.12f, 0.14f, 0.18f, 1.0f},
         ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .roughness = 0.9f, .metallic = 0.0f}
     );
     reg.Assign<ZHLN::Components::NameComponent>(ground, "glTFInspectorGround");
@@ -234,7 +234,7 @@ void TreeRow(
     JPH::Vec4 btnColor = selected ? JPH::Vec4(0.18f, 0.36f, 0.56f, 0.98f) :
                                     (playing ? JPH::Vec4(0.15f, 0.30f, 0.20f, 0.85f) : JPH::Vec4(0.10f, 0.12f, 0.16f, 0.60f));
 
-    if (ui.Button(text, btnColor)) {
+    if (ui.Button(text, ZHLN::ToFloat4(btnColor))) {
         if (expandable) {
             if (state.expanded.contains(pathStr)) {
                 state.expanded.erase(pathStr);

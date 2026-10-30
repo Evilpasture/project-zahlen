@@ -74,8 +74,9 @@ struct LightningTestSuite {
             const JPH::RVec3 cloudPos(0.0, 180.0, 0.0);
             const JPH::RVec3 groundPos(25.0, 0.0, -15.0);
 
-            const ZHLN::Entity boltEntity =
-                ZHLN::Lightning::Spawn(*engine, cloudPos, groundPos, ZHLN::LightningConfig {.eta = 2.0f, .timeDilation = 1.0f, .subdivisions = 4});
+            const ZHLN::Entity boltEntity = ZHLN::Lightning::Spawn(
+                *engine, ZHLN::ToDouble3(cloudPos), ZHLN::ToDouble3(groundPos), ZHLN::LightningConfig {.eta = 2.0f, .timeDilation = 1.0f, .subdivisions = 4}
+            );
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(boltEntity));
 
@@ -180,7 +181,7 @@ struct LightningTestSuite {
             reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.ambientExposure = kBaselineExposure; });
 
             // Spawn first strike
-            const ZHLN::Entity bolt1 = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(0, 150, 0), JPH::RVec3(-10, 0, 0));
+            const ZHLN::Entity bolt1 = ZHLN::Lightning::Spawn(*engine, {0, 150, 0}, {-10, 0, 0});
 
             // Advance 2 frames
             constexpr float dt = 1.0f / 60.0f;
@@ -188,7 +189,7 @@ struct LightningTestSuite {
             ZHLN::Lightning::Update(*engine, dt);
 
             // Spawn second strike while first strike is active (Tests baseline exposure inheritance)
-            const ZHLN::Entity bolt2 = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(30, 160, 20), JPH::RVec3(40, 0, 25));
+            const ZHLN::Entity bolt2 = ZHLN::Lightning::Spawn(*engine, {30, 160, 20}, {40, 0, 25});
 
             const auto c1 = reg.Get<ZHLN::LightningComponent>(bolt1);
             const auto c2 = reg.Get<ZHLN::LightningComponent>(bolt2);
@@ -238,7 +239,7 @@ struct LightningTestSuite {
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
 
-            const ZHLN::Entity rawBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(0, 80, 0), JPH::RVec3(0, 0, 0));
+            const ZHLN::Entity rawBolt = ZHLN::Lightning::Spawn(*engine, {0, 80, 0}, {0, 0, 0});
             const auto         raw     = reg.Get<ZHLN::LightningComponent>(rawBolt);
             if (!ZHLN::Test::ExpectTrue(raw.has_value())) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
@@ -258,7 +259,7 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectNe(reusedSlot, oldPos);
             rc.DestroyBuffer(reusedSlot);
 
-            const ZHLN::Entity despawnBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(10, 80, 0), JPH::RVec3(10, 0, 0));
+            const ZHLN::Entity despawnBolt = ZHLN::Lightning::Spawn(*engine, {10, 80, 0}, {10, 0, 0});
             const auto         bolt        = reg.Get<ZHLN::LightningComponent>(despawnBolt);
             if (!ZHLN::Test::ExpectTrue(bolt.has_value())) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
@@ -278,7 +279,7 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectFalse(rc.GetGPUMesh(meshAsset).has_value());
             ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(materialAsset).has_value());
 
-            const ZHLN::Entity componentBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(20, 80, 0), JPH::RVec3(20, 0, 0));
+            const ZHLN::Entity componentBolt = ZHLN::Lightning::Spawn(*engine, {20, 80, 0}, {20, 0, 0});
             const auto         component     = reg.Get<ZHLN::LightningComponent>(componentBolt);
             if (!ZHLN::Test::ExpectTrue(component.has_value())) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
@@ -289,7 +290,7 @@ struct LightningTestSuite {
             ZHLN::DespawnEntity(*engine, componentBolt);
             engine->ProcessPendingDestroy();
 
-            const ZHLN::Entity cachedBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(30, 80, 0), JPH::RVec3(30, 0, 0));
+            const ZHLN::Entity cachedBolt = ZHLN::Lightning::Spawn(*engine, {30, 80, 0}, {30, 0, 0});
             const auto         cached     = reg.Get<ZHLN::LightningComponent>(cachedBolt);
             if (!ZHLN::Test::ExpectTrue(cached.has_value())) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);

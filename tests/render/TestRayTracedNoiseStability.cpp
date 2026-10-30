@@ -195,11 +195,11 @@ struct RayTracedNoiseStabilityTestSuite {
             // thick at y = 0.18m, t ~ 0.4m < 1.2m along L_sun) right inside the
             // CSM normal/depth-bias Peter-Panning zone.
             ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(4.0f, 0.06f, 0.25f),
+                *engine, {4.0f, 0.06f, 0.25f},
                 ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.06, 15.0), .createPhysics = false, .materialOverride = boxMat}
             );
             ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(4.0f, 0.008f, 0.012f),
+                *engine, {4.0f, 0.008f, 0.012f},
                 ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.18, 16.5), .createPhysics = false, .materialOverride = boxMat}
             );
 
@@ -259,7 +259,7 @@ struct RayTracedNoiseStabilityTestSuite {
                 camComp->camera.pitch    = -18.0f;
             }
             const ZHLN::Entity highCaster = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(3.0f, 3.0f, 3.0f),
+                *engine, {3.0f, 3.0f, 3.0f},
                 ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 12.0, 22.0), .createPhysics = false, .materialOverride = boxMat}
             );
 
@@ -314,7 +314,7 @@ struct RayTracedNoiseStabilityTestSuite {
             }
 
             const ZHLN::Entity curb = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(2.2f, 0.06f, 0.25f),
+                *engine, {2.2f, 0.06f, 0.25f},
                 ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-2.0, 0.06, 15.0), .createPhysics = false, .materialOverride = boxMat}
             );
 

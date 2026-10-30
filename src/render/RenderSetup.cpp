@@ -57,7 +57,7 @@ void RenderContext::SetFrameData(
 
     JPH::Vec3  sunDir    = frame.sunDirection;
     if (sunDir.LengthSq() > 1e-6f) sunDir = sunDir.Normalized();
-    JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, JPH::Vec3::sZero(), JPH::Vec3::sAxisY());
+    JPH::Mat44 lightView = Math::CreateLookAt(ToFloat3(sunDir * 100.0f), {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
 
     float tanHalfFov = std::tan(JPH::DegreesToRadians(cam.fov * 0.5f));
 

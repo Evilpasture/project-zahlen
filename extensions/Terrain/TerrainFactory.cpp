@@ -399,7 +399,7 @@ auto CreateTerrainFromData(
         tData.colors.assign(colorsRGBA, colorsRGBA + (static_cast<ptrdiff_t>(sampleCount * sampleCount * 4)));
     }
     TerrainHandle tHandle  = TerrainSystem::RegisterTerrainData(std::move(tData));
-    JPH::Mat44    worldMat = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
+    JPH::Mat44    worldMat = Math::CreateTransform(ToFloat3(params.position), ToFloat4(params.rotation), ToFloat3(params.scale));
 
     reg.Add(e, Components::NameComponent {.name = String64("TerrainData_" + std::to_string(e.index))});
     reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
@@ -422,7 +422,9 @@ auto CreateTerrainFromData(
     if (params.createPhysics && pc != nullptr && heights != nullptr) {
         auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
         // FIXED: Used pc->CreateRigidBody
-        auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
+        auto body = pc->CreateRigidBody(
+            shape, ToDouble3(params.position), ToFloat4(params.rotation), JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF
+        );
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
     }
 
@@ -477,7 +479,7 @@ auto CreateTerrain(
     ctx.RegisterGPUMaterial(matAsset, mat);
 
     TerrainHandle tHandle  = TerrainSystem::RegisterTerrainData(std::move(tData));
-    JPH::Mat44    worldMat = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
+    JPH::Mat44    worldMat = Math::CreateTransform(ToFloat3(params.position), ToFloat4(params.rotation), ToFloat3(params.scale));
 
     reg.Add(e, Components::NameComponent {.name = String64("Terrain_" + std::to_string(e.index))});
     reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
@@ -501,8 +503,9 @@ auto CreateTerrain(
         const TerrainData* stored = TerrainSystem::GetTerrainData(tHandle);
         if (stored != nullptr && !stored->heights.empty()) {
             auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
-            auto body =
-                pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
+            auto body  = pc->CreateRigidBody(
+                shape, ToDouble3(params.position), ToFloat4(params.rotation), JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF
+            );
             reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
         }
     }

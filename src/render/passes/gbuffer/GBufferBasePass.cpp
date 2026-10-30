@@ -70,9 +70,8 @@ void RecordGpuCulled(
     uint32_t                    drawCount,
     const GBufferTargets&       in
 ) noexcept {
-    auto* const cmd        = encoder.cmd;
-    const auto  frameIndex = ctx.inFlight;
-    const auto& countBuf   = ctx.secondPassCountBuffers;
+    auto* const cmd      = encoder.cmd;
+    const auto& countBuf = ctx.secondPassCountBuffers;
 
     Vk::BufferBarrier::ComputeToTransfer(countBuf).Record(cmd);
     Vk::FillBuffer(cmd, countBuf);

@@ -350,7 +350,7 @@ struct MeshShaderTestSuite {
             };
 
             const std::array<Case, 3> cases = {
-                Case {.name = "box", .mesh = ZHLN::PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f))},
+                Case {.name = "box", .mesh = ZHLN::PrefabFactory::CreateBoxMesh(rc, {0.5f, 0.5f, 0.5f})},
                 Case {.name = "plane", .mesh = ZHLN::PrefabFactory::CreatePlaneMesh(rc, 4.0f)},
                 Case {.name = "tetrahedron", .mesh = ZHLN::PrefabFactory::CreateTetrahedronMesh(rc)},
             };
@@ -499,9 +499,7 @@ struct MeshShaderTestSuite {
                 // rejected by the task shader's normal cone, and partial overlap.
                 const std::array<JPH::RVec3, 3> spawnPoints = {JPH::RVec3(-1.3, 1.0, 0.0), JPH::RVec3(0.0, 1.0, -1.0), JPH::RVec3(1.3, 1.2, 0.4)};
                 for (const auto& p: spawnPoints) {
-                    ZHLN::PrefabFactory::CreateBox(
-                        engine, JPH::Vec3(0.6f, 0.6f, 0.6f), ZHLN::PrefabFactory::SpawnParams {.position = p, .createPhysics = false}
-                    );
+                    ZHLN::PrefabFactory::CreateBox(engine, {0.6f, 0.6f, 0.6f}, ZHLN::PrefabFactory::SpawnParams {.position = p, .createPhysics = false});
                 }
                 return {};
             };
@@ -723,7 +721,7 @@ struct MeshShaderTestSuite {
                 } else {
                     // Half-extents 0.5: front face at z = +0.5, camera 0.10 in front of it.
                     cam.position = JPH::Vec3(0.0f, 0.0f, 0.60f);
-                    ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3(0.5f, 0.5f, 0.5f), atOrigin);
+                    ZHLN::PrefabFactory::CreateBox(engine, {0.5f, 0.5f, 0.5f}, atOrigin);
                 }
                 // The closeup pose is chosen by the branch above: the write-back belongs
                 // after it, or the engine renders the pre-branch framing.
@@ -894,10 +892,9 @@ struct MeshShaderTestSuite {
                 // to make it face -Z, away from the camera; leave room for the
                 // black background around the quad when checking its silhouette.
                 const ZHLN::Entity plane = ZHLN::PrefabFactory::CreatePlane(
-                    engine, 1.0f, JPH::Vec4(1, 1, 1, 1),
+                    engine, 1.0f, {1, 1, 1, 1},
                     ZHLN::PrefabFactory::SpawnParams {
-                        .rotation = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -std::numbers::pi_v<float> * 0.5f),
-                        .materialOverride = *material
+                        .rotation = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -std::numbers::pi_v<float> * 0.5f), .materialOverride = *material
                     }
                 );
                 const auto part = reg.Get<ZHLN::Components::MeshComponent>(plane);

@@ -60,10 +60,9 @@ struct SolidPayload {
 [[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const JPH::Vec4& color, float size) -> SolidPayload {
     ZHLN::GUI::Context gui(engine.GetFontAtlas());
     ZHLN::GUI::Frame   ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = engine.GetPlatformHost().GetSize(), .dt = 1.0f / 60.0f});
-    ui.Box(
-        "Solid", ZHLN::GUI::BoxConfig {.width = {.fixed = size}, .height = {.fixed = size}, .color = color, .padding = 12.0f},
-        [&]() { ui.Text("X", 24.0f, color); }
-    );
+    ui.Box("Solid", ZHLN::GUI::BoxConfig {.width = {.fixed = size}, .height = {.fixed = size}, .color = color, .padding = 12.0f}, [&]() {
+        ui.Text("X", 24.0f, ZHLN::ToFloat4(color));
+    });
     const ZHLN::UIDrawData frame = std::move(ui).End();
 
     SolidPayload payload;

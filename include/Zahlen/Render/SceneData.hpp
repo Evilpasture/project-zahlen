@@ -85,10 +85,10 @@ struct SceneData {
         billboards.clear();
     }
 
-    void AddLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) {
-        lines.push_back({start, end, colorStart, colorEnd});
+    void AddLine(JPH::Float3 start, JPH::Float3 end, JPH::Float4 colorStart, JPH::Float4 colorEnd) {
+        lines.push_back({ToVec3(start), ToVec3(end), ToVec4(colorStart), ToVec4(colorEnd)});
     }
-    void AddLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg color) {
+    void AddLine(JPH::Float3 start, JPH::Float3 end, JPH::Float4 color) {
         AddLine(start, end, color, color);
     }
 

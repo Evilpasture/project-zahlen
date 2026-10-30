@@ -10,17 +10,112 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Geometry/AABox.h>
+#include <Jolt/Math/DVec3.h>
+#include <Jolt/Math/Double3.h>
 #include <Jolt/Math/Float3.h>
+#include <Jolt/Math/Float4.h>
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Render/Vertex.hpp>
 
+namespace ZHLN {
+
+// Value <-> SIMD bridge. Public APIs take the POD aggregates -- JPH::Float3,
+// JPH::Float4 and JPH::Double3 -- so callers write `{1.0f, 2.0f, 3.0f}` and
+// never name a Jolt maths type. Vec3/Vec4/Quat/DVec3 are built only where a
+// calculation actually needs them. Jolt's constructors are explicit, so the
+// switch of representation is never silent and never a hidden per-call cost
+// that a reader has to infer: the conversion is spelled at the boundary.
+// The identity overloads exist so a call site can name the spelling it needs
+// without first knowing which one it already holds; conversions stay idempotent.
+[[nodiscard]] inline auto ToFloat3(JPH::Float3 inV) noexcept -> JPH::Float3 {
+    return inV;
+}
+
+[[nodiscard]] inline auto ToFloat3(JPH::Vec3Arg inV) noexcept -> JPH::Float3 {
+    JPH::Float3 out;
+    inV.StoreFloat3(&out);
+    return out;
+}
+
+[[nodiscard]] inline auto ToFloat4(JPH::Float4 inV) noexcept -> JPH::Float4 {
+    return inV;
+}
+
+[[nodiscard]] inline auto ToFloat4(JPH::Vec4Arg inV) noexcept -> JPH::Float4 {
+    JPH::Float4 out;
+    inV.StoreFloat4(&out);
+    return out;
+}
+
+[[nodiscard]] inline auto ToFloat4(JPH::QuatArg inQ) noexcept -> JPH::Float4 {
+    JPH::Float4 out;
+    inQ.StoreFloat4(&out);
+    return out;
+}
+
+[[nodiscard]] inline auto ToDouble3(JPH::Double3 inV) noexcept -> JPH::Double3 {
+    return inV;
+}
+
+[[nodiscard]] inline auto ToDouble3(JPH::RVec3Arg inV) noexcept -> JPH::Double3 {
+    JPH::Double3 out;
+    inV.StoreDouble3(&out);
+    return out;
+}
+
+[[nodiscard]] inline auto ToVec3(JPH::Float3 inV) noexcept -> JPH::Vec3 {
+    return JPH::Vec3(inV);
+}
+
+[[nodiscard]] inline auto ToVec3(JPH::Vec3Arg inV) noexcept -> JPH::Vec3 {
+    return inV;
+}
+
+[[nodiscard]] inline auto ToVec4(JPH::Float4 inV) noexcept -> JPH::Vec4 {
+    return JPH::Vec4::sLoadFloat4(&inV);
+}
+
+[[nodiscard]] inline auto ToVec4(JPH::Vec4Arg inV) noexcept -> JPH::Vec4 {
+    return inV;
+}
+
+[[nodiscard]] inline auto ToQuat(JPH::Float4 inQ) noexcept -> JPH::Quat {
+    return JPH::Quat(inQ);
+}
+
+[[nodiscard]] inline auto ToQuat(JPH::QuatArg inQ) noexcept -> JPH::Quat {
+    return inQ;
+}
+
+[[nodiscard]] inline auto ToRVec3(JPH::Double3 inV) noexcept -> JPH::RVec3 {
+    return JPH::RVec3(inV);
+}
+
+[[nodiscard]] inline auto ToRVec3(JPH::RVec3Arg inV) noexcept -> JPH::RVec3 {
+    return inV;
+}
+
+#ifdef JPH_DOUBLE_PRECISION
+// RVec3 is DVec3 only in double-precision builds. Without the define it aliases
+// Vec3, and these two overloads would collide with the Vec3/Float3 pair above.
+[[nodiscard]] inline auto ToFloat3(JPH::RVec3Arg inV) noexcept -> JPH::Float3 {
+    return ToFloat3(JPH::Vec3(inV));
+}
+
+[[nodiscard]] inline auto ToDouble3(JPH::Vec3Arg inV) noexcept -> JPH::Double3 {
+    return ToDouble3(JPH::RVec3(inV));
+}
+#endif
+
+} // namespace ZHLN
+
 namespace ZHLN::Math {
 
-inline auto CreateLookAt(JPH::Vec3Arg eye, JPH::Vec3Arg target, JPH::Vec3Arg up) {
-    return JPH::Mat44::sLookAt(eye, target, up);
+inline auto CreateLookAt(JPH::Float3 eye, JPH::Float3 target, JPH::Float3 up) {
+    return JPH::Mat44::sLookAt(ToVec3(eye), ToVec3(target), ToVec3(up));
 }
 
 inline auto CreatePerspective(float fovRadians, float aspect, float nearZ, float farZ) {
@@ -42,13 +137,13 @@ inline auto CreateOrtho(float left, float right, float bottom, float top, float 
     );
 }
 
-inline auto CreateTransform(JPH::Vec3Arg translation, JPH::QuatArg rotation, JPH::Vec3Arg scale) {
-    JPH::Mat44 m = JPH::Mat44::sRotationTranslation(rotation, translation);
-    return m.PreScaled(scale);
+inline auto CreateTransform(JPH::Float3 translation, JPH::Float4 rotation, JPH::Float3 scale) {
+    JPH::Mat44 m = JPH::Mat44::sRotationTranslation(ToQuat(rotation), ToVec3(translation));
+    return m.PreScaled(ToVec3(scale));
 }
 
-inline auto CreateTransform(JPH::Vec3Arg translation, JPH::QuatArg rotation) {
-    return JPH::Mat44::sRotationTranslation(rotation, translation);
+inline auto CreateTransform(JPH::Float3 translation, JPH::Float4 rotation) {
+    return JPH::Mat44::sRotationTranslation(ToQuat(rotation), ToVec3(translation));
 }
 
 // Exact scalar equality for matrix-cache comparisons; this is not an epsilon test.
@@ -100,21 +195,21 @@ inline constexpr float kDecomposeEpsilon = 1e-5f;
     return trs;
 }
 
-inline auto EulerToQuat(JPH::Vec3Arg radians) {
+inline auto EulerToQuat(JPH::Float3 radians) {
+    return JPH::Quat::sEulerAngles(ToVec3(radians));
+}
+
+inline auto QuatToEuler(JPH::Float4 quat) {
+    return ToQuat(quat).GetEulerAngles();
+}
+
+inline auto EulerDegreesToQuat(JPH::Float3 degrees) {
+    const JPH::Vec3 radians = ToVec3(degrees) * (JPH::JPH_PI / 180.0f);
     return JPH::Quat::sEulerAngles(radians);
 }
 
-inline auto QuatToEuler(JPH::QuatArg quat) {
-    return quat.GetEulerAngles();
-}
-
-inline auto EulerDegreesToQuat(JPH::Vec3Arg degrees) {
-    JPH::Vec3 radians = degrees * (JPH::JPH_PI / 180.0f);
-    return JPH::Quat::sEulerAngles(radians);
-}
-
-inline auto QuatToEulerDegrees(JPH::QuatArg quat) {
-    return quat.GetEulerAngles() * (180.0f / JPH::JPH_PI);
+inline auto QuatToEulerDegrees(JPH::Float4 quat) {
+    return ToQuat(quat).GetEulerAngles() * (180.0f / JPH::JPH_PI);
 }
 
 inline auto CalculateFrustumAABB(const JPH::Mat44& viewProj) -> JPH::AABox {
@@ -259,4 +354,4 @@ inline auto PackUV(float u, float v) -> PackedHalf2 {
     return value;
 }
 
-}
+} // namespace ZHLN::Math

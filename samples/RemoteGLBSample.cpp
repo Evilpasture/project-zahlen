@@ -599,7 +599,7 @@ struct Studio {
     JPH::Vec3Arg     direction
 ) -> ZHLN::Entity {
     auto&            reg   = engine.GetRegistry();
-    const JPH::Mat44 world = ZHLN::Math::CreateTransform(position, JPH::Quat::sIdentity());
+    const JPH::Mat44 world = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(position), {0.0f, 0.0f, 0.0f, 1.0f});
     return reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64(name)},
         ZHLN::Components::TransformComponent {.position = position, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
@@ -684,7 +684,7 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     const ZHLN::Material floorMaterial = engine.GetRenderContext().CreateMaterial(floorDesc).value_or(ZHLN::Material {});
 
     studio.floor = ZHLN::PrefabFactory::CreatePlane(
-        engine, radius * kFloorExtent, JPH::Vec4(1.0f, 1.0f, 1.0f, 1.0f),
+        engine, radius * kFloorExtent, {1.0f, 1.0f, 1.0f, 1.0f},
         ZHLN::PrefabFactory::SpawnParams {
             .position         = JPH::RVec3(center.GetX(), subject.boundsMin.GetY(), center.GetZ()),
             .createPhysics    = false,

@@ -270,13 +270,12 @@ auto MatchesObservedRemotePropertySchema(const MsgPackValue& snapshot, uint16_t 
            && anchoredCount >= required && canCollideCount >= required && transparencyCount >= required;
 }
 
-constexpr std::array<std::pair<uint16_t, std::string_view>, 22> kObservedRemotePropertyChannels {{
-    {5u, "Position"}, {18u, "UserId"}, {19u, "Character"}, {20u, "Rotation"}, {21u, "Size"},
-    {22u, "Anchored"}, {23u, "CanCollide"}, {24u, "Color"}, {25u, "Transparency"}, {32u, "NetworkOwner"},
-    {33u, "Shape"}, {49u, "RootPart"}, {50u, "State"}, {56u, "Enabled"}, {57u, "Intensity"},
-    {58u, "Shadows"}, {59u, "ShadowRadius"}, {60u, "SourceRadius"}, {61u, "Direction"}, {62u, "IsMain"},
-    {63u, "Range"}, {64u, "Falloff"}
-}};
+constexpr std::array<std::pair<uint16_t, std::string_view>, 22> kObservedRemotePropertyChannels {
+    {{5u, "Position"},    {18u, "UserId"},  {19u, "Character"},    {20u, "Rotation"},     {21u, "Size"},         {22u, "Anchored"},
+     {23u, "CanCollide"}, {24u, "Color"},   {25u, "Transparency"}, {32u, "NetworkOwner"}, {33u, "Shape"},        {49u, "RootPart"},
+     {50u, "State"},      {56u, "Enabled"}, {57u, "Intensity"},    {58u, "Shadows"},      {59u, "ShadowRadius"}, {60u, "SourceRadius"},
+     {61u, "Direction"},  {62u, "IsMain"},  {63u, "Range"},        {64u, "Falloff"}}
+};
 
 auto BuildConnectPacket(const LaunchConfig& config, uint16_t udpPort) -> MsgPackValue {
     MsgPackValue packet = MsgPackValue::Map();
@@ -664,7 +663,7 @@ void ClientSession::ApplyProperties(ReplicatedObject& object, const MsgPackValue
             object.transformDirty = true;
         } else if (property == "Rotation") {
             object.rotationEulerDeg = value.AsVec3(VEC3_SCALE, object.rotationEulerDeg);
-            object.rotationQuat = Math::EulerDegreesToQuat(object.rotationEulerDeg).Normalized();
+            object.rotationQuat     = Math::EulerDegreesToQuat(ToFloat3(object.rotationEulerDeg)).Normalized();
             object.physicsHistory.Clear();
             object.hasPhysicsSample = false;
             object.transformDirty = true;
@@ -826,8 +825,8 @@ void ClientSession::ApplyPhysicsUpdates(const MsgPackValue& physicsUpdates) {
         object->physicsHistory.Push(NetworkTransformSample {.position = position, .rotation = rotation, .receivedAt = receivedAt});
         object->position = position;
         object->rotationQuat = rotation;
-        object->rotationEulerDeg = Math::QuatToEulerDegrees(object->rotationQuat);
-        object->linearVelocity = JPH::Vec3(scaled(data[7]), scaled(data[8]), scaled(data[9]));
+        object->rotationEulerDeg = Math::QuatToEulerDegrees(ToFloat4(object->rotationQuat));
+        object->linearVelocity   = JPH::Vec3(scaled(data[7]), scaled(data[8]), scaled(data[9]));
         object->hasPhysicsSample = true;
         object->transformDirty = true;
     }
@@ -1318,10 +1317,10 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         // this pose instead of snapping back to an old remote sample.
         object.position = transform.position;
         object.rotationQuat = transform.rotation.Normalized();
-        object.rotationEulerDeg = Math::QuatToEulerDegrees(object.rotationQuat);
-        object.linearVelocity = transform.linearVelocity;
-        object.renderPosition = object.position;
-        object.renderRotation = object.rotationQuat;
+        object.rotationEulerDeg = Math::QuatToEulerDegrees(ToFloat4(object.rotationQuat));
+        object.linearVelocity   = transform.linearVelocity;
+        object.renderPosition   = object.position;
+        object.renderRotation   = object.rotationQuat;
         object.physicsHistory.Clear();
         object.hasPhysicsSample = false;
 

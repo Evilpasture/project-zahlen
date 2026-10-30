@@ -74,7 +74,7 @@ struct ExplosionTestSuite {
 
             // Spawn omnidirectional fireball
             const JPH::Vec3    origin(0.0f, 5.0f, 0.0f);
-            const ZHLN::Entity expRoot = ZHLN::ExplosionSystem::Spawn(*engine, origin, 1.0f, ZHLN::OrdnanceType::StandardFireball);
+            const ZHLN::Entity expRoot = ZHLN::ExplosionSystem::Spawn(*engine, ZHLN::ToFloat3(origin), 1.0f, ZHLN::OrdnanceType::StandardFireball);
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(expRoot));
 
@@ -133,7 +133,7 @@ struct ExplosionTestSuite {
             auto& reg = engine->GetRegistry();
 
             // 2. Detonate Artillery Mortar at (0, 0, 0)
-            const ZHLN::Entity expRoot = ZHLN::ExplosionSystem::Spawn(*engine, JPH::Vec3(0.0f, 0.0f, 0.0f), 1.0f, ZHLN::OrdnanceType::ArtilleryMortar);
+            const ZHLN::Entity expRoot = ZHLN::ExplosionSystem::Spawn(*engine, {0.0f, 0.0f, 0.0f}, 1.0f, ZHLN::OrdnanceType::ArtilleryMortar);
             ZHLN::Test::ExpectTrue(reg.IsAlive(expRoot));
 
             const auto comp = reg.Get<ZHLN::ExplosionComponent>(expRoot);

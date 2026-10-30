@@ -121,7 +121,7 @@ struct ViewmodelTestSuite {
             vmMat.baseColorFactor    = JPH::Float4 {0.0f, 1.0f, 0.5f, 1.0f};
 
             const ZHLN::Entity vmGun = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(0.08f, 0.08f, 0.35f),
+                *engine, {0.08f, 0.08f, 0.35f},
                 ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.2, 1.35, 1.5), .createPhysics = false, .materialOverride = vmMat}
             );
 
@@ -185,7 +185,7 @@ struct ViewmodelTestSuite {
             wallMat.baseColorFactor    = JPH::Float4 {0.15f, 0.15f, 0.15f, 1.0f};
 
             const ZHLN::Entity darkWall = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(4.0f, 4.0f, 0.2f),
+                *engine, {4.0f, 4.0f, 0.2f},
                 ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, -2.0), .createPhysics = false, .materialOverride = wallMat}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(darkWall));
@@ -195,7 +195,7 @@ struct ViewmodelTestSuite {
             vmMat.baseColorFactor    = JPH::Float4 {0.0f, 1.0f, 1.0f, 1.0f};
 
             const ZHLN::Entity vmObject = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(0.3f, 0.3f, 0.3f),
+                *engine, {0.3f, 0.3f, 0.3f},
                 ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, 1.2), .createPhysics = false, .materialOverride = vmMat}
             );
             reg.Patch<ZHLN::Components::MeshComponent>(vmObject, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });

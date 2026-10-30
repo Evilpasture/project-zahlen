@@ -104,10 +104,8 @@ struct RayTracedShadowsTestSuite {
                     auto& reg = eng.GetRegistry();
 
                     const ZHLN::Entity occluder = ZHLN::PrefabFactory::CreateBox(
-                        eng, JPH::Vec3(0.5f, 3.0f, 4.0f),
-                        ZHLN::PrefabFactory::SpawnParams {
-                            .position = JPH::RVec3(0.0, 3.0, -8.0), .createPhysics = false, .color = {0.7f, 0.7f, 0.7f, 1.0f}
-                        }
+                        eng, {0.5f, 3.0f, 4.0f},
+                        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 3.0, -8.0), .createPhysics = false, .color = {0.7f, 0.7f, 0.7f, 1.0f}}
                     );
 
                     TickFrames(eng, 2);

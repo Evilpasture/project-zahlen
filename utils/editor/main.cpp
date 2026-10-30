@@ -137,7 +137,7 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
     JPH::Vec3 pFar  = JPH::Vec3(farWorld.GetX() / farWorld.GetW(), farWorld.GetY() / farWorld.GetW(), farWorld.GetZ() / farWorld.GetW());
     JPH::Vec3 dir   = (pFar - pNear).Normalized();
 
-    return engine.GetPhysicsContext().Raycast(JPH::RVec3(pNear), dir, 1000.0f);
+    return engine.GetPhysicsContext().Raycast(ZHLN::ToDouble3(pNear), ZHLN::ToFloat3(dir), 1000.0f);
 }
 
 // Draws one frame of the self-hosted editor using the Clay layout engine:
@@ -396,10 +396,10 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
             ZHLN::Entity spawned = ZHLN::Entity::Null();
             switch (kind) {
                 case 0:
-                    spawned = ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3::sReplicate(0.5f), sp);
+                    spawned = ZHLN::PrefabFactory::CreateBox(engine, ZHLN::ToFloat3(JPH::Vec3::sReplicate(0.5f)), sp);
                     break;
                 case 1:
-                    spawned = ZHLN::PrefabFactory::CreatePlane(engine, 2.0f, JPH::Vec4(0.6f, 0.6f, 0.6f, 1.0f), sp);
+                    spawned = ZHLN::PrefabFactory::CreatePlane(engine, 2.0f, {0.6f, 0.6f, 0.6f, 1.0f}, sp);
                     break;
                 case 2:
                     spawned = ZHLN::PrefabFactory::CreateSphere(engine, 0.5f, sp);

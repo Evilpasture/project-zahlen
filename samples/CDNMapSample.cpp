@@ -199,7 +199,7 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         const JPH::Vec3  sunPos = center + JPH::Vec3(radius * 4.0f, radius * 8.0f, radius * 3.0f);
-        const JPH::Mat44 world  = ZHLN::Math::CreateTransform(sunPos, JPH::Quat::sIdentity());
+        const JPH::Mat44 world  = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(sunPos), {0.0f, 0.0f, 0.0f, 1.0f});
         reg.Create(
             ZHLN::Components::NameComponent {.name = ZHLN::String64("MapSun")},
             ZHLN::Components::TransformComponent {.position = sunPos, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},

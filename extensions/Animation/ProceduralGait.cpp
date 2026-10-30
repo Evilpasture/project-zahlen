@@ -519,7 +519,7 @@ void SolveLegGrounding(
         JPH::Vec3 probeWorld   = (planted && lockValid && !enteringPlant) ? lockedWorld : desiredWorld;
         probeWorld.SetY(desiredWorld.GetY());
 
-        const auto hit = physics.Raycast(JPH::RVec3(probeWorld + JPH::Vec3(0.0f, 0.75f, 0.0f)), JPH::Vec3(0.0f, -1.0f, 0.0f), 1.80f, ignoredPhysicsHandle);
+        const auto hit = physics.Raycast(ToDouble3(probeWorld + JPH::Vec3(0.0f, 0.75f, 0.0f)), {0.0f, -1.0f, 0.0f}, 1.80f, ignoredPhysicsHandle);
 
         FootContact contact {.position = desiredWorld, .normal = hit.hasHit ? SafeNormalized(hit.normal, JPH::Vec3::sAxisY()) : JPH::Vec3::sAxisY()};
         if (hit.hasHit) {

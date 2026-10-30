@@ -131,7 +131,8 @@ auto LogicBenchmark::SpawnFloor() -> void {
     m_world->GetRegistry().Create(
         Components::PhysicsComponent {
             .physicsHandle = physics.CreateRigidBody(
-                slab, JPH::RVec3 {0.0, -static_cast<double>(kFloorHalfHeight), 0.0}, JPH::Quat::sIdentity(), JPH::EMotionType::Static, Layers::ID::NON_MOVING
+                slab, ToDouble3(JPH::RVec3 {0.0, -static_cast<double>(kFloorHalfHeight), 0.0}), {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static,
+                Layers::ID::NON_MOVING
             ),
             .isStatic = true
         }
@@ -166,9 +167,8 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
         }
 
         const JPH::Vec3 position = LatticePosition(m_spawnedCubes);
-        const auto      handle   = physics.CreateRigidBody(
-            cube, JPH::RVec3 {position.GetX(), position.GetY(), position.GetZ()}, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, Layers::ID::MOVING
-        );
+        const auto      handle =
+            physics.CreateRigidBody(cube, ToDouble3(JPH::RVec3(position)), {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, Layers::ID::MOVING);
 
         const Entity entity = registry.Create();
         registry.Add(entity, Components::TransformComponent {.position = position});

@@ -604,7 +604,6 @@ void SynchronizeLocomotionTrack(
     const float     sprintSpeed     = movement != nullptr ? movement->speed * movement->sprintMultiplier : 0.0f;
     const float     hysteresis      = std::clamp(std::min(kGaitHysteresis, runSpeed * 0.25f), 0.05f, kGaitHysteresis);
     const bool      wantsRun        = movement != nullptr && movement->isSprinting;
-    const bool      aboveExit       = speed >= runSpeed + hysteresis;
     const bool      belowEnter      = speed < runSpeed - hysteresis;
     // Sprinting far enough past the boundary latches; the sprint key alone does
     // not, because the controller reports it for the whole hold.
@@ -2601,9 +2600,9 @@ void DrawProceduralDebugRig(
 
     const auto worldPosition = [&](RigNodeIndex node) { return ModelToWorld(rootPosition, rootRotation, boneMap.modelTransforms[node].GetTranslation()); };
     const auto drawCross     = [&](JPH::Vec3Arg point, float radius, JPH::Vec4Arg color) {
-        scene.AddLine(point - JPH::Vec3(radius, 0.0f, 0.0f), point + JPH::Vec3(radius, 0.0f, 0.0f), color);
-        scene.AddLine(point - JPH::Vec3(0.0f, radius, 0.0f), point + JPH::Vec3(0.0f, radius, 0.0f), color);
-        scene.AddLine(point - JPH::Vec3(0.0f, 0.0f, radius), point + JPH::Vec3(0.0f, 0.0f, radius), color);
+        scene.AddLine(ToFloat3(point - JPH::Vec3(radius, 0.0f, 0.0f)), ToFloat3(point + JPH::Vec3(radius, 0.0f, 0.0f)), ToFloat4(color));
+        scene.AddLine(ToFloat3(point - JPH::Vec3(0.0f, radius, 0.0f)), ToFloat3(point + JPH::Vec3(0.0f, radius, 0.0f)), ToFloat4(color));
+        scene.AddLine(ToFloat3(point - JPH::Vec3(0.0f, 0.0f, radius)), ToFloat3(point + JPH::Vec3(0.0f, 0.0f, radius)), ToFloat4(color));
     };
 
     const JPH::Vec4 torsoColor(0.15f, 0.85f, 1.00f, 1.0f);
@@ -2625,7 +2624,7 @@ void DrawProceduralDebugRig(
             color = legColor;
         }
         if (IsValidRigNode(parent, boneMap.nodeCount)) {
-            scene.AddLine(worldPosition(parent), worldPosition(node), color);
+            scene.AddLine(ToFloat3(worldPosition(parent)), ToFloat3(worldPosition(node)), ToFloat4(color));
         }
         drawCross(worldPosition(node), semantic == BoneSlot(CharacterBone::Head) ? 0.07f : 0.025f, color);
     }
@@ -2636,7 +2635,7 @@ void DrawProceduralDebugRig(
         if (constraint.kind == RigChildOfKind::Hand && 
             IsValidRigNode(constraint.parent, boneMap.nodeCount) && 
             IsValidRigNode(constraint.child, boneMap.nodeCount)) {
-            scene.AddLine(worldPosition(constraint.parent), worldPosition(constraint.child), constraintColor);
+            scene.AddLine(ToFloat3(worldPosition(constraint.parent)), ToFloat3(worldPosition(constraint.child)), ToFloat4(constraintColor));
             drawCross(worldPosition(constraint.child), 0.04f, constraintColor);
         }
     }
@@ -2648,7 +2647,7 @@ void DrawProceduralDebugRig(
             const RigNodeIndex node0     = boneMap.nodeIndices[BoneSlot(CharacterBone::HairStart) + particle0];
             const RigNodeIndex node1     = boneMap.nodeIndices[BoneSlot(CharacterBone::HairStart) + particle1];
             if (IsValidRigNode(node0, boneMap.nodeCount) && IsValidRigNode(node1, boneMap.nodeCount)) {
-                scene.AddLine(worldPosition(node0), worldPosition(node1), hairColor);
+                scene.AddLine(ToFloat3(worldPosition(node0)), ToFloat3(worldPosition(node1)), ToFloat4(hairColor));
             }
         }
     }
@@ -2657,8 +2656,8 @@ void DrawProceduralDebugRig(
         const JPH::Vec4 normalColor(1.0f, 0.95f, 0.12f, 1.0f);
         const JPH::Vec3 footL = ModelToWorld(rootPosition, rootRotation, gait->localFootTargetL);
         const JPH::Vec3 footR = ModelToWorld(rootPosition, rootRotation, gait->localFootTargetR);
-        scene.AddLine(footL, footL + gait->footNormalL * 0.22f, normalColor);
-        scene.AddLine(footR, footR + gait->footNormalR * 0.22f, normalColor);
+        scene.AddLine(ToFloat3(footL), ToFloat3(footL + gait->footNormalL * 0.22f), ToFloat4(normalColor));
+        scene.AddLine(ToFloat3(footR), ToFloat3(footR + gait->footNormalR * 0.22f), ToFloat4(normalColor));
 
         // Sagittal stride wheel: cyan ticks are pass poses, orange ticks are
         // reach poses, and the spoke follows the distance-driven gait phase.
@@ -2676,13 +2675,14 @@ void DrawProceduralDebugRig(
             const float     angle1 = 2.0f * std::numbers::pi_v<float> * static_cast<float>(segment + 1) / 24.0f;
             const JPH::Vec3 p0     = wheelCenterModel + JPH::Vec3(0.0f, -std::sin(angle0) * wheelRadius, std::cos(angle0) * wheelRadius);
             const JPH::Vec3 p1     = wheelCenterModel + JPH::Vec3(0.0f, -std::sin(angle1) * wheelRadius, std::cos(angle1) * wheelRadius);
-            scene.AddLine(ModelToWorld(rootPosition, rootRotation, p0), ModelToWorld(rootPosition, rootRotation, p1), wheelColor);
+            scene.AddLine(ToFloat3(ModelToWorld(rootPosition, rootRotation, p0)), ToFloat3(ModelToWorld(rootPosition, rootRotation, p1)), ToFloat4(wheelColor));
         }
         const JPH::Vec3 wheelMarkerModel = wheelCenterModel +
                                            JPH::Vec3(0.0f, -std::sin(gait->strideWheelAngle) * wheelRadius, std::cos(gait->strideWheelAngle) * wheelRadius);
         const JPH::Vec4 markerColor      = gait->passWeightL > gait->reachWeightL ? passColor : reachColor;
         scene.AddLine(
-            ModelToWorld(rootPosition, rootRotation, wheelCenterModel), ModelToWorld(rootPosition, rootRotation, wheelMarkerModel), markerColor
+            ToFloat3(ModelToWorld(rootPosition, rootRotation, wheelCenterModel)), ToFloat3(ModelToWorld(rootPosition, rootRotation, wheelMarkerModel)),
+            ToFloat4(markerColor)
         );
         drawCross(ModelToWorld(rootPosition, rootRotation, wheelMarkerModel), 0.025f, markerColor);
         drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel + JPH::Vec3(0.0f, wheelRadius, 0.0f)), 0.018f, passColor);

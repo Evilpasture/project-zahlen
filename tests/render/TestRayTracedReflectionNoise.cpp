@@ -233,7 +233,7 @@ struct RayTracedReflectionNoiseTestSuite {
             ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.02, 8.0), .createPhysics = false, .materialOverride = *plateMat}
         );
         ZHLN::PrefabFactory::CreateBox(
-            engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
+            engine, {2.0f, 2.0f, 2.0f},
             ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 6.0, 6.0), .createPhysics = false, .materialOverride = *boxMat}
         );
 

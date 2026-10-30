@@ -772,14 +772,14 @@ void Frame::EndColumn() noexcept {
     EndBox();
 }
 
-void Frame::Text(std::string_view text, float fontSize, const JPH::Vec4& color) noexcept {
+void Frame::Text(std::string_view text, float fontSize, JPH::Float4 color) noexcept {
     assert(_impl != nullptr && _impl->inLayout);
     Clay_SetCurrentContext(_impl->clayContext);
-    Clay_TextElementConfig config = {.textColor = ToClayColor(color), .fontSize = static_cast<uint16_t>(fontSize)};
+    Clay_TextElementConfig config = {.textColor = ToClayColor(ToVec4(color)), .fontSize = static_cast<uint16_t>(fontSize)};
     Clay__OpenTextElement(_impl->Intern(text), config);
 }
 
-auto Frame::Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, std::string_view id) noexcept -> bool {
+auto Frame::Button(std::string_view label, JPH::Float4 color, const Sizing& width, std::string_view id) noexcept -> bool {
     assert(_impl != nullptr && _impl->inLayout);
     Clay_SetCurrentContext(_impl->clayContext);
     bool                   clicked = false;
@@ -820,10 +820,10 @@ auto Frame::Button(std::string_view label, const JPH::Vec4& color, const Sizing&
              .padding         = {24, 24, 10, 10},
              .childAlignment  = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
              .layoutDirection = CLAY_LEFT_TO_RIGHT},
-        .backgroundColor =
-            isHovered ? (isMouseDown ? ToClayColor(color + JPH::Vec4(0.22f, 0.22f, 0.22f, 0.0f)) : ToClayColor(color + JPH::Vec4(0.12f, 0.12f, 0.12f, 0.0f))) :
-                        ToClayColor(color),
-        .cornerRadius = {6, 6, 6, 6}
+        .backgroundColor = isHovered ? (isMouseDown ? ToClayColor(ToVec4(color) + JPH::Vec4(0.22f, 0.22f, 0.22f, 0.0f)) :
+                                                      ToClayColor(ToVec4(color) + JPH::Vec4(0.12f, 0.12f, 0.12f, 0.0f))) :
+                                       ToClayColor(ToVec4(color)),
+        .cornerRadius    = {6, 6, 6, 6}
     };
     Clay__ConfigureOpenElement(decl);
 
@@ -1121,10 +1121,10 @@ auto Frame::TextInputImpl(std::string_view label, std::string& value, size_t max
             return;
         }
         const size_t split = (caretIdx > emitted && caretIdx <= to) ? caretIdx : to;
-        Text(all.substr(from, split - from), kTextInputFontSize, color);
+        Text(all.substr(from, split - from), kTextInputFontSize, ToFloat4(color));
         if (split < to) {
             drawCaret();
-            Text(all.substr(split, to - split), kTextInputFontSize, color);
+            Text(all.substr(split, to - split), kTextInputFontSize, ToFloat4(color));
         } else if (caretIdx == to) {
             drawCaret();
         }
@@ -1335,7 +1335,7 @@ auto Frame::Dropdown(std::string_view label, std::span<const std::string_view> o
                 .backgroundColor = hot ? Clay_Color {70, 100, 140, 255} : Clay_Color {0, 0, 0, 0}
             };
             Clay__ConfigureOpenElement(rowDecl);
-            Text(options[static_cast<size_t>(i)], 14.0f, (i == selected) ? JPH::Vec4 {1.0f, 1.0f, 1.0f, 1.0f} : JPH::Vec4 {0.8f, 0.8f, 0.8f, 1.0f});
+            Text(options[static_cast<size_t>(i)], 14.0f, (i == selected) ? JPH::Float4 {1.0f, 1.0f, 1.0f, 1.0f} : JPH::Float4 {0.8f, 0.8f, 0.8f, 1.0f});
             Clay__CloseElement();
         }
 

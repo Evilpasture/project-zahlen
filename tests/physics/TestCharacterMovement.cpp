@@ -78,16 +78,16 @@ struct CPUPipelineHarness {
         pc(cfg) {
         // Ground at Y = -0.5m with half-height 0.5m -> surface at Y = 0.0m (Dense index 0)
         auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 100.0f, 0.5f, 100.0f);
-        pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+        pc.CreateRigidBody(groundShape, {0, -0.5, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
         // Character at spawn position (Dense index 1). The hull is authored
         // explicitly: the core character API takes a shape and behavioral
         // knobs, and the supporting volume must fit the hull's origin.
         charPhys = pc.CreateCharacter(
-            spawnPos, ZHLN::Physics::CharacterParams {
-                          .shape            = ZHLN::Physics::CreateDualShape(hull),
-                          .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -hull.GetLifterOffsetY())
-                      }
+            ZHLN::ToDouble3(spawnPos),
+            ZHLN::Physics::CharacterParams {
+                .shape = ZHLN::Physics::CreateDualShape(hull), .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -hull.GetLifterOffsetY())
+            }
         );
         player   = reg.Create(
             ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Character::MovementComponent {.speed = 6.0f},
@@ -128,7 +128,7 @@ struct CPUPipelineHarness {
         accumulator += std::min(renderDt, 0.1f);
         while (accumulator >= kTargetDt) {
             JPH::Vec3 vel(move->inputX * move->speed, verticalVel, move->inputZ * move->speed);
-            pc.SetCharacterVelocity(charPhys, vel);
+            pc.SetCharacterVelocity(charPhys, ZHLN::ToFloat3(vel));
 
             // Prop interaction is controller policy, not a contact-callback
             // policy: the fixed step pushes the props the character moves
@@ -298,7 +298,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             CPUPipelineHarness  harness(cfg);
 
             auto wallShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 10.0f, 2.0f, 0.5f);
-            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 4.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            harness.pc.CreateRigidBody(wallShape, {0, 1.5, 4.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -324,7 +324,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             CPUPipelineHarness  harness(cfg);
 
             auto wallShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 50.0f, 2.0f, 0.5f);
-            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 3.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            harness.pc.CreateRigidBody(wallShape, {0, 1.5, 3.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -390,7 +390,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             CPUPipelineHarness  harness(cfg);
 
             auto curbShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.075f, 0.5f);
-            harness.pc.CreateRigidBody(curbShape, JPH::RVec3(0, 0.075, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            harness.pc.CreateRigidBody(curbShape, {0, 0.075, 2.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -417,7 +417,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
             JPH::Quat rampRot   = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-25.0f));
             auto      rampShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.2f, 5.0f);
-            harness.pc.CreateRigidBody(rampShape, JPH::RVec3(0, 1.0, 4.0), rampRot, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            harness.pc.CreateRigidBody(rampShape, {0, 1.0, 4.0}, ToFloat4(rampRot), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -444,7 +444,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
             auto         boxShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
             ZHLN::Physics::BodyHandle pushBox =
-                harness.pc.CreateRigidBody(boxShape, JPH::RVec3(0.0, 0.25, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+                harness.pc.CreateRigidBody(boxShape, {0.0, 0.25, 2.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -453,7 +453,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(1.0f / 60.0f, 0.0f, 0.66f);
             }
 
-            auto rayHit = harness.pc.Raycast(JPH::RVec3(0.0, 0.25, 0.0), JPH::Vec3(0.0f, 0.0f, 1.0f), 10.0f);
+            auto rayHit = harness.pc.Raycast({0.0, 0.25, 0.0}, {0.0f, 0.0f, 1.0f}, 10.0f);
             ZHLN::Test::ExpectTrue(rayHit.hasHit);
             ZHLN::Test::ExpectTrue(rayHit.handle == pushBox);
             ZHLN::Test::ExpectGt(rayHit.position.GetZ(), 2.6f);

@@ -51,7 +51,7 @@ auto ClientReplicator::ApplyInitialObjects(Engine& engine, std::span<const uint8
 
         const JPH::Vec3  position = object.position;
         const JPH::Vec3  scale    = object.size;
-        const JPH::Mat44 worldMat = Math::CreateTransform(position, JPH::Quat::sIdentity(), scale);
+        const JPH::Mat44 worldMat = Math::CreateTransform(ToFloat3(position), {0.0f, 0.0f, 0.0f, 1.0f}, ToFloat3(scale));
 
         reg.Add(
             e, Components::NameComponent {.name = String64("ReplicatedObject")}, Components::TransformComponent {.position = position, .scale = scale},

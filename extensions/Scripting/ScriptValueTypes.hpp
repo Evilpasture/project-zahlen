@@ -11,8 +11,8 @@
 // Why these need teaching at all is at ScriptValueTrait in ScriptBinder.hpp. The
 // short version: left generic, a Vec3 crosses as an opaque BoxedObject, so a
 // script could only hand back one it had already been given. Physics calls like
-//   SetCharacterVelocity(Entity, Vec3Arg)
-//   Raycast(RVec3Arg origin, Vec3Arg dir, float max, Physics::BodyHandle ignore)
+//   SetCharacterVelocity(Entity, Float3)
+//   Raycast(Double3 origin, Float3 dir, float max, Physics::BodyHandle ignore)
 // would be uncallable from Lua, which is most of the reason the
 // ZHLN_DispatchCommand table still exists.
 //

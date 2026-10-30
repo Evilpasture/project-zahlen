@@ -370,13 +370,13 @@ void DrawHierarchy(GUI::Frame& gui, Session& session) {
     const bool canDel   = selected && NodeId(session.tree, RootPath(session.tree)) != session.selectedId;
 
     gui.BeginRow(4.0f);
-    if (canAdd && gui.Button("Add Child", JPH::Vec4(0.16f, 0.30f, 0.20f, 0.95f))) {
+    if (canAdd && gui.Button("Add Child", {0.16f, 0.30f, 0.20f, 0.95f})) {
         const auto kind = static_cast<GUI::NodeKind>(session.addKindIndex);
         if (GUI::InsertChild(session.tree, session.selectedId, MakeChild(session, kind))) {
             // Stay on the container so the next Add Child keeps landing here.
         }
     }
-    if (canDel && gui.Button("Delete", JPH::Vec4(0.42f, 0.16f, 0.16f, 0.95f))) {
+    if (canDel && gui.Button("Delete", {0.42f, 0.16f, 0.16f, 0.95f})) {
         if (GUI::RemoveNodeById(session.tree, session.selectedId)) {
             session.selectedId.clear();
         }
@@ -876,7 +876,7 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
                         },
                         [&]() {
                             gui.Text("Canvas", 14.0f, {0.6f, 0.7f, 0.8f, 1.0f});
-                            if (gui.Button("Preview", JPH::Vec4(0.16f, 0.24f, 0.36f, 0.95f))) {
+                            if (gui.Button("Preview", {0.16f, 0.24f, 0.36f, 0.95f})) {
                                 session.openPreviewRequested = true;
                             }
                             if (PreviewIsRunning(session)) {
@@ -892,10 +892,10 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
                                 gui.Text("G grab   S scale   R rotate", 12.0f, {0.5f, 0.55f, 0.6f, 1.0f});
                             }
 #if defined(ZHLN_HAS_UI_TOML)
-                            if (gui.Button("Save", JPH::Vec4(0.16f, 0.30f, 0.20f, 0.95f))) {
+                            if (gui.Button("Save", {0.16f, 0.30f, 0.20f, 0.95f})) {
                                 SaveTree(session.tree, kDocumentPath);
                             }
-                            if (gui.Button("Load", JPH::Vec4(0.16f, 0.24f, 0.36f, 0.95f))) {
+                            if (gui.Button("Load", {0.16f, 0.24f, 0.36f, 0.95f})) {
                                 LoadTree(session, kDocumentPath);
                             }
 #endif

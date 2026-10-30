@@ -70,7 +70,7 @@ void test_frustum_culling_simd(
     float                       z,
     bool                        expectedVisible
 ) {
-    Expect(camFrustum.frustum.IsSphereVisible(JPH::Vec3(x, y, z), 1.0f)) == expectedVisible;
+    Expect(camFrustum.frustum.IsSphereVisible({x, y, z}, 1.0f)) == expectedVisible;
 }
 
 // --- 3. Packed Vertex Attributes & Half-Float Encoding ---

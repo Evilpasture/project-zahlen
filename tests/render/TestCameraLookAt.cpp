@@ -88,11 +88,11 @@ struct CameraLookAtTestSuite {
 
             // Default camera looks toward the origin. Put the subject well off that axis.
             const ZHLN::Entity target = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
+                *engine, {0.8f, 0.8f, 0.8f},
                 ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(4.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *redMatRes}
             );
             const ZHLN::Entity decoy = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
+                *engine, {0.8f, 0.8f, 0.8f},
                 ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *greenMatRes}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(target));

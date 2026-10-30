@@ -57,8 +57,10 @@ struct CaptureResult {
 // this *same* mesh. No parity-dependent copies of its indices or pipelines.
 [[nodiscard]] auto MakePanel(ZHLN::RenderContext& rc) -> ZHLN::Mesh {
     const std::array<ZHLN::VertexPosition, 4> positions {{
-        {{-0.45f, 0.45f, 0.0f}}, {{-0.45f, -0.45f, 0.0f}},
-        {{0.45f, -0.45f, 0.0f}}, {{0.45f, 0.45f, 0.0f}},
+        {{-0.45f, 0.45f, 0.0f}},
+        {{-0.45f, -0.45f, 0.0f}},
+        {{0.45f, -0.45f, 0.0f}},
+        {{0.45f, 0.45f, 0.0f}},
     }};
     std::array<ZHLN::VertexTangentFrame, 4> frames {};
     std::array<ZHLN::VertexSurface, 4> surfaces {};
@@ -179,8 +181,8 @@ const std::array<JPH::Vec3, 5> kCenters {
         const bool mirrored = i == 1 || i == 2 || i == 4;
         const auto rotation = i == 2 ? JPH::Quat::sRotation(JPH::Vec3::sAxisY(), JPH::JPH_PI) : JPH::Quat::sIdentity();
         const JPH::Vec3 scale(mirrored ? -1.0f : 1.0f, 1.0f, 1.0f);
-        const JPH::Mat44 world = ZHLN::Math::CreateTransform(kCenters[i], rotation, scale);
-        const ZHLN::Entity e = reg.Create();
+        const JPH::Mat44   world = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(kCenters[i]), ZHLN::ToFloat4(rotation), ZHLN::ToFloat3(scale));
+        const ZHLN::Entity e     = reg.Create();
         reg.Add(e, ZHLN::Components::TransformComponent {.position = kCenters[i], .rotation = rotation, .scale = scale});
         reg.Add(e, ZHLN::Components::WorldTransformComponent {.world = world, .previous = world});
         reg.Add(e, ZHLN::Components::MeshComponent {

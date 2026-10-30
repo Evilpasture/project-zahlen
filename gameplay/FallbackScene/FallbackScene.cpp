@@ -220,7 +220,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     if (s_AnimateScene) {
         reg.Patch<Components::TransformComponent>(s_CubeEntity, [&](auto& trans) -> auto {
             JPH::Vec3 euler(s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f);
-            trans.rotation = Math::EulerDegreesToQuat(euler);
+            trans.rotation = Math::EulerDegreesToQuat(ToFloat3(euler));
             trans.position.SetY(2.0f + std::sin(s_AccumTime * 2.0f) * 0.25f);
         });
 
@@ -261,8 +261,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         });
 
         // Header title
-        ui.Text("ZAHLEN ENGINE :: STANDALONE FALLBACK MODE", 18.0f,
-                { 0.35f, 0.88f, 1.0f, 1.0f });
+        ui.Text("ZAHLEN ENGINE :: STANDALONE FALLBACK MODE", 18.0f, {0.35f, 0.88f, 1.0f, 1.0f});
 
         // Alert toast box
         ui.BeginBox("FallbackAlertBox", GUI::BoxConfig {

@@ -35,7 +35,7 @@ void VerifyCullingResults(CullingSystem::CullingQuery query, std::span<const Ent
 
         float currentMaxScale = std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
 
-        if (frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
+        if (frustum.IsSphereVisible(ToFloat3(pos), meshes[i].cullRadius * currentMaxScale)) {
             expectedVisible++;
         }
     }
@@ -194,7 +194,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
         shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
 
         JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
-        JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
+        JPH::Mat44 lightView = Math::CreateLookAt(ToFloat3(lightPos), ToFloat3(shadowCenter), {0.0f, 1.0f, 0.0f});
 
         float      halfWidth      = shadowWidth * 0.5f;
         JPH::Mat44 lightProj      = Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
@@ -351,7 +351,7 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
 
     JPH::Vec4 cyanColor(0.0f, 1.0f, 1.0f, 1.0f);
     for (auto edge: frustumEdges) {
-        scene.AddLine(corners[edge.start], corners[edge.end], cyanColor, cyanColor);
+        scene.AddLine(ToFloat3(corners[edge.start]), ToFloat3(corners[edge.end]), ToFloat4(cyanColor), ToFloat4(cyanColor));
     }
 }
 

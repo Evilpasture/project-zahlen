@@ -138,7 +138,7 @@ struct DescriptorHeapsParallelSuite {
                     const uint32_t  matIdx = (row * kGridCols + col) % 4;
                     const JPH::Vec3 pos(firstCol + static_cast<float>(col) * spacing, 0.6f + static_cast<float>(row) * spacing, 0.0f);
                     ZHLN::PrefabFactory::CreateBox(
-                        *engine, JPH::Vec3(halfExtent, halfExtent, halfExtent),
+                        *engine, {halfExtent, halfExtent, halfExtent},
                         ZHLN::PrefabFactory::SpawnParams {
                             .position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = gpuMaterials[matIdx]
                         }

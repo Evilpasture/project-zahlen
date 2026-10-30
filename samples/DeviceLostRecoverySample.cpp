@@ -114,29 +114,42 @@ void ClearArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> entities) {
         });
     }
 
-    entities.push_back(ZHLN::PrefabFactory::CreatePlane(
-        engine, 24.0f, JPH::Vec4(0.32f, 0.34f, 0.38f, 1.0f),
-        ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true}
-    ));
+    entities.push_back(
+        ZHLN::PrefabFactory::CreatePlane(
+            engine, 24.0f, {0.32f, 0.34f, 0.38f, 1.0f},
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true}
+        )
+    );
 
-    entities.push_back(ZHLN::PrefabFactory::CreateBox(
-        engine, JPH::Vec3(1.5f, 1.5f, 1.5f),
-        ZHLN::PrefabFactory::SpawnParams {
-            .position = {-3.0, 1.5, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.35f, .color = {0.85f, 0.35f, 0.20f, 1.0f}
-        }
-    ));
-    entities.push_back(ZHLN::PrefabFactory::CreateSphere(
-        engine, 1.25f,
-        ZHLN::PrefabFactory::SpawnParams {
-            .position = {3.0, 1.25, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.20f, .metallic = 0.80f, .color = {0.20f, 0.55f, 0.85f, 1.0f}
-        }
-    ));
-    entities.push_back(ZHLN::PrefabFactory::CreateCylinder(
-        engine, 0.70f, 3.0f,
-        ZHLN::PrefabFactory::SpawnParams {
-            .position = {0.0, 1.5, -4.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.45f, .color = {0.30f, 0.70f, 0.40f, 1.0f}
-        }
-    ));
+    entities.push_back(
+        ZHLN::PrefabFactory::CreateBox(
+            engine, {1.5f, 1.5f, 1.5f},
+            ZHLN::PrefabFactory::SpawnParams {
+                .position = {-3.0, 1.5, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.35f, .color = {0.85f, 0.35f, 0.20f, 1.0f}
+            }
+        )
+    );
+    entities.push_back(
+        ZHLN::PrefabFactory::CreateSphere(
+            engine, 1.25f,
+            ZHLN::PrefabFactory::SpawnParams {
+                .position        = {3.0, 1.25, 0.0},
+                .createPhysics   = true,
+                .isStaticPhysics = true,
+                .roughness       = 0.20f,
+                .metallic        = 0.80f,
+                .color           = {0.20f, 0.55f, 0.85f, 1.0f}
+            }
+        )
+    );
+    entities.push_back(
+        ZHLN::PrefabFactory::CreateCylinder(
+            engine, 0.70f, 3.0f,
+            ZHLN::PrefabFactory::SpawnParams {
+                .position = {0.0, 1.5, -4.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.45f, .color = {0.30f, 0.70f, 0.40f, 1.0f}
+            }
+        )
+    );
     entities.push_back(ZHLN::PrefabFactory::CreateCone(
         engine, 1.10f, 2.4f,
         ZHLN::PrefabFactory::SpawnParams {

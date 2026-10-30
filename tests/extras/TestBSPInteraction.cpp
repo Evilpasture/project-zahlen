@@ -30,7 +30,7 @@ void Release(PhysicsContext&, Components::PhysicsComponent&) {
 } // namespace SceneResources
 void AudioContext::PostEvent(const AudioEvent&) noexcept {
 }
-void PhysicsContext::SetCharacterPosition(Physics::BodyHandle, JPH::RVec3Arg) {
+void PhysicsContext::SetCharacterPosition(Physics::BodyHandle, JPH::Double3) {
 }
 auto Engine::GetRegistry() -> ECS::Registry& {
     static ECS::Registry reg;

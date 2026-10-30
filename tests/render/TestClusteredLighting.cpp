@@ -72,15 +72,15 @@ struct ClusteredLightingTestSuite {
                 }
 
                 ZHLN::PrefabFactory::CreateBox(
-                    *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
+                    *engine, {0.8f, 0.8f, 0.8f},
                     ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-2.2, 1.0, 0.0), .createPhysics = false, .materialOverride = *grayMatRes}
                 );
                 ZHLN::PrefabFactory::CreateBox(
-                    *engine, JPH::Vec3(0.7f, 0.7f, 0.7f),
+                    *engine, {0.7f, 0.7f, 0.7f},
                     ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.0, -2.0), .createPhysics = false, .materialOverride = *redMatRes}
                 );
                 ZHLN::PrefabFactory::CreateBox(
-                    *engine, JPH::Vec3(0.7f, 0.7f, 0.7f),
+                    *engine, {0.7f, 0.7f, 0.7f},
                     ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(2.2, 1.0, 1.0), .createPhysics = false, .materialOverride = *blueMatRes}
                 );
 
@@ -261,7 +261,7 @@ struct ClusteredLightingTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
                 );
                 ZHLN::PrefabFactory::CreateBox(
-                    *engine, JPH::Vec3(0.7f, 0.7f, 0.7f),
+                    *engine, {0.7f, 0.7f, 0.7f},
                     ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.7, 5.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
                 );
 
@@ -499,7 +499,7 @@ struct ClusteredLightingTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
                 );
                 ZHLN::PrefabFactory::CreateBox(
-                    *engine, JPH::Vec3(0.7f, 0.7f, 0.7f),
+                    *engine, {0.7f, 0.7f, 0.7f},
                     ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.7, 5.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
                 );
 
@@ -653,7 +653,7 @@ struct ClusteredLightingTestSuite {
 
                 // Central pedestal at quadrant boundary to test additive color mixing
                 ZHLN::PrefabFactory::CreateBox(
-                    *engine, JPH::Vec3(1.0f, 0.6f, 1.0f),
+                    *engine, {1.0f, 0.6f, 1.0f},
                     ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.6, 0.0), .createPhysics = false, .materialOverride = *neutralMat}
                 );
 

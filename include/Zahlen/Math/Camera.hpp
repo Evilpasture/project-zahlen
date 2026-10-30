@@ -49,12 +49,12 @@ struct Frustum {
         mW[1] = JPH::Vec4(planes[4].GetW(), planes[5].GetW(), 1e10f, 1e10f);
     }
 
-    [[nodiscard]] auto IsSphereVisible(JPH::Vec3Arg center, float radius) const -> bool {
-        float inflatedRadius = -(radius + 0.5f);
+    [[nodiscard]] auto IsSphereVisible(JPH::Float3 center, float radius) const -> bool {
+        const float inflatedRadius = -(radius + 0.5f);
 
-        JPH::Vec4 cX   = JPH::Vec4::sReplicate(center.GetX());
-        JPH::Vec4 cY   = JPH::Vec4::sReplicate(center.GetY());
-        JPH::Vec4 cZ   = JPH::Vec4::sReplicate(center.GetZ());
+        JPH::Vec4 cX   = JPH::Vec4::sReplicate(center.x);
+        JPH::Vec4 cY   = JPH::Vec4::sReplicate(center.y);
+        JPH::Vec4 cZ   = JPH::Vec4::sReplicate(center.z);
         JPH::Vec4 negR = JPH::Vec4::sReplicate(inflatedRadius);
 
         JPH::Vec4 dist0 = mX[0] * cX + mY[0] * cY + mZ[0] * cZ + mW[0];
@@ -87,7 +87,7 @@ struct Camera {
         direction.SetY(JPH::Sin(JPH::DegreesToRadians(pitch)));
         direction.SetZ(JPH::Sin(JPH::DegreesToRadians(yaw)) * JPH::Cos(JPH::DegreesToRadians(pitch)));
 
-        return Math::CreateLookAt(position, position + direction.Normalized(), JPH::Vec3::sAxisY());
+        return Math::CreateLookAt(ToFloat3(position), ToFloat3(position + direction.Normalized()), {0.0f, 1.0f, 0.0f});
     }
 
     [[nodiscard]] auto GetProjectionMatrix(float aspectRatio) const -> JPH::Mat44 {

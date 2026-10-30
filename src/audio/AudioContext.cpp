@@ -13,6 +13,7 @@
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 #include <array>
@@ -1484,22 +1485,17 @@ auto AudioContext::Channels() const noexcept -> uint32_t {
     return _impl->channels;
 }
 
-void AudioContext::UpdateListener(
-    const JPH::Vec3& position,
-    const JPH::Vec3& direction,
-    const JPH::Vec3& up,
-    const JPH::Vec3& velocity
-) {
+void AudioContext::UpdateListener(JPH::Float3 position, JPH::Float3 direction, JPH::Float3 up, JPH::Float3 velocity) {
     if (!_impl->initialized) {
         return;
     }
-    ma_engine_listener_set_position(&_impl->engine, 0, position.GetX(), position.GetY(), position.GetZ());
-    ma_engine_listener_set_direction(&_impl->engine, 0, direction.GetX(), direction.GetY(), direction.GetZ());
-    ma_engine_listener_set_world_up(&_impl->engine, 0, up.GetX(), up.GetY(), up.GetZ());
-    ma_engine_listener_set_velocity(&_impl->engine, 0, velocity.GetX(), velocity.GetY(), velocity.GetZ());
+    ma_engine_listener_set_position(&_impl->engine, 0, position.x, position.y, position.z);
+    ma_engine_listener_set_direction(&_impl->engine, 0, direction.x, direction.y, direction.z);
+    ma_engine_listener_set_world_up(&_impl->engine, 0, up.x, up.y, up.z);
+    ma_engine_listener_set_velocity(&_impl->engine, 0, velocity.x, velocity.y, velocity.z);
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
-        _impl->listenerPos = position;
+        _impl->listenerPos = ToVec3(position);
         for (const uint32_t slotIdx: _impl->activeVoiceSlots) {
             auto& slot = _impl->voiceSlots[slotIdx];
             if (slot.inUse.load(std::memory_order::relaxed) && slot.spatialized &&
@@ -2173,7 +2169,7 @@ auto AudioContext::GetVoiceBus(AudioHandle handle) const noexcept -> AudioBusId 
     });
 }
 
-void AudioContext::SetVoicePosition(AudioHandle handle, const JPH::Vec3& position) {
+void AudioContext::SetVoicePosition(AudioHandle handle, JPH::Float3 position) {
     const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
@@ -2182,15 +2178,15 @@ void AudioContext::SetVoicePosition(AudioHandle handle, const JPH::Vec3& positio
         if (!slot.inUse.load(std::memory_order::relaxed) || slot.generation.load(std::memory_order::relaxed) != gen) {
             return;
         }
-        slot.position = position;
-        ma_sound_set_position(&slot.sound, position.GetX(), position.GetY(), position.GetZ());
+        slot.position = ToVec3(position);
+        ma_sound_set_position(&slot.sound, position.x, position.y, position.z);
         if (slot.spatialized && slot.attenuation.model == AudioAttenuationModel::Logarithmic) {
             _impl->UpdateVoiceDynamicSendTargetsLocked(slot);
         }
     });
 }
 
-void AudioContext::SetVoiceVelocity(AudioHandle handle, const JPH::Vec3& velocity) {
+void AudioContext::SetVoiceVelocity(AudioHandle handle, JPH::Float3 velocity) {
     const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
@@ -2199,12 +2195,12 @@ void AudioContext::SetVoiceVelocity(AudioHandle handle, const JPH::Vec3& velocit
         if (!slot.inUse.load(std::memory_order::relaxed) || slot.generation.load(std::memory_order::relaxed) != gen) {
             return;
         }
-        slot.velocity = velocity;
-        ma_sound_set_velocity(&slot.sound, velocity.GetX(), velocity.GetY(), velocity.GetZ());
+        slot.velocity = ToVec3(velocity);
+        ma_sound_set_velocity(&slot.sound, velocity.x, velocity.y, velocity.z);
     });
 }
 
-void AudioContext::SetVoiceDirection(AudioHandle handle, const JPH::Vec3& direction) {
+void AudioContext::SetVoiceDirection(AudioHandle handle, JPH::Float3 direction) {
     const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
@@ -2213,8 +2209,8 @@ void AudioContext::SetVoiceDirection(AudioHandle handle, const JPH::Vec3& direct
         if (!slot.inUse.load(std::memory_order::relaxed) || slot.generation.load(std::memory_order::relaxed) != gen) {
             return;
         }
-        slot.direction = direction;
-        ma_sound_set_direction(&slot.sound, direction.GetX(), direction.GetY(), direction.GetZ());
+        slot.direction = ToVec3(direction);
+        ma_sound_set_direction(&slot.sound, direction.x, direction.y, direction.z);
     });
 }
 

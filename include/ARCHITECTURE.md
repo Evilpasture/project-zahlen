@@ -86,8 +86,13 @@ struct LightningComponent {
 };
 
 // GOOD: Stateless System Function
+// Parameters that cross a subsystem boundary are Jolt's POD aggregates --
+// JPH::Float3, JPH::Float4, JPH::Double3 -- never Vec3Arg/QuatArg/RVec3Arg and
+// never `const JPH::Vec3&`. A caller writes `{1.0f, 2.0f, 3.0f}`; the SIMD
+// types are built where the maths happens (ZHLN::ToVec3 / ToQuat / ToRVec3 in
+// Math3D.hpp are the only bridge, and it is explicit in both directions).
 namespace ZHLN::Lightning {
-Entity Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, const LightningConfig& cfg);
+Entity Spawn(Engine& engine, JPH::Double3 cloudPos, JPH::Double3 groundPos, const LightningConfig& cfg);
 void   Update(Engine& engine, float dt);
 } // namespace ZHLN::Lightning
 ```

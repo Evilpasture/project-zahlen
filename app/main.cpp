@@ -41,7 +41,7 @@ struct SandboxGame {
 
         // Everything here is scene-owned: Engine's normal teardown reclaims
         // both the generated GPU meshes and their Jolt bodies.
-        ZHLN::PrefabFactory::CreatePlane(engine, 30.0f, JPH::Vec4(0.25f, 0.29f, 0.34f, 1.0f), {.createPhysics = true, .isStaticPhysics = true});
+        ZHLN::PrefabFactory::CreatePlane(engine, 30.0f, {0.25f, 0.29f, 0.34f, 1.0f}, {.createPhysics = true, .isStaticPhysics = true});
 
         // --cubes controls the initial physics population. --seed optionally
         // jitters the grid with a fixed integer LCG (the default stays aligned).
@@ -56,7 +56,7 @@ struct SandboxGame {
             const float z      = static_cast<float>(i / 8) * 1.65f + (seed ? jitter() : 0.0f);
             const float stripe = static_cast<float>(i % 5);
             ZHLN::PrefabFactory::CreateBox(
-                engine, JPH::Vec3::sReplicate(0.55f),
+                engine, ZHLN::ToFloat3(JPH::Vec3::sReplicate(0.55f)),
                 {.position        = JPH::RVec3(x, 2.5f + stripe * 0.35f, z),
                  .createPhysics   = true,
                  .isStaticPhysics = false,
@@ -121,7 +121,7 @@ struct SandboxGame {
         const float        pitch   = JPH::DegreesToRadians(cam.pitch);
         const JPH::Vec3    forward = JPH::Vec3(JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)).Normalized();
         const ZHLN::Entity cube    = ZHLN::PrefabFactory::CreateBox(
-            engine, JPH::Vec3::sReplicate(0.30f),
+            engine, ZHLN::ToFloat3(JPH::Vec3::sReplicate(0.30f)),
             {.position        = JPH::RVec3(cam.position + forward * 2.0f),
              .createPhysics   = true,
              .isStaticPhysics = false,
@@ -129,7 +129,7 @@ struct SandboxGame {
         );
         if (cube != ZHLN::Entity::Null()) {
             if (auto body = reg.Get<ZHLN::Components::PhysicsComponent>(cube)) {
-                engine.GetPhysicsContext().AddImpulse(body->physicsHandle, forward * 12.0f);
+                engine.GetPhysicsContext().AddImpulse(body->physicsHandle, ZHLN::ToFloat3(forward * 12.0f));
             }
         }
         if (engine.GetAudioContext().IsInitialized()) {

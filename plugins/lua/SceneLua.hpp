@@ -69,11 +69,11 @@ struct LuaValueTrait<JPH::Vec3> {
 
     static void Push(Builder& builder, const JPH::Vec3& v) {
         builder.BeginTable(3, 0);
-        builder.PushDouble(v.GetX());
+        builder.PushDouble(static_cast<double>(v.GetX()));
         builder.SetElementTop(0);
-        builder.PushDouble(v.GetY());
+        builder.PushDouble(static_cast<double>(v.GetY()));
         builder.SetElementTop(1);
-        builder.PushDouble(v.GetZ());
+        builder.PushDouble(static_cast<double>(v.GetZ()));
         builder.SetElementTop(2);
     }
 };
@@ -103,13 +103,13 @@ struct LuaValueTrait<JPH::Vec4> {
 
     static void Push(Builder& builder, const JPH::Vec4& v) {
         builder.BeginTable(4, 0);
-        builder.PushDouble(v.GetX());
+        builder.PushDouble(static_cast<double>(v.GetX()));
         builder.SetElementTop(0);
-        builder.PushDouble(v.GetY());
+        builder.PushDouble(static_cast<double>(v.GetY()));
         builder.SetElementTop(1);
-        builder.PushDouble(v.GetZ());
+        builder.PushDouble(static_cast<double>(v.GetZ()));
         builder.SetElementTop(2);
-        builder.PushDouble(v.GetW());
+        builder.PushDouble(static_cast<double>(v.GetW()));
         builder.SetElementTop(3);
     }
 };
@@ -139,13 +139,13 @@ struct LuaValueTrait<JPH::Quat> {
 
     static void Push(Builder& builder, const JPH::Quat& q) {
         builder.BeginTable(4, 0);
-        builder.PushDouble(q.GetX());
+        builder.PushDouble(static_cast<double>(q.GetX()));
         builder.SetElementTop(0);
-        builder.PushDouble(q.GetY());
+        builder.PushDouble(static_cast<double>(q.GetY()));
         builder.SetElementTop(1);
-        builder.PushDouble(q.GetZ());
+        builder.PushDouble(static_cast<double>(q.GetZ()));
         builder.SetElementTop(2);
-        builder.PushDouble(q.GetW());
+        builder.PushDouble(static_cast<double>(q.GetW()));
         builder.SetElementTop(3);
     }
 };

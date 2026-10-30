@@ -159,7 +159,7 @@ constexpr float kHaloBloomStrength = 0.003f;
     }
 
     ZHLN::PrefabFactory::CreateBox(
-        engine, JPH::Vec3(1.0f, 1.0f, 1.0f),
+        engine, {1.0f, 1.0f, 1.0f},
         ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *material}
     );
 

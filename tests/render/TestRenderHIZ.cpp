@@ -114,7 +114,7 @@ struct HiZTestSuite {
             for (int x = -3; x <= 3; ++x) {
                 for (int z = 1; z <= 4; ++z) {
                     ZHLN::PrefabFactory::CreateBox(
-                        *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
+                        *engine, {0.5f, 0.5f, 0.5f},
                         ZHLN::PrefabFactory::SpawnParams {
                             .position        = JPH::RVec3(static_cast<double>(x * 4), 1.0, static_cast<double>(z * 6)),
                             .createPhysics   = true,
@@ -164,7 +164,7 @@ struct HiZTestSuite {
 
             // 1. Large Opaque Occluder Wall right in front of camera (Z = 5m, 12m wide, 8m tall)
             const ZHLN::Entity occluderWall = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(6.0f, 4.0f, 0.25f),
+                *engine, {6.0f, 4.0f, 0.25f},
                 ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(0.0, 4.0, 5.0), .createPhysics = true, .isStaticPhysics = true, .color = {0.15f, 0.15f, 0.15f, 1.0f}
                 }
@@ -172,7 +172,7 @@ struct HiZTestSuite {
 
             // 2. Small Target Box occluded completely behind the wall (Z = 18m)
             const ZHLN::Entity hiddenTarget = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
+                *engine, {0.5f, 0.5f, 0.5f},
                 ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(0.0, 4.0, 18.0), .createPhysics = true, .isStaticPhysics = true, .color = {1.0f, 0.0f, 0.0f, 1.0f}
                 }
@@ -180,7 +180,7 @@ struct HiZTestSuite {
 
             // 3. Visible Target Box placed to the side (Z = 5m, X = 15m - outside wall footprint)
             const ZHLN::Entity visibleTarget = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
+                *engine, {0.5f, 0.5f, 0.5f},
                 ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(15.0, 4.0, 5.0), .createPhysics = true, .isStaticPhysics = true, .color = {0.0f, 1.0f, 0.0f, 1.0f}
                 }

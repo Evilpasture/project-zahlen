@@ -79,7 +79,7 @@ static_assert(
 [[nodiscard]] auto MakeSpawnParams(const SceneEntity& entity) -> PrefabFactory::SpawnParams {
     return PrefabFactory::SpawnParams {
         .position           = ToRVec3(entity.transform.position),
-        .rotation           = Math::EulerDegreesToQuat(JPH::Vec3 {entity.transform.rotation}),
+        .rotation           = Math::EulerDegreesToQuat(ToFloat3(entity.transform.rotation)),
         .scale              = JPH::Vec3 {entity.transform.scale},
         .createPhysics      = entity.body != BodyKind::None,
         .isStaticPhysics    = entity.body != BodyKind::Dynamic,
@@ -174,14 +174,14 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 
         switch (entity.shape) {
             case ShapeKind::Box: {
-                const Entity created = PrefabFactory::CreateBox(engine, JPH::Vec3 {entity.halfExtents}, params);
+                const Entity created = PrefabFactory::CreateBox(engine, ToFloat3(entity.halfExtents), params);
                 NameEntity(registry, created, entity.name);
                 StampSource(registry, created, entity);
                 instance.entities.push_back(created);
                 break;
             }
             case ShapeKind::Plane: {
-                const Entity created = PrefabFactory::CreatePlane(engine, entity.extent, JPH::Vec4::sLoadFloat4(&entity.material.baseColor), params);
+                const Entity created = PrefabFactory::CreatePlane(engine, entity.extent, ToFloat4(JPH::Vec4::sLoadFloat4(&entity.material.baseColor)), params);
                 NameEntity(registry, created, entity.name);
                 StampSource(registry, created, entity);
                 instance.entities.push_back(created);
@@ -253,7 +253,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                         registry.Add(
                             parts[0], Components::PhysicsComponent {
                                           .physicsHandle = physics.CreateRigidBody(
-                                              shape, params.position, params.rotation, JPH::EMotionType::Kinematic, Layers::ID::MOVING, 0,
+                                              shape, ToDouble3(params.position), ToFloat4(params.rotation), JPH::EMotionType::Kinematic, Layers::ID::MOVING, 0,
                                               params.physicsCategory, params.physicsMask
                                           ),
                                           .isStatic = true
@@ -271,9 +271,9 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 // Logic-only entity (trigger volumes): transform + source stamp,
                 // no rendered geometry and no physics.
                 const JPH::Vec3  position = JPH::Vec3 {entity.transform.position};
-                const JPH::Quat  rotation = Math::EulerDegreesToQuat(JPH::Vec3 {entity.transform.rotation});
+                const JPH::Quat  rotation = Math::EulerDegreesToQuat(ToFloat3(entity.transform.rotation));
                 const JPH::Vec3  scale    = JPH::Vec3 {entity.transform.scale};
-                const JPH::Mat44 world    = Math::CreateTransform(position, rotation, scale);
+                const JPH::Mat44 world    = Math::CreateTransform(ToFloat3(position), ToFloat4(rotation), ToFloat3(scale));
 
                 const Entity created = registry.Create(
                     Components::TransformComponent {.position = position, .rotation = rotation, .scale = scale},
@@ -295,8 +295,8 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         }
 
         const JPH::Vec3  position = JPH::Vec3 {light.position};
-        const JPH::Quat  rotation = Math::EulerDegreesToQuat(JPH::Vec3 {light.rotation});
-        const JPH::Mat44 world    = Math::CreateTransform(position, rotation, JPH::Vec3::sReplicate(1.0f));
+        const JPH::Quat  rotation = Math::EulerDegreesToQuat(ToFloat3(light.rotation));
+        const JPH::Mat44 world    = Math::CreateTransform(ToFloat3(position), ToFloat4(rotation), {1.0f, 1.0f, 1.0f});
 
         const JPH::Vec3 rawDirection = JPH::Vec3 {light.direction};
         const JPH::Vec3 direction    = rawDirection.LengthSq() > 1e-8f ? rawDirection.Normalized() : rawDirection;
@@ -340,7 +340,7 @@ namespace {
 [[nodiscard]] auto ToDescriptionTransform(const Components::TransformComponent& transform) noexcept -> Transform {
     return Transform {
         .position = ToDescriptionFloat3(transform.position),
-        .rotation = ToDescriptionFloat3(Math::QuatToEulerDegrees(transform.rotation)),
+        .rotation = ToDescriptionFloat3(Math::QuatToEulerDegrees(ToFloat4(transform.rotation))),
         .scale    = ToDescriptionFloat3(transform.scale)
     };
 }
@@ -449,7 +449,7 @@ namespace {
                 .name        = name ? std::string {std::string_view {name->name}} : std::string {},
                 .type        = std::string {ZHLN::Reflect::EnumToString(light.type)},
                 .position    = transform ? ToDescriptionFloat3(transform->position) : defaults.position,
-                .rotation    = transform ? ToDescriptionFloat3(Math::QuatToEulerDegrees(transform->rotation)) : defaults.rotation,
+                .rotation    = transform ? ToDescriptionFloat3(Math::QuatToEulerDegrees(ToFloat4(transform->rotation))) : defaults.rotation,
                 .direction   = ToDescriptionFloat3(light.direction),
                 .color       = ToDescriptionFloat3(light.color),
                 .intensity   = light.intensity,

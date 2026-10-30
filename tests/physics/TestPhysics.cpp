@@ -41,13 +41,14 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
             // Create static ground box at (0, 0, 0) with half-extents (10, 1, 10)
             auto         boxShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 10.0f, 1.0f, 10.0f);
-            ZHLN::Physics::BodyHandle ground = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            ZHLN::Physics::BodyHandle ground =
+                pc.CreateRigidBody(boxShape, {0, 0, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             ZHLN::Test::Expect(ground) != ZHLN::Physics::BodyHandle::Null();
 
             pc.OptimizeBroadphase();
 
             // 1. Raycast downwards from (0, 10, 0) -> (0, -1, 0)
-            auto hit = pc.Raycast(JPH::RVec3(0, 10, 0), JPH::Vec3(0, -1, 0), 20.0f);
+            auto hit = pc.Raycast({0, 10, 0}, {0, -1, 0}, 20.0f);
             ZHLN::Test::Expect(hit.hasHit);
             ZHLN::Test::Expect(hit.handle.Pack()) == ground.Pack();
 
@@ -57,7 +58,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
             // 2. Sphere overlap at (0, 0, 0)
             JPH::Array<ZHLN::Physics::BodyHandle> overlapResults;
-            pc.OverlapSphere(JPH::RVec3(0, 0, 0), 5.0f, overlapResults);
+            pc.OverlapSphere({0, 0, 0}, 5.0f, overlapResults);
             ZHLN::Test::ExpectGe(overlapResults.size(), 1);
 
             return {};
@@ -71,7 +72,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             // Top surface initially at Y = 10.5
             auto         sphereShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.5f);
             ZHLN::Physics::BodyHandle sphere =
-                pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 10, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+                pc.CreateRigidBody(sphereShape, {0, 10, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             ZHLN::Test::ExpectTrue(sphere != ZHLN::Physics::BodyHandle::Null());
 
             pc.OptimizeBroadphase();
@@ -83,7 +84,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             }
 
             // Raycast down from (0, 15, 0) to find new fallen position
-            auto hit = pc.Raycast(JPH::RVec3(0, 15, 0), JPH::Vec3(0, -1, 0), 30.0f);
+            auto hit = pc.Raycast({0, 15, 0}, {0, -1, 0}, 30.0f);
             ZHLN::Test::ExpectTrue(hit.hasHit);
             ZHLN::Test::ExpectLt(hit.position.GetY(), 10.0f); // Top surface fell below 10.0m
 
@@ -115,8 +116,8 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::PhysicsContext pc(cfg);
             ZHLN::ECS::Registry registry; // destroyed before pc
             const auto shape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.5f, 0.5f, 0.5f);
-            auto createBody = [&] {
-                return pc.CreateRigidBody(shape, JPH::RVec3(0, 1, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+            auto                 createBody = [&] {
+                return pc.CreateRigidBody(shape, {0, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             };
 
             const auto firstBody = createBody();
@@ -210,12 +211,15 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             // The motion type is queryable as soon as the body exists in Jolt,
             // before any Step has populated the engine's shadow SoA. A dynamic
             // body is dynamic the moment it is created.
-            const ZHLN::Physics::BodyHandle dynamicBody = pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+            const ZHLN::Physics::BodyHandle dynamicBody =
+                pc.CreateRigidBody(sphereShape, {0, 0, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             ZHLN::Test::ExpectTrue(dynamicBody != ZHLN::Physics::BodyHandle::Null());
             ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(dynamicBody));
 
-            const ZHLN::Physics::BodyHandle staticBody    = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
-            const ZHLN::Physics::BodyHandle kinematicBody = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 10, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Kinematic, ZHLN::Layers::ID::MOVING);
+            const ZHLN::Physics::BodyHandle staticBody =
+                pc.CreateRigidBody(boxShape, {0, 5, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            const ZHLN::Physics::BodyHandle kinematicBody =
+                pc.CreateRigidBody(boxShape, {0, 10, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Kinematic, ZHLN::Layers::ID::MOVING);
             ZHLN::Test::ExpectTrue(staticBody != ZHLN::Physics::BodyHandle::Null());
             ZHLN::Test::ExpectTrue(kinematicBody != ZHLN::Physics::BodyHandle::Null());
             ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(staticBody));
@@ -229,7 +233,8 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             pc.DestroyBody(dynamicBody);
             pc.Step(1.0f / 60.0f);
 
-            const ZHLN::Physics::BodyHandle reused = pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+            const ZHLN::Physics::BodyHandle reused =
+                pc.CreateRigidBody(sphereShape, {0, 0, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             ZHLN::Test::ExpectTrue(reused != ZHLN::Physics::BodyHandle::Null());
             ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(reused));        // the live occupant is dynamic
             ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(dynamicBody));  // the stale handle is not
@@ -241,13 +246,13 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::PhysicsContext pc(cfg);
 
             const auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 40.0f, 0.5f, 40.0f);
-            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            pc.CreateRigidBody(groundShape, {0, -0.5, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             pc.OptimizeBroadphase();
 
             constexpr size_t                        kCharCount = 8;
             std::vector<ZHLN::Physics::BodyHandle>  characters(kCharCount);
             for (size_t i = 0; i < kCharCount; ++i) {
-                characters[i] = pc.CreateCharacter(JPH::RVec3(static_cast<double>(i) * 2.5, 1.5, 0.0));
+                characters[i] = pc.CreateCharacter({static_cast<double>(i) * 2.5, 1.5, 0.0});
                 if (!ZHLN::Test::ExpectTrue(characters[i] != ZHLN::Physics::BodyHandle::Null())) {
                     return std::unexpected(PhysicsTestError::ParallelCharacterSyncFailed);
                 }
@@ -293,21 +298,18 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
             const auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 50.0f, 0.5f, 50.0f);
             const auto sphereShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.35f);
-            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            pc.CreateRigidBody(groundShape, {0, -0.5, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
             constexpr size_t                       kPersistentBodies = 12;
             std::vector<ZHLN::Physics::BodyHandle> persistent(kPersistentBodies);
             for (size_t i = 0; i < kPersistentBodies; ++i) {
                 persistent[i] = pc.CreateRigidBody(
-                    sphereShape,
-                    JPH::RVec3(static_cast<double>(i) * 1.25 - 6.0, 4.0 + static_cast<double>(i) * 0.25, 0.0),
-                    JPH::Quat::sIdentity(),
-                    JPH::EMotionType::Dynamic,
-                    ZHLN::Layers::ID::MOVING
+                    sphereShape, {static_cast<double>(i) * 1.25 - 6.0, 4.0 + static_cast<double>(i) * 0.25, 0.0}, {0.0f, 0.0f, 0.0f, 1.0f},
+                    JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING
                 );
             }
 
-            const ZHLN::Physics::BodyHandle character = pc.CreateCharacter(JPH::RVec3(0.0, 0.8, 3.0));
+            const ZHLN::Physics::BodyHandle character          = pc.CreateCharacter({0.0, 0.8, 3.0});
             const float                     cachedGroundOffset = pc.GetCharacterGroundOffset(character);
             if (!ZHLN::Test::ExpectGt(cachedGroundOffset, 0.5f)) {
                 return std::unexpected(PhysicsTestError::LockFreeConcurrencyFailed);
@@ -360,14 +362,13 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                                 return;
                             }
                             const auto transient = pc.CreateRigidBody(
-                                shape, JPH::RVec3(0.0, 8.0 + static_cast<double>(b), -4.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic,
-                                ZHLN::Layers::ID::MOVING
+                                shape, {0.0, 8.0 + static_cast<double>(b), -4.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING
                             );
                             if (transient == ZHLN::Physics::BodyHandle::Null() || !pc.IsBodyDynamic(transient)) {
                                 workerFailed.store(true, std::memory_order::release);
                                 return;
                             }
-                            pc.AddImpulse(persistent[(currentEpoch + b) % kPersistentBodies], JPH::Vec3(0.0f, 0.25f, 0.0f));
+                            pc.AddImpulse(persistent[(currentEpoch + b) % kPersistentBodies], {0.0f, 0.25f, 0.0f});
                             pc.DestroyBody(transient);
                         }
                     }
@@ -375,7 +376,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             });
 
             for (int step = 0; step < 30; ++step) {
-                pc.SetCharacterVelocity(character, JPH::Vec3(0.5f, -2.0f, 0.0f));
+                pc.SetCharacterVelocity(character, {0.5f, -2.0f, 0.0f});
                 pc.Step(1.0f / 60.0f);
                 stepEpoch.fetch_add(1u, std::memory_order::release);
             }

@@ -4,15 +4,16 @@
 #pragma once
 
 #include <Jolt/Jolt.h>
+#include <Jolt/Math/Float4.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Math/Geometry2D.hpp>
-#include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/GUI/Font.hpp>
 #include <Zahlen/GUI/TextBuffer.hpp>
 #include <Zahlen/GUI/UIData.hpp>
+#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Render/Handles.hpp>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -232,10 +233,9 @@ class ZHLN_API Frame {
         ScrollArea(id, cfg, ScrollBarStyle {}, content);
     }
 
-    void Text(std::string_view text, float fontSize = 16.0f, const JPH::Vec4& color = {1, 1, 1, 1}) noexcept;
+    void Text(std::string_view text, float fontSize = 16.0f, JPH::Float4 color = {1, 1, 1, 1}) noexcept;
 
-    auto Button(std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}) noexcept
-        -> bool;
+    auto Button(std::string_view label, JPH::Float4 color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}) noexcept -> bool;
     auto Button(std::string_view label, const Sizing& width) noexcept -> bool {
         return Button(label, {0.16f, 0.24f, 0.36f, 0.95f}, width);
     }
@@ -288,7 +288,7 @@ class ZHLN_API Frame {
 
     template <typename OnClickFn>
         requires std::invocable<OnClickFn>
-    auto Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, OnClickFn&& onClick) -> bool {
+    auto Button(std::string_view label, JPH::Float4 color, const Sizing& width, OnClickFn&& onClick) -> bool {
         if (Button(label, color, width)) {
             onClick();
             return true;
@@ -298,7 +298,7 @@ class ZHLN_API Frame {
 
     template <typename OnClickFn, typename OnHoverFn>
         requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
-    auto Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) -> bool {
+    auto Button(std::string_view label, JPH::Float4 color, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) -> bool {
         bool clicked = Button(label, color, width);
         if (IsItemHovered()) {
             onHover();

@@ -176,7 +176,7 @@ constexpr auto kComponentKinds =
             }
             field = JPH::Vec3(v[0], v[1], v[2]);
         } else if constexpr (std::is_same_v<FT, JPH::Quat>) {
-            const JPH::Vec3 euler   = ZHLN::Math::QuatToEulerDegrees(field);
+            const JPH::Vec3 euler   = ZHLN::Math::QuatToEulerDegrees(ToFloat4(field));
             float           deg[3]  = {euler.GetX(), euler.GetY(), euler.GetZ()};
             bool            changed = false;
             for (int axis = 0; axis < 3; ++axis) {
@@ -188,7 +188,7 @@ constexpr auto kComponentKinds =
                     changed = true;
             }
             if (changed) {
-                field = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(deg[0], deg[1], deg[2]));
+                field = ZHLN::Math::EulerDegreesToQuat({deg[0], deg[1], deg[2]});
             }
         } else if constexpr (std::is_same_v<FT, ZHLN::String256> || std::is_same_v<FT, ZHLN::String64>) {
             // rowId rather than name: two components in the same section can
@@ -561,10 +561,10 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
     // Entity-level operations. New Entity also selects its result, so the
     // inspector opens on it immediately instead of on whatever was picked last.
     gui.BeginRow(4.0f, 0.0f);
-    if (gui.Button("New Entity", JPH::Vec4(0.16f, 0.30f, 0.20f, 0.95f))) {
+    if (gui.Button("New Entity", {0.16f, 0.30f, 0.20f, 0.95f})) {
         state.selectedEntity = CreateEntity(reg);
     }
-    if (state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity) && gui.Button("Delete", JPH::Vec4(0.42f, 0.16f, 0.16f, 0.95f))) {
+    if (state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity) && gui.Button("Delete", {0.42f, 0.16f, 0.16f, 0.95f})) {
         DestroySelected(engine, state);
     }
     gui.EndRow();
@@ -614,7 +614,7 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
             gui.BeginRow(0.0f, static_cast<float>(row.depth) * 8.0f);
         }
 
-        if (gui.Button(label, color)) {
+        if (gui.Button(label, ToFloat4(color))) {
             state.selectedEntity = row.entity;
         }
 
@@ -660,7 +660,7 @@ void DrawInspectorPanel(GUI::Frame& gui, ZHLN::ECS::Registry& reg, EditorState& 
             // it holding some other entity's data -- hence the return before the
             // patch below, which would otherwise write the stale copy back.
             std::array<char, 64> removeBuf {};
-            if (gui.Button(ZHLN::FormatTo(removeBuf, "Remove {}", title), JPH::Vec4(0.40f, 0.16f, 0.16f, 0.90f))) {
+            if (gui.Button(ZHLN::FormatTo(removeBuf, "Remove {}", title), {0.40f, 0.16f, 0.16f, 0.90f})) {
                 reg.Remove<CompT>(sel);
                 gui.EndCollapsingHeader();
                 return;

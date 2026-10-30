@@ -331,7 +331,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
 
     // 3. Center Platform
     ZHLN::PrefabFactory::CreateBox(
-        engine, JPH::Vec3(10.0f, 0.50f, 10.0f),
+        engine, {10.0f, 0.50f, 10.0f},
         ZHLN::PrefabFactory::SpawnParams {
             .position = {0.0, 0.50, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.50f, .color = {0.32f, 0.34f, 0.38f, 1.0f}
         }
@@ -339,7 +339,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
 
     // 4. 30-Degree Grounding Test Ramp
     ZHLN::PrefabFactory::CreateBox(
-        engine, JPH::Vec3(4.5f, 0.18f, 2.2f),
+        engine, {4.5f, 0.18f, 2.2f},
         ZHLN::PrefabFactory::SpawnParams {
             .position        = {-14.0, 2.75, 5.0},
             .rotation        = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), JPH::DegreesToRadians(30.0f)),
@@ -354,7 +354,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     for (int i = 0; i < 6; ++i) {
         float stepHeight = 0.20f + (static_cast<float>(i) * 0.10f);
         ZHLN::PrefabFactory::CreateBox(
-            engine, JPH::Vec3(1.0f, stepHeight * 0.5f, 1.0f),
+            engine, {1.0f, stepHeight * 0.5f, 1.0f},
             ZHLN::PrefabFactory::SpawnParams {
                 .position        = {12.0 + (static_cast<double>(i) * 2.5), static_cast<double>(stepHeight * 0.5f), -4.0},
                 .createPhysics   = true,
@@ -378,7 +378,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     };
     for (const auto& p: pillars) {
         ZHLN::PrefabFactory::CreateBox(
-            engine, JPH::Vec3(p.width * 0.5f, p.height * 0.5f, p.width * 0.5f),
+            engine, {p.width * 0.5f, p.height * 0.5f, p.width * 0.5f},
             ZHLN::PrefabFactory::SpawnParams {
                 .position        = {static_cast<double>(p.x), static_cast<double>(p.height * 0.5f), static_cast<double>(p.z)},
                 .createPhysics   = true,
@@ -428,7 +428,7 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
         materialDesc.baseColor        = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()};
         const ZHLN::Material material = engine.GetRenderContext().CreateMaterial(materialDesc).value_or(ZHLN::Material {});
         const ZHLN::Entity   part     = ZHLN::PrefabFactory::CreateBox(
-            engine, JPH::Vec3(halfExtents) * scale,
+            engine, ZHLN::ToFloat3(JPH::Vec3(halfExtents) * scale),
             ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = material}
         );
         reg.Add(part, ZHLN::Components::HierarchyComponent {.parent = handgun});

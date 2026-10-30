@@ -243,7 +243,7 @@ struct RTRPBRReflectionTestSuite {
 
     static ZHLN::Entity SpawnEmitter(ZHLN::Engine& engine, const ZHLN::Material& mat, float x = 0.0f) {
         return ZHLN::PrefabFactory::CreateBox(
-            engine, JPH::Vec3(2.4f, 1.1f, 0.12f),
+            engine, {2.4f, 1.1f, 0.12f},
             ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(x, 3.2, -1.2), .createPhysics = false, .materialOverride = mat}
         );
     }

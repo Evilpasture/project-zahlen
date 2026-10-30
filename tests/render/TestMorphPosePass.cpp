@@ -159,7 +159,7 @@ struct MorphPosePassSuite {
         auto& rc     = engine.GetRenderContext();
         auto  prefab = std::make_unique<ZHLN::ModelPrefab>();
 
-        const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.6f, 0.6f, 0.6f), JPH::Vec4(0.85f, 0.45f, 0.2f, 1.0f));
+        const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(rc, {0.6f, 0.6f, 0.6f}, {0.85f, 0.45f, 0.2f, 1.0f});
 
         // Deltas are float4-per-vertex blocks laid out target-major:
         // common.slang's GetMorphDisplacement reads

@@ -145,7 +145,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         }
 
         if (auto impulseCmd = query.Get<Components::RagdollImpulseCommand>(e)) {
-            pc.AddRagdollImpulse(ragComp.ragdollHandle, impulseCmd->jointIndex, impulseCmd->impulse);
+            pc.AddRagdollImpulse(ragComp.ragdollHandle, impulseCmd->jointIndex, ToFloat3(impulseCmd->impulse));
             ecb.RemoveComponent<Components::RagdollImpulseCommand>(e);
         }
 
@@ -218,7 +218,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
             if (ragComp.state == RagdollState::Dynamic || ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
                 if (!ragComp.isAddedToPhysics) {
                     const JPH::Vec3 initialVelocity = phys ? pc.GetCharacterVelocity(phys->physicsHandle) : JPH::Vec3::sZero();
-                    pc.ActivateRagdoll(ragComp.ragdollHandle, animPose, initialVelocity);
+                    pc.ActivateRagdoll(ragComp.ragdollHandle, animPose, ToFloat3(initialVelocity));
                     ragComp.isAddedToPhysics = true;
                 }
             } else if (ragComp.state == RagdollState::Inactive && ragComp.isAddedToPhysics) {

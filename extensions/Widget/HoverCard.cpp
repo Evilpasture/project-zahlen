@@ -3,6 +3,7 @@
 
 #include <Widget/HoverCard.hpp>
 #include <Widget/TextFit.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <algorithm>
 #include <format>
 #include <optional>
@@ -142,7 +143,7 @@ void DrawHoverCard(GUI::Frame& ui, const HoverState& state, ZHLN::Extent2D viewp
         },
         [&]() -> void {
             for (const std::string& line: state.lines) {
-                ui.Text(FitToWidth(line, textWidth, advance), style.fontSize, style.textInk);
+                ui.Text(FitToWidth(line, textWidth, advance), style.fontSize, ToFloat4(style.textInk));
             }
         }
     );

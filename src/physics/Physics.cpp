@@ -355,8 +355,8 @@ auto PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p1, float p
 
 auto PhysicsContext::CreateRigidBody(
     const JPH::ShapeRefC& shape,
-    JPH::RVec3Arg         pos,
-    JPH::QuatArg          rot,
+    JPH::Double3          pos,
+    JPH::Float4           rot,
     JPH::EMotionType      motion,
     Layers::ID            layer,
     uint32_t              materialID,
@@ -370,12 +370,12 @@ auto PhysicsContext::CreateRigidBody(
 
     auto&                     world  = _impl->world;
     auto&                     bt     = world.bodyTable;
-    const Physics::BodyHandle handle = bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, motion, pos, rot);
+    const Physics::BodyHandle handle = bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, motion, ToRVec3(pos), ToQuat(rot));
 
     uint32_t precreatedBodyID = JPH::BodyID::cInvalidBodyID;
     if (world.TryEnterIdleJoltMutation()) {
         const Physics::MaterialData mat = world.ResolveMaterial(materialID);
-        JPH::BodyCreationSettings   settings(shape, pos, rot, motion, static_cast<JPH::ObjectLayer>(layer));
+        JPH::BodyCreationSettings   settings(shape, ToRVec3(pos), ToQuat(rot), motion, static_cast<JPH::ObjectLayer>(layer));
         settings.mUserData    = handle.Pack();
         settings.mFriction    = mat.friction;
         settings.mRestitution = mat.restitution;
@@ -404,13 +404,13 @@ auto PhysicsContext::CreateRigidBody(
     cmd.shape               = shape;
     cmd.payload.createRigid = Physics::CreateRigidPayload {
         .handle           = handle,
-        .px               = pos.GetX(),
-        .py               = pos.GetY(),
-        .pz               = pos.GetZ(),
-        .rx               = rot.GetX(),
-        .ry               = rot.GetY(),
-        .rz               = rot.GetZ(),
-        .rw               = rot.GetW(),
+        .px               = static_cast<JPH::Real>(pos.x),
+        .py               = static_cast<JPH::Real>(pos.y),
+        .pz               = static_cast<JPH::Real>(pos.z),
+        .rx               = rot.x,
+        .ry               = rot.y,
+        .rz               = rot.z,
+        .rw               = rot.w,
         .precreatedBodyID = precreatedBodyID,
         .materialID       = materialID,
         .category         = category,
@@ -515,8 +515,8 @@ auto PhysicsContext::CreateMeshBody(
     uint32_t              vertexCount,
     const uint32_t*       indices,
     uint32_t              indexCount,
-    JPH::RVec3Arg         pos,
-    JPH::QuatArg          rot,
+    JPH::Double3          pos,
+    JPH::Float4           rot,
     uint32_t              category,
     uint32_t              mask
 ) -> Physics::BodyHandle {
@@ -524,10 +524,10 @@ auto PhysicsContext::CreateMeshBody(
     if (shape == nullptr) {
         return Physics::BodyHandle::Null();
     }
-    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask);
+    return CreateRigidBody(shape, ToDouble3(pos), ToFloat4(rot), JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask);
 }
 
-auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::CharacterParams& params) -> Physics::BodyHandle {
+auto PhysicsContext::CreateCharacter(JPH::Double3 position, const Physics::CharacterParams& params) -> Physics::BodyHandle {
     auto* impl  = _impl.get();
     auto& world = impl->world;
 
@@ -544,7 +544,7 @@ auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::Char
     const float groundOffset = charShape->GetLocalBounds().mMax.GetY();
 
     const Physics::BodyHandle handle =
-        world.bodyTable.ReserveSlot(Physics::SlotState::PendingCreateChar, JPH::EMotionType::Kinematic, position, JPH::Quat::sIdentity());
+        world.bodyTable.ReserveSlot(Physics::SlotState::PendingCreateChar, JPH::EMotionType::Kinematic, ToRVec3(position), JPH::Quat::sIdentity());
     impl->characters.InitReservedSlot(handle, groundOffset);
 
     const JPH::Vec3  planeNormal   = params.supportingVolume.GetNormal();
@@ -554,9 +554,9 @@ auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::Char
     cmd.shape              = std::move(charShape);
     cmd.payload.createChar = Physics::CreateCharacterPayload {
         .handle                   = handle,
-        .px                       = position.GetX(),
-        .py                       = position.GetY(),
-        .pz                       = position.GetZ(),
+        .px                       = static_cast<JPH::Real>(position.x),
+        .py                       = static_cast<JPH::Real>(position.y),
+        .pz                       = static_cast<JPH::Real>(position.z),
         .maxSlopeAngle            = params.maxSlopeAngle,
         .maxStrength              = params.maxStrength,
         .characterPadding         = params.characterPadding,
@@ -612,22 +612,22 @@ auto PhysicsContext::GetDebugDrawData(bool drawShapes, bool drawConstraints, boo
     };
 }
 
-void PhysicsContext::SetCharacterVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity) {
-    if (!_impl->characters.RecordDesiredVelocity(handle, velocity)) {
+void PhysicsContext::SetCharacterVelocity(Physics::BodyHandle handle, JPH::Float3 velocity) {
+    if (!_impl->characters.RecordDesiredVelocity(handle, ToVec3(velocity))) {
         return;
     }
     Physics::Command cmd {};
     cmd.type                = Physics::CommandType::SetCharacterVelocity;
     cmd.payload.setVelocity = Physics::SetVelocityPayload {
         .handle = handle,
-        .vx     = velocity.GetX(),
-        .vy     = velocity.GetY(),
-        .vz     = velocity.GetZ(),
+        .vx     = velocity.x,
+        .vy     = velocity.y,
+        .vz     = velocity.z,
     };
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetCharacterPosition(Physics::BodyHandle handle, JPH::RVec3Arg position) {
+void PhysicsContext::SetCharacterPosition(Physics::BodyHandle handle, JPH::Double3 position) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -636,14 +636,14 @@ void PhysicsContext::SetCharacterPosition(Physics::BodyHandle handle, JPH::RVec3
     cmd.type                = Physics::CommandType::SetCharacterPosition;
     cmd.payload.setPosition = Physics::SetPositionPayload {
         .handle = handle,
-        .px     = position.GetX(),
-        .py     = position.GetY(),
-        .pz     = position.GetZ(),
+        .px     = static_cast<JPH::Real>(position.x),
+        .py     = static_cast<JPH::Real>(position.y),
+        .pz     = static_cast<JPH::Real>(position.z),
     };
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetKinematicPose(Physics::BodyHandle handle, JPH::RVec3Arg position, JPH::QuatArg rotation) {
+void PhysicsContext::SetKinematicPose(Physics::BodyHandle handle, JPH::Double3 position, JPH::Float4 rotation) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -652,18 +652,18 @@ void PhysicsContext::SetKinematicPose(Physics::BodyHandle handle, JPH::RVec3Arg 
     cmd.type                     = Physics::CommandType::SetKinematicPose;
     cmd.payload.setKinematicPose = Physics::SetKinematicPosePayload {
         .handle = handle,
-        .px     = position.GetX(),
-        .py     = position.GetY(),
-        .pz     = position.GetZ(),
-        .rx     = rotation.GetX(),
-        .ry     = rotation.GetY(),
-        .rz     = rotation.GetZ(),
-        .rw     = rotation.GetW(),
+        .px     = static_cast<JPH::Real>(position.x),
+        .py     = static_cast<JPH::Real>(position.y),
+        .pz     = static_cast<JPH::Real>(position.z),
+        .rx     = rotation.x,
+        .ry     = rotation.y,
+        .rz     = rotation.z,
+        .rw     = rotation.w,
     };
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetLinearVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity) {
+void PhysicsContext::SetLinearVelocity(Physics::BodyHandle handle, JPH::Float3 velocity) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -672,9 +672,9 @@ void PhysicsContext::SetLinearVelocity(Physics::BodyHandle handle, JPH::Vec3Arg 
     cmd.type                = Physics::CommandType::SetLinearVelocity;
     cmd.payload.setVelocity = Physics::SetVelocityPayload {
         .handle = handle,
-        .vx     = velocity.GetX(),
-        .vy     = velocity.GetY(),
-        .vz     = velocity.GetZ(),
+        .vx     = velocity.x,
+        .vy     = velocity.y,
+        .vz     = velocity.z,
     };
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
@@ -770,8 +770,8 @@ auto PhysicsContext::GetRagdoll(Physics::RagdollHandle handle) const noexcept ->
     return _impl->ragdolls.GetRagdoll(handle);
 }
 
-void PhysicsContext::ActivateRagdoll(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept {
-    _impl->ragdolls.ActivateRagdoll(handle, pose, initialVelocity);
+void PhysicsContext::ActivateRagdoll(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose, JPH::Float3 initialVelocity) noexcept {
+    _impl->ragdolls.ActivateRagdoll(handle, pose, ToVec3(initialVelocity));
 }
 
 void PhysicsContext::RemoveRagdoll(Physics::RagdollHandle handle) noexcept {
@@ -782,8 +782,8 @@ void PhysicsContext::DriveRagdollPose(Physics::RagdollHandle handle, const JPH::
     _impl->ragdolls.DriveRagdollPose(handle, pose);
 }
 
-void PhysicsContext::AddRagdollImpulse(Physics::RagdollHandle handle, uint32_t jointIndex, JPH::Vec3Arg impulse) noexcept {
-    _impl->ragdolls.AddRagdollImpulse(handle, jointIndex, impulse, *_impl->world.bodyInterface);
+void PhysicsContext::AddRagdollImpulse(Physics::RagdollHandle handle, uint32_t jointIndex, JPH::Float3 impulse) noexcept {
+    _impl->ragdolls.AddRagdollImpulse(handle, jointIndex, ToVec3(impulse), *_impl->world.bodyInterface);
 }
 
 auto PhysicsContext::GetRagdollPose(Physics::RagdollHandle handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept -> bool {
@@ -879,7 +879,7 @@ void PhysicsContext::RegisterMaterial(uint32_t id, float friction, float restitu
     _impl->world.RegisterMaterial(id, friction, restitution);
 }
 
-void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Vec3Arg impulse) {
+void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Float3 impulse) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -888,14 +888,14 @@ void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Vec3Arg impulse
     cmd.type                = Physics::CommandType::AddImpulse;
     cmd.payload.setVelocity = Physics::SetVelocityPayload {
         .handle = handle,
-        .vx     = impulse.GetX(),
-        .vy     = impulse.GetY(),
-        .vz     = impulse.GetZ(),
+        .vx     = impulse.x,
+        .vy     = impulse.y,
+        .vz     = impulse.z,
     };
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Vec3Arg impulse, JPH::RVec3Arg position) {
+void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Float3 impulse, JPH::Double3 position) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -904,19 +904,19 @@ void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Vec3Arg impulse
     cmd.type                    = Physics::CommandType::AddImpulseAtPosition;
     cmd.payload.addImpulseAtPos = Physics::AddImpulseAtPosPayload {
         .handle = handle,
-        .px     = position.GetX(),
-        .py     = position.GetY(),
-        .pz     = position.GetZ(),
-        .ix     = impulse.GetX(),
-        .iy     = impulse.GetY(),
-        .iz     = impulse.GetZ(),
+        .px     = static_cast<JPH::Real>(position.x),
+        .py     = static_cast<JPH::Real>(position.y),
+        .pz     = static_cast<JPH::Real>(position.z),
+        .ix     = impulse.x,
+        .iy     = impulse.y,
+        .iz     = impulse.z,
     };
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::AddRadialImpulse(JPH::RVec3Arg center, float radius, float maxImpulse) {
+void PhysicsContext::AddRadialImpulse(JPH::Double3 center, float radius, float maxImpulse) {
     JPH::Array<Physics::BodyHandle> overlapped;
-    OverlapSphere(center, radius, overlapped);
+    OverlapSphere(ToDouble3(center), radius, overlapped);
 
     for (const Physics::BodyHandle physHandle: overlapped) {
         const auto bodyPos = BodyPosition(physHandle);
@@ -924,14 +924,14 @@ void PhysicsContext::AddRadialImpulse(JPH::RVec3Arg center, float radius, float 
             continue;
         }
 
-        const JPH::RVec3 diff    = *bodyPos - center;
+        const JPH::RVec3 diff    = *bodyPos - ToRVec3(center);
         const auto       dist    = static_cast<float>(diff.Length());
         const float      falloff = 1.0f - std::clamp(dist / radius, 0.0f, 1.0f);
 
         if (dist > 1e-4f && falloff > 0.01f) {
             const JPH::Vec3 impulseDir = JPH::Vec3(diff / static_cast<double>(dist)) + JPH::Vec3(0.0f, 0.35f, 0.0f);
             const JPH::Vec3 impulse    = impulseDir.Normalized() * (maxImpulse * falloff * falloff);
-            AddImpulse(physHandle, impulse);
+            AddImpulse(physHandle, ToFloat3(impulse));
         }
     }
 }

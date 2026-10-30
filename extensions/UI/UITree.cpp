@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <UI/UITree.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <cstddef>
 #include <utility>
 
@@ -225,10 +226,6 @@ namespace {
     return root.id.empty() ? std::string {"root"} : root.id;
 }
 
-[[nodiscard]] auto ToVec4(const JPH::Float4& c) -> JPH::Vec4 {
-    return {c.x, c.y, c.z, c.w};
-}
-
 [[nodiscard]] auto ToBoxConfig(const NodeBox& box) -> BoxConfig {
     BoxConfig cfg;
     cfg.width        = box.width;
@@ -350,7 +347,7 @@ void RenderNode(
         }
 
         case NodeKind::Text:
-            wrapLeaf([&]() { gui.Text(label, node.fontSize, ToVec4(node.textColor)); });
+            wrapLeaf([&]() { gui.Text(label, node.fontSize, ToFloat4(node.textColor)); });
             NoteDesignClick(gui, id, mode, result);
             break;
 

@@ -22,7 +22,7 @@ void test_physics_step_without_task_scheduler_uses_serial_fallback() {
     if (!ExpectTrue(shape != nullptr)) {
         return;
     }
-    const auto body = pc.CreateRigidBody(shape, JPH::RVec3(0.0, 10.0, 0.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, Layers::ID::MOVING);
+    const auto body = pc.CreateRigidBody(shape, {0.0, 10.0, 0.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, Layers::ID::MOVING);
     if (!ExpectTrue(body != Physics::BodyHandle::Null())) {
         return;
     }

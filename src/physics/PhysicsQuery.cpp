@@ -69,21 +69,22 @@ class QueryFilter final: public JPH::BodyFilter {
 
 } // namespace
 
-auto PhysicsContext::Raycast(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance, Physics::BodyHandle ignore) const -> Physics::RaycastResult {
-    const auto& world = GetWorld();
+auto PhysicsContext::Raycast(JPH::Double3 origin, JPH::Float3 direction, float maxDistance, Physics::BodyHandle ignore) const -> Physics::RaycastResult {
+    const JPH::Vec3 dir   = ToVec3(direction);
+    const auto&     world = GetWorld();
 
     if (world.isStepping.load(std::memory_order::acquire)) {
         return {};
     }
 
-    const float lengthSq = direction.LengthSq();
+    const float lengthSq = dir.LengthSq();
     if (lengthSq < 1e-6f) {
         return {};
     }
 
-    const JPH::Vec3    scaledDir = direction.Normalized() * maxDistance;
-    const JPH::RRayCast ray {origin, scaledDir};
-    JPH::RayCastResult hit;
+    const JPH::Vec3     scaledDir = dir.Normalized() * maxDistance;
+    const JPH::RRayCast ray {ToRVec3(origin), scaledDir};
+    JPH::RayCastResult  hit;
 
     const JPH::BodyID ignoreID = Physics::GetBodyID(world, ignore);
     const QueryFilter filter(world, ignoreID);
@@ -112,25 +113,26 @@ auto PhysicsContext::Raycast(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float
 }
 
 void PhysicsContext::RaycastAll(
-    JPH::RVec3Arg                       origin,
-    JPH::Vec3Arg                        direction,
+    JPH::Double3                        origin,
+    JPH::Float3                         direction,
     float                               maxDistance,
     JPH::Array<Physics::RaycastResult>& outResults,
     Physics::BodyHandle                 ignore
 ) const {
-    const auto& world = GetWorld();
+    const JPH::Vec3 dir   = ToVec3(direction);
+    const auto&     world = GetWorld();
 
     if (world.isStepping.load(std::memory_order::acquire)) {
         return;
     }
 
-    const float lengthSq = direction.LengthSq();
+    const float lengthSq = dir.LengthSq();
     if (lengthSq < 1e-6f) {
         return;
     }
 
-    const JPH::Vec3     scaledDir = direction.Normalized() * maxDistance;
-    const JPH::RRayCast ray {origin, scaledDir};
+    const JPH::Vec3     scaledDir = dir.Normalized() * maxDistance;
+    const JPH::RRayCast ray {ToRVec3(origin), scaledDir};
 
     JPH::RayCastSettings settings;
     settings.mBackFaceModeTriangles = JPH::EBackFaceMode::CollideWithBackFaces;
@@ -170,25 +172,26 @@ void PhysicsContext::RaycastAll(
 }
 
 void PhysicsContext::RaycastAllPenetrations(
-    JPH::RVec3Arg                                  origin,
-    JPH::Vec3Arg                                   direction,
+    JPH::Double3                                   origin,
+    JPH::Float3                                    direction,
     float                                          maxDistance,
     JPH::Array<Physics::RaycastPenetrationResult>& outResults,
     Physics::BodyHandle                            ignore
 ) const {
-    const auto& world = GetWorld();
+    const JPH::Vec3 dir   = ToVec3(direction);
+    const auto&     world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
         return;
     }
 
-    const float lengthSq = direction.LengthSq();
+    const float lengthSq = dir.LengthSq();
     if (lengthSq < 1e-6f) {
         return;
     }
 
-    const JPH::Vec3     dirNorm   = direction.Normalized();
+    const JPH::Vec3     dirNorm   = dir.Normalized();
     const JPH::Vec3     scaledDir = dirNorm * maxDistance;
-    const JPH::RRayCast ray {origin, scaledDir};
+    const JPH::RRayCast ray {ToRVec3(origin), scaledDir};
 
     JPH::RayCastSettings settings;
     settings.mBackFaceModeTriangles = JPH::EBackFaceMode::CollideWithBackFaces;
@@ -282,7 +285,7 @@ void PhysicsContext::RaycastAllPenetrations(
                 res.exitNormal   = -dirNorm;
             }
         } else {
-            res.entryPosition = origin;
+            res.entryPosition = ToRVec3(origin);
             res.entryNormal   = -dirNorm;
             res.entryFraction = 0.0f;
             res.exitPosition  = entryHit.position;
@@ -295,10 +298,10 @@ void PhysicsContext::RaycastAllPenetrations(
     }
 }
 
-auto PhysicsContext::RaycastPenetration(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance, Physics::BodyHandle ignore) const
+auto PhysicsContext::RaycastPenetration(JPH::Double3 origin, JPH::Float3 direction, float maxDistance, Physics::BodyHandle ignore) const
     -> Physics::RaycastPenetrationResult {
     JPH::Array<Physics::RaycastPenetrationResult> results;
-    RaycastAllPenetrations(origin, direction, maxDistance, results, ignore);
+    RaycastAllPenetrations(ToDouble3(origin), ToFloat3(direction), maxDistance, results, ignore);
     if (!results.empty()) {
         return results[0];
     }
@@ -307,24 +310,25 @@ auto PhysicsContext::RaycastPenetration(JPH::RVec3Arg origin, JPH::Vec3Arg direc
 
 auto PhysicsContext::Shapecast(
     const JPH::ShapeRefC& shape,
-    JPH::RVec3Arg         pos,
-    JPH::QuatArg          rot,
-    JPH::Vec3Arg          direction,
+    JPH::Double3          pos,
+    JPH::Float4           rot,
+    JPH::Float3           direction,
     float                 maxDistance,
     Physics::BodyHandle   ignore
 ) const -> Physics::ShapeCastResult {
-    const auto& world = GetWorld();
+    const JPH::Vec3 dir   = ToVec3(direction);
+    const auto&     world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
         return {};
     }
 
-    const float lengthSq = direction.LengthSq();
+    const float lengthSq = dir.LengthSq();
     if (lengthSq < 1e-6f) {
         return {};
     }
 
-    const JPH::Vec3       scaledDir = direction.Normalized() * maxDistance;
-    const JPH::RShapeCast cast(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sRotationTranslation(rot, pos), scaledDir);
+    const JPH::Vec3       scaledDir = dir.Normalized() * maxDistance;
+    const JPH::RShapeCast cast(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sRotationTranslation(ToQuat(rot), ToRVec3(pos)), scaledDir);
 
     JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
     const JPH::BodyID                                          ignoreID = Physics::GetBodyID(world, ignore);
@@ -354,7 +358,7 @@ auto PhysicsContext::Shapecast(
     return result;
 }
 
-void PhysicsContext::OverlapSphere(JPH::RVec3Arg center, float radius, JPH::Array<Physics::BodyHandle>& outResults) const {
+void PhysicsContext::OverlapSphere(JPH::Double3 center, float radius, JPH::Array<Physics::BodyHandle>& outResults) const {
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
         return;
@@ -366,7 +370,7 @@ void PhysicsContext::OverlapSphere(JPH::RVec3Arg center, float radius, JPH::Arra
     JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
     const auto*                                               query = &world.system->GetNarrowPhaseQuery();
 
-    query->CollideShape(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(center), {}, JPH::RVec3::sZero(), collector);
+    query->CollideShape(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(ToRVec3(center)), {}, JPH::RVec3::sZero(), collector);
 
     for (const auto& hit: collector.mHits) {
         if (const auto handle = FindBodyHandle(world, hit.mBodyID2)) {
@@ -375,13 +379,13 @@ void PhysicsContext::OverlapSphere(JPH::RVec3Arg center, float radius, JPH::Arra
     }
 }
 
-void PhysicsContext::OverlapAABB(JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox, JPH::Array<Physics::BodyHandle>& outResults) const {
+void PhysicsContext::OverlapAABB(JPH::Double3 minBox, JPH::Double3 maxBox, JPH::Array<Physics::BodyHandle>& outResults) const {
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
         return;
     }
 
-    const JPH::AABox                                              box {JPH::Vec3(minBox), JPH::Vec3(maxBox)};
+    const JPH::AABox                                              box {ToRVec3(minBox), ToRVec3(maxBox)};
     JPH::AllHitCollisionCollector<JPH::CollideShapeBodyCollector> collector;
     const auto*                                                   query = &world.system->GetBroadPhaseQuery();
 
@@ -394,13 +398,13 @@ void PhysicsContext::OverlapAABB(JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox, JPH
     }
 }
 
-void PhysicsContext::QueryAABB(JPH::Vec3Arg min, JPH::Vec3Arg max, JPH::Array<Physics::BodyHandle>& outEntities) const {
+void PhysicsContext::QueryAABB(JPH::Float3 min, JPH::Float3 max, JPH::Array<Physics::BodyHandle>& outEntities) const {
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
         return;
     }
 
-    const JPH::AABox box(min, max);
+    const JPH::AABox box(ToVec3(min), ToVec3(max));
 
     struct SimpleCollector final: public JPH::CollideShapeBodyCollector {
         const Physics::PhysicsWorld&     worldRef;
@@ -444,7 +448,7 @@ void PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frus
                     const JPH::Vec3  center = bounds.GetCenter();
                     const float      radius = bounds.GetExtent().Length();
 
-                    if (frustumRef.IsSphereVisible(center, radius)) {
+                    if (frustumRef.IsSphereVisible(ToFloat3(center), radius)) {
                         out.push_back(*handle);
                     }
                 }
