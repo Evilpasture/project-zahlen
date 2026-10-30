@@ -11,15 +11,21 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/SharedMutex.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
+#include <atomic>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <new>
+#include <optional>
 #include <span>
+#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -45,10 +51,10 @@ class EventWriter;
 //     `Push<T>()` calls to land cleanly in the fresh `primary` buffer, destroys the
 //     visited payloads, and retains both page mappings for reuse on future frames.
 //   * Lock-free channel directory reads: channel nodes live at permanent slab
-//     addresses in an atomic prepend-only intrusive list, so `View<T>()` and
-//     warm `Writer<T>()` / `Push<T>()` lookups never acquire a mutex, and
-//     `SystemGraph` can safely run `EventWriter<A>` and `EventWriter<B>` (or
-//     multiple `EventReader<A>`s) concurrently across worker fibers.
+//     addresses in an atomic prepend-only intrusive list. `View<T>()` and
+//     warm `Push<T>()` lookups never acquire a mutex; checked writers take a
+//     read lease, so `Clear()` and moves wait for their in-flight operations.
+//     `SystemGraph` can run writers for distinct event types concurrently.
 class EventBus {
   public:
     // The supplied resource must return memory aligned to GetPageSize() for
@@ -67,20 +73,15 @@ class EventBus {
     EventBus(const EventBus&)                    = delete;
     auto operator=(const EventBus&) -> EventBus& = delete;
 
-    EventBus(EventBus&& other) noexcept
-        : _pages(other._pages),
-          _head(other._head.exchange(nullptr, std::memory_order::acq_rel)),
-          _slab(std::exchange(other._slab, nullptr)),
-          _channelCount(other._channelCount.exchange(0, std::memory_order::acq_rel)) {
+    EventBus(EventBus&& other) noexcept: EventBus(other._pages) {
+        TakeFrom(other);
     }
 
     auto operator=(EventBus&& other) noexcept -> EventBus& {
         if (this != &other) {
-            Clear();
-            _pages = other._pages;
-            _head.store(other._head.exchange(nullptr, std::memory_order::acq_rel), std::memory_order::release);
-            _slab = std::exchange(other._slab, nullptr);
-            _channelCount.store(other._channelCount.exchange(0, std::memory_order::acq_rel), std::memory_order::release);
+            MutexGuard init(_writerInitMutex);
+            ClearLocked(); // Retire destination handles before adopting the source.
+            TakeFrom(other);
         }
         return *this;
     }
@@ -176,25 +177,11 @@ class EventBus {
         }
     }
 
-    // Drops every channel and releases all mapped pages, returning the bus to its
-    // initial empty state.
+    // Drops every channel and releases all mapped pages. Previously issued
+    // writers fail safely; a subsequent Writer<T>() obtains a fresh binding.
     void Clear() noexcept {
-        ChannelNode* node = _head.exchange(nullptr, std::memory_order::acq_rel);
-        while (node != nullptr) {
-            ChannelNode* next = node->next.load(std::memory_order::relaxed);
-            node->destroyFn(node);
-            node = next;
-        }
-        _channelCount.store(0, std::memory_order::release);
-
-        SlabChunk* chunk = std::exchange(_slab, nullptr);
-        while (chunk != nullptr) {
-            SlabChunk*   prev  = chunk->prev;
-            const size_t bytes = chunk->mappedBytes;
-            std::destroy_at(chunk);
-            _pages->deallocate(chunk, bytes, GetPageSize());
-            chunk = prev;
-        }
+        MutexGuard init(_writerInitMutex);
+        ClearLocked();
     }
 
     [[nodiscard]] auto ChannelCount() const noexcept -> size_t {
@@ -204,6 +191,148 @@ class EventBus {
   private:
     template <typename T>
     friend class EventWriter;
+
+    // Fiber stacks can resume on another worker thread. A TLS-only nesting
+    // guard would lose an active lease on migration (or mistake a paused fiber
+    // on this thread for the current one), so track the context in the binding.
+    // Main fibers use OS thread identity, including before TaskSystem::Init.
+    struct WriterCallContext {
+        Fiber*          fiber = nullptr;
+        std::thread::id thread {};
+    };
+
+    [[nodiscard]] static auto WriterContext() noexcept -> WriterCallContext {
+        if (auto* fiber = GetCurrentFiber(); fiber != nullptr && !fiber->isMain) {
+            return {.fiber = fiber};
+        }
+        return {.thread = std::this_thread::get_id()};
+    }
+
+    struct WriterCallFrame {
+        WriterCallContext context;
+        WriterCallFrame*  next = nullptr;
+    };
+
+    // Intrusively reference counted and allocated separately from _pages:
+    // retained writers can outlive both the bus and its caller-owned resource.
+    // The bus slot and each writer/operation own one reference; no event storage
+    // lives here, only a checked bus reference and its lifecycle lock.
+    struct WriterBinding {
+        Atomic<size_t>   references {1};
+        SharedMutex      lifecycle;
+        Mutex            callsMutex {};
+        WriterCallFrame* calls = nullptr;
+        EventBus*        bus;
+
+        explicit WriterBinding(EventBus& owner) noexcept: bus(&owner) {
+        }
+
+        void Retain() noexcept {
+            const size_t previous = references.fetch_add(1, std::memory_order::relaxed);
+            if (previous == std::numeric_limits<size_t>::max()) {
+                Panic("EventBus writer binding reference count overflow");
+            }
+        }
+
+        void Release() noexcept {
+            if (references.fetch_sub(1, std::memory_order::acq_rel) == 1) {
+                delete this;
+            }
+        }
+
+        [[nodiscard]] auto HasActiveCall() noexcept -> bool {
+            const auto context = WriterContext();
+            MutexGuard guard(callsMutex);
+            for (auto* frame = calls; frame != nullptr; frame = frame->next) {
+                if (frame->context.fiber == context.fiber && frame->context.thread == context.thread) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        void AddCall(WriterCallFrame& frame) noexcept {
+            MutexGuard guard(callsMutex);
+            frame.next = calls;
+            calls      = &frame;
+        }
+
+        void RemoveCall(WriterCallFrame& frame) noexcept {
+            MutexGuard guard(callsMutex);
+            auto**     link = &calls;
+            while (*link != &frame) {
+                if (*link == nullptr) {
+                    Panic("EventBus writer lease bookkeeping is inconsistent");
+                }
+                link = &(*link)->next;
+            }
+            *link = frame.next;
+        }
+    };
+
+    // One owning pointer; copying it retains the binding, moving transfers the
+    // reference, and the last release destroys it. Adopt takes the initial
+    // reference produced by new (rather than incrementing it again).
+    struct WriterBindingRef {
+        WriterBindingRef() noexcept = default;
+
+        [[nodiscard]] static auto Adopt(WriterBinding* binding) noexcept -> WriterBindingRef {
+            return WriterBindingRef(binding);
+        }
+
+        WriterBindingRef(const WriterBindingRef& other) noexcept: _binding(other._binding) {
+            if (_binding != nullptr) {
+                _binding->Retain();
+            }
+        }
+
+        WriterBindingRef(WriterBindingRef&& other) noexcept: _binding(std::exchange(other._binding, nullptr)) {
+        }
+
+        ~WriterBindingRef() noexcept {
+            if (_binding != nullptr) {
+                _binding->Release();
+            }
+        }
+
+        auto operator=(WriterBindingRef other) noexcept -> WriterBindingRef& {
+            std::swap(_binding, other._binding);
+            return *this;
+        }
+
+        [[nodiscard]] explicit operator bool() const noexcept {
+            return _binding != nullptr;
+        }
+
+        [[nodiscard]] auto operator->() const noexcept -> WriterBinding* {
+            return _binding;
+        }
+
+      private:
+        explicit WriterBindingRef(WriterBinding* binding) noexcept: _binding(binding) {
+        }
+
+        WriterBinding* _binding = nullptr;
+    };
+
+    // The slot lock serializes taking a new intrusive reference with releasing
+    // the bus's last reference on Clear(). Never hold it while acquiring the
+    // lifecycle lock: an active callback can request another writer while Clear
+    // waits for that callback's read lease.
+    struct WriterBindingSlot {
+        mutable Mutex     mutex {};
+        WriterBindingRef value;
+
+        [[nodiscard]] auto load() const noexcept -> WriterBindingRef {
+            MutexGuard guard(mutex);
+            return value;
+        }
+
+        void store(WriterBindingRef next) noexcept {
+            MutexGuard guard(mutex);
+            value = std::move(next);
+        }
+    };
 
     struct SlabChunk {
         SlabChunk* prev        = nullptr;
@@ -289,6 +418,94 @@ class EventBus {
         }
     };
 
+    // Caller holds _writerInitMutex; keep it across the entire retire/transfer
+    // sequence during move assignment, so a new Writer cannot be issued into
+    // the destination between the two steps.
+    void ClearLocked() noexcept {
+        auto binding = _writerBinding.load();
+        if (binding) {
+            if (binding->HasActiveCall()) {
+                Panic("EventBus::Clear cannot run inside an active EventWriter callback");
+            }
+            WriteLockGuard lifetime(binding->lifecycle);
+            binding->bus = nullptr;
+            _writerBinding.store({});
+            ClearStorage();
+        } else {
+            ClearStorage();
+        }
+    }
+
+    void ClearStorage() noexcept {
+        ChannelNode* node = _head.exchange(nullptr, std::memory_order_acq_rel);
+        while (node != nullptr) {
+            ChannelNode* next = node->next.load(std::memory_order::relaxed);
+            node->destroyFn(node);
+            node = next;
+        }
+        _channelCount.store(0, std::memory_order::release);
+
+        SlabChunk* chunk = std::exchange(_slab, nullptr);
+        while (chunk != nullptr) {
+            SlabChunk*   prev  = chunk->prev;
+            const size_t bytes = chunk->mappedBytes;
+            std::destroy_at(chunk);
+            _pages->deallocate(chunk, bytes, GetPageSize());
+            chunk = prev;
+        }
+    }
+
+    void TakeFrom(EventBus& other) noexcept {
+        MutexGuard init(other._writerInitMutex);
+        auto       binding = other._writerBinding.load();
+        if (binding) {
+            if (binding->HasActiveCall()) {
+                Panic("EventBus cannot move from inside an active EventWriter callback");
+            }
+            WriteLockGuard lifetime(binding->lifecycle);
+            TransferStorage(other);
+            other._writerBinding.store({});
+            _writerBinding.store(binding);
+            binding->bus = this;
+        } else {
+            TransferStorage(other);
+        }
+    }
+
+    void TransferStorage(EventBus& other) noexcept {
+        _pages = other._pages;
+        _head.store(other._head.exchange(nullptr, std::memory_order::acq_rel), std::memory_order::release);
+        _slab = std::exchange(other._slab, nullptr);
+        _channelCount.store(other._channelCount.exchange(0, std::memory_order::acq_rel), std::memory_order::release);
+    }
+
+    template <typename T>
+    [[nodiscard]] auto BindWriter() -> WriterBindingRef {
+        // A drain callback may request another writer while Clear is waiting
+        // for this fiber's read lease. The slot's snapshot stays owned even
+        // when another fiber is retiring it; only the fiber that already holds
+        // the read lease may bypass the initialization mutex.
+        auto binding = _writerBinding.load();
+        if (binding && binding->HasActiveCall()) {
+            EnsureChannel<T>();
+            return binding;
+        }
+
+        MutexGuard init(_writerInitMutex);
+        binding = _writerBinding.load();
+        if (!binding) {
+            auto* fresh = new (std::nothrow) WriterBinding(*this);
+            if (fresh == nullptr) {
+                Panic("EventBus could not allocate writer binding");
+            }
+            binding = WriterBindingRef::Adopt(fresh);
+            _writerBinding.store(binding);
+        }
+        SharedLockGuard lifetime(binding->lifecycle);
+        EnsureChannel<T>(); // Preserve Writer<T>()'s eager channel registration.
+        return binding;
+    }
+
     [[nodiscard]] auto AllocateInSlabLocked(size_t bytes, size_t alignment) -> void* {
         Assert(alignment <= GetPageSize(), "EventBus channel alignment exceeds OS page size");
 
@@ -354,11 +571,13 @@ class EventBus {
         });
     }
 
-    std::pmr::memory_resource* _pages        = nullptr;
-    Atomic<ChannelNode*>      _head         {nullptr};
-    SlabChunk*                 _slab         = nullptr;
-    Atomic<size_t>             _channelCount {0};
-    mutable Mutex              _channelCreateMutex;
+    std::pmr::memory_resource*                 _pages        = nullptr;
+    Atomic<ChannelNode*>                      _head         {nullptr};
+    SlabChunk*                                 _slab         = nullptr;
+    Atomic<size_t>                             _channelCount {0};
+    WriterBindingSlot                          _writerBinding;
+    mutable Mutex                              _writerInitMutex {};
+    mutable Mutex                              _channelCreateMutex {};
 };
 
 // Read-only view of pending events of type `T` for ECS systems (`SystemGraph`).
@@ -409,76 +628,158 @@ class EventReader {
     std::span<const T> _events {};
 };
 
-// Direct channel writer/consumer handle for events of type `T` in ECS systems (`SystemGraph`).
+// Checked writer/consumer handle for events of type `T` in ECS systems (`SystemGraph`).
 // Declares `Access::Write` on `EventToken<T>` — serializing against other writers or readers
 // of `T`, while running in parallel with writers/readers of unrelated event types `U != T`.
+// A checked logical handle, not a pointer into the bus's page slab. Copying a
+// writer keeps only the small lifetime binding alive; Clear() closes that
+// binding before freeing its channels. Moves transfer the binding to the new
+// bus, so existing writers follow the moved events. The handle can outlive the
+// bus *and its injected page resource* and still report expiry safely.
 template <typename T>
 class EventWriter {
   public:
     using EventType = T;
     static_assert(std::is_object_v<T> && !std::is_const_v<T>, "EventWriter<T> requires a non-const value type T");
 
-    constexpr EventWriter() noexcept = default;
-    explicit EventWriter(EventBus& bus) : _channel(&bus.EnsureChannel<T>()) {
+    EventWriter() noexcept = default; // Unbound handles fail checked operations; Push always panics.
+    explicit EventWriter(EventBus& bus): _binding(bus.BindWriter<T>()) {
     }
 
-    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
-        return _channel != nullptr;
+    [[nodiscard]] auto Valid() const noexcept -> bool {
+        return Visit([](EventBus&) {});
+    }
+
+    [[nodiscard]] auto TryPush(const T& event) const -> bool
+        requires std::copy_constructible<T>
+    {
+        return Visit([&](EventBus& bus) { bus.Push<T>(event); });
+    }
+
+    [[nodiscard]] auto TryPush(T&& event) const -> bool
+        requires std::move_constructible<T>
+    {
+        return Visit([&](EventBus& bus) { bus.Push<T>(std::move(event)); });
     }
 
     void Push(const T& event) const
         requires std::copy_constructible<T>
     {
-        Assert(_channel != nullptr, "EventWriter<T>::Push called on an unbound writer");
-        _channel->Emplace(event);
+        if (!TryPush(event)) {
+            Panic("EventWriter<T>::Push called with an expired or moved-from writer");
+        }
     }
 
     void Push(T&& event) const
         requires std::move_constructible<T>
     {
-        Assert(_channel != nullptr, "EventWriter<T>::Push called on an unbound writer");
-        _channel->Emplace(std::move(event));
+        if (!TryPush(std::move(event))) {
+            Panic("EventWriter<T>::Push called with an expired or moved-from writer");
+        }
+    }
+
+    // Emplace deliberately does not return a reference into the bus's storage:
+    // such a reference would become invalid after a push, drain, or Clear().
+    template <typename... Args>
+        requires std::constructible_from<T, Args...>
+    [[nodiscard]] auto TryEmplace(Args&&... args) const -> bool {
+        return Visit([&](EventBus& bus) { (void)bus.Emplace<T>(std::forward<Args>(args)...); });
     }
 
     template <typename... Args>
         requires std::constructible_from<T, Args...>
-    auto Emplace(Args&&... args) const -> T& {
-        Assert(_channel != nullptr, "EventWriter<T>::Emplace called on an unbound writer");
-        return _channel->Emplace(std::forward<Args>(args)...);
+    void Emplace(Args&&... args) const {
+        if (!TryEmplace(std::forward<Args>(args)...)) {
+            Panic("EventWriter<T>::Emplace called with an expired or moved-from writer");
+        }
+    }
+
+    [[nodiscard]] auto TryPushRange(std::span<const T> events) const -> bool
+        requires std::copy_constructible<T>
+    {
+        return Visit([&](EventBus& bus) { bus.PushRange<T>(events); });
     }
 
     void PushRange(std::span<const T> events) const
         requires std::copy_constructible<T>
     {
-        Assert(_channel != nullptr, "EventWriter<T>::PushRange called on an unbound writer");
-        if (!events.empty()) {
-            _channel->AppendRange(events);
+        if (!TryPushRange(events)) {
+            Panic("EventWriter<T>::PushRange called with an expired or moved-from writer");
         }
     }
 
     template <typename Fn>
+    [[nodiscard]] auto TryDrain(Fn&& fn) const -> std::optional<size_t> {
+        std::optional<size_t> result;
+        if (!Visit([&](EventBus& bus) { result = bus.Drain<T>(std::forward<Fn>(fn)); })) {
+            return std::nullopt;
+        }
+        return result;
+    }
+
+    template <typename Fn>
     auto Drain(Fn&& fn) const -> size_t {
-        Assert(_channel != nullptr, "EventWriter<T>::Drain called on an unbound writer");
-        return _channel->Drain(std::forward<Fn>(fn));
+        auto result = TryDrain(std::forward<Fn>(fn));
+        if (!result.has_value()) {
+            Panic("EventWriter<T>::Drain called with an expired or moved-from writer");
+        }
+        return *result;
+    }
+
+    [[nodiscard]] auto TryClear() const noexcept -> bool {
+        return Visit([](EventBus& bus) { bus.ClearChannel<T>(); });
     }
 
     void Clear() const noexcept {
-        Assert(_channel != nullptr, "EventWriter<T>::Clear called on an unbound writer");
-        _channel->ClearEvents();
+        if (!TryClear()) {
+            Panic("EventWriter<T>::Clear called with an expired or moved-from writer");
+        }
+    }
+
+    [[nodiscard]] auto TryPendingCount() const noexcept -> std::optional<size_t> {
+        std::optional<size_t> count;
+        if (!Visit([&](EventBus& bus) { count = bus.Count<T>(); })) {
+            return std::nullopt;
+        }
+        return count;
     }
 
     [[nodiscard]] auto PendingCount() const noexcept -> size_t {
-        return _channel != nullptr ? _channel->View().size() : 0;
+        const auto count = TryPendingCount();
+        if (!count.has_value()) {
+            Panic("EventWriter<T>::PendingCount called with an expired or moved-from writer");
+        }
+        return *count;
     }
 
   private:
-    friend class EventBus;
-    using Channel = EventBus::TypedChannel<T>;
+    template <typename Fn>
+    auto Visit(Fn&& fn) const -> bool {
+        const auto binding = _binding;
+        if (!binding) {
+            return false;
+        }
 
-    constexpr explicit EventWriter(Channel* channel) noexcept : _channel(channel) {
+        // A Drain callback may push or drain the same type again. The outer
+        // invocation already holds a read lease, so taking another while Clear
+        // is waiting for a write lease would deadlock the current fiber.
+        if (binding->HasActiveCall()) {
+            std::forward<Fn>(fn)(*binding->bus);
+            return true;
+        }
+
+        SharedLockGuard lifetime(binding->lifecycle);
+        if (binding->bus == nullptr) {
+            return false;
+        }
+        EventBus::WriterCallFrame frame {EventBus::WriterContext()};
+        binding->AddCall(frame);
+        ZHLN::defer _([&]() noexcept { binding->RemoveCall(frame); });
+        std::forward<Fn>(fn)(*binding->bus);
+        return true;
     }
 
-    Channel* _channel = nullptr;
+    EventBus::WriterBindingRef _binding;
 };
 
 template <typename T>
@@ -488,7 +789,7 @@ template <typename T>
 
 template <typename T>
 [[nodiscard]] inline auto EventBus::Writer() -> EventWriter<T> {
-    return EventWriter<T>(&EnsureChannel<T>());
+    return EventWriter<T>(*this);
 }
 
 } // namespace ZHLN::ECS
