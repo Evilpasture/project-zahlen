@@ -7,14 +7,14 @@
 
 namespace ZHLN {
 struct MeshParticlePipelines;
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
 
 struct ShadowPass: Vk::RenderPass<"MainShadow", Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>> {
     const MeshParticlePipelines& particles;
-    RenderFrameContext&          frame;
+    RenderFrame&                 frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

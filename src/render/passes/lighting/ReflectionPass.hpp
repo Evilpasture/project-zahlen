@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "FrameContext.hpp"
+#include "RenderFrame.hpp"
+#include "Renderer.hpp"
 #include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN::Passes {
@@ -23,7 +24,7 @@ struct ReflectionPass:
         Vk::ShaderRead<Res_RcgiProbes>,
         Vk::ShaderRead<Res_RcgiCascadeA>,
         Vk::ColorWrite<OutputTag>> {
-    RenderFrameContext&           frame;
+    RenderFrame&                  frame;
     Slang::ScenePassPushConstants pc {};
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept {
@@ -34,13 +35,11 @@ struct ReflectionPass:
         // strictly on live RCGI (`enableDiffuseGI && giIntensity > 0 && tlas != nullptr`),
         // keeping `pc.giIntensity` untouched for `lighting.slang` and keeping rough
         // surfaces bit-invariant when `enableRTR` toggles alone.
-        const uint32_t fIdx     = frame.presenter.frameIndex;
-        const bool     rcgiLive = (SurfaceTag::kTranslucentSurface == 0) && frame.ctx.RayTracingSupported() && frame.settings.rayTracing.enableDiffuseGI &&
-                              frame.settings.post.giIntensity > 0.0f && frame.settings.environment.fullBright == 0 &&
-                              frame.frames.tlasAddresses[fIdx] != nullptr;
+        const bool rcgiLive = (SurfaceTag::kTranslucentSurface == 0) && frame.renderer.ctx.RayTracingSupported() && frame.settings.rayTracing.enableDiffuseGI &&
+                              frame.settings.post.giIntensity > 0.0f && frame.settings.environment.fullBright == 0 && frame.tlasAddresses != nullptr;
         push.giIntensity = rcgiLive ? frame.settings.post.giIntensity : 0.0f;
 
-        frame.reflectionPipeline.Dispatch(ctx, SurfaceTag::Resolve(frame), push);
+        frame.renderer.reflectionPipeline.Dispatch(frame, ctx, SurfaceTag::Resolve(frame), push);
     }
 };
 

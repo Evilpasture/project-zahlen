@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/gbuffer/BackgroundGBufferPass.hpp"
+#include "Renderer.hpp"
 #include "passes/SceneDraw.hpp"
 #include <ShaderBindings.hpp>
 
@@ -15,7 +16,7 @@ namespace ZHLN::Passes {
 // by a second depth band; that split is retired.)
 void BackgroundGBufferPass::operator()(VkCommandBuffer cmd) const noexcept {
     Vk::CommandEncoder encoder(cmd);
-    const auto  sceneVp = frame.EffectiveViewport();
+    const auto         sceneVp = frame.viewport;
     const auto  in      = GBufferSceneTargets(frame);
 
     // Vk::DynamicPass(in.sceneColor.Extent())
@@ -32,8 +33,8 @@ void BackgroundGBufferPass::operator()(VkCommandBuffer cmd) const noexcept {
         .LoadColor(in.bakedMask)
         .LoadDepth(in.depth)
         .Execute(cmd, [&]() {
-            for (size_t i = 0; i < frame.queues.Draws().size(); ++i) {
-                const auto& drawCmd = frame.queues.Draws()[i];
+            for (size_t i = 0; i < frame.renderer.queues.Draws().size(); ++i) {
+                const auto& drawCmd = frame.renderer.queues.Draws()[i];
                 if ((drawCmd.flags & DrawFlags::Background) == DrawFlags::None || !IsVisibleIn(drawCmd.flags, RenderPassType::Main) ||
                     IsForwardOnly(drawCmd.instanceData.flags) || drawCmd.material == nullptr || drawCmd.material->pipeline == VK_NULL_HANDLE) {
                     continue;
@@ -47,7 +48,7 @@ void BackgroundGBufferPass::operator()(VkCommandBuffer cmd) const noexcept {
                 // pin the background layer to the classic vertex path and drop
                 // it off the meshlet path on GPUs that use it, for no gain --
                 // SubmitDrawInstanced already falls back to that pipeline.
-                SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive());
+                SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, frame.meshShading);
             }
         });
 }

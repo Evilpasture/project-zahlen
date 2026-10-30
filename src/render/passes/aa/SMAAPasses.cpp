@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/aa/SMAAPasses.hpp"
+#include "Renderer.hpp"
 #include "passes/FullscreenPassRecorder.hpp"
 #include "passes/aa/AntiAliasingResources.hpp"
 #include <ShaderBindings.hpp>
@@ -34,8 +35,8 @@ void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
 
 void SmaaWeightPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     FullscreenPassRecorder<Shaders::SmaaWeight, Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>::Record(frame, ctx, aa.smaaWeight, [&]() {
-        const auto& areaView   = frame.textureManager.View(aa.smaaAreaTexIdx);
-        const auto& searchView = frame.textureManager.View(aa.smaaSearchTexIdx);
+        const auto& areaView   = frame.renderer.textureManager.View(aa.smaaAreaTexIdx);
+        const auto& searchView = frame.renderer.textureManager.View(aa.smaaSearchTexIdx);
 
         return MakeFullscreenPassArgs(
             MetricsOf(frame.graphResources.smaaWeightTarget.extent),

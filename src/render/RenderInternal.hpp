@@ -4,7 +4,6 @@
 #pragma once
 #include "ComputePassResources.hpp"
 #include "DrawCommands.hpp"
-#include "FrameContext.hpp"
 #include "FrameDestinations.hpp"
 #include "FrameResources.hpp"
 #include "GeometryManager.hpp"
@@ -12,6 +11,7 @@
 #include "PipelineRegistry.hpp"
 #include "PresentationTarget.hpp"
 #include "RenderDiagnostics.hpp"
+#include "Renderer.hpp"
 #include "Rendering.hpp"
 #include "TargetManager.hpp"
 #include "TextureManager.hpp"
@@ -89,7 +89,7 @@ using DecalLayout          = Vk::ReflectedLayout;
 namespace Resource {
 }
 
-struct RenderContext::Impl: RenderFrameContext {
+struct RenderContext::Impl: Renderer {
     struct RenderState {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> initialState;
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>                                           finalColor;

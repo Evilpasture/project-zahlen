@@ -13,24 +13,18 @@ struct GBufferSurface;
 
 namespace ZHLN {
 
-struct RenderFrameContext;
+struct RenderFrame;
 
+// A renderer-owned pass bundle with no per-frame state of its own: the frame it
+// dispatches for is an argument, so this class cannot hold a stale view of one.
 class ReflectionPipeline {
 public:
-    explicit ReflectionPipeline(RenderFrameContext& ctx) noexcept:
-        _ctx{ctx} {
-    }
+  ReflectionPipeline() noexcept = default;
 
-    Vk::FullscreenPass<Vk::ReflectedLayout> pass;
+  Vk::FullscreenPass<Vk::ReflectedLayout> pass;
 
-    void Dispatch(
-        Vk::RasterPassContextBase& ctx,
-        const Passes::GBufferSurface& surface,
-        const Slang::ScenePassPushConstants& pc
-    ) const noexcept;
-
-private:
-    RenderFrameContext& _ctx;
+  void Dispatch(RenderFrame& frame, Vk::RasterPassContextBase& ctx, const Passes::GBufferSurface& surface, const Slang::ScenePassPushConstants& pc)
+      const noexcept;
 };
 
 }

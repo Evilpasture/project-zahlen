@@ -37,7 +37,7 @@ concept StreamStateEstablisher = requires(const Fn& establish, VkCommandBuffer c
 /// (device lost) or at the previous stream's addresses (a frame that tears).
 ///
 /// There are two such streams in a frame -- a window's graphics stream and the
-/// async compute stream -- and both begin through RenderFrameContext::BeginStream
+/// async compute stream -- and both begin through Renderer::BeginStream
 /// rather than here, because only the frame context owns the heaps.
 ///
 /// Secondary command buffers are not begun this way: they inherit neither the

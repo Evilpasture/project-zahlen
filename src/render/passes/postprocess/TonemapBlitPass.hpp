@@ -3,6 +3,7 @@
 
 #pragma once
 #include "PassPayloads.hpp"
+#include "Renderer.hpp"
 #include "TargetManager.hpp"
 #include "graph/RenderPassDecl.hpp"
 #include "passes/FullscreenPassRecorder.hpp"
@@ -41,7 +42,7 @@ struct TonemapBlitPass:
     using SwapchainImageFn = FunctionRef<Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>() const>;
 
     PostProcessResources& post;
-    RenderFrameContext&   frame;
+    RenderFrame&          frame;
     SwapchainImageFn      getSwapchainImage;
 
     // Manual-scope pass (operator()(VkCommandBuffer)): the draw closure below
@@ -56,17 +57,16 @@ struct TonemapBlitPass:
             [&]() {
                 auto& blitInputImage = [&]() -> auto& {
                     if constexpr (Mode != AAMode::None) {
-                        return frame.accumulationHistory.Current();
+                        return frame.renderer.accumulationHistory.Current();
                     } else {
                         return frame.graphResources.hdrSceneColor;
                     }
                 }();
 
-                const auto              fIdx = frame.presenter.frameIndex;
                 const BlitPushConstants pc {
                     .vignetteIntensity = frame.settings.post.vignetteIntensity,
                     .vignettePower     = frame.settings.post.vignettePower,
-                    .fullBright        = frame.currentUniforms.fullBright != 0 ? 1 : 0,
+                    .fullBright        = frame.uniforms.fullBright != 0 ? 1 : 0,
                     .exposure          = frame.settings.post.exposure,
                     .bloomStrength     = frame.settings.post.bloomStrength,
                     .contrast          = frame.settings.post.contrast,
@@ -79,11 +79,10 @@ struct TonemapBlitPass:
                 return MakeFullscreenPassArgs(
                     pc, Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<BlitInputRes<Mode>>>(blitInputImage)),
                     Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(frame.graphResources.bloomFinalTarget)),
-                    Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(frame.ActiveDepthTarget())),
-                    Vk::Unread<"frame">(frame.frames.frameUniformBuffers[fIdx])
+                    Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(frame.ActiveDepthTarget())), Vk::Unread<"frame">(frame.frameUniformBuffers)
                 );
             },
-            [&swapchainTarget](RenderFrameContext&, VkCommandBuffer drawCmd, auto&& execute) {
+            [&swapchainTarget](RenderFrame&, VkCommandBuffer drawCmd, auto&& execute) {
                 Vk::DynamicPass(swapchainTarget.Extent()).OverwriteColor(swapchainTarget).Execute(drawCmd, [&]() { execute(); });
             }
         );

@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/forward/OpaqueSceneCopyPass.hpp"
-#include "FrameContext.hpp"
+#include "RenderFrame.hpp"
 
 namespace ZHLN::Passes {
 
 void OpaqueSceneCopyPass::operator()(VkCommandBuffer cmd) const noexcept {
-    const auto& src = impl.graphResources.hdrSceneColor;
-    const auto& dst = impl.graphResources.transLightingTarget;
+    const auto& src = frame.graphResources.hdrSceneColor;
+    const auto& dst = frame.graphResources.transLightingTarget;
 
     const VkExtent3D extent {src.extent.width, src.extent.height, 1};
 

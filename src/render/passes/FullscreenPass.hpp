@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "FrameContext.hpp"
+#include "RenderFrame.hpp"
 #include "graph/RenderPassDecl.hpp"
 #include "passes/FullscreenPassRecorder.hpp"
 #include "passes/GraphPassUtils.hpp"
@@ -27,7 +27,7 @@ template <
 struct FullscreenPass: Vk::RenderPass<PassName, Vk::ShaderRead<InRes>..., Vk::ColorWrite<OutRes>> {
     static_assert(TemplatedDetail::kNameProfilesAsStage<PassName>, "the pass name has no Stage enumerator, so the GPU profiler would never time it");
 
-    RenderFrameContext&                     frame;
+    RenderFrame&                             frame;
     Vk::FullscreenPass<Vk::ReflectedLayout>& pipeline;
     PrepareFn                               prepare;
 

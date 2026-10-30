@@ -26,6 +26,17 @@
 
 namespace ZHLN {
 
+RenderFrame::RenderFrame(Renderer& renderer, uint32_t inFlight) noexcept:
+    Slice(renderer.frames, inFlight), renderer(renderer), inFlight(inFlight), graphResources(renderer.graphResources), settings(renderer.settings),
+    state(renderer.frameState), viewProj(renderer.current_view_proj), unjitteredViewProj(renderer.unjittered_view_proj), view(renderer.view_matrix),
+    shadowProjView(renderer.shadowProjView), uniforms(renderer.currentUniforms), dt(renderer.currentDt), viewport(renderer.EffectiveViewport()),
+    meshShading(renderer.MeshShadingActive()), activeLineVertexCount(renderer.activeLineVertexCount) {
+}
+
+auto RenderFrame::ActiveDepthTarget() noexcept -> Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>& {
+    return renderer.ActiveDepthTarget();
+}
+
 namespace Diag {
 
 auto DisableGpuCulling() noexcept -> bool {
@@ -49,7 +60,7 @@ template <typename... Ptrs>
 
 } // namespace
 
-auto RenderFrameContext::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> {
+auto Renderer::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> {
     std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> addresses {};
     for (const auto& entry: Slang::kFrameAddressMeta) {
         // Engine policy: which CPU resource serves each named field. Field
@@ -76,13 +87,13 @@ auto RenderFrameContext::FrameHeapAddresses() const noexcept -> std::array<VkDev
     return addresses;
 }
 
-void RenderFrameContext::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept {
+void Renderer::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept {
     heapManager.BindHeaps(cmd);
     const auto addresses = FrameHeapAddresses();
     Vk::PushHeapFrameAddresses(cmd, GpuAbi::kScenePushLayout, addresses);
 }
 
-auto RenderFrameContext::BeginStream(VkCommandBuffer cmd) const noexcept -> std::expected<Vk::StreamCommandRecorder, ErrorCode> {
+auto Renderer::BeginStream(VkCommandBuffer cmd) const noexcept -> std::expected<Vk::StreamCommandRecorder, ErrorCode> {
     // The establishing step is passed in as the factory's argument rather than
     // called before or after it: that is what makes a stream without heap state
     // unrepresentable, instead of merely unlikely.

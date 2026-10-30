@@ -6,7 +6,7 @@
 #include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN {
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
@@ -22,7 +22,7 @@ struct BloomPass:
         Vk::ComputeWrite<Res_BloomUp2>,
         Vk::ComputeWrite<Res_BloomUp1>,
         Vk::ComputeWrite<Res_BloomFinal>> {
-    RenderFrameContext& frame;
+    RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

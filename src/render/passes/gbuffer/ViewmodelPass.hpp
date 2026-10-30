@@ -6,7 +6,7 @@
 #include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN {
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
@@ -19,7 +19,7 @@ struct ViewmodelPass:
         Vk::ColorWrite<Res_NormRough>,
         Vk::ColorWrite<Res_BakedMask>,
         Vk::DepthStencilWrite<Res_Depth>> {
-    RenderFrameContext& frame;
+    RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

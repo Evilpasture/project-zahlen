@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include "../FrameContext.hpp"
+#include "../RenderFrame.hpp"
+#include "Renderer.hpp"
 #include <functional>
 #include <tuple>
 #include <type_traits>
@@ -36,17 +37,17 @@ struct FullscreenPassRecorder {
     // passes, the cmd-forms manual ones. Mixing them nests vkCmdBeginRendering.
 
     template <typename LayoutT, typename Prepare>
-    static void Record(RenderFrameContext& impl, Vk::RasterPassContextBase& ctx, Vk::FullscreenPass<LayoutT>& pass, Prepare&& prepare) noexcept {
-        RecordCustom(impl, ctx, pass, std::forward<Prepare>(prepare), [](auto&, VkCommandBuffer, auto&& execute) noexcept { execute(); });
+    static void Record(RenderFrame& frame, Vk::RasterPassContextBase& ctx, Vk::FullscreenPass<LayoutT>& pass, Prepare&& prepare) noexcept {
+        RecordCustom(frame, ctx, pass, std::forward<Prepare>(prepare), [](auto&, VkCommandBuffer, auto&& execute) noexcept { execute(); });
     }
 
     template <typename LayoutT, typename Prepare>
-    static void Record(RenderFrameContext& impl, VkCommandBuffer cmd, Vk::FullscreenPass<LayoutT>& pass, Prepare&& prepare) noexcept {
-        RecordCustom(impl, cmd, pass, std::forward<Prepare>(prepare), [](auto&, VkCommandBuffer, auto&& execute) noexcept { execute(); });
+    static void Record(RenderFrame& frame, VkCommandBuffer cmd, Vk::FullscreenPass<LayoutT>& pass, Prepare&& prepare) noexcept {
+        RecordCustom(frame, cmd, pass, std::forward<Prepare>(prepare), [](auto&, VkCommandBuffer, auto&& execute) noexcept { execute(); });
     }
 
     template <typename LayoutT, typename Prepare, typename Draw>
-    static void RecordCustom(RenderFrameContext& impl, VkCommandBuffer cmd, Vk::FullscreenPass<LayoutT>& pass, Prepare&& prepare, Draw&& draw) noexcept {
+    static void RecordCustom(RenderFrame& frame, VkCommandBuffer cmd, Vk::FullscreenPass<LayoutT>& pass, Prepare&& prepare, Draw&& draw) noexcept {
         // Manual shape: the raw handle enters here and nowhere further. The
         // boundary check is the one `if` this contract allows; everything
         // below runs on the context proof.
@@ -54,11 +55,11 @@ struct FullscreenPassRecorder {
             return;
         }
         Vk::RasterPassContextBase ctx(cmd);
-        RecordCustom(impl, ctx, pass, std::forward<Prepare>(prepare), std::forward<Draw>(draw));
+        RecordCustom(frame, ctx, pass, std::forward<Prepare>(prepare), std::forward<Draw>(draw));
     }
 
     template <typename LayoutT, typename Prepare, typename Draw>
-    static void RecordCustom(RenderFrameContext& impl, Vk::RasterPassContextBase& ctx, Vk::FullscreenPass<LayoutT>& pass, Prepare&& prepare, Draw&& draw) noexcept {
+    static void RecordCustom(RenderFrame& frame, Vk::RasterPassContextBase& ctx, Vk::FullscreenPass<LayoutT>& pass, Prepare&& prepare, Draw&& draw) noexcept {
         // Record-time pruning: an unbuilt pass produces no ActivePipeline and
         // never reaches the draw; the draw itself holds the proof, not a flag.
         const auto active = Vk::ActivePipeline::From(pass.pipeline);
@@ -68,7 +69,8 @@ struct FullscreenPassRecorder {
 
         const auto args  = std::invoke(std::forward<Prepare>(prepare));
         const auto block = std::apply(
-            [&impl, &pass](const auto&... slots) noexcept { return pass.template WriteHeapParameters<Declared>(impl.heapManager, slots...); }, args.slots
+            [&frame, &pass](const auto&... slots) noexcept { return pass.template WriteHeapParameters<Declared>(frame.renderer.heapManager, slots...); },
+            args.slots
         );
 
         // The heap-index proof: Create refuses the zero offset a mis-reflected
@@ -79,7 +81,7 @@ struct FullscreenPassRecorder {
         }
 
         const auto execute = [&]() noexcept { pass.template ExecuteHeap<Modules...>(ctx, *active, *heap, args.push); };
-        std::invoke(std::forward<Draw>(draw), impl, ctx.Cmd(), execute);
+        std::invoke(std::forward<Draw>(draw), frame, ctx.Cmd(), execute);
     }
 };
 

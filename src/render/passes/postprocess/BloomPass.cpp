@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/postprocess/BloomPass.hpp"
-#include "FrameContext.hpp"
 #include "PassPayloads.hpp"
+#include "RenderFrame.hpp"
+#include "Renderer.hpp"
 #include <ShaderBindings.hpp>
 #include <algorithm>
 
@@ -21,9 +22,9 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto up1        = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomUp1);
     const auto bloomFinal = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomFinalTarget);
 
-    Vk::ComputeChain thresholdChain(frame.heapManager, cmd);
-    Vk::ComputeChain downChain(frame.heapManager, cmd);
-    Vk::ComputeChain upChain(frame.heapManager, cmd);
+    Vk::ComputeChain thresholdChain(frame.renderer.heapManager, cmd);
+    Vk::ComputeChain downChain(frame.renderer.heapManager, cmd);
+    Vk::ComputeChain upChain(frame.renderer.heapManager, cmd);
 
     const auto Kawase = [](int mode, const auto& src) noexcept {
         return KawasePushConstants {
@@ -42,22 +43,27 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
         .exposure      = std::max(frame.settings.post.exposure, 1e-4f)
     };
 
-    thresholdChain.Step<BloomThreshold>(frame.post.bloomThreshold, thresh.Extent(), thresholdPush, Vk::Slot<"texInput">(srcHdr), Vk::Slot<"outImage">(thresh));
-
-    Vk::MemoryBarrier::ComputeWriteToRead().Record(cmd);
-
-    downChain.Step<BloomDown>(frame.post.bloomDown, down1.Extent(), Kawase(0, thresh), Vk::Slot<"texInput">(thresh), Vk::Slot<"outImage">(down1));
-    downChain.Step<BloomDown>(frame.post.bloomDown, down2.Extent(), Kawase(0, down1), Vk::Slot<"texInput">(down1), Vk::Slot<"outImage">(down2));
-    downChain.Step<BloomDown>(frame.post.bloomDown, down3.Extent(), Kawase(0, down2), Vk::Slot<"texInput">(down2), Vk::Slot<"outImage">(down3));
-
-    Vk::MemoryBarrier::ComputeWriteToRead().Record(cmd);
-
-    upChain.Step<BloomUp>(
-        frame.post.bloomUp, up2.Extent(), Kawase(1, down3), Vk::Slot<"texInput">(down3), Vk::Slot<"texLow">(down2), Vk::Slot<"outImage">(up2)
+    thresholdChain.Step<BloomThreshold>(
+        frame.renderer.post.bloomThreshold, thresh.Extent(), thresholdPush, Vk::Slot<"texInput">(srcHdr), Vk::Slot<"outImage">(thresh)
     );
-    upChain.Step<BloomUp>(frame.post.bloomUp, up1.Extent(), Kawase(1, up2), Vk::Slot<"texInput">(up2), Vk::Slot<"texLow">(down1), Vk::Slot<"outImage">(up1));
+
+    Vk::MemoryBarrier::ComputeWriteToRead().Record(cmd);
+
+    downChain.Step<BloomDown>(frame.renderer.post.bloomDown, down1.Extent(), Kawase(0, thresh), Vk::Slot<"texInput">(thresh), Vk::Slot<"outImage">(down1));
+    downChain.Step<BloomDown>(frame.renderer.post.bloomDown, down2.Extent(), Kawase(0, down1), Vk::Slot<"texInput">(down1), Vk::Slot<"outImage">(down2));
+    downChain.Step<BloomDown>(frame.renderer.post.bloomDown, down3.Extent(), Kawase(0, down2), Vk::Slot<"texInput">(down2), Vk::Slot<"outImage">(down3));
+
+    Vk::MemoryBarrier::ComputeWriteToRead().Record(cmd);
+
     upChain.Step<BloomUp>(
-        frame.post.bloomUp, bloomFinal.Extent(), Kawase(1, up1), Vk::Slot<"texInput">(up1), Vk::Slot<"texLow">(thresh), Vk::Slot<"outImage">(bloomFinal)
+        frame.renderer.post.bloomUp, up2.Extent(), Kawase(1, down3), Vk::Slot<"texInput">(down3), Vk::Slot<"texLow">(down2), Vk::Slot<"outImage">(up2)
+    );
+    upChain.Step<BloomUp>(
+        frame.renderer.post.bloomUp, up1.Extent(), Kawase(1, up2), Vk::Slot<"texInput">(up2), Vk::Slot<"texLow">(down1), Vk::Slot<"outImage">(up1)
+    );
+    upChain.Step<BloomUp>(
+        frame.renderer.post.bloomUp, bloomFinal.Extent(), Kawase(1, up1), Vk::Slot<"texInput">(up1), Vk::Slot<"texLow">(thresh),
+        Vk::Slot<"outImage">(bloomFinal)
     );
 }
 

@@ -6,13 +6,13 @@
 #include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN {
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
 
 struct OpaqueSceneCopyPass: Vk::RenderPass<"OpaqueSceneCopy", Vk::TransferSrcRead<Res_HdrSceneColor>, Vk::TransferDstWriteThenShaderRead<Res_TransLighting>> {
-    RenderFrameContext& impl;
+    RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

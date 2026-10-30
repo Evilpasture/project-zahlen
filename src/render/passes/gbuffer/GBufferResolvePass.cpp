@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/gbuffer/GBufferResolvePass.hpp"
+#include "Renderer.hpp"
 #include "passes/SceneDraw.hpp"
 #include "passes/culling/CullingResources.hpp"
 #include <ShaderBindings.hpp>
@@ -12,7 +13,7 @@ namespace ZHLN::Passes {
 namespace {
 
 void RecordGpuCulled(
-    RenderFrameContext&          ctx,
+    RenderFrame&                 ctx,
     Vk::CommandEncoder&          encoder,
     CullingResources&            cull,
     const CsgResources&          csg,
@@ -22,28 +23,25 @@ void RecordGpuCulled(
     const GBufferTargets&        in
 ) noexcept {
     auto* const    cmd         = encoder.cmd;
-    const uint32_t frameIndex  = ctx.presenter.frameIndex;
-    const auto&    indirectBuf = ctx.frames.indirectCommandsBuffersPass2[frameIndex];
+    const auto&    indirectBuf = ctx.indirectCommandsBuffersPass2;
 
     Vk::BufferBarrier::IndirectToTransfer(indirectBuf).Record(cmd);
     Vk::FillBuffer(cmd, indirectBuf);
     Vk::BufferBarrier::TransferToCompute(indirectBuf).Record(cmd);
 
     const auto             hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
-    const auto             sceneVp = ctx.EffectiveViewport();
+    const auto             sceneVp = ctx.viewport;
     const CullingConstants pc {
-        .viewProj       = ctx.unjittered_view_proj,
+        .viewProj       = ctx.unjitteredViewProj,
         .hizScreenSize  = {sceneVp.width, sceneVp.height},
         .maxHiZMipLevel = hizMips > 0 ? hizMips - 1 : 0,
         .drawCount      = drawCount,
         .passIndex      = 1,
     };
-    const auto block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
-        cull.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[frameIndex]),
-        Vk::Slot<"g_indirectCommands">(indirectBuf),
+    const auto block = ctx.renderer.heapManager.WriteHeapParameters<Shaders::Culling>(
+        cull.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.instanceDataBuffers), Vk::Slot<"g_indirectCommands">(indirectBuf),
         Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
-        Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[frameIndex]),
-        Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[frameIndex])
+        Vk::Slot<"g_secondPassCandidates">(ctx.secondPassCandidatesBuffers), Vk::Slot<"g_secondPassCount">(ctx.secondPassCountBuffers)
     );
     cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
@@ -77,7 +75,7 @@ void RecordGpuCulled(
 }
 
 void RecordCpuCulled(
-    RenderFrameContext&          ctx,
+    RenderFrame&                 ctx,
     Vk::CommandEncoder&          encoder,
     const CsgResources&          csg,
     const MeshParticlePipelines& particles,
@@ -86,7 +84,7 @@ void RecordCpuCulled(
     auto* const cmd = encoder.cmd;
 
     Vk::DynamicPass(in.sceneColor.Extent())
-        .Viewport(ctx.EffectiveViewport())
+        .Viewport(ctx.viewport)
         .LoadColor(in.sceneColor)
         .LoadColor(in.velocity)
         .LoadColor(in.normRough)
@@ -103,15 +101,15 @@ void RecordCpuCulled(
 void GBufferResolvePass::operator()(VkCommandBuffer cmd) const noexcept {
     Vk::CommandEncoder encoder(cmd);
 
-    const auto drawCount = static_cast<uint32_t>(frame.queues.Draws().size());
-    if (drawCount == 0 && frame.queues.MeshParticleEmitters().empty() && frame.queues.CsgDraws().empty()) {
+    const auto drawCount = static_cast<uint32_t>(frame.renderer.queues.Draws().size());
+    if (drawCount == 0 && frame.renderer.queues.MeshParticleEmitters().empty() && frame.renderer.queues.CsgDraws().empty()) {
         return;
     }
 
     const auto groups = BuildGroupRanges(frame);
     const auto in     = GBufferSceneTargets(frame);
-    if (cull.cullingPass.pipeline.Valid() && frame.frames.indirectCommandsBuffers[frame.presenter.frameIndex].Valid() &&
-        (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !frame.MeshShadingActive()) {
+    if (cull.cullingPass.pipeline.Valid() && frame.indirectCommandsBuffers.Valid() && (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() &&
+        !frame.meshShading) {
         RecordGpuCulled(frame, encoder, cull, csg, particles, groups, drawCount, in);
     } else {
         RecordCpuCulled(frame, encoder, csg, particles, in);

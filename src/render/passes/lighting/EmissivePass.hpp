@@ -8,7 +8,7 @@
 
 namespace ZHLN {
 struct ForwardResources;
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
@@ -21,7 +21,7 @@ struct EmissivePass:
     using PushConstants = ObjectConstants;
 
     const ForwardResources& forward;
-    RenderFrameContext&     frame;
+    RenderFrame&            frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

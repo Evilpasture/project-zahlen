@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/gbuffer/GBufferBasePass.hpp"
+#include "Renderer.hpp"
 #include "passes/SceneDraw.hpp"
 #include "passes/culling/CullingResources.hpp"
 #include <ShaderBindings.hpp>
@@ -62,7 +63,7 @@ struct TaskSystemSchedulerAdapter {
 };
 
 void RecordGpuCulled(
-    RenderFrameContext&         ctx,
+    RenderFrame&                ctx,
     Vk::CommandEncoder&         encoder,
     CullingResources&           cull,
     std::span<const GroupRange> groups,
@@ -70,40 +71,37 @@ void RecordGpuCulled(
     const GBufferTargets&       in
 ) noexcept {
     auto* const cmd        = encoder.cmd;
-    const auto  frameIndex = ctx.presenter.frameIndex;
-    const auto& countBuf   = ctx.frames.secondPassCountBuffers[frameIndex];
+    const auto  frameIndex = ctx.inFlight;
+    const auto& countBuf   = ctx.secondPassCountBuffers;
 
     Vk::BufferBarrier::ComputeToTransfer(countBuf).Record(cmd);
     Vk::FillBuffer(cmd, countBuf);
     Vk::BufferBarrier::TransferToCompute(countBuf).Record(cmd);
 
-    const auto     sceneVp = ctx.EffectiveViewport();
+    const auto     sceneVp = ctx.viewport;
     const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
 
     const CullingConstants pc {
-        .viewProj       = ctx.unjittered_view_proj,
+        .viewProj       = ctx.unjitteredViewProj,
         .hizScreenSize  = {sceneVp.width, sceneVp.height},
         .maxHiZMipLevel = hizMips > 0 ? hizMips - 1 : 0,
         .drawCount      = drawCount,
         .passIndex      = 0,
     };
 
-    const auto block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
-        cull.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[frameIndex]),
-        Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffers[frameIndex]),
+    const auto block = ctx.renderer.heapManager.WriteHeapParameters<Shaders::Culling>(
+        cull.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.instanceDataBuffers), Vk::Slot<"g_indirectCommands">(ctx.indirectCommandsBuffers),
         Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
-        Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[frameIndex]),
-        Vk::Slot<"g_secondPassCount">(countBuf)
+        Vk::Slot<"g_secondPassCandidates">(ctx.secondPassCandidatesBuffers), Vk::Slot<"g_secondPassCount">(countBuf)
     );
     cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
     Vk::BufferBarrier::Record(
-        cmd,
-        std::to_array({
-            Vk::BufferBarrier::ComputeToIndirect(ctx.frames.indirectCommandsBuffers[frameIndex]),
-            Vk::BufferBarrier::ComputeWriteToRead(ctx.frames.secondPassCandidatesBuffers[frameIndex]),
-            Vk::BufferBarrier::ComputeWriteToRead(countBuf),
-        })
+        cmd, std::to_array({
+                 Vk::BufferBarrier::ComputeToIndirect(ctx.indirectCommandsBuffers),
+                 Vk::BufferBarrier::ComputeWriteToRead(ctx.secondPassCandidatesBuffers),
+                 Vk::BufferBarrier::ComputeWriteToRead(countBuf),
+             })
     );
 
     Vk::DynamicPass(in.sceneColor.Extent())
@@ -122,7 +120,7 @@ void RecordGpuCulled(
                 encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                     {
                         .pipeline       = group.material->pipeline,
-                        .argumentBuffer = ctx.frames.indirectCommandsBuffers[frameIndex].Handle(),
+                        .argumentBuffer = ctx.indirectCommandsBuffers.Handle(),
                         .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                         .drawCount      = group.count,
                     },
@@ -132,10 +130,10 @@ void RecordGpuCulled(
         });
 }
 
-void RecordCpuCulled(RenderFrameContext& ctx, VkCommandBuffer cmd, uint32_t drawCount, const GBufferTargets& in) noexcept {
+void RecordCpuCulled(RenderFrame& ctx, VkCommandBuffer cmd, uint32_t drawCount, const GBufferTargets& in) noexcept {
     using enum DrawFlags;
-    const uint32_t frameIndex = ctx.presenter.frameIndex;
-    const auto     sceneVp    = ctx.EffectiveViewport();
+    const uint32_t frameIndex = ctx.inFlight;
+    const auto     sceneVp    = ctx.viewport;
 
     const auto pass = Vk::DynamicPass(in.sceneColor.Extent())
                           .Viewport(sceneVp)
@@ -146,22 +144,20 @@ void RecordCpuCulled(RenderFrameContext& ctx, VkCommandBuffer cmd, uint32_t draw
                           .ClearDepth(in.depth, kClearDepthValue)
                           .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT);
     pass.Execute(cmd, [&]() {
-        const auto secContext = ctx.CreateSecondaryContext(pass.GetInheritance());
+        const auto secContext = ctx.renderer.CreateSecondaryContext(pass.GetInheritance());
 
         const auto chunks = Vk::ParallelDrawDispatch(
-            cmd,
-            secContext,
-            drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
+            cmd, secContext, drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
             [&](uint32_t) -> VkCommandBuffer {
                 auto wIdx = TaskSystem::GetWorkerIndex();
-                if (wIdx >= ctx.workerCmds.size()) {
-                    wIdx = static_cast<uint32_t>(ctx.workerCmds.size() - 1);
+                if (wIdx >= ctx.renderer.workerCmds.size()) {
+                    wIdx = static_cast<uint32_t>(ctx.renderer.workerCmds.size() - 1);
                 }
-                const auto localCmdIdx = ctx.workerCmds[wIdx].cmdCount[frameIndex].fetch_add(1, std::memory_order::relaxed);
-                return ctx.workerCmds[wIdx].pools[frameIndex][localCmdIdx];
+                const auto localCmdIdx = ctx.renderer.workerCmds[wIdx].cmdCount[frameIndex].fetch_add(1, std::memory_order::relaxed);
+                return ctx.renderer.workerCmds[wIdx].pools[frameIndex][localCmdIdx];
             },
             [&](Vk::CommandEncoder& encoder, uint32_t i) {
-                const auto& drawCmd = ctx.queues.Draws()[i];
+                const auto& drawCmd = ctx.renderer.queues.Draws()[i];
                 // Background scenery draws only in BackgroundGBufferPass; a
                 // second stamp here would write the skybox into the world
                 // pass's cleared G-buffer ahead of its own pass. (Both passes
@@ -172,7 +168,7 @@ void RecordCpuCulled(RenderFrameContext& ctx, VkCommandBuffer cmd, uint32_t draw
                     IsForwardOnly(drawCmd.instanceData.flags)) {
                     return;
                 }
-                SubmitDrawInstanced(encoder, drawCmd, i, ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive());
+                SubmitDrawInstanced(encoder, drawCmd, i, ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.meshShading);
             }
         );
 
@@ -191,7 +187,7 @@ void RecordCpuCulled(RenderFrameContext& ctx, VkCommandBuffer cmd, uint32_t draw
 void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
     Vk::CommandEncoder encoder(cmd);
 
-    const auto drawCount = static_cast<uint32_t>(frame.queues.Draws().size());
+    const auto drawCount = static_cast<uint32_t>(frame.renderer.queues.Draws().size());
     if (drawCount == 0) {
         const auto in = GBufferSceneTargets(frame);
         Vk::DynamicPass(in.sceneColor.Extent())
@@ -206,8 +202,8 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const auto groups = BuildGroupRanges(frame);
     const auto in     = GBufferSceneTargets(frame);
-    if (cull.cullingPass.pipeline.Valid() && frame.frames.indirectCommandsBuffers[frame.presenter.frameIndex].Valid() &&
-        (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !frame.MeshShadingActive()) {
+    if (cull.cullingPass.pipeline.Valid() && frame.indirectCommandsBuffers.Valid() && (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() &&
+        !frame.meshShading) {
         RecordGpuCulled(frame, encoder, cull, groups, drawCount, in);
     } else {
         RecordCpuCulled(frame, cmd, drawCount, in);

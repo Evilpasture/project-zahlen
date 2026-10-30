@@ -7,21 +7,21 @@
 
 namespace ZHLN {
 struct CullingResources;
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
 
 struct HiZGeneratePass: Vk::RenderPass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>> {
     CullingResources&   cull;
-    RenderFrameContext& frame;
+    RenderFrame&        frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };
 
 struct SsrHiZGeneratePass: Vk::RenderPass<"SsrHiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>> {
     CullingResources&   cull;
-    RenderFrameContext& frame;
+    RenderFrame&        frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

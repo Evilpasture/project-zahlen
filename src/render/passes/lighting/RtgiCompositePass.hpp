@@ -6,7 +6,7 @@
 #include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN {
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
@@ -22,7 +22,7 @@ struct RtgiCompositePass:
         Vk::ComputeRead<Res_RcgiProbes>,
         Vk::ComputeRead<Res_RcgiCascadeA>,
         Vk::ComputeWrite<Res_LightingGI>> {
-    RenderFrameContext& frame;
+    RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

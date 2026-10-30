@@ -7,7 +7,7 @@
 
 namespace ZHLN {
 struct DecalResources;
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
@@ -19,7 +19,7 @@ namespace ZHLN::Passes {
 // its own (BuildDecalPipeline), not a variant of the compact G-buffer.
 struct DecalPass: Vk::RenderPass<"DecalPass", Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_NormRough>> {
     const DecalResources& decals;
-    RenderFrameContext&   frame;
+    RenderFrame&          frame;
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };

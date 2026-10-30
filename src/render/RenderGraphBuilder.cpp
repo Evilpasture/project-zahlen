@@ -78,7 +78,13 @@ void ExecuteSceneGraph(
     const GraphicsSettings&             settings,
     RenderGraphDetail::SwapchainImageFn getSwapchain
 ) {
-    auto graph = RenderGraphDetail::BuildFrameGraph<Mode>(self, RenderGraphDetail::AssembleScenePushConstants(self, view, settings), getSwapchain);
+    // The frame this graph records into: the slot it occupies in the
+    // frames-in-flight storage, and the state it was settled with. It outlives
+    // every pass below because it is a local of the recording, not a member of
+    // the renderer.
+    RenderFrame frame {self, self.presenter.frameIndex};
+
+    auto graph = RenderGraphDetail::BuildFrameGraph<Mode>(self, frame, RenderGraphDetail::AssembleScenePushConstants(self, view, settings), getSwapchain);
 
     typename decltype(graph)::Binder binder;
     binder.AutoBind(self);

@@ -6,7 +6,7 @@
 #include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN {
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
@@ -18,7 +18,7 @@ struct TranslucentPrePass:
         Vk::ColorWrite<Res_TransAnisotropy>,
         Vk::ColorWrite<Res_TransSheen>,
         Vk::DepthStencilWrite<Res_TransDepth>> {
-    RenderFrameContext& frame;
+    RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

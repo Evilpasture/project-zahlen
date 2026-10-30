@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "FrameContext.hpp"
 #include "PassPayloads.hpp"
+#include "RenderFrame.hpp"
+#include "Renderer.hpp"
 #include "TargetManager.hpp"
 #include "graph/RenderPassDecl.hpp"
 #include "passes/ComputePass.hpp"
+#include "pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 #include <algorithm>
 #include <array>
@@ -31,18 +33,17 @@ struct GtaoDesc {
     using ShaderModule         = Shaders::Modules::GtaoCS;
     using PushConstants        = GtaoPushConstants;
 
-    [[nodiscard]] static bool ShouldRun(RenderFrameContext& frame) noexcept {
+    [[nodiscard]] static bool ShouldRun(RenderFrame& frame) noexcept {
         const int giMode = frame.settings.post.mode;
         return giMode == 3 || giMode == 4;
     }
 
-    [[nodiscard]] static auto
-        GetPass(RenderFrameContext& frame) noexcept -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::GtaoCS, GtaoPushConstants>>& {
-        return frame.lighting.gtao;
+    [[nodiscard]] static auto GetPass(RenderFrame& frame) noexcept -> Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::GtaoCS, GtaoPushConstants>>& {
+        return frame.renderer.lighting.gtao;
     }
 
-    [[nodiscard]] static auto Prepare(RenderFrameContext& frame, const Slang::ScenePassPushConstants& pc) noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
+    [[nodiscard]] static auto Prepare(RenderFrame& frame, const Slang::ScenePassPushConstants& pc) noexcept {
+        const uint32_t fIdx = frame.inFlight;
 
         const auto& fullExt = frame.ActiveDepthTarget().extent;
         const auto  push    = GtaoPushConstants {
@@ -61,7 +62,7 @@ struct GtaoDesc {
             push, VkExtent3D {frame.graphResources.ao.extent.width, frame.graphResources.ao.extent.height, 1},
             Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
             Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
-            Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"outAo">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.ao))
+            Vk::Slot<"frame">(frame.frameUniformBuffers), Vk::Slot<"outAo">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.ao))
         );
     }
 };
@@ -80,13 +81,12 @@ struct RcgiCascadePass:
         Vk::ComputeWrite<Res_RcgiProbes>,
         Vk::ComputeWrite<Res_RcgiCascadeA>,
         Vk::ComputeWrite<Res_RcgiCascadeB>> {
-    RenderFrameContext& frame;
+    RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept {
-        const uint32_t fIdx = frame.presenter.frameIndex;
-        const bool     active =
-            frame.ctx.RayTracingSupported() && frame.settings.rayTracing.enableDiffuseGI && frame.settings.post.giIntensity > 0.0f &&
-            frame.settings.environment.fullBright == 0 && frame.frames.tlasAddresses[fIdx] != nullptr;
+        const uint32_t fIdx = frame.inFlight;
+        const bool active   = frame.renderer.ctx.RayTracingSupported() && frame.settings.rayTracing.enableDiffuseGI && frame.settings.post.giIntensity > 0.0f &&
+                            frame.settings.environment.fullBright == 0 && frame.tlasAddresses != nullptr;
         if (!active) {
             return;
         }
@@ -103,9 +103,9 @@ struct RcgiCascadePass:
         const auto cascadeA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rcgiCascadeA);
         const auto cascadeB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rcgiCascadeB);
 
-        const Vk::AsAddressWrite tlas {.address = frame.frames.tlasAddresses[fIdx].Get()};
+        const Vk::AsAddressWrite tlas {.address = frame.tlasAddresses.Get()};
 
-        Vk::ComputeChain chain(frame.heapManager, cmd);
+        Vk::ComputeChain chain(frame.renderer.heapManager, cmd);
 
         // Step 1: Surface-pinned probe pyramid C0 -> C1 -> C2 -> C3
         for (uint32_t c = 0u; c < 4u; ++c) {
@@ -118,12 +118,9 @@ struct RcgiCascadePass:
             };
 
             chain.Step<Shaders::RcgiProbeSetup>(
-                frame.lighting.rcgiProbeSetup, VkExtent3D {probeW, probeH, 1u}, push,
-                Vk::Slot<"texDepth">(depth),
-                Vk::Slot<"texNormalRoughness">(normal),
-                Vk::Slot<"inProbes">(probes),
-                Vk::Slot<"outProbes">(probes),
-                Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx])
+                frame.renderer.lighting.rcgiProbeSetup, VkExtent3D {probeW, probeH, 1u}, push, Vk::Slot<"texDepth">(depth),
+                Vk::Slot<"texNormalRoughness">(normal), Vk::Slot<"inProbes">(probes), Vk::Slot<"outProbes">(probes),
+                Vk::Slot<"frame">(frame.frameUniformBuffers)
             );
         }
 
@@ -159,16 +156,11 @@ struct RcgiCascadePass:
             };
 
             chain.Step<Shaders::RcgiCascadeTraceMerge>(
-                frame.lighting.rcgiCascadeTraceMerge, VkExtent3D {alignedExt.width, alignedExt.height, 1u}, push,
-                Vk::Slot<"inProbes">(probes),
-                Vk::Slot<"inUpperCascade">(inUpper),
-                Vk::Slot<"outCascade">(outCasc),
-                Vk::Slot<"tlas">(tlas),
+                frame.renderer.lighting.rcgiCascadeTraceMerge, VkExtent3D {alignedExt.width, alignedExt.height, 1u}, push, Vk::Slot<"inProbes">(probes),
+                Vk::Slot<"inUpperCascade">(inUpper), Vk::Slot<"outCascade">(outCasc), Vk::Slot<"tlas">(tlas),
                 Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.View(VK_IMAGE_ASPECT_DEPTH_BIT)),
-                Vk::Slot<"shadowTiles">(frame.frames.shadowTileBuffers[fIdx]),
-                Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]),
-                Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
-                Vk::Slot<"lights">(frame.frames.lightStorageBuffers[fIdx])
+                Vk::Slot<"shadowTiles">(frame.shadowTileBuffers), Vk::Slot<"frame">(frame.frameUniformBuffers),
+                Vk::Slot<"g_instances">(frame.instanceDataBuffers), Vk::Slot<"lights">(frame.lightStorageBuffers)
             );
         }
     }

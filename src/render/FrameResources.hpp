@@ -48,6 +48,51 @@ struct FrameResources {
         currentJointSlot  = (currentJointSlot + 1) % kJointBufferRingSize;
     }
 
+    // One frame's slice of every PerFrame<> above: the storage's own names,
+    // bound to the slot this frame occupies. Built once when the frame begins,
+    // so a pass asks for `frame.lightStorageBuffers` instead of walking into the
+    // renderer, finding the frames-in-flight storage, and indexing it with a
+    // slot number it had to fetch from presentation state first.
+    //
+    // Lives next to the storage, so a new per-frame buffer is a two-line change
+    // in one place.
+    //
+    // The joint buffers are not PerFrame<>: they are a separate three-slot ring
+    // with its own cursor (AdvanceJointRing, which stays on the renderer because
+    // it is the renderer that advances between frames). The slice resolves the
+    // two slots this frame reads and writes.
+    struct Slice {
+        Slice(FrameResources& resources, uint32_t index) noexcept:
+            lineVbos(resources.lineVbos[index]), lineVboAddresses(resources.lineVboAddresses[index]), clusterGridBuffers(resources.clusterGridBuffers[index]),
+            lightIndexListBuffers(resources.lightIndexListBuffers[index]), globalCounterBuffers(resources.globalCounterBuffers[index]),
+            frameUniformBuffers(resources.frameUniformBuffers[index]), lightStorageBuffers(resources.lightStorageBuffers[index]),
+            shadowTileBuffers(resources.shadowTileBuffers[index]), instanceDataBuffers(resources.instanceDataBuffers[index]),
+            indirectCommandsBuffers(resources.indirectCommandsBuffers[index]), indirectCommandsBuffersPass2(resources.indirectCommandsBuffersPass2[index]),
+            secondPassCandidatesBuffers(resources.secondPassCandidatesBuffers[index]), secondPassCountBuffers(resources.secondPassCountBuffers[index]),
+            tlas(resources.tlas[index]), tlasAddresses(resources.tlasAddresses[index]), debugMeshHandles(resources.debugMeshHandles[index]),
+            currentJoint(resources.jointBuffers[resources.currentJointSlot]), previousJoint(resources.jointBuffers[resources.previousJointSlot]) {
+        }
+
+        Vk::Buffer&                lineVbos;
+        VkDeviceAddress&           lineVboAddresses;
+        Vk::Buffer&                clusterGridBuffers;
+        Vk::Buffer&                lightIndexListBuffers;
+        Vk::Buffer&                globalCounterBuffers;
+        Vk::Buffer&                frameUniformBuffers;
+        Vk::Buffer&                lightStorageBuffers;
+        Vk::Buffer&                shadowTileBuffers;
+        Vk::Buffer&                instanceDataBuffers;
+        Vk::Buffer&                indirectCommandsBuffers;
+        Vk::Buffer&                indirectCommandsBuffersPass2;
+        Vk::Buffer&                secondPassCandidatesBuffers;
+        Vk::Buffer&                secondPassCountBuffers;
+        Vk::AccelerationStructure& tlas;
+        Vk::DeviceAddress<>&       tlasAddresses;
+        BufferHandle&              debugMeshHandles;
+        Vk::Buffer&                currentJoint;
+        Vk::Buffer&                previousJoint;
+    };
+
     PerFrame<Vk::DeviceAddress<>>       tlasAddresses;
     PerFrame<Vk::Buffer>                tlasBuffer;
     PerFrame<Vk::Buffer>                tlasScratchBuffer;

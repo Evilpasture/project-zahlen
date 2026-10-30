@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-
-#include "FrameContext.hpp"
+#include "RenderFrame.hpp"
 #include "Rendering.hpp"
 #include "TargetManager.hpp"
+#include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN::Passes {
 
@@ -25,10 +25,10 @@ struct OpaqueSurface {
     // Mirrors ScenePassPushConstants::translucentSurface for this G-buffer.
     static constexpr int kTranslucentSurface = 0;
 
-    [[nodiscard]] static auto Resolve(RenderFrameContext& impl) noexcept -> GBufferSurface {
+    [[nodiscard]] static auto Resolve(RenderFrame& frame) noexcept -> GBufferSurface {
         return {
-            .depth   = Vk::Assume<Vk::ShaderRead<Depth>>(impl.ActiveDepthTarget()).Raw(),
-            .normals = Vk::Assume<Vk::ShaderRead<Normals>>(impl.graphResources.normalRoughnessBuffer).Raw(),
+            .depth   = Vk::Assume<Vk::ShaderRead<Depth>>(frame.ActiveDepthTarget()).Raw(),
+            .normals = Vk::Assume<Vk::ShaderRead<Normals>>(frame.graphResources.normalRoughnessBuffer).Raw(),
         };
     }
 };
@@ -40,10 +40,10 @@ struct TranslucentSurface {
     // Mirrors ScenePassPushConstants::translucentSurface for this G-buffer.
     static constexpr int kTranslucentSurface = 1;
 
-    [[nodiscard]] static auto Resolve(RenderFrameContext& impl) noexcept -> GBufferSurface {
+    [[nodiscard]] static auto Resolve(RenderFrame& frame) noexcept -> GBufferSurface {
         return {
-            .depth   = Vk::Assume<Vk::ShaderRead<Depth>>(impl.graphResources.transDepthBuffer).Raw(),
-            .normals = Vk::Assume<Vk::ShaderRead<Normals>>(impl.graphResources.transNormalBuffer).Raw(),
+            .depth   = Vk::Assume<Vk::ShaderRead<Depth>>(frame.graphResources.transDepthBuffer).Raw(),
+            .normals = Vk::Assume<Vk::ShaderRead<Normals>>(frame.graphResources.transNormalBuffer).Raw(),
         };
     }
 };

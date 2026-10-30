@@ -2,28 +2,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/lighting/ReflectionInputs.hpp"
+#include "Renderer.hpp"
 
 namespace ZHLN::Passes {
 
-auto GatherReflectionInputs(RenderFrameContext& frame) noexcept -> ReflectionInputs {
+auto GatherReflectionInputs(RenderFrame& frame) noexcept -> ReflectionInputs {
     return ReflectionInputs {
-        .prefiltered = Vk::ImageWrite {frame.iblPayload.prefilteredView},
+        .prefiltered = Vk::ImageWrite {frame.renderer.iblPayload.prefilteredView},
         .visualSky =
             Vk::ImageWrite {
-                frame.iblPayload.visualSkyView.Handle() != VK_NULL_HANDLE ? frame.iblPayload.visualSkyView :
-                                                                             frame.textureManager.View(kFallbackBlackTextureIndex)
+                frame.renderer.iblPayload.visualSkyView.Handle() != VK_NULL_HANDLE ? frame.renderer.iblPayload.visualSkyView :
+                                                                                     frame.renderer.textureManager.View(kFallbackBlackTextureIndex)
             },
-        .brdfLut = Vk::ImageWrite {frame.iblPayload.brdfLutView},
-        .tlas    = Vk::AsAddressWrite {
-            .address = (frame.ctx.RayTracingSupported() && frame.frames.tlasAddresses[frame.presenter.frameIndex] != nullptr) ?
-                           frame.frames.tlasAddresses[frame.presenter.frameIndex].Get() :
-                           0
-        }
+        .brdfLut = Vk::ImageWrite {frame.renderer.iblPayload.brdfLutView},
+        .tlas    = Vk::AsAddressWrite {.address = (frame.renderer.ctx.RayTracingSupported() && frame.tlasAddresses != nullptr) ? frame.tlasAddresses.Get() : 0}
     };
 }
 
-auto ReflectionVariant(RenderFrameContext& frame) noexcept -> uint32_t {
-    const bool rtrActive = frame.settings.rayTracing.enableReflections && frame.ctx.RayTracingSupported();
+auto ReflectionVariant(RenderFrame& frame) noexcept -> uint32_t {
+    const bool rtrActive = frame.settings.rayTracing.enableReflections && frame.renderer.ctx.RayTracingSupported();
     return (frame.settings.post.enableSSR ? 1u : 0u) | (rtrActive ? 2u : 0u);
 }
 

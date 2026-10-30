@@ -8,7 +8,7 @@
 
 namespace ZHLN {
 struct PostProcessResources;
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
@@ -26,7 +26,7 @@ struct ClusteredLightingPass:
         Vk::ColorWrite<Res_Lighting>,
         Vk::ColorWrite<Res_LightingAo>> {
     const PostProcessResources&   post;
-    RenderFrameContext&           frame;
+    RenderFrame&                  frame;
     Slang::ScenePassPushConstants pc {};
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;

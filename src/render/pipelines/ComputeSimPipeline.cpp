@@ -40,16 +40,19 @@ void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt
     const uint32_t fIdx = impl.presenter.frameIndex;
     RebuildClusterBounds(impl, cmd, fIdx);
 
-    auto computeGraph = Vk::MakePassPack(
-                            Passes::ClusterCullingPass {.cull = impl.culling, .frame = impl},
-                            Passes::ComputePass<Passes::VolumetricFogInjectDesc> {.frame = impl},
-                            Passes::ComputePass<Passes::VolumetricLightInjectDesc> {.frame = impl},
-                            Passes::ComputePass<Passes::VolumetricIntegrationDesc> {.frame = impl},
-                            Passes::ComputePass<Passes::VolumetricTemporalDesc> {.frame = impl},
-                            Passes::ParticleUpdatePass {.particles = impl.particleUpdate, .frame = impl, .dt = dt},
-                            Passes::MeshParticleUpdatePass {.particles = impl.particleUpdate, .frame = impl, .dt = dt}
-    )
-                            .BuildGraph();
+    // The async compute stream records its own frame, over the same slot: same
+    // per-frame storage, its own recording.
+    RenderFrame frame {impl, fIdx};
+
+    auto computeGraph =
+        Vk::MakePassPack(
+            Passes::ClusterCullingPass {.cull = impl.culling, .frame = frame}, Passes::ComputePass<Passes::VolumetricFogInjectDesc> {.frame = frame},
+            Passes::ComputePass<Passes::VolumetricLightInjectDesc> {.frame = frame}, Passes::ComputePass<Passes::VolumetricIntegrationDesc> {.frame = frame},
+            Passes::ComputePass<Passes::VolumetricTemporalDesc> {.frame = frame},
+            Passes::ParticleUpdatePass {.particles = impl.particleUpdate, .frame = frame, .dt = dt},
+            Passes::MeshParticleUpdatePass {.particles = impl.particleUpdate, .frame = frame, .dt = dt}
+        )
+            .BuildGraph();
 
     using ComputeResources = typename decltype(computeGraph)::Resources;
     typename decltype(computeGraph)::Binder compBinder;

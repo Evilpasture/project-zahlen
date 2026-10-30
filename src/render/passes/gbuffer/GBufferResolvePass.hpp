@@ -9,7 +9,7 @@ namespace ZHLN {
 struct CsgResources;
 struct CullingResources;
 struct MeshParticlePipelines;
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
@@ -26,7 +26,7 @@ struct GBufferResolvePass:
     CullingResources&            cull;
     const CsgResources&          csg;
     const MeshParticlePipelines& particles;
-    RenderFrameContext&          frame;
+    RenderFrame&                 frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

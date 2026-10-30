@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "FrameContext.hpp"
+#include "RenderFrame.hpp"
+#include "Renderer.hpp"
 #include "graph/RenderPassDecl.hpp"
 #include "passes/GraphPassUtils.hpp"
 #include <ShaderBindings.hpp>
@@ -86,11 +87,11 @@ template <typename Desc>
 struct ComputePass: TemplatedDetail::RenderPassOf<Desc::name, typename Desc::Usages> {
     static_assert(TemplatedDetail::kNameProfilesAsStage<Desc::name>, "the pass name has no Stage enumerator, so the GPU profiler would never time it");
 
-    RenderFrameContext&           frame;
+    RenderFrame&                  frame;
     Slang::ScenePassPushConstants pc {};
 
     void operator()(VkCommandBuffer cmd) const noexcept {
-        if constexpr (requires(RenderFrameContext& f) {
+        if constexpr (requires(RenderFrame& f) {
                           {
                               Desc::ShouldRun(f)
                           } -> std::convertible_to<bool>;
@@ -112,7 +113,7 @@ struct ComputePass: TemplatedDetail::RenderPassOf<Desc::name, typename Desc::Usa
         auto&      resource = Desc::GetPass(frame);
         const auto block    = std::apply(
             [&](const auto&... slots) noexcept {
-                return frame.heapManager.template WriteHeapParameters<typename Desc::ShaderDecl>(Vk::TemplatedDetail::BindingsOf(resource), slots...);
+                return frame.renderer.heapManager.template WriteHeapParameters<typename Desc::ShaderDecl>(Vk::TemplatedDetail::BindingsOf(resource), slots...);
             },
             args.slots
         );

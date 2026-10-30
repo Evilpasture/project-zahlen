@@ -8,7 +8,7 @@
 
 namespace ZHLN {
 struct CullingResources;
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
@@ -24,7 +24,7 @@ struct GBufferBasePass:
     using PushConstants = ObjectConstants;
 
     CullingResources&   cull;
-    RenderFrameContext& frame;
+    RenderFrame&        frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

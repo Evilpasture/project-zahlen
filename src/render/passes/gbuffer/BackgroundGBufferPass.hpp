@@ -7,7 +7,7 @@
 #include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN {
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
@@ -33,7 +33,7 @@ struct BackgroundGBufferPass:
         Vk::DepthStencilWrite<Res_Depth>> {
     using PushConstants = ObjectConstants;
 
-    RenderFrameContext& frame;
+    RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/gbuffer/DecalPass.hpp"
-#include "FrameContext.hpp"
+#include "RenderFrame.hpp"
+#include "Renderer.hpp"
 #include "passes/gbuffer/DecalResources.hpp"
 #include <ShaderBindings.hpp>
 
@@ -13,16 +14,16 @@ static_assert(GpuAbi::ScenePassPayload<DecalPushConstants>, "a pass payload that
 
 void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     auto* const cmd = ctx.Cmd();
-    if (!decals.pass.Valid() || frame.queues.Decals().empty()) {
+    if (!decals.pass.Valid() || frame.renderer.queues.Decals().empty()) {
         return;
     }
 
     Vk::CommandEncoder encoder(cmd);
     encoder.BindPipeline(decals.pass.Get());
 
-    const auto invViewProj = frame.unjittered_view_proj.Inversed();
+    const auto invViewProj = frame.unjitteredViewProj.Inversed();
 
-    for (const auto& decalCmd: frame.queues.Decals()) {
+    for (const auto& decalCmd: frame.renderer.queues.Decals()) {
         const DecalPushConstants decalPC {
             .worldMatrix = decalCmd.transform,
             .clipToLocal = decalCmd.invTransform * invViewProj,

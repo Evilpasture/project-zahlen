@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "FrameContext.hpp"
+#include "RenderFrame.hpp"
 #include "Rendering.hpp"
 namespace ZHLN::Passes {
 
@@ -14,8 +14,8 @@ struct ReflectionInputs {
     Vk::AsAddressWrite tlas {};
 };
 
-[[nodiscard]] auto GatherReflectionInputs(RenderFrameContext& frame) noexcept -> ReflectionInputs;
+[[nodiscard]] auto GatherReflectionInputs(RenderFrame& frame) noexcept -> ReflectionInputs;
 
-[[nodiscard]] auto ReflectionVariant(RenderFrameContext& frame) noexcept -> uint32_t;
+[[nodiscard]] auto ReflectionVariant(RenderFrame& frame) noexcept -> uint32_t;
 
 } // namespace ZHLN::Passes

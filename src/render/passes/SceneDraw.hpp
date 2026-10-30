@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "FrameContext.hpp"
 #include "RenderConstants.hpp"
+#include "RenderFrame.hpp"
 #include "passes/SceneDrawResources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Array.hpp>
@@ -84,16 +84,16 @@ void SubmitDrawInstanced(
     );
 }
 
-void DrawCSGMeshes(RenderFrameContext& ctx, Vk::CommandEncoder& encoder, const CsgResources& csg, VkExtent3D extent) noexcept;
+void DrawCSGMeshes(RenderFrame& ctx, Vk::CommandEncoder& encoder, const CsgResources& csg, VkExtent3D extent) noexcept;
 
-void Draw3DParticles(RenderFrameContext& ctx, Vk::CommandEncoder& encoder, const MeshParticlePipelines& particles) noexcept;
+void Draw3DParticles(RenderFrame& ctx, Vk::CommandEncoder& encoder, const MeshParticlePipelines& particles) noexcept;
 
-void Draw3DParticleShadows(RenderFrameContext& ctx, Vk::CommandEncoder& encoder, const MeshParticlePipelines& particles) noexcept;
+void Draw3DParticleShadows(RenderFrame& ctx, Vk::CommandEncoder& encoder, const MeshParticlePipelines& particles) noexcept;
 
 using GBufferTargets = SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>;
 
-[[nodiscard]] auto GBufferSceneTargets(RenderFrameContext& impl) noexcept -> GBufferTargets;
+[[nodiscard]] auto GBufferSceneTargets(RenderFrame& frame) noexcept -> GBufferTargets;
 
-[[nodiscard]] auto BuildGroupRanges(const RenderFrameContext& frame) -> ZHLN::Array<GroupRange>;
+[[nodiscard]] auto BuildGroupRanges(const RenderFrame& frame) -> ZHLN::Array<GroupRange>;
 
 } // namespace ZHLN::Passes

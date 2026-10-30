@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/culling/HiZGeneratePass.hpp"
-#include "FrameContext.hpp"
+#include "RenderFrame.hpp"
+#include "Renderer.hpp"
 #include "passes/culling/CullingResources.hpp"
 #include <ShaderBindings.hpp>
 #include <algorithm>
@@ -14,7 +15,7 @@ static_assert(GpuAbi::ScenePassPayload<HiZPushConstants>, "a pass payload that o
 
 namespace {
 
-void GenerateHiZPyramid(VkCommandBuffer cmd, CullingResources& cull, RenderFrameContext& frame, uint32_t reduceMin) noexcept {
+void GenerateHiZPyramid(VkCommandBuffer cmd, CullingResources& cull, RenderFrame& frame, uint32_t reduceMin) noexcept {
     const uint32_t width  = frame.graphResources.hizMap.extent.width;
     const uint32_t height = frame.graphResources.hizMap.extent.height;
     const uint32_t mips   = std::min(frame.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
@@ -41,9 +42,8 @@ void GenerateHiZPyramid(VkCommandBuffer cmd, CullingResources& cull, RenderFrame
         const auto inDepth = mip == 0 ?
                                  Vk::ImageWrite {frame.ActiveDepthTarget().image.View()} :
                                  Vk::ImageWrite {frame.graphResources.hizMap.image.View(VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 1), VK_IMAGE_LAYOUT_GENERAL};
-        const auto block   = frame.heapManager.WriteHeapParameters<Shaders::Hiz>(
-            cull.hizHeapBindings, Vk::Slot<"inDepth">(inDepth),
-            Vk::Slot<"outDepth">(frame.graphResources.hizMap.image.View(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1))
+        const auto block   = frame.renderer.heapManager.WriteHeapParameters<Shaders::Hiz>(
+            cull.hizHeapBindings, Vk::Slot<"inDepth">(inDepth), Vk::Slot<"outDepth">(frame.graphResources.hizMap.image.View(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1))
         );
         cull.hizGeneratePass.DispatchHeapIndexedThreads<Shaders::Modules::HizGenerateCS>(cmd, block, dstW, dstH, 1, hizPC);
     }

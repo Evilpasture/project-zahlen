@@ -9,6 +9,7 @@
 #include "GeometryManager.hpp"
 #include "GpuAbi.hpp"
 #include "GpuLayout.hpp"
+#include "RenderFrame.hpp"
 #include "Rendering.hpp"
 #include "TargetManager.hpp"
 #include "TextureManager.hpp"
@@ -58,7 +59,7 @@ struct WorkerCmdContext {
     std::array<ZHLN::Atomic<uint32_t>, Vk::kFramesInFlight>                   cmdCount {};
 };
 
-struct RenderFrameContext {
+struct Renderer {
     using GraphResources = TargetManager::GraphResources;
 
     Vk::Context   ctx;
@@ -78,17 +79,17 @@ struct RenderFrameContext {
     TargetManager   targets;
     GraphResources& graphResources = targets.Graph();
 
-    FrameResources                                            frames;
+    FrameResources frames;
     // Both halves share the same physical type; the explicit graph resolvers
     // identify whichever half is Previous or Current on a given frame.
     PingPong<Vk::RenderTarget<Res_AccumCurrent>> accumulationHistory;
-    Vk::Buffer                                                clusterBoundsBuffer;
-    Vk::Buffer                                                morphDeltasBuffer;
+    Vk::Buffer                                   clusterBoundsBuffer;
+    Vk::Buffer                                   morphDeltasBuffer;
 
     Vk::SwapchainPresenter presenter;
     // Primary scene depth is a renderer resource, not part of presentation state.
     Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> primaryDepthTarget;
-    FrameDestinations      destinations;
+    FrameDestinations                                    destinations;
 
     DrawQueueManager queues;
     GraphicsSettings settings {};
@@ -105,7 +106,7 @@ struct RenderFrameContext {
     // lookup-table views, and the bloom/HDR chain. Both groups are addressed the
     // same way -- one member per pass, pipeline and bindings together.
     PostProcessResources post;
-    ReflectionPipeline  reflectionPipeline;
+    ReflectionPipeline   reflectionPipeline;
 
     uint32_t viewportX = 0;
     uint32_t viewportY = 0;
@@ -130,30 +131,16 @@ struct RenderFrameContext {
 
     ZHLN::Array<Light> mappedLights;
 
-    struct FrameTransientState {
-        bool computeSubmitted = false;
-
-        bool inForkSecondary = false;
-
-        bool hasSkinned = false;
-
-        bool resized            = true;
-        bool clusterBoundsDirty = true;
-
-        void Reset() noexcept {
-            computeSubmitted = false;
-            inForkSecondary  = false;
-            hasSkinned       = false;
-        }
-    };
-
+    // Per-frame transient state, declared in RenderFrame.hpp: the frame loop
+    // resets it between frames and the frame a pass is handed reads it as
+    // `frame.state`.
     FrameTransientState frameState;
 
     IBLPayload iblPayload;
 
-    RenderFrameContext() noexcept:
+    Renderer() noexcept:
         targets(ctx, allocator, graphicsCmdRing), textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
-        geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue), reflectionPipeline(*this) {
+        geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue) {
     }
 
     [[nodiscard]] constexpr auto EffectiveViewport() const noexcept -> VkViewport {
@@ -204,9 +191,7 @@ struct RenderFrameContext {
         const auto addresses = FrameHeapAddresses();
         return Vk::SecondaryPassContext {
             rendering, heapManager.GetInheritance(),
-            Vk::FramePushState {
-                GpuAbi::kScenePushLayout.UsedFrameAddresses(), std::span<const VkDeviceAddress> {addresses.data(), addresses.size()}
-            }
+            Vk::FramePushState {GpuAbi::kScenePushLayout.UsedFrameAddresses(), std::span<const VkDeviceAddress> {addresses.data(), addresses.size()}}
         };
     }
 

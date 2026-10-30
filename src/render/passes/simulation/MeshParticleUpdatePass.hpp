@@ -7,14 +7,14 @@
 
 namespace ZHLN {
 struct ParticleUpdateResources;
-struct RenderFrameContext;
+struct RenderFrame;
 } // namespace ZHLN
 
 namespace ZHLN::Passes {
 
 struct MeshParticleUpdatePass: Vk::RenderPass<"MeshParticleUpdate"> {
     const ParticleUpdateResources& particles;
-    RenderFrameContext&            frame;
+    RenderFrame&                   frame;
     float                          dt;
 
     void operator()(VkCommandBuffer cmd) const noexcept;

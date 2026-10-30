@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "FrameContext.hpp"
+#include "RenderFrame.hpp"
 #include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN::Passes {
@@ -11,7 +11,7 @@ namespace ZHLN::Passes {
 // and `EmissivePass` finish writing mip 0, enabling deterministic Tier 2 cone-traced
 // mip selection (`0.20 <= roughness <= 0.40`) in `ReflectionPass` with zero temporal noise.
 struct LightingMipPass: Vk::RenderPass<"LightingMip", Vk::TransferDstWriteThenShaderRead<Res_LightingGI>> {
-    RenderFrameContext& frame;
+    RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept {
         const auto& dst = frame.graphResources.lightingGI;

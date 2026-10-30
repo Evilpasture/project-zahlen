@@ -2,29 +2,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/lighting/ClusteredLightingPass.hpp"
-#include "FrameContext.hpp"
+#include "RenderFrame.hpp"
+#include "Renderer.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {
 
 void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    const auto fIdx         = frame.presenter.frameIndex;
-    const bool hasTlas      = frame.ctx.RayTracingSupported() && frame.frames.tlasAddresses[fIdx] != nullptr;
+    const bool               hasTlas      = frame.renderer.ctx.RayTracingSupported() && frame.tlasAddresses != nullptr;
     const auto lightVariant = ((frame.settings.rayTracing.enableReflections || frame.settings.rayTracing.enableShadows) && hasTlas) ? 1 : 0;
-    const Vk::AsAddressWrite tlas {.address = hasTlas ? frame.frames.tlasAddresses[fIdx].Get() : 0};
+    const Vk::AsAddressWrite tlas {.address = hasTlas ? frame.tlasAddresses.Get() : 0};
 
     const auto block = post.lighting.WriteHeapParameters<Shaders::Lighting>(
-        frame.heapManager, Vk::Slot<"texInput">(Vk::Assume<Vk::FragmentAndComputeRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
+        frame.renderer.heapManager, Vk::Slot<"texInput">(Vk::Assume<Vk::FragmentAndComputeRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
         Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"texBakedMask">(Vk::Assume<Vk::FragmentAndComputeRead<Res_BakedMask>>(frame.graphResources.bakedMask)),
-        Vk::Slot<"lights">(frame.frames.lightStorageBuffers[fIdx]), Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]),
+        Vk::Slot<"lights">(frame.lightStorageBuffers), Vk::Slot<"frame">(frame.frameUniformBuffers),
         Vk::Slot<"shadowMap">(Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(frame.graphResources.shadowMap)), Vk::Slot<"ltc_mat">(post.ltcMat),
-        Vk::Slot<"ltc_amp">(post.ltcAmp), Vk::Slot<"clusterGrid">(frame.frames.clusterGridBuffers[fIdx]),
-        Vk::Slot<"clusterIndexList">(frame.frames.lightIndexListBuffers[fIdx]),
-        Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.View(VK_IMAGE_ASPECT_DEPTH_BIT)),
-        Vk::Slot<"shadowTiles">(frame.frames.shadowTileBuffers[fIdx]), Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(frame.graphResources.ao)),
-        Vk::Slot<"tlas">(tlas)
+        Vk::Slot<"ltc_amp">(post.ltcAmp), Vk::Slot<"clusterGrid">(frame.clusterGridBuffers), Vk::Slot<"clusterIndexList">(frame.lightIndexListBuffers),
+        Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.View(VK_IMAGE_ASPECT_DEPTH_BIT)), Vk::Slot<"shadowTiles">(frame.shadowTileBuffers),
+        Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(frame.graphResources.ao)), Vk::Slot<"tlas">(tlas)
     );
     // Typestate: From proves the variant's bounds and validity, Create the
     // non-zero heap push -- ExecuteHeap cannot be reached with anything else.
