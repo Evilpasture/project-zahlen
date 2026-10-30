@@ -13,6 +13,27 @@ on:
 permissions:
   contents: read
 
+# Only the libraries with no Arch package and no CMake probe stay vendored.
+# Slang, GLFW, simdjson and Vulkan-Headers are provisioned by the distro and the
+# Vulkan SDK inside the image, so cloning them (slang alone is the largest tree
+# in the repo) is pure overhead. Jolt, VulkanMemoryAllocator, meshoptimizer,
+# SPIRV-Reflect, volk, mimalloc and the header-only cgltf/stb/clay/miniaudio are
+# added with add_subdirectory or included from extern/, so they must be present.
+# LuaJIT stays pinned because the submodule is a fork with CI patches in it.
+env:
+  VENDORED_SUBMODULES: >-
+    extern/JoltPhysics
+    extern/LuaJIT
+    extern/VulkanMemoryAllocator
+    extern/SPIRV-Reflect
+    extern/volk
+    extern/meshoptimizer
+    extern/mimalloc
+    extern/miniaudio
+    extern/cgltf
+    extern/clay
+    extern/stb
+
 # A superseded pull-request run is wasted work; pushes are never cancelled so a
 # release image is always produced.
 concurrency:
@@ -38,7 +59,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
+
+      - name: Fetch Vendored Libraries
+        run: git submodule update --init --depth 1 ${VENDORED_SUBMODULES}
 
       - name: Compute Image Names
         id: names
@@ -90,10 +114,11 @@ jobs:
       contents: read
       packages: read
     steps:
+      # No submodules: the happy path only pulls the image Build published.
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -116,6 +141,7 @@ jobs:
             echo "Testing the image published by the Build job."
           else
             echo "::warning::Published builder image unavailable; rebuilding the builder stage from cache."
+            git submodule update --init --depth 1 ${VENDORED_SUBMODULES}
             docker buildx build --target builder --load -t zahlen-builder:local \
               --cache-from type=gha .
             ref="zahlen-builder:local"
@@ -150,10 +176,14 @@ jobs:
       contents: read
       packages: write
     steps:
+      # The context must match Build's byte for byte or the cache misses.
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
+
+      - name: Fetch Vendored Libraries
+        run: git submodule update --init --depth 1 ${VENDORED_SUBMODULES}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
