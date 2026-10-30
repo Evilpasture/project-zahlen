@@ -6,10 +6,89 @@ on:
   pull_request:
     branches: [main, master]
 
-jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
+# Build and Deploy publish images to the GitHub Container Registry. Fork pull
+# requests receive a read-only token, so publishing is skipped there and each job
+# falls back to the shared Actions build cache. The scopes are granted per job
+# below so that Test stays read-only.
+permissions:
+  contents: read
 
+# A superseded pull-request run is wasted work; pushes are never cancelled so a
+# release image is always produced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ===========================================================================
+  # BUILD - compile the engine and publish the image that carries the compiled
+  # tree. Runs no tests: a red test suite must not hide a compiling tree.
+  # ===========================================================================
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      builder_image: ${{ steps.names.outputs.builder_image }}
+      runtime_image: ${{ steps.names.outputs.runtime_image }}
+      publish: ${{ steps.names.outputs.publish }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compute Image Names
+        id: names
+        run: |
+          # GHCR requires lowercase image names.
+          base="ghcr.io/${GITHUB_REPOSITORY,,}"
+          publish=true
+          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            publish=false
+          fi
+          {
+            echo "builder_image=${base}-builder:${GITHUB_SHA}"
+            echo "runtime_image=${base}"
+            echo "publish=${publish}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: steps.names.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Stages 1-2 of the Dockerfile only: toolchain plus compile. The ztest
+      # stage is deliberately not built here.
+      - name: Build Engine
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: builder
+          push: ${{ steps.names.outputs.publish == 'true' }}
+          tags: ${{ steps.names.outputs.builder_image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ===========================================================================
+  # TEST - consume the image the Build job published and run ztest inside it.
+  # Nothing is compiled here unless the image is unavailable (fork PRs).
+  # ===========================================================================
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -19,23 +98,96 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Step 1: Build up to the builder stage and execute ztest
-      # If ztest encounters a failure, the action fails here
-      - name: Build Engine and Run ztest Suite
-        uses: docker/build-push-action@v5
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          context: .
-          target: builder
-          load: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 2: Package runtime image (only reaches here if tests passed)
-      - name: Package Runtime Container Image
-        uses: docker/build-push-action@v5
+      # Preferred path: pull the exact tree Build compiled and published.
+      # Fallback: nothing was published (fork PR), so rebuild the builder stage
+      # from the Actions cache and test that instead of skipping the suite.
+      - name: Resolve Builder Image
+        id: image
+        run: |
+          ref="${{ needs.build.outputs.builder_image }}"
+          if [ "${{ needs.build.outputs.publish }}" = "true" ] && docker pull "$ref"; then
+            echo "Testing the image published by the Build job."
+          else
+            echo "::warning::Published builder image unavailable; rebuilding the builder stage from cache."
+            docker buildx build --target builder --load -t zahlen-builder:local \
+              --cache-from type=gha .
+            ref="zahlen-builder:local"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      # ASan/UBSan and Lavapipe are baked into the image environment, so the
+      # suite runs with the same flags CI has always used.
+      - name: Run ztest Suite
+        run: |
+          set -o pipefail
+          docker run --rm "${{ steps.image.outputs.ref }}" \
+            ./build/bin/ztest --test-dir build -V 2>&1 | tee ztest.log
+
+      - name: Upload ztest Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ztest-log
+          path: ztest.log
+          if-no-files-found: ignore
+
+  # ===========================================================================
+  # DEPLOY - stage 4 of the Dockerfile only: package the runtime image from the
+  # cached build output and publish it. Requires a green Test job.
+  # ===========================================================================
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: needs.build.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The builder stage is restored from the cache the Build job wrote, so only
+      # the runtime layers are actually built here.
+      - name: Build and Publish Runtime Image
+        id: image
+        uses: docker/build-push-action@v6
         with:
           context: .
           target: runner
-          tags: zahlen:latest
-          load: true
+          push: ${{ needs.build.outputs.publish == 'true' }}
+          tags: |
+            ${{ needs.build.outputs.runtime_image }}:${{ github.sha }}
+            ${{ needs.build.outputs.runtime_image }}:latest
           cache-from: type=gha
+
+      - name: Deploy Summary
+        if: needs.build.outputs.publish == 'true'
+        run: |
+          {
+            echo "### Runtime image published"
+            echo
+            echo '```'
+            echo "${{ needs.build.outputs.runtime_image }}:${{ github.sha }}"
+            echo "${{ needs.build.outputs.runtime_image }}:latest"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

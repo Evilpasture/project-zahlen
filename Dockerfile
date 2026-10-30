@@ -1,7 +1,9 @@
 # ==============================================================================
-# STAGE 1: Build Environment (CI Runner)
+# STAGE 1: Toolchain (shared by the build and test stages)
 # ==============================================================================
-FROM archlinux:latest AS builder
+# Everything expensive and source-independent lives here so that the build and
+# test stages reuse one cached layer set.
+FROM archlinux:latest AS base
 
 # Combine keyring update, full system upgrade, and package installation into ONE RUN
 RUN pacman -Sy --noconfirm && \
@@ -56,6 +58,14 @@ WORKDIR /workspace
 
 COPY . .
 
+
+# ==============================================================================
+# STAGE 2: Build (compile only, tests are a separate stage)
+# ==============================================================================
+# This stage stops after compiling. It never runs the test suite, so the GitHub
+# Actions "Build" job can produce and publish an image even when a test fails.
+FROM base AS builder
+
 # 1. Configure CMake with Tests & ASan/UBSan enabled
 RUN cmake -B build -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
@@ -66,11 +76,7 @@ RUN cmake -B build -S . -G Ninja \
 # 2. Build everything (Engine, Asset Cooker, ztest, and Test Executables)
 RUN cmake --build build
 
-# 3. RUN THE TESTS
-# If any test fails, Docker build fails and stops the CI pipeline immediately!
-RUN ./build/bin/ztest --test-dir build -V
-
-# 4. Collect the runtime payload: the binaries, the cooked asset pak and, when
+# 3. Collect the runtime payload: the binaries, the cooked asset pak and, when
 #    configured, the gameplay script module. build/data/base.pak points into the
 #    shared cooked-asset cache, so dereference it for the runner image. A staged
 #    build/scripts tree may also be a symlink into the source tree; the script
@@ -86,7 +92,19 @@ RUN mkdir -p /workspace/dist/data && \
 
 
 # ==============================================================================
-# STAGE 2: Minimal Runtime Deployment Image
+# STAGE 3: Test (runs the ztest suite)
+# ==============================================================================
+# Kept out of the build stage so compiling and testing are independent steps.
+# `docker build --target test .` reproduces CI locally; the GitHub Actions "Test"
+# job instead runs the same command inside the image published by "Build", so a
+# failing test is reported without ever blocking the build job.
+FROM builder AS test
+
+RUN ./build/bin/ztest --test-dir build -V
+
+
+# ==============================================================================
+# STAGE 4: Minimal Runtime Deployment Image
 # ==============================================================================
 FROM archlinux:latest AS runner
 
