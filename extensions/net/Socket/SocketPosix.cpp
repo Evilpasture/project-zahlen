@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Socket/Socket.hpp>
-
 #include <algorithm>
 #include <cerrno>
 #include <climits>
+#include <cstdint>
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
@@ -21,8 +21,7 @@
 namespace ZHLN::Net {
 namespace {
 
-[[nodiscard]] auto Failure(const SocketError error, const int nativeCode = 0, const SocketErrorDomain domain = SocketErrorDomain::Posix)
-    -> SocketFailure {
+[[nodiscard]] auto Failure(const SocketError error, const int nativeCode = 0, const SocketErrorDomain domain = SocketErrorDomain::Posix) -> SocketFailure {
     return SocketFailure {.error = error, .domain = domain, .nativeCode = nativeCode};
 }
 
@@ -30,12 +29,11 @@ namespace {
     return static_cast<int>(nativeHandle);
 }
 
-[[nodiscard]] auto ToNativeEndpoint(const SocketEndpoint& endpoint, sockaddr_storage& storage, socklen_t& length) noexcept
-    -> bool {
+[[nodiscard]] auto ToNativeEndpoint(const SocketEndpoint& endpoint, sockaddr_storage& storage, socklen_t& length) noexcept -> bool {
     storage = {};
     switch (endpoint.family) {
         case SocketAddressFamily::IPv4: {
-            auto* address      = reinterpret_cast<sockaddr_in*>(&storage);
+            auto* address       = reinterpret_cast<sockaddr_in*>(&storage);
             address->sin_family = AF_INET;
             address->sin_port   = htons(endpoint.port);
             std::memcpy(&address->sin_addr, endpoint.address.data(), sizeof(address->sin_addr));
@@ -43,9 +41,9 @@ namespace {
             return true;
         }
         case SocketAddressFamily::IPv6: {
-            auto* address       = reinterpret_cast<sockaddr_in6*>(&storage);
-            address->sin6_family = AF_INET6;
-            address->sin6_port   = htons(endpoint.port);
+            auto* address          = reinterpret_cast<sockaddr_in6*>(&storage);
+            address->sin6_family   = AF_INET6;
+            address->sin6_port     = htons(endpoint.port);
             address->sin6_scope_id = endpoint.scopeId;
             std::memcpy(&address->sin6_addr, endpoint.address.data(), sizeof(address->sin6_addr));
             length = sizeof(sockaddr_in6);
@@ -57,27 +55,21 @@ namespace {
     return false;
 }
 
-[[nodiscard]] auto FromNativeEndpoint(const sockaddr* address, const socklen_t length) noexcept
-    -> std::expected<SocketEndpoint, SocketFailure> {
+[[nodiscard]] auto FromNativeEndpoint(const sockaddr* address, const socklen_t length) noexcept -> std::expected<SocketEndpoint, SocketFailure> {
     if (address == nullptr) {
         return std::unexpected(Failure(SocketError::InvalidEndpoint));
     }
 
     if (address->sa_family == AF_INET && length >= sizeof(sockaddr_in)) {
-        const auto* native = reinterpret_cast<const sockaddr_in*>(address);
+        const auto*    native = reinterpret_cast<const sockaddr_in*>(address);
         SocketEndpoint endpoint {.family = SocketAddressFamily::IPv4, .address = {}, .port = ntohs(native->sin_port)};
         std::memcpy(endpoint.address.data(), &native->sin_addr, sizeof(native->sin_addr));
         return endpoint;
     }
 
     if (address->sa_family == AF_INET6 && length >= sizeof(sockaddr_in6)) {
-        const auto* native = reinterpret_cast<const sockaddr_in6*>(address);
-        SocketEndpoint endpoint {
-            .family  = SocketAddressFamily::IPv6,
-            .address = {},
-            .port    = ntohs(native->sin6_port),
-            .scopeId = native->sin6_scope_id
-        };
+        const auto*    native = reinterpret_cast<const sockaddr_in6*>(address);
+        SocketEndpoint endpoint {.family = SocketAddressFamily::IPv6, .address = {}, .port = ntohs(native->sin6_port), .scopeId = native->sin6_scope_id};
         std::memcpy(endpoint.address.data(), &native->sin6_addr, sizeof(native->sin6_addr));
         return endpoint;
     }
@@ -104,8 +96,7 @@ namespace {
 
 class SocketAccess {
   public:
-    [[nodiscard]] static auto Adopt(const int descriptor, const SocketType type, const SocketAddressFamily family) noexcept
-        -> Socket {
+    [[nodiscard]] static auto Adopt(const int descriptor, const SocketType type, const SocketAddressFamily family) noexcept -> Socket {
         return Socket(static_cast<std::uintptr_t>(descriptor), type, family, false);
     }
 
@@ -121,9 +112,7 @@ class SocketAccess {
         socklen_t        peerLength = sizeof(peer);
         int              descriptor = 0;
         do {
-            descriptor = accept(
-                NativeHandle(listener._nativeHandle), reinterpret_cast<sockaddr*>(&peer), &peerLength
-            );
+            descriptor = accept(NativeHandle(listener._nativeHandle), reinterpret_cast<sockaddr*>(&peer), &peerLength);
         } while (descriptor < 0 && errno == EINTR);
 
         if (descriptor < 0) {
@@ -155,8 +144,7 @@ Socket::~Socket() noexcept {
 }
 
 Socket::Socket(Socket&& other) noexcept:
-    _nativeHandle(other._nativeHandle), _type(other._type), _family(other._family), _open(other._open),
-    _runtimeLease(other._runtimeLease) {
+    _nativeHandle(other._nativeHandle), _type(other._type), _family(other._family), _open(other._open), _runtimeLease(other._runtimeLease) {
     other._nativeHandle = 0;
     other._family       = SocketAddressFamily::Any;
     other._open         = false;
@@ -266,8 +254,7 @@ auto Socket::Listen(const int backlog) noexcept -> std::expected<void, SocketFai
     return {};
 }
 
-auto Socket::Connect(const SocketEndpoint& endpoint, const std::chrono::milliseconds timeout) noexcept
-    -> std::expected<void, SocketFailure> {
+auto Socket::Connect(const SocketEndpoint& endpoint, const std::chrono::milliseconds timeout) noexcept -> std::expected<void, SocketFailure> {
     if (!_open) {
         return std::unexpected(Failure(SocketError::InvalidSocket));
     }
@@ -302,8 +289,8 @@ auto Socket::Connect(const SocketEndpoint& endpoint, const std::chrono::millisec
         return std::unexpected(Failure(SocketError::ConnectTimedOut));
     }
 
-    int       socketError = 0;
-    socklen_t  socketErrorLength = sizeof(socketError);
+    int       socketError       = 0;
+    socklen_t socketErrorLength = sizeof(socketError);
     if (getsockopt(NativeHandle(_nativeHandle), SOL_SOCKET, SO_ERROR, &socketError, &socketErrorLength) < 0) {
         return std::unexpected(Failure(SocketError::ConnectFailed, errno));
     }
@@ -313,11 +300,8 @@ auto Socket::Connect(const SocketEndpoint& endpoint, const std::chrono::millisec
     return {};
 }
 
-auto Socket::WaitFor(
-    const bool readable,
-    const bool writable,
-    const std::chrono::milliseconds timeout
-) const noexcept -> std::expected<SocketReadiness, SocketFailure> {
+auto Socket::WaitFor(const bool readable, const bool writable, const std::chrono::milliseconds timeout) const noexcept
+    -> std::expected<SocketReadiness, SocketFailure> {
     if (!_open) {
         return std::unexpected(Failure(SocketError::InvalidSocket));
     }
@@ -333,14 +317,13 @@ auto Socket::WaitFor(
     }
 
     const auto waitDuration = std::chrono::milliseconds(ToPollTimeout(timeout));
-    const auto deadline = std::chrono::steady_clock::now() + waitDuration;
-    int        result   = 0;
+    const auto deadline     = std::chrono::steady_clock::now() + waitDuration;
+    int        result       = 0;
     for (;;) {
-        descriptor.revents = 0;
-        const auto now = std::chrono::steady_clock::now();
-        const auto remaining = (now >= deadline) ? std::chrono::milliseconds::zero()
-                                                  : std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
-        result = poll(&descriptor, 1, ToPollTimeout(remaining));
+        descriptor.revents   = 0;
+        const auto now       = std::chrono::steady_clock::now();
+        const auto remaining = (now >= deadline) ? std::chrono::milliseconds::zero() : std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+        result               = poll(&descriptor, 1, ToPollTimeout(remaining));
         if (result >= 0 || errno != EINTR) {
             break;
         }
@@ -414,10 +397,7 @@ auto Socket::Receive(const std::span<uint8_t> bytes) noexcept -> std::expected<S
     return SocketIOResult {.state = SocketIOState::Complete, .bytes = static_cast<size_t>(result)};
 }
 
-auto Socket::SendTo(
-    const std::span<const uint8_t> bytes,
-    const SocketEndpoint& endpoint
-) noexcept -> std::expected<SocketIOResult, SocketFailure> {
+auto Socket::SendTo(const std::span<const uint8_t> bytes, const SocketEndpoint& endpoint) noexcept -> std::expected<SocketIOResult, SocketFailure> {
     if (!_open) {
         return std::unexpected(Failure(SocketError::InvalidSocket));
     }
@@ -438,15 +418,9 @@ auto Socket::SendTo(
     ssize_t    result       = 0;
     do {
 #ifdef MSG_NOSIGNAL
-        result = sendto(
-            NativeHandle(_nativeHandle), bytes.data(), transferSize, MSG_NOSIGNAL,
-            reinterpret_cast<const sockaddr*>(&storage), length
-        );
+        result = sendto(NativeHandle(_nativeHandle), bytes.data(), transferSize, MSG_NOSIGNAL, reinterpret_cast<const sockaddr*>(&storage), length);
 #else
-        result = sendto(
-            NativeHandle(_nativeHandle), bytes.data(), transferSize, 0,
-            reinterpret_cast<const sockaddr*>(&storage), length
-        );
+        result = sendto(NativeHandle(_nativeHandle), bytes.data(), transferSize, 0, reinterpret_cast<const sockaddr*>(&storage), length);
 #endif
     } while (result < 0 && errno == EINTR);
 
@@ -467,14 +441,11 @@ auto Socket::ReceiveFrom(const std::span<uint8_t> bytes) noexcept -> std::expect
         return std::unexpected(Failure(SocketError::InvalidArgument));
     }
     sockaddr_storage peerStorage {};
-    socklen_t        peerLength = sizeof(peerStorage);
+    socklen_t        peerLength   = sizeof(peerStorage);
     const auto       transferSize = std::min(bytes.size(), MaxTransferSize());
-    ssize_t          result = 0;
+    ssize_t          result       = 0;
     do {
-        result = recvfrom(
-            NativeHandle(_nativeHandle), bytes.data(), transferSize, 0,
-            reinterpret_cast<sockaddr*>(&peerStorage), &peerLength
-        );
+        result = recvfrom(NativeHandle(_nativeHandle), bytes.data(), transferSize, 0, reinterpret_cast<sockaddr*>(&peerStorage), &peerLength);
     } while (result < 0 && errno == EINTR);
 
     if (result < 0) {
@@ -488,10 +459,7 @@ auto Socket::ReceiveFrom(const std::span<uint8_t> bytes) noexcept -> std::expect
     if (!peer) {
         return std::unexpected(peer.error());
     }
-    return SocketDatagramResult {
-        .io   = SocketIOResult {.state = SocketIOState::Complete, .bytes = static_cast<size_t>(result)},
-        .peer = *peer
-    };
+    return SocketDatagramResult {.io = SocketIOResult {.state = SocketIOState::Complete, .bytes = static_cast<size_t>(result)}, .peer = *peer};
 }
 
 auto Socket::LocalEndpoint() const noexcept -> std::expected<SocketEndpoint, SocketFailure> {
@@ -508,9 +476,7 @@ auto Socket::LocalEndpoint() const noexcept -> std::expected<SocketEndpoint, Soc
 }
 
 auto OpenSocket(const SocketType type, const SocketAddressFamily family) noexcept -> std::expected<Socket, SocketFailure> {
-    const int nativeFamily = family == SocketAddressFamily::IPv4 ? AF_INET
-                           : family == SocketAddressFamily::IPv6 ? AF_INET6
-                                                                : AF_UNSPEC;
+    const int nativeFamily = family == SocketAddressFamily::IPv4 ? AF_INET : family == SocketAddressFamily::IPv6 ? AF_INET6 : AF_UNSPEC;
     if (nativeFamily == AF_UNSPEC) {
         return std::unexpected(Failure(SocketError::InvalidEndpoint));
     }
@@ -536,23 +502,17 @@ auto OpenSocket(const SocketType type, const SocketAddressFamily family) noexcep
     return SocketAccess::Adopt(descriptor, type, family);
 }
 
-auto ResolveSocketEndpoints(
-    const std::string_view host,
-    const uint16_t port,
-    const SocketAddressFamily family,
-    const SocketType type
-) noexcept -> std::expected<std::vector<SocketEndpoint>, SocketFailure> {
+auto ResolveSocketEndpoints(const std::string_view host, const uint16_t port, const SocketAddressFamily family, const SocketType type) noexcept
+    -> std::expected<std::vector<SocketEndpoint>, SocketFailure> {
     addrinfo hints {};
-    hints.ai_family   = family == SocketAddressFamily::IPv4 ? AF_INET
-                      : family == SocketAddressFamily::IPv6 ? AF_INET6
-                                                           : AF_UNSPEC;
+    hints.ai_family   = family == SocketAddressFamily::IPv4 ? AF_INET : family == SocketAddressFamily::IPv6 ? AF_INET6 : AF_UNSPEC;
     hints.ai_socktype = type == SocketType::Stream ? SOCK_STREAM : SOCK_DGRAM;
     hints.ai_protocol = type == SocketType::Stream ? IPPROTO_TCP : IPPROTO_UDP;
 
     const std::string hostName(host);
     const std::string service = std::to_string(port);
     addrinfo*         results = nullptr;
-    const int         status = getaddrinfo(hostName.c_str(), service.c_str(), &hints, &results);
+    const int         status  = getaddrinfo(hostName.c_str(), service.c_str(), &hints, &results);
     if (status != 0) {
         if (results != nullptr) {
             freeaddrinfo(results);
