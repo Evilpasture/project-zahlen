@@ -411,6 +411,8 @@ endif()
 
 add_subdirectory(extensions/Signal)
 add_subdirectory(extensions/CommandLine)
+# Screenshot encoding is reusable and available even in a core-only build.
+add_subdirectory(extensions/Screenshot)
 
 add_executable(zahlen app/main.cpp)
 
@@ -598,7 +600,7 @@ if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_project_light_client)
     endif()
 endif()
 
-target_link_libraries(zahlen PRIVATE zahlen_application)
+target_link_libraries(zahlen PRIVATE zahlen_application zahlen_screenshot)
 target_link_libraries(zahlen_cube PRIVATE zahlen_application)
 
 # Tool-specific dependencies stay on tool targets. The core-only build still

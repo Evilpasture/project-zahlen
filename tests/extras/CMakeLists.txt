@@ -174,8 +174,9 @@ zahlen_register_extras_test(${TARGET_NAME})
 zahlen_add_extras_group(Extras_Application
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestApplication.cpp
+    TestScreenshot.cpp
 )
-target_link_libraries(Extras_Application PRIVATE zahlen_application)
+target_link_libraries(Extras_Application PRIVATE zahlen_application zahlen_screenshot)
 zahlen_register_extras_test(Extras_Application)
 zahlen_add_extras_build_alias(Extras_Application TestApplication)
 

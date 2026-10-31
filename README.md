@@ -270,3 +270,21 @@ the Mesa version and environment; installing Lavapipe alone does not guarantee
 that every renderer path or test works. The builder uses CI's Release +
 ASan/UBSan settings. Its Arch packages are rolling, so use a SHA or image digest
 when matching a specific toolchain matters.
+
+### Capture a frame
+
+The `zahlen` executable can capture the sandbox scene to a PNG and exit:
+
+```sh
+./build/bin/zahlen --headless --width 320 --height 180 \
+  --capture-frame frame.png --warmup-frames 10
+```
+
+The default warm-up is 10 completed frames; `--warmup-frames` accepts 1 through
+100000. The option does not itself enable headless mode. The output path is
+relative to the process working directory, its parent must already exist, and an
+existing file is overwritten. A failed capture or write exits nonzero. With the
+persistent dev container, the path is inside the container; for example, use
+`scripts/dev-container.sh run --headless --capture-frame /workspace/frame.png`,
+then `podman cp zahlen-dev:/workspace/frame.png ./frame.png` (or `docker cp`
+when using Docker). Rendering features still depend on the Vulkan driver.

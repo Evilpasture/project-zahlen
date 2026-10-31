@@ -82,8 +82,9 @@ RUN slangc -version 2>/dev/null || \
 # CI deliberately uses the system Lavapipe and validation layer packages.
 # CMake disables the checked-in Arch-built sandbox in ZHLN_IN_DOCKER mode,
 # leaving these environment variables as the source of truth for ztest.
-ENV VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+RUN test -f /usr/share/vulkan/icd.d/lvp_icd.json
+ENV VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
 ENV VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d
 
 WORKDIR /workspace
