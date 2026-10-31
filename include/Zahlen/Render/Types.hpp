@@ -81,12 +81,13 @@ using MaterialSamplerAddresses                         = std::array<TextureSampl
 // glTF textureInfo, not the image, owns the UV transform and set selection.
 // Apply offset + rotation * scale to TEXCOORD_0 or TEXCOORD_1 per reference.
 //
-// A float2 is spelled JPH::Float2 here, as everywhere the engine stores one:
-// the pod is the storage spelling, Vec2 does not exist in Jolt, and a
-// std::array<float, 2> would be a third spelling of the same eight bytes.
+// The two 2-component fields are ZHLN::Float2: eight bytes, the storage a
+// JPH::Float2 holds, and the only 2D type in the engine's vocabulary -- Vec2 does
+// not exist in Jolt, and a std::array<float, 2> would be a third spelling of the
+// same eight bytes.
 struct MaterialTextureTransform {
-    JPH::Float2    offset {0.0f, 0.0f};
-    JPH::Float2    scale {1.0f, 1.0f};
+    ZHLN::Float2   offset {0.0f, 0.0f};
+    ZHLN::Float2   scale {1.0f, 1.0f};
     float          rotation                                                   = 0.0f; // Radians, counter-clockwise in glTF UV space.
     uint32_t       texCoord                                                   = 0;
     constexpr bool operator==(const MaterialTextureTransform&) const noexcept = default;
@@ -195,11 +196,12 @@ struct Material {
 // The lane types are the only spellings a float2/float3/float4 has in this
 // header. A std::array<float, N> here would be a second spelling of the same
 // bytes, and every crossing into the GPU layout -- the one place these values
-// end up -- would need a hand-written conversion for it. The pods are the same
-// size and alignment the arrays had, so this changes no struct's layout.
+// end up -- would need a hand-written conversion for it. The value types are the
+// same size and alignment as the Jolt pods they stand in for, so this changes no
+// struct's layout.
 static_assert(
-    sizeof(JPH::Float2) == 8 && alignof(JPH::Float2) == 4 && sizeof(JPH::Float3) == 12 && alignof(JPH::Float3) == 4 && sizeof(JPH::Float4) == 16 &&
-        alignof(JPH::Float4) == 4,
+    sizeof(ZHLN::Float2) == 8 && alignof(ZHLN::Float2) == 4 && sizeof(ZHLN::Float3) == 12 && alignof(ZHLN::Float3) == 4 && sizeof(ZHLN::Float4) == 16 &&
+        alignof(ZHLN::Float4) == 4,
     "the lane pods are the storage spelling; their geometry is the ABI"
 );
 
@@ -302,8 +304,8 @@ struct MaterialDesc {
 };
 
 struct DrawParams {
-    JPH::Mat44  transform        = JPH::Mat44::sIdentity();
-    JPH::Mat44  prevTransform    = JPH::Mat44::sIdentity();
+    ZHLN::Mat44 transform        = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat44 prevTransform    = ZHLN::Mat44::sIdentity();
     float       cullRadius       = 1.0f;
     JPH::Float3 localCenter      = {0.0f, 0.0f, 0.0f};
     uint32_t    jointOffset      = 0;
@@ -329,8 +331,8 @@ struct DrawParams {
 struct CSGCutterParams {
     Mesh         mesh;
     Material     material;
-    JPH::Mat44   transform           = JPH::Mat44::sIdentity();
-    JPH::Mat44   prevTransform       = JPH::Mat44::sIdentity();
+    ZHLN::Mat44  transform           = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat44  prevTransform       = ZHLN::Mat44::sIdentity();
     float        cullRadius          = 1.0f;
     CSGOperation operation           = CSGOperation::Difference;
     uint32_t     jointOffset         = 0;
@@ -344,8 +346,8 @@ struct CSGDrawParams {
 };
 
 struct DecalParams {
-    JPH::Mat44    transform    = JPH::Mat44::sIdentity();
-    JPH::Mat44    invTransform = JPH::Mat44::sIdentity();
+    ZHLN::Mat44   transform    = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat44   invTransform = ZHLN::Mat44::sIdentity();
     TextureHandle albedoMap    = TextureHandle::Invalid;
     TextureHandle normalMap    = TextureHandle::Invalid;
     float         roughness    = 0.5f;

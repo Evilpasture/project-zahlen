@@ -267,7 +267,9 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
 }
 
 void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
-    const JPH::Mat44 unjittered = view.projMatrix * view.viewMatrix;
+    const JPH::Mat44 proj       = view.projMatrix;
+    const JPH::Mat44 viewMatrix = view.viewMatrix;
+    const JPH::Mat44 unjittered = proj * viewMatrix;
 
     current_view_proj    = view.viewProjMatrix;
     unjittered_view_proj = unjittered;
@@ -288,7 +290,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     gpu->viewProj           = view.viewProjMatrix;
     gpu->unjitteredViewProj = unjittered;
     gpu->invViewProj        = unjittered.Inversed();
-    gpu->invProj            = view.projMatrix.Inversed();
+    gpu->invProj            = proj.Inversed();
     gpu->camPos             = currentUniforms.camPos;
     gpu->frameIndex         = currentUniforms.frameIndex;
 }

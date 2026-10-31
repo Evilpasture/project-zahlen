@@ -18,53 +18,48 @@
 // include/ names a generated type, which is what lets the engine build with no shader
 // tool having run: the engine is a producer of scene terms, not a consumer of the ABI.
 
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <array>
 #include <cstdint>
 
 namespace ZHLN {
 
 struct FrameData {
-    JPH::Mat44 viewProj {};
-    JPH::Mat44 unjitteredViewProj {};
-    JPH::Mat44 prevUnjitteredViewProj {};
-    JPH::Mat44 invViewProj {};
+    ZHLN::Mat44 viewProj {};
+    ZHLN::Mat44 unjitteredViewProj {};
+    ZHLN::Mat44 prevUnjitteredViewProj {};
+    ZHLN::Mat44 invViewProj {};
 
-    JPH::Vec3 camPosition {};
-    float     frameClock = 0.0f; // seconds, wrapped: the clock shaders animate from
+    ZHLN::Float3 camPosition {};
+    float        frameClock = 0.0f; // seconds, wrapped: the clock shaders animate from
 
-    JPH::Vec3 sunDirection {0.0f, -1.0f, 0.0f};
-    float     sunIntensity = 0.0f;
-    JPH::Vec3 sunRadiance {};
+    ZHLN::Float3 sunDirection {0.0f, -1.0f, 0.0f};
+    float        sunIntensity = 0.0f;
+    ZHLN::Float3 sunRadiance {};
 
     // The IBL probe the frame was authored with, if any.
-    JPH::Vec3 probeMin {};
-    JPH::Vec3 probeMax {};
-    JPH::Vec3 probePos {};
+    ZHLN::Float3 probeMin {};
+    ZHLN::Float3 probeMax {};
+    ZHLN::Float3 probePos {};
 
-    JPH::Vec4 skyZenith {0.0f, 0.0f, 0.0f, 1.0f};
-    JPH::Vec4 skyHorizon {0.0f, 0.0f, 0.0f, 1.0f};
-    JPH::Vec4 skyGround {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::Float4 skyZenith {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::Float4 skyHorizon {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::Float4 skyGround {0.0f, 0.0f, 0.0f, 1.0f};
 
     // This frame's temporal jitter in x/y and the previous frame's in z/w.
-    JPH::Vec4 jitter {};
+    ZHLN::Float4 jitter {};
 
     // The settings the frame was authored with; the same member types
     // GraphicsSettings holds, so nothing is converted on the way in.
-    float    shadowWidth = 0.0f;
+    float    shadowWidth      = 0.0f;
     uint32_t shadowResolution = 0;
-    float    sunSize = 0.05f;
-    float    ambientExposure = 1.0f;
-    int32_t  useLocalProbe = 0;
-    int32_t  enableRTR = 0;
-    int32_t  fullBright = 0;
-    uint32_t frameIndex = 0;
+    float    sunSize          = 0.05f;
+    float    ambientExposure  = 1.0f;
+    int32_t  useLocalProbe    = 0;
+    int32_t  enableRTR        = 0;
+    int32_t  fullBright       = 0;
+    uint32_t frameIndex       = 0;
 };
 
 // One scene light. `castsShadow` is what the author asked for and nothing more:
@@ -73,25 +68,25 @@ struct FrameData {
 // not a property of the scene. Everything else is what the light *is*, in world
 // space.
 struct LightDesc {
-    LightType type = LightType::Directional;
-    JPH::Vec3 position {};
-    JPH::Vec3 direction {};
-    JPH::Vec3 color {};
-    float     intensity = 0.0f;
-    float     radius = 0.0f;
-    float     range = 1000.0f;
+    LightType    type = LightType::Directional;
+    ZHLN::Float3 position {};
+    ZHLN::Float3 direction {};
+    ZHLN::Float3 color {};
+    float        intensity = 0.0f;
+    float        radius    = 0.0f;
+    float        range     = 1000.0f;
     // An area light's quad: one column per lane of the shader's four points.
-    JPH::Mat44 points = JPH::Mat44::sIdentity();
+    ZHLN::Mat44 points = ZHLN::Mat44::sIdentity();
     // Asks for a shadow-atlas tile. A light that does not ask is never
     // allocated one, so a scene's shadow cost stays an authored decision.
-    bool       castsShadow = false;
-    uint32_t   twoSided = 0;
+    bool     castsShadow = false;
+    uint32_t twoSided    = 0;
     // The map compiler baked this light into the map's lightmaps. The renderer
     // still shades with it -- unbaked geometry needs it -- but withholds what
     // the bake already holds where the lightmap owns the surface (src/render
     // Res_BakedMask). Scene::kBakeOwnsNone / kBakeOwnsDiffuse / kBakeOwnsAll:
     // an authored light keeps its specular, an emissive proxy does not.
-    uint32_t   baked = 0;
+    uint32_t baked = 0;
     // Spot cone angles in radians from the axis (0 = no authored cone).
     float innerConeRadians = 0.0f;
     float outerConeRadians = 0.0f;

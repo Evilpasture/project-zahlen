@@ -2120,7 +2120,8 @@ void ProceduralAnimationSystem(
         const bool locomotionSyncEnabled = animator && tracks && tracks->synchronizeToStrideWheel;
 
         const JPH::Vec3 velocityWorld   = physicsComponent ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
-        const JPH::Quat rootRotation    = transform->rotation.Normalized();
+        const JPH::Quat entityRotation  = transform->rotation;
+        const JPH::Quat rootRotation    = entityRotation.Normalized();
         const JPH::Vec3 velocityLocal   = rootRotation.Inversed() * velocityWorld;
         const float     horizontalSpeed = std::sqrt(velocityLocal.GetX() * velocityLocal.GetX() + velocityLocal.GetZ() * velocityLocal.GetZ());
 
@@ -2246,7 +2247,8 @@ void ProceduralAnimationSystem(
                                                                                                  JPH::Vec3(0.0f, 1.6f, 0.0f);
             JPH::Vec3           aimDirection    = JPH::Vec3::sAxisZ();
             if (const auto lookAt = registry.Get<ProceduralLookAtComponent>(entity)) {
-                const JPH::Vec3 targetModel = rootRotation.Inversed() * (lookAt->targetWorldPos - transform->position);
+                const JPH::Vec3 entityPosition = transform->position;
+                const JPH::Vec3 targetModel    = rootRotation.Inversed() * (lookAt->targetWorldPos - entityPosition);
                 const JPH::Vec3 fromHead    = targetModel - headPosition;
                 if (fromHead.LengthSq() > 1.0e-8f) {
                     aimDirection = fromHead.Normalized();
@@ -2328,7 +2330,8 @@ void ProceduralAnimationSystem(
                     if (hierarchy->parent == entity) {
                         localItem = itemHandling->itemModelTransform;
                     } else if (const auto parentWorld = registry.Get<Components::WorldTransformComponent>(hierarchy->parent)) {
-                        localItem = parentWorld->world.Inversed() * worldItem;
+                        const JPH::Mat44 parentMatrix = parentWorld->world;
+                        localItem                     = parentMatrix.Inversed() * worldItem;
                     }
                 }
                 if (auto itemTransform = registry.Get<Components::TransformComponent>(itemHandling->itemEntity)) {
@@ -2373,7 +2376,8 @@ void ProceduralAnimationSystem(
                     continue;
                 }
                 const JPH::Mat44 world         = boneMap->modelTransforms[node];
-                const JPH::Vec3  modelPosition = inverseRoot * (world.GetTranslation() - transform->position);
+                const JPH::Vec3  entityPosition = transform->position;
+                const JPH::Vec3  modelPosition  = inverseRoot * (world.GetTranslation() - entityPosition);
                 const JPH::Quat  modelRotation = (inverseRoot * ExtractRotation(world)).Normalized();
                 const JPH::Vec3  worldScale(world.GetColumn3(0).Length(), world.GetColumn3(1).Length(), world.GetColumn3(2).Length());
                 boneMap->modelTransforms[node] = JPH::Mat44::sRotationTranslation(modelRotation, modelPosition).PreScaled(worldScale);
@@ -2482,7 +2486,8 @@ void ProceduralAnimationSystem(
                 // to reach through.
                 if (auto cameraComp = registry.Get<Components::CameraComponent>(registry.SingletonEntity<Components::MainCameraTagComponent>())) {
                     Camera& camera            = cameraComp->camera;
-                    camera.position           = transform->position + rootRotation * firstPerson->smoothedEyeModel;
+                    const JPH::Vec3 entityPosition    = transform->position;
+                    camera.position                   = entityPosition + rootRotation * firstPerson->smoothedEyeModel;
                     const JPH::Quat worldView = (rootRotation * firstPerson->smoothedViewModel).Normalized();
                     JPH::Vec3       forward   = worldView * JPH::Vec3::sAxisZ();
                     forward                   = forward.LengthSq() > 1.0e-8f ? forward.Normalized() : rootRotation * JPH::Vec3::sAxisZ();

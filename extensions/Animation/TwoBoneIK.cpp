@@ -41,7 +41,8 @@ void TwoBoneIKSystem::Update(
         JPH::Quat  invEntityRot   = JPH::Quat::sIdentity();
         if (const auto entityTr = query.Get<Components::TransformComponent>(entity)) {
             invEntityLocal = entityTr->GetLocalMatrix().Inversed();
-            invEntityRot   = entityTr->rotation.Normalized().Conjugated();
+            const JPH::Quat entityRotation = entityTr->rotation;
+            invEntityRot                   = entityRotation.Normalized().Conjugated();
         }
 
         std::array<Animation::IKChain, kMaxTwoBoneIKChains> translated {};
@@ -58,7 +59,8 @@ void TwoBoneIKSystem::Update(
                 if (const auto targetTr = query.Get<Components::TransformComponent>(src.targetEntity)) {
                     const JPH::Mat44 targetInModel = invEntityLocal * targetTr->GetLocalMatrix();
                     targetPosModel                 = targetInModel * src.targetOffset;
-                    targetRotModel                 = (invEntityRot * targetTr->rotation).Normalized();
+                    const JPH::Quat targetRotation = targetTr->rotation;
+                    targetRotModel                 = (invEntityRot * targetRotation).Normalized();
                 }
             }
 

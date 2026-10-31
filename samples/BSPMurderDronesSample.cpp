@@ -468,7 +468,7 @@ void UpdatePlayerRigAmbientCube(ZHLN::Engine& engine) {
         return;
     }
     // Inverse of ConvertPosition (Source -> engine): engine = (x*s, z*s, -y*s).
-    const JPH::Vec3 e = world->world.GetTranslation();
+    const JPH::Vec3 e = JPH::Mat44(world->world).GetTranslation();
     const float     s = g_rigImportOpts.unitScale;
     const std::array<float, 3> src = {e.GetX() / s, -e.GetZ() / s, e.GetY() / s};
 
@@ -1155,7 +1155,7 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     if (const auto firstPerson = reg.Get<ZHLN::FirstPersonVisibilityComponent>(g_player); firstPerson && firstPerson->cameraInitialized) {
         eyeOffsetModel = firstPerson->smoothedEyeModel;
     }
-    const JPH::Vec3 eyePos = trans->position + trans->rotation * eyeOffsetModel;
+    const JPH::Vec3 eyePos = JPH::Vec3(trans->position) + JPH::Quat(trans->rotation) * eyeOffsetModel;
 
     // Camera-relative turning, applied to the ECS rotation rather than to
     // Character::MovementComponent::orientation: the controller SLEPs that
@@ -1170,7 +1170,7 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     {
         const float     yawRadians = JPH::DegreesToRadians(g_view.yaw);
         const JPH::Vec3 viewFlat(JPH::Cos(yawRadians), 0.0f, JPH::Sin(yawRadians));
-        const JPH::Vec3 facing = trans->rotation * JPH::Vec3::sAxisZ();
+        const JPH::Vec3 facing = JPH::Quat(trans->rotation) * JPH::Vec3::sAxisZ();
         const JPH::Vec3 facingFlat(facing.GetX(), 0.0f, facing.GetZ());
         if (facingFlat.LengthSq() > 1.0e-6f) {
             const JPH::Vec3 facingUnit   = facingFlat.Normalized();

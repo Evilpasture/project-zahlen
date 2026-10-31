@@ -78,7 +78,8 @@ void TeleportPlayer(
 
     // The destination origin is at floor level while the character body origin
     // sits at the capsule centre, so lift by the shape's own ground offset.
-    const JPH::Vec3 center = destTrans->position + JPH::Vec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsHandle) + 0.05f, 0.0f);
+    const JPH::Vec3 destPos = destTrans->position;
+    const JPH::Vec3 center  = destPos + JPH::Vec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsHandle) + 0.05f, 0.0f);
     physics->SetCharacterPosition(playerPhys->physicsHandle, center);
     physics->SetCharacterVelocity(playerPhys->physicsHandle, {0.0f, 0.0f, 0.0f});
 
@@ -89,7 +90,8 @@ void TeleportPlayer(
     // View snap: the destination's Euler triplet rotates +X to
     // (cos p cos y, sin p, cos p sin y) -- exactly SceneCamera's direction
     // formula -- so the camera's yaw/pitch invert straight out of it.
-    const JPH::Vec3 forward = destTrans->rotation.RotateAxisX();
+    const JPH::Quat destRot = destTrans->rotation;
+    const JPH::Vec3 forward = destRot.RotateAxisX();
     if (const Entity camEnt = registry.SingletonEntity<Components::MainCameraTagComponent>(); camEnt != Entity::Null()) {
         registry.Patch<Components::CameraComponent>(camEnt, [&](Components::CameraComponent& cc) {
             cc.camera.yaw   = std::atan2(forward.GetZ(), forward.GetX()) * 57.29577951308232f;
@@ -165,12 +167,13 @@ void InteractionSystem::Update(
             continue;
         }
 
-        bool inside = false;
+        const JPH::Vec3 triggerPosition = trans->position;
+        bool            inside          = false;
         if (trigger.halfExtents.LengthSq() > 1e-4f) {
-            const JPH::Vec3 delta = (playerPos - trans->position).Abs();
+            const JPH::Vec3 delta = (playerPos - triggerPosition).Abs();
             inside = delta.GetX() <= trigger.halfExtents.GetX() && delta.GetY() <= trigger.halfExtents.GetY() && delta.GetZ() <= trigger.halfExtents.GetZ();
         } else {
-            const float dist = (trans->position - playerPos).Length();
+            const float dist = (triggerPosition - playerPos).Length();
             inside           = dist <= trigger.radius;
         }
 
@@ -272,7 +275,8 @@ void InteractionSystem::Update(
             continue;
         }
 
-        const float dist = (trans->position - playerPos).Length();
+        const JPH::Vec3 doorPosition = trans->position;
+        const float     dist         = (doorPosition - playerPos).Length();
         if (dist <= 2.5f) {
             if ((door.flags & DoorFlags::TouchOpens) != DoorFlags::None && door.state == DoorState::Closed) {
                 FireEntityInput(registry, doorEnt, "Open", "", audio);
@@ -311,7 +315,8 @@ void InteractionSystem::Update(
             continue;
         }
 
-        const float dist = (trans->position - playerPos).Length();
+        const JPH::Vec3 buttonPosition = trans->position;
+        const float     dist           = (buttonPosition - playerPos).Length();
         if (dist <= 2.5f) {
             if ((button.flags & ButtonFlags::TouchActivates) != ButtonFlags::None && button.state == ButtonState::Off) {
                 FireEntityInput(registry, buttonEnt, "Press", "", audio);

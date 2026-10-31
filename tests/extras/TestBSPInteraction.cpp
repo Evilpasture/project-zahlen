@@ -461,8 +461,9 @@ struct BSPInteractionTestSuite {
             }
             // Half a speed-step of travel away from the gate, still nowhere near
             // the origin.
-            ZHLN::Test::ExpectGt((moved->position - pivot).Length(), 0.0f);
-            ZHLN::Test::ExpectGt((moved->position - JPH::Vec3::sZero()).Length(), 0.0f);
+            const JPH::Vec3 movedPos = moved->position;
+            ZHLN::Test::ExpectGt((movedPos - pivot).Length(), 0.0f);
+            ZHLN::Test::ExpectGt(movedPos.Length(), 0.0f);
 
             return {};
         }
@@ -514,7 +515,7 @@ struct BSPInteractionTestSuite {
             door       = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Opening);
             ZHLN::Test::ExpectLt(std::abs(door->progress - 0.5f), 1e-3f);
-            ZHLN::Test::ExpectLt(std::abs(trans->position.GetY() - 1.0f), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs(trans->position.y - 1.0f), 1e-3f);
 
             // 3. Step another 0.25s -> reaches Open
             ZHLN::Interaction::DoorMovementSystem::Update(query, reg, ZHLN::FrameDt {0.25f}, std::nullopt, std::nullopt);
@@ -522,7 +523,7 @@ struct BSPInteractionTestSuite {
             trans = reg.Get<ZHLN::Components::TransformComponent>(doorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Open);
             ZHLN::Test::ExpectLt(std::abs(door->progress - 1.0f), 1e-3f);
-            ZHLN::Test::ExpectLt(std::abs(trans->position.GetY() - 2.0f), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs(trans->position.y - 2.0f), 1e-3f);
             ZHLN::Test::ExpectEq(door->waitTimer, 1.0f);
 
             // 4. Wait 1.0s -> transitions to Closing
@@ -536,7 +537,7 @@ struct BSPInteractionTestSuite {
             trans = reg.Get<ZHLN::Components::TransformComponent>(doorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Closed);
             ZHLN::Test::ExpectLt(std::abs(door->progress - 0.0f), 1e-3f);
-            ZHLN::Test::ExpectLt(std::abs(trans->position.GetY() - 0.0f), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs(trans->position.y - 0.0f), 1e-3f);
 
             return {};
         }
@@ -589,14 +590,15 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectLt(std::abs(door->progress - 0.5f), 1e-3f);
 
             // Quat length remains 1.0
-            ZHLN::Test::ExpectLt(std::abs(trans->rotation.Length() - 1.0f), 1e-3f);
+            const JPH::Quat doorRot = trans->rotation;
+            ZHLN::Test::ExpectLt(std::abs(doorRot.Length() - 1.0f), 1e-3f);
 
             // Complete open
             ZHLN::Interaction::DoorMovementSystem::Update(query, reg, ZHLN::FrameDt {0.5f}, std::nullopt, std::nullopt);
             trans = reg.Get<ZHLN::Components::TransformComponent>(rotDoorEnt);
             door  = reg.Get<ZHLN::Interaction::DoorComponent>(rotDoorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Open);
-            ZHLN::Test::ExpectLt(std::abs((trans->rotation.GetY() - openQ.GetY())), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs((trans->rotation.y - openQ.GetY())), 1e-3f);
 
             return {};
         }

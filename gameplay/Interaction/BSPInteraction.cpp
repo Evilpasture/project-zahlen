@@ -296,9 +296,13 @@ void AttachDoor(
     const float wait     = record.wait.value_or(kDefaultDoorWait);
     const float lip      = record.lip.value_or(0.0f);
 
-    const JPH::Vec3 closedPos = transform ? transform->position : JPH::Vec3::sZero();
+    JPH::Vec3 closedPos = JPH::Vec3::sZero();
+    JPH::Quat closedRot = JPH::Quat::sIdentity();
+    if (transform) {
+        closedPos = transform->position;
+        closedRot = transform->rotation;
+    }
     JPH::Vec3       openPos   = closedPos;
-    const JPH::Quat closedRot = transform ? transform->rotation : JPH::Quat::sIdentity();
     JPH::Quat       openRot   = closedRot;
     JPH::Vec3       rotAxis   = JPH::Vec3::sAxisY();
     float           rotAngle  = record.distance.value_or(kDefaultDoorRotation);
@@ -371,7 +375,10 @@ void AttachButton(ECS::Registry& registry, const BSP::EntityRecord& record, cons
     const float wait  = record.wait.value_or(kDefaultButtonWait);
     const float lip   = record.lip.value_or(0.0f);
 
-    const JPH::Vec3 unpressed = transform ? transform->position : JPH::Vec3::sZero();
+    JPH::Vec3 unpressed = JPH::Vec3::sZero();
+    if (transform) {
+        unpressed = transform->position;
+    }
     const float     travel    = (lip > 0.0f) ? (lip * options.unitScale) : kDefaultButtonTravel;
     const JPH::Vec3 pressed =
         ((flags & ButtonFlags::DontMove) != ButtonFlags::None) ? unpressed : (unpressed + record.moveDirection * travel);

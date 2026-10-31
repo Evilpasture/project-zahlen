@@ -58,7 +58,9 @@ struct TOMLVector<JPH::Float4> : std::true_type {};
 // quietly change shape -- `color = [r, g, b, a]` becoming a table of x/y/z/w --
 // as soon as a field was spelled in a value type instead of a Jolt one.
 template <>
-struct TOMLVector<ZHLN::Float3> : std::true_type {};
+struct TOMLVector<ZHLN::Float2>: std::true_type {};
+template <>
+struct TOMLVector<ZHLN::Float3>: std::true_type {};
 template <>
 struct TOMLVector<ZHLN::Float4> : std::true_type {};
 template <>

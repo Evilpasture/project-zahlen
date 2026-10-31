@@ -225,7 +225,7 @@ struct ExplosionTestSuite {
             if (!ZHLN::Test::ExpectTrue(trans.has_value())) {
                 return std::unexpected(ExplosionTestError::CraterDecalSpawnFailed);
             }
-            ZHLN::Test::ExpectLt(trans->scale.GetX(), 6.8f);
+            ZHLN::Test::ExpectLt(trans->scale.x, 6.8f);
 
             // 2. Simulate past the 28.0s expiration mark (age: 27s -> 29.5s)
             for (int i = 0; i < 150; ++i) {

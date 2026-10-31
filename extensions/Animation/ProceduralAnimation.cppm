@@ -11,11 +11,11 @@ module;
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Physics/PhysicsHandles.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -184,17 +184,17 @@ struct alignas(64) RigBoneMap {
     int32_t                               springPoseTrack         = -1;
     bool                                  springPoseInitialized   = false;
 
-    AssetID sourcePrefabAsset            = InvalidAssetID;
-    size_t  nodeCount                    = 0;
-    size_t  sourceHairStrandCount        = 0;
-    uint32_t jointOffset                 = 0;
-    uint32_t jointCount                  = 0;
-    int32_t  skeletonIndex               = -1;
-    uint64_t poseVersion                 = 0;
-    size_t   synchronizedAttachmentCount = 0;
+    AssetID  sourcePrefabAsset            = InvalidAssetID;
+    size_t   nodeCount                    = 0;
+    size_t   sourceHairStrandCount        = 0;
+    uint32_t jointOffset                  = 0;
+    uint32_t jointCount                   = 0;
+    int32_t  skeletonIndex                = -1;
+    uint64_t poseVersion                  = 0;
+    size_t   synchronizedAttachmentCount  = 0;
     size_t   synchronizedSkinPaletteCount = 0;
-    bool     initialized                 = false;
-    bool     poseValid                   = false;
+    bool     initialized                  = false;
+    bool     poseValid                    = false;
     // Baked control rigs animate CTR/FK/IK/MCH/ORG and DEF nodes together.
     // Filtering only the semantic DEF nodes through independent springs breaks
     // those authored relationships, so their complete hierarchy is sampled as
@@ -215,14 +215,14 @@ static_assert(std::is_trivially_copyable_v<RigBoneMap>, "RigBoneMap must remain 
  * when the character crosses a speed threshold.
  */
 struct GaitPreset {
-    float strideLength       = 1.60f;
-    float stepHeight         = 0.28f;
-    float maxBounceHeight    = 0.025f;
-    float bounceGravity      = 9.81f;
-    float pelvisSwayScale    = 0.30f;  // Reduced default - human locomotion has minimal sway
-    float armSwingScale      = 1.0f;
-    float forwardLeanScale   = 1.0f;
-    float lateralBankScale   = 1.0f;
+    float strideLength     = 1.60f;
+    float stepHeight       = 0.28f;
+    float maxBounceHeight  = 0.025f;
+    float bounceGravity    = 9.81f;
+    float pelvisSwayScale  = 0.30f; // Reduced default - human locomotion has minimal sway
+    float armSwingScale    = 1.0f;
+    float forwardLeanScale = 1.0f;
+    float lateralBankScale = 1.0f;
 };
 
 /** Parametric gait state, including persistent world-space foot locks. */
@@ -238,10 +238,10 @@ struct ProceduralLocomotionComponent {
     // override it directly for crouch, sneak, or wounded gaits.
     GaitPreset currentPreset {};
     GaitPreset targetPreset {};
-    float      gaitBlendWeight = 0.0f;
-    float      gaitBlendSpeed  = 2.0f; // Slower blend for more visible transitions
+    float      gaitBlendWeight  = 0.0f;
+    float      gaitBlendSpeed   = 2.0f; // Slower blend for more visible transitions
     float      pelvisSwayScale  = 1.0f;
-    float      armSwingScale   = 1.0f;
+    float      armSwingScale    = 1.0f;
     float      forwardLeanScale = 1.0f;
     float      lateralBankScale = 1.0f;
 
@@ -505,8 +505,8 @@ struct ProceduralLocomotionTracksComponent {
     float   prevPlaybackSpeed = 1.0f;
     float   blendFactor       = 1.0f;
 
-    float movementThreshold        = 0.08f;
-    float runSpeedThreshold        = 3.20f;
+    float movementThreshold = 0.08f;
+    float runSpeedThreshold = 3.20f;
     // Hysteresis state for the walk/run switch (see SynchronizeLocomotionTrack):
     // once running, speed must drop below the threshold minus the dead band to
     // fall back to walk, so holding Shift on the boundary cannot flap the state

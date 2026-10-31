@@ -28,16 +28,19 @@ auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
     for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
         reg.Patch<Components::LightComponent>(e, [&](const auto& light) {
             if (light.type != LightType::Sun) return;
-            if (light.direction.LengthSq() > 1e-4f) {
-                sun.direction = light.direction;
+            const JPH::Vec3 direction = light.direction;
+            if (direction.LengthSq() > 1e-4f) {
+                sun.direction = direction;
             } else if (!reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
-                           sun.direction = worldTrans.world.GetColumn3(2);
+                           const JPH::Mat44 world = worldTrans.world;
+                           sun.direction          = world.GetColumn3(2);
                        })) {
                 reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) { sun.direction = trans.GetLocalMatrix().GetColumn3(2); });
             }
             sun.intensity = light.intensity;
             // Preserve the white legacy default for tag-only sun entities.
-            sun.color = light.color.LengthSq() > 1e-8f ? light.color : JPH::Vec3::sReplicate(1.0f);
+            const JPH::Vec3 color = light.color;
+            sun.color             = color.LengthSq() > 1e-8f ? color : JPH::Vec3::sReplicate(1.0f);
             sun.fromEnvironment = reg.Get<Components::EnvironmentSunTagComponent>(e).has_value();
             found = true;
         });
@@ -48,12 +51,17 @@ auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
         const auto sunEntities = reg.GetEntitiesWith<Components::SunTagComponent>();
         if (!sunEntities.empty()) {
             const Entity sunEnt = sunEntities[0];
-            if (!reg.Patch<Components::WorldTransformComponent>(sunEnt, [&](const auto& worldTrans) { sun.direction = worldTrans.world.GetColumn3(2); })) {
+            if (!reg.Patch<Components::WorldTransformComponent>(sunEnt, [&](const auto& worldTrans) {
+                    const JPH::Mat44 world = worldTrans.world;
+                    sun.direction          = world.GetColumn3(2);
+                })) {
                 reg.Patch<Components::TransformComponent>(sunEnt, [&](const auto& trans) { sun.direction = trans.GetLocalMatrix().GetColumn3(2); });
             }
             reg.Patch<Components::LightComponent>(sunEnt, [&](const auto& light) {
-                sun.intensity = light.intensity;
-                if (light.color.LengthSq() > 1e-8f) sun.color = light.color;
+                sun.intensity         = light.intensity;
+                const JPH::Vec3 color = light.color;
+                if (color.LengthSq() > 1e-8f)
+                    sun.color = color;
             });
         }
     }
@@ -114,20 +122,24 @@ void LightingSystem::Update(ECS::Query<const Components::LightComponent, const C
 
             JPH::Vec3 lightPos    = JPH::Vec3::sZero();
             bool      hasLightPos = query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
-                lightPos = worldTrans.world.GetTranslation();
+                const JPH::Mat44 world = worldTrans.world;
+                lightPos               = world.GetTranslation();
             });
             if (!hasLightPos) {
                 hasLightPos = query.Patch<Components::TransformComponent>(e, [&](const auto& trans) { lightPos = trans.position; });
             }
             if (!hasLightPos && light.type == LightType::Area) {
-                lightPos    = 0.25f * (light.points.GetColumn3(0) + light.points.GetColumn3(1) + light.points.GetColumn3(2) + light.points.GetColumn3(3));
-                hasLightPos = true;
+                const JPH::Mat44 quad = light.points;
+                lightPos              = 0.25f * (quad.GetColumn3(0) + quad.GetColumn3(1) + quad.GetColumn3(2) + quad.GetColumn3(3));
+                hasLightPos           = true;
             }
             desc.position = lightPos;
 
-            if (light.type == LightType::Spot && desc.direction.LengthSq() <= 1e-8f) {
+            const JPH::Vec3 direction = desc.direction;
+            if (light.type == LightType::Spot && direction.LengthSq() <= 1e-8f) {
                 if (!query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
-                        desc.direction = worldTrans.world.GetColumn3(2);
+                        const JPH::Mat44 world = worldTrans.world;
+                        desc.direction         = world.GetColumn3(2);
                     })) {
                     query.Patch<Components::TransformComponent>(e, [&](const auto& trans) {
                         desc.direction = trans.GetLocalMatrix().GetColumn3(2);

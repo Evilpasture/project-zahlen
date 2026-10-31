@@ -553,7 +553,7 @@ struct RenderPipelinesTestSuite {
 
                 ZHLN::Println(
                     "    [INFO] {}: transform Y {:.3f} | physics state {} | body {} | raycast {} | engine frame {}", which,
-                    trans ? trans->position.GetY() : -1.0f, stateText, body,
+                    trans ? trans->position.y : -1.0f, stateText, body,
                     hit.hasHit ? std::format("hit at Y {:.3f}", static_cast<float>(hit.position.GetY())) : std::string("no hit"), eng.GetCurrentFrame()
                 );
             };
@@ -600,7 +600,7 @@ struct RenderPipelinesTestSuite {
             }
             reportFall(*first, falling, "engine A box");
             if (const auto transform = first->GetRegistry().Get<ZHLN::Components::TransformComponent>(falling); ZHLN::Test::ExpectTrue(transform.has_value())) {
-                ZHLN::Test::ExpectLt(transform->position.GetY(), 7.5f);
+                ZHLN::Test::ExpectLt(transform->position.y, 7.5f);
             }
 
             // 3. Destroying A releases the slot, and B gets a working engine --
@@ -624,7 +624,7 @@ struct RenderPipelinesTestSuite {
             reportFall(*second, fallingB, "engine B box");
             if (const auto transform = second->GetRegistry().Get<ZHLN::Components::TransformComponent>(fallingB);
                 ZHLN::Test::ExpectTrue(transform.has_value())) {
-                ZHLN::Test::ExpectLt(transform->position.GetY(), 7.5f);
+                ZHLN::Test::ExpectLt(transform->position.y, 7.5f);
             }
 
             second.reset();

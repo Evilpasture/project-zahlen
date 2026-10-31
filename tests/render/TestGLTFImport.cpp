@@ -1665,7 +1665,7 @@ struct GLTFImportTestSuite {
                 if (part == nullptr)
                     return std::unexpected(GLTFImportError::NegativeScaleMismatch);
                 const bool sourceMirrored = SourceWorld(source.data->nodes[static_cast<size_t>(part->nodeIndex)]).GetDeterminant3x3() < 0.0f;
-                if ((world->world.GetDeterminant3x3() < 0.0f) != sourceMirrored) {
+                if ((JPH::Mat44(world->world).GetDeterminant3x3() < 0.0f) != sourceMirrored) {
                     return std::unexpected(GLTFImportError::NegativeScaleMismatch);
                 }
                 ++matched;
@@ -1719,7 +1719,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const auto& transform = mat.textureTransforms[transSlot];
-            if (transform.texCoord != 1u || transform.offset != JPH::Float2 {0.25f, -0.25f} || transform.scale != JPH::Float2 {2.0f, 0.5f} ||
+            if (transform.texCoord != 1u || transform.offset != ZHLN::Float2 {0.25f, -0.25f} || transform.scale != ZHLN::Float2 {2.0f, 0.5f} ||
                 std::abs(transform.rotation - 1.5707963f) > 1e-5f || mat.textureTransforms[albedoSlot].texCoord != 0u) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1749,10 +1749,10 @@ struct GLTFImportTestSuite {
             const auto& sheenColor     = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::SheenColor)];
             const auto& sheenRoughness = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::SheenRoughness)];
             const auto& occlusion      = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Occlusion)];
-            if (albedo.texCoord != 1u || albedo.offset != JPH::Float2 {0.2f, 0.4f} || albedo.scale != JPH::Float2 {2.0f, -3.0f} ||
-                std::abs(albedo.rotation - 1.5707963f) > 1e-5f || pbr.texCoord != 0u || pbr.scale != JPH::Float2 {30.0f, -30.0f} || normal != pbr ||
-                sheenColor.texCoord != 0u || sheenColor.scale != JPH::Float2 {4.0f, -5.0f} || sheenRoughness.texCoord != 1u ||
-                sheenRoughness.scale != JPH::Float2 {1.0f, 1.0f} || occlusion.scale != JPH::Float2 {1.0f, 1.0f}) {
+            if (albedo.texCoord != 1u || albedo.offset != ZHLN::Float2 {0.2f, 0.4f} || albedo.scale != ZHLN::Float2 {2.0f, -3.0f} ||
+                std::abs(albedo.rotation - 1.5707963f) > 1e-5f || pbr.texCoord != 0u || pbr.scale != ZHLN::Float2 {30.0f, -30.0f} || normal != pbr ||
+                sheenColor.texCoord != 0u || sheenColor.scale != ZHLN::Float2 {4.0f, -5.0f} || sheenRoughness.texCoord != 1u ||
+                sheenRoughness.scale != ZHLN::Float2 {1.0f, 1.0f} || occlusion.scale != ZHLN::Float2 {1.0f, 1.0f}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             // A positive rotation in top-left-origin UV space moves +U toward
@@ -1869,10 +1869,13 @@ struct GLTFImportTestSuite {
             // within a unit box at the origin, so a spawn four metres away must
             // not show up in the light's own TransformComponent.
             const auto glowLocal = registry.Get<ZHLN::Components::TransformComponent>(glowEntity);
-            if (!glowLocal || glowLocal->position.Length() > 2.0f) {
+            if (!glowLocal) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
             const JPH::Vec3 localOffset = glowLocal->position;
+            if (localOffset.Length() > 2.0f) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
 
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
@@ -1880,7 +1883,7 @@ struct GLTFImportTestSuite {
             if (!glowWorld) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            const JPH::Vec3 restingPosition = glowWorld->world.GetTranslation();
+            const JPH::Vec3 restingPosition = JPH::Mat44(glowWorld->world).GetTranslation();
             if (!restingPosition.IsClose(spawnPosition + localOffset, 0.001f)) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
@@ -1894,20 +1897,23 @@ struct GLTFImportTestSuite {
             }
             // Write the public field directly: transform propagation must not
             // depend on a setter, Patch hook, or caller-maintained dirty bit.
-            rootTransform->position += delta;
+            rootTransform->position = JPH::Vec3(rootTransform->position) + delta;
 
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
             const auto movedWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(glowEntity);
-            if (!movedWorld || !movedWorld->world.GetTranslation().IsClose(restingPosition + delta, 0.001f) ||
-                !movedWorld->previous.GetTranslation().IsClose(movedWorld->world.GetTranslation(), 0.001f)) {
+            if (!movedWorld) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
+            const JPH::Vec3 movedGlowPos = JPH::Mat44(movedWorld->world).GetTranslation();
+            const JPH::Vec3 movedGlowPrev = JPH::Mat44(movedWorld->previous).GetTranslation();
+            if (!movedGlowPos.IsClose(restingPosition + delta, 0.001f) || !movedGlowPrev.IsClose(movedGlowPos, 0.001f)) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
 
             // A direct world-matrix write on a transformed parent must preserve
             // that parent output and dirty its descendants, even though local TRS
             // is unchanged. This exercises root -> transformless bridge -> part -> light.
-            const JPH::Vec3 movedGlowPosition = movedWorld->world.GetTranslation();
             const JPH::Vec3 parentWorldDelta(0.5f, 0.0f, 0.0f);
             auto            rootWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(rootEntity);
             if (!rootWorld) {
@@ -1919,8 +1925,12 @@ struct GLTFImportTestSuite {
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
             const auto parentMovedGlow = registry.Get<ZHLN::Components::WorldTransformComponent>(glowEntity);
-            if (!parentMovedGlow || !parentMovedGlow->world.GetTranslation().IsClose(movedGlowPosition + parentWorldDelta, 0.001f) ||
-                !parentMovedGlow->previous.GetTranslation().IsClose(parentMovedGlow->world.GetTranslation(), 0.001f)) {
+            if (!parentMovedGlow) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
+            const JPH::Vec3 parentMovedPos  = JPH::Mat44(parentMovedGlow->world).GetTranslation();
+            const JPH::Vec3 parentMovedPrev = JPH::Mat44(parentMovedGlow->previous).GetTranslation();
+            if (!parentMovedPos.IsClose(movedGlowPos + parentWorldDelta, 0.001f) || !parentMovedPrev.IsClose(parentMovedPos, 0.001f)) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
 
@@ -1943,9 +1953,15 @@ struct GLTFImportTestSuite {
 
             const auto syncedGlowWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(glowEntity);
             const auto syncedWorldOnly = registry.Get<ZHLN::Components::WorldTransformComponent>(worldOnlyEntity);
-            if (!syncedGlowWorld || !syncedWorldOnly || !syncedGlowWorld->world.GetTranslation().IsClose(externallyMovedGlow.GetTranslation(), 0.001f) ||
-                !syncedGlowWorld->previous.GetTranslation().IsClose(externallyMovedGlow.GetTranslation(), 0.001f) ||
-                !syncedWorldOnly->previous.GetTranslation().IsClose(currentWorldOnly.GetTranslation(), 0.001f)) {
+            if (!syncedGlowWorld || !syncedWorldOnly) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
+            const JPH::Vec3 externallyMovedGlowPos = externallyMovedGlow.GetTranslation();
+            const JPH::Vec3 syncedGlowPos          = JPH::Mat44(syncedGlowWorld->world).GetTranslation();
+            const JPH::Vec3 syncedGlowPrev         = JPH::Mat44(syncedGlowWorld->previous).GetTranslation();
+            const JPH::Vec3 syncedOnlyPrev         = JPH::Mat44(syncedWorldOnly->previous).GetTranslation();
+            if (!syncedGlowPos.IsClose(externallyMovedGlowPos, 0.001f) || !syncedGlowPrev.IsClose(externallyMovedGlowPos, 0.001f) ||
+                !syncedOnlyPrev.IsClose(currentWorldOnly.GetTranslation(), 0.001f)) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
 

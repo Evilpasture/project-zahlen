@@ -425,8 +425,8 @@ struct TwoBoneIKTestSuite {
             if (!ZHLN::Test::ExpectTrue(animAfter.has_value()) || !ZHLN::Test::ExpectTrue(animAfter->isFinished) ||
                 !ZHLN::Test::ExpectEq(idleMorph->weights[0], 1.0f) || !ZHLN::Test::ExpectEq(idleMorph->weights[1], 0.75f) ||
                 !ZHLN::Test::ExpectTrue(rigidTr.has_value()) ||
-                !ZHLN::Test::ExpectTrue(rigidTr->position.IsClose(JPH::Vec3(0.0f, 2.0f, 4.5f), 1.0e-4f)) ||
-                !ZHLN::Test::ExpectTrue(skinnedTr->position.IsClose(JPH::Vec3(7.0f, 8.0f, 9.0f), 1.0e-4f))) {
+                !ZHLN::Test::ExpectTrue(JPH::Vec3(rigidTr->position).IsClose(JPH::Vec3(0.0f, 2.0f, 4.5f), 1.0e-4f)) ||
+                !ZHLN::Test::ExpectTrue(JPH::Vec3(skinnedTr->position).IsClose(JPH::Vec3(7.0f, 8.0f, 9.0f), 1.0e-4f))) {
                 return std::unexpected(TwoBoneIKTestError::ECSBridgeFailed);
             }
             return {};
@@ -510,7 +510,7 @@ struct TwoBoneIKTestSuite {
             const auto modelPose = animCtx.ModelPose(animComp->animationHandle);
             if (!ZHLN::Test::ExpectEq(modelPose.size(), static_cast<size_t>(4)) ||
                 !ZHLN::Test::ExpectTrue(modelPose[2].GetTranslation().IsClose(JPH::Vec3(0.0f, 2.0f, 2.8f), 1.0e-3f)) ||
-                !ZHLN::Test::ExpectTrue(fingerTr->position.IsClose(JPH::Vec3(0.0f, 2.0f, 3.3f), 1.0e-3f))) {
+                !ZHLN::Test::ExpectTrue(JPH::Vec3(fingerTr->position).IsClose(JPH::Vec3(0.0f, 2.0f, 3.3f), 1.0e-3f))) {
                 return std::unexpected(TwoBoneIKTestError::ECSBridgeFailed);
             }
             return {};

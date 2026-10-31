@@ -221,7 +221,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         reg.Patch<Components::TransformComponent>(s_CubeEntity, [&](auto& trans) -> auto {
             JPH::Vec3 euler(s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f);
             trans.rotation = Math::EulerDegreesToQuat(euler);
-            trans.position.SetY(2.0f + std::sin(s_AccumTime * 2.0f) * 0.25f);
+            trans.position.y = 2.0f + std::sin(s_AccumTime * 2.0f) * 0.25f;
         });
 
         reg.Patch<Components::TransformComponent>(s_PointLight, [&](auto& trans) -> auto {

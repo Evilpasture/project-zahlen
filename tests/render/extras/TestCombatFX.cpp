@@ -121,9 +121,9 @@ struct CombatFXTestSuite {
                 }
 
                 // Verify decal was placed at hit position
-                ZHLN::Test::ExpectEq(transComp->position.GetX(), hitPos1.GetX());
-                ZHLN::Test::ExpectEq(transComp->position.GetY(), hitPos1.GetY());
-                ZHLN::Test::ExpectEq(transComp->position.GetZ(), hitPos1.GetZ());
+                ZHLN::Test::ExpectEq(transComp->position.x, hitPos1.GetX());
+                ZHLN::Test::ExpectEq(transComp->position.y, hitPos1.GetY());
+                ZHLN::Test::ExpectEq(transComp->position.z, hitPos1.GetZ());
                 ZHLN::Test::ExpectTrue(decalComp->albedoMap != ZHLN::TextureHandle::Invalid);
             }
 

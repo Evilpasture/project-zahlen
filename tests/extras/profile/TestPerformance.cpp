@@ -346,7 +346,7 @@ struct PerformanceTestSuite {
 
                                      for (size_t frame = 0; frame < 10; ++frame) {
                                          for (size_t i = 0; i < healths.size(); ++i) {
-                                             trans[i].position.SetX(trans[i].position.GetX() + moves[i].speed * 0.016f);
+                                             trans[i].position.x += moves[i].speed * 0.016f;
                                              healths[i].currentHealth = std::min(healths[i].maxHealth, healths[i].currentHealth + 0.1f);
                                          }
                                      }
@@ -741,7 +741,7 @@ struct PerformanceTestSuite {
                                          // Raycast to probe surrounding terrain & dynamic obstacles
                                          JPH::Vec3  forward(std::sin(static_cast<float>(frame + i) * 0.05f), 0.0f, std::cos(static_cast<float>(frame + i) * 0.05f));
                                          const auto rayHit =
-                                             physicsContext.Raycast(trans->position + JPH::Vec3(0, 0.5f, 0), forward, 10.0f, phys->physicsHandle);
+                                             physicsContext.Raycast(JPH::Vec3(trans->position) + JPH::Vec3(0, 0.5f, 0), forward, 10.0f, phys->physicsHandle);
                                          totalRaysCast.fetch_add(1, std::memory_order::relaxed);
 
                                          if (rayHit.hasHit) {

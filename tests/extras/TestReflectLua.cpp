@@ -279,7 +279,7 @@ struct ReflectLuaSuite {
             !vecOk) {
             return std::unexpected(LuaSuiteFail::UnexpectedError);
         }
-        if (!Near(postComp.exposure, 1.5f) || !Near(postComp.colorFilter.GetY(), 0.8f) || !Near(postComp.skyZenith.GetZ(), 0.3f)) {
+        if (!Near(postComp.exposure, 1.5f) || !Near(postComp.colorFilter.y, 0.8f) || !Near(postComp.skyZenith.z, 0.3f)) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
 

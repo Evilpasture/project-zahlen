@@ -65,7 +65,7 @@ auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view pa
 
 struct SpawnParams {
     ZHLN::Double3 position {};
-    JPH::Quat     rotation = JPH::Quat::sIdentity();
+    ZHLN::Float4  rotation {0.0f, 0.0f, 0.0f, 1.0f};
     ZHLN::Float3  scale {1.0f, 1.0f, 1.0f};
 
     bool     createPhysics   = false;

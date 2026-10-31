@@ -5,11 +5,11 @@
 
 // Zahlen/Math/ValueTypes.hpp
 //
-// The three value types the engine's public surface is spelled in: Float3,
-// Float4 and Double3. They hold the same members, in the same order, as the Jolt
-// storage classes of the same names, and convert to and from them -- and to and
-// from the SIMD classes Vec3, Vec4, Quat and RVec3 -- implicitly, in both
-// directions.
+// The six value types the engine's public surface is spelled in: Float2, Float3,
+// Float4, Double3, Quat and Mat44. They hold the same members, in the same order,
+// as the Jolt storage classes of the same names, and convert to and from them --
+// and to and from the SIMD classes Vec3, Vec4, Quat and RVec3 -- implicitly, in
+// both directions.
 //
 // Why these exist
 // ---------------
@@ -29,9 +29,16 @@
 // What they are not
 // -----------------
 // No arithmetic. This is the storage spelling of a vector, not a maths library:
-// a calculation loads a Vec3/RVec3 where it is written. And no new members: an
-// addition here changes the size of every aggregate and every buffer element that
-// embeds one, which the static_asserts at the bottom of this file would catch.
+// a calculation loads a Vec3/RVec3 where it is written, and a matrix multiplies
+// as a Mat44. No operator+, no Dot, no Normalized, no operator* on Mat44. And no
+// new members: an addition here changes the size of every aggregate and every
+// buffer element that embeds one, which the static_asserts at the bottom of this
+// file would catch.
+//
+// Quat and Mat44 are here for a second reason. A rotation and a colour are the
+// same sixteen bytes, and a transform is the same sixty-four bytes Jolt hands the
+// shaders; naming them in public headers is what lets include/Zahlen stop
+// depending on Jolt's headers for the shapes it stores.
 //
 // Two rules follow from a type that converts to several Jolt types at once
 // ----------------------------------------------------------------------
@@ -51,8 +58,10 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Math/Double3.h>
+#include <Jolt/Math/Float2.h>
 #include <Jolt/Math/Float3.h>
 #include <Jolt/Math/Float4.h>
+#include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Real.h>
 #include <Jolt/Math/Vec3.h>
@@ -62,6 +71,32 @@
 namespace ZHLN {
 
 class Double3;
+
+// Two floats, 8 bytes: UV offsets and scales, 2D sizes, extents. Jolt has no Vec2,
+// so this is the one type in the file with no SIMD counterpart to convert to: a
+// JPH::Float2 is the only other spelling of the same eight bytes.
+class [[nodiscard]] Float2 {
+  public:
+    float x = 0.0f;
+    float y = 0.0f;
+
+    constexpr Float2() noexcept = default;
+    constexpr Float2(float inX, float inY) noexcept: x(inX), y(inY) {
+    }
+
+    Float2(JPH::Float2 inV) noexcept: x(inV.x), y(inV.y) {
+    }
+
+    operator JPH::Float2() const noexcept {
+        return JPH::Float2 {x, y};
+    }
+
+    [[nodiscard]] constexpr auto operator[](int inCoordinate) const noexcept -> float {
+        return inCoordinate == 0 ? x : y;
+    }
+
+    bool operator==(const Float2&) const = default;
+};
 
 // Three floats, 12 bytes: positions, extents, directions, normals.
 class [[nodiscard]] Float3 {
@@ -257,20 +292,128 @@ class [[nodiscard]] Double3 {
 #endif
 };
 
+// Four floats, 16 bytes, xyzw: a rotation. The same bytes as Float4 and a
+// different meaning, which is the reason the type exists -- a signature that takes
+// a Quat cannot be handed a colour, and a caller holding a Quat does not have to
+// remember whether this parameter is quaternion-first or colour-first.
+//
+// The default is the identity rotation, (0, 0, 0, 1), which is also Jolt's.
+class [[nodiscard]] alignas(alignof(JPH::Quat)) Quat {
+  public:
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float w = 1.0f;
+
+    constexpr Quat() noexcept = default;
+    constexpr Quat(float inX, float inY, float inZ, float inW) noexcept: x(inX), y(inY), z(inZ), w(inW) {
+    }
+
+    Quat(JPH::QuatArg inQ) noexcept {
+        const JPH::Float4 pod = Load(inQ);
+        x                     = pod.x;
+        y                     = pod.y;
+        z                     = pod.z;
+        w                     = pod.w;
+    }
+
+    operator JPH::Quat() const noexcept {
+        return JPH::Quat(JPH::Float4 {x, y, z, w});
+    }
+
+    [[nodiscard]] constexpr auto operator[](int inCoordinate) const noexcept -> float {
+        switch (inCoordinate) {
+            case 0:
+                return x;
+            case 1:
+                return y;
+            case 2:
+                return z;
+            default:
+                return w;
+        }
+    }
+
+    bool operator==(const Quat&) const = default;
+
+  private:
+    [[nodiscard]] static auto Load(JPH::QuatArg inQ) noexcept -> JPH::Float4 {
+        JPH::Float4 pod;
+        inQ.StoreFloat4(&pod);
+        return pod;
+    }
+};
+
+// Sixteen floats, 64 bytes, column-major: the storage of a transform, in the order
+// Jolt stores it and the shaders read it, so a field that becomes a Mat44 does not
+// change a single byte of any upload.
+//
+// sIdentity and sZero are construction, not arithmetic: they exist because a
+// storage field needs a default, and `Mat44 transform = ZHLN::Mat44::sIdentity()`
+// is what the declaration it replaces already said.
+class [[nodiscard]] alignas(alignof(JPH::Mat44)) Mat44 {
+  public:
+    // Element (row r, column c) is column[c][r]; the four floats of a column are
+    // what a shader reads as one float4.
+    Float4 column[4] {};
+
+    constexpr Mat44() noexcept = default;
+
+    Mat44(const JPH::Mat44& inM) noexcept {
+        for (int index = 0; index < 4; ++index) {
+            column[index] = FromColumn(inM, index);
+        }
+    }
+
+    operator JPH::Mat44() const noexcept {
+        return JPH::Mat44(ToColumn(0), ToColumn(1), ToColumn(2), ToColumn(3));
+    }
+
+    [[nodiscard]] static constexpr auto sIdentity() noexcept -> Mat44 {
+        Mat44 out {};
+        out.column[0].x = 1.0f;
+        out.column[1].y = 1.0f;
+        out.column[2].z = 1.0f;
+        out.column[3].w = 1.0f;
+        return out;
+    }
+    [[nodiscard]] static constexpr auto sZero() noexcept -> Mat44 {
+        return Mat44 {};
+    }
+
+    bool operator==(const Mat44&) const = default;
+
+  private:
+    [[nodiscard]] static auto FromColumn(const JPH::Mat44& inM, int inIndex) noexcept -> Float4 {
+        JPH::Float4 pod;
+        inM.GetColumn4(inIndex).StoreFloat4(&pod);
+        return Float4(pod.x, pod.y, pod.z, pod.w);
+    }
+    [[nodiscard]] auto ToColumn(int inIndex) const noexcept -> JPH::Vec4 {
+        const Float4& source = column[inIndex];
+        return JPH::Vec4(source.x, source.y, source.z, source.w);
+    }
+};
+
 inline Float3::Float3(const Double3& inV) noexcept: x(static_cast<float>(inV.x)), y(static_cast<float>(inV.y)), z(static_cast<float>(inV.z)) {
 }
 
 // The conversions above are only correct if the storage is. These fail here, once,
 // instead of reading past a member at a call site.
+static_assert(sizeof(Float2) == sizeof(JPH::Float2) && alignof(Float2) == alignof(JPH::Float2), "Float2 must stay layout-identical to JPH::Float2");
 static_assert(sizeof(Float3) == sizeof(JPH::Float3) && alignof(Float3) == alignof(JPH::Float3), "Float3 must stay layout-identical to JPH::Float3");
 static_assert(sizeof(Float4) == sizeof(JPH::Float4) && alignof(Float4) == alignof(JPH::Float4), "Float4 must stay layout-identical to JPH::Float4");
 static_assert(sizeof(Double3) == sizeof(JPH::Double3) && alignof(Double3) == alignof(JPH::Double3), "Double3 must stay layout-identical to JPH::Double3");
+static_assert(sizeof(Quat) == sizeof(JPH::Quat) && alignof(Quat) == alignof(JPH::Quat), "Quat must stay layout-identical to JPH::Quat");
+static_assert(sizeof(Mat44) == sizeof(JPH::Mat44) && alignof(Mat44) == alignof(JPH::Mat44), "Mat44 must stay layout-identical to JPH::Mat44");
 static_assert(
-    std::is_trivially_copyable_v<Float3> && std::is_trivially_copyable_v<Float4> && std::is_trivially_copyable_v<Double3>,
+    std::is_trivially_copyable_v<Float2> && std::is_trivially_copyable_v<Float3> && std::is_trivially_copyable_v<Float4> &&
+        std::is_trivially_copyable_v<Double3> && std::is_trivially_copyable_v<Quat> && std::is_trivially_copyable_v<Mat44>,
     "value types cross the boundary by value and must stay trivially copyable"
 );
 static_assert(
-    std::is_standard_layout_v<Float3> && std::is_standard_layout_v<Float4> && std::is_standard_layout_v<Double3>,
+    std::is_standard_layout_v<Float2> && std::is_standard_layout_v<Float3> && std::is_standard_layout_v<Float4> && std::is_standard_layout_v<Double3> &&
+        std::is_standard_layout_v<Quat> && std::is_standard_layout_v<Mat44>,
     "value types stand in for the Jolt storage classes and must stay standard-layout"
 );
 

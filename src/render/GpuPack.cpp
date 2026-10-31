@@ -3,6 +3,8 @@
 
 #include "GpuPack.hpp"
 
+#include <Zahlen/Math/ValueTypes.hpp>
+
 namespace ZHLN::GpuPack {
 
 static_assert(
@@ -34,24 +36,24 @@ auto PackMeshlet(const MeshletDesc& desc) noexcept -> GPUMeshlet {
 auto PackParticleEmitter(const ParticleEmitterDesc& desc, uint32_t textureIndex, uint32_t blendMode) noexcept -> ParticleEmitterParams {
     ParticleEmitterParams packed {};
 
-    desc.gravity.StoreFloat3(&packed.gravity);
-    packed.drag = desc.drag;
+    packed.gravity = desc.gravity;
+    packed.drag    = desc.drag;
 
-    desc.turbulence.StoreFloat3(&packed.turbulence);
+    packed.turbulence     = desc.turbulence;
     packed.turbulenceFreq = desc.turbulenceFreq;
 
-    desc.spawnOrigin.StoreFloat3(&packed.spawnOrigin);
-    packed.spawnRadius = desc.spawnRadius;
-    desc.spawnBoxExtent.StoreFloat3(&packed.spawnBoxExtent);
-    packed.loopBoundary = desc.loopBoundary;
+    packed.spawnOrigin    = desc.spawnOrigin;
+    packed.spawnRadius    = desc.spawnRadius;
+    packed.spawnBoxExtent = desc.spawnBoxExtent;
+    packed.loopBoundary   = desc.loopBoundary;
 
-    desc.initVelMin.StoreFloat3(&packed.initVelMin);
+    packed.initVelMin  = desc.initVelMin;
     packed.lifetimeMin = desc.lifetimeMin;
-    desc.initVelMax.StoreFloat3(&packed.initVelMax);
+    packed.initVelMax  = desc.initVelMax;
     packed.lifetimeMax = desc.lifetimeMax;
 
-    desc.startColor.StoreFloat4(&packed.startColor);
-    desc.endColor.StoreFloat4(&packed.endColor);
+    packed.startColor = desc.startColor;
+    packed.endColor   = desc.endColor;
     packed.startSize = desc.startSize;
     packed.endSize   = desc.endSize;
 
@@ -67,29 +69,29 @@ auto PackParticleEmitter(const ParticleEmitterDesc& desc, uint32_t textureIndex,
 auto PackMeshParticleEmitter(const MeshParticleEmitterDesc& desc) noexcept -> MeshParticleEmitterParams {
     MeshParticleEmitterParams packed {};
 
-    desc.gravity.StoreFloat3(&packed.gravity);
-    packed.drag = desc.drag;
+    packed.gravity = desc.gravity;
+    packed.drag    = desc.drag;
 
-    desc.turbulence.StoreFloat3(&packed.turbulence);
+    packed.turbulence     = desc.turbulence;
     packed.turbulenceFreq = desc.turbulenceFreq;
 
-    desc.spawnOrigin.StoreFloat3(&packed.spawnOrigin);
-    packed.spawnRadius = desc.spawnRadius;
-    desc.spawnBoxExtent.StoreFloat3(&packed.spawnBoxExtent);
-    packed.loopBoundary = desc.loopBoundary;
+    packed.spawnOrigin    = desc.spawnOrigin;
+    packed.spawnRadius    = desc.spawnRadius;
+    packed.spawnBoxExtent = desc.spawnBoxExtent;
+    packed.loopBoundary   = desc.loopBoundary;
 
-    desc.initVelMin.StoreFloat3(&packed.initVelMin);
+    packed.initVelMin  = desc.initVelMin;
     packed.lifetimeMin = desc.lifetimeMin;
-    desc.initVelMax.StoreFloat3(&packed.initVelMax);
+    packed.initVelMax  = desc.initVelMax;
     packed.lifetimeMax = desc.lifetimeMax;
 
-    desc.rotVelMin.StoreFloat3(&packed.rotVelMin);
-    packed.scaleMin = desc.scaleMin;
-    desc.rotVelMax.StoreFloat3(&packed.rotVelMax);
-    packed.scaleMax = desc.scaleMax;
+    packed.rotVelMin = desc.rotVelMin;
+    packed.scaleMin  = desc.scaleMin;
+    packed.rotVelMax = desc.rotVelMax;
+    packed.scaleMax  = desc.scaleMax;
 
-    desc.startColor.StoreFloat4(&packed.startColor);
-    desc.endColor.StoreFloat4(&packed.endColor);
+    packed.startColor = desc.startColor;
+    packed.endColor   = desc.endColor;
 
     return packed;
 }
@@ -105,9 +107,9 @@ auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t sha
     packed.range          = (desc.range > 0.0f) ? desc.range : 1000.0f;
     packed.shadowTileBase = shadowTileBase;
 
-    desc.position.StoreFloat3(&packed.position);
-    desc.direction.StoreFloat3(&packed.direction);
-    desc.color.StoreFloat3(&packed.color);
+    packed.position  = desc.position;
+    packed.direction = desc.direction;
+    packed.color     = desc.color;
 
     if (desc.type == LightType::Spot && desc.outerConeRadians > 0.0f) {
         const float outer   = std::min(desc.outerConeRadians, JPH::JPH_PI * 0.5f);
@@ -119,11 +121,14 @@ auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t sha
         packed.outerConeCos = -1.0f;
     }
 
-    JPH::Vec4(worldToView * desc.position, 1.0f).StoreFloat4(&packed.positionView);
+    const JPH::Vec3 position = desc.position;
+    JPH::Vec4(worldToView * position, 1.0f).StoreFloat4(&packed.positionView);
 
     if (desc.type == LightType::Area) {
+        const JPH::Mat44 quad = desc.points;
         for (uint32_t column = 0; column < 4; ++column) {
-            desc.points.GetColumn4(column).StoreFloat4(&packed.points[column]);
+            const ZHLN::Float4 lane = quad.GetColumn4(column);
+            packed.points[column]   = lane;
         }
     }
 
@@ -138,15 +143,15 @@ auto PackFrameData(const FrameData& frame) noexcept -> FrameUniforms {
     packed.prevUnjitteredViewProj = frame.prevUnjitteredViewProj;
     packed.invViewProj            = frame.invViewProj;
 
-    packed.camPos      = JPH::Float4 {frame.camPosition.GetX(), frame.camPosition.GetY(), frame.camPosition.GetZ(), frame.frameClock};
-    packed.lightDir    = JPH::Float4 {frame.sunDirection.GetX(), frame.sunDirection.GetY(), frame.sunDirection.GetZ(), frame.sunIntensity};
-    packed.sunRadiance = JPH::Float4 {frame.sunRadiance.GetX(), frame.sunRadiance.GetY(), frame.sunRadiance.GetZ(), 0.0f};
+    packed.camPos      = JPH::Float4 {frame.camPosition.x, frame.camPosition.y, frame.camPosition.z, frame.frameClock};
+    packed.lightDir    = JPH::Float4 {frame.sunDirection.x, frame.sunDirection.y, frame.sunDirection.z, frame.sunIntensity};
+    packed.sunRadiance = JPH::Float4 {frame.sunRadiance.x, frame.sunRadiance.y, frame.sunRadiance.z, 0.0f};
 
-    packed.probeMin = JPH::Float4 {frame.probeMin.GetX(), frame.probeMin.GetY(), frame.probeMin.GetZ(), static_cast<float>(frame.useLocalProbe)};
-    packed.probeMax = JPH::Float4 {frame.probeMax.GetX(), frame.probeMax.GetY(), frame.probeMax.GetZ(), 0.0f};
-    packed.probePos = JPH::Float4 {frame.probePos.GetX(), frame.probePos.GetY(), frame.probePos.GetZ(), 0.0f};
+    packed.probeMin = JPH::Float4 {frame.probeMin.x, frame.probeMin.y, frame.probeMin.z, static_cast<float>(frame.useLocalProbe)};
+    packed.probeMax = JPH::Float4 {frame.probeMax.x, frame.probeMax.y, frame.probeMax.z, 0.0f};
+    packed.probePos = JPH::Float4 {frame.probePos.x, frame.probePos.y, frame.probePos.z, 0.0f};
 
-    packed.jitterParams = JPH::Float4 {frame.jitter.GetX(), frame.jitter.GetY(), frame.jitter.GetZ(), frame.jitter.GetW()};
+    packed.jitterParams = frame.jitter;
 
     packed.enableRTR        = frame.enableRTR;
     packed.fullBright       = frame.fullBright;
@@ -156,9 +161,9 @@ auto PackFrameData(const FrameData& frame) noexcept -> FrameUniforms {
     packed.sunSize          = frame.sunSize;
     packed.ambientExposure  = frame.ambientExposure;
 
-    packed.skyZenith  = JPH::Float4 {frame.skyZenith.GetX(), frame.skyZenith.GetY(), frame.skyZenith.GetZ(), frame.skyZenith.GetW()};
-    packed.skyHorizon = JPH::Float4 {frame.skyHorizon.GetX(), frame.skyHorizon.GetY(), frame.skyHorizon.GetZ(), frame.skyHorizon.GetW()};
-    packed.skyGround  = JPH::Float4 {frame.skyGround.GetX(), frame.skyGround.GetY(), frame.skyGround.GetZ(), frame.skyGround.GetW()};
+    packed.skyZenith  = frame.skyZenith;
+    packed.skyHorizon = frame.skyHorizon;
+    packed.skyGround  = frame.skyGround;
 
     return packed;
 }

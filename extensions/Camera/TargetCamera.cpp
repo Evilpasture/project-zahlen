@@ -69,7 +69,8 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
 
         // 2. TARGET POSITION RESOLUTION (Always smoothly interpolate using alpha)
         bool foundPos = reg.Patch<Components::WorldTransformComponent>(targetEnt, [&](const auto& worldTrans) -> auto {
-            targetPos = worldTrans.world.GetTranslation();
+            const JPH::Mat44 world = worldTrans.world;
+            targetPos              = world.GetTranslation();
         });
 
         if (!foundPos) {

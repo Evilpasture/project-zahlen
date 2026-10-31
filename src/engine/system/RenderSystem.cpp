@@ -188,8 +188,12 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         auto morphComp  = reg.Get<Components::MorphTargetComponent>(e);
         auto worldTrans = reg.Get<Components::WorldTransformComponent>(e);
 
-        JPH::Mat44 worldMat = worldTrans ? worldTrans->world : JPH::Mat44::sIdentity();
-        JPH::Mat44 prevMat  = worldTrans ? worldTrans->previous : worldMat;
+        JPH::Mat44 worldMat = JPH::Mat44::sIdentity();
+        JPH::Mat44 prevMat  = JPH::Mat44::sIdentity();
+        if (worldTrans) {
+            worldMat = worldTrans->world;
+            prevMat  = worldTrans->previous;
+        }
 
         bool     isSkinned   = skelMesh.has_value();
         uint32_t jointOffset = isSkinned ? skelMesh->jointOffset : 0;
@@ -231,7 +235,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
                 .transform           = worldMat,
                 .prevTransform       = prevMat,
                 .cullRadius          = meshComp->cullRadius,
-                .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
+                .localCenter         = {meshComp->localCenter.x, meshComp->localCenter.y, meshComp->localCenter.z},
                 .jointOffset         = jointOffset,
                 .morphOffset         = morphOffset,
                 .activeMorphCount    = activeMorphCount,
@@ -250,8 +254,12 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
                         if (cutGpuMeshOpt && cutGpuMatOpt) {
                             auto       cutSkelMesh   = reg.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
                             auto       cutWorldTrans = reg.Get<Components::WorldTransformComponent>(mod.operandEntity);
-                            JPH::Mat44 cutWorldMat   = cutWorldTrans ? cutWorldTrans->world : JPH::Mat44::sIdentity();
-                            JPH::Mat44 cutPrevMat    = cutWorldTrans ? cutWorldTrans->previous : cutWorldMat;
+                            JPH::Mat44 cutWorldMat   = JPH::Mat44::sIdentity();
+                            JPH::Mat44 cutPrevMat    = JPH::Mat44::sIdentity();
+                            if (cutWorldTrans) {
+                                cutWorldMat = cutWorldTrans->world;
+                                cutPrevMat  = cutWorldTrans->previous;
+                            }
 
                             BufferHandle cutScratchVbo = BufferHandle::Invalid;
                             if (cutSkelMesh) {
@@ -281,18 +289,18 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         }
 
         DrawParams drawParams {
-             .transform           = worldMat,
-             .prevTransform       = prevMat,
-             .cullRadius          = meshComp->cullRadius,
-             .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
-             .jointOffset         = jointOffset,
-             .morphOffset         = morphOffset,
-             .activeMorphCount    = activeMorphCount,
-             .morphWeights        = morphWeights,
-             .flags               = drawFlags,
-             .skinnedVertexBuffer = scratchVbo,
-             .roughness           = roughness,
-             .metallic            = metallic
+            .transform           = worldMat,
+            .prevTransform       = prevMat,
+            .cullRadius          = meshComp->cullRadius,
+            .localCenter         = {meshComp->localCenter.x, meshComp->localCenter.y, meshComp->localCenter.z},
+            .jointOffset         = jointOffset,
+            .morphOffset         = morphOffset,
+            .activeMorphCount    = activeMorphCount,
+            .morphWeights        = morphWeights,
+            .flags               = drawFlags,
+            .skinnedVertexBuffer = scratchVbo,
+            .roughness           = roughness,
+            .metallic            = metallic
         };
         if (auto ambient = reg.Get<Components::AmbientCubeComponent>(e)) {
             drawParams.hasAmbientCube = true;
@@ -315,7 +323,8 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         return extra;
     }
     if (auto world = reg.Get<Components::WorldTransformComponent>(cameraEnt)) {
-        extra.position = world->world.GetTranslation();
+        const JPH::Mat44 worldMat = world->world;
+        extra.position            = worldMat.GetTranslation();
     }
     return extra;
 }
@@ -339,7 +348,10 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
     const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
     const JPH::Mat44 view   = cam.GetViewMatrix();
     const JPH::Mat44 proj   = cam.GetProjectionMatrix(aspect);
-    const JPH::Mat44 viewProj = cComp ? cComp->viewProj : proj * view;
+    JPH::Mat44       viewProj = proj * view;
+    if (cComp) {
+        viewProj = cComp->viewProj;
+    }
 
     // The view's planes belong to the view, not to the camera: handed to the
     // renderer with the rest of the SceneView.

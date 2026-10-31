@@ -929,10 +929,10 @@ struct ProceduralAnimationTestSuite {
             const size_t synchronizedCount   = ZHLN::ProceduralAnimation::SyncNonSkinnedAttachments(registry, root, map);
             const auto   attachmentTransform = registry.Get<ZHLN::Components::TransformComponent>(attachment);
             const auto   skinnedTransform    = registry.Get<ZHLN::Components::TransformComponent>(skinned);
-            if (synchronizedCount != 1 || !attachmentTransform || !attachmentTransform->position.IsClose(expectedPosition, 0.0001f) ||
-                !attachmentTransform->scale.IsClose(expectedScale, 0.0001f) ||
-                !(attachmentTransform->rotation * JPH::Vec3::sAxisZ()).IsClose(expectedRotation * JPH::Vec3::sAxisZ(), 0.0001f) ||
-                !skinnedTransform || !skinnedTransform->position.IsClose(JPH::Vec3(9.0f, 9.0f, 9.0f), 0.0001f)) {
+            if (synchronizedCount != 1 || !attachmentTransform || !JPH::Vec3(attachmentTransform->position).IsClose(expectedPosition, 0.0001f) ||
+                !JPH::Vec3(attachmentTransform->scale).IsClose(expectedScale, 0.0001f) ||
+                !(JPH::Quat(attachmentTransform->rotation) * JPH::Vec3::sAxisZ()).IsClose(expectedRotation * JPH::Vec3::sAxisZ(), 0.0001f) ||
+                !skinnedTransform || !JPH::Vec3(skinnedTransform->position).IsClose(JPH::Vec3(9.0f, 9.0f, 9.0f), 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};
@@ -1243,7 +1243,7 @@ struct ProceduralAnimationTestSuite {
             }
             for (const Descendant& descendant: descendants) {
                 const auto transform = registry.Get<ZHLN::Components::TransformComponent>(descendant.entity);
-                if (!transform || !transform->position.IsClose(map.modelTransforms[descendant.node].GetTranslation(), 0.0001f)) {
+                if (!transform || !JPH::Vec3(transform->position).IsClose(map.modelTransforms[descendant.node].GetTranslation(), 0.0001f)) {
                     return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                 }
             }

@@ -6,6 +6,7 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Zahlen/Audio/AudioTypes.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -45,10 +46,12 @@ struct Components {
         float metallic  = 0.0f;
     };
     struct TransformComponent {
-        JPH::Vec3 position = JPH::Vec3::sZero();
-        JPH::Quat rotation = JPH::Quat::sIdentity();
-        JPH::Vec3 scale    = JPH::Vec3::sReplicate(1.0f);
+        ZHLN::Float3 position = {};
+        ZHLN::Float4 rotation = {0.0f, 0.0f, 0.0f, 1.0f};
+        ZHLN::Float3 scale    = {1.0f, 1.0f, 1.0f};
 
+        // The calculation loads the Jolt types; the component is storage. The
+        // parameters are Vec3Arg/QuatArg, so the members convert on the way in.
         [[nodiscard]] JPH::Mat44 GetLocalMatrix() const {
             return JPH::Mat44::sRotationTranslation(rotation, position) * JPH::Mat44::sScale(scale);
         }
@@ -59,8 +62,8 @@ struct Components {
     };
 
     struct WorldTransformComponent {
-        JPH::Mat44 world    = JPH::Mat44::sIdentity();
-        JPH::Mat44 previous = JPH::Mat44::sIdentity();
+        ZHLN::Mat44 world    = ZHLN::Mat44::sIdentity();
+        ZHLN::Mat44 previous = ZHLN::Mat44::sIdentity();
     };
 
     // Per-entity ambient cube (see DrawParams::ambientCube). Presence enables the
@@ -70,12 +73,12 @@ struct Components {
     };
 
     struct MeshComponent {
-        AssetID    meshAsset     = InvalidAssetID;
-        MaterialID materialAsset = InvalidMaterialID;
-        float      cullRadius    = 1.0f;
-        JPH::Vec3  localCenter   = JPH::Vec3::sZero();
-        DrawFlags  flags         = DrawFlags::None;
-        int32_t    nodeIndex     = -1;
+        AssetID      meshAsset     = InvalidAssetID;
+        MaterialID   materialAsset = InvalidMaterialID;
+        float        cullRadius    = 1.0f;
+        ZHLN::Float3 localCenter   = {};
+        DrawFlags    flags         = DrawFlags::None;
+        int32_t      nodeIndex     = -1;
     };
 
     // Scene-owned buffers for a generated mesh. MeshComponent only references
@@ -85,11 +88,11 @@ struct Components {
     struct OwnedMeshComponent {
         enum class Shape : uint8_t { None, Box, Plane, Sphere, Cylinder, Cone };
 
-        AssetID   meshAsset  = InvalidAssetID;
-        Mesh      mesh       = {};
-        Shape     shape      = Shape::None;
-        JPH::Vec3 dimensions = JPH::Vec3::sZero(); // box: half extents; others: radius/extent, height
-        JPH::Vec4 color      = JPH::Vec4(1.0f, 1.0f, 1.0f, 1.0f);
+        AssetID      meshAsset  = InvalidAssetID;
+        Mesh         mesh       = {};
+        Shape        shape      = Shape::None;
+        JPH::Vec3    dimensions = JPH::Vec3::sZero(); // box: half extents; others: radius/extent, height
+        ZHLN::Float4 color      = {1.0f, 1.0f, 1.0f, 1.0f};
     };
 
     struct SkeletalMeshComponent {
@@ -125,7 +128,7 @@ struct Components {
         RayTracingConfig config {};
     };
     struct ImpulseCommand {
-        JPH::Vec3 linear = JPH::Vec3::sZero();
+        ZHLN::Float3 linear = {};
     };
     struct RagdollHitReactionCommand {
         uint32_t jointIndex = 0;
@@ -135,8 +138,8 @@ struct Components {
     };
 
     struct RagdollImpulseCommand {
-        uint32_t  jointIndex = 0;
-        JPH::Vec3 impulse    = JPH::Vec3::sZero();
+        uint32_t     jointIndex = 0;
+        ZHLN::Float3 impulse    = {};
     };
 
     struct RagdollComponent {
@@ -160,11 +163,11 @@ struct Components {
     struct CameraComponent {
         Camera camera {};
 
-        JPH::Mat44 viewProj               = JPH::Mat44::sIdentity();
-        JPH::Mat44 unjitteredViewProj     = JPH::Mat44::sIdentity();
-        JPH::Mat44 prevUnjitteredViewProj = JPH::Mat44::sIdentity();
-        JPH::Mat44 frozenViewProj         = JPH::Mat44::sIdentity();
-        uint32_t   frameCounter           = 0;
+        ZHLN::Mat44 viewProj               = ZHLN::Mat44::sIdentity();
+        ZHLN::Mat44 unjitteredViewProj     = ZHLN::Mat44::sIdentity();
+        ZHLN::Mat44 prevUnjitteredViewProj = ZHLN::Mat44::sIdentity();
+        ZHLN::Mat44 frozenViewProj         = ZHLN::Mat44::sIdentity();
+        uint32_t    frameCounter           = 0;
     };
     // The pose rides in the same storage as the matrices, so it must stay a pod
     // the SoA sets can memcpy -- the invariant the camera fold relies on.
@@ -179,7 +182,7 @@ struct Components {
     struct SceneSourceComponent {
         Scene::ShapeKind shape = Scene::ShapeKind::Box;
         ZHLN::String256  source;
-        JPH::Float3      halfExtents           = {0.5f, 0.5f, 0.5f};
+        ZHLN::Float3     halfExtents           = {0.5f, 0.5f, 0.5f};
         float            extent                = 10.0f;
         bool             emissiveVirtualLights = false;
     };
@@ -227,22 +230,21 @@ struct Components {
         int   enableRTR         = 0;
         int   fullBright        = 0;
 
-        float     exposure      = 1.0f;
-        float     bloomStrength = 0.0f;
-        float     contrast      = 1.0f;
-        float     saturation    = 1.0f;
-        int       tonemapper    = 3;
-        JPH::Vec3 colorFilter   = JPH::Vec3::sReplicate(1.0f);
+        float        exposure      = 1.0f;
+        float        bloomStrength = 0.0f;
+        float        contrast      = 1.0f;
+        float        saturation    = 1.0f;
+        int          tonemapper    = 3;
+        ZHLN::Float3 colorFilter   = {1.0f, 1.0f, 1.0f};
 
-        float     ambientExposure = 1.0f;
-        JPH::Vec3 probeMin        = JPH::Vec3(-22.0f, 0.0f, -22.0f);
-        JPH::Vec3 probeMax        = JPH::Vec3(22.0f, 12.0f, 22.0f);
-        JPH::Vec3 probePos        = JPH::Vec3(0.0f, 4.0f, 0.0f);
+        float        ambientExposure = 1.0f;
+        ZHLN::Float3 probeMin        = {-22.0f, 0.0f, -22.0f};
+        ZHLN::Float3 probeMax        = {22.0f, 12.0f, 22.0f};
+        ZHLN::Float3 probePos        = {0.0f, 4.0f, 0.0f};
 
-        JPH::Vec4 skyZenith  = JPH::Vec4(0.003f, 0.008f, 0.020f, 1.0f);
-        JPH::Vec4 skyHorizon = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f);
-        JPH::Vec4 skyGround  = JPH::Vec4(0.001f, 0.001f, 0.003f, 1.0f);
-
+        ZHLN::Float4 skyZenith  = {0.003f, 0.008f, 0.020f, 1.0f};
+        ZHLN::Float4 skyHorizon = {0.015f, 0.035f, 0.080f, 1.0f};
+        ZHLN::Float4 skyGround  = {0.001f, 0.001f, 0.003f, 1.0f};
     };
 
     struct EnvironmentMapComponent {
@@ -267,8 +269,8 @@ struct Components {
     static_assert(std::is_trivially_copyable_v<AnimatorComponent>);
 
     struct AudioListenerComponent {
-        bool      isPrimary = true;
-        JPH::Vec3 velocity  = JPH::Vec3::sZero();
+        bool         isPrimary = true;
+        ZHLN::Float3 velocity  = {};
     };
     static_assert(std::is_trivially_copyable_v<AudioListenerComponent>);
 
@@ -284,9 +286,9 @@ struct Components {
         AudioBusId           bus           = AudioBus::SFX;
         AudioPlaybackMode    playbackMode  = AudioPlaybackMode::Decompressed;
         float                reverbSend    = 0.0f;
-        JPH::Vec3            velocity      = JPH::Vec3::sZero();
-        AudioAttenuationDesc attenuation   {};
-        AudioOcclusionDesc   occlusion     {};
+        ZHLN::Float3         velocity      = {};
+        AudioAttenuationDesc attenuation {};
+        AudioOcclusionDesc   occlusion {};
 
         AudioHandle voiceHandle = AudioHandle::Invalid;
     };
@@ -596,19 +598,19 @@ struct Components {
     };
     static_assert(std::is_trivially_copyable_v<InputStateComponent>);
     struct LightComponent {
-        LightType  type;
-        JPH::Vec3  color       = JPH::Vec3::sZero();
-        float      intensity   = 0.0f;
-        float      radius      = 0.0f;
-        JPH::Vec3  direction   = JPH::Vec3::sZero();
-        float      range       = 0.0f;
-        JPH::Mat44 points      = JPH::Mat44::sIdentity();
-        uint32_t   twoSided    = 0;
+        LightType    type;
+        ZHLN::Float3 color     = {};
+        float        intensity = 0.0f;
+        float        radius    = 0.0f;
+        ZHLN::Float3 direction = {};
+        float        range     = 0.0f;
+        ZHLN::Mat44  points    = ZHLN::Mat44::sIdentity();
+        uint32_t     twoSided  = 0;
         // Asks the shadow atlas for a tile. How many lights get one is not
         // capped here: the atlas sub-allocates from one depth image and steps
         // a light's tile resolution down with distance instead of switching
         // its shadows off at a hard budget.
-        bool       castsShadow = false;
+        bool castsShadow = false;
         // Spot cone angles in radians from the axis (0 = no authored cone:
         // the packer emits the -1/-1 "full sphere" sentinel instead).
         float innerConeRadians = 0.0f;
@@ -663,25 +665,25 @@ struct Components {
     enum class VolumetricVolumeType : uint32_t { Box = 0, Sphere = 1 };
 
     struct VolumetricFogComponent {
-        float     density         = 0.02f;
-        float     heightFalloff   = 0.035f;
-        float     heightOffset    = 0.0f;
-        float     anisotropy      = 0.5f;
-        JPH::Vec3 scatteringColor = JPH::Vec3(0.91f, 0.95f, 1.0f);
-        JPH::Vec3 absorptionColor = JPH::Vec3(0.015f, 0.015f, 0.015f);
-        JPH::Vec3 emissiveColor   = JPH::Vec3::sZero();
-        float     noiseScale      = 0.035f;
-        float     noiseSpeed      = 1.0f;
-        float     noiseIntensity  = 0.5f;
-        uint32_t  enableNoise     = 1;
+        float        density         = 0.02f;
+        float        heightFalloff   = 0.035f;
+        float        heightOffset    = 0.0f;
+        float        anisotropy      = 0.5f;
+        ZHLN::Float3 scatteringColor = {0.91f, 0.95f, 1.0f};
+        ZHLN::Float3 absorptionColor = {0.015f, 0.015f, 0.015f};
+        ZHLN::Float3 emissiveColor   = {};
+        float        noiseScale      = 0.035f;
+        float        noiseSpeed      = 1.0f;
+        float        noiseIntensity  = 0.5f;
+        uint32_t     enableNoise     = 1;
     };
 
     struct VolumetricVolumeComponent {
         VolumetricVolumeType type       = VolumetricVolumeType::Box;
-        JPH::Vec3            extents    = JPH::Vec3(5.0f, 5.0f, 5.0f);
+        ZHLN::Float3         extents    = {5.0f, 5.0f, 5.0f};
         float                density    = 0.1f;
-        JPH::Vec3            color      = JPH::Vec3(1.0f, 1.0f, 1.0f);
-        JPH::Vec3            emissive   = JPH::Vec3::sZero();
+        ZHLN::Float3         color      = {1.0f, 1.0f, 1.0f};
+        ZHLN::Float3         emissive   = {};
         float                anisotropy = 0.5f;
         float                blendEdge  = 0.2f;
     };

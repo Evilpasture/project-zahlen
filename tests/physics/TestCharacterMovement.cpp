@@ -146,7 +146,7 @@ struct CPUPipelineHarness {
 
         trans->position = prevPos + alpha * (currPos - prevPos);
 
-        JPH::Vec3 targetCenter = trans->position + JPH::Vec3(0.0f, 1.5f, 0.0f);
+        JPH::Vec3 targetCenter = JPH::Vec3(trans->position) + JPH::Vec3(0.0f, 1.5f, 0.0f);
         cam.position           = targetCenter + JPH::Vec3(0.0f, 0.0f, -5.0f);
     }
 };
@@ -212,13 +212,13 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
 
             const auto trans = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
-            float      lastZ = trans->position.GetZ();
+            float      lastZ = trans->position.z;
 
             constexpr float dt144 = 1.0f / 144.0f;
             for (int i = 0; i < 144; ++i) {
                 harness.Tick(dt144, 0.0f, 1.0f);
 
-                float currZ = trans->position.GetZ();
+                float currZ = trans->position.z;
                 ZHLN::Test::ExpectGt(currZ, lastZ);
 
                 if (currZ <= lastZ) {
@@ -243,7 +243,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(dt144, 0.0f, 1.0f);
 
                 const auto trans        = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
-                JPH::Vec3  targetCenter = trans->position + JPH::Vec3(0.0f, 1.5f, 0.0f);
+                JPH::Vec3  targetCenter = JPH::Vec3(trans->position) + JPH::Vec3(0.0f, 1.5f, 0.0f);
 
                 float dist = (harness.cam.position - targetCenter).Length();
                 distances.push_back(dist);
@@ -271,7 +271,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
 
             const auto trans = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
-            float      lastZ = trans->position.GetZ();
+            float      lastZ = trans->position.z;
 
             const std::array<float, 5> variableDts = {0.008f, 0.033f, 0.012f, 0.048f, 0.016f};
 
@@ -279,7 +279,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 for (float dt: variableDts) {
                     harness.Tick(dt, 0.0f, 1.0f);
 
-                    float currZ = trans->position.GetZ();
+                    float currZ = trans->position.z;
                     ZHLN::Test::ExpectGt(currZ, lastZ);
 
                     if (currZ <= lastZ) {

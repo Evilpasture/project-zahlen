@@ -235,7 +235,10 @@ float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float wo
         }
 
         const auto trans    = reg.Get<Components::TransformComponent>(e);
-        JPH::Vec3  pos      = trans ? trans->position : JPH::Vec3::sZero();
+        JPH::Vec3  pos      = JPH::Vec3::sZero();
+        if (trans) {
+            pos = trans->position;
+        }
         float       halfSize = tData->worldSize * 0.5f;
 
         float localX = worldX - pos.GetX();

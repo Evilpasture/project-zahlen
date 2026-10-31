@@ -41,7 +41,8 @@ void LODSystem::GraphUpdate(LODQuery query) {
 
             JPH::Vec3 worldPos = JPH::Vec3::sZero();
             if (auto worldTrans = query.Get<Components::WorldTransformComponent>(e)) {
-                worldPos = worldTrans->world.GetTranslation();
+                const JPH::Mat44 world = worldTrans->world;
+                worldPos               = world.GetTranslation();
             } else if (auto trans = query.Get<Components::TransformComponent>(e)) {
                 worldPos = trans->position;
             }

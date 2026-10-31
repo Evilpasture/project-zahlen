@@ -40,13 +40,15 @@ ZHLN_API void AudioSystem(
             JPH::Vec3 up  = JPH::Vec3::sAxisY();
 
             if (auto wt = query.Get<Components::WorldTransformComponent>(e)) {
-                pos = wt->world.GetTranslation();
-                dir = -wt->world.GetColumn3(2).Normalized();
-                up  = wt->world.GetColumn3(1).Normalized();
+                const JPH::Mat44 world = wt->world;
+                pos                    = world.GetTranslation();
+                dir                    = -world.GetColumn3(2).Normalized();
+                up                     = world.GetColumn3(1).Normalized();
             } else if (auto t = query.Get<Components::TransformComponent>(e)) {
-                pos = t->position;
-                dir = t->rotation * JPH::Vec3::sAxisZ();
-                up  = t->rotation * JPH::Vec3::sAxisY();
+                const JPH::Quat rotation = t->rotation;
+                pos                      = t->position;
+                dir                      = rotation * JPH::Vec3::sAxisZ();
+                up                       = rotation * JPH::Vec3::sAxisY();
             }
 
             device.UpdateListener(pos, dir, up, listener->velocity);
@@ -77,11 +79,13 @@ ZHLN_API void AudioSystem(
         JPH::Vec3 pos = JPH::Vec3::sZero();
         JPH::Vec3 dir = JPH::Vec3(0.0f, 0.0f, -1.0f);
         if (auto wt = query.Get<Components::WorldTransformComponent>(e)) {
-            pos = wt->world.GetTranslation();
-            dir = -wt->world.GetColumn3(2).Normalized();
+            const JPH::Mat44 world = wt->world;
+            pos                    = world.GetTranslation();
+            dir                    = -world.GetColumn3(2).Normalized();
         } else if (auto t = query.Get<Components::TransformComponent>(e)) {
-            pos = t->position;
-            dir = t->rotation * JPH::Vec3(0.0f, 0.0f, -1.0f);
+            const JPH::Quat rotation = t->rotation;
+            pos                      = t->position;
+            dir                      = rotation * JPH::Vec3(0.0f, 0.0f, -1.0f);
         }
 
         if (src.voiceHandle != AudioHandle::Invalid && !device.IsVoiceValid(src.voiceHandle)) {

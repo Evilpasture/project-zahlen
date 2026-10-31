@@ -30,7 +30,10 @@ void VerifyCullingResults(CullingSystem::CullingQuery query, std::span<const Ent
         }
 
         const auto worldTrans = query.Get<Components::WorldTransformComponent>(entities[i]);
-        JPH::Mat44 worldMat   = worldTrans ? worldTrans->world : JPH::Mat44::sIdentity();
+        JPH::Mat44 worldMat   = JPH::Mat44::sIdentity();
+        if (worldTrans) {
+            worldMat = worldTrans->world;
+        }
         JPH::Vec3  pos        = worldMat * meshes[i].localCenter;
 
         float currentMaxScale = std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
@@ -255,7 +258,10 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
             }
 
             const auto worldTrans = query.Get<Components::WorldTransformComponent>(e);
-            JPH::Mat44 worldMat   = worldTrans ? worldTrans->world : JPH::Mat44::sIdentity();
+            JPH::Mat44 worldMat   = JPH::Mat44::sIdentity();
+            if (worldTrans) {
+                worldMat = worldTrans->world;
+            }
 
             batchEntities[n] = e;
             batchCenters[n]  = worldMat * meshComp.localCenter;

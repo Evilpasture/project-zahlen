@@ -46,11 +46,10 @@ using ScratchStorage = TransformSystem::ScratchStorage;
 
 auto TransformSystem::LocalTransformBits(const Components::TransformComponent& transform) noexcept -> std::array<uint32_t, 10> {
     return {
-        std::bit_cast<uint32_t>(transform.position.GetX()), std::bit_cast<uint32_t>(transform.position.GetY()),
-        std::bit_cast<uint32_t>(transform.position.GetZ()), std::bit_cast<uint32_t>(transform.rotation.GetX()),
-        std::bit_cast<uint32_t>(transform.rotation.GetY()), std::bit_cast<uint32_t>(transform.rotation.GetZ()),
-        std::bit_cast<uint32_t>(transform.rotation.GetW()), std::bit_cast<uint32_t>(transform.scale.GetX()),
-        std::bit_cast<uint32_t>(transform.scale.GetY()),    std::bit_cast<uint32_t>(transform.scale.GetZ()),
+        std::bit_cast<uint32_t>(transform.position.x), std::bit_cast<uint32_t>(transform.position.y), std::bit_cast<uint32_t>(transform.position.z),
+        std::bit_cast<uint32_t>(transform.rotation.x), std::bit_cast<uint32_t>(transform.rotation.y), std::bit_cast<uint32_t>(transform.rotation.z),
+        std::bit_cast<uint32_t>(transform.rotation.w), std::bit_cast<uint32_t>(transform.scale.x),    std::bit_cast<uint32_t>(transform.scale.y),
+        std::bit_cast<uint32_t>(transform.scale.z),
     };
 }
 

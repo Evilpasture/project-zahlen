@@ -839,7 +839,8 @@ auto main(int argc, char* argv[]) -> int {
         // 2. Update Procedural Look-At Orbit via Multi-Component Patch
         const auto sampleTime = static_cast<float>(clock.UnscaledElapsedTime());
         registry.Patch<ZHLN::Components::TransformComponent, ZHLN::ProceduralLookAtComponent>(player, [&](const auto& trans, auto& lookAt) -> auto {
-            lookAt.targetWorldPos = trans.position + trans.rotation * JPH::Vec3(std::sin(sampleTime * 0.65f) * 2.2f, 1.65f, 4.0f);
+            const JPH::Quat rotation = trans.rotation;
+            lookAt.targetWorldPos    = JPH::Vec3(trans.position) + rotation * JPH::Vec3(std::sin(sampleTime * 0.65f) * 2.2f, 1.65f, 4.0f);
         });
 
         // 3. Synchronized Engine Tick (uses Clock's scaled DeltaTime)

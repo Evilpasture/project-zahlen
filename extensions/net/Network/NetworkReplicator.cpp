@@ -117,8 +117,10 @@ void NetworkInterpolationSystem(
             continue;
         }
         const float t  = std::min(1.0f, interp->interpolationSpeed * dt.value);
-        trans->position = trans->position + (interp->targetPosition - trans->position) * t;
-        trans->rotation = trans->rotation.SLERP(interp->targetRotation, t).Normalized();
+        const JPH::Vec3 position = trans->position;
+        const JPH::Quat rotation = trans->rotation;
+        trans->position          = position + (interp->targetPosition - position) * t;
+        trans->rotation          = rotation.SLERP(interp->targetRotation, t).Normalized();
     }
 }
 

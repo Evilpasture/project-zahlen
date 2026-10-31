@@ -100,7 +100,8 @@ void RenderContext::Impl::AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept
 
     std::array<JPH::Mat44, ShadowAtlas::kPointFaces> faces {};
     for (size_t index = 0; index < submittedLights.size(); ++index) {
-        const LightDesc& desc = submittedLights[index];
+        const LightDesc& desc          = submittedLights[index];
+        const JPH::Vec3  lightPosition = desc.position;
         const bool isPoint    = desc.type == LightType::Point;
         const bool isSpot     = desc.type == LightType::Spot;
         if (!desc.castsShadow || (!isPoint && !isSpot)) {
@@ -115,7 +116,7 @@ void RenderContext::Impl::AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept
         req.key        = ShadowAtlas::MakeLightKey(desc.type, desc.position, desc.intensity, desc.range);
         req.lightIndex = static_cast<int32_t>(index);
         req.faceCount  = faceCount;
-        req.tile       = ShadowAtlas::TileForDistance((desc.position - viewPos).Length());
+        req.tile       = ShadowAtlas::TileForDistance((lightPosition - viewPos).Length());
         for (uint32_t face = 0; face < faceCount; ++face) {
             req.faces[face] = faces[face];
         }

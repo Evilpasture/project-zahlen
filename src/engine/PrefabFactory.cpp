@@ -848,11 +848,11 @@ void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
         const auto meshComp = reg.Get<Components::MeshComponent>(entities[i]);
         if (meshComp && !ctx.GetGPUMaterial(meshComp->materialAsset).has_value()) {
             if (auto created = ctx.CreateMaterial(
-                    owned.color.GetW() < 1.0f ? MaterialDesc::Transparent({owned.color.GetX(), owned.color.GetY(), owned.color.GetZ(), owned.color.GetW()}) :
-                                                MaterialDesc::Basic({owned.color.GetX(), owned.color.GetY(), owned.color.GetZ(), owned.color.GetW()})
+                    owned.color.w < 1.0f ? MaterialDesc::Transparent({owned.color.x, owned.color.y, owned.color.z, owned.color.w}) :
+                                           MaterialDesc::Basic({owned.color.x, owned.color.y, owned.color.z, owned.color.w})
                 )) {
                 Material mat        = *created;
-                mat.baseColorFactor = {owned.color.GetX(), owned.color.GetY(), owned.color.GetZ(), owned.color.GetW()};
+                mat.baseColorFactor = {owned.color.x, owned.color.y, owned.color.z, owned.color.w};
                 if (const auto pbr = reg.Get<Components::PBRComponent>(entities[i])) {
                     mat.roughnessFactor = pbr->roughness;
                     mat.metallicFactor  = pbr->metallic;
