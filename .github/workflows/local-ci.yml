@@ -1,0 +1,26 @@
+name: Local CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  local-build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the preconfigured builder image
+        run: |
+          docker build \
+            --target builder \
+            -t zahlen-builder:local \
+            .
+
+      - name: Run tests with Lavapipe
+        run: |
+          docker run --rm \
+            -e VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json \
+            -e VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+            zahlen-builder:local \
+            ./build/bin/ztest --test-dir build -V

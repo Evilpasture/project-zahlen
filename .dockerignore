@@ -1,28 +1,52 @@
-# Ignore local compiler build directories
-build/
-bin/
-out/
-cmake-build-*/
-.ninja_deps
-.ninja_log
-
-# Ignore local Git history
+# Ignore Git & Cloudflare wrangler state
 .git/
-.gitignore
+.wrangler/
 
-# Ignore IDE and editor configurations
+# Build directories & binaries
+build/
+dist/
+target/
+bin/
+import/
+obj/
+out/
+*.exe
+*.dll
+*.so
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# C++ build artifacts & caches
+.vs/
+ipch/
+*.pch
+*.tlog
+*.o
+*.obj
+.cache/
+.pytest_cache/
+__pycache__/
+gcm.cache/
+
+# Environments & heavy local assets
+.venv/
+env/
+node_modules/
+blender/
+NSightAftermath/
+resources/intermediate/
+
+# IDE configs (keep .clang-format and .clang-tidy out of here so CI can use them)
 .vscode/
 .idea/
 *.sublime-project
 *.sublime-workspace
-.clang-format
-.clang-tidy
 
-# Ignore intermediate cooked assets (these will be rebuilt clean inside the container)
-resources/intermediate/
-build_assets/
-data/*.pak
-
-# OS junk
+# OS junk & temporary files
 **/.DS_Store
 Thumbs.db
+*.tmp
+*.bak
