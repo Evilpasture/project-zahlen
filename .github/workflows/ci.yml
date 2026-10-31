@@ -186,10 +186,81 @@ jobs:
           path: ztest.log
           if-no-files-found: ignore
 
+  sdk-test:
+    name: Installed app / Lavapipe (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    needs: [prepare, build, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: asan
+            sanitizers: "ON"
+          - variant: release
+            sanitizers: "OFF"
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: needs.prepare.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Forks cannot publish; recreate that variant using its cache scope.
+      # Published runs must test the exact pushed artifact, not a silent rebuild.
+      - name: Resolve builder image
+        id: image
+        env:
+          BASE: ${{ needs.prepare.outputs.base }}
+          PUBLISH: ${{ needs.prepare.outputs.publish }}
+          IMAGE_KEY: ${{ needs.prepare.outputs.image_key }}
+          VARIANT: ${{ matrix.variant }}
+          SANITIZERS: ${{ matrix.sanitizers }}
+        run: |
+          if [ "$PUBLISH" = true ]; then
+            ref="${BASE}-builder:${IMAGE_KEY}-${VARIANT}"
+            docker pull "$ref"
+          else
+            git submodule update --init --depth 1 ${VENDORED_SUBMODULES}
+            ref="zahlen-builder:${VARIANT}-local"
+            docker buildx build --target builder --load -t "$ref" \
+              --build-arg "ZHLN_USE_SANITIZERS=$SANITIZERS" \
+              --cache-from "type=gha,scope=zahlen-${VARIANT}" .
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Render actual app/cube.cpp from installed packages with Lavapipe
+        run: |
+          mkdir -p sdk-output
+          docker run --rm --entrypoint bash \
+            -v "$PWD/sdk-output:/sdk-output" \
+            "${{ steps.image.outputs.ref }}" scripts/test-installed-sdk.sh
+
+      - name: Upload split SDK packages and rendered frame
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zahlen-sdk-${{ matrix.variant }}
+          path: sdk-output/
+          if-no-files-found: error
+
+
   deploy:
     name: Package runtime (${{ matrix.variant }})
     runs-on: ubuntu-latest
-    needs: [prepare, build, test]
+    needs: [prepare, build, test, sdk-test]
     strategy:
       fail-fast: false
       matrix:

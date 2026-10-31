@@ -24,7 +24,7 @@ zahlen_enable_reflection(zahlen_host_runner)
 
 # Application composition lives outside Core: ordinary games link just this
 # target, while bespoke hosts can still use zahlen_engine directly. CMake
-# writes only the default-module includes/calls present in this build graph.
+# leaves optional module composition to the consuming application.
 add_library(zahlen_application STATIC Application.cpp)
 set_target_properties(zahlen_application PROPERTIES
     CXX_STANDARD 26
@@ -49,58 +49,10 @@ target_include_directories(zahlen_application
 target_compile_definitions(zahlen_application PRIVATE JPH_DOUBLE_PRECISION)
 zahlen_enable_reflection(zahlen_application)
 
-# Generate the ordered default-module install pass from build targets, not
-# compiler definitions. No disabled extension can leak an include or symbol
-# reference into this translation unit (including extras OFF).
+# Application is deliberately independent of which extras this checkout built.
+# Compose gameplay explicitly with Application::Install in the consuming app.
 set(AUTOLOAD_INCLUDES "")
 set(AUTOLOAD_CALLS "")
-
-if(TARGET zahlen_fonts)
-    target_link_libraries(zahlen_application PRIVATE zahlen_fonts)
-    string(APPEND AUTOLOAD_INCLUDES "#include <Fonts/Fonts.hpp>\n")
-    string(APPEND AUTOLOAD_CALLS
-        "    // Prime the cache before InitializeDefaultScene uploads the font atlas.\n"
-        "    if (auto fontID = Fonts::LoadFontAsset(engine, Fonts::VendoredDefaultFontSource()); !fontID) {\n"
-        "        LogWarning(\"Font asset failed to load ({}), using embedded default.\", fontID.error());\n"
-        "    }\n"
-    )
-endif()
-if(TARGET zahlen_character_controller)
-    target_link_libraries(zahlen_application PRIVATE zahlen_character_controller)
-    string(APPEND AUTOLOAD_INCLUDES "#include <CharacterController/CharacterController.hpp>\n")
-    string(APPEND AUTOLOAD_CALLS "    // Character writes MovementComponent; Interaction reads it.\n"
-                                 "    Character::Install(engine);\n")
-endif()
-if(TARGET zahlen_camera)
-    target_link_libraries(zahlen_application PRIVATE zahlen_camera)
-    string(APPEND AUTOLOAD_INCLUDES "#include <Camera/TargetCamera.hpp>\n")
-    string(APPEND AUTOLOAD_CALLS "    CameraRig::Install(engine);\n")
-endif()
-if(TARGET zahlen_interaction)
-    target_link_libraries(zahlen_application PRIVATE zahlen_interaction)
-    string(APPEND AUTOLOAD_INCLUDES "#include <Interaction/InteractionSystem.hpp>\n")
-    string(APPEND AUTOLOAD_CALLS "    Interaction::Install(engine);\n")
-endif()
-if(TARGET zahlen_terrain)
-    target_link_libraries(zahlen_application PRIVATE zahlen_terrain)
-    string(APPEND AUTOLOAD_INCLUDES "#include <Terrain/TerrainSystem.hpp>\n")
-    string(APPEND AUTOLOAD_CALLS "    Terrain::Install(engine);\n")
-endif()
-if(TARGET zahlen_animation)
-    target_link_libraries(zahlen_application PRIVATE zahlen_animation)
-    string(APPEND AUTOLOAD_INCLUDES "#include <Animation/IK.hpp>\n")
-    string(APPEND AUTOLOAD_CALLS "    IK::Install(engine); // installs Animation before IK\n")
-endif()
-if(TARGET zahlen_freecam)
-    target_link_libraries(zahlen_application PRIVATE zahlen_freecam)
-    string(APPEND AUTOLOAD_INCLUDES "#include <FreeCam/FreeCam.hpp>\n")
-    string(APPEND AUTOLOAD_CALLS "    FreeCam::Install(engine);\n")
-endif()
-if(TARGET zahlen_ragdoll_authoring)
-    target_link_libraries(zahlen_application PRIVATE zahlen_ragdoll_authoring)
-    string(APPEND AUTOLOAD_INCLUDES "#include <RagdollAuthoring/RagdollAuthoring.hpp>\n")
-    string(APPEND AUTOLOAD_CALLS "    RagdollAuthoring::Install(engine);\n")
-endif()
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/DefaultModules.cpp.in"

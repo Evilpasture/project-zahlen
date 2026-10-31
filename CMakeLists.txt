@@ -35,7 +35,13 @@ if(APPLE)
 endif()
 
 
-project(zahlen LANGUAGES C CXX ASM)
+project(zahlen VERSION 0.1.0 LANGUAGES C CXX ASM)
+
+option(ZHLN_INSTALL_SDK "Install independently consumable SDK packages" OFF)
+if(ZHLN_INSTALL_SDK)
+    # Jolt is shipped with Engine, with the exact ABI used by this build.
+    set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+endif()
 
 
 if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -635,4 +641,8 @@ endif()
 
 if(ZHLN_SYNTAX_ONLY)
     include(SyntaxOnly)
+endif()
+
+if(ZHLN_INSTALL_SDK)
+    include(ZahlenSDK)
 endif()

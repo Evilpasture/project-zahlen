@@ -21,8 +21,8 @@
 
 namespace ZHLN {
 
-// Application-layer preset. Installs the available gameplay extensions before
-// the first scene; Core does not depend on optional gameplay targets.
+// Compatibility hook; the base Application installs no optional modules.
+// Compose modules explicitly with Install().
 void InstallApplicationDefaults(Engine& engine);
 
 // A layer may implement any of Start, Tick, UI and Stop. Start runs after
@@ -44,8 +44,8 @@ class Application {
   public:
     explicit Application(EngineConfig config = {}): _config(std::move(config)) {}
 
-    // Ordinary games get the installed extensions automatically. Custom hosts
-    // may opt out, or add modules before InitializeDefaultScene builds graphs.
+    // Retained for source compatibility. The base defaults are empty; use
+    // Install() to compose modules before InitializeDefaultScene builds graphs.
     auto WithDefaultModules(bool enabled = true) noexcept -> Application& {
         _defaultModules = enabled;
         return *this;

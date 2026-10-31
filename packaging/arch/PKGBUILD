@@ -1,0 +1,46 @@
+# Split repackaging of the RELEASE SDK artifacts produced by the CI test job.
+# Put the sixteen zahlen-*-release.tar.gz files beside this PKGBUILD.
+# Set pkgver to the SDK commit/release before publishing to a repository.
+pkgbase=zahlen-sdk
+pkgver=0.1.0
+pkgrel=1
+arch=('x86_64')
+url='https://github.com/Evilpasture/project-zahlen'
+license=('GPL-3.0-or-later')
+options=('!strip')
+_components=(Engine CommandLine Signal HostRunner Application UISchema Serialization GLTF Screenshot Netpbm FreeCam Camera CharacterController SkeletalAnimation Animation Data)
+_names=(engine command-line signal host-runner application ui-schema serialization gltf screenshot netpbm freecam camera character-controller skeletal-animation animation data)
+pkgname=()
+source=()
+sha256sums=()
+for i in "${!_components[@]}"; do
+    pkgname+=("zahlen-${_names[i]}")
+    source+=("zahlen-${_components[i]}-release.tar.gz")
+    sha256sums+=('SKIP') # Run updpkgsums before distributing this recipe.
+done
+noextract=("${source[@]}")
+
+_package() {
+    local component=$1
+    shift
+    pkgdesc="Zahlen ${component} SDK (headers and CMake link metadata included)"
+    depends=("$@")
+    tar -C "$pkgdir" -xzf "$srcdir/zahlen-${component}-release.tar.gz"
+}
+package_zahlen-engine() { _package Engine gcc-libs glfw zstd vulkan-icd-loader; }
+package_zahlen-command-line() { _package CommandLine gcc-libs; }
+package_zahlen-signal() { _package Signal "zahlen-engine=$pkgver-$pkgrel"; }
+package_zahlen-host-runner() { _package HostRunner "zahlen-engine=$pkgver-$pkgrel" "zahlen-command-line=$pkgver-$pkgrel" "zahlen-signal=$pkgver-$pkgrel"; }
+package_zahlen-application() { _package Application "zahlen-engine=$pkgver-$pkgrel" "zahlen-command-line=$pkgver-$pkgrel" "zahlen-host-runner=$pkgver-$pkgrel"; }
+package_zahlen-ui-schema() { _package UISchema "zahlen-engine=$pkgver-$pkgrel"; }
+package_zahlen-serialization() { _package Serialization "zahlen-engine=$pkgver-$pkgrel" "zahlen-ui-schema=$pkgver-$pkgrel" simdjson; }
+package_zahlen-gltf() { _package GLTF "zahlen-engine=$pkgver-$pkgrel" "zahlen-serialization=$pkgver-$pkgrel"; }
+package_zahlen-screenshot() { _package Screenshot "zahlen-engine=$pkgver-$pkgrel"; }
+package_zahlen-freecam() { _package FreeCam "zahlen-engine=$pkgver-$pkgrel"; }
+package_zahlen-camera() { _package Camera "zahlen-engine=$pkgver-$pkgrel" "zahlen-freecam=$pkgver-$pkgrel"; }
+package_zahlen-character-controller() { _package CharacterController "zahlen-engine=$pkgver-$pkgrel" "zahlen-freecam=$pkgver-$pkgrel"; }
+package_zahlen-skeletal-animation() { _package SkeletalAnimation "zahlen-engine=$pkgver-$pkgrel"; }
+package_zahlen-animation() { _package Animation "zahlen-engine=$pkgver-$pkgrel" "zahlen-skeletal-animation=$pkgver-$pkgrel" "zahlen-character-controller=$pkgver-$pkgrel" "zahlen-camera=$pkgver-$pkgrel" "zahlen-freecam=$pkgver-$pkgrel"; }
+package_zahlen-data() { _package Data; }
+
+package_zahlen-netpbm() { _package Netpbm "zahlen-engine=$pkgver-$pkgrel"; }

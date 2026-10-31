@@ -57,7 +57,7 @@ if(USE_SANITIZERS)
         $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
     )
     target_sources(zahlen_engine INTERFACE
-        $<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:$<TARGET_OBJECTS:zahlen_sanitizer_options>>
+        $<BUILD_INTERFACE:$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:$<TARGET_OBJECTS:zahlen_sanitizer_options>>>
     )
 endif()
 
