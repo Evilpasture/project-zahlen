@@ -13,6 +13,7 @@ module;
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Physics/PhysicsHandles.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -98,8 +99,8 @@ struct RigChildOfConstraint {
     RigNodeIndex   parent         = InvalidRigNode;
     RigNodeIndex   child          = InvalidRigNode;
     RigChildOfKind kind           = RigChildOfKind::Hand;
-    JPH::Mat44     bindRelative   = JPH::Mat44::sIdentity();
-    JPH::Mat44     localPoseDelta = JPH::Mat44::sIdentity();
+    ZHLN::Mat44    bindRelative   = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat44    localPoseDelta = ZHLN::Mat44::sIdentity();
 };
 
 enum class FingerDigit : uint8_t {
@@ -119,8 +120,8 @@ struct RigFingerJointConstraint {
     uint8_t      segment        = 0;
     bool         repairRelation = false;
     float        hingeFlexSign  = -1.0f;
-    JPH::Mat44   bindRelative   = JPH::Mat44::sIdentity();
-    JPH::Mat44   localPoseDelta = JPH::Mat44::sIdentity();
+    ZHLN::Mat44  bindRelative   = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat44  localPoseDelta = ZHLN::Mat44::sIdentity();
 };
 
 /**
@@ -245,14 +246,14 @@ struct ProceduralLocomotionComponent {
     float      forwardLeanScale = 1.0f;
     float      lateralBankScale = 1.0f;
 
-    JPH::Vec3 localFootTargetL = JPH::Vec3::sZero();
-    JPH::Vec3 localFootTargetR = JPH::Vec3::sZero();
-    JPH::Vec3 footNormalL      = JPH::Vec3::sAxisY();
-    JPH::Vec3 footNormalR      = JPH::Vec3::sAxisY();
-    float     plantWeightL     = 1.0f;
-    float     plantWeightR     = 1.0f;
-    bool      ikReachClampedL  = false;
-    bool      ikReachClampedR  = false;
+    ZHLN::Float3 localFootTargetL = {};
+    ZHLN::Float3 localFootTargetR = {};
+    ZHLN::Float3 footNormalL      = {0.0f, 1.0f, 0.0f};
+    ZHLN::Float3 footNormalR      = {0.0f, 1.0f, 0.0f};
+    float        plantWeightL     = 1.0f;
+    float        plantWeightR     = 1.0f;
+    bool         ikReachClampedL  = false;
+    bool         ikReachClampedR  = false;
 
     float forwardLean             = 0.0f;
     float lateralBank             = 0.0f;
@@ -274,24 +275,24 @@ struct ProceduralLocomotionComponent {
 
     // Gait-wheel instrumentation. Pass peaks as a foot crosses below the COM;
     // reach peaks near the forward/back stride extrema.
-    float     strideWheelAngle  = 0.0f;
-    float     passWeightL       = 0.0f;
-    float     passWeightR       = 0.0f;
-    float     reachWeightL      = 0.0f;
-    float     reachWeightR      = 0.0f;
-    JPH::Vec3 centerOfMassModel = JPH::Vec3(0.0f, 1.12f, 0.0f);
+    float        strideWheelAngle  = 0.0f;
+    float        passWeightL       = 0.0f;
+    float        passWeightR       = 0.0f;
+    float        reachWeightL      = 0.0f;
+    float        reachWeightR      = 0.0f;
+    ZHLN::Float3 centerOfMassModel = {0.0f, 1.12f, 0.0f};
 
-    JPH::Vec3 previousVelocity        = JPH::Vec3::sZero();
-    JPH::Vec3 directionalAcceleration = JPH::Vec3::sZero();
-    JPH::Quat previousRootRotation    = JPH::Quat::sIdentity();
-    bool      orientationInitialized  = false;
+    ZHLN::Float3 previousVelocity        = {};
+    ZHLN::Float3 directionalAcceleration = {};
+    ZHLN::Float4 previousRootRotation    = {0.0f, 0.0f, 0.0f, 1.0f};
+    bool         orientationInitialized  = false;
 
-    JPH::Vec3 plantedFootWorldL = JPH::Vec3::sZero();
-    JPH::Vec3 plantedFootWorldR = JPH::Vec3::sZero();
-    bool      footLockValidL    = false;
-    bool      footLockValidR    = false;
-    bool      wasPlantedL       = true;
-    bool      wasPlantedR       = true;
+    ZHLN::Float3 plantedFootWorldL = {};
+    ZHLN::Float3 plantedFootWorldR = {};
+    bool         footLockValidL    = false;
+    bool         footLockValidR    = false;
+    bool         wasPlantedL       = true;
+    bool         wasPlantedR       = true;
 };
 
 /** Fixed-capacity 24 x 6 particle state; rigs may populate 18-24 strands. */
@@ -328,28 +329,28 @@ struct alignas(64) HairStrandsComponent {
 };
 
 struct ProceduralLookAtComponent {
-    JPH::Vec3 targetWorldPos = JPH::Vec3::sZero();
-    float     weight         = 1.0f;
-    float     maxAngleDeg    = 75.0f;
+    ZHLN::Float3 targetWorldPos = {};
+    float        weight         = 1.0f;
+    float        maxAngleDeg    = 75.0f;
 };
 
 struct FirstPersonVisibilityComponent {
-    JPH::Vec3 eyeOffsetModel      = JPH::Vec3(0.0f, 0.07f, 0.08f);
-    JPH::Vec3 smoothedEyeModel    = JPH::Vec3::sZero();
-    JPH::Vec3 eyeVelocity         = JPH::Vec3::sZero();
-    JPH::Quat smoothedViewModel   = JPH::Quat::sIdentity();
-    JPH::Vec3 viewAngularVelocity = JPH::Vec3::sZero();
-    float     lookYawDegrees      = 0.0f;
-    float     lookPitchDegrees    = 0.0f;
-    float     positionStiffness   = 120.0f;
-    float     rotationStiffness   = 160.0f;
-    float     dampingFactor       = 1.0f;
-    float     fov                 = 75.0f;
-    float     nearPlane           = 0.03f;
-    bool      enabled             = false;
-    bool      hideHead            = true;
-    bool      hideHair            = true;
-    bool      cameraInitialized   = false;
+    ZHLN::Float3 eyeOffsetModel      = {0.0f, 0.07f, 0.08f};
+    ZHLN::Float3 smoothedEyeModel    = {};
+    ZHLN::Float3 eyeVelocity         = {};
+    ZHLN::Float4 smoothedViewModel   = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::Float3 viewAngularVelocity = {};
+    float        lookYawDegrees      = 0.0f;
+    float        lookPitchDegrees    = 0.0f;
+    float        positionStiffness   = 120.0f;
+    float        rotationStiffness   = 160.0f;
+    float        dampingFactor       = 1.0f;
+    float        fov                 = 75.0f;
+    float        nearPlane           = 0.03f;
+    bool         enabled             = false;
+    bool         hideHead            = true;
+    bool         hideHair            = true;
+    bool         cameraInitialized   = false;
 };
 
 namespace Animation {
@@ -391,8 +392,8 @@ struct GraspDesc {
 struct GripPoint {
     CharacterBone       assignedLimb       = CharacterBone::HandR;
     GripOrientationMode orientationMode    = GripOrientationMode::AutomaticHanded;
-    JPH::Mat44          localTransform     = JPH::Mat44::sIdentity();
-    JPH::Vec3           poleHintOffset     = JPH::Vec3(0.0f, -1.0f, -0.5f);
+    ZHLN::Mat44         localTransform     = ZHLN::Mat44::sIdentity();
+    ZHLN::Float3        poleHintOffset     = {0.0f, -1.0f, -0.5f};
     float               ikWeight           = 1.0f;
     float               ikWeightVelocity   = 0.0f;
     float               evaluatedIKWeight  = 1.0f;
@@ -413,16 +414,16 @@ struct ItemObstacleAvoidance {
 };
 
 struct ItemSwayState {
-    JPH::Vec3 positionOffset         = JPH::Vec3::sZero();
-    JPH::Vec3 positionVelocity       = JPH::Vec3::sZero();
-    JPH::Quat rotationOffset         = JPH::Quat::sIdentity();
-    JPH::Vec3 angularVelocity        = JPH::Vec3::sZero();
-    JPH::Vec3 previousDriverPosition = JPH::Vec3::sZero();
-    JPH::Quat previousDriverRotation = JPH::Quat::sIdentity();
-    float     massKg                 = 2.5f;
-    float     stiffness              = 130.0f;
-    float     damping                = 0.84f;
-    bool      driverInitialized      = false;
+    ZHLN::Float3 positionOffset         = {};
+    ZHLN::Float3 positionVelocity       = {};
+    ZHLN::Float4 rotationOffset         = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::Float3 angularVelocity        = {};
+    ZHLN::Float3 previousDriverPosition = {};
+    ZHLN::Float4 previousDriverRotation = {0.0f, 0.0f, 0.0f, 1.0f};
+    float        massKg                 = 2.5f;
+    float        stiffness              = 130.0f;
+    float        damping                = 0.84f;
+    bool         driverInitialized      = false;
 };
 
 struct ItemHandlingComponent {
@@ -430,17 +431,17 @@ struct ItemHandlingComponent {
     ItemDriverMode driverMode = ItemDriverMode::HandAnchored;
     Entity         itemEntity {};
 
-    JPH::Mat44 hipLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.20f, -0.16f, 0.40f));
-    JPH::Mat44 aimLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.00f, -0.05f, 0.22f));
-    JPH::Mat44 worldAnchor    = JPH::Mat44::sIdentity();
-    float      aimProgress    = 0.0f;
-    float      aimVelocity    = 0.0f;
+    ZHLN::Mat44 hipLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.20f, -0.16f, 0.40f));
+    ZHLN::Mat44 aimLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.00f, -0.05f, 0.22f));
+    ZHLN::Mat44 worldAnchor    = ZHLN::Mat44::sIdentity();
+    float       aimProgress    = 0.0f;
+    float       aimVelocity    = 0.0f;
 
     std::array<GripPoint, 4> grips {};
     size_t                   gripCount = 0;
     ItemObstacleAvoidance    avoidance {};
     ItemSwayState            sway {};
-    JPH::Mat44               itemModelTransform = JPH::Mat44::sIdentity();
+    ZHLN::Mat44              itemModelTransform = ZHLN::Mat44::sIdentity();
     float                    shoulderLeadWeight = 0.20f;
     float                    torsoReachWeight   = 0.25f;
 };

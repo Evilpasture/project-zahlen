@@ -46,6 +46,7 @@ module;
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -108,48 +109,46 @@ enum class MessageType : uint8_t {
 };
 
 struct ClientHello {
-    uint32_t    protocolVersion ZHLN_ANNOTATION(ZHLN::Description<"Wire protocol version the client speaks"> {});
-    uint64_t    userId ZHLN_ANNOTATION(ZHLN::Description<"Player identity issued by the server operator"> {});
-    std::string token ZHLN_ANNOTATION(ZHLN::Description<"Shared secret used for this login session"> {});
+    uint32_t protocolVersion ZHLN_ANNOTATION(ZHLN::Description<"Wire protocol version the client speaks"> {});
+    uint64_t userId          ZHLN_ANNOTATION(ZHLN::Description<"Player identity issued by the server operator"> {});
+    std::string token        ZHLN_ANNOTATION(ZHLN::Description<"Shared secret used for this login session"> {});
 };
 
 struct ServerWelcome {
-    uint32_t serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick at handshake time"> {}) = 0;
-    uint16_t realtimePort ZHLN_ANNOTATION(ZHLN::Description<"UDP port serving realtime physics and input traffic"> {}) = 0;
-    uint8_t  tickRateHz ZHLN_ANNOTATION(ZHLN::Description<"Authoritative server tick rate in hertz"> {},
-                         = ZHLN::Wire::Range<1, 240> {}) = 0;
+    uint32_t serverTick   ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick at handshake time"> {})                                = 0;
+    uint16_t realtimePort ZHLN_ANNOTATION(ZHLN::Description<"UDP port serving realtime physics and input traffic"> {})                     = 0;
+    uint8_t tickRateHz    ZHLN_ANNOTATION(ZHLN::Description<"Authoritative server tick rate in hertz"> {}, = ZHLN::Wire::Range<1, 240> {}) = 0;
 };
 
 struct ObjectSnapshot {
-    uint64_t  uid ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {}) = 0;
+    uint64_t uid       ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {}) = 0;
     JPH::Vec3 position ZHLN_ANNOTATION(ZHLN::Description<"World-space position, quantized to 1/256 m"> {});
-    JPH::Vec3 size ZHLN_ANNOTATION(ZHLN::Description<"Axis-aligned object extents, quantized to 1/256 m"> {});
+    JPH::Vec3 size     ZHLN_ANNOTATION(ZHLN::Description<"Axis-aligned object extents, quantized to 1/256 m"> {});
 };
 
 struct ZHLN_ANNOTATION(ZHLN::Wire::Version<2> {}) InitialSnapshotMessage {
-    uint32_t                    serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick of this snapshot"> {}) = 0;
+    uint32_t serverTick                 ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick of this snapshot"> {}) = 0;
     std::vector<ObjectSnapshot> objects ZHLN_ANNOTATION(ZHLN::Description<"Every replicated object in the world"> {});
 };
 
 struct PhysicsBodyState {
-    uint64_t  uid ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {}) = 0;
+    uint64_t uid       ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {}) = 0;
     JPH::Vec3 position ZHLN_ANNOTATION(ZHLN::Description<"World-space position, quantized to 1/256 m"> {});
     JPH::Quat rotation ZHLN_ANNOTATION(ZHLN::Description<"Sign-canonical orientation, quantized to 1/32767 per component"> {});
     JPH::Vec3 velocity ZHLN_ANNOTATION(ZHLN::Description<"Linear velocity in metres per second"> {});
 };
 
 struct ZHLN_ANNOTATION(ZHLN::Wire::Version<2> {}) PhysicsBatchMessage {
-    uint32_t                      serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick of this batch"> {}) = 0;
+    uint32_t serverTick                  ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick of this batch"> {}) = 0;
     std::vector<PhysicsBodyState> bodies ZHLN_ANNOTATION(ZHLN::Description<"One entry per moving replicated body"> {});
 };
 
 struct ClientInputMessage {
-    uint64_t userId ZHLN_ANNOTATION(ZHLN::Description<"Player identity issued by the server operator"> {}) = 0;
-    uint32_t sequence ZHLN_ANNOTATION(ZHLN::Description<"Monotonically increasing input counter"> {}) = 0;
-    uint8_t  moveFlags ZHLN_ANNOTATION(ZHLN::Description<"Movement bitfield: 1=forward 2=backward 4=left 8=right 16=jump"> {},
-                        = ZHLN::Wire::Range<0, 31> {}) = 0;
-    float    yaw ZHLN_ANNOTATION(ZHLN::Description<"Camera yaw in degrees, clockwise positive"> {},
-               = ZHLN::Wire::Range<-1000.0f, 1000.0f> {}) = 0.0f;
+    uint64_t userId   ZHLN_ANNOTATION(ZHLN::Description<"Player identity issued by the server operator"> {}) = 0;
+    uint32_t sequence ZHLN_ANNOTATION(ZHLN::Description<"Monotonically increasing input counter"> {})        = 0;
+    uint8_t
+        moveFlags ZHLN_ANNOTATION(ZHLN::Description<"Movement bitfield: 1=forward 2=backward 4=left 8=right 16=jump"> {}, = ZHLN::Wire::Range<0, 31> {}) = 0;
+    float yaw     ZHLN_ANNOTATION(ZHLN::Description<"Camera yaw in degrees, clockwise positive"> {}, = ZHLN::Wire::Range<-1000.0f, 1000.0f> {})          = 0.0f;
 };
 
 // ============================================================================
@@ -187,7 +186,7 @@ inline constexpr uint8_t PROTOCOL_VERSION       = 2;
 // ============================================================================
 
 struct MessageEnvelope {
-    MessageType           type {};
+    MessageType          type {};
     std::vector<uint8_t> payload {};
 };
 
@@ -226,8 +225,7 @@ struct ZHLN::Wire::Codec<JPH::Vec3> {
         for (const float component: components) {
             const double meters = static_cast<double>(component);
             if (!std::isfinite(component) || meters < -WorldMax || meters > WorldMax) {
-                return std::unexpected(
-                    writer.Fail(ZHLN::Wire::WireError::ValueOutOfRange, meters, -WorldMax, WorldMax));
+                return std::unexpected(writer.Fail(ZHLN::Wire::WireError::ValueOutOfRange, meters, -WorldMax, WorldMax));
             }
             const double scaled  = std::round(meters * ZHLN::Net::POSITION_SCALE);
             const double clamped = std::clamp(scaled, -2147483647.0, 2147483647.0);
@@ -243,14 +241,15 @@ struct ZHLN::Wire::Codec<JPH::Vec3> {
         int32_t quantized[3] = {};
         for (size_t index = 0; index < 3; ++index) {
             const ZHLN::Wire::IndexPathScope scope(reader.Path(), index);
-            const auto                              res = reader.Get(quantized[index]);
+            const auto                       res = reader.Get(quantized[index]);
             if (!res) {
                 return res;
             }
         }
-        value = JPH::Vec3(static_cast<float>(quantized[0]) * ZHLN::Net::INV_POSITION_SCALE,
-                          static_cast<float>(quantized[1]) * ZHLN::Net::INV_POSITION_SCALE,
-                          static_cast<float>(quantized[2]) * ZHLN::Net::INV_POSITION_SCALE);
+        value = JPH::Vec3(
+            static_cast<float>(quantized[0]) * ZHLN::Net::INV_POSITION_SCALE, static_cast<float>(quantized[1]) * ZHLN::Net::INV_POSITION_SCALE,
+            static_cast<float>(quantized[2]) * ZHLN::Net::INV_POSITION_SCALE
+        );
         return {};
     }
 };
@@ -273,13 +272,12 @@ struct ZHLN::Wire::Codec<JPH::Quat> {
         const float components[4] = {x, y, z, w};
         for (const float component: components) {
             if (!std::isfinite(component)) {
-                return std::unexpected(
-                    writer.Fail(ZHLN::Wire::WireError::ValueOutOfRange, static_cast<double>(component), -1.0, 1.0));
+                return std::unexpected(writer.Fail(ZHLN::Wire::WireError::ValueOutOfRange, static_cast<double>(component), -1.0, 1.0));
             }
             // Clamp instead of rejecting: normalized quaternions can overshoot
             // ±1 by one ULP.
-            const float scaled  = std::round(std::clamp(component, -1.0f, 1.0f) * ZHLN::Net::QUAT_SCALE);
-            const auto  res     = writer.Put(static_cast<int16_t>(scaled));
+            const float scaled = std::round(std::clamp(component, -1.0f, 1.0f) * ZHLN::Net::QUAT_SCALE);
+            const auto  res    = writer.Put(static_cast<int16_t>(scaled));
             if (!res) {
                 return res;
             }
@@ -291,15 +289,15 @@ struct ZHLN::Wire::Codec<JPH::Quat> {
         int16_t quantized[4] = {};
         for (size_t index = 0; index < 4; ++index) {
             const ZHLN::Wire::IndexPathScope scope(reader.Path(), index);
-            const auto                              res = reader.Get(quantized[index]);
+            const auto                       res = reader.Get(quantized[index]);
             if (!res) {
                 return res;
             }
         }
-        value = JPH::Quat(static_cast<float>(quantized[0]) * ZHLN::Net::INV_QUAT_SCALE,
-                          static_cast<float>(quantized[1]) * ZHLN::Net::INV_QUAT_SCALE,
-                          static_cast<float>(quantized[2]) * ZHLN::Net::INV_QUAT_SCALE,
-                          static_cast<float>(quantized[3]) * ZHLN::Net::INV_QUAT_SCALE)
+        value = JPH::Quat(
+                    static_cast<float>(quantized[0]) * ZHLN::Net::INV_QUAT_SCALE, static_cast<float>(quantized[1]) * ZHLN::Net::INV_QUAT_SCALE,
+                    static_cast<float>(quantized[2]) * ZHLN::Net::INV_QUAT_SCALE, static_cast<float>(quantized[3]) * ZHLN::Net::INV_QUAT_SCALE
+        )
                     .Normalized();
         return {};
     }
@@ -580,10 +578,10 @@ struct NetworkIdentityComponent {
 };
 
 struct NetworkInterpolationComponent {
-    JPH::Vec3 targetPosition     = JPH::Vec3::sZero();
-    JPH::Quat targetRotation     = JPH::Quat::sIdentity();
-    JPH::Vec3 linearVelocity     = JPH::Vec3::sZero();
-    float     interpolationSpeed = 20.0f;
+    ZHLN::Float3 targetPosition     = {};
+    ZHLN::Float4 targetRotation     = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::Float3 linearVelocity     = {};
+    float        interpolationSpeed = 20.0f;
 };
 
 // ============================================================================
@@ -622,9 +620,8 @@ class ZHLN_STATIC_API NetworkClient {
     NetworkClient(NetworkClient&&) noexcept;
     auto operator=(NetworkClient&&) noexcept -> NetworkClient&;
 
-    [[nodiscard]] auto Connect(std::string_view host, uint16_t port, uint64_t userId, std::string_view token) noexcept
-        -> std::expected<void, ErrorCode>;
-    void Disconnect() noexcept;
+    [[nodiscard]] auto Connect(std::string_view host, uint16_t port, uint64_t userId, std::string_view token) noexcept -> std::expected<void, ErrorCode>;
+    void               Disconnect() noexcept;
 
     [[nodiscard]] auto PollEvents(Engine& engine) noexcept -> std::expected<void, ErrorCode>;
     void               SendInputs(bool forward, bool backward, bool left, bool right, bool jump, float yaw) noexcept;

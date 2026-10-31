@@ -733,8 +733,8 @@ auto main(int argc, char* argv[]) -> int {
     if (bounds.valid) {
         const JPH::Vec3 size = bounds.Size();
         ZHLN::Log(
-            "[Sample] Estimated GLB bounds min=({}, {}, {}), max=({}, {}, {}), size=({}, {}, {}).", bounds.min.GetX(), bounds.min.GetY(), bounds.min.GetZ(),
-            bounds.max.GetX(), bounds.max.GetY(), bounds.max.GetZ(), size.GetX(), size.GetY(), size.GetZ()
+            "[Sample] Estimated GLB bounds min=({}, {}, {}), max=({}, {}, {}), size=({}, {}, {}).", bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x,
+            bounds.max.y, bounds.max.z, size.GetX(), size.GetY(), size.GetZ()
         );
     }
     ZHLN::Log(

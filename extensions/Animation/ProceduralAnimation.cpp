@@ -1745,7 +1745,8 @@ void ProceduralAnimation::CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMa
             continue;
         }
         const JPH::Mat44 authoredRelative = boneMap.modelTransforms[constraint.parent].Inversed() * boneMap.modelTransforms[constraint.child];
-        constraint.localPoseDelta         = constraint.bindRelative.Inversed() * authoredRelative;
+        const JPH::Mat44 bindRelative     = constraint.bindRelative;
+        constraint.localPoseDelta         = bindRelative.Inversed() * authoredRelative;
     }
 
     if (!boneMap.preserveAuthoredHierarchy) {
@@ -1757,7 +1758,8 @@ void ProceduralAnimation::CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMa
             continue;
         }
         const JPH::Mat44 authoredRelative = boneMap.modelTransforms[constraint.parent].Inversed() * boneMap.modelTransforms[constraint.child];
-        constraint.localPoseDelta         = constraint.bindRelative.Inversed() * authoredRelative;
+        const JPH::Mat44 bindRelative     = constraint.bindRelative;
+        constraint.localPoseDelta         = bindRelative.Inversed() * authoredRelative;
     }
 }
 
@@ -2127,7 +2129,8 @@ void ProceduralAnimationSystem(
 
         float angularVelocity = 0.0f;
         if (gait->orientationInitialized) {
-            const JPH::Vec3 oldForward = gait->previousRootRotation * JPH::Vec3::sAxisZ();
+            const JPH::Quat previousRootRotation = gait->previousRootRotation;
+            const JPH::Vec3 oldForward           = previousRootRotation * JPH::Vec3::sAxisZ();
             const JPH::Vec3 newForward = rootRotation * JPH::Vec3::sAxisZ();
             const float     dot        = std::clamp(oldForward.Dot(newForward), -1.0f, 1.0f);
             const float     sign       = oldForward.Cross(newForward).GetY() < 0.0f ? -1.0f : 1.0f;
@@ -2248,7 +2251,8 @@ void ProceduralAnimationSystem(
             JPH::Vec3           aimDirection    = JPH::Vec3::sAxisZ();
             if (const auto lookAt = registry.Get<ProceduralLookAtComponent>(entity)) {
                 const JPH::Vec3 entityPosition = transform->position;
-                const JPH::Vec3 targetModel    = rootRotation.Inversed() * (lookAt->targetWorldPos - entityPosition);
+                const JPH::Vec3 lookAtTarget   = lookAt->targetWorldPos;
+                const JPH::Vec3 targetModel    = rootRotation.Inversed() * (lookAtTarget - entityPosition);
                 const JPH::Vec3 fromHead    = targetModel - headPosition;
                 if (fromHead.LengthSq() > 1.0e-8f) {
                     aimDirection = fromHead.Normalized();
@@ -2285,7 +2289,8 @@ void ProceduralAnimationSystem(
                 const JPH::Vec3 upperPosition = boneMap->modelTransforms[upperNode].GetTranslation();
                 const float armLength  = (boneMap->modelTransforms[foreNode].GetTranslation() - upperPosition).Length() +
                                          (boneMap->modelTransforms[handNode].GetTranslation() - boneMap->modelTransforms[foreNode].GetTranslation()).Length();
-                const JPH::Vec3 target = (itemHandling->itemModelTransform * grip.localTransform).GetTranslation();
+                const JPH::Mat44 itemModel   = itemHandling->itemModelTransform;
+                const JPH::Vec3  target      = (itemModel * grip.localTransform).GetTranslation();
                 const float     reachExcess = std::max((target - upperPosition).Length() - armLength * 0.90f, 0.0f) * grip.evaluatedIKWeight;
                 if (primaryReachGrip == gripCount || reachExcess > greatestReachExcess) {
                     primaryReachGrip    = gripIndex;
@@ -2299,7 +2304,8 @@ void ProceduralAnimationSystem(
                 Animation::ApplyTorsoReachCompensation(
                     boneMap->modelTransforms.data(), *boneMap, left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR,
                     left ? CharacterBone::ForearmL : CharacterBone::ForearmR, left ? CharacterBone::HandL : CharacterBone::HandR,
-                    (itemHandling->itemModelTransform * grip.localTransform).GetTranslation(), itemHandling->torsoReachWeight * grip.evaluatedIKWeight
+                    (JPH::Mat44(itemHandling->itemModelTransform) * grip.localTransform).GetTranslation(),
+                    itemHandling->torsoReachWeight * grip.evaluatedIKWeight
                 );
             }
             Animation::ConstrainItemToGripReach(*itemHandling, boneMap->modelTransforms.data(), *boneMap);
@@ -2314,7 +2320,7 @@ void ProceduralAnimationSystem(
                 const CharacterBone upperBone  = left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR;
                 const CharacterBone foreBone   = left ? CharacterBone::ForearmL : CharacterBone::ForearmR;
                 const CharacterBone handBone   = left ? CharacterBone::HandL : CharacterBone::HandR;
-                const JPH::Mat44    gripTarget = itemHandling->itemModelTransform * grip.localTransform;
+                const JPH::Mat44    gripTarget = JPH::Mat44(itemHandling->itemModelTransform) * grip.localTransform;
 
                 Animation::ApplyClavicleLead(
                     boneMap->modelTransforms.data(), *boneMap, upperBone, gripTarget.GetTranslation(), itemHandling->shoulderLeadWeight * gripWeight
@@ -2417,7 +2423,7 @@ void ProceduralAnimationSystem(
                 Animation::SolveLimbIK(
                     boneMap->modelTransforms.data(), *boneMap, left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR,
                     left ? CharacterBone::ForearmL : CharacterBone::ForearmR, left ? CharacterBone::HandL : CharacterBone::HandR,
-                    itemHandling->itemModelTransform * grip.localTransform, grip
+                    JPH::Mat44(itemHandling->itemModelTransform) * grip.localTransform, grip
                 );
             }
         }
@@ -2472,13 +2478,17 @@ void ProceduralAnimationSystem(
                     firstPerson->viewAngularVelocity = JPH::Vec3::sZero();
                     firstPerson->cameraInitialized   = true;
                 } else {
-                    SpringVector(
-                        firstPerson->smoothedEyeModel, firstPerson->eyeVelocity, targetEyeModel, dt, firstPerson->positionStiffness, firstPerson->dampingFactor
-                    );
-                    SpringRotation(
-                        firstPerson->smoothedViewModel, firstPerson->viewAngularVelocity, targetViewModel, dt, firstPerson->rotationStiffness,
-                        firstPerson->dampingFactor
-                    );
+                    // The springs integrate their first two arguments in place.
+                    JPH::Vec3 smoothedEye  = firstPerson->smoothedEyeModel;
+                    JPH::Vec3 eyeVelocity  = firstPerson->eyeVelocity;
+                    JPH::Quat smoothedView = firstPerson->smoothedViewModel;
+                    JPH::Vec3 viewAngular  = firstPerson->viewAngularVelocity;
+                    SpringVector(smoothedEye, eyeVelocity, targetEyeModel, dt, firstPerson->positionStiffness, firstPerson->dampingFactor);
+                    SpringRotation(smoothedView, viewAngular, targetViewModel, dt, firstPerson->rotationStiffness, firstPerson->dampingFactor);
+                    firstPerson->smoothedEyeModel    = smoothedEye;
+                    firstPerson->eyeVelocity         = eyeVelocity;
+                    firstPerson->smoothedViewModel   = smoothedView;
+                    firstPerson->viewAngularVelocity = viewAngular;
                 }
 
                 // The first-person pose goes to the camera entity's own
@@ -2661,13 +2671,13 @@ void DrawProceduralDebugRig(
         const JPH::Vec4 normalColor(1.0f, 0.95f, 0.12f, 1.0f);
         const JPH::Vec3 footL = ModelToWorld(rootPosition, rootRotation, gait->localFootTargetL);
         const JPH::Vec3 footR = ModelToWorld(rootPosition, rootRotation, gait->localFootTargetR);
-        scene.AddLine(footL, footL + gait->footNormalL * 0.22f, normalColor);
-        scene.AddLine(footR, footR + gait->footNormalR * 0.22f, normalColor);
+        scene.AddLine(footL, footL + JPH::Vec3(gait->footNormalL) * 0.22f, normalColor);
+        scene.AddLine(footR, footR + JPH::Vec3(gait->footNormalR) * 0.22f, normalColor);
 
         // Sagittal stride wheel: cyan ticks are pass poses, orange ticks are
         // reach poses, and the spoke follows the distance-driven gait phase.
         constexpr float wheelRadius      = 0.24f;
-        const JPH::Vec3 wheelCenterModel = gait->centerOfMassModel + JPH::Vec3(-0.48f, 0.0f, 0.0f);
+        const JPH::Vec3 wheelCenterModel = JPH::Vec3(gait->centerOfMassModel) + JPH::Vec3(-0.48f, 0.0f, 0.0f);
         const JPH::Vec4 wheelColor(0.40f, 0.45f, 0.55f, 0.85f);
         const JPH::Vec4 passColor(0.10f, 0.95f, 1.00f, 1.0f);
         const JPH::Vec4 reachColor(1.00f, 0.42f, 0.08f, 1.0f);

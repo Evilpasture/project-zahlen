@@ -243,16 +243,21 @@ void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, fl
         reachWeight            = wheelReach * wheelReach;
     };
 
-    evaluateFoot(0.0f, gait.localFootTargetL, gait.plantWeightL, gait.passWeightL, gait.reachWeightL);
-    evaluateFoot(0.5f, gait.localFootTargetR, gait.plantWeightR, gait.passWeightR, gait.reachWeightR);
-    gait.localFootTargetL.SetX(0.14f);
-    gait.localFootTargetR.SetX(-0.14f);
+    // The stride solve writes addresses, so it runs on Jolt locals and the
+    // component is stored once at the end -- a member converts on assignment,
+    // not on binding to a JPH::Vec3&.
+    JPH::Vec3 footTargetL = gait.localFootTargetL;
+    JPH::Vec3 footTargetR = gait.localFootTargetR;
+    evaluateFoot(0.0f, footTargetL, gait.plantWeightL, gait.passWeightL, gait.reachWeightL);
+    evaluateFoot(0.5f, footTargetR, gait.plantWeightR, gait.passWeightR, gait.reachWeightR);
+    footTargetL.SetX(0.14f);
+    footTargetR.SetX(-0.14f);
 
     if (speed < 0.035f) {
-        gait.localFootTargetL.SetZ(0.0f);
-        gait.localFootTargetR.SetZ(0.0f);
-        gait.localFootTargetL.SetY(0.0f);
-        gait.localFootTargetR.SetY(0.0f);
+        footTargetL.SetZ(0.0f);
+        footTargetR.SetZ(0.0f);
+        footTargetL.SetY(0.0f);
+        footTargetR.SetY(0.0f);
         gait.plantWeightL  = 1.0f;
         gait.plantWeightR  = 1.0f;
         gait.gravityBounce = 0.0f;
@@ -267,9 +272,12 @@ void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, fl
         gait.pelvisSway = 0.0f;
     }
 
-    const float targetForwardLean = std::clamp(-gait.directionalAcceleration.GetZ() * 0.018f * gait.forwardLeanScale, -0.22f, 0.22f);
+    gait.localFootTargetL = footTargetL;
+    gait.localFootTargetR = footTargetR;
+
+    const float targetForwardLean = std::clamp(-gait.directionalAcceleration.z * 0.018f * gait.forwardLeanScale, -0.22f, 0.22f);
     const float centripetal       = speed * angularVelocity;
-    const float targetLateralBank = std::clamp((gait.directionalAcceleration.GetX() * 0.008f - centripetal * 0.018f) * gait.lateralBankScale, -0.28f, 0.28f);
+    const float targetLateralBank = std::clamp((gait.directionalAcceleration.x * 0.008f - centripetal * 0.018f) * gait.lateralBankScale, -0.28f, 0.28f);
     SpringScalar(gait.forwardLean, gait.tiltPitchVelocity, targetForwardLean, dt, 5.5f, 0.88f);
     SpringScalar(gait.lateralBank, gait.tiltRollVelocity, targetLateralBank, dt, 5.5f, 0.88f);
 }
@@ -552,12 +560,17 @@ void SolveLegGrounding(
         return IsValidRigNode(footNode, map.nodeCount) ? nodeTransforms[footNode].GetTranslation() : JPH::Vec3(proceduralTarget);
     };
 
-    const JPH::Vec3 probeL   = footProbe(CharacterBone::FootL, gait.localFootTargetL);
-    const JPH::Vec3 probeR   = footProbe(CharacterBone::FootR, gait.localFootTargetR);
-    const bool      lockL    = worldLockFeet && gait.plantWeightL > 0.5f;
-    const bool      lockR    = worldLockFeet && gait.plantWeightR > 0.5f;
-    FootContact     contactL = raycastFoot(probeL, lockL, lockL && !gait.wasPlantedL, gait.plantedFootWorldL, gait.footLockValidL);
-    FootContact     contactR = raycastFoot(probeR, lockR, lockR && !gait.wasPlantedR, gait.plantedFootWorldR, gait.footLockValidR);
+    const JPH::Vec3 probeL = footProbe(CharacterBone::FootL, gait.localFootTargetL);
+    const JPH::Vec3 probeR = footProbe(CharacterBone::FootR, gait.localFootTargetR);
+    const bool      lockL  = worldLockFeet && gait.plantWeightL > 0.5f;
+    const bool      lockR  = worldLockFeet && gait.plantWeightR > 0.5f;
+    // The world lock is an out-parameter, so it steps through a Jolt local.
+    JPH::Vec3   lockedWorldL = gait.plantedFootWorldL;
+    JPH::Vec3   lockedWorldR = gait.plantedFootWorldR;
+    FootContact contactL     = raycastFoot(probeL, lockL, lockL && !gait.wasPlantedL, lockedWorldL, gait.footLockValidL);
+    FootContact contactR     = raycastFoot(probeR, lockR, lockR && !gait.wasPlantedR, lockedWorldR, gait.footLockValidR);
+    gait.plantedFootWorldL   = lockedWorldL;
+    gait.plantedFootWorldR   = lockedWorldR;
     gait.wasPlantedL         = lockL;
     gait.wasPlantedR         = lockR;
     gait.footNormalL         = contactL.normal;
@@ -708,8 +721,7 @@ void SolveUpperBody(
     }
 
     if (applyArmSwing) {
-        const float horizontalSpeed =
-            std::sqrt(gait.previousVelocity.GetX() * gait.previousVelocity.GetX() + gait.previousVelocity.GetZ() * gait.previousVelocity.GetZ());
+        const float        horizontalSpeed = std::sqrt(gait.previousVelocity.x * gait.previousVelocity.x + gait.previousVelocity.z * gait.previousVelocity.z);
         const float        swingWeight = std::clamp(horizontalSpeed * 0.35f, 0.0f, 1.0f);
         const float        armAngle    = std::sin(kGaitTwoPi * gait.phase) * 0.58f * swingWeight * gait.armSwingScale;
         const RigNodeIndex armL        = Node(map, CharacterBone::UpperArmL);
@@ -732,7 +744,7 @@ void SolveUpperBody(
     }
 
     const JPH::Quat inverseRootRot = rootRotation.Inversed();
-    const JPH::Vec3 targetModel    = inverseRootRot * (lookAt->targetWorldPos - JPH::Vec3(rootPosition));
+    const JPH::Vec3 targetModel    = inverseRootRot * (JPH::Vec3(lookAt->targetWorldPos) - JPH::Vec3(rootPosition));
     const JPH::Vec3 headPosition   = nodeTransforms[headNode].GetTranslation();
     JPH::Vec3       targetDir      = targetModel - headPosition;
     if (targetDir.LengthSq() < 1.0e-8f) {

@@ -18,6 +18,7 @@ module;
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
@@ -52,13 +53,13 @@ struct SurfaceResponse {
     float         decalRoughness = 0.90f;
     bool          spawnDecal     = true;
 
-    JPH::Vec4 sparkColor    = JPH::Vec4(1.0f, 0.82f, 0.55f, 1.0f);
-    uint32_t  sparkCount    = 8;
-    float     sparkSpeed    = 4.5f;
-    float     sparkLifetime = 0.35f;
-    float     sparkSize     = 0.035f;
-    float     sparkGravity  = -14.0f;
-    float     sparkDrag     = 1.5f;
+    ZHLN::Float4 sparkColor    = {1.0f, 0.82f, 0.55f, 1.0f};
+    uint32_t     sparkCount    = 8;
+    float        sparkSpeed    = 4.5f;
+    float        sparkLifetime = 0.35f;
+    float        sparkSize     = 0.035f;
+    float        sparkGravity  = -14.0f;
+    float        sparkDrag     = 1.5f;
 
     // Optional audio parameters (Hz, Q, Duration)
     bool  hasAudio      = true;
@@ -71,35 +72,35 @@ struct SurfaceResponse {
 // ============================================================================
 
 struct BulletTracer {
-    JPH::Vec3 start         = JPH::Vec3::sZero();
-    JPH::Vec3 direction     = JPH::Vec3::sAxisZ();
-    float     speed         = 350.0f;
-    float     length        = 2.5f;
-    float     totalDistance = 0.0f;
-    float     traveled      = 0.0f;
-    JPH::Vec4 colorStart    = JPH::Vec4(1.0f, 0.92f, 0.65f, 1.0f);
-    JPH::Vec4 colorEnd      = JPH::Vec4(1.0f, 0.45f, 0.10f, 0.0f);
+    ZHLN::Float3 start         = {};
+    ZHLN::Float3 direction     = {0.0f, 0.0f, 1.0f};
+    float        speed         = 350.0f;
+    float        length        = 2.5f;
+    float        totalDistance = 0.0f;
+    float        traveled      = 0.0f;
+    ZHLN::Float4 colorStart    = {1.0f, 0.92f, 0.65f, 1.0f};
+    ZHLN::Float4 colorEnd      = {1.0f, 0.45f, 0.10f, 0.0f};
 };
 
 struct EnergyRing {
-    JPH::Vec3 position  = JPH::Vec3::sZero();
-    JPH::Vec3 normal    = JPH::Vec3::sAxisY();
-    float     radius    = 0.0f;
-    float     maxRadius = 2.5f;
-    float     age       = 0.0f;
-    float     duration  = 0.25f;
-    JPH::Vec4 color     = JPH::Vec4(0.65f, 0.90f, 1.00f, 0.8f);
+    ZHLN::Float3 position  = {};
+    ZHLN::Float3 normal    = {0.0f, 1.0f, 0.0f};
+    float        radius    = 0.0f;
+    float        maxRadius = 2.5f;
+    float        age       = 0.0f;
+    float        duration  = 0.25f;
+    ZHLN::Float4 color     = {0.65f, 0.90f, 1.00f, 0.8f};
 };
 
 struct ImpactParticle {
-    JPH::Vec3 position = JPH::Vec3::sZero();
-    JPH::Vec3 velocity = JPH::Vec3::sZero();
-    JPH::Vec4 color    = JPH::Vec4::sReplicate(1.0f);
-    float     size     = 0.04f;
-    float     age      = 0.0f;
-    float     maxLife  = 0.35f;
-    float     drag     = 1.5f;
-    float     gravity  = -12.0f;
+    ZHLN::Float3 position = {};
+    ZHLN::Float3 velocity = {};
+    ZHLN::Float4 color    = {1.0f, 1.0f, 1.0f, 1.0f};
+    float        size     = 0.04f;
+    float        age      = 0.0f;
+    float        maxLife  = 0.35f;
+    float        drag     = 1.5f;
+    float        gravity  = -12.0f;
 };
 
 // ============================================================================
@@ -312,8 +313,11 @@ class System {
             float tail = std::max(0.0f, tracer.traveled - tracer.length);
 
             if (head > tail) {
-                JPH::Vec3 pTail = tracer.start + (tracer.direction * tail);
-                JPH::Vec3 pHead = tracer.start + (tracer.direction * head);
+                // Storage fields, Jolt algebra: load once, use twice.
+                const JPH::Vec3 tracerStart = tracer.start;
+                const JPH::Vec3 tracerDir   = tracer.direction;
+                JPH::Vec3       pTail       = tracerStart + (tracerDir * tail);
+                JPH::Vec3       pHead       = tracerStart + (tracerDir * head);
 
                 // Draws line segment with HDR emissive boost into line queue
                 scene.AddLine(pTail, pHead, tracer.colorEnd, tracer.colorStart);
@@ -328,18 +332,21 @@ class System {
             float currentRadius = ring.maxRadius * std::sin(t * (std::numbers::pi_v<float> * 0.5f));
 
             // Approximate ring with 16-segment line loop
-            constexpr int kSegments = 16;
-            JPH::Vec3     u         = (std::abs(ring.normal.GetY()) > 0.95f) ? JPH::Vec3::sAxisX() : JPH::Vec3::sAxisY();
-            JPH::Vec3     v         = ring.normal.Cross(u).Normalized();
-            u                       = v.Cross(ring.normal).Normalized();
+            constexpr int   kSegments  = 16;
+            const JPH::Vec3 ringNormal = ring.normal;
+            const JPH::Vec4 ringColor  = ring.color;
+            const JPH::Vec3 ringOrigin = ring.position;
+            JPH::Vec3       u          = (std::abs(ringNormal.GetY()) > 0.95f) ? JPH::Vec3::sAxisX() : JPH::Vec3::sAxisY();
+            JPH::Vec3       v          = ringNormal.Cross(u).Normalized();
+            u                          = v.Cross(ringNormal).Normalized();
 
-            float     alpha = (1.0f - t) * ring.color.GetW();
-            JPH::Vec4 col(ring.color.GetX(), ring.color.GetY(), ring.color.GetZ(), alpha);
+            float     alpha = (1.0f - t) * ringColor.GetW();
+            JPH::Vec4 col(ringColor.GetX(), ringColor.GetY(), ringColor.GetZ(), alpha);
 
-            JPH::Vec3 prevP = ring.position + u * currentRadius;
+            JPH::Vec3 prevP = ringOrigin + u * currentRadius;
             for (int i = 1; i <= kSegments; ++i) {
                 float     theta = (static_cast<float>(i) / kSegments) * 2.0f * std::numbers::pi_v<float>;
-                JPH::Vec3 p     = ring.position + (u * std::cos(theta) + v * std::sin(theta)) * currentRadius;
+                JPH::Vec3 p     = ringOrigin + (u * std::cos(theta) + v * std::sin(theta)) * currentRadius;
                 scene.AddLine(prevP, p, col, col);
                 prevP = p;
             }
@@ -349,18 +356,24 @@ class System {
         // 3. Advance Impact Particles (Generalized drag + gravity without planar floor assumption)
         for (auto& p: m_particles) {
             p.age += dt;
-            p.velocity.SetY(p.velocity.GetY() + (p.gravity * dt));
-            p.velocity *= std::exp(-p.drag * dt);
-            p.position += p.velocity * dt;
+            // Integration is written on Jolt locals and stored back: the fields
+            // are storage, and a member converts on assignment, not on SetY or *=.
+            JPH::Vec3 velocity = p.velocity;
+            JPH::Vec3 position = p.position;
+            velocity.SetY(velocity.GetY() + (p.gravity * dt));
+            velocity *= std::exp(-p.drag * dt);
+            position += velocity * dt;
+            p.velocity = velocity;
+            p.position = position;
 
             // Render spark as short directional streak along velocity vector
-            float speed = p.velocity.Length();
+            float speed = velocity.Length();
             if (speed > 0.05f) {
-                JPH::Vec3 streakTail = p.position - (p.velocity / speed) * (p.size * 1.5f);
-                float     alpha      = std::max(0.0f, 1.0f - (p.age / p.maxLife)) * p.color.GetW();
-                JPH::Vec4 col(p.color.GetX(), p.color.GetY(), p.color.GetZ(), alpha);
+                JPH::Vec3 streakTail = position - (velocity / speed) * (p.size * 1.5f);
+                float     alpha      = std::max(0.0f, 1.0f - (p.age / p.maxLife)) * p.color.w;
+                JPH::Vec4 col(p.color.x, p.color.y, p.color.z, alpha);
 
-                scene.AddLine(streakTail, p.position, col, col);
+                scene.AddLine(streakTail, position, col, col);
             }
         }
         ZHLN::Ranges::EraseIf(m_particles, [](const auto& p) -> auto { return p.age >= p.maxLife; });

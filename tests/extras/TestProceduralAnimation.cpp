@@ -170,9 +170,9 @@ struct ProceduralAnimationTestSuite {
             const ZHLN::Physics::DualShapeConfig            hull = ZHLN::Locomotion::FitDualShapeToBounds(bounds, ZHLN::Physics::DualShapeConfig {}, options);
             const float                                     horizontalExtent = std::max(2.5f * options.lateralCoverage, 1.25f) * options.horizontalPadding;
             const float                                     hullTop          = hull.GetBumperOffsetY() + hull.bumperRadiusY;
-            if (!bounds.valid || !bounds.min.IsClose(JPH::Vec3(-2.0f, 1.0f, -1.25f), 0.0001f) || !bounds.max.IsClose(JPH::Vec3(2.5f, 5.0f, 1.0f), 0.0001f) ||
-                std::abs(hull.bumperRadiusXZ - horizontalExtent) > 0.0001f || hull.lifterRadius >= hull.bumperRadiusXZ ||
-                hull.bumperRadiusY <= hull.bumperRadiusXZ || hullTop < 5.0f * options.verticalPadding - 0.0001f) {
+            if (!bounds.valid || !JPH::Vec3(bounds.min).IsClose(JPH::Vec3(-2.0f, 1.0f, -1.25f), 0.0001f) ||
+                !JPH::Vec3(bounds.max).IsClose(JPH::Vec3(2.5f, 5.0f, 1.0f), 0.0001f) || std::abs(hull.bumperRadiusXZ - horizontalExtent) > 0.0001f ||
+                hull.lifterRadius >= hull.bumperRadiusXZ || hull.bumperRadiusY <= hull.bumperRadiusXZ || hullTop < 5.0f * options.verticalPadding - 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};
@@ -591,7 +591,7 @@ struct ProceduralAnimationTestSuite {
             const bool phaseIsDistanceDriven  = std::abs(gait.phase - 0.625f) < 0.0001f;
             const bool feetAreOpposed         = gait.plantWeightL != gait.plantWeightR;
             const bool authoredSwingPreserved = gait.plantWeightR < 0.001f && gait.plantWeightL > 0.99f;
-            const bool accelerationIsFinite   = std::isfinite(gait.directionalAcceleration.GetZ());
+            const bool accelerationIsFinite   = std::isfinite(gait.directionalAcceleration.z);
             const bool wheelTracksPhase       = std::abs(gait.strideWheelAngle - gait.phase * 2.0f * std::numbers::pi_v<float>) < 0.0001f;
             const bool passReachPartition     = std::abs(gait.passWeightL + gait.reachWeightL - 1.0f) < 0.0001f;
             const bool twoKeySynchronization  = std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.0f)) < 0.0001f &&
@@ -846,9 +846,9 @@ struct ProceduralAnimationTestSuite {
                 ((reachMap.modelTransforms[reachFore].GetTranslation() - reachMap.modelTransforms[reachUpper].GetTranslation()).Length() +
                  (reachMap.modelTransforms[reachHand].GetTranslation() - reachMap.modelTransforms[reachFore].GetTranslation()).Length()) *
                 reachHandling.grips[0].maxArmExtension;
-            const float              constrainedDistance = ((reachHandling.itemModelTransform * reachHandling.grips[0].localTransform).GetTranslation() -
-                                                            reachMap.modelTransforms[reachUpper].GetTranslation())
-                                                               .Length();
+            const JPH::Mat44 reachModel = reachHandling.itemModelTransform;
+            const float      constrainedDistance =
+                ((reachModel * reachHandling.grips[0].localTransform).GetTranslation() - reachMap.modelTransforms[reachUpper].GetTranslation()).Length();
             const ZHLN::RigNodeIndex reachUpperL         = reachMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)];
             const ZHLN::RigNodeIndex reachForeL          = reachMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)];
             const ZHLN::RigNodeIndex reachHandL          = reachMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)];
@@ -856,9 +856,8 @@ struct ProceduralAnimationTestSuite {
                 ((reachMap.modelTransforms[reachForeL].GetTranslation() - reachMap.modelTransforms[reachUpperL].GetTranslation()).Length() +
                  (reachMap.modelTransforms[reachHandL].GetTranslation() - reachMap.modelTransforms[reachForeL].GetTranslation()).Length()) *
                 reachHandling.grips[1].maxArmExtension;
-            const float constrainedDistanceL = ((reachHandling.itemModelTransform * reachHandling.grips[1].localTransform).GetTranslation() -
-                                                reachMap.modelTransforms[reachUpperL].GetTranslation())
-                                                   .Length();
+            const float constrainedDistanceL =
+                ((reachModel * reachHandling.grips[1].localTransform).GetTranslation() - reachMap.modelTransforms[reachUpperL].GetTranslation()).Length();
             if (constrainedDistance > maximumReach + 0.0001f || constrainedDistanceL > maximumReachL + 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }

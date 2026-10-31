@@ -11,6 +11,7 @@ module;
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterComponents.hpp>
@@ -31,12 +32,17 @@ export namespace ZHLN::Locomotion {
 inline constexpr float kTwoPi = 2.0f * std::numbers::pi_v<float>;
 
 struct CharacterBoundsEstimate {
-    JPH::Vec3 min   = JPH::Vec3::sZero();
-    JPH::Vec3 max   = JPH::Vec3::sZero();
-    bool      valid = false;
+    ZHLN::Float3 min   = {};
+    ZHLN::Float3 max   = {};
+    bool         valid = false;
 
     [[nodiscard]] auto Size() const noexcept -> JPH::Vec3 {
-        return valid ? max - min : JPH::Vec3::sZero();
+        if (!valid) {
+            return JPH::Vec3::sZero();
+        }
+        const JPH::Vec3 low  = min;
+        const JPH::Vec3 high = max;
+        return high - low;
     }
 };
 
@@ -83,10 +89,8 @@ struct DualShapeFitOptions {
             estimate.valid = true;
             return;
         }
-        estimate.min =
-            JPH::Vec3(std::min(estimate.min.GetX(), point.GetX()), std::min(estimate.min.GetY(), point.GetY()), std::min(estimate.min.GetZ(), point.GetZ()));
-        estimate.max =
-            JPH::Vec3(std::max(estimate.max.GetX(), point.GetX()), std::max(estimate.max.GetY(), point.GetY()), std::max(estimate.max.GetZ(), point.GetZ()));
+        estimate.min = {std::min(estimate.min.x, point.GetX()), std::min(estimate.min.y, point.GetY()), std::min(estimate.min.z, point.GetZ())};
+        estimate.max = {std::max(estimate.max.x, point.GetX()), std::max(estimate.max.y, point.GetY()), std::max(estimate.max.z, point.GetZ())};
     };
 
     for (const ModelPart& part: prefab.parts) {
@@ -120,14 +124,14 @@ struct DualShapeFitOptions {
         return fallback;
     }
 
-    const float maxAbsX = std::max(std::abs(bounds.min.GetX()), std::abs(bounds.max.GetX()));
-    const float maxAbsZ = std::max(std::abs(bounds.min.GetZ()), std::abs(bounds.max.GetZ()));
+    const float maxAbsX = std::max(std::abs(bounds.min.x), std::abs(bounds.max.x));
+    const float maxAbsZ = std::max(std::abs(bounds.min.z), std::abs(bounds.max.z));
     // The potential X envelope includes arms, weapons, and other appendages.
     // A CharacterVirtual bumper represents the torso, so retain all depth but
     // use a configurable fraction of lateral reach rather than swallowing the
     // complete animation silhouette.
     const float horizontalExtent = std::max(maxAbsX * std::clamp(options.lateralCoverage, 0.1f, 1.0f), maxAbsZ);
-    const float targetTop        = std::max(bounds.max.GetY(), size.GetY()) * std::max(options.verticalPadding, 1.0f);
+    const float targetTop        = std::max(bounds.max.y, size.GetY()) * std::max(options.verticalPadding, 1.0f);
     if (!std::isfinite(horizontalExtent) || !std::isfinite(targetTop) || horizontalExtent <= 0.0f || targetTop <= 0.0f) {
         return fallback;
     }
@@ -221,9 +225,9 @@ auto DrawWireframeSphere(
 }
 
 struct DebugPalette {
-    JPH::Vec4 colorBumper        = {0.10f, 1.00f, 0.20f, 1.0f}; // Vibrant Green
-    JPH::Vec4 colorLifter        = {1.00f, 1.00f, 1.00f, 1.0f}; // Pure White
-    JPH::Vec4 colorVelocityDebug = {1.00f, 0.90f, 0.10f, 1.0f}; // Yellow
+    ZHLN::Float4 colorBumper        = {0.10f, 1.00f, 0.20f, 1.0f}; // Vibrant Green
+    ZHLN::Float4 colorLifter        = {1.00f, 1.00f, 1.00f, 1.0f}; // Pure White
+    ZHLN::Float4 colorVelocityDebug = {1.00f, 0.90f, 0.10f, 1.0f}; // Yellow
 };
 
 /**

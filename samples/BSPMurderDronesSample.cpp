@@ -1700,8 +1700,8 @@ auto main(int argc, char* argv[]) -> int {
     if (rigBounds.valid) {
         const JPH::Vec3 size = rigBounds.Size();
         ZHLN::Log(
-            "[BSPSample] Estimated rig bounds min=({}, {}, {}), max=({}, {}, {}), size=({}, {}, {}).", rigBounds.min.GetX(), rigBounds.min.GetY(),
-            rigBounds.min.GetZ(), rigBounds.max.GetX(), rigBounds.max.GetY(), rigBounds.max.GetZ(), size.GetX(), size.GetY(), size.GetZ()
+            "[BSPSample] Estimated rig bounds min=({}, {}, {}), max=({}, {}, {}), size=({}, {}, {}).", rigBounds.min.x, rigBounds.min.y, rigBounds.min.z,
+            rigBounds.max.x, rigBounds.max.y, rigBounds.max.z, size.GetX(), size.GetY(), size.GetZ()
         );
     }
     ZHLN::Log(

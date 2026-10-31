@@ -143,8 +143,8 @@ JPH::Mat44 SolveItemBasePose(
             return primaryHandModel;
         case ItemDriverMode::AimGuided: {
             const JPH::Quat aimRotation = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), SafeNormalized(aimDirModel, JPH::Vec3::sAxisZ()));
-            const JPH::Vec3 hipPosition = JPH::Vec3(headPosModel) + aimRotation * handling.hipLocalOffset.GetTranslation();
-            const JPH::Vec3 aimPosition = JPH::Vec3(headPosModel) + aimRotation * handling.aimLocalOffset.GetTranslation();
+            const JPH::Vec3 hipPosition = JPH::Vec3(headPosModel) + aimRotation * JPH::Mat44(handling.hipLocalOffset).GetTranslation();
+            const JPH::Vec3 aimPosition = JPH::Vec3(headPosModel) + aimRotation * JPH::Mat44(handling.aimLocalOffset).GetTranslation();
             const float     blend       = SmoothStep(handling.aimProgress);
             return JPH::Mat44::sRotationTranslation(aimRotation, hipPosition + (aimPosition - hipPosition) * blend);
         }
@@ -181,8 +181,9 @@ void UpdateItemDynamics(
     const float      inertia        = std::clamp(handling.sway.massKg * 0.035f, 0.01f, 0.35f);
     if (handling.sway.driverInitialized) {
         const JPH::Vec3 localDriverDelta = driverRotation.Inversed() * (driverPosition - handling.sway.previousDriverPosition);
-        handling.sway.positionOffset -= localDriverDelta * inertia;
-        JPH::Quat delta = (driverRotation * handling.sway.previousDriverRotation.Inversed()).Normalized();
+        handling.sway.positionOffset           = JPH::Vec3(handling.sway.positionOffset) - localDriverDelta * inertia;
+        const JPH::Quat previousDriverRotation = handling.sway.previousDriverRotation;
+        JPH::Quat       delta                  = (driverRotation * previousDriverRotation.Inversed()).Normalized();
         if (delta.GetW() < 0.0f) {
             delta = JPH::Quat(-delta.GetX(), -delta.GetY(), -delta.GetZ(), -delta.GetW());
         }
@@ -223,26 +224,41 @@ void UpdateItemDynamics(
     // Repeated overlap at fraction zero therefore converges to one pushback
     // distance instead of accumulating until the item leaves the scene.
     const float effectiveStiffness = std::max(handling.sway.stiffness, 0.0f) / std::max(handling.sway.massKg, 0.1f);
-    SpringVector(handling.sway.positionOffset, handling.sway.positionVelocity, obstaclePositionTarget, dt, effectiveStiffness, handling.sway.damping);
-    SpringRotation(handling.sway.rotationOffset, handling.sway.angularVelocity, obstacleRotationTarget, dt, effectiveStiffness, handling.sway.damping);
+    // The springs write through their addresses, so the state is loaded, stepped
+    // and stored: a member converts on assignment, never to a JPH::Vec3&.
+    JPH::Vec3 swayOffset          = handling.sway.positionOffset;
+    JPH::Vec3 swayVelocity        = handling.sway.positionVelocity;
+    JPH::Quat swayRotation        = handling.sway.rotationOffset;
+    JPH::Vec3 swayAngularVelocity = handling.sway.angularVelocity;
+    SpringVector(swayOffset, swayVelocity, obstaclePositionTarget, dt, effectiveStiffness, handling.sway.damping);
+    SpringRotation(swayRotation, swayAngularVelocity, obstacleRotationTarget, dt, effectiveStiffness, handling.sway.damping);
+    handling.sway.positionOffset   = swayOffset;
+    handling.sway.positionVelocity = swayVelocity;
+    handling.sway.rotationOffset   = swayRotation;
+    handling.sway.angularVelocity  = swayAngularVelocity;
 
-    const bool finitePosition = std::isfinite(handling.sway.positionOffset.GetX()) && std::isfinite(handling.sway.positionOffset.GetY()) &&
-                                std::isfinite(handling.sway.positionOffset.GetZ());
-    const bool finiteRotation = std::isfinite(handling.sway.rotationOffset.GetX()) && std::isfinite(handling.sway.rotationOffset.GetY()) &&
-                                std::isfinite(handling.sway.rotationOffset.GetZ()) && std::isfinite(handling.sway.rotationOffset.GetW());
+    const bool finitePosition = std::isfinite(handling.sway.positionOffset.x) && std::isfinite(handling.sway.positionOffset.y) &&
+                                std::isfinite(handling.sway.positionOffset.z);
+    const bool finiteRotation = std::isfinite(handling.sway.rotationOffset.x) && std::isfinite(handling.sway.rotationOffset.y) &&
+                                std::isfinite(handling.sway.rotationOffset.z) && std::isfinite(handling.sway.rotationOffset.w);
     if (!finitePosition || !finiteRotation) {
         handling.sway.positionOffset   = obstaclePositionTarget;
         handling.sway.positionVelocity = JPH::Vec3::sZero();
         handling.sway.rotationOffset   = obstacleRotationTarget;
         handling.sway.angularVelocity  = JPH::Vec3::sZero();
     }
+    // Clamp against the stored values: the NaN guard above may have replaced them.
     const float maximumOffset = std::max(handling.avoidance.probeDistance * 1.25f, 0.25f);
-    if (handling.sway.positionOffset.LengthSq() > maximumOffset * maximumOffset) {
-        handling.sway.positionOffset = handling.sway.positionOffset.Normalized() * maximumOffset;
-        handling.sway.positionVelocity *= 0.25f;
+    swayOffset                = handling.sway.positionOffset;
+    if (swayOffset.LengthSq() > maximumOffset * maximumOffset) {
+        swayOffset                     = swayOffset.Normalized() * maximumOffset;
+        handling.sway.positionOffset   = swayOffset;
+        handling.sway.positionVelocity = JPH::Vec3(handling.sway.positionVelocity) * 0.25f;
     }
-    handling.sway.rotationOffset = handling.sway.rotationOffset.Normalized();
-    handling.itemModelTransform  = handling.itemModelTransform * JPH::Mat44::sRotationTranslation(handling.sway.rotationOffset, handling.sway.positionOffset);
+    swayRotation                 = JPH::Quat(handling.sway.rotationOffset).Normalized();
+    const JPH::Mat44 itemModel   = handling.itemModelTransform;
+    handling.sway.rotationOffset = swayRotation;
+    handling.itemModelTransform  = itemModel * JPH::Mat44::sRotationTranslation(swayRotation, handling.sway.positionOffset);
 }
 
 void ConstrainItemToGripReach(ItemHandlingComponent& handling, const JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
@@ -275,7 +291,8 @@ void ConstrainItemToGripReach(ItemHandlingComponent& handling, const JPH::Mat44*
             const JPH::Vec3 upperPosition = nodeTransforms[upperNode].GetTranslation();
             const float     armLength     = (nodeTransforms[foreNode].GetTranslation() - upperPosition).Length() +
                                             (nodeTransforms[handNode].GetTranslation() - nodeTransforms[foreNode].GetTranslation()).Length();
-            const JPH::Vec3 gripTarget    = (handling.itemModelTransform * grip.localTransform).GetTranslation();
+            const JPH::Mat44 itemModel     = handling.itemModelTransform;
+            const JPH::Vec3  gripTarget    = (itemModel * grip.localTransform).GetTranslation();
             const JPH::Vec3 reachVector   = gripTarget - upperPosition;
             const float     distance      = reachVector.Length();
             const float     maximumReach  = armLength * std::clamp(grip.maxArmExtension, 0.50f, 0.9999f);
@@ -289,7 +306,9 @@ void ConstrainItemToGripReach(ItemHandlingComponent& handling, const JPH::Mat44*
         if (greatestExcess <= 1.0e-5f || correctionWeight <= 1.0e-5f) {
             break;
         }
-        handling.itemModelTransform.SetTranslation(handling.itemModelTransform.GetTranslation() + correction / correctionWeight);
+        JPH::Mat44 itemModel = handling.itemModelTransform;
+        itemModel.SetTranslation(itemModel.GetTranslation() + correction / correctionWeight);
+        handling.itemModelTransform = itemModel;
     }
 }
 
