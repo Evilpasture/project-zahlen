@@ -12,6 +12,7 @@
 #include <lua/ReflectLua.hpp>
 
 #include <Zahlen/Physics/Jolt.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Engine/Scene.hpp>
 
 namespace ZHLN::ReflectLua {
@@ -24,6 +25,20 @@ struct LuaVector<JPH::Float3> : std::true_type {};
 
 template <>
 struct LuaVector<JPH::Float4> : std::true_type {};
+
+// Native math values must retain the same sequence/named-table Lua contract as
+// Jolt's storage vectors. Their fields are public and reflection can visit them.
+template <>
+struct LuaVector<ZHLN::Float2> : std::true_type {};
+
+template <>
+struct LuaVector<ZHLN::Float3> : std::true_type {};
+
+template <>
+struct LuaVector<ZHLN::Float4> : std::true_type {};
+
+template <>
+struct LuaVector<ZHLN::Double3> : std::true_type {};
 
 namespace TemplatedDetail {
 

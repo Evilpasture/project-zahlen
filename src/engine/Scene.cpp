@@ -36,6 +36,17 @@ void AssignConverted(Dst& dst, const Src& src) {
         dst = src;
     } else if constexpr (std::is_same_v<D, bool> && std::is_arithmetic_v<S>) {
         dst = src != 0;
+    // Scene descriptions still store Jolt Float3 while the ECS component uses
+    // native Float3/Float4. Handle both directions; sky alpha is not part of
+    // the description and is restored as one when instantiating a scene.
+    } else if constexpr (std::is_same_v<D, JPH::Float3> && std::is_same_v<S, ZHLN::Float3>) {
+        dst = JPH::Float3 {src.x, src.y, src.z};
+    } else if constexpr (std::is_same_v<D, ZHLN::Float3> && std::is_same_v<S, JPH::Float3>) {
+        dst = ZHLN::Float3 {src.x, src.y, src.z};
+    } else if constexpr (std::is_same_v<D, JPH::Float3> && std::is_same_v<S, ZHLN::Float4>) {
+        dst = JPH::Float3 {src.x, src.y, src.z};
+    } else if constexpr (std::is_same_v<D, ZHLN::Float4> && std::is_same_v<S, JPH::Float3>) {
+        dst = ZHLN::Float4 {src.x, src.y, src.z, 1.0f};
     } else if constexpr (std::is_same_v<D, JPH::Float3> && std::is_same_v<S, JPH::Vec4>) {
         dst = JPH::Float3 {src.GetX(), src.GetY(), src.GetZ()};
     } else if constexpr (std::is_same_v<D, JPH::Vec4> && std::is_same_v<S, JPH::Float3>) {

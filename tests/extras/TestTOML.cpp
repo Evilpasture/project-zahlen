@@ -599,7 +599,11 @@ onClickAction = "editor.save_scene"
                                                                      .tonemapper      = 3,
                                                                      .colorFilter     = JPH::Vec3(1.0f, 0.9f, 0.8f),
                                                                      .ambientExposure = 40.0f,
-                                                                     .skyZenith       = JPH::Vec4(0.5f, 0.25f, 0.125f, 1.0f),
+                                                                     .probeMin        = {1.0f, 2.0f, 3.0f},
+                                                                     .probeMax        = {4.0f, 5.0f, 6.0f},
+                                                                     .skyZenith       = JPH::Vec4(0.5f, 0.25f, 0.125f, 0.3f),
+                                                                     .skyHorizon      = {0.6f, 0.7f, 0.8f, 0.2f},
+                                                                     .skyGround       = {0.1f, 0.2f, 0.3f, 0.4f},
                                                                  }
             );
 
@@ -690,7 +694,7 @@ onClickAction = "editor.save_scene"
             ZHLN::Test::ExpectEq(scene.camera.fov, 52.0f);
 
             // The environment comes out of the settings component by field name,
-            // int -> bool and Vec4 -> Float3 included.
+            // int -> bool and native Float3/Float4 -> JPH::Float3 included.
             ZHLN::Test::ExpectEq(scene.environment.giIntensity, 2.5f);
             ZHLN::Test::ExpectEq(scene.environment.ambientExposure, 40.0f);
             ZHLN::Test::ExpectTrue(scene.environment.enableRTR);
@@ -702,6 +706,11 @@ onClickAction = "editor.save_scene"
             ZHLN::Test::ExpectEq(scene.environment.tonemapper, 3);
             ZHLN::Test::ExpectEq(scene.environment.colorFilter.y, 0.9f);
             ZHLN::Test::ExpectEq(scene.environment.skyZenith.x, 0.5f);
+            ZHLN::Test::ExpectEq(scene.environment.skyZenith.z, 0.125f);
+            ZHLN::Test::ExpectEq(scene.environment.skyHorizon.y, 0.7f);
+            ZHLN::Test::ExpectEq(scene.environment.skyGround.z, 0.3f);
+            ZHLN::Test::ExpectEq(scene.environment.probeMin.y, 2.0f);
+            ZHLN::Test::ExpectEq(scene.environment.probeMax.z, 6.0f);
 
             const auto& box = scene.entities[0];
             ZHLN::Test::ExpectEq(box.name, std::string {"SavedBox"});

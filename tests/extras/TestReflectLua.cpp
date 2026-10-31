@@ -269,7 +269,7 @@ struct ReflectLuaSuite {
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         }
 
-        // 4. Component SIMD JPH::Vec3 / Vec4 patch works directly on trivially copyable ECS component.
+        // 4. Native Float3 / Float4 accept both sequence and named forms.
         ZHLN::Components::PostProcessSettingsComponent postComp {};
         postComp.exposure = 1.5f;
         if (auto vecOk = ZHLN::ReflectLua::ApplyPatchString(
@@ -280,6 +280,24 @@ struct ReflectLuaSuite {
             return std::unexpected(LuaSuiteFail::UnexpectedError);
         }
         if (!Near(postComp.exposure, 1.5f) || !Near(postComp.colorFilter.y, 0.8f) || !Near(postComp.skyZenith.z, 0.3f)) {
+            return std::unexpected(LuaSuiteFail::WrongValue);
+        }
+
+        // Named and short sequence patches preserve untouched coordinates;
+        // an invalid coordinate rolls back the entire component.
+        if (auto ok = ZHLN::ReflectLua::ApplyPatchString(
+                postComp, "return { colorFilter = { x = 0.4 }, skyZenith = { 0.6 } }"); !ok) {
+            return std::unexpected(LuaSuiteFail::UnexpectedError);
+        }
+        if (!Near(postComp.colorFilter.x, 0.4f) || !Near(postComp.colorFilter.y, 0.8f) ||
+            !Near(postComp.skyZenith.x, 0.6f) || !Near(postComp.skyZenith.z, 0.3f)) {
+            return std::unexpected(LuaSuiteFail::WrongValue);
+        }
+        if (auto bad = ZHLN::ReflectLua::ApplyPatchString(
+                postComp, "return { exposure = 8, colorFilter = { x = 'bad' } }"); bad) {
+            return std::unexpected(LuaSuiteFail::ExpectedFailureDidNotHappen);
+        }
+        if (!Near(postComp.exposure, 1.5f) || !Near(postComp.colorFilter.x, 0.4f)) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
 
