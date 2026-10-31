@@ -272,10 +272,10 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
 
     const size_t capacity = 1u + prefab->parts.size(); // root + parts; no unauthored virtual lights
     std::vector<ZHLN::Entity> instances(capacity);
-    const uint32_t written = ZHLN::PrefabFactory::InstantiatePrefab(
+    const uint32_t            written = ZHLN::PrefabFactory::InstantiatePrefab(
         engine, *prefab,
         ZHLN::PrefabFactory::SpawnParams {
-            .position              = JPH::RVec3(0.0, 0.0, 0.0),
+            .position              = {0.0, 0.0, 0.0},
             .createPhysics         = false,
             .isAnimated            = !prefab->animations.empty(),
             .emissiveVirtualLights = false,

@@ -45,7 +45,7 @@ using ScenePushConstants = Slang::ScenePassPushConstants;
     return ScenePushConstants {
         .invViewProj = view.invViewProjMatrix,
         .viewProj    = view.viewProjMatrix,
-        .camPos      = {view.worldPosition.GetX(), view.worldPosition.GetY(), view.worldPosition.GetZ(), view.time},
+        .camPos      = {view.worldPosition.x, view.worldPosition.y, view.worldPosition.z, view.time},
         .giMode      = settings.post.mode,
         .aoRadius    = settings.post.aoRadius,
         .aoBias      = settings.post.aoBias,

@@ -220,7 +220,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     if (s_AnimateScene) {
         reg.Patch<Components::TransformComponent>(s_CubeEntity, [&](auto& trans) -> auto {
             JPH::Vec3 euler(s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f);
-            trans.rotation = Math::EulerDegreesToQuat(ToFloat3(euler));
+            trans.rotation = Math::EulerDegreesToQuat(euler);
             trans.position.SetY(2.0f + std::sin(s_AccumTime * 2.0f) * 0.25f);
         });
 

@@ -32,6 +32,7 @@
 #include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/KernelApp.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/View.hpp>
@@ -414,7 +415,7 @@ void DrawHierarchy(GUI::Frame& gui, Session& session) {
     return {};
 }
 
-void DrawFloat4(GUI::Frame& gui, std::string_view prefix, JPH::Float4& value, float minVal, float maxVal, float step) {
+void DrawFloat4(GUI::Frame& gui, std::string_view prefix, ZHLN::Float4& value, float minVal, float maxVal, float step) {
     for (int axis = 0; axis < 4; ++axis) {
         std::array<char, 64> idBuf {};
         const std::string_view label = ZHLN::FormatTo(idBuf, "{} {}", prefix, "RGBA"[axis]);

@@ -18,6 +18,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <cmath>
 #include <string>
@@ -30,7 +31,7 @@ void Release(PhysicsContext&, Components::PhysicsComponent&) {
 } // namespace SceneResources
 void AudioContext::PostEvent(const AudioEvent&) noexcept {
 }
-void PhysicsContext::SetCharacterPosition(Physics::BodyHandle, JPH::Double3) {
+void PhysicsContext::SetCharacterPosition(Physics::BodyHandle, ZHLN::Double3) {
 }
 auto Engine::GetRegistry() -> ECS::Registry& {
     static ECS::Registry reg;

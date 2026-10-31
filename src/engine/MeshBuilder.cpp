@@ -3,6 +3,7 @@
 
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -74,7 +75,7 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
     return finalMesh;
 }
 
-auto CreatePlaneMesh(RenderContext& ctx, float extent, JPH::Float4 color) -> Mesh {
+auto CreatePlaneMesh(RenderContext& ctx, float extent, ZHLN::Float4 color) -> Mesh {
     Packed1010102 n = Math::PackNormal(0.0f, 1.0f, 0.0f);
     Packed1010102 t = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
     PackedRGBA8   c = Math::PackColor(color.x, color.y, color.z, color.w);
@@ -118,7 +119,7 @@ auto CreatePlaneMesh(RenderContext& ctx, float extent, JPH::Float4 color) -> Mes
     return finalMesh;
 }
 
-auto CreateBoxMesh(RenderContext& ctx, JPH::Float3 halfExtents, JPH::Float4 color) -> Mesh {
+auto CreateBoxMesh(RenderContext& ctx, ZHLN::Float3 halfExtents, ZHLN::Float4 color) -> Mesh {
     const float x = halfExtents.x;
     const float y = halfExtents.y;
     const float z = halfExtents.z;
@@ -215,7 +216,7 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Float3 halfExtents, JPH::Float4 colo
     return finalMesh;
 }
 
-auto CreateSphereMesh(RenderContext& ctx, float radius, JPH::Float4 color) -> Mesh {
+auto CreateSphereMesh(RenderContext& ctx, float radius, ZHLN::Float4 color) -> Mesh {
     constexpr int kRings    = 12;
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
@@ -283,7 +284,7 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, JPH::Float4 color) -> Me
     return finalMesh;
 }
 
-auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, JPH::Float4 color) -> Mesh {
+auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, ZHLN::Float4 color) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   hy        = (height > 1e-4f ? height : 1e-4f) * 0.5f;
@@ -359,7 +360,7 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, JPH::Flo
     return finalMesh;
 }
 
-auto CreateConeMesh(RenderContext& ctx, float radius, float height, JPH::Float4 color) -> Mesh {
+auto CreateConeMesh(RenderContext& ctx, float radius, float height, ZHLN::Float4 color) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   h         = height > 1e-4f ? height : 1e-4f;

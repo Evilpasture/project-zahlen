@@ -8,6 +8,7 @@
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/FrameData.hpp>
@@ -85,10 +86,10 @@ struct SceneData {
         billboards.clear();
     }
 
-    void AddLine(JPH::Float3 start, JPH::Float3 end, JPH::Float4 colorStart, JPH::Float4 colorEnd) {
-        lines.push_back({ToVec3(start), ToVec3(end), ToVec4(colorStart), ToVec4(colorEnd)});
+    void AddLine(ZHLN::Float3 start, ZHLN::Float3 end, ZHLN::Float4 colorStart, ZHLN::Float4 colorEnd) {
+        lines.push_back({static_cast<JPH::Vec3>(start), static_cast<JPH::Vec3>(end), static_cast<JPH::Vec4>(colorStart), static_cast<JPH::Vec4>(colorEnd)});
     }
-    void AddLine(JPH::Float3 start, JPH::Float3 end, JPH::Float4 color) {
+    void AddLine(ZHLN::Float3 start, ZHLN::Float3 end, ZHLN::Float4 color) {
         AddLine(start, end, color, color);
     }
 

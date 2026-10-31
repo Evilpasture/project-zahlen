@@ -453,7 +453,7 @@ void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
         [&]() -> void {
             // The title is 34 characters: at 13 px against a 300 px content width
             // it fits with room to spare, and at 16 it would wrap.
-            ui.Text("Logic Benchmark  (zahlen_benchmark)", 13.0f, ToFloat4(kTitleInk));
+            ui.Text("Logic Benchmark  (zahlen_benchmark)", 13.0f, kTitleInk);
 
             ui.Row(8.0f, [&]() -> void {
                 ui.Checkbox("Running", running);
@@ -469,10 +469,10 @@ void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
             // One concern per line, each short enough that it cannot wrap: this
             // panel is 300 px of content, and a wrapped line of numbers is a line
             // nobody reads.
-            ui.Text(std::format("entities {:>6}   bodies {:>6}", metrics.entityCount, metrics.activePhysicsBodies), 12.0f, ToFloat4(kBodyInk));
-            ui.Text(std::format("tick {:.3f} ms   avg {:.3f} ms", metrics.lastTickTimeMs, metrics.avgTickTimeMs), 12.0f, ToFloat4(kBodyInk));
-            ui.Text(std::format("min {:.3f} ms   max {:.3f} ms", metrics.minTickTimeMs, metrics.maxTickTimeMs), 12.0f, ToFloat4(kBodyInk));
-            ui.Text(std::format("ticks {}   wall {:.2f} s   {:.0f} t/s", metrics.totalTicks, metrics.totalTimeSec, rate), 12.0f, ToFloat4(kBodyInk));
+            ui.Text(std::format("entities {:>6}   bodies {:>6}", metrics.entityCount, metrics.activePhysicsBodies), 12.0f, kBodyInk);
+            ui.Text(std::format("tick {:.3f} ms   avg {:.3f} ms", metrics.lastTickTimeMs, metrics.avgTickTimeMs), 12.0f, kBodyInk);
+            ui.Text(std::format("min {:.3f} ms   max {:.3f} ms", metrics.minTickTimeMs, metrics.maxTickTimeMs), 12.0f, kBodyInk);
+            ui.Text(std::format("ticks {}   wall {:.2f} s   {:.0f} t/s", metrics.totalTicks, metrics.totalTimeSec, rate), 12.0f, kBodyInk);
 
             // The chart: the last kChartBars ticks, each bar scaled against the
             // worst tick in the window. Bars are laid out left to right and
@@ -512,7 +512,7 @@ void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
                     benchmark->SpawnWorkload(1000);
                 }
             });
-            ui.Text("adds bodies to the live world", 11.0f, ToFloat4(kBodyInk));
+            ui.Text("adds bodies to the live world", 11.0f, kBodyInk);
         }
     );
 }
@@ -613,17 +613,18 @@ void BenchmarkViewer::Impl::DrawStageRow(
     const std::string_view rowId = TableId(prefix, column, index, kStageSparkBars + 4);
 
     ui.Box(
-        rowId, GUI::BoxConfig {.width = {.fixed = style.ColumnWidth()}, .gap = style.gap, .direction = GUI::Direction::Row, .alignCross = GUI::Alignment::Center},
+        rowId,
+        GUI::BoxConfig {.width = {.fixed = style.ColumnWidth()}, .gap = style.gap, .direction = GUI::Direction::Row, .alignCross = GUI::Alignment::Center},
         [&]() -> void {
             ui.Box(
                 TableId(prefix, column, index, 0), GUI::BoxConfig {.width = {.fixed = style.nameWidth}, .alignCross = GUI::Alignment::Center},
-                [&]() -> void { ui.Text(FitToWidth(row.name, style.nameWidth, style.advance), style.fontSize, ToFloat4(rowInk)); }
+                [&]() -> void { ui.Text(FitToWidth(row.name, style.nameWidth, style.advance), style.fontSize, rowInk); }
             );
 
             ui.Box(
                 TableId(prefix, column, index, 1),
                 GUI::BoxConfig {.width = {.fixed = style.valueWidth}, .alignMain = GUI::Alignment::End, .alignCross = GUI::Alignment::Center},
-                [&]() -> void { ui.Text(std::format("{:.2f}", row.lastMs), style.fontSize, ToFloat4(valueInk)); }
+                [&]() -> void { ui.Text(std::format("{:.2f}", row.lastMs), style.fontSize, valueInk); }
             );
 
             // The sparkline is the metric's own history, scaled to the row's own
@@ -679,7 +680,7 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnap
     // running the frames perfectly well, and the frame numbers above are
     // unaffected.
     if (!system.unavailableReason.empty()) {
-        ui.Text(FitToWidth(std::format("Machine  {}", system.unavailableReason), telemetryContent, AdvanceAt(12.0f)), 12.0f, ToFloat4(kCpuNameInk));
+        ui.Text(FitToWidth(std::format("Machine  {}", system.unavailableReason), telemetryContent, AdvanceAt(12.0f)), 12.0f, kCpuNameInk);
         return;
     }
 
@@ -695,7 +696,7 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnap
                 FitToWidth(
                     std::format("Machine  {}", backend.empty() ? std::string_view("no counters on this platform") : backend), telemetryContent, AdvanceAt(12.0f)
                 ),
-                12.0f, ToFloat4(kTitleInk)
+                12.0f, kTitleInk
             );
         });
         if (ui.IsPointerOver(id)) {
@@ -719,9 +720,7 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnap
 
         const std::string_view id = TableId("hw", 0, 1, 0);
         ui.Box(id, GUI::BoxConfig {.direction = GUI::Direction::Column}, [&]() -> void {
-            ui.Text(
-                FitToWidth(line, telemetryContent, AdvanceAt(12.0f)), 12.0f, ToFloat4(system.cpuUsagePct ? LoadInk(system.cpuUsagePct->last) : kCpuNameInk)
-            );
+            ui.Text(FitToWidth(line, telemetryContent, AdvanceAt(12.0f)), 12.0f, (system.cpuUsagePct ? LoadInk(system.cpuUsagePct->last) : kCpuNameInk));
         });
 
         if (ui.IsPointerOver(id) && (system.cpuUsagePct || system.cpuClockMHz)) {
@@ -766,10 +765,10 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnap
 
         ui.Box(id, GUI::BoxConfig {.direction = GUI::Direction::Column}, [&]() -> void {
             if (FitsWidth(all, telemetryContent, advance)) {
-                ui.Text(all, 12.0f, ToFloat4(ink));
+                ui.Text(all, 12.0f, ink);
             } else {
-                ui.Text(FitToWidth(std::format("GPU  {}", name), telemetryContent, advance), 12.0f, ToFloat4(kTitleInk));
-                ui.Text(FitToWidth(std::format("GPU{}", readings), telemetryContent, AdvanceAt(11.0f)), 11.0f, ToFloat4(ink));
+                ui.Text(FitToWidth(std::format("GPU  {}", name), telemetryContent, advance), 12.0f, kTitleInk);
+                ui.Text(FitToWidth(std::format("GPU{}", readings), telemetryContent, AdvanceAt(11.0f)), 11.0f, ink);
             }
         });
 
@@ -786,7 +785,7 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnap
         const std::string_view reason =
             system.gpuUnavailableReason.empty() ? std::string_view("no utilization or clock counters are exposed on this machine")
                                                 : std::string_view(system.gpuUnavailableReason);
-        ui.Text(FitToWidth(std::format("GPU counters  {}", reason), telemetryContent, AdvanceAt(11.0f)), 11.0f, ToFloat4(kCpuNameInk));
+        ui.Text(FitToWidth(std::format("GPU counters  {}", reason), telemetryContent, AdvanceAt(11.0f)), 11.0f, kCpuNameInk);
     }
 }
 
@@ -833,7 +832,7 @@ void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Frame& ui, std::span<const CoreTel
         if (withClock > 0 && withClock < cores.size()) {
             note.append(std::format("   {} with a clock", withClock));
         }
-        ui.Text(FitToWidth(note, telemetryContent, AdvanceAt(10.0f)), 10.0f, ToFloat4(kCpuNameInk));
+        ui.Text(FitToWidth(note, telemetryContent, AdvanceAt(10.0f)), 10.0f, kCpuNameInk);
     }
 }
 
@@ -854,10 +853,10 @@ void BenchmarkViewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& co
                     TableId("core", 0, cell, 1),
                     GUI::BoxConfig {.width = {.fixed = cellWidth}, .gap = 3.0f, .direction = GUI::Direction::Row, .alignCross = GUI::Alignment::Center},
                     [&]() -> void {
-                        ui.Text(std::format("c{:02}", core.index), kCoreCellFontSize, ToFloat4(kCpuNameInk));
-                        ui.Text(std::format("{:.0f}%", core.usagePct->last), kCoreCellFontSize, ToFloat4(LoadInk(core.usagePct->last)));
+                        ui.Text(std::format("c{:02}", core.index), kCoreCellFontSize, kCpuNameInk);
+                        ui.Text(std::format("{:.0f}%", core.usagePct->last), kCoreCellFontSize, LoadInk(core.usagePct->last));
                         if (core.clockMHz) {
-                            ui.Text(std::format("{:.2f}G", core.clockMHz->last / 1000.0f), kCoreCellFontSize, ToFloat4(kCpuNameInk));
+                            ui.Text(std::format("{:.2f}G", core.clockMHz->last / 1000.0f), kCoreCellFontSize, kCpuNameInk);
                         }
                     }
                 );
@@ -974,85 +973,80 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& eng
                     .direction = GUI::Direction::Column,
                 },
                 [&]() -> void {
+                    ui.Text("Frame Telemetry  (host frames)", 16.0f, kTitleInk);
 
-                ui.Text("Frame Telemetry  (host frames)", 16.0f, ToFloat4(kTitleInk));
+                    // Three short lines rather than two long ones: at 13 px these are 27
+                    // to 45 characters wide against a content width that holds about 66,
+                    // so none of them can wrap into the ones below.
+                    ui.Row(10.0f, [&]() -> void {
+                        ui.Text(std::format("avg {:.1f} fps", stats.avgFps), 17.0f, kTitleInk);
+                        ui.Text(std::format("now {:.1f}", stats.instantFps), 12.0f, kBodyInk);
+                        ui.Text(std::format("frame {:.2f} ms", stats.frameMsLast), 12.0f, kBodyInk);
+                    });
 
-                // Three short lines rather than two long ones: at 13 px these are 27
-                // to 45 characters wide against a content width that holds about 66,
-                // so none of them can wrap into the ones below.
-                ui.Row(10.0f, [&]() -> void {
-                    ui.Text(std::format("avg {:.1f} fps", stats.avgFps), 17.0f, ToFloat4(kTitleInk));
-                    ui.Text(std::format("now {:.1f}", stats.instantFps), 12.0f, ToFloat4(kBodyInk));
-                    ui.Text(std::format("frame {:.2f} ms", stats.frameMsLast), 12.0f, ToFloat4(kBodyInk));
-                });
-
-                ui.Text(std::format("1% low {:.2f} ms   0.1% low {:.2f} ms", stats.frameMsLow1, stats.frameMsLow01), 13.0f, ToFloat4(kBodyInk));
-                ui.Text(
-                    std::format("avg {:.2f}  min {:.2f}  max {:.2f} ms", stats.frameMsAvg, stats.frameMsMin, stats.frameMsMax), 12.0f, ToFloat4(kCpuNameInk)
-                );
-                ui.Text(std::format("{} frames   {:.0f} s window", stats.frames, stats.windowSeconds), 12.0f, ToFloat4(kCpuNameInk));
-                if (stats.clippedSamples > 0) {
-                    ui.Text(
-                        std::format("{} frames over {:.0f} ms counted apart", stats.clippedSamples, FrameTelemetry::kSampleCeilingMs), 11.0f,
-                        ToFloat4(kSlowBarInk)
-                    );
-                }
-
-                DrawFrameTimeChart(ui, chart, stats);
-
-                ui.Row(6.0f, [&]() -> void {
-                    if (ui.Button(telemetry.IsCapturing() ? "Stop capture" : "Capture CSV")) {
-                        ToggleCapture();
+                    ui.Text(std::format("1% low {:.2f} ms   0.1% low {:.2f} ms", stats.frameMsLow1, stats.frameMsLow01), 13.0f, kBodyInk);
+                    ui.Text(std::format("avg {:.2f}  min {:.2f}  max {:.2f} ms", stats.frameMsAvg, stats.frameMsMin, stats.frameMsMax), 12.0f, kCpuNameInk);
+                    ui.Text(std::format("{} frames   {:.0f} s window", stats.frames, stats.windowSeconds), 12.0f, kCpuNameInk);
+                    if (stats.clippedSamples > 0) {
+                        ui.Text(
+                            std::format("{} frames over {:.0f} ms counted apart", stats.clippedSamples, FrameTelemetry::kSampleCeilingMs), 11.0f, kSlowBarInk
+                        );
                     }
-                    if (ui.Button("Clear")) {
-                        telemetry.Reset();
+
+                    DrawFrameTimeChart(ui, chart, stats);
+
+                    ui.Row(6.0f, [&]() -> void {
+                        if (ui.Button(telemetry.IsCapturing() ? "Stop capture" : "Capture CSV")) {
+                            ToggleCapture();
+                        }
+                        if (ui.Button("Clear")) {
+                            telemetry.Reset();
+                        }
+                    });
+
+                    // What the capture button writes, for the pointer that asks: the
+                    // button is named for the file, and the file's path is not worth a
+                    // line of the panel for the rest of the session.
+                    const std::string_view captureLabel = telemetry.IsCapturing() ? std::string_view("Stop capture") : std::string_view("Capture CSV");
+                    if (ui.IsPointerOver(captureLabel)) {
+                        GUI::Widget::SetHover(hover, captureLabel);
+                        GUI::Widget::AddHoverLine(hover, "one CSV row per frame: the frame columns, then the machine columns");
+                        GUI::Widget::AddHoverLine(hover, "written under build/cache/captures/");
                     }
-                });
 
-                // What the capture button writes, for the pointer that asks: the
-                // button is named for the file, and the file's path is not worth a
-                // line of the panel for the rest of the session.
-                const std::string_view captureLabel = telemetry.IsCapturing() ? std::string_view("Stop capture") : std::string_view("Capture CSV");
-                if (ui.IsPointerOver(captureLabel)) {
-                    GUI::Widget::SetHover(hover, captureLabel);
-                    GUI::Widget::AddHoverLine(hover, "one CSV row per frame: the frame columns, then the machine columns");
-                    GUI::Widget::AddHoverLine(hover, "written under build/cache/captures/");
-                }
-
-                if (telemetry.IsCapturing()) {
-                    ui.Text(
-                        std::format("capturing {}   ({} frames)", telemetry.CapturePath().filename().string(), telemetry.CapturedFrames()), 11.0f,
-                        ToFloat4(kFastBarInk)
-                    );
-                } else if (!telemetry.CapturePath().empty()) {
-                    ui.Text(
-                        std::format("last capture {}   ({} frames)", telemetry.CapturePath().filename().string(), telemetry.CapturedFrames()), 11.0f,
-                        ToFloat4(kCpuNameInk)
-                    );
-                }
-
-                // The machine the frames ran on, between the host's own numbers and
-                // the profiler's tables: the frame text above says how fast, these
-                // say what the machine was busy with while it was fast.
-                DrawHardwareSection(ui, system.Snapshot(), system);
-
-                ui.Text(std::format("GPU  {:.2f} ms total   ({} stages)", stats.gpuTotalMs, gpuCount), 13.0f, ToFloat4(kTitleInk));
-                DrawStageColumns(ui, stages.first(gpuCount), tableGpu, "g");
-
-                if (stages.size() > gpuCount) {
-                    const size_t cpuCount = stages.size() - gpuCount;
-
-                    // The scope list has no natural bound -- it grows with every
-                    // registered scope -- but the panel's own scroll area now owns
-                    // the viewport budget, so the rows just flow and the panel
-                    // scrolls when they overflow. Rows go in directly rather than
-                    // through ui.Column for the same reason as the GPU table's.
-                    ui.Text(std::format("CPU  ({} scopes)", cpuCount), 13.0f, ToFloat4(kTitleInk));
-                    for (size_t i = 0; i < cpuCount; ++i) {
-                        DrawStageRow(ui, stages[gpuCount + i], tableCpu, "c", 0, i);
+                    if (telemetry.IsCapturing()) {
+                        ui.Text(
+                            std::format("capturing {}   ({} frames)", telemetry.CapturePath().filename().string(), telemetry.CapturedFrames()), 11.0f,
+                            kFastBarInk
+                        );
+                    } else if (!telemetry.CapturePath().empty()) {
+                        ui.Text(
+                            std::format("last capture {}   ({} frames)", telemetry.CapturePath().filename().string(), telemetry.CapturedFrames()), 11.0f,
+                            kCpuNameInk
+                        );
                     }
-                }
 
+                    // The machine the frames ran on, between the host's own numbers and
+                    // the profiler's tables: the frame text above says how fast, these
+                    // say what the machine was busy with while it was fast.
+                    DrawHardwareSection(ui, system.Snapshot(), system);
+
+                    ui.Text(std::format("GPU  {:.2f} ms total   ({} stages)", stats.gpuTotalMs, gpuCount), 13.0f, kTitleInk);
+                    DrawStageColumns(ui, stages.first(gpuCount), tableGpu, "g");
+
+                    if (stages.size() > gpuCount) {
+                        const size_t cpuCount = stages.size() - gpuCount;
+
+                        // The scope list has no natural bound -- it grows with every
+                        // registered scope -- but the panel's own scroll area now owns
+                        // the viewport budget, so the rows just flow and the panel
+                        // scrolls when they overflow. Rows go in directly rather than
+                        // through ui.Column for the same reason as the GPU table's.
+                        ui.Text(std::format("CPU  ({} scopes)", cpuCount), 13.0f, kTitleInk);
+                        for (size_t i = 0; i < cpuCount; ++i) {
+                            DrawStageRow(ui, stages[gpuCount + i], tableCpu, "c", 0, i);
+                        }
+                    }
                 }
             );
 

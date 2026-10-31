@@ -545,7 +545,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
 
             // Ground plane gives the shadow catch + distance reference.
             ZHLN::PrefabFactory::CreatePlane(
-                *engine, 220.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false}
+                *engine, 220.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}
             );
 
             // Far-field ramp probe: large red surface crossing the cascade
@@ -555,9 +555,9 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             ZHLN::PrefabFactory::CreatePlane(
                 *engine, 140.0f, {0.90f, 0.10f, 0.08f, 1.0f},
                 ZHLN::PrefabFactory::SpawnParams {
-                    .position      = JPH::RVec3(0.0, 0.05, 250.0),
+                    .position      = {0.0, 0.05, 250.0},
                     .rotation      = ZHLN::Math::EulerDegreesToQuat({-24.0f, 0.0f, 0.0f}),
-                    .scale         = JPH::Vec3(0.34f, 1.0f, 1.0f),
+                    .scale         = {0.34f, 1.0f, 1.0f},
                     .createPhysics = false,
                     .roughness     = 0.65f
                 }
@@ -604,7 +604,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 ringEntities[i] = ZHLN::PrefabFactory::CreateBox(
                     *engine, {rings[i].size, rings[i].size, rings[i].size},
                     ZHLN::PrefabFactory::SpawnParams {
-                        .position         = JPH::RVec3(static_cast<double>(rings[i].x), kEyeHeight, static_cast<double>(rings[i].distance)),
+                        .position         = {static_cast<double>(rings[i].x), kEyeHeight, static_cast<double>(rings[i].distance)},
                         .createPhysics    = false,
                         .materialOverride = *mat
                     }

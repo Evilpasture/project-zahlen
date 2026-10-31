@@ -13,6 +13,7 @@
 #include <Zahlen/GUI/UIData.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <concepts>
 #include <cstddef>
@@ -37,8 +38,8 @@ struct Sizing {
 struct BoxConfig {
     Sizing    width        = {};
     Sizing    height       = {};
-    JPH::Vec4 color        = {0.0f, 0.0f, 0.0f, 0.0f};
-    JPH::Vec4 cornerRadius = {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::Float4 color {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::Float4 cornerRadius {0.0f, 0.0f, 0.0f, 0.0f};
     float     padding      = 0.0f;
     float     gap          = 0.0f;
     Direction direction    = Direction::Column;
@@ -55,9 +56,9 @@ struct ScrollBarStyle {
     float     width           = 6.0f;
     float     minThumb        = 20.0f;
     float     margin          = 2.0f;
-    JPH::Vec4 trackColor      = {1.0f, 1.0f, 1.0f, 0.06f};
-    JPH::Vec4 thumbColor      = {1.0f, 1.0f, 1.0f, 0.30f};
-    JPH::Vec4 thumbHoverColor = {1.0f, 1.0f, 1.0f, 0.55f};
+    ZHLN::Float4 trackColor {1.0f, 1.0f, 1.0f, 0.06f};
+    ZHLN::Float4 thumbColor {1.0f, 1.0f, 1.0f, 0.30f};
+    ZHLN::Float4 thumbHoverColor {1.0f, 1.0f, 1.0f, 0.55f};
 };
 
 // Resolved from the previous frame's layout. scrollY is <= 0, matching the
@@ -233,9 +234,9 @@ class ZHLN_API Frame {
         ScrollArea(id, cfg, ScrollBarStyle {}, content);
     }
 
-    void Text(std::string_view text, float fontSize = 16.0f, JPH::Float4 color = {1, 1, 1, 1}) noexcept;
+    void Text(std::string_view text, float fontSize = 16.0f, ZHLN::Float4 color = {1, 1, 1, 1}) noexcept;
 
-    auto Button(std::string_view label, JPH::Float4 color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}) noexcept -> bool;
+    auto Button(std::string_view label, ZHLN::Float4 color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}) noexcept -> bool;
     auto Button(std::string_view label, const Sizing& width) noexcept -> bool {
         return Button(label, {0.16f, 0.24f, 0.36f, 0.95f}, width);
     }
@@ -288,7 +289,7 @@ class ZHLN_API Frame {
 
     template <typename OnClickFn>
         requires std::invocable<OnClickFn>
-    auto Button(std::string_view label, JPH::Float4 color, const Sizing& width, OnClickFn&& onClick) -> bool {
+    auto Button(std::string_view label, ZHLN::Float4 color, const Sizing& width, OnClickFn&& onClick) -> bool {
         if (Button(label, color, width)) {
             onClick();
             return true;
@@ -298,7 +299,7 @@ class ZHLN_API Frame {
 
     template <typename OnClickFn, typename OnHoverFn>
         requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
-    auto Button(std::string_view label, JPH::Float4 color, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) -> bool {
+    auto Button(std::string_view label, ZHLN::Float4 color, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) -> bool {
         bool clicked = Button(label, color, width);
         if (IsItemHovered()) {
             onHover();

@@ -5,6 +5,7 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/Handles.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -289,17 +290,13 @@ struct MaterialDesc {
     MaterialSamplerAddresses  textureSamplers {};
     MaterialTextureTransforms textureTransforms {};
 
-    static MaterialDesc Basic(
-        JPH::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}, float roughness = 0.5f, float metallic = 0.0f, bool twoSided = false
-    ) {
+    static MaterialDesc Basic(ZHLN::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}, float roughness = 0.5f, float metallic = 0.0f, bool twoSided = false) {
         return MaterialDesc {.doubleSided = twoSided, .metallic = metallic, .roughness = roughness, .baseColor = color};
     }
-    static MaterialDesc Transparent(JPH::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}, float roughness = 0.1f, bool twoSided = false) {
-        return MaterialDesc {
-            .doubleSided = twoSided, .alphaBlend = true, .alphaMode = 2, .metallic = 0.0f, .roughness = roughness, .baseColor = color
-        };
+    static MaterialDesc Transparent(ZHLN::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}, float roughness = 0.1f, bool twoSided = false) {
+        return MaterialDesc {.doubleSided = twoSided, .alphaBlend = true, .alphaMode = 2, .metallic = 0.0f, .roughness = roughness, .baseColor = color};
     }
-    static MaterialDesc Unlit(JPH::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}) {
+    static MaterialDesc Unlit(ZHLN::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}) {
         return MaterialDesc {.unlit = true, .baseColor = color};
     }
 };

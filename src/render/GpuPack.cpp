@@ -17,14 +17,6 @@ static_assert(
     "the generated Slang GPU enums must preserve the host enums' wire values"
 );
 
-namespace {
-
-[[nodiscard]] auto ToFloat4(const JPH::Vec4& v) noexcept -> JPH::Float4 {
-    return JPH::Float4 {v.GetX(), v.GetY(), v.GetZ(), v.GetW()};
-}
-
-} // namespace
-
 auto PackMeshlet(const MeshletDesc& desc) noexcept -> GPUMeshlet {
     GPUMeshlet packed {};
     packed.vertexOffset   = desc.vertexOffset;
@@ -154,7 +146,7 @@ auto PackFrameData(const FrameData& frame) noexcept -> FrameUniforms {
     packed.probeMax = JPH::Float4 {frame.probeMax.GetX(), frame.probeMax.GetY(), frame.probeMax.GetZ(), 0.0f};
     packed.probePos = JPH::Float4 {frame.probePos.GetX(), frame.probePos.GetY(), frame.probePos.GetZ(), 0.0f};
 
-    packed.jitterParams = ToFloat4(frame.jitter);
+    packed.jitterParams = JPH::Float4 {frame.jitter.GetX(), frame.jitter.GetY(), frame.jitter.GetZ(), frame.jitter.GetW()};
 
     packed.enableRTR        = frame.enableRTR;
     packed.fullBright       = frame.fullBright;
@@ -164,9 +156,9 @@ auto PackFrameData(const FrameData& frame) noexcept -> FrameUniforms {
     packed.sunSize          = frame.sunSize;
     packed.ambientExposure  = frame.ambientExposure;
 
-    packed.skyZenith  = ToFloat4(frame.skyZenith);
-    packed.skyHorizon = ToFloat4(frame.skyHorizon);
-    packed.skyGround  = ToFloat4(frame.skyGround);
+    packed.skyZenith  = JPH::Float4 {frame.skyZenith.GetX(), frame.skyZenith.GetY(), frame.skyZenith.GetZ(), frame.skyZenith.GetW()};
+    packed.skyHorizon = JPH::Float4 {frame.skyHorizon.GetX(), frame.skyHorizon.GetY(), frame.skyHorizon.GetZ(), frame.skyHorizon.GetW()};
+    packed.skyGround  = JPH::Float4 {frame.skyGround.GetX(), frame.skyGround.GetY(), frame.skyGround.GetZ(), frame.skyGround.GetW()};
 
     return packed;
 }

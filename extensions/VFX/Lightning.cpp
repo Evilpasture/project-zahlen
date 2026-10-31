@@ -5,6 +5,7 @@ module;
 
 // --- Global Module Fragment: Implementation Dependencies ---
 // clang-format off
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Math/Mat44.h>
@@ -241,7 +242,7 @@ void Attach(Engine& engine, Entity entity, LightningComponent component) {
     engine.GetRegistry().Add(entity, std::move(component));
 }
 
-auto Spawn(Engine& engine, JPH::Double3 cloudPos, JPH::Double3 groundPos, const LightningConfig& cfg) -> Entity {
+auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, const LightningConfig& cfg) -> Entity {
     auto& reg = engine.GetRegistry();
     auto& rc  = engine.GetRenderContext();
 
@@ -265,7 +266,7 @@ auto Spawn(Engine& engine, JPH::Double3 cloudPos, JPH::Double3 groundPos, const 
     static thread_local std::mt19937 s_rng(std::random_device {}());
 
     const JPH::Vec3 cloudOrigin(static_cast<float>(groundPos.x), static_cast<float>(cloudPos.y), static_cast<float>(groundPos.z));
-    const JPH::Vec3 groundTarget(ToRVec3(groundPos));
+    const JPH::Vec3 groundTarget(static_cast<JPH::RVec3>(groundPos));
 
     // The ribbon faces the view, and the flash is placed relative to it: a world
     // with no main camera has no view to face and nothing to flash, so there is no

@@ -64,7 +64,7 @@ struct RayTracedShadowsTestSuite {
                 }
                 ZHLN::PrefabFactory::CreatePlane(
                     *engine, 400.0f, {0.55f, 0.55f, 0.55f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMatRes}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMatRes}
                 );
 
                 const ZHLN::Entity sunEnt = reg.Create();
@@ -105,7 +105,7 @@ struct RayTracedShadowsTestSuite {
 
                     const ZHLN::Entity occluder = ZHLN::PrefabFactory::CreateBox(
                         eng, {0.5f, 3.0f, 4.0f},
-                        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 3.0, -8.0), .createPhysics = false, .color = {0.7f, 0.7f, 0.7f, 1.0f}}
+                        ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, -8.0}, .createPhysics = false, .color = {0.7f, 0.7f, 0.7f, 1.0f}}
                     );
 
                     TickFrames(eng, 2);

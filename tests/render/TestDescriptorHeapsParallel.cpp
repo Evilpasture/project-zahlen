@@ -140,7 +140,7 @@ struct DescriptorHeapsParallelSuite {
                     ZHLN::PrefabFactory::CreateBox(
                         *engine, {halfExtent, halfExtent, halfExtent},
                         ZHLN::PrefabFactory::SpawnParams {
-                            .position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = gpuMaterials[matIdx]
+                            .position = {pos.GetX(), pos.GetY(), pos.GetZ()}, .createPhysics = false, .materialOverride = gpuMaterials[matIdx]
                         }
                     );
                 }

@@ -461,7 +461,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     shadowCenter.SetZ(std::round(shadowCenter.GetZ() / textelSize) * textelSize);
 
     JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
-    JPH::Mat44 lightView = Math::CreateLookAt(ToFloat3(lightPos), ToFloat3(shadowCenter), {0.0f, 1.0f, 0.0f});
+    JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
 
     float      halfWidth = shadowWidth * 0.5f;
     JPH::Mat44 lightProj = Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
@@ -612,7 +612,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
             for (size_t i = 0; i + 1 < debugData.lineCount; i += 2) {
                 const auto& v0 = debugData.lines[i];
                 const auto& v1 = debugData.lines[i + 1];
-                scene.AddLine({v0.x, v0.y, v0.z}, {v1.x, v1.y, v1.z}, ToFloat4(UnpackColorVec4(v0.color)), ToFloat4(UnpackColorVec4(v1.color)));
+                scene.AddLine({v0.x, v0.y, v0.z}, {v1.x, v1.y, v1.z}, UnpackColorVec4(v0.color), UnpackColorVec4(v1.color));
             }
         } else if (debugData.triangleCount > 0) {
             std::vector<VertexPosition> debugPos;

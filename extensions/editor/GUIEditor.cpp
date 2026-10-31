@@ -176,7 +176,7 @@ constexpr auto kComponentKinds =
             }
             field = JPH::Vec3(v[0], v[1], v[2]);
         } else if constexpr (std::is_same_v<FT, JPH::Quat>) {
-            const JPH::Vec3 euler   = ZHLN::Math::QuatToEulerDegrees(ToFloat4(field));
+            const JPH::Vec3 euler   = ZHLN::Math::QuatToEulerDegrees(field);
             float           deg[3]  = {euler.GetX(), euler.GetY(), euler.GetZ()};
             bool            changed = false;
             for (int axis = 0; axis < 3; ++axis) {
@@ -614,7 +614,7 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
             gui.BeginRow(0.0f, static_cast<float>(row.depth) * 8.0f);
         }
 
-        if (gui.Button(label, ToFloat4(color))) {
+        if (gui.Button(label, color)) {
             state.selectedEntity = row.entity;
         }
 

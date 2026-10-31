@@ -713,7 +713,7 @@ struct MeshShaderTestSuite {
                 cam.nearZ = 0.01f;
                 cam.farZ = 10.0f;
 
-                const ZHLN::PrefabFactory::SpawnParams atOrigin {.position = JPH::RVec3(0, 0, 0), .createPhysics = false};
+                const ZHLN::PrefabFactory::SpawnParams atOrigin {.position = {0, 0, 0}, .createPhysics = false};
                 if (subject.sphere) {
                     // Radius 0.5: surface at z = +0.5, camera 0.20 in front of it.
                     cam.position = JPH::Vec3(0.0f, 0.0f, 0.70f);

@@ -27,6 +27,7 @@
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
@@ -355,8 +356,8 @@ auto PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p1, float p
 
 auto PhysicsContext::CreateRigidBody(
     const JPH::ShapeRefC& shape,
-    JPH::Double3          pos,
-    JPH::Float4           rot,
+    ZHLN::Double3         pos,
+    ZHLN::Float4          rot,
     JPH::EMotionType      motion,
     Layers::ID            layer,
     uint32_t              materialID,
@@ -370,12 +371,13 @@ auto PhysicsContext::CreateRigidBody(
 
     auto&                     world  = _impl->world;
     auto&                     bt     = world.bodyTable;
-    const Physics::BodyHandle handle = bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, motion, ToRVec3(pos), ToQuat(rot));
+    const Physics::BodyHandle handle =
+        bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, motion, static_cast<JPH::RVec3>(pos), static_cast<JPH::Quat>(rot));
 
     uint32_t precreatedBodyID = JPH::BodyID::cInvalidBodyID;
     if (world.TryEnterIdleJoltMutation()) {
         const Physics::MaterialData mat = world.ResolveMaterial(materialID);
-        JPH::BodyCreationSettings   settings(shape, ToRVec3(pos), ToQuat(rot), motion, static_cast<JPH::ObjectLayer>(layer));
+        JPH::BodyCreationSettings   settings(shape, static_cast<JPH::RVec3>(pos), static_cast<JPH::Quat>(rot), motion, static_cast<JPH::ObjectLayer>(layer));
         settings.mUserData    = handle.Pack();
         settings.mFriction    = mat.friction;
         settings.mRestitution = mat.restitution;
@@ -515,8 +517,8 @@ auto PhysicsContext::CreateMeshBody(
     uint32_t              vertexCount,
     const uint32_t*       indices,
     uint32_t              indexCount,
-    JPH::Double3          pos,
-    JPH::Float4           rot,
+    ZHLN::Double3         pos,
+    ZHLN::Float4          rot,
     uint32_t              category,
     uint32_t              mask
 ) -> Physics::BodyHandle {
@@ -524,10 +526,10 @@ auto PhysicsContext::CreateMeshBody(
     if (shape == nullptr) {
         return Physics::BodyHandle::Null();
     }
-    return CreateRigidBody(shape, ToDouble3(pos), ToFloat4(rot), JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask);
+    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask);
 }
 
-auto PhysicsContext::CreateCharacter(JPH::Double3 position, const Physics::CharacterParams& params) -> Physics::BodyHandle {
+auto PhysicsContext::CreateCharacter(ZHLN::Double3 position, const Physics::CharacterParams& params) -> Physics::BodyHandle {
     auto* impl  = _impl.get();
     auto& world = impl->world;
 
@@ -543,8 +545,9 @@ auto PhysicsContext::CreateCharacter(JPH::Double3 position, const Physics::Chara
     // queries Jolt shape bounds on hot steering ticks.
     const float groundOffset = charShape->GetLocalBounds().mMax.GetY();
 
-    const Physics::BodyHandle handle =
-        world.bodyTable.ReserveSlot(Physics::SlotState::PendingCreateChar, JPH::EMotionType::Kinematic, ToRVec3(position), JPH::Quat::sIdentity());
+    const Physics::BodyHandle handle = world.bodyTable.ReserveSlot(
+        Physics::SlotState::PendingCreateChar, JPH::EMotionType::Kinematic, static_cast<JPH::RVec3>(position), JPH::Quat::sIdentity()
+    );
     impl->characters.InitReservedSlot(handle, groundOffset);
 
     const JPH::Vec3  planeNormal   = params.supportingVolume.GetNormal();
@@ -612,8 +615,8 @@ auto PhysicsContext::GetDebugDrawData(bool drawShapes, bool drawConstraints, boo
     };
 }
 
-void PhysicsContext::SetCharacterVelocity(Physics::BodyHandle handle, JPH::Float3 velocity) {
-    if (!_impl->characters.RecordDesiredVelocity(handle, ToVec3(velocity))) {
+void PhysicsContext::SetCharacterVelocity(Physics::BodyHandle handle, ZHLN::Float3 velocity) {
+    if (!_impl->characters.RecordDesiredVelocity(handle, static_cast<JPH::Vec3>(velocity))) {
         return;
     }
     Physics::Command cmd {};
@@ -627,7 +630,7 @@ void PhysicsContext::SetCharacterVelocity(Physics::BodyHandle handle, JPH::Float
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetCharacterPosition(Physics::BodyHandle handle, JPH::Double3 position) {
+void PhysicsContext::SetCharacterPosition(Physics::BodyHandle handle, ZHLN::Double3 position) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -643,7 +646,7 @@ void PhysicsContext::SetCharacterPosition(Physics::BodyHandle handle, JPH::Doubl
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetKinematicPose(Physics::BodyHandle handle, JPH::Double3 position, JPH::Float4 rotation) {
+void PhysicsContext::SetKinematicPose(Physics::BodyHandle handle, ZHLN::Double3 position, ZHLN::Float4 rotation) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -663,7 +666,7 @@ void PhysicsContext::SetKinematicPose(Physics::BodyHandle handle, JPH::Double3 p
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetLinearVelocity(Physics::BodyHandle handle, JPH::Float3 velocity) {
+void PhysicsContext::SetLinearVelocity(Physics::BodyHandle handle, ZHLN::Float3 velocity) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -770,8 +773,8 @@ auto PhysicsContext::GetRagdoll(Physics::RagdollHandle handle) const noexcept ->
     return _impl->ragdolls.GetRagdoll(handle);
 }
 
-void PhysicsContext::ActivateRagdoll(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose, JPH::Float3 initialVelocity) noexcept {
-    _impl->ragdolls.ActivateRagdoll(handle, pose, ToVec3(initialVelocity));
+void PhysicsContext::ActivateRagdoll(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose, ZHLN::Float3 initialVelocity) noexcept {
+    _impl->ragdolls.ActivateRagdoll(handle, pose, static_cast<JPH::Vec3>(initialVelocity));
 }
 
 void PhysicsContext::RemoveRagdoll(Physics::RagdollHandle handle) noexcept {
@@ -782,8 +785,8 @@ void PhysicsContext::DriveRagdollPose(Physics::RagdollHandle handle, const JPH::
     _impl->ragdolls.DriveRagdollPose(handle, pose);
 }
 
-void PhysicsContext::AddRagdollImpulse(Physics::RagdollHandle handle, uint32_t jointIndex, JPH::Float3 impulse) noexcept {
-    _impl->ragdolls.AddRagdollImpulse(handle, jointIndex, ToVec3(impulse), *_impl->world.bodyInterface);
+void PhysicsContext::AddRagdollImpulse(Physics::RagdollHandle handle, uint32_t jointIndex, ZHLN::Float3 impulse) noexcept {
+    _impl->ragdolls.AddRagdollImpulse(handle, jointIndex, static_cast<JPH::Vec3>(impulse), *_impl->world.bodyInterface);
 }
 
 auto PhysicsContext::GetRagdollPose(Physics::RagdollHandle handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept -> bool {
@@ -879,7 +882,7 @@ void PhysicsContext::RegisterMaterial(uint32_t id, float friction, float restitu
     _impl->world.RegisterMaterial(id, friction, restitution);
 }
 
-void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Float3 impulse) {
+void PhysicsContext::AddImpulse(Physics::BodyHandle handle, ZHLN::Float3 impulse) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -895,7 +898,7 @@ void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Float3 impulse)
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Float3 impulse, JPH::Double3 position) {
+void PhysicsContext::AddImpulse(Physics::BodyHandle handle, ZHLN::Float3 impulse, ZHLN::Double3 position) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -914,9 +917,9 @@ void PhysicsContext::AddImpulse(Physics::BodyHandle handle, JPH::Float3 impulse,
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::AddRadialImpulse(JPH::Double3 center, float radius, float maxImpulse) {
+void PhysicsContext::AddRadialImpulse(ZHLN::Double3 center, float radius, float maxImpulse) {
     JPH::Array<Physics::BodyHandle> overlapped;
-    OverlapSphere(ToDouble3(center), radius, overlapped);
+    OverlapSphere(center, radius, overlapped);
 
     for (const Physics::BodyHandle physHandle: overlapped) {
         const auto bodyPos = BodyPosition(physHandle);
@@ -924,14 +927,14 @@ void PhysicsContext::AddRadialImpulse(JPH::Double3 center, float radius, float m
             continue;
         }
 
-        const JPH::RVec3 diff    = *bodyPos - ToRVec3(center);
+        const JPH::RVec3 diff    = *bodyPos - static_cast<JPH::RVec3>(center);
         const auto       dist    = static_cast<float>(diff.Length());
         const float      falloff = 1.0f - std::clamp(dist / radius, 0.0f, 1.0f);
 
         if (dist > 1e-4f && falloff > 0.01f) {
             const JPH::Vec3 impulseDir = JPH::Vec3(diff / static_cast<double>(dist)) + JPH::Vec3(0.0f, 0.35f, 0.0f);
             const JPH::Vec3 impulse    = impulseDir.Normalized() * (maxImpulse * falloff * falloff);
-            AddImpulse(physHandle, ToFloat3(impulse));
+            AddImpulse(physHandle, impulse);
         }
     }
 }

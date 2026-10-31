@@ -59,9 +59,8 @@ struct RenderPipelinesTestSuite {
 
             auto&      reg = engine->GetRegistry();
             auto&      rc  = engine->GetRenderContext();
-            const auto box = ZHLN::PrefabFactory::CreateBox(
-                *engine, {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 3, 0), .createPhysics = false}
-            );
+            const auto box =
+                ZHLN::PrefabFactory::CreateBox(*engine, {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 3, 0}, .createPhysics = false});
             const auto boxMesh = reg.Get<ZHLN::Components::MeshComponent>(box);
             const auto camera  = reg.GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(boxMesh.has_value() && camera.has_value())) {
@@ -590,8 +589,7 @@ struct RenderPipelinesTestSuite {
             // 2. The refusal did not damage the engine that was already up:
             // rendering and physics still work through its explicit owner.
             const ZHLN::Entity falling = ZHLN::PrefabFactory::CreateBox(
-                *first, {0.5f, 0.5f, 0.5f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true, .isStaticPhysics = false}
+                *first, {0.5f, 0.5f, 0.5f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 8.0, 0.0}, .createPhysics = true, .isStaticPhysics = false}
             );
             ZHLN::Test::ExpectTrue(falling != ZHLN::Entity::Null());
 
@@ -617,8 +615,7 @@ struct RenderPipelinesTestSuite {
             second->InitializeDefaultScene();
 
             const ZHLN::Entity fallingB = ZHLN::PrefabFactory::CreateBox(
-                *second, {0.5f, 0.5f, 0.5f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true, .isStaticPhysics = false}
+                *second, {0.5f, 0.5f, 0.5f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 8.0, 0.0}, .createPhysics = true, .isStaticPhysics = false}
             );
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 second->ProcessEvents();

@@ -19,6 +19,7 @@
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Physics/PhysicsHandles.hpp>
 #include <Zahlen/Render/Vertex.hpp>
@@ -73,10 +74,10 @@ enum class ShapeType : uint8_t { Box = 0, Sphere = 1, Capsule = 2, Cylinder = 3,
 enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
 
 struct ConstraintParams {
-    JPH::Vec3 pivot;
-    JPH::Vec3 axis;
-    float     limitMin;
-    float     limitMax;
+    ZHLN::Float3 pivot;
+    ZHLN::Float3 axis {0.0f, 1.0f, 0.0f};
+    float        limitMin;
+    float        limitMax;
     bool  hasMotor;
     float target;
     float frequency;
@@ -94,7 +95,10 @@ struct ConstraintHandle {
 };
 
 static_assert((std::is_trivially_default_constructible_v<ConstraintHandle> && std::is_trivially_copyable_v<ConstraintHandle>) );
-static_assert((std::is_trivially_default_constructible_v<ConstraintParams> && std::is_trivially_copyable_v<ConstraintParams>) );
+// Trivially copyable is the contract here: the struct is built at the call site
+// and handed over by value. It is no longer trivially *default* constructible,
+// because Float3/Float4 initialise their members -- which is the point of them.
+static_assert(std::is_trivially_copyable_v<ConstraintParams> && std::is_standard_layout_v<ConstraintParams>);
 
 struct RagdollPartParams {
     uint32_t       jointIndex;
@@ -102,11 +106,11 @@ struct RagdollPartParams {
     JPH::ShapeRefC shape            = nullptr;
     float          mass             = 10.0f;
 
-    JPH::RVec3 position = JPH::RVec3::sZero();
-    JPH::Quat  rotation = JPH::Quat::sIdentity();
+    ZHLN::Double3 position {};
+    JPH::Quat     rotation = JPH::Quat::sIdentity();
 
-    JPH::Vec3 twistAxis   = JPH::Vec3::sAxisX();
-    JPH::Vec3 planeNormal = JPH::Vec3::sAxisY();
+    ZHLN::Float3 twistAxis {1.0f, 0.0f, 0.0f};
+    ZHLN::Float3 planeNormal {0.0f, 1.0f, 0.0f};
 
     float coneAngle = 0.0f;
     float twistMin  = -0.1f;
@@ -219,8 +223,8 @@ class ZHLN_API PhysicsContext {
 
     auto CreateRigidBody(
         const JPH::ShapeRefC& shape,
-        JPH::Double3          pos,
-        JPH::Float4           rot,
+        ZHLN::Double3         pos,
+        ZHLN::Float4          rot,
         JPH::EMotionType      motion,
         Layers::ID            layer,
         uint32_t              materialID = 0,
@@ -237,13 +241,13 @@ class ZHLN_API PhysicsContext {
         uint32_t              vertexCount,
         const uint32_t*       indices,
         uint32_t              indexCount,
-        JPH::Double3          pos,
-        JPH::Float4           rot,
+        ZHLN::Double3         pos,
+        ZHLN::Float4          rot,
         uint32_t              category = 0xFFFFFFFF,
         uint32_t              mask     = 0xFFFFFFFF
     ) -> Physics::BodyHandle;
 
-    auto CreateCharacter(JPH::Double3 position, const Physics::CharacterParams& params = {}) -> Physics::BodyHandle;
+    auto CreateCharacter(ZHLN::Double3 position, const Physics::CharacterParams& params = {}) -> Physics::BodyHandle;
 
     // Physics owns the Jolt instance; ECS components borrow a generational handle.
     auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, std::span<const Physics::RagdollPartParams> parts) -> Physics::RagdollHandle;
@@ -251,10 +255,10 @@ class ZHLN_API PhysicsContext {
     void DestroyRagdolls(std::span<const Physics::RagdollHandle> handles) noexcept;
     // Borrowed until DestroyRagdoll; use only while the owning component is live.
     [[nodiscard]] auto GetRagdoll(Physics::RagdollHandle handle) const noexcept -> ZHLN::Optional<JPH::Ragdoll&>;
-    void               ActivateRagdoll(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose, JPH::Float3 initialVelocity) noexcept;
+    void               ActivateRagdoll(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose, ZHLN::Float3 initialVelocity) noexcept;
     void               RemoveRagdoll(Physics::RagdollHandle handle) noexcept;
     void               DriveRagdollPose(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose) noexcept;
-    void               AddRagdollImpulse(Physics::RagdollHandle handle, uint32_t jointIndex, JPH::Float3 impulse) noexcept;
+    void               AddRagdollImpulse(Physics::RagdollHandle handle, uint32_t jointIndex, ZHLN::Float3 impulse) noexcept;
     // Generation-safe lookups: the optional ties the result to its proof of
     // validity; a stale handle simply has no value to hand back.
     [[nodiscard]] auto BodyPosition(Physics::BodyHandle handle) const noexcept -> std::optional<JPH::RVec3>;
@@ -271,13 +275,13 @@ class ZHLN_API PhysicsContext {
     // duplicate handles are ignored using the same validation as DestroyBody.
     void DestroyBodies(std::span<const Physics::BodyHandle> handles);
 
-    void SetLinearVelocity(Physics::BodyHandle handle, JPH::Float3 velocity);
-    void SetCharacterVelocity(Physics::BodyHandle handle, JPH::Float3 velocity);
-    void SetCharacterPosition(Physics::BodyHandle handle, JPH::Double3 position);
+    void SetLinearVelocity(Physics::BodyHandle handle, ZHLN::Float3 velocity);
+    void SetCharacterVelocity(Physics::BodyHandle handle, ZHLN::Float3 velocity);
+    void SetCharacterPosition(Physics::BodyHandle handle, ZHLN::Double3 position);
     // Teleports a kinematic (scripted) rigid body. SetCharacterPosition only
     // works on CharacterVirtual bodies; rigid-body handles need this instead.
     // Ignored for static bodies, which cannot be moved in the broadphase.
-    void SetKinematicPose(Physics::BodyHandle handle, JPH::Double3 position, JPH::Float4 rotation);
+    void SetKinematicPose(Physics::BodyHandle handle, ZHLN::Double3 position, ZHLN::Float4 rotation);
 
     auto               GetCharacterVelocity(Physics::BodyHandle handle) const -> JPH::Vec3;
     // Vertical half-extent of a character's collision shape, i.e. the distance
@@ -290,33 +294,34 @@ class ZHLN_API PhysicsContext {
     [[nodiscard]] auto IsBodyDynamic(Physics::BodyHandle handle) const -> bool;
     [[nodiscard]] auto GetPositionBuffer() const -> BufferView;
     auto               GetRotation(JPH::BodyID bodyID) const -> JPH::Quat;
-    void               AddImpulse(Physics::BodyHandle handle, JPH::Float3 impulse);
-    void               AddImpulse(Physics::BodyHandle handle, JPH::Float3 impulse, JPH::Double3 position);
+    void               AddImpulse(Physics::BodyHandle handle, ZHLN::Float3 impulse);
+    void               AddImpulse(Physics::BodyHandle handle, ZHLN::Float3 impulse, ZHLN::Double3 position);
 
-    void AddRadialImpulse(JPH::Double3 center, float radius, float maxImpulse);
+    void AddRadialImpulse(ZHLN::Double3 center, float radius, float maxImpulse);
 
     [[nodiscard]] auto GetContactEvents() const -> std::pair<const Physics::ContactEvent*, size_t>;
 
-    auto CreateConstraint(Physics::ConstraintType type, Physics::BodyHandle b1, Physics::BodyHandle b2, const Physics::ConstraintParams& params) -> Physics::ConstraintHandle;
+    auto CreateConstraint(Physics::ConstraintType type, Physics::BodyHandle b1, Physics::BodyHandle b2, const Physics::ConstraintParams& params)
+        -> Physics::ConstraintHandle;
     void SetConstraintTarget(Physics::ConstraintHandle handle, float value);
 
     [[nodiscard]] auto
-        Raycast(JPH::Double3 origin, JPH::Float3 direction, float maxDistance = 1000.0f, Physics::BodyHandle ignore = {}) const -> Physics::RaycastResult;
+        Raycast(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance = 1000.0f, Physics::BodyHandle ignore = {}) const -> Physics::RaycastResult;
 
     void RaycastAll(
-        JPH::Double3                        origin,
-        JPH::Float3                         direction,
+        ZHLN::Double3                       origin,
+        ZHLN::Float3                        direction,
         float                               maxDistance,
         JPH::Array<Physics::RaycastResult>& outResults,
         Physics::BodyHandle                 ignore = {}
     ) const;
 
-    [[nodiscard]] auto RaycastPenetration(JPH::Double3 origin, JPH::Float3 direction, float maxDistance = 1000.0f, Physics::BodyHandle ignore = {}) const
+    [[nodiscard]] auto RaycastPenetration(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance = 1000.0f, Physics::BodyHandle ignore = {}) const
         -> Physics::RaycastPenetrationResult;
 
     void RaycastAllPenetrations(
-        JPH::Double3                                   origin,
-        JPH::Float3                                    direction,
+        ZHLN::Double3                                  origin,
+        ZHLN::Float3                                   direction,
         float                                          maxDistance,
         JPH::Array<Physics::RaycastPenetrationResult>& outResults,
         Physics::BodyHandle                            ignore = {}
@@ -324,16 +329,16 @@ class ZHLN_API PhysicsContext {
 
     [[nodiscard]] auto Shapecast(
         const JPH::ShapeRefC& shape,
-        JPH::Double3          pos,
-        JPH::Float4           rot,
-        JPH::Float3           direction,
+        ZHLN::Double3         pos,
+        ZHLN::Float4          rot,
+        ZHLN::Float3          direction,
         float                 maxDistance = 1000.0f,
         Physics::BodyHandle   ignore      = {}
     ) const -> Physics::ShapeCastResult;
 
-    void OverlapSphere(JPH::Double3 center, float radius, JPH::Array<Physics::BodyHandle>& outResults) const;
-    void OverlapAABB(JPH::Double3 minBox, JPH::Double3 maxBox, JPH::Array<Physics::BodyHandle>& outResults) const;
-    void QueryAABB(JPH::Float3 min, JPH::Float3 max, JPH::Array<Physics::BodyHandle>& outHandles) const;
+    void OverlapSphere(ZHLN::Double3 center, float radius, JPH::Array<Physics::BodyHandle>& outResults) const;
+    void OverlapAABB(ZHLN::Double3 minBox, ZHLN::Double3 maxBox, JPH::Array<Physics::BodyHandle>& outResults) const;
+    void QueryAABB(ZHLN::Float3 min, ZHLN::Float3 max, JPH::Array<Physics::BodyHandle>& outHandles) const;
     void FrustumCull(const JPH::Mat44& viewProj, const Frustum& frustum, JPH::Array<Physics::BodyHandle>& outHandles) const;
 
     [[nodiscard]] auto GetBodyHandle(JPH::BodyID bodyID) const -> Physics::BodyHandle;

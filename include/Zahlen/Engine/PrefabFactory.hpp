@@ -16,6 +16,7 @@
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <span>
@@ -43,11 +44,11 @@ void ReleaseOwnedMeshes(RenderContext& ctx, ECS::Registry& reg);
 // Standalone builders return caller-owned buffers: use DestroyMesh after their
 // last draw. Entity spawners below attach scene-owned cleanup instead.
 auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh;
-auto CreatePlaneMesh(RenderContext& ctx, float extent = 10.0f, JPH::Float4 color = {0.6f, 0.6f, 0.6f, 1.0f}) -> Mesh;
-auto CreateBoxMesh(RenderContext& ctx, JPH::Float3 halfExtents, JPH::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-auto CreateSphereMesh(RenderContext& ctx, float radius, JPH::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, JPH::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-auto CreateConeMesh(RenderContext& ctx, float radius, float height, JPH::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreatePlaneMesh(RenderContext& ctx, float extent = 10.0f, ZHLN::Float4 color = {0.6f, 0.6f, 0.6f, 1.0f}) -> Mesh;
+auto CreateBoxMesh(RenderContext& ctx, ZHLN::Float3 halfExtents, ZHLN::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreateSphereMesh(RenderContext& ctx, float radius, ZHLN::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, ZHLN::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreateConeMesh(RenderContext& ctx, float radius, float height, ZHLN::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 
 auto CreateFontAtlas(RenderContext& ctx) -> FontAtlas;
 auto CreateFontAtlas(RenderContext& ctx, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> FontAtlas;
@@ -63,9 +64,9 @@ auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> ZHLN::Option
 auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB = true) -> TextureHandle;
 
 struct SpawnParams {
-    JPH::RVec3 position = JPH::RVec3::sZero();
-    JPH::Quat  rotation = JPH::Quat::sIdentity();
-    JPH::Vec3  scale    = JPH::Vec3::sReplicate(1.0f);
+    ZHLN::Double3 position {};
+    JPH::Quat     rotation = JPH::Quat::sIdentity();
+    ZHLN::Float3  scale {1.0f, 1.0f, 1.0f};
 
     bool     createPhysics   = false;
     bool     useBoxColliders = false;
@@ -91,25 +92,25 @@ struct SpawnParams {
     // skybox's props into DrawFlags::Background) without forking the asset.
     DrawFlags drawFlags = DrawFlags::None;
 
-    float     roughness = 0.5f;
-    float     metallic  = 0.0f;
-    JPH::Vec4 color     = {0.8f, 0.4f, 0.2f, -1.0f};
+    float        roughness = 0.5f;
+    float        metallic  = 0.0f;
+    ZHLN::Float4 color {0.8f, 0.4f, 0.2f, -1.0f};
 
     Material materialOverride = {.pipeline = PipelineHandle::Invalid};
 };
 
-auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, JPH::Float3 halfExtents, const SpawnParams& params = {}) -> Entity;
-auto CreateBox(Engine& engine, JPH::Float3 halfExtents, const SpawnParams& params = {}) -> Entity;
+auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::Float3 halfExtents, const SpawnParams& params = {}) -> Entity;
+auto CreateBox(Engine& engine, ZHLN::Float3 halfExtents, const SpawnParams& params = {}) -> Entity;
 
 auto CreatePlane(
     RenderContext&                  ctx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           extent = 10.0f,
-    JPH::Float4                     color  = {0.6f, 0.6f, 0.6f, 1.0f},
+    ZHLN::Float4                    color  = {0.6f, 0.6f, 0.6f, 1.0f},
     const SpawnParams&              params = {}
 ) -> Entity;
-auto CreatePlane(Engine& engine, float extent = 10.0f, JPH::Float4 color = {0.6f, 0.6f, 0.6f, 1.0f}, const SpawnParams& params = {}) -> Entity;
+auto CreatePlane(Engine& engine, float extent = 10.0f, ZHLN::Float4 color = {0.6f, 0.6f, 0.6f, 1.0f}, const SpawnParams& params = {}) -> Entity;
 
 auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params = {}) -> Entity;
 auto CreateSphere(Engine& engine, float radius, const SpawnParams& params = {}) -> Entity;

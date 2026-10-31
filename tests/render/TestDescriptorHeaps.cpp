@@ -200,9 +200,7 @@ struct DescriptorHeapsSuite {
 
                 ZHLN::PrefabFactory::CreateBox(
                     *engine, {halfExtent, halfExtent, halfExtent},
-                    ZHLN::PrefabFactory::SpawnParams {
-                        .position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = mat
-                    }
+                    ZHLN::PrefabFactory::SpawnParams {.position = {pos.GetX(), pos.GetY(), pos.GetZ()}, .createPhysics = false, .materialOverride = mat}
                 );
             }
 
@@ -475,7 +473,7 @@ struct DescriptorHeapsSuite {
             }
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-2.5, 1.5, 0.0), .createPhysics = false, .materialOverride = *redMatRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = {-2.5, 1.5, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}
             );
 
             auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.1f, 1.0f, 0.1f, 1.0f}});
@@ -484,7 +482,7 @@ struct DescriptorHeapsSuite {
             }
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(2.5, 1.5, 0.0), .createPhysics = false, .materialOverride = *greenMatRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = {2.5, 1.5, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}
             );
 
             constexpr float dt = 1.0f / 60.0f;

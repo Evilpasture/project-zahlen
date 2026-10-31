@@ -13,6 +13,7 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Physics/Collision/Shape/Shape.h>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <cstdint>
 #include <vector>
 
@@ -69,7 +70,7 @@ struct ModelLight {
     String64  name;
     int32_t   nodeIndex      = -1;
     LightType type           = LightType::Point;
-    JPH::Vec3 color          = JPH::Vec3::sReplicate(1.0f);
+    ZHLN::Float3 color {1.0f, 1.0f, 1.0f};
     float     intensity      = 1.0f;                // Candela (lm/sr) for point/spot, lux (lm/m^2) for directional
     float     range          = 0.0f;                // 0.0f = infinite / default inverse-square falloff
     float     innerConeAngle = 0.0f;                // For spot lights (radians)

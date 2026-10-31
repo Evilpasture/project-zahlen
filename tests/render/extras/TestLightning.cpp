@@ -74,9 +74,8 @@ struct LightningTestSuite {
             const JPH::RVec3 cloudPos(0.0, 180.0, 0.0);
             const JPH::RVec3 groundPos(25.0, 0.0, -15.0);
 
-            const ZHLN::Entity boltEntity = ZHLN::Lightning::Spawn(
-                *engine, ZHLN::ToDouble3(cloudPos), ZHLN::ToDouble3(groundPos), ZHLN::LightningConfig {.eta = 2.0f, .timeDilation = 1.0f, .subdivisions = 4}
-            );
+            const ZHLN::Entity boltEntity =
+                ZHLN::Lightning::Spawn(*engine, cloudPos, groundPos, ZHLN::LightningConfig {.eta = 2.0f, .timeDilation = 1.0f, .subdivisions = 4});
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(boltEntity));
 

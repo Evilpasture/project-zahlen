@@ -12,6 +12,7 @@
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/GUI/GUI.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -604,7 +605,7 @@ void Frame::BeginBox(std::string_view id, const BoxConfig& cfg) noexcept {
              .childAlignment  = ToClayChildAlignment(cfg),
              .layoutDirection = (cfg.direction == Direction::Row) ? CLAY_LEFT_TO_RIGHT : CLAY_TOP_TO_BOTTOM},
         .backgroundColor = ToClayColor(cfg.color),
-        .cornerRadius    = {cfg.cornerRadius.GetX(), cfg.cornerRadius.GetY(), cfg.cornerRadius.GetZ(), cfg.cornerRadius.GetW()}
+        .cornerRadius    = {cfg.cornerRadius.x, cfg.cornerRadius.y, cfg.cornerRadius.z, cfg.cornerRadius.w}
     };
 
     if (cfg.offsetX != 0.0f || cfg.offsetY != 0.0f) {
@@ -620,7 +621,7 @@ void Frame::BeginBox(std::string_view id, const BoxConfig& cfg) noexcept {
         auto           numId  = static_cast<uint32_t>(Hash32(id));
         Clay_ElementId elemId = Clay_GetElementIdWithIndex(_impl->Intern(id), numId);
         Clay__OpenElementWithId(elemId);
-        if (cfg.color.GetW() > 0.01f) {
+        if (cfg.color.w > 0.01f) {
             const Clay_ElementData elemData = Clay_GetElementData(elemId);
             const float            mx       = _impl->mouseX;
             const float            my       = _impl->mouseY;
@@ -633,7 +634,7 @@ void Frame::BeginBox(std::string_view id, const BoxConfig& cfg) noexcept {
         }
     } else {
         Clay__OpenElement();
-        if (cfg.color.GetW() > 0.01f && Clay_Hovered()) {
+        if (cfg.color.w > 0.01f && Clay_Hovered()) {
             _impl->frameCapturedMouse = true;
         }
     }
@@ -772,14 +773,14 @@ void Frame::EndColumn() noexcept {
     EndBox();
 }
 
-void Frame::Text(std::string_view text, float fontSize, JPH::Float4 color) noexcept {
+void Frame::Text(std::string_view text, float fontSize, ZHLN::Float4 color) noexcept {
     assert(_impl != nullptr && _impl->inLayout);
     Clay_SetCurrentContext(_impl->clayContext);
-    Clay_TextElementConfig config = {.textColor = ToClayColor(ToVec4(color)), .fontSize = static_cast<uint16_t>(fontSize)};
+    Clay_TextElementConfig config = {.textColor = ToClayColor(static_cast<JPH::Vec4>(color)), .fontSize = static_cast<uint16_t>(fontSize)};
     Clay__OpenTextElement(_impl->Intern(text), config);
 }
 
-auto Frame::Button(std::string_view label, JPH::Float4 color, const Sizing& width, std::string_view id) noexcept -> bool {
+auto Frame::Button(std::string_view label, ZHLN::Float4 color, const Sizing& width, std::string_view id) noexcept -> bool {
     assert(_impl != nullptr && _impl->inLayout);
     Clay_SetCurrentContext(_impl->clayContext);
     bool                   clicked = false;
@@ -820,9 +821,9 @@ auto Frame::Button(std::string_view label, JPH::Float4 color, const Sizing& widt
              .padding         = {24, 24, 10, 10},
              .childAlignment  = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
              .layoutDirection = CLAY_LEFT_TO_RIGHT},
-        .backgroundColor = isHovered ? (isMouseDown ? ToClayColor(ToVec4(color) + JPH::Vec4(0.22f, 0.22f, 0.22f, 0.0f)) :
-                                                      ToClayColor(ToVec4(color) + JPH::Vec4(0.12f, 0.12f, 0.12f, 0.0f))) :
-                                       ToClayColor(ToVec4(color)),
+        .backgroundColor = isHovered ? (isMouseDown ? ToClayColor(static_cast<JPH::Vec4>(color) + JPH::Vec4(0.22f, 0.22f, 0.22f, 0.0f)) :
+                                                      ToClayColor(static_cast<JPH::Vec4>(color) + JPH::Vec4(0.12f, 0.12f, 0.12f, 0.0f))) :
+                                       ToClayColor(static_cast<JPH::Vec4>(color)),
         .cornerRadius    = {6, 6, 6, 6}
     };
     Clay__ConfigureOpenElement(decl);
@@ -1121,10 +1122,10 @@ auto Frame::TextInputImpl(std::string_view label, std::string& value, size_t max
             return;
         }
         const size_t split = (caretIdx > emitted && caretIdx <= to) ? caretIdx : to;
-        Text(all.substr(from, split - from), kTextInputFontSize, ToFloat4(color));
+        Text(all.substr(from, split - from), kTextInputFontSize, color);
         if (split < to) {
             drawCaret();
-            Text(all.substr(split, to - split), kTextInputFontSize, ToFloat4(color));
+            Text(all.substr(split, to - split), kTextInputFontSize, color);
         } else if (caretIdx == to) {
             drawCaret();
         }

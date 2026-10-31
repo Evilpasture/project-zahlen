@@ -332,7 +332,7 @@ auto DescribeInteractiveEntities(ECS::Registry& registry, const BSPMap& map, con
             // The exact conjugated Source rotation: TeleportPlayer recovers the
             // post-teleport view direction from this transform's +X axis.
             const JPH::Vec3 angles = OptionalVec3(entity, "angles").value_or(JPH::Vec3::sZero());
-            record.orientation     = Math::EulerDegreesToQuat(ToFloat3(EngineEulerAnglesFromSourceAngles(angles, options)));
+            record.orientation     = Math::EulerDegreesToQuat(EngineEulerAnglesFromSourceAngles(angles, options));
             records.push_back(std::move(record));
             continue;
         }

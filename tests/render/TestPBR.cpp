@@ -131,7 +131,7 @@ struct PBRTestSuite {
 
             const ZHLN::Entity goldCube = ZHLN::PrefabFactory::CreateBox(
                 *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-1.2, 1.0, 0.0), .createPhysics = false, .materialOverride = *goldMatRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = {-1.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *goldMatRes}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(goldCube));
 
@@ -143,7 +143,7 @@ struct PBRTestSuite {
 
             const ZHLN::Entity redCube = ZHLN::PrefabFactory::CreateBox(
                 *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(1.2, 1.0, 0.0), .createPhysics = false, .materialOverride = *redMatRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = {1.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(redCube));
 
@@ -288,12 +288,12 @@ struct PBRTestSuite {
 
             const ZHLN::Entity smoothBox = ZHLN::PrefabFactory::CreateBox(
                 *engine, {0.7f, 0.7f, 0.7f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-1.15, 1.0, 0.0), .createPhysics = false, .materialOverride = *smoothMatRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = {-1.15, 1.0, 0.0}, .createPhysics = false, .materialOverride = *smoothMatRes}
             );
 
             const ZHLN::Entity roughBox = ZHLN::PrefabFactory::CreateBox(
                 *engine, {0.7f, 0.7f, 0.7f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(1.15, 1.0, 0.0), .createPhysics = false, .materialOverride = *roughMatRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = {1.15, 1.0, 0.0}, .createPhysics = false, .materialOverride = *roughMatRes}
             );
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(smoothBox));
@@ -453,7 +453,7 @@ struct PBRTestSuite {
             cam.pitch = 0.0f;
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {1.5f, 1.5f, 0.2f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *material}
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *material}
             );
 
             // Flat HDR vs. the same sky with a single-pixel point-like
@@ -601,9 +601,7 @@ struct PBRTestSuite {
                 .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}
             });
             if (!mat) return std::unexpected(PBRTestError::MaterialCreationFailed);
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {3.0f, 3.0f, 0.07f}, {.position = JPH::RVec3(0.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *mat}
-            );
+            ZHLN::PrefabFactory::CreateBox(*engine, {3.0f, 3.0f, 0.07f}, {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *mat});
 
             constexpr uint32_t w = 128, h = 64;
             ZHLN::EnvironmentImage env;
@@ -636,7 +634,7 @@ struct PBRTestSuite {
             const double distance = 1.5;
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {0.32f, 0.32f, 0.32f},
-                {.position         = JPH::RVec3(sunDirection[0] * distance, 1.0 + sunDirection[1] * distance, sunDirection[2] * distance),
+                {.position         = {sunDirection[0] * distance, 1.0 + sunDirection[1] * distance, sunDirection[2] * distance},
                  .createPhysics    = false,
                  .materialOverride = *mat}
             );
@@ -723,12 +721,8 @@ struct PBRTestSuite {
             cam.yaw = -90.0f;
             cam.pitch = 0.0f;
             cam.fov = 60.0f;
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {1.0f, 1.0f, 1.0f}, {.position = JPH::RVec3(-0.95, 1.0, 0.0), .createPhysics = false, .materialOverride = *control}
-            );
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {1.0f, 1.0f, 1.0f}, {.position = JPH::RVec3(0.95, 1.0, 0.0), .createPhysics = false, .materialOverride = *mapped}
-            );
+            ZHLN::PrefabFactory::CreateBox(*engine, {1.0f, 1.0f, 1.0f}, {.position = {-0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *control});
+            ZHLN::PrefabFactory::CreateBox(*engine, {1.0f, 1.0f, 1.0f}, {.position = {0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *mapped});
             ZHLN::Test::Headless::TickFrames(*engine, 8);
             if (!reg.GetEntitiesWith<ZHLN::Components::LightComponent>().empty())
                 return std::unexpected(PBRTestError::EnvironmentBakeFailed);
@@ -779,7 +773,7 @@ struct PBRTestSuite {
 
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {2.0f, 2.0f, 0.1f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *greenMatRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}
             );
 
             // Tick 5 frames

@@ -135,7 +135,7 @@ auto AuthorPartsFromRecipe(const Skeleton& skeleton, const RagdollRecipe& recipe
         part.maxMotorForce    = spec.maxMotorForce;
 
         const JPH::Mat44 bindPose = skeleton.joints[i].inverseBindMatrix.Inversed();
-        part.position             = JPH::RVec3(bindPose.GetTranslation());
+        part.position             = bindPose.GetTranslation();
         part.rotation             = bindPose.GetQuaternion().Normalized();
 
         switch (spec.shape) {

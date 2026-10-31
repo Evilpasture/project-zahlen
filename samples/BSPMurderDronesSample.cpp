@@ -285,7 +285,7 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
 
     // The player is a CharacterVirtual, not a Jolt body, so it is not
     // in the broadphase and cannot be hit -- no ignore handle is needed.
-    const ZHLN::Physics::RaycastResult hit = engine.GetPhysicsContext().Raycast(ZHLN::ToDouble3(cc->camera.position), ZHLN::ToFloat3(dir), kPickDistance);
+    const ZHLN::Physics::RaycastResult hit = engine.GetPhysicsContext().Raycast(cc->camera.position, dir, kPickDistance);
     if (!hit.hasHit) {
         return;
     }
@@ -914,7 +914,7 @@ auto AttachCharacterRig(
         const size_t              outputCapacity = 1 + prefab->parts.size() * 2;
         std::vector<ZHLN::Entity> parts(outputCapacity);
         const uint32_t            count = ZHLN::PrefabFactory::InstantiatePrefab(
-            engine, *prefab, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .isAnimated = true}, parts.data(),
+            engine, *prefab, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .isAnimated = true}, parts.data(),
             static_cast<uint32_t>(parts.size())
         );
         const uint32_t writtenCount = std::min(count, static_cast<uint32_t>(parts.size()));
@@ -1732,13 +1732,13 @@ auto main(int argc, char* argv[]) -> int {
             .maxSlopeAngle    = JPH::DegreesToRadians(50.0f),
             .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -playerHull.GetLifterOffsetY()),
         };
-        const ZHLN::Physics::BodyHandle playerBody = physics.CreateCharacter(ZHLN::ToDouble3(spawnCenter), characterParams);
+        const ZHLN::Physics::BodyHandle playerBody = physics.CreateCharacter(spawnCenter, characterParams);
         if (playerBody == ZHLN::Physics::BodyHandle::Null()) {
             ZHLN::LogError("[BSPSample] Failed to create the player CharacterVirtual body.");
             return EXIT_FAILURE;
         }
 
-        const JPH::Mat44 playerWorld = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(spawnCenter), {0.0f, 0.0f, 0.0f, 1.0f});
+        const JPH::Mat44 playerWorld = ZHLN::Math::CreateTransform(spawnCenter, {0.0f, 0.0f, 0.0f, 1.0f});
         g_player                     = reg.Create(
             ZHLN::Components::PlayerTagComponent {}, ZHLN::Components::NameComponent {.name = ZHLN::String64("Player_Procedural")},
             ZHLN::Components::TransformComponent {.position = spawnCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
@@ -1830,7 +1830,7 @@ auto main(int argc, char* argv[]) -> int {
 
         if (!hasSun) {
             const JPH::Vec3  sunPos = mapCenter + JPH::Vec3(mapRadius * 1.5f, mapRadius * 2.5f, mapRadius * 1.0f);
-            const JPH::Mat44 world  = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(sunPos), {0.0f, 0.0f, 0.0f, 1.0f});
+            const JPH::Mat44 world  = ZHLN::Math::CreateTransform(sunPos, {0.0f, 0.0f, 0.0f, 1.0f});
             reg.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64("WorldSun")},
                 ZHLN::Components::TransformComponent {.position = sunPos, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},

@@ -247,9 +247,7 @@ struct MorphPosePassSuite {
             const float x = (static_cast<float>(i) - (static_cast<float>(count) - 1.0f) * 0.5f) * 1.5f;
             (void) ZHLN::PrefabFactory::InstantiatePrefab(
                 engine, prefab,
-                ZHLN::PrefabFactory::SpawnParams {
-                    .position = JPH::RVec3(x, 1.0f, 0.0f), .createPhysics = false, .isAnimated = true, .materialOverride = material
-                }
+                ZHLN::PrefabFactory::SpawnParams {.position = {x, 1.0f, 0.0f}, .createPhysics = false, .isAnimated = true, .materialOverride = material}
             );
         }
 

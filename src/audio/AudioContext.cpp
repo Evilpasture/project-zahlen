@@ -14,6 +14,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 #include <array>
@@ -1139,7 +1140,7 @@ struct AudioContext::Impl {
 
         float distGain = 1.0f;
         if (desc.spatialized && desc.attenuation.model == AudioAttenuationModel::Logarithmic) {
-            distGain = EvaluateDistanceAttenuation(desc.attenuation, (desc.position - listenerPos).Length());
+            distGain = EvaluateDistanceAttenuation(desc.attenuation, (static_cast<JPH::Vec3>(desc.position) - listenerPos).Length());
         }
         const float initDry = ComputeOcclusionDirectGain(desc.occlusion) * distGain;
         const float initWet = std::clamp(desc.reverbSend, 0.0f, 1.0f) * distGain;
@@ -1195,9 +1196,9 @@ struct AudioContext::Impl {
         ma_sound_set_volume(&slot.sound, slot.baseVolume);
         ma_sound_set_pitch(&slot.sound, slot.pitch);
         ma_sound_set_pan(&slot.sound, slot.pan);
-        ma_sound_set_position(&slot.sound, desc.position.GetX(), desc.position.GetY(), desc.position.GetZ());
-        ma_sound_set_velocity(&slot.sound, desc.velocity.GetX(), desc.velocity.GetY(), desc.velocity.GetZ());
-        ma_sound_set_direction(&slot.sound, desc.direction.GetX(), desc.direction.GetY(), desc.direction.GetZ());
+        ma_sound_set_position(&slot.sound, desc.position.x, desc.position.y, desc.position.z);
+        ma_sound_set_velocity(&slot.sound, desc.velocity.x, desc.velocity.y, desc.velocity.z);
+        ma_sound_set_direction(&slot.sound, desc.direction.x, desc.direction.y, desc.direction.z);
         ApplyMiniaudioAttenuation(&slot.sound, desc.spatialized, desc.attenuation);
         UpdateVoiceDynamicSendTargetsLocked(slot);
 
@@ -1230,7 +1231,7 @@ struct AudioContext::Impl {
         ma_sound_group* group = ResolveGroupPtr(ev.bus);
         if (ma_sound_init_from_file(&engine, ev.filepath.c_str(), 0, group, nullptr, sound) == MA_SUCCESS) {
             DrainHeadlessResourceManagerJobs();
-            ma_sound_set_position(sound, ev.position.GetX(), ev.position.GetY(), ev.position.GetZ());
+            ma_sound_set_position(sound, ev.position.x, ev.position.y, ev.position.z);
             ma_sound_set_volume(sound, std::max(0.0f, ev.volume));
             ma_sound_set_pitch(sound, std::max(0.01f, ev.pitch));
             ApplyMiniaudioAttenuation(sound, true, ev.attenuation);
@@ -1294,7 +1295,7 @@ struct AudioContext::Impl {
 
         ma_sound_group* group = ResolveGroupPtr(ev.bus);
         if (ma_sound_init_from_data_source(&engine, &burst->base, 0, group, &burst->sound) == MA_SUCCESS) {
-            ma_sound_set_position(&burst->sound, ev.position.GetX(), ev.position.GetY(), ev.position.GetZ());
+            ma_sound_set_position(&burst->sound, ev.position.x, ev.position.y, ev.position.z);
             ApplyMiniaudioAttenuation(&burst->sound, true, ev.attenuation);
             ma_sound_start(&burst->sound);
             Lock(transientMutex, [&] -> void { activeBursts.push_back(burst); });
@@ -1328,7 +1329,7 @@ struct AudioContext::Impl {
 
         ma_sound_group* group = ResolveGroupPtr(ev.bus);
         if (ma_sound_init_from_data_source(&engine, &sweep->base, 0, group, &sweep->sound) == MA_SUCCESS) {
-            ma_sound_set_position(&sweep->sound, ev.position.GetX(), ev.position.GetY(), ev.position.GetZ());
+            ma_sound_set_position(&sweep->sound, ev.position.x, ev.position.y, ev.position.z);
             ApplyMiniaudioAttenuation(&sweep->sound, true, ev.attenuation);
             ma_sound_start(&sweep->sound);
             Lock(transientMutex, [&] -> void { activeSweeps.push_back(sweep); });
@@ -1485,7 +1486,7 @@ auto AudioContext::Channels() const noexcept -> uint32_t {
     return _impl->channels;
 }
 
-void AudioContext::UpdateListener(JPH::Float3 position, JPH::Float3 direction, JPH::Float3 up, JPH::Float3 velocity) {
+void AudioContext::UpdateListener(ZHLN::Float3 position, ZHLN::Float3 direction, ZHLN::Float3 up, ZHLN::Float3 velocity) {
     if (!_impl->initialized) {
         return;
     }
@@ -1495,7 +1496,7 @@ void AudioContext::UpdateListener(JPH::Float3 position, JPH::Float3 direction, J
     ma_engine_listener_set_velocity(&_impl->engine, 0, velocity.x, velocity.y, velocity.z);
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
-        _impl->listenerPos = ToVec3(position);
+        _impl->listenerPos = static_cast<JPH::Vec3>(position);
         for (const uint32_t slotIdx: _impl->activeVoiceSlots) {
             auto& slot = _impl->voiceSlots[slotIdx];
             if (slot.inUse.load(std::memory_order::relaxed) && slot.spatialized &&
@@ -2169,7 +2170,7 @@ auto AudioContext::GetVoiceBus(AudioHandle handle) const noexcept -> AudioBusId 
     });
 }
 
-void AudioContext::SetVoicePosition(AudioHandle handle, JPH::Float3 position) {
+void AudioContext::SetVoicePosition(AudioHandle handle, ZHLN::Float3 position) {
     const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
@@ -2178,7 +2179,7 @@ void AudioContext::SetVoicePosition(AudioHandle handle, JPH::Float3 position) {
         if (!slot.inUse.load(std::memory_order::relaxed) || slot.generation.load(std::memory_order::relaxed) != gen) {
             return;
         }
-        slot.position = ToVec3(position);
+        slot.position = static_cast<JPH::Vec3>(position);
         ma_sound_set_position(&slot.sound, position.x, position.y, position.z);
         if (slot.spatialized && slot.attenuation.model == AudioAttenuationModel::Logarithmic) {
             _impl->UpdateVoiceDynamicSendTargetsLocked(slot);
@@ -2186,7 +2187,7 @@ void AudioContext::SetVoicePosition(AudioHandle handle, JPH::Float3 position) {
     });
 }
 
-void AudioContext::SetVoiceVelocity(AudioHandle handle, JPH::Float3 velocity) {
+void AudioContext::SetVoiceVelocity(AudioHandle handle, ZHLN::Float3 velocity) {
     const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
@@ -2195,12 +2196,12 @@ void AudioContext::SetVoiceVelocity(AudioHandle handle, JPH::Float3 velocity) {
         if (!slot.inUse.load(std::memory_order::relaxed) || slot.generation.load(std::memory_order::relaxed) != gen) {
             return;
         }
-        slot.velocity = ToVec3(velocity);
+        slot.velocity = static_cast<JPH::Vec3>(velocity);
         ma_sound_set_velocity(&slot.sound, velocity.x, velocity.y, velocity.z);
     });
 }
 
-void AudioContext::SetVoiceDirection(AudioHandle handle, JPH::Float3 direction) {
+void AudioContext::SetVoiceDirection(AudioHandle handle, ZHLN::Float3 direction) {
     const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
@@ -2209,7 +2210,7 @@ void AudioContext::SetVoiceDirection(AudioHandle handle, JPH::Float3 direction) 
         if (!slot.inUse.load(std::memory_order::relaxed) || slot.generation.load(std::memory_order::relaxed) != gen) {
             return;
         }
-        slot.direction = ToVec3(direction);
+        slot.direction = static_cast<JPH::Vec3>(direction);
         ma_sound_set_direction(&slot.sound, direction.x, direction.y, direction.z);
     });
 }

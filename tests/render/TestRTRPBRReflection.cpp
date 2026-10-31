@@ -22,6 +22,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -225,9 +226,7 @@ struct RTRPBRReflectionTestSuite {
         cam.fov      = 55.0f;
     }
 
-    static auto MakeMat(
-        ZHLN::Engine& engine, float metallic, float roughness, JPH::Float4 base,
-        JPH::Float4 emissive = JPH::Float4 {0.0f, 0.0f, 0.0f, 1.0f})
+    static auto MakeMat(ZHLN::Engine& engine, float metallic, float roughness, ZHLN::Float4 base, ZHLN::Float4 emissive = JPH::Float4 {0.0f, 0.0f, 0.0f, 1.0f})
         -> std::expected<ZHLN::Material, ZHLN::ErrorCode> {
         return engine.GetRenderContext().CreateMaterial(
             ZHLN::MaterialDesc {.metallic = metallic, .roughness = roughness, .baseColor = base, .emissive = emissive}
@@ -237,14 +236,13 @@ struct RTRPBRReflectionTestSuite {
     static ZHLN::Entity SpawnMirror(ZHLN::Engine& engine, const ZHLN::Material& mat) {
         return ZHLN::PrefabFactory::CreatePlane(
             engine, 16.0f, {0.85f, 0.85f, 0.88f, 1.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = mat}
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = mat}
         );
     }
 
     static ZHLN::Entity SpawnEmitter(ZHLN::Engine& engine, const ZHLN::Material& mat, float x = 0.0f) {
         return ZHLN::PrefabFactory::CreateBox(
-            engine, {2.4f, 1.1f, 0.12f},
-            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(x, 3.2, -1.2), .createPhysics = false, .materialOverride = mat}
+            engine, {2.4f, 1.1f, 0.12f}, ZHLN::PrefabFactory::SpawnParams {.position = {x, 3.2, -1.2}, .createPhysics = false, .materialOverride = mat}
         );
     }
 

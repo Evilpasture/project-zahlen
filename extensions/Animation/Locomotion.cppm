@@ -181,7 +181,7 @@ auto DrawWireframeEllipsoid(SceneData& scene, const JPH::Vec3& center, const Ell
             const JPH::Vec3 p0(center.GetX() + (std::cos(t0) * ringRadius), ringY, center.GetZ() + (std::sin(t0) * ringRadius));
             const JPH::Vec3 p1(center.GetX() + (std::cos(t1) * ringRadius), ringY, center.GetZ() + (std::sin(t1) * ringRadius));
 
-            scene.AddLine(ToFloat3(p0), ToFloat3(p1), ToFloat4(color));
+            scene.AddLine(p0, p1, color);
         }
     }
 
@@ -203,7 +203,7 @@ auto DrawWireframeEllipsoid(SceneData& scene, const JPH::Vec3& center, const Ell
             const JPH::Vec3 p0(center.GetX() + (r0 * cosLon), y0, center.GetZ() + (r0 * sinLon));
             const JPH::Vec3 p1(center.GetX() + (r1 * cosLon), y1, center.GetZ() + (r1 * sinLon));
 
-            scene.AddLine(ToFloat3(p0), ToFloat3(p1), ToFloat4(color));
+            scene.AddLine(p0, p1, color);
         }
     }
 }
@@ -248,8 +248,8 @@ auto SpawnCharacter(
         .shape            = Physics::CreateDualShape(config),
         .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -config.GetLifterOffsetY())
     };
-    const Physics::BodyHandle charPhys = pc.CreateCharacter(ToDouble3(spawnPosition), characterParams);
-    const JPH::Mat44          world    = Math::CreateTransform(ToFloat3(spawnPosition), {0.0f, 0.0f, 0.0f, 1.0f});
+    const Physics::BodyHandle charPhys = pc.CreateCharacter(spawnPosition, characterParams);
+    const JPH::Mat44          world    = Math::CreateTransform(spawnPosition, {0.0f, 0.0f, 0.0f, 1.0f});
     const Entity              player   = reg.Create(
         Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
         Components::TransformComponent {.position = spawnPosition}, Components::WorldTransformComponent {.world = world, .previous = world},
@@ -318,7 +318,7 @@ auto
         const float     speed = move->speed * (move->isSprinting ? std::max(move->sprintMultiplier, 1.0f) : 1.0f);
         const JPH::Vec3 vel(move->inputX * speed, move->currentYVel, move->inputZ * speed);
         if (vel.LengthSq() > 0.01f) {
-            scene.AddLine(ToFloat3(finalBumperCenter), ToFloat3(finalBumperCenter + (vel * 0.25f)), ToFloat4(palette.colorVelocityDebug));
+            scene.AddLine(finalBumperCenter, finalBumperCenter + (vel * 0.25f), palette.colorVelocityDebug);
         }
     }
 }

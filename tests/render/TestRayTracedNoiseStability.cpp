@@ -129,7 +129,7 @@ struct RayTracedNoiseStabilityTestSuite {
 
         ZHLN::PrefabFactory::CreatePlane(
             engine, 120.0f, {0.8f, 0.8f, 0.82f, 1.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMat}
         );
 
         const ZHLN::Entity sunEnt = reg.Create();
@@ -196,11 +196,11 @@ struct RayTracedNoiseStabilityTestSuite {
             // CSM normal/depth-bias Peter-Panning zone.
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {4.0f, 0.06f, 0.25f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.06, 15.0), .createPhysics = false, .materialOverride = boxMat}
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.06, 15.0}, .createPhysics = false, .materialOverride = boxMat}
             );
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {4.0f, 0.008f, 0.012f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.18, 16.5), .createPhysics = false, .materialOverride = boxMat}
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.18, 16.5}, .createPhysics = false, .materialOverride = boxMat}
             );
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
@@ -260,7 +260,7 @@ struct RayTracedNoiseStabilityTestSuite {
             }
             const ZHLN::Entity highCaster = ZHLN::PrefabFactory::CreateBox(
                 *engine, {3.0f, 3.0f, 3.0f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 12.0, 22.0), .createPhysics = false, .materialOverride = boxMat}
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 12.0, 22.0}, .createPhysics = false, .materialOverride = boxMat}
             );
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
@@ -315,7 +315,7 @@ struct RayTracedNoiseStabilityTestSuite {
 
             const ZHLN::Entity curb = ZHLN::PrefabFactory::CreateBox(
                 *engine, {2.2f, 0.06f, 0.25f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-2.0, 0.06, 15.0), .createPhysics = false, .materialOverride = boxMat}
+                ZHLN::PrefabFactory::SpawnParams {.position = {-2.0, 0.06, 15.0}, .createPhysics = false, .materialOverride = boxMat}
             );
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);

@@ -192,7 +192,7 @@ auto SpawnUnlitChamfer(ZHLN::Engine& engine, float x, const ZHLN::Material& mate
     rc.RegisterGPUMaterial(matAsset, material);
 
     const JPH::Vec3  position = JPH::Vec3(x, 0.0f, 0.0f);
-    const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(position), {0.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 1.0f});
+    const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(position, {0.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 1.0f});
     reg.Add(e, ZHLN::Components::NameComponent {.name = ZHLN::String64("UnlitChamfer_" + tag)});
     reg.Add(e, ZHLN::Components::TransformComponent {.position = position, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)});
     reg.Add(e, ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
@@ -257,7 +257,7 @@ struct UnlitMaterialsTestSuite {
             );
             if (!controlMaterial) return std::unexpected(UnlitMaterialError::MaterialCreationFailed);
             ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.45f, 0.45f, 0.45f}, {.position = JPH::RVec3(0.0, -1.6, 0.0), .createPhysics = false, .materialOverride = *controlMaterial}
+                *engine, {0.45f, 0.45f, 0.45f}, {.position = {0.0, -1.6, 0.0}, .createPhysics = false, .materialOverride = *controlMaterial}
             );
 
             ZHLN::Test::Headless::TickFrames(*engine, 6);
@@ -338,15 +338,9 @@ struct UnlitMaterialsTestSuite {
                 .baseColor = {0.0f, 1.0f, 1.0f, 0.5f}, .albedoMap = *texture
             });
             if (!wall || !mask || !blend) return std::unexpected(UnlitMaterialError::MaterialCreationFailed);
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {4.0f, 3.0f, 0.04f}, {.position = JPH::RVec3(0.0, 0.0, -1.0), .createPhysics = false, .materialOverride = *wall}
-            );
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.55f, 0.6f, 0.02f}, {.position = JPH::RVec3(-0.7, 0.0, 0.0), .createPhysics = false, .materialOverride = *mask}
-            );
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.55f, 0.6f, 0.02f}, {.position = JPH::RVec3(0.7, 0.0, 0.0), .createPhysics = false, .materialOverride = *blend}
-            );
+            ZHLN::PrefabFactory::CreateBox(*engine, {4.0f, 3.0f, 0.04f}, {.position = {0.0, 0.0, -1.0}, .createPhysics = false, .materialOverride = *wall});
+            ZHLN::PrefabFactory::CreateBox(*engine, {0.55f, 0.6f, 0.02f}, {.position = {-0.7, 0.0, 0.0}, .createPhysics = false, .materialOverride = *mask});
+            ZHLN::PrefabFactory::CreateBox(*engine, {0.55f, 0.6f, 0.02f}, {.position = {0.7, 0.0, 0.0}, .createPhysics = false, .materialOverride = *blend});
 
             ZHLN::Test::Headless::TickFrames(*engine, 6);
             const auto frame = ZHLN::Test::Headless::Capture(*engine, "unlit_alpha_coverage.ppm");

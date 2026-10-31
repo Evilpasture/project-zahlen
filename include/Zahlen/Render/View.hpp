@@ -5,6 +5,7 @@
 #pragma once
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/Handles.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -20,7 +21,7 @@ struct SceneView {
     JPH::Mat44       projMatrix        = JPH::Mat44::sIdentity();
     JPH::Mat44       viewProjMatrix    = JPH::Mat44::sIdentity();
     JPH::Mat44       invViewProjMatrix = JPH::Mat44::sIdentity();
-    JPH::Vec3        worldPosition     = JPH::Vec3::sZero();
+    ZHLN::Float3     worldPosition {};
     ViewportRect     viewport          = {};
     FrameTarget     target            = {};
     Frustum          frustum           = {};

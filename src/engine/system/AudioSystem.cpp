@@ -49,7 +49,7 @@ ZHLN_API void AudioSystem(
                 up  = t->rotation * JPH::Vec3::sAxisY();
             }
 
-            device.UpdateListener(ToFloat3(pos), ToFloat3(dir), ToFloat3(up), ToFloat3(listener->velocity));
+            device.UpdateListener(pos, dir, up, listener->velocity);
             listenerFound = true;
             break;
         }
@@ -63,7 +63,7 @@ ZHLN_API void AudioSystem(
             const float yawRad   = JPH::DegreesToRadians(cam.yaw);
             const float pitchRad = JPH::DegreesToRadians(cam.pitch);
             const JPH::Vec3 dir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-            device.UpdateListener(ToFloat3(cam.position), ToFloat3(dir.Normalized()), {0.0f, 1.0f, 0.0f});
+            device.UpdateListener(cam.position, dir.Normalized(), {0.0f, 1.0f, 0.0f});
         }
     }
 
@@ -135,9 +135,9 @@ ZHLN_API void AudioSystem(
             device.SetVoiceOcclusion(src.voiceHandle, src.occlusion);
 
             if (src.isSpatialized) {
-                device.SetVoicePosition(src.voiceHandle, ToFloat3(pos));
-                device.SetVoiceDirection(src.voiceHandle, ToFloat3(dir));
-                device.SetVoiceVelocity(src.voiceHandle, ToFloat3(src.velocity));
+                device.SetVoicePosition(src.voiceHandle, pos);
+                device.SetVoiceDirection(src.voiceHandle, dir);
+                device.SetVoiceVelocity(src.voiceHandle, src.velocity);
                 device.SetVoiceAttenuation(src.voiceHandle, src.attenuation);
             }
 

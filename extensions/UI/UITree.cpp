@@ -230,8 +230,8 @@ namespace {
     BoxConfig cfg;
     cfg.width        = box.width;
     cfg.height       = box.height;
-    cfg.color        = ToVec4(box.color);
-    cfg.cornerRadius = ToVec4(box.cornerRadius);
+    cfg.color        = box.color;
+    cfg.cornerRadius = box.cornerRadius;
     cfg.padding      = box.padding;
     cfg.gap          = box.gap;
     cfg.direction    = box.direction;
@@ -257,7 +257,7 @@ namespace {
 }
 
 void ApplySelectionTint(BoxConfig& cfg) {
-    cfg.color = cfg.color + JPH::Vec4(0.15f, 0.25f, 0.40f, 0.25f);
+    cfg.color = static_cast<JPH::Vec4>(cfg.color) + JPH::Vec4(0.15f, 0.25f, 0.40f, 0.25f);
 }
 
 void NoteDesignClick(Frame& gui, std::string_view id, TreeMode mode, RenderUITreeResult& result) {
@@ -347,7 +347,7 @@ void RenderNode(
         }
 
         case NodeKind::Text:
-            wrapLeaf([&]() { gui.Text(label, node.fontSize, ToFloat4(node.textColor)); });
+            wrapLeaf([&]() { gui.Text(label, node.fontSize, node.textColor); });
             NoteDesignClick(gui, id, mode, result);
             break;
 

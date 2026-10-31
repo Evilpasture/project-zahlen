@@ -198,7 +198,7 @@ void BuildAoScene(ZHLN::Engine& engine) {
     }
 
     ZHLN::PrefabFactory::CreatePlane(
-        engine, 120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false}
+        engine, 120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}
     );
 
     auto makeMat = [&](float gray) {
@@ -212,13 +212,13 @@ void BuildAoScene(ZHLN::Engine& engine) {
     }
 
     ZHLN::PrefabFactory::CreateBox(
-        engine, {0.8f, 0.8f, 0.8f}, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-2.2, 1.0, 0.0), .createPhysics = false, .materialOverride = *matA}
+        engine, {0.8f, 0.8f, 0.8f}, ZHLN::PrefabFactory::SpawnParams {.position = {-2.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *matA}
     );
     ZHLN::PrefabFactory::CreateBox(
-        engine, {0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.0, -2.0), .createPhysics = false, .materialOverride = *matB}
+        engine, {0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, -2.0}, .createPhysics = false, .materialOverride = *matB}
     );
     ZHLN::PrefabFactory::CreateBox(
-        engine, {0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(2.2, 1.0, 1.0), .createPhysics = false, .materialOverride = *matC}
+        engine, {0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {2.2, 1.0, 1.0}, .createPhysics = false, .materialOverride = *matC}
     );
 
     const ZHLN::Entity sunEnt = reg.Create();

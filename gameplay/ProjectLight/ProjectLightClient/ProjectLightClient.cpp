@@ -663,7 +663,7 @@ void ClientSession::ApplyProperties(ReplicatedObject& object, const MsgPackValue
             object.transformDirty = true;
         } else if (property == "Rotation") {
             object.rotationEulerDeg = value.AsVec3(VEC3_SCALE, object.rotationEulerDeg);
-            object.rotationQuat     = Math::EulerDegreesToQuat(ToFloat3(object.rotationEulerDeg)).Normalized();
+            object.rotationQuat     = Math::EulerDegreesToQuat(object.rotationEulerDeg).Normalized();
             object.physicsHistory.Clear();
             object.hasPhysicsSample = false;
             object.transformDirty = true;
@@ -825,7 +825,7 @@ void ClientSession::ApplyPhysicsUpdates(const MsgPackValue& physicsUpdates) {
         object->physicsHistory.Push(NetworkTransformSample {.position = position, .rotation = rotation, .receivedAt = receivedAt});
         object->position = position;
         object->rotationQuat = rotation;
-        object->rotationEulerDeg = Math::QuatToEulerDegrees(ToFloat4(object->rotationQuat));
+        object->rotationEulerDeg = Math::QuatToEulerDegrees(object->rotationQuat);
         object->linearVelocity   = JPH::Vec3(scaled(data[7]), scaled(data[8]), scaled(data[9]));
         object->hasPhysicsSample = true;
         object->transformDirty = true;
@@ -1317,7 +1317,7 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         // this pose instead of snapping back to an old remote sample.
         object.position = transform.position;
         object.rotationQuat = transform.rotation.Normalized();
-        object.rotationEulerDeg = Math::QuatToEulerDegrees(ToFloat4(object.rotationQuat));
+        object.rotationEulerDeg = Math::QuatToEulerDegrees(object.rotationQuat);
         object.linearVelocity   = transform.linearVelocity;
         object.renderPosition   = object.position;
         object.renderRotation   = object.rotationQuat;

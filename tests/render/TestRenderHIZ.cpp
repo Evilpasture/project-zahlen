@@ -107,7 +107,7 @@ struct HiZTestSuite {
             // Spawn ground plane and multiple scatter cubes
             const ZHLN::Entity ground = ZHLN::PrefabFactory::CreatePlane(
                 *engine, 60.0f, {0.2f, 0.2f, 0.25f, 1.0f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = true, .isStaticPhysics = true}
+                ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = true, .isStaticPhysics = true}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(ground));
 
@@ -116,7 +116,7 @@ struct HiZTestSuite {
                     ZHLN::PrefabFactory::CreateBox(
                         *engine, {0.5f, 0.5f, 0.5f},
                         ZHLN::PrefabFactory::SpawnParams {
-                            .position        = JPH::RVec3(static_cast<double>(x * 4), 1.0, static_cast<double>(z * 6)),
+                            .position        = {static_cast<double>(x * 4), 1.0, static_cast<double>(z * 6)},
                             .createPhysics   = true,
                             .isStaticPhysics = true,
                             .color           = {0.8f, 0.4f, 0.1f, 1.0f}
@@ -166,7 +166,7 @@ struct HiZTestSuite {
             const ZHLN::Entity occluderWall = ZHLN::PrefabFactory::CreateBox(
                 *engine, {6.0f, 4.0f, 0.25f},
                 ZHLN::PrefabFactory::SpawnParams {
-                    .position = JPH::RVec3(0.0, 4.0, 5.0), .createPhysics = true, .isStaticPhysics = true, .color = {0.15f, 0.15f, 0.15f, 1.0f}
+                    .position = {0.0, 4.0, 5.0}, .createPhysics = true, .isStaticPhysics = true, .color = {0.15f, 0.15f, 0.15f, 1.0f}
                 }
             );
 
@@ -174,7 +174,7 @@ struct HiZTestSuite {
             const ZHLN::Entity hiddenTarget = ZHLN::PrefabFactory::CreateBox(
                 *engine, {0.5f, 0.5f, 0.5f},
                 ZHLN::PrefabFactory::SpawnParams {
-                    .position = JPH::RVec3(0.0, 4.0, 18.0), .createPhysics = true, .isStaticPhysics = true, .color = {1.0f, 0.0f, 0.0f, 1.0f}
+                    .position = {0.0, 4.0, 18.0}, .createPhysics = true, .isStaticPhysics = true, .color = {1.0f, 0.0f, 0.0f, 1.0f}
                 }
             );
 
@@ -182,7 +182,7 @@ struct HiZTestSuite {
             const ZHLN::Entity visibleTarget = ZHLN::PrefabFactory::CreateBox(
                 *engine, {0.5f, 0.5f, 0.5f},
                 ZHLN::PrefabFactory::SpawnParams {
-                    .position = JPH::RVec3(15.0, 4.0, 5.0), .createPhysics = true, .isStaticPhysics = true, .color = {0.0f, 1.0f, 0.0f, 1.0f}
+                    .position = {15.0, 4.0, 5.0}, .createPhysics = true, .isStaticPhysics = true, .color = {0.0f, 1.0f, 0.0f, 1.0f}
                 }
             );
 

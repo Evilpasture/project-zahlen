@@ -664,9 +664,8 @@ struct PerformanceTestSuite {
                 float      spawnZ = posDist(rng);
                 JPH::RVec3 spawnPos(spawnX, 1.5, spawnZ);
 
-                ZHLN::Physics::BodyHandle bodyHandle = physicsContext.CreateRigidBody(
-                    agentShape, ZHLN::ToDouble3(spawnPos), {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING
-                );
+                ZHLN::Physics::BodyHandle bodyHandle =
+                    physicsContext.CreateRigidBody(agentShape, spawnPos, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
 
                 ZHLN::Entity agent = registry.Create(
                     ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)},
@@ -741,9 +740,8 @@ struct PerformanceTestSuite {
 
                                          // Raycast to probe surrounding terrain & dynamic obstacles
                                          JPH::Vec3  forward(std::sin(static_cast<float>(frame + i) * 0.05f), 0.0f, std::cos(static_cast<float>(frame + i) * 0.05f));
-                                         const auto rayHit = physicsContext.Raycast(
-                                             ZHLN::ToDouble3(trans->position + JPH::Vec3(0, 0.5f, 0)), ZHLN::ToFloat3(forward), 10.0f, phys->physicsHandle
-                                         );
+                                         const auto rayHit =
+                                             physicsContext.Raycast(trans->position + JPH::Vec3(0, 0.5f, 0), forward, 10.0f, phys->physicsHandle);
                                          totalRaysCast.fetch_add(1, std::memory_order::relaxed);
 
                                          if (rayHit.hasHit) {
@@ -752,7 +750,7 @@ struct PerformanceTestSuite {
                                          }
 
                                          // Apply movement impulse based on perception
-                                         physicsContext.SetLinearVelocity(phys->physicsHandle, ZHLN::ToFloat3(forward * 4.0f));
+                                         physicsContext.SetLinearVelocity(phys->physicsHandle, forward * 4.0f);
                                      }
                                  });
 

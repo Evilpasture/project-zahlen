@@ -217,7 +217,7 @@ struct RayTracedReflectionNoiseTestSuite {
 
         ZHLN::PrefabFactory::CreatePlane(
             engine, 120.0f, {0.05f, 0.05f, 0.06f, 1.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMat}
         );
         // Just above the floor so it wins the depth test everywhere it covers.
         //
@@ -230,11 +230,10 @@ struct RayTracedReflectionNoiseTestSuite {
         // far strip inside the top probe rows.
         ZHLN::PrefabFactory::CreatePlane(
             engine, 60.0f, {0.5f, 0.5f, 0.5f, 1.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.02, 8.0), .createPhysics = false, .materialOverride = *plateMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.02, 8.0}, .createPhysics = false, .materialOverride = *plateMat}
         );
         ZHLN::PrefabFactory::CreateBox(
-            engine, {2.0f, 2.0f, 2.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 6.0, 6.0), .createPhysics = false, .materialOverride = *boxMat}
+            engine, {2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 6.0, 6.0}, .createPhysics = false, .materialOverride = *boxMat}
         );
 
         const ZHLN::Entity sunEnt = reg.Create();

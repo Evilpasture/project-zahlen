@@ -61,7 +61,7 @@ struct ReflectionsTestSuite {
                 }
                 ZHLN::PrefabFactory::CreatePlane(
                     *engine, 120.0f, {0.85f, 0.85f, 0.88f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *mirrorMatRes}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *mirrorMatRes}
                 );
 
                 auto emissiveMatRes = rc.CreateMaterial(
@@ -72,7 +72,7 @@ struct ReflectionsTestSuite {
                 }
                 ZHLN::PrefabFactory::CreateBox(
                     *engine, {0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 3.0, 0.0), .createPhysics = false, .materialOverride = *emissiveMatRes}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMatRes}
                 );
 
                 const ZHLN::Entity sunEnt = reg.Create();
@@ -246,7 +246,7 @@ struct ReflectionsTestSuite {
 
                 ZHLN::PrefabFactory::CreatePlane(
                     *engine, 120.0f, {0.9f, 0.9f, 0.95f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *mirrorMat}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *mirrorMat}
                 );
 
                 // 4 Distinct High-Luminance Emissive Geometric Emitters at Y = 3.0, Z = 0.0:
@@ -269,19 +269,19 @@ struct ReflectionsTestSuite {
 
                 ZHLN::PrefabFactory::CreateBox(
                     *engine, {0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-4.5, 3.0, 0.0), .createPhysics = false, .materialOverride = *matEmissiveRed}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {-4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveRed}
                 );
                 ZHLN::PrefabFactory::CreateBox(
                     *engine, {0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-1.5, 3.0, 0.0), .createPhysics = false, .materialOverride = *matEmissiveGrn}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {-1.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveGrn}
                 );
                 ZHLN::PrefabFactory::CreateBox(
                     *engine, {0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(1.5, 3.0, 0.0), .createPhysics = false, .materialOverride = *matEmissiveBlu}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {1.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveBlu}
                 );
                 ZHLN::PrefabFactory::CreateBox(
                     *engine, {0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(4.5, 3.0, 0.0), .createPhysics = false, .materialOverride = *matEmissiveYel}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveYel}
                 );
 
                 const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
@@ -486,7 +486,7 @@ struct ReflectionsTestSuite {
                 auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.5f, .roughness = 0.25f, .baseColor = {0.6f, 0.6f, 0.65f, 1.0f}});
                 ZHLN::PrefabFactory::CreatePlane(
                     *engine, 80.0f, {0.6f, 0.6f, 0.65f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *floorMat}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *floorMat}
                 );
 
                 auto monolithMat = rc.CreateMaterial(
@@ -494,7 +494,7 @@ struct ReflectionsTestSuite {
                 );
                 ZHLN::PrefabFactory::CreateBox(
                     *engine, {0.8f, 2.5f, 0.8f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 2.5, 0.0), .createPhysics = false, .materialOverride = *monolithMat}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 2.5, 0.0}, .createPhysics = false, .materialOverride = *monolithMat}
                 );
 
                 auto goldMat      = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.15f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}});
@@ -509,7 +509,7 @@ struct ReflectionsTestSuite {
                         ZHLN::PrefabFactory::CreateBox(
                             *engine, {0.5f, 0.5f, 0.5f},
                             ZHLN::PrefabFactory::SpawnParams {
-                                .position = JPH::RVec3(px, 0.5, pz), .createPhysics = false, .materialOverride = ((x + z) % 2 == 0) ? *goldMat : *roughPlastic
+                                .position = {px, 0.5, pz}, .createPhysics = false, .materialOverride = ((x + z) % 2 == 0) ? *goldMat : *roughPlastic
                             }
                         );
                     }

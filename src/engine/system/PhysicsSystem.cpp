@@ -34,7 +34,7 @@ void CommitImpulses(Engine& engine) {
         const auto   cmd  = reg.Get<Components::ImpulseCommand>(e);
         const auto   phys = reg.Get<Components::PhysicsComponent>(e);
         if (cmd && phys && cmd->linear.LengthSq() > 0.0f) {
-            pc.AddImpulse(phys->physicsHandle, ToFloat3(cmd->linear));
+            pc.AddImpulse(phys->physicsHandle, cmd->linear);
         }
         reg.Remove<Components::ImpulseCommand>(e);
     }

@@ -159,8 +159,7 @@ constexpr float kHaloBloomStrength = 0.003f;
     }
 
     ZHLN::PrefabFactory::CreateBox(
-        engine, {1.0f, 1.0f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *material}
+        engine, {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *material}
     );
 
     const auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();

@@ -12,6 +12,7 @@ module;
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <cstdint>
 
@@ -59,7 +60,7 @@ export struct LightningComponent {
 
 namespace Lightning {
 
-export auto Spawn(Engine& engine, JPH::Double3 cloudPos, JPH::Double3 groundPos, const LightningConfig& cfg = {}) -> Entity;
+export auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, const LightningConfig& cfg = {}) -> Entity;
 
 export auto Update(Engine& engine, float dt) -> void;
 

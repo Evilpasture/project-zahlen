@@ -112,7 +112,7 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
 
     const JPH::Vec3  sunPos   = JPH::Vec3(15.0f, 30.0f, 15.0f);
     const JPH::Quat  sunRot   = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f});
-    const JPH::Mat44 sunWorld = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(sunPos), ZHLN::ToFloat4(sunRot));
+    const JPH::Mat44 sunWorld = ZHLN::Math::CreateTransform(sunPos, sunRot);
     reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("glTFInspectorSun")},
         ZHLN::Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = JPH::Vec3::sReplicate(1.0f)},
@@ -123,8 +123,7 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     );
 
     const ZHLN::Entity ground = ZHLN::PrefabFactory::CreatePlane(
-        engine, 40.0f, {0.12f, 0.14f, 0.18f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .roughness = 0.9f, .metallic = 0.0f}
+        engine, 40.0f, {0.12f, 0.14f, 0.18f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .roughness = 0.9f, .metallic = 0.0f}
     );
     reg.Assign<ZHLN::Components::NameComponent>(ground, "glTFInspectorGround");
 
@@ -234,7 +233,7 @@ void TreeRow(
     JPH::Vec4 btnColor = selected ? JPH::Vec4(0.18f, 0.36f, 0.56f, 0.98f) :
                                     (playing ? JPH::Vec4(0.15f, 0.30f, 0.20f, 0.85f) : JPH::Vec4(0.10f, 0.12f, 0.16f, 0.60f));
 
-    if (ui.Button(text, ZHLN::ToFloat4(btnColor))) {
+    if (ui.Button(text, btnColor)) {
         if (expandable) {
             if (state.expanded.contains(pathStr)) {
                 state.expanded.erase(pathStr);
@@ -525,8 +524,8 @@ void DrawModelContentRows(ZHLN::GUI::Frame& ui, InspectorState& state, const ZHL
             TreeRow(
                 ui, state, lPath, depth + 1, lName, false, std::format("Light: {}", lName),
                 std::format(
-                    "Type: {}\nColor: ({:.2f}, {:.2f}, {:.2f})\nIntensity: {:.1f}\nRange: {:.1f}", static_cast<int>(light.type), light.color.GetX(),
-                    light.color.GetY(), light.color.GetZ(), light.intensity, light.range
+                    "Type: {}\nColor: ({:.2f}, {:.2f}, {:.2f})\nIntensity: {:.1f}\nRange: {:.1f}", static_cast<int>(light.type), light.color.x, light.color.y,
+                    light.color.z, light.intensity, light.range
                 ),
                 ThemeText()
             );
@@ -633,8 +632,8 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
     const uint32_t capacity = 1u + static_cast<uint32_t>(prefab->parts.size());
     state.instances.resize(static_cast<size_t>(capacity));
     const uint32_t written = ZHLN::PrefabFactory::InstantiatePrefab(
-        engine, *prefab, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .isAnimated = true},
-        state.instances.data(), capacity
+        engine, *prefab, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .isAnimated = true}, state.instances.data(),
+        capacity
     );
 
     ComputeBounds(*prefab, state.target, state.distance);

@@ -153,7 +153,7 @@ void WriteTransform(Engine& engine, ReplicatedObject& object, Entity entity, JPH
     object.rotationQuat = rotation.Normalized();
     object.renderPosition = object.position;
     object.renderRotation = object.rotationQuat;
-    object.rotationEulerDeg = Math::QuatToEulerDegrees(ToFloat4(object.rotationQuat));
+    object.rotationEulerDeg = Math::QuatToEulerDegrees(object.rotationQuat);
     object.transformDirty   = true;
     if (entity == Entity::Null())
         return;
@@ -223,13 +223,13 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
         PrefabFactory::SpawnParams params;
         // Physics bodies must start from the latest authoritative pose, not a
         // delayed render sample. This matters when NetworkOwner changes.
-        params.position         = JPH::RVec3(createPhysics ? object.position : object.renderPosition);
+        params.position         = createPhysics ? object.position : object.renderPosition;
         params.rotation         = (createPhysics ? object.rotationQuat : object.renderRotation).Normalized();
         params.scale            = size;
         params.createPhysics    = createPhysics;
         params.isStaticPhysics  = object.anchored;
         params.physicsMask      = object.canCollide ? 0xFFFFFFFFu : 0u;
-        params.color            = JPH::Vec4(1.0f, 1.0f, 1.0f, 1.0f);
+        params.color            = {1.0f, 1.0f, 1.0f, 1.0f};
         params.roughness        = object.roughness;
         params.metallic         = object.metallic;
 
@@ -262,7 +262,7 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
             default:
                 // Wedge, CornerWedge, Capsule and MeshPart asset substitution are
                 // intentionally represented by the nearest built-in primitive.
-                entity = PrefabFactory::CreateBox(engine, ToFloat3(halfExtents), params);
+                entity = PrefabFactory::CreateBox(engine, halfExtents, params);
                 break;
         }
 
@@ -290,7 +290,7 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
             transform->scale    = size;
         }
         if (auto world = registry.Get<Components::WorldTransformComponent>(entity)) {
-            const JPH::Mat44 matrix = Math::CreateTransform(ToFloat3(object.renderPosition), ToFloat4(object.renderRotation.Normalized()), ToFloat3(size));
+            const JPH::Mat44 matrix = Math::CreateTransform(object.renderPosition, object.renderRotation.Normalized(), size);
             world->world            = matrix;
             world->previous         = matrix;
         }
@@ -351,7 +351,7 @@ void SpawnOrUpdateLightEntity(Engine& engine, SceneMirrorState& state, Replicate
     Entity      entity            = state.index.Find(object.uid);
     if (entity == Entity::Null() || !registry.IsAlive(entity) || registry.Get<Components::PendingDestroy>(entity).has_value()) {
         entity = registry.Create();
-        const JPH::Mat44 matrix = Math::CreateTransform(ToFloat3(object.position), ToFloat4(object.rotationQuat), {1.0f, 1.0f, 1.0f});
+        const JPH::Mat44 matrix = Math::CreateTransform(object.position, object.rotationQuat, {1.0f, 1.0f, 1.0f});
         registry.Add(
             entity, ProjectLightInstanceComponent {.uid = object.uid}, ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid},
             ProjectLightReplicaTag {}, Components::NameComponent {.name = String64(object.name)},
@@ -495,7 +495,7 @@ void UpdateSoundVoices(Engine& engine, SceneMirrorState& state) {
             }
             const ReplicatedObject* parent = FindObject(state, object.parentUid);
             if (parent != nullptr)
-                audio.SetVoicePosition(object.audioHandle, ToFloat3(parent->position));
+                audio.SetVoicePosition(object.audioHandle, parent->position);
         } else if (object.audioHandle != AudioHandle::Invalid) {
             audio.StopVoice(object.audioHandle);
             object.audioHandle = AudioHandle::Invalid;
@@ -649,7 +649,7 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
     Physics::CharacterParams params;
     params.shape = physics.GetOrCreateShape(Physics::ShapeType::Capsule, 2.0f, 0.5f);
     params.maxSlopeAngle = JPH::DegreesToRadians(45.0f);
-    state.localControllerBody = physics.CreateCharacter(ToDouble3(rootPart->position), params);
+    state.localControllerBody = physics.CreateCharacter(rootPart->position, params);
     if (state.localControllerBody == Physics::BodyHandle::Null()) {
         Log("[ProjectLight] Could not create the local player CharacterVirtual body.");
         return;
@@ -658,7 +658,7 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
     registry.RegisterComponent<Character::MovementComponent>();
     registry.RegisterComponent<Character::InputComponent>();
     const Entity controller = registry.Create();
-    const JPH::Mat44 matrix     = Math::CreateTransform(ToFloat3(rootPart->position), ToFloat4(rootPart->rotationQuat), {1.0f, 1.0f, 1.0f});
+    const JPH::Mat44 matrix     = Math::CreateTransform(rootPart->position, rootPart->rotationQuat, {1.0f, 1.0f, 1.0f});
     registry.Add(
         controller, Components::NameComponent {.name = String64("ProjectLightLocalController")},
         Components::TransformComponent {.position = rootPart->position, .rotation = rootPart->rotationQuat, .scale = JPH::Vec3::sReplicate(1.0f)},

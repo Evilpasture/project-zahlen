@@ -428,8 +428,8 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
         materialDesc.baseColor        = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()};
         const ZHLN::Material material = engine.GetRenderContext().CreateMaterial(materialDesc).value_or(ZHLN::Material {});
         const ZHLN::Entity   part     = ZHLN::PrefabFactory::CreateBox(
-            engine, ZHLN::ToFloat3(JPH::Vec3(halfExtents) * scale),
-            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = material}
+            engine, JPH::Vec3(halfExtents) * scale,
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = material}
         );
         reg.Add(part, ZHLN::Components::HierarchyComponent {.parent = handgun});
         reg.Patch<ZHLN::Components::TransformComponent>(part, [&](auto& transform) -> auto {
@@ -600,8 +600,8 @@ auto AttachCharacterRig(
         const size_t              outputCapacity = 1 + prefab->parts.size() * 2;
         std::vector<ZHLN::Entity> parts(outputCapacity);
         const uint32_t            count = ZHLN::PrefabFactory::InstantiatePrefab(
-            engine, *prefab, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.20, 0.0), .createPhysics = false, .isAnimated = true},
-            parts.data(), static_cast<uint32_t>(parts.size())
+            engine, *prefab, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.20, 0.0}, .createPhysics = false, .isAnimated = true}, parts.data(),
+            static_cast<uint32_t>(parts.size())
         );
         const uint32_t writtenCount = std::min(count, static_cast<uint32_t>(parts.size()));
 

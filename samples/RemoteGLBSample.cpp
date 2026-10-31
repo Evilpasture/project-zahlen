@@ -532,7 +532,7 @@ auto ImportSubject(ZHLN::Engine& engine, Subject& subject, std::span<const uint8
     const uint32_t written = ZHLN::PrefabFactory::InstantiatePrefab(
         engine, *prefab,
         ZHLN::PrefabFactory::SpawnParams {
-            .position      = JPH::RVec3(0.0, 0.0, 0.0),
+            .position      = {0.0, 0.0, 0.0},
             .createPhysics = false,
             .isAnimated    = !prefab->animations.empty(),
         },
@@ -599,7 +599,7 @@ struct Studio {
     JPH::Vec3Arg     direction
 ) -> ZHLN::Entity {
     auto&            reg   = engine.GetRegistry();
-    const JPH::Mat44 world = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(position), {0.0f, 0.0f, 0.0f, 1.0f});
+    const JPH::Mat44 world = ZHLN::Math::CreateTransform(position, {0.0f, 0.0f, 0.0f, 1.0f});
     return reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64(name)},
         ZHLN::Components::TransformComponent {.position = position, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
@@ -686,7 +686,7 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     studio.floor = ZHLN::PrefabFactory::CreatePlane(
         engine, radius * kFloorExtent, {1.0f, 1.0f, 1.0f, 1.0f},
         ZHLN::PrefabFactory::SpawnParams {
-            .position         = JPH::RVec3(center.GetX(), subject.boundsMin.GetY(), center.GetZ()),
+            .position         = {center.GetX(), subject.boundsMin.GetY(), center.GetZ()},
             .createPhysics    = false,
             .materialOverride = floorMaterial,
         }

@@ -98,7 +98,7 @@ struct DecalTestSuite {
             const JPH::Vec3  decalPos(0.0f, 1.5f, 0.0f);
             const JPH::Quat  decalRot = JPH::Quat::sIdentity();
             const JPH::Vec3  decalScale(1.5f, 1.5f, 2.0f);
-            const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(decalPos), ZHLN::ToFloat4(decalRot), ZHLN::ToFloat3(decalScale));
+            const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(decalPos, decalRot, decalScale);
 
             const ZHLN::Entity decalEnt = reg.Create();
             reg.Add(
@@ -176,7 +176,7 @@ struct DecalTestSuite {
             const ZHLN::Entity wall = ZHLN::PrefabFactory::CreateBox(
                 *engine, {4.0f, 4.0f, 0.2f},
                 ZHLN::PrefabFactory::SpawnParams {
-                    .position = JPH::RVec3(0.0, 1.5, -2.0), .createPhysics = false, .color = {0.15f, 0.15f, 0.15f, 1.0f} // Dark gray background (RGB: ~38)
+                    .position = {0.0, 1.5, -2.0}, .createPhysics = false, .color = {0.15f, 0.15f, 0.15f, 1.0f} // Dark gray background (RGB: ~38)
                 }
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(wall));
@@ -189,7 +189,7 @@ struct DecalTestSuite {
             const JPH::Vec3  decalPos(0.0f, 1.5f, -2.0f);
             const JPH::Quat  decalRot = JPH::Quat::sIdentity();
             const JPH::Vec3  decalScale(2.5f, 2.5f, 2.0f);
-            const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(decalPos), ZHLN::ToFloat4(decalRot), ZHLN::ToFloat3(decalScale));
+            const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(decalPos, decalRot, decalScale);
 
             const ZHLN::Entity decalEnt = reg.Create();
             reg.Add(
@@ -272,13 +272,13 @@ struct DecalTestSuite {
             // 1. Front Wall at Z = -2.0m (Inside decal projection volume)
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {2.0f, 2.0f, 0.1f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, -2.0), .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}}
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -2.0}, .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}}
             );
 
             // 2. Far Object at Z = -15.0m (Completely outside decal projection depth)
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {4.0f, 4.0f, 0.1f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, -15.0), .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}}
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -15.0}, .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}}
             );
 
             // 3. Small decal positioned tightly around the front wall (depth extent = 1.0m)
@@ -286,7 +286,7 @@ struct DecalTestSuite {
             ZHLN::TextureHandle blueDecalTex = rc.CreateProceduralTexture("vfx_test_decal_blue", {64, 64}, bluePixels, true);
 
             const JPH::Vec3  decalPos(0.0f, 1.5f, -2.0f);
-            const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(decalPos), {0.0f, 0.0f, 0.0f, 1.0f}, {1.5f, 1.5f, 1.0f});
+            const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(decalPos, {0.0f, 0.0f, 0.0f, 1.0f}, {1.5f, 1.5f, 1.0f});
 
             const ZHLN::Entity decalEnt = reg.Create();
             reg.Add(

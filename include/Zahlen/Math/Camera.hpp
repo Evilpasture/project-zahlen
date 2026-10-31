@@ -5,6 +5,7 @@
 
 #include <Zahlen/Math/Math3D.hpp>
 #include <Jolt/Jolt.h>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <array>
 
@@ -49,7 +50,7 @@ struct Frustum {
         mW[1] = JPH::Vec4(planes[4].GetW(), planes[5].GetW(), 1e10f, 1e10f);
     }
 
-    [[nodiscard]] auto IsSphereVisible(JPH::Float3 center, float radius) const -> bool {
+    [[nodiscard]] auto IsSphereVisible(ZHLN::Float3 center, float radius) const -> bool {
         const float inflatedRadius = -(radius + 0.5f);
 
         JPH::Vec4 cX   = JPH::Vec4::sReplicate(center.x);
@@ -87,7 +88,7 @@ struct Camera {
         direction.SetY(JPH::Sin(JPH::DegreesToRadians(pitch)));
         direction.SetZ(JPH::Sin(JPH::DegreesToRadians(yaw)) * JPH::Cos(JPH::DegreesToRadians(pitch)));
 
-        return Math::CreateLookAt(ToFloat3(position), ToFloat3(position + direction.Normalized()), {0.0f, 1.0f, 0.0f});
+        return Math::CreateLookAt(position, position + direction.Normalized(), {0.0f, 1.0f, 0.0f});
     }
 
     [[nodiscard]] auto GetProjectionMatrix(float aspectRatio) const -> JPH::Mat44 {

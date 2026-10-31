@@ -133,7 +133,7 @@ inline void SyncTestAudioSourcesSystem(
         if (!src) continue;
         if (src->voiceHandle != AudioHandle::Invalid && audio->IsVoiceValid(src->voiceHandle)) {
             if (auto t = query.Get<Components::TransformComponent>(e)) {
-                audio->SetVoicePosition(src->voiceHandle, ToFloat3(t->position));
+                audio->SetVoicePosition(src->voiceHandle, t->position);
             }
             audio->SetVoiceBus(src->voiceHandle, src->bus);
             audio->SetVoiceOcclusion(src->voiceHandle, src->occlusion);
@@ -364,15 +364,14 @@ void test_spatial_panning_logarithmic_rolloff_and_occlusion_lowpass_dsp() {
     };
 
     const AudioHandle spatialVoice = audio.CreateVoiceFromMemory(
-        toneBytes,
-        VoiceDesc {
-            .bus         = AudioBus::SFX,
-            .spatialized = true,
-            .looping     = true,
-            .volume      = 1.0f,
-            .position    = JPH::Vec3(1.0f, 0.0f, 0.0f), // 1m directly right of listener
-            .attenuation = logAtten,
-        }
+        toneBytes, VoiceDesc {
+                       .bus         = AudioBus::SFX,
+                       .spatialized = true,
+                       .looping     = true,
+                       .volume      = 1.0f,
+                       .position    = {1.0f, 0.0f, 0.0f}, // 1m directly right of listener
+                       .attenuation = logAtten,
+                   }
     );
     Expect(spatialVoice != AudioHandle::Invalid);
     audio.PlayVoice(spatialVoice);

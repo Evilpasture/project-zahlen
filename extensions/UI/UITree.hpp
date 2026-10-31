@@ -27,12 +27,15 @@
 // The namespace stays ZHLN::GUI so the schema reads as part of the GUI family.
 // ===========================================================================
 
+// clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Float4.h>
+// clang-format on
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/ECS/EventBus.hpp>
 #include <Zahlen/GUI/GUI.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -45,14 +48,15 @@ enum class NodeKind : uint8_t { Box = 0, Row, Column, Text, Button, Checkbox, Sl
 // so a builder can select a node instead of firing "Save".
 enum class TreeMode : uint8_t { Preview = 0, Design };
 
-// Layout knobs for a UINode. Same fields as BoxConfig, but colours are Jolt
-// storage vectors so a document can say `color = [r, g, b, a]` rather than a
-// table of SIMD lanes.
+// Layout knobs for a UINode. Same fields as BoxConfig, but the colours are value
+// types so a document can say `color = [r, g, b, a]` rather than a table of SIMD
+// lanes. That array form is opted into by toml/SceneTOML.hpp, next to the Jolt
+// specialisations it replaces.
 struct NodeBox {
     Sizing      width        = {};
     Sizing      height       = {};
-    JPH::Float4 color        = {0.0f, 0.0f, 0.0f, 0.0f};
-    JPH::Float4 cornerRadius = {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::Float4 color        = {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::Float4 cornerRadius = {0.0f, 0.0f, 0.0f, 0.0f};
     float       padding      = 0.0f;
     float       gap          = 0.0f;
     Direction   direction    = Direction::Column;
@@ -80,7 +84,7 @@ struct UINode {
 
     NodeBox     box {};
     float       fontSize  = 16.0f;
-    JPH::Float4 textColor = {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::Float4 textColor = {1.0f, 1.0f, 1.0f, 1.0f};
     float       minVal    = 0.0f;
     float       maxVal    = 1.0f;
 

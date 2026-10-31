@@ -95,7 +95,7 @@ struct RenderAnimatedMeshTestSuite {
             const uint32_t            count = ZHLN::GLTF::InstantiatePrefabFromMemory(
                 *engine, kUziGlbData, "Uzi.glb",
                 {
-                    .position        = JPH::RVec3(0.0f, 0.0f, 0.0f),
+                    .position        = {0.0f, 0.0f, 0.0f},
                     .createPhysics   = false,
                     .isStaticPhysics = true,
                     .isAnimated      = true,

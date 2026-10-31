@@ -1423,7 +1423,7 @@ auto BuildModelPrefab(
                          (gltfLight->type == cgltf_light_type_point)       ? LightType::Point :
                                                                              LightType::Spot,
 
-            .color          = JPH::Vec3(gltfLight->color[0], gltfLight->color[1], gltfLight->color[2]),
+            .color          = {gltfLight->color[0], gltfLight->color[1], gltfLight->color[2]},
             .intensity      = gltfLight->intensity,
             .range          = gltfLight->range,
             .innerConeAngle = (gltfLight->type == cgltf_light_type_spot) ? gltfLight->spot_inner_cone_angle : 0.0f,

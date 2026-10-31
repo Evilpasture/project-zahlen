@@ -12,6 +12,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -45,7 +46,7 @@ static_assert(Reflect::EnumCount<AudioEventType>() == kAudioEventTypeCount);
 struct AudioEvent {
     AudioEventType       type       = AudioEventType::OneShot2D;
     String64             filepath {};
-    JPH::Vec3            position   = JPH::Vec3::sZero();
+    ZHLN::Float3         position {};
     float                volume     = 1.0f;
     float                pitch      = 1.0f;
     float                param1     = 0.0f;
@@ -70,9 +71,9 @@ struct VoiceDesc {
     float                pitch        = 1.0f;
     float                pan          = 0.0f;
     float                reverbSend   = 0.0f;
-    JPH::Vec3            position     = JPH::Vec3::sZero();
-    JPH::Vec3            velocity     = JPH::Vec3::sZero();
-    JPH::Vec3            direction    = JPH::Vec3(0.0f, 0.0f, -1.0f);
+    ZHLN::Float3         position {};
+    ZHLN::Float3         velocity {};
+    ZHLN::Float3         direction {0.0f, 0.0f, -1.0f};
     AudioAttenuationDesc attenuation  {};
     AudioOcclusionDesc   occlusion    {};
 };
@@ -96,7 +97,7 @@ class ZHLN_API AudioContext {
     [[nodiscard]] auto Channels() const noexcept -> uint32_t;
 
     // Listener state (3D spatialization + Doppler velocity).
-    void UpdateListener(JPH::Float3 position, JPH::Float3 direction, JPH::Float3 up = {0.0f, 1.0f, 0.0f}, JPH::Float3 velocity = {0.0f, 0.0f, 0.0f});
+    void UpdateListener(ZHLN::Float3 position, ZHLN::Float3 direction, ZHLN::Float3 up = {0.0f, 1.0f, 0.0f}, ZHLN::Float3 velocity = {0.0f, 0.0f, 0.0f});
 
     // Deferred transient one-shot & procedural SFX queue.
     void PostEvent(const AudioEvent& event) noexcept;
@@ -177,9 +178,9 @@ class ZHLN_API AudioContext {
     void               SetVoiceBus(AudioHandle handle, AudioBusId bus);
     [[nodiscard]] auto GetVoiceBus(AudioHandle handle) const noexcept -> AudioBusId;
 
-    void SetVoicePosition(AudioHandle handle, JPH::Float3 position);
-    void SetVoiceVelocity(AudioHandle handle, JPH::Float3 velocity);
-    void SetVoiceDirection(AudioHandle handle, JPH::Float3 direction);
+    void SetVoicePosition(AudioHandle handle, ZHLN::Float3 position);
+    void SetVoiceVelocity(AudioHandle handle, ZHLN::Float3 velocity);
+    void SetVoiceDirection(AudioHandle handle, ZHLN::Float3 direction);
 
     void               SetVoiceVolume(AudioHandle handle, float volume);
     [[nodiscard]] auto GetVoiceVolume(AudioHandle handle) const noexcept -> float;

@@ -1827,7 +1827,7 @@ struct GLTFImportTestSuite {
             // 1. The default spawn adds no lights: the glow comes from the
             //    material, exactly as it would in any other glTF viewer.
             std::array<ZHLN::Entity, 8>            defaultEntities {};
-            const ZHLN::PrefabFactory::SpawnParams defaultParams {.position = JPH::RVec3(0.0f, 0.0f, 0.0f)};
+            const ZHLN::PrefabFactory::SpawnParams defaultParams {.position = {0.0f, 0.0f, 0.0f}};
             const uint32_t                         defaultSpawned =
                 ZHLN::PrefabFactory::InstantiatePrefab(*engine, *prefab, defaultParams, defaultEntities.data(), static_cast<uint32_t>(defaultEntities.size()));
             if (defaultSpawned == 0 || lightCount() != lightsBefore) {
@@ -1837,7 +1837,7 @@ struct GLTFImportTestSuite {
             // 2. Opting in adds exactly one light for the one emissive part.
             std::array<ZHLN::Entity, 8>            entities {};
             const JPH::Vec3                        spawnPosition(4.0f, 1.0f, -2.0f);
-            const ZHLN::PrefabFactory::SpawnParams params {.position = JPH::RVec3(spawnPosition), .emissiveVirtualLights = true};
+            const ZHLN::PrefabFactory::SpawnParams params {.position = spawnPosition, .emissiveVirtualLights = true};
             const uint32_t spawned = ZHLN::PrefabFactory::InstantiatePrefab(*engine, *prefab, params, entities.data(), static_cast<uint32_t>(entities.size()));
             if (spawned < 3 || lightCount() != lightsBefore + 1) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);

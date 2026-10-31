@@ -9,6 +9,7 @@
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
@@ -206,8 +207,8 @@ namespace {
 
 auto SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnParams& p) -> Entity {
     Entity     root     = reg.Create();
-    JPH::Mat44 localMat = Math::CreateTransform(ToFloat3(p.position), ToFloat4(p.rotation), ToFloat3(p.scale));
-    reg.Add(root, Components::TransformComponent {.position = JPH::Vec3(p.position), .rotation = p.rotation, .scale = p.scale});
+    JPH::Mat44 localMat = Math::CreateTransform(p.position, p.rotation, p.scale);
+    reg.Add(root, Components::TransformComponent {.position = ZHLN::Float3(p.position), .rotation = p.rotation, .scale = p.scale});
     reg.Add(root, Components::WorldTransformComponent {.world = localMat, .previous = localMat});
     reg.Add(root, Components::NameComponent {.name = String64("Root_" + std::string(vPath))});
     return root;
@@ -278,7 +279,7 @@ auto InstantiateMeshPart(
     Entity                                 rootEntity,
     std::unordered_map<int32_t, uint32_t>& allocatedSkeletons
 ) -> Entity {
-    const JPH::Mat44 baseTransform = Math::CreateTransform(ToFloat3(params.position), ToFloat4(params.rotation), ToFloat3(params.scale));
+    const JPH::Mat44 baseTransform = Math::CreateTransform(params.position, params.rotation, params.scale);
 
     AssetID    meshAsset = part.meshAsset;
     MaterialID matAsset  = params.materialOverride.pipeline != PipelineHandle::Invalid ? static_cast<uint64_t>(params.materialOverride.pipeline) :
@@ -317,7 +318,7 @@ auto InstantiateMeshPart(
         flags |= DrawFlags::ExcludeFromTLAS;
     }
 
-    JPH::Mat44 worldMat = Math::CreateTransform(ToFloat3(prep.translation), ToFloat4(prep.rotation), ToFloat3(prep.scale));
+    JPH::Mat44 worldMat = Math::CreateTransform(prep.translation, prep.rotation, prep.scale);
 
     if (params.createPhysics && prep.shape != nullptr) {
         reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
@@ -327,7 +328,7 @@ auto InstantiateMeshPart(
             e,
             Components::PhysicsComponent {
                 .physicsHandle = pc.CreateRigidBody(
-                    prep.shape, ToDouble3(prep.translation), ToFloat4(prep.rotation),
+                    prep.shape, prep.translation, prep.rotation,
                     params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
                     (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory,
                     params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
@@ -426,7 +427,7 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
 
 } // namespace
 
-auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, JPH::Float3 halfExtents, const SpawnParams& params) -> Entity {
+auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::Float3 halfExtents, const SpawnParams& params) -> Entity {
     JPH::Vec4 boxColor = (params.materialOverride.baseColorFactor[3] >= 0.0f) ?
                              JPH::Vec4(
                                  params.materialOverride.baseColorFactor[0], params.materialOverride.baseColorFactor[1],
@@ -434,7 +435,7 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
                              ) :
                              JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
 
-    Mesh mesh = CreateBoxMesh(ctx, ToFloat3(halfExtents), ToFloat4(boxColor));
+    Mesh mesh = CreateBoxMesh(ctx, halfExtents, boxColor);
 
     Material mat;
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
@@ -454,27 +455,30 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     ctx.RegisterGPUMesh(meshAsset, mesh);
     ctx.RegisterGPUMaterial(matAsset, mat);
 
-    JPH::Mat44 worldMat = Math::CreateTransform(ToFloat3(params.position), ToFloat4(params.rotation), ToFloat3(params.scale));
+    JPH::Mat44 worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("Box_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     float maxExtent = std::max({halfExtents.x, halfExtents.y, halfExtents.z});
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = maxExtent * 2.0f});
     reg.Add(
         e, Components::OwnedMeshComponent {
-               .meshAsset = meshAsset, .mesh = mesh, .shape = Components::OwnedMeshComponent::Shape::Box, .dimensions = ToVec3(halfExtents), .color = boxColor
+               .meshAsset  = meshAsset,
+               .mesh       = mesh,
+               .shape      = Components::OwnedMeshComponent::Shape::Box,
+               .dimensions = static_cast<JPH::Vec3>(halfExtents),
+               .color      = boxColor
            }
     );
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        auto shape = pc->GetOrCreateShape(
-            Physics::ShapeType::Box, halfExtents.x * params.scale.GetX(), halfExtents.y * params.scale.GetY(), halfExtents.z * params.scale.GetZ()
-        );
+        auto shape =
+            pc->GetOrCreateShape(Physics::ShapeType::Box, halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z);
         auto body = pc->CreateRigidBody(
-            shape, ToDouble3(params.position), ToFloat4(params.rotation),
+            shape, params.position, params.rotation,
             params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
             (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask,
             (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
@@ -485,7 +489,7 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     return e;
 }
 
-auto CreateBox(Engine& engine, JPH::Float3 halfExtents, const SpawnParams& params) -> Entity {
+auto CreateBox(Engine& engine, ZHLN::Float3 halfExtents, const SpawnParams& params) -> Entity {
     return CreateBox(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), halfExtents, params);
 }
 
@@ -505,7 +509,7 @@ auto SpawnPrimitive(
     float                                 physP2,
     const SpawnParams&                    params
 ) -> Entity {
-    const JPH::Vec4 shapeColor = (params.color.GetW() >= 0.0f) ? params.color : JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    const JPH::Vec4 shapeColor = (params.color.w >= 0.0f) ? JPH::Vec4(params.color) : JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
 
     Material mat;
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
@@ -525,10 +529,10 @@ auto SpawnPrimitive(
     ctx.RegisterGPUMesh(meshAsset, mesh);
     ctx.RegisterGPUMaterial(matAsset, mat);
 
-    JPH::Mat44 worldMat = Math::CreateTransform(ToFloat3(params.position), ToFloat4(params.rotation), ToFloat3(params.scale));
+    JPH::Mat44 worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64(std::string(shapeName) + "_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = cullRadius});
     reg.Add(e, Components::OwnedMeshComponent {.meshAsset = meshAsset, .mesh = mesh, .shape = shape, .dimensions = dimensions, .color = shapeColor});
@@ -537,7 +541,7 @@ auto SpawnPrimitive(
     if (params.createPhysics && pc) {
         auto bodyShape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
         auto body      = pc->CreateRigidBody(
-            bodyShape, ToDouble3(params.position), ToFloat4(params.rotation),
+            bodyShape, params.position, params.rotation,
             params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
             (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask,
             (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
@@ -551,13 +555,13 @@ auto SpawnPrimitive(
 
 auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
-    if (resolved.color.GetW() < 0.0f) {
-        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    if (resolved.color.w < 0.0f) {
+        resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
-    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
-        ctx, reg, pc, "Sphere", CreateSphereMesh(ctx, radius, ToFloat4(resolved.color)), Components::OwnedMeshComponent::Shape::Sphere,
-        JPH::Vec3(radius, 0.0f, 0.0f), radius * maxScale * 2.0f, Physics::ShapeType::Sphere, radius * maxScale, 0.0f, resolved
+        ctx, reg, pc, "Sphere", CreateSphereMesh(ctx, radius, resolved.color), Components::OwnedMeshComponent::Shape::Sphere, JPH::Vec3(radius, 0.0f, 0.0f),
+        radius * maxScale * 2.0f, Physics::ShapeType::Sphere, radius * maxScale, 0.0f, resolved
     );
 }
 
@@ -568,12 +572,12 @@ auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> En
 auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params)
     -> Entity {
     SpawnParams resolved = params;
-    if (resolved.color.GetW() < 0.0f) {
-        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    if (resolved.color.w < 0.0f) {
+        resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
-    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
-        ctx, reg, pc, "Cylinder", CreateCylinderMesh(ctx, radius, height, ToFloat4(resolved.color)), Components::OwnedMeshComponent::Shape::Cylinder,
+        ctx, reg, pc, "Cylinder", CreateCylinderMesh(ctx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cylinder,
         JPH::Vec3(radius, height, 0.0f), std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * maxScale,
         height * 0.5f * maxScale, resolved
     );
@@ -585,14 +589,13 @@ auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParam
 
 auto CreateCone(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
-    if (resolved.color.GetW() < 0.0f) {
-        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    if (resolved.color.w < 0.0f) {
+        resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
-    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
-        ctx, reg, pc, "Cone", CreateConeMesh(ctx, radius, height, ToFloat4(resolved.color)), Components::OwnedMeshComponent::Shape::Cone,
-        JPH::Vec3(radius, height, 0.0f), std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * 0.5f * maxScale,
-        height * 0.5f * maxScale, resolved
+        ctx, reg, pc, "Cone", CreateConeMesh(ctx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cone, JPH::Vec3(radius, height, 0.0f),
+        std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * 0.5f * maxScale, height * 0.5f * maxScale, resolved
     );
 }
 
@@ -600,7 +603,7 @@ auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& p
     return CreateCone(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), radius, height, params);
 }
 
-auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, JPH::Float4 color, const SpawnParams& params)
+auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::Float4 color, const SpawnParams& params)
     -> Entity {
     Mesh mesh = CreatePlaneMesh(ctx, extent, color);
 
@@ -622,10 +625,10 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
     ctx.RegisterGPUMesh(meshAsset, mesh);
     ctx.RegisterGPUMaterial(matAsset, mat);
 
-    JPH::Mat44 worldMat = Math::CreateTransform(ToFloat3(params.position), ToFloat4(params.rotation), ToFloat3(params.scale));
+    JPH::Mat44 worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("Plane_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = extent * 2.0f});
@@ -635,7 +638,7 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
                .mesh       = mesh,
                .shape      = Components::OwnedMeshComponent::Shape::Plane,
                .dimensions = JPH::Vec3(extent, 0.0f, 0.0f),
-               .color      = ToVec4(color)
+               .color      = static_cast<JPH::Vec4>(color)
            }
     );
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
@@ -643,8 +646,7 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
     if (params.createPhysics && pc) {
         auto shape = pc->GetOrCreateShape(Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
         auto body  = pc->CreateRigidBody(
-            shape, ToDouble3(params.position), ToFloat4(params.rotation), JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, params.physicsCategory,
-            params.physicsMask
+            shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, params.physicsCategory, params.physicsMask
         );
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
     }
@@ -652,7 +654,7 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
     return e;
 }
 
-auto CreatePlane(Engine& engine, float extent, JPH::Float4 color, const SpawnParams& params) -> Entity {
+auto CreatePlane(Engine& engine, float extent, ZHLN::Float4 color, const SpawnParams& params) -> Entity {
     return CreatePlane(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), extent, color, params);
 }
 
@@ -691,10 +693,10 @@ auto InstantiatePrefab(
         }
     }
 
-    JPH::Mat44                baseTransform = Math::CreateTransform(ToFloat3(params.position), ToFloat4(params.rotation), ToFloat3(params.scale));
+    JPH::Mat44                baseTransform = Math::CreateTransform(params.position, params.rotation, params.scale);
     std::vector<PreparedPart> preparedParts = PreparePrefabPhysics(prefab, baseTransform, params.createPhysics, params.useBoxColliders);
 
-    float                                 scaleMult = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    float                                 scaleMult = std::max({params.scale.x, params.scale.y, params.scale.z});
     std::unordered_map<int32_t, uint32_t> allocatedSkeletons;
 
     std::unordered_map<std::string, Entity> instantiatedParts;
@@ -819,19 +821,19 @@ void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
         auto& owned = owners[i];
         switch (owned.shape) {
             case Shape::Box:
-                owned.mesh = CreateBoxMesh(ctx, ToFloat3(owned.dimensions), ToFloat4(owned.color));
+                owned.mesh = CreateBoxMesh(ctx, owned.dimensions, owned.color);
                 break;
             case Shape::Plane:
-                owned.mesh = CreatePlaneMesh(ctx, owned.dimensions.GetX(), ToFloat4(owned.color));
+                owned.mesh = CreatePlaneMesh(ctx, owned.dimensions.GetX(), owned.color);
                 break;
             case Shape::Sphere:
-                owned.mesh = CreateSphereMesh(ctx, owned.dimensions.GetX(), ToFloat4(owned.color));
+                owned.mesh = CreateSphereMesh(ctx, owned.dimensions.GetX(), owned.color);
                 break;
             case Shape::Cylinder:
-                owned.mesh = CreateCylinderMesh(ctx, owned.dimensions.GetX(), owned.dimensions.GetY(), ToFloat4(owned.color));
+                owned.mesh = CreateCylinderMesh(ctx, owned.dimensions.GetX(), owned.dimensions.GetY(), owned.color);
                 break;
             case Shape::Cone:
-                owned.mesh = CreateConeMesh(ctx, owned.dimensions.GetX(), owned.dimensions.GetY(), ToFloat4(owned.color));
+                owned.mesh = CreateConeMesh(ctx, owned.dimensions.GetX(), owned.dimensions.GetY(), owned.color);
                 break;
             case Shape::None:
                 continue;

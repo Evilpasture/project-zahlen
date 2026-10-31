@@ -5,6 +5,7 @@ module;
 
 // Public Engine & Jolt Headers
 // clang-format off
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Math/Mat44.h>
@@ -444,12 +445,12 @@ export class ExplosionSystem {
         engine.GetRegistry().Add(entity, std::move(component));
     }
 
-    static Entity Spawn(Engine& engine, JPH::Float3 origin, float scale = 1.0f, OrdnanceType type = OrdnanceType::ArtilleryMortar) {
+    static Entity Spawn(Engine& engine, ZHLN::Float3 origin, float scale = 1.0f, OrdnanceType type = OrdnanceType::ArtilleryMortar) {
         auto& reg = engine.GetRegistry();
         Init(engine);
 
         ExplosionComponent initialExp {
-            .type = type, .origin = ToVec3(origin), .scale = scale, .duration = (type == OrdnanceType::ArtilleryMortar) ? 3.5f : 2.5f
+            .type = type, .origin = static_cast<JPH::Vec3>(origin), .scale = scale, .duration = (type == OrdnanceType::ArtilleryMortar) ? 3.5f : 2.5f
         };
 
         std::mt19937 gen(std::random_device {}());
@@ -465,8 +466,8 @@ export class ExplosionSystem {
         initialExp.debrisEntity = debrisEntity;
 
         // Position light directly at origin with slight vertical offset
-        JPH::Vec3  lightWorldPos = ToVec3(origin) + JPH::Vec3(0.0f, 1.8f * scale, 0.0f);
-        JPH::Mat44 rootTransform = Math::CreateTransform(ToFloat3(lightWorldPos), {0.0f, 0.0f, 0.0f, 1.0f});
+        JPH::Vec3  lightWorldPos = static_cast<JPH::Vec3>(origin) + JPH::Vec3(0.0f, 1.8f * scale, 0.0f);
+        JPH::Mat44 rootTransform = Math::CreateTransform(lightWorldPos, {0.0f, 0.0f, 0.0f, 1.0f});
 
         // Attach synchronously to root entity
         reg.Add(
@@ -484,7 +485,8 @@ export class ExplosionSystem {
 
         if (debrisEntity != Entity::Null()) {
             reg.Add(
-                debrisEntity, Components::NameComponent {.name = String64("Artillery3DDebris")}, Components::TransformComponent {.position = ToVec3(origin)},
+                debrisEntity, Components::NameComponent {.name = String64("Artillery3DDebris")},
+                Components::TransformComponent {.position = static_cast<JPH::Vec3>(origin)},
                 Components::MeshParticleEmitterComponent {
                     .meshAsset     = s_DebrisMeshAsset,
                     .materialAsset = s_DebrisMatAsset,
@@ -493,7 +495,7 @@ export class ExplosionSystem {
                     .params =
                         {.gravity     = {0.0f, -18.0f * scale, 0.0f},
                          .drag        = 0.32f,
-                         .spawnOrigin = ToVec3(origin),
+                         .spawnOrigin = static_cast<JPH::Vec3>(origin),
                          .initVelMin  = {-12.0f * scale, 6.0f * scale, -12.0f * scale},
                          .lifetimeMin = 2.0f,
                          .initVelMax  = {12.0f * scale, 20.0f * scale, 12.0f * scale},
@@ -513,7 +515,7 @@ export class ExplosionSystem {
         auto& audio = engine.GetAudioContext();
         audio.PostEvent(
             {.type       = AudioEventType::NoiseBurst3D,
-             .position   = ToVec3(origin),
+             .position   = static_cast<JPH::Vec3>(origin),
              .volume     = 1.0f,
              .param1     = 60.0f, // Low pass cutoff frequency
              .param2     = 3.5f,  // Q factor
@@ -524,7 +526,7 @@ export class ExplosionSystem {
 
         audio.PostEvent(
             {.type     = AudioEventType::ToneSweep3D,
-             .position = ToVec3(origin),
+             .position = static_cast<JPH::Vec3>(origin),
              .volume   = 0.85f,
              .param1   = 150.0f, // Start frequency
              .param2   = 30.0f,  // End frequency
@@ -534,7 +536,7 @@ export class ExplosionSystem {
 
         audio.PostEvent(
             {.type       = AudioEventType::NoiseBurst3D,
-             .position   = ToVec3(origin),
+             .position   = static_cast<JPH::Vec3>(origin),
              .volume     = 0.65f,
              .param1     = 320.0f, // Band pass center frequency
              .param2     = 1.4f,   // Q factor
@@ -594,7 +596,7 @@ export class ExplosionSystem {
                     float     projDepth = 5.0f * exp.scale;
                     JPH::Vec3 decalScale(radius * 2.0f, radius * 2.0f, projDepth);
 
-                    JPH::Mat44 localMat = Math::CreateTransform(ToFloat3(exp.origin), ToFloat4(decalRot), ToFloat3(decalScale));
+                    JPH::Mat44 localMat = Math::CreateTransform(exp.origin, decalRot, decalScale);
 
                     // Autonomous entity with CraterDecalComponent
                     ecb.AddComponent(
@@ -657,7 +659,7 @@ export class ExplosionSystem {
 
                     reg.Patch<Components::TransformComponent>(craterEnt, [&](auto& trans) { trans.scale = newScale; });
                     reg.Patch<Components::WorldTransformComponent>(craterEnt, [&](auto& wt) {
-                        wt.world = Math::CreateTransform(ToFloat3(crater.origin), ToFloat4(crater.rotation), ToFloat3(newScale));
+                        wt.world = Math::CreateTransform(crater.origin, crater.rotation, newScale);
                     });
                 }
 

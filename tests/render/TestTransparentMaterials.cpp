@@ -102,8 +102,7 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
     }
 
     ZHLN::PrefabFactory::CreateBox(
-        engine, {4.0f, 3.0f, 0.08f},
-        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, -1.0), .createPhysics = false, .materialOverride = *wallMat}
+        engine, {4.0f, 3.0f, 0.08f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, -1.0}, .createPhysics = false, .materialOverride = *wallMat}
     );
 
     if (pane != PaneKind::None) {
@@ -126,8 +125,7 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
         }
 
         const ZHLN::Entity paneEnt = ZHLN::PrefabFactory::CreateBox(
-            engine, {1.0f, 1.0f, 0.04f},
-            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *paneMat}
+            engine, {1.0f, 1.0f, 0.04f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *paneMat}
         );
         if (glass) {
             registry.Patch<ZHLN::Components::MeshComponent>(paneEnt, [](auto& mesh) { mesh.flags |= ZHLN::DrawFlags::ExcludeFromTLAS; });
@@ -333,7 +331,7 @@ struct TransparentMaterialsTestSuite {
             }
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {4.0f, 3.0f, 0.04f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, -1.0), .createPhysics = false, .materialOverride = *wallMat}
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, -1.0}, .createPhysics = false, .materialOverride = *wallMat}
             );
             const ZHLN::Entity pane = ZHLN::PrefabFactory::CreateBox(
                 *engine, {1.0f, 1.0f, 0.02f}, ZHLN::PrefabFactory::SpawnParams {.createPhysics = false, .materialOverride = *paneMat}

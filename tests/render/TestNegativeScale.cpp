@@ -181,7 +181,7 @@ const std::array<JPH::Vec3, 5> kCenters {
         const bool mirrored = i == 1 || i == 2 || i == 4;
         const auto rotation = i == 2 ? JPH::Quat::sRotation(JPH::Vec3::sAxisY(), JPH::JPH_PI) : JPH::Quat::sIdentity();
         const JPH::Vec3 scale(mirrored ? -1.0f : 1.0f, 1.0f, 1.0f);
-        const JPH::Mat44   world = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(kCenters[i]), ZHLN::ToFloat4(rotation), ZHLN::ToFloat3(scale));
+        const JPH::Mat44   world = ZHLN::Math::CreateTransform(kCenters[i], rotation, scale);
         const ZHLN::Entity e     = reg.Create();
         reg.Add(e, ZHLN::Components::TransformComponent {.position = kCenters[i], .rotation = rotation, .scale = scale});
         reg.Add(e, ZHLN::Components::WorldTransformComponent {.world = world, .previous = world});

@@ -227,7 +227,7 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
         }
 
         JPH::Array<Physics::BodyHandle> overlaps;
-        pc.OverlapSphere(ToDouble3(charPos), kPushRadius, overlaps);
+        pc.OverlapSphere(charPos, kPushRadius, overlaps);
 
         for (Physics::BodyHandle other: overlaps) {
             if (other == phys->physicsHandle || !pc.IsBodyDynamic(other)) {
@@ -254,7 +254,7 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
                 if (impulse.GetY() < 0.0f) {
                     impulse.SetY(0.0f);
                 }
-                pc.AddImpulse(other, ToFloat3(impulse));
+                pc.AddImpulse(other, impulse);
             }
         }
     }

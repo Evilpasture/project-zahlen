@@ -36,6 +36,7 @@
 #include <Jolt/Math/Float2.h>
 #include <Jolt/Math/Float3.h>
 #include <Jolt/Math/Float4.h>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <toml/TOML.hpp>
 #include <type_traits>
 
@@ -52,5 +53,15 @@ template <>
 struct TOMLVector<JPH::Float3> : std::true_type {};
 template <>
 struct TOMLVector<JPH::Float4> : std::true_type {};
+// The engine's value types stand in for those storage classes on the boundary, so
+// they keep the same array form. Without these three lines a GUI document would
+// quietly change shape -- `color = [r, g, b, a]` becoming a table of x/y/z/w --
+// as soon as a field was spelled in a value type instead of a Jolt one.
+template <>
+struct TOMLVector<ZHLN::Float3> : std::true_type {};
+template <>
+struct TOMLVector<ZHLN::Float4> : std::true_type {};
+template <>
+struct TOMLVector<ZHLN::Double3> : std::true_type {};
 
 } // namespace ZHLN::ReflectTOML

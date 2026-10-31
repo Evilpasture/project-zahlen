@@ -214,9 +214,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
             float posZ = (static_cast<float>(r) - kGridRows * 0.5f) * 2.0f;
             const ZHLN::Entity box  = ZHLN::PrefabFactory::CreateBox(
                 engine, {0.5f, 0.5f, 0.5f},
-                ZHLN::PrefabFactory::SpawnParams {
-                    .position = JPH::RVec3(posX, 0.5, posZ), .createPhysics = false, .materialOverride = (r % 2 == 0) ? *goldMat : *blueMat
-                }
+                ZHLN::PrefabFactory::SpawnParams {.position = {posX, 0.5, posZ}, .createPhysics = false, .materialOverride = (r % 2 == 0) ? *goldMat : *blueMat}
             );
             // A box has three vertex streams and three meshlet buffers. Fail
             // immediately rather than timing a scene with invalid geometry.
@@ -300,7 +298,7 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
 
     ZHLN::PrefabFactory::CreatePlane(
         engine, 100.0f, {0.6f, 0.6f, 0.65f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .roughness = 0.5f, .metallic = 0.0f}
+        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .roughness = 0.5f, .metallic = 0.0f}
     );
 
     constexpr size_t          kLightCount = 64;
@@ -445,7 +443,7 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     );
 
     ZHLN::PrefabFactory::CreatePlane(
-        engine, 80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false}
+        engine, 80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false}
     );
 
     const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
@@ -478,8 +476,7 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
     auto& rc  = engine.GetRenderContext();
 
     ZHLN::PrefabFactory::CreateBox(
-        engine, {25.0f, 15.0f, 0.5f},
-        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 7.5, 0), .createPhysics = false, .color = {0.2f, 0.2f, 0.2f, 1.0f}}
+        engine, {25.0f, 15.0f, 0.5f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 7.5, 0}, .createPhysics = false, .color = {0.2f, 0.2f, 0.2f, 1.0f}}
     );
 
     auto decalPixels = GenerateProceduralDecalTexture(64, 255, 40, 20);
@@ -491,7 +488,7 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
         float posY = 1.5f + static_cast<float>(i / 20) * 2.5f;
 
         const JPH::Vec3  pos(posX, posY, 0.0f);
-        const JPH::Mat44 world = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(pos), {0.0f, 0.0f, 0.0f, 1.0f}, {2.5f, 2.5f, 2.5f});
+        const JPH::Mat44 world = ZHLN::Math::CreateTransform(pos, {0.0f, 0.0f, 0.0f, 1.0f}, {2.5f, 2.5f, 2.5f});
 
         reg.Create(
             ZHLN::Components::TransformComponent {.position = pos, .scale = JPH::Vec3(2.5f, 2.5f, 2.5f)},
@@ -602,8 +599,7 @@ auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> s
     }
 
     ZHLN::PrefabFactory::CreateBox(
-        engine, {2.0f, 2.0f, 2.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 2, 0), .createPhysics = false, .roughness = 0.3f, .metallic = 0.8f}
+        engine, {2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 2, 0}, .createPhysics = false, .roughness = 0.3f, .metallic = 0.8f}
     );
 
     constexpr uint32_t         kFrames = 60;
@@ -654,7 +650,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     auto mirrorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.92f, 0.92f, 0.95f, 1.0f}});
     ZHLN::PrefabFactory::CreatePlane(
         engine, 100.0f, {0.92f, 0.92f, 0.95f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *mirrorMat}
+        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *mirrorMat}
     );
 
     constexpr size_t kGridDim  = 20;
@@ -669,7 +665,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
             ZHLN::PrefabFactory::CreateBox(
                 engine, {0.5f, 0.5f, 0.5f},
                 ZHLN::PrefabFactory::SpawnParams {
-                    .position = JPH::RVec3(posX, 0.5, posZ), .createPhysics = false, .materialOverride = (r % 2 == 0) ? *chromeMat : *goldMat
+                    .position = {posX, 0.5, posZ}, .createPhysics = false, .materialOverride = (r % 2 == 0) ? *chromeMat : *goldMat
                 }
             );
         }
@@ -679,8 +675,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
         ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.1f, 0.1f, 1.0f}, .emissive = {24.0f, 2.0f, 2.0f, 1.0f}}
     );
     const ZHLN::Entity emissiveCube = ZHLN::PrefabFactory::CreateBox(
-        engine, {2.0f, 2.0f, 2.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 5.0, 0.0), .createPhysics = false, .materialOverride = *emissiveMat}
+        engine, {2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 5.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMat}
     );
 
     const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
@@ -745,7 +740,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.8f, .roughness = 0.08f, .baseColor = {0.85f, 0.85f, 0.90f, 1.0f}});
     ZHLN::PrefabFactory::CreatePlane(
         engine, 120.0f, {0.85f, 0.85f, 0.90f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *floorMat}
+        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *floorMat}
     );
 
     // 2. Geometry Population (600 Distinct PBR Meshes with RT Reflection Targets)
@@ -763,8 +758,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
             auto  mat  = (c % 3 == 0) ? *goldMat : ((c % 3 == 1) ? *redMat : *chromeMat);
 
             ZHLN::PrefabFactory::CreateBox(
-                engine, {0.6f, 0.6f, 0.6f},
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(posX, 0.6, posZ), .createPhysics = false, .materialOverride = mat}
+                engine, {0.6f, 0.6f, 0.6f}, ZHLN::PrefabFactory::SpawnParams {.position = {posX, 0.6, posZ}, .createPhysics = false, .materialOverride = mat}
             );
         }
     }
@@ -842,7 +836,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         float            posX  = -30.0f + static_cast<float>(i % 10) * 6.5f;
         float            posZ  = -30.0f + static_cast<float>(i / 10) * 12.0f;
         const JPH::Vec3  pos   = JPH::Vec3(posX, 0.01f, posZ);
-        const JPH::Mat44 world = ZHLN::Math::CreateTransform(ZHLN::ToFloat3(pos), {0.0f, 0.0f, 0.0f, 1.0f}, {2.5f, 2.5f, 2.5f});
+        const JPH::Mat44 world = ZHLN::Math::CreateTransform(pos, {0.0f, 0.0f, 0.0f, 1.0f}, {2.5f, 2.5f, 2.5f});
 
         reg.Create(
             ZHLN::Components::TransformComponent {.position = pos, .scale = JPH::Vec3(2.5f, 2.5f, 2.5f)},

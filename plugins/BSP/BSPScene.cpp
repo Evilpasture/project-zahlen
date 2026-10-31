@@ -413,7 +413,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // (cos p cos y, sin p, cos p sin y); take them from the exact
             // conjugated rotation's forward, not the Euler slots, because the
             // slots' yaw sign is the prop convention, not the camera's.
-            const JPH::Quat qView     = Math::EulerDegreesToQuat(ToFloat3(EngineEulerAnglesFromSourceAngles(angles, options)));
+            const JPH::Quat qView     = Math::EulerDegreesToQuat(EngineEulerAnglesFromSourceAngles(angles, options));
             const JPH::Vec3 viewFwd   = qView.RotateAxisX();
             scene.camera.pitch        = std::asin(std::clamp(viewFwd.GetY(), -1.0f, 1.0f)) * kRadiansToDegrees;
             scene.camera.yaw          = std::atan2(viewFwd.GetZ(), viewFwd.GetX()) * kRadiansToDegrees;
@@ -616,7 +616,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 prop.drawFlags    = DrawFlags::Background;
                 prop.body         = Scene::BodyKind::None;
                 prop.startsAsleep = false;
-                const JPH::Vec3 composed = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(ToFloat3(prop.transform.rotation)));
+                const JPH::Vec3 composed = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(prop.transform.rotation));
                 prop.transform.rotation  = {composed.GetX(), composed.GetY(), composed.GetZ()};
             }
 
@@ -664,7 +664,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         propEntity.transform.rotation = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
         if (skyProp) {
             propEntity.drawFlags = DrawFlags::Background;
-            const JPH::Vec3 composed = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(ToFloat3(propEntity.transform.rotation)));
+            const JPH::Vec3 composed      = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(propEntity.transform.rotation));
             propEntity.transform.rotation = {composed.GetX(), composed.GetY(), composed.GetZ()};
         }
 

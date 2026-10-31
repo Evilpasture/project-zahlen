@@ -84,10 +84,9 @@ struct CPUPipelineHarness {
         // explicitly: the core character API takes a shape and behavioral
         // knobs, and the supporting volume must fit the hull's origin.
         charPhys = pc.CreateCharacter(
-            ZHLN::ToDouble3(spawnPos),
-            ZHLN::Physics::CharacterParams {
-                .shape = ZHLN::Physics::CreateDualShape(hull), .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -hull.GetLifterOffsetY())
-            }
+            spawnPos, ZHLN::Physics::CharacterParams {
+                          .shape = ZHLN::Physics::CreateDualShape(hull), .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -hull.GetLifterOffsetY())
+                      }
         );
         player   = reg.Create(
             ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Character::MovementComponent {.speed = 6.0f},
@@ -128,7 +127,7 @@ struct CPUPipelineHarness {
         accumulator += std::min(renderDt, 0.1f);
         while (accumulator >= kTargetDt) {
             JPH::Vec3 vel(move->inputX * move->speed, verticalVel, move->inputZ * move->speed);
-            pc.SetCharacterVelocity(charPhys, ZHLN::ToFloat3(vel));
+            pc.SetCharacterVelocity(charPhys, vel);
 
             // Prop interaction is controller policy, not a contact-callback
             // policy: the fixed step pushes the props the character moves
@@ -417,7 +416,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
             JPH::Quat rampRot   = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-25.0f));
             auto      rampShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.2f, 5.0f);
-            harness.pc.CreateRigidBody(rampShape, {0, 1.0, 4.0}, ToFloat4(rampRot), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            harness.pc.CreateRigidBody(rampShape, {0, 1.0, 4.0}, rampRot, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);

@@ -209,7 +209,7 @@ void UpdateItemDynamics(
         if (const auto physicsComponent = registry.Get<Components::PhysicsComponent>(characterEntity)) {
             ignoredPhysics = physicsComponent->physicsHandle;
         }
-        const auto hit = physics.Raycast(ToDouble3(origin), ToFloat3(forward), handling.avoidance.probeDistance, ignoredPhysics);
+        const auto hit = physics.Raycast(origin, forward, handling.avoidance.probeDistance, ignoredPhysics);
         if (hit.hasHit && std::isfinite(hit.fraction)) {
             const float penetration = handling.avoidance.probeDistance * (1.0f - std::clamp(hit.fraction, 0.0f, 1.0f));
             const float pushback    = std::clamp(penetration * std::max(handling.avoidance.pushbackScale, 0.0f), 0.0f, handling.avoidance.probeDistance);
