@@ -113,3 +113,6 @@ NSightAftermath/
 *_snapshot.md
 repomix-output.*
 *.rej
+
+# Local entry-point development workspace
+.zahlen-dev/

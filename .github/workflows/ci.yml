@@ -102,6 +102,17 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Keep the immutable SHA tag above and publish a convenient entry-point
+      # development image only for main pushes. Pull by SHA for reproducibility.
+      - name: Publish latest development image
+        if: >-
+          steps.names.outputs.publish == 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker buildx imagetools create \
+            --tag "ghcr.io/${GITHUB_REPOSITORY,,}-builder:latest" \
+            "${{ steps.names.outputs.builder_image }}"
+
   # ===========================================================================
   # TEST - consume the image the Build job published and run ztest inside it.
   # Nothing is compiled here unless the image is unavailable (fork PRs).

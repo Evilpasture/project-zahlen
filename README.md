@@ -232,3 +232,41 @@ This project is licensed under the GNU General Public License version 3.0 or lat
 
 All dependencies are licensed under their respective licenses too.
 
+
+## Prebuilt entry-point development container
+
+CI publishes `ghcr.io/evilpasture/project-zahlen-builder:latest` after a
+successful build of `main`, as well as immutable commit-SHA tags. The builder
+contains the source, toolchain, configured build tree and prebuilt engine; the
+runtime image is a separate, smaller deployment image. The GHCR builder package
+must be public for anonymous pulls. `latest` follows successful builds and may
+lag the repository; select a SHA tag with `ZHLN_DEV_IMAGE` for a known revision.
+
+With Podman or Docker installed, from a checkout of this repository:
+
+```sh
+scripts/dev-container.sh init
+# Edit .zahlen-dev/main.cpp (initially copied from the image).
+scripts/dev-container.sh build
+scripts/dev-container.sh run --headless
+scripts/dev-container.sh test
+```
+
+`build` copies only the edited entry point into the persistent container and
+builds the `zahlen` target against its existing Ninja build tree. A no-op build
+need not recompile it. Other changes, including engine source and CMake changes,
+are not automatically synced; use `shell` to inspect the container or a full
+source-based build for those. Copy your changes back into the checkout when
+ready to commit. `reset` removes the container and its build changes but keeps
+`.zahlen-dev/main.cpp`; run `init` again to pull a newer image. The container
+storage itself must persist between invocations; transient environments may need
+to re-pull after a reset. Default host networking is intended to work around
+rootless Podman's `/dev/net/tun` restriction in Arena and does not isolate the
+container's network. Use a trusted image and source code.
+
+The builder sets the Lavapipe ICD and includes Vulkan validation layers. Actual
+Vulkan feature availability, display access, and headless execution depend on
+the Mesa version and environment; installing Lavapipe alone does not guarantee
+that every renderer path or test works. The builder uses CI's Release +
+ASan/UBSan settings. Its Arch packages are rolling, so use a SHA or image digest
+when matching a specific toolchain matters.
