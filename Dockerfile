@@ -1,3 +1,7 @@
+# CI may package an already-published builder image instead of rebuilding it.
+# The default is the local stage, preserving `docker build --target runner .`.
+ARG ZHLN_BUILDER_IMAGE=builder
+
 # ==============================================================================
 # STAGE 1: Toolchain (shared by the build and test stages)
 # ==============================================================================
@@ -100,8 +104,11 @@ COPY . .
 FROM base AS builder
 
 ARG ZHLN_SLANG_VENDORED=OFF
+# Default remains the instrumented developer/test build. CI selects OFF for
+# the separately published, portable optimized Release variant.
+ARG ZHLN_USE_SANITIZERS=ON
 
-# 1. Configure CMake with Tests & ASan/UBSan enabled
+# 1. Configure CMake with tests; sanitizers are chosen per build variant.
 # ZHLN_HAS_BLENDER=OFF is what keeps a .blend source in a game tree from
 # turning into an extraction rule this image could not run. The probe
 # (cmake/BlenderProbe.cmake) finds no Blender here either way; pinning the
@@ -109,13 +116,28 @@ ARG ZHLN_SLANG_VENDORED=OFF
 RUN cmake -B build -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DZHLN_BUILD_TESTS=ON \
-    -DUSE_SANITIZERS=ON \
+    -DUSE_SANITIZERS=${ZHLN_USE_SANITIZERS} \
     -DZHLN_IN_DOCKER=ON \
     -DZHLN_HAS_BLENDER=OFF \
     -DZHLN_SLANG_VENDORED=${ZHLN_SLANG_VENDORED}
 
 # 2. Build everything (Engine, Asset Cooker, ztest, and Test Executables)
 RUN cmake --build build
+
+# Verify that the chosen variant actually reached the linked binaries. This
+# catches accidentally packaging an ASan/UBSan engine as the speed build (or a
+# non-instrumented engine as the sanitizer build).
+RUN set -eu; \
+    case "${ZHLN_USE_SANITIZERS}" in ON|OFF) ;; *) echo "ZHLN_USE_SANITIZERS must be ON or OFF" >&2; exit 1;; esac; \
+    for file in /workspace/build/bin/zahlen /workspace/build/libzahlen_engine.so; do \
+      deps="$(ldd "$file")"; echo "$deps"; \
+      if echo "$deps" | grep -q 'not found'; then exit 1; fi; \
+      if [ "${ZHLN_USE_SANITIZERS}" = ON ]; then \
+        echo "$deps" | grep -q 'libasan\.so'; echo "$deps" | grep -q 'libubsan\.so'; \
+      else \
+        if echo "$deps" | grep -Eq 'libasan\.so|libubsan\.so'; then echo "Unexpected sanitizer dependency in $file" >&2; exit 1; fi; \
+      fi; \
+    done
 
 # 3. Collect the runtime payload: the binaries, the cooked asset pak and, when
 #    configured, the gameplay script module. build/data/base.pak points into the
@@ -147,7 +169,12 @@ RUN ./build/bin/ztest --test-dir build -V
 # ==============================================================================
 # STAGE 4: Minimal Runtime Deployment Image
 # ==============================================================================
+# In CI this resolves to the exact run-tagged builder previously tested. For a
+# local build it resolves to the builder stage above. BuildKit need not rebuild
+# the engine when the published builder is supplied.
+FROM ${ZHLN_BUILDER_IMAGE} AS payload
 FROM archlinux:latest AS runner
+ARG ZHLN_USE_SANITIZERS=ON
 
 RUN pacman -Sy --noconfirm && \
     pacman -S --needed --noconfirm archlinux-keyring && \
@@ -155,11 +182,16 @@ RUN pacman -Sy --noconfirm && \
 
 # glfw is here because the engine links the distro's shared libglfw.so once the
 # builder stops compiling the vendored static copy; pacman pulls its X11/Wayland
-# backends in with it. vulkan-headers is not needed: it is compile-time only.
+# backends in with it. The application also links system simdjson and LuaJIT;
+# gcc-libs carries the sanitizer runtimes needed by the ASan variant.
+# vulkan-headers is not needed: it is compile-time only.
 RUN pacman -S --needed --noconfirm \
     vulkan-icd-loader \
     vulkan-validation-layers \
     vulkan-swrast \
+    gcc-libs \
+    simdjson \
+    luajit \
     glfw \
     libevdev \
     seatd \
@@ -168,17 +200,30 @@ RUN pacman -S --needed --noconfirm \
     libxkbcommon \
     libglvnd \
     zstd && \
-    groupadd -g 998 input || true && \
-    groupadd -g 999 seat || true
+    (groupadd -g 998 input || true) && \
+    (groupadd -g 999 seat || true)
 
 WORKDIR /app
 
 # The payload the builder collected: ./zahlen, its libraries, and ./data/base.pak.
-COPY --from=builder /workspace/dist/ /app/
+COPY --from=payload /workspace/dist/ /app/
 # Shader sources and loose assets are read, and watched for hot reload, from this
 # layout rather than from the pak.
-COPY --from=builder /workspace/resources ./resources
+COPY --from=payload /workspace/resources ./resources
 
 ENV LD_LIBRARY_PATH=/app
+
+# Verify the deployment image too: its libraries differ from the builder's.
+RUN set -eu; \
+    case "${ZHLN_USE_SANITIZERS}" in ON|OFF) ;; *) echo "ZHLN_USE_SANITIZERS must be ON or OFF" >&2; exit 1;; esac; \
+    for file in /app/zahlen /app/libzahlen_engine.so; do \
+      deps="$(ldd "$file")"; echo "$deps"; \
+      if echo "$deps" | grep -q 'not found'; then exit 1; fi; \
+      if [ "${ZHLN_USE_SANITIZERS}" = ON ]; then \
+        echo "$deps" | grep -q 'libasan\.so'; echo "$deps" | grep -q 'libubsan\.so'; \
+      else \
+        if echo "$deps" | grep -Eq 'libasan\.so|libubsan\.so'; then echo "Unexpected sanitizer dependency in $file" >&2; exit 1; fi; \
+      fi; \
+    done
 
 ENTRYPOINT ["./zahlen"]

@@ -235,8 +235,8 @@ All dependencies are licensed under their respective licenses too.
 
 ## Prebuilt entry-point development container
 
-CI publishes `ghcr.io/evilpasture/project-zahlen-builder:latest` after a
-successful build of `main`, as well as immutable commit-SHA tags. The builder
+CI promotes `ghcr.io/evilpasture/project-zahlen-builder:latest` after a
+successful build and test of current `main`, alongside commit-SHA tags. The builder
 contains the source, toolchain, configured build tree and prebuilt engine; the
 runtime image is a separate, smaller deployment image. The GHCR builder package
 must be public for anonymous pulls. `latest` follows successful builds and may
@@ -288,3 +288,40 @@ persistent dev container, the path is inside the container; for example, use
 `scripts/dev-container.sh run --headless --capture-frame /workspace/frame.png`,
 then `podman cp zahlen-dev:/workspace/frame.png ./frame.png` (or `docker cp`
 when using Docker). Rendering features still depend on the Vulkan driver.
+
+### Sanitized and optimized container images
+
+CI builds and tests two independent `Release` variants. The **asan** variant
+uses ASan/UBSan; **release** sets `USE_SANITIZERS=OFF` and retains CMake's
+portable Release optimization flags (normally `-O3 -DNDEBUG` with GCC). It
+is the appropriate starting point for performance measurements. This does not
+remove Vulkan validation, change renderer features, or enable CPU-specific
+`-march=native`/LTO. Compare the same workloads and runtime settings when timing.
+
+For successful current-`main` runs GHCR publishes:
+
+| Image | ASan/UBSan | Use |
+| --- | --- | --- |
+| `ghcr.io/evilpasture/project-zahlen:latest` or `:release` | off | optimized runtime |
+| `ghcr.io/evilpasture/project-zahlen:asan` | on | instrumented runtime |
+| `ghcr.io/evilpasture/project-zahlen-builder:latest` or `:asan` | on | existing development workflow |
+| `ghcr.io/evilpasture/project-zahlen-builder:release` | off | prebuilt unsanitized dev/benchmark tree |
+
+Both image packages also publish `:<commit-sha>-asan` and
+`:<commit-sha>-release` convenience tags. CI tests and packages the matching
+run-specific `:<sha>-<run-id>-<attempt>-<variant>` tag so overlapping reruns
+cannot replace the tested input. Registry tags are mutable; pin an image digest
+for strict reproducibility. The legacy builder `:<sha>` selects ASan; the
+legacy runtime `:<sha>` selects release. To use
+the unsanitized builder with `scripts/dev-container.sh`, set
+`ZHLN_DEV_IMAGE=ghcr.io/evilpasture/project-zahlen-builder:release` before
+`init`; `reset` the old container first. Both variants are tested before either
+runtime is promoted, and superseded commits are not promoted. Promotion updates
+several tags sequentially, so a failure during promotion can leave a partial
+update. Matrix jobs need enough concurrent GitHub runners to actually run in
+parallel, and two complete builds use more CI time and storage overall.
+
+For a local Docker build, pass `--build-arg ZHLN_USE_SANITIZERS=OFF` for release
+or `ON` for ASan/UBSan (the default), for either the `builder` or `runner`
+target. The runner normally packages that local builder; CI instead supplies
+`ZHLN_BUILDER_IMAGE` to package the exact builder image that passed tests.

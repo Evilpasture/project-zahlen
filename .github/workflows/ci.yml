@@ -41,193 +41,219 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # ===========================================================================
-  # BUILD - compile the engine and publish the image that carries the compiled
-  # tree. Runs no tests: a red test suite must not hide a compiling tree.
-  # ===========================================================================
-  build:
-    name: Build
+  # Compute names once. Matrix jobs must not publish job outputs with the same
+  # key: GitHub merges matrix outputs in an unspecified order.
+  prepare:
+    name: Prepare image names
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     outputs:
-      builder_image: ${{ steps.names.outputs.builder_image }}
-      runtime_image: ${{ steps.names.outputs.runtime_image }}
+      base: ${{ steps.names.outputs.base }}
+      image_key: ${{ steps.names.outputs.image_key }}
       publish: ${{ steps.names.outputs.publish }}
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          submodules: false
-
-      - name: Fetch Vendored Libraries
-        run: git submodule update --init --depth 1 ${VENDORED_SUBMODULES}
-
-      - name: Compute Image Names
+      - name: Compute image names
         id: names
         run: |
-          # GHCR requires lowercase image names.
           base="ghcr.io/${GITHUB_REPOSITORY,,}"
           publish=true
           if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
             publish=false
           fi
-          {
-            echo "builder_image=${base}-builder:${GITHUB_SHA}"
-            echo "runtime_image=${base}"
-            echo "publish=${publish}"
-          } >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          # A failed-jobs-only rerun reuses prepare's output and the builders
+          # that already succeeded. A full rerun receives a fresh attempt key.
+          echo "image_key=${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        if: steps.names.outputs.publish == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Stages 1-2 of the Dockerfile only: toolchain plus compile. The ztest
-      # stage is deliberately not built here.
-      - name: Build Engine
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: builder
-          push: ${{ steps.names.outputs.publish == 'true' }}
-          tags: ${{ steps.names.outputs.builder_image }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ===========================================================================
-  # TEST - consume the image the Build job published and run ztest inside it.
-  # Nothing is compiled here unless the image is unavailable (fork PRs).
-  # ===========================================================================
-  test:
-    name: Test
+  # Each variant has a run-specific tag and its own GHA cache scope. Matrix
+  # builds finish independently; tests start after both build variants succeed.
+  build:
+    name: Build (${{ matrix.variant }})
+    needs: prepare
     runs-on: ubuntu-latest
-    needs: build
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      # No submodules: the happy path only pulls the image Build published.
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          submodules: false
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Preferred path: pull the exact tree Build compiled and published.
-      # Fallback: nothing was published (fork PR), so rebuild the builder stage
-      # from the Actions cache and test that instead of skipping the suite.
-      - name: Resolve Builder Image
-        id: image
-        run: |
-          ref="${{ needs.build.outputs.builder_image }}"
-          if [ "${{ needs.build.outputs.publish }}" = "true" ] && docker pull "$ref"; then
-            echo "Testing the image published by the Build job."
-          else
-            echo "::warning::Published builder image unavailable; rebuilding the builder stage from cache."
-            git submodule update --init --depth 1 ${VENDORED_SUBMODULES}
-            docker buildx build --target builder --load -t zahlen-builder:local \
-              --cache-from type=gha .
-            ref="zahlen-builder:local"
-          fi
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
-
-      # ASan/UBSan and Lavapipe are baked into the image environment, so the
-      # suite runs with the same flags CI has always used.
-      - name: Run ztest Suite
-        run: |
-          set -o pipefail
-          docker run --rm "${{ steps.image.outputs.ref }}" \
-            ./build/bin/ztest --test-dir build -V 2>&1 | tee ztest.log
-
-      - name: Upload ztest Log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ztest-log
-          path: ztest.log
-          if-no-files-found: ignore
-
-  # ===========================================================================
-  # DEPLOY - stage 4 of the Dockerfile only: package the runtime image from the
-  # cached build output and publish it. Requires a green Test job.
-  # ===========================================================================
-  deploy:
-    name: Deploy
-    runs-on: ubuntu-latest
-    needs: [build, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: asan
+            sanitizers: "ON"
+          - variant: release
+            sanitizers: "OFF"
     permissions:
       contents: read
       packages: write
     steps:
-      # The context must match Build's byte for byte or the cache misses.
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: false
 
-      - name: Fetch Vendored Libraries
+      - name: Fetch vendored libraries
         run: git submodule update --init --depth 1 ${VENDORED_SUBMODULES}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        if: needs.build.outputs.publish == 'true'
+        if: needs.prepare.outputs.publish == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The builder stage is restored from the cache the Build job wrote, so only
-      # the runtime layers are actually built here.
-      - name: Build and Publish Runtime Image
+      - name: Build and publish builder
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: builder
+          push: ${{ needs.prepare.outputs.publish == 'true' }}
+          tags: |
+            ${{ needs.prepare.outputs.base }}-builder:${{ needs.prepare.outputs.image_key }}-${{ matrix.variant }}
+            ${{ needs.prepare.outputs.base }}-builder:${{ github.sha }}-${{ matrix.variant }}
+            ${{ matrix.variant == 'asan' && format('{0}-builder:{1}', needs.prepare.outputs.base, github.sha) || '' }}
+          build-args: |
+            ZHLN_USE_SANITIZERS=${{ matrix.sanitizers }}
+          cache-from: type=gha,scope=zahlen-${{ matrix.variant }}
+          cache-to: type=gha,scope=zahlen-${{ matrix.variant }},mode=max
+
+  test:
+    name: Test (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: asan
+            sanitizers: "ON"
+          - variant: release
+            sanitizers: "OFF"
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: needs.prepare.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Forks cannot publish; recreate that variant using its cache scope.
+      # Published runs must test the exact pushed artifact, not a silent rebuild.
+      - name: Resolve builder image
         id: image
+        env:
+          BASE: ${{ needs.prepare.outputs.base }}
+          PUBLISH: ${{ needs.prepare.outputs.publish }}
+          IMAGE_KEY: ${{ needs.prepare.outputs.image_key }}
+          VARIANT: ${{ matrix.variant }}
+          SANITIZERS: ${{ matrix.sanitizers }}
+        run: |
+          if [ "$PUBLISH" = true ]; then
+            ref="${BASE}-builder:${IMAGE_KEY}-${VARIANT}"
+            docker pull "$ref"
+          else
+            git submodule update --init --depth 1 ${VENDORED_SUBMODULES}
+            ref="zahlen-builder:${VARIANT}-local"
+            docker buildx build --target builder --load -t "$ref" \
+              --build-arg "ZHLN_USE_SANITIZERS=$SANITIZERS" \
+              --cache-from "type=gha,scope=zahlen-${VARIANT}" .
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Run ztest suite
+        run: |
+          set -o pipefail
+          docker run --rm "${{ steps.image.outputs.ref }}" \
+            ./build/bin/ztest --test-dir build -V 2>&1 | tee ztest.log
+
+      - name: Upload ztest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ztest-log-${{ matrix.variant }}
+          path: ztest.log
+          if-no-files-found: ignore
+
+  deploy:
+    name: Package runtime (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    needs: [prepare, build, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: asan
+            sanitizers: "ON"
+          - variant: release
+            sanitizers: "OFF"
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # Only fork runs build the local builder stage; published runs copy from
+      # the exact tested run-tagged image via ZHLN_BUILDER_IMAGE.
+      - name: Fetch vendored libraries for fork build
+        if: needs.prepare.outputs.publish != 'true'
+        run: git submodule update --init --depth 1 ${VENDORED_SUBMODULES}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: needs.prepare.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish runtime image
         uses: docker/build-push-action@v6
         with:
           context: .
           target: runner
-          push: ${{ needs.build.outputs.publish == 'true' }}
-          tags: ${{ needs.build.outputs.runtime_image }}:${{ github.sha }}
-          cache-from: type=gha
+          push: ${{ needs.prepare.outputs.publish == 'true' }}
+          tags: |
+            ${{ needs.prepare.outputs.base }}:${{ needs.prepare.outputs.image_key }}-${{ matrix.variant }}
+            ${{ needs.prepare.outputs.base }}:${{ github.sha }}-${{ matrix.variant }}
+            ${{ matrix.variant == 'release' && format('{0}:{1}', needs.prepare.outputs.base, github.sha) || '' }}
+          build-args: |
+            ZHLN_USE_SANITIZERS=${{ matrix.sanitizers }}
+            ZHLN_BUILDER_IMAGE=${{ needs.prepare.outputs.publish == 'true' && format('{0}-builder:{1}-{2}', needs.prepare.outputs.base, needs.prepare.outputs.image_key, matrix.variant) || 'builder' }}
+          cache-from: type=gha,scope=zahlen-${{ matrix.variant }}
 
-      - name: Deploy Summary
-        if: needs.build.outputs.publish == 'true'
+      - name: Deploy summary
+        if: needs.prepare.outputs.publish == 'true'
         run: |
-          {
-            echo "### Runtime image published"
-            echo
-            echo '```'
-            echo "${{ needs.build.outputs.runtime_image }}:${{ github.sha }}"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "### Runtime image: ${{ matrix.variant }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '${{ needs.prepare.outputs.base }}:${{ needs.prepare.outputs.image_key }}-${{ matrix.variant }}' >> "$GITHUB_STEP_SUMMARY"
 
-  # Only the lightweight mutable-tag promotion is serialized. Builds and tests
-  # stay parallel, and a slow older run cannot replace tags after a newer one.
+  # Serialize only mutable-tag promotion. The run-specific build/test jobs can
+  # overlap, and a slow old run cannot replace latest after a newer run.
   publish-latest:
     name: Promote latest images
     runs-on: ubuntu-latest
-    needs: [build, deploy]
+    needs: [prepare, deploy]
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      needs.build.outputs.publish == 'true'
+      needs.prepare.outputs.publish == 'true'
     concurrency:
       group: ${{ github.workflow }}-publish-latest
       cancel-in-progress: false
@@ -260,11 +286,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Promote immutable images to latest
+      - name: Promote run-specific images to stable tags
         if: steps.head.outputs.current == 'true'
+        env:
+          BASE: ${{ needs.prepare.outputs.base }}
+          IMAGE_KEY: ${{ needs.prepare.outputs.image_key }}
         run: |
-          base="ghcr.io/${GITHUB_REPOSITORY,,}"
-          docker buildx imagetools create --tag "${base}-builder:latest" \
-            "${{ needs.build.outputs.builder_image }}"
-          docker buildx imagetools create --tag "${base}:latest" \
-            "${base}:${GITHUB_SHA}"
+          # Preserve the existing sanitized builder:latest dev workflow.
+          docker buildx imagetools create \
+            -t "${BASE}-builder:latest" -t "${BASE}-builder:asan" \
+            "${BASE}-builder:${IMAGE_KEY}-asan"
+          docker buildx imagetools create -t "${BASE}-builder:release" \
+            "${BASE}-builder:${IMAGE_KEY}-release"
+          # Existing runtime:latest now means the speed build; both remain named.
+          docker buildx imagetools create -t "${BASE}:latest" -t "${BASE}:release" \
+            "${BASE}:${IMAGE_KEY}-release"
+          docker buildx imagetools create -t "${BASE}:asan" \
+            "${BASE}:${IMAGE_KEY}-asan"
