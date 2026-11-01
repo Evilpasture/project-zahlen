@@ -159,12 +159,42 @@ fi
 step "ninja + pkg-config"
 apt_install ninja-build pkg-config
 
-step "vulkan runtime + lavapipe (CPU rendering; the same ICD name the images use)"
+step "vulkan runtime + lavapipe (CPU rendering)"
 apt_install libvulkan1 mesa-vulkan-drivers vulkan-tools
-if [ ! -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then
-    echo "error: no lavapipe ICD after installing mesa-vulkan-drivers" >&2
+# The manifest name is not portable: Arch ships the upstream lvp_icd.json, while
+# Debian and Ubuntu suffix it with the architecture (lvp_icd.x86_64.json). Look
+# for whichever exists and hand it to every later step, so nothing in this repo
+# hardcodes one distro's spelling again.
+icd=
+for candidate in /usr/share/vulkan/icd.d/lvp_icd*.json; do
+    if [ -f "${candidate}" ]; then
+        icd=${candidate}
+        break
+    fi
+done
+if [ -z "${icd}" ]; then
+    echo "error: no lavapipe ICD found after installing mesa-vulkan-drivers" >&2
     ls -la /usr/share/vulkan/icd.d/ >&2 || true
     exit 1
+fi
+export VK_DRIVER_FILES="${icd}"
+export VK_ICD_FILENAMES="${icd}"
+if [ -n "${GITHUB_ENV:-}" ]; then
+    # Later workflow steps inherit this; a local run just exports it in the shell.
+    {
+        printf 'VK_DRIVER_FILES=%s\n' "${icd}"
+        printf 'VK_ICD_FILENAMES=%s\n' "${icd}"
+    } >>"${GITHUB_ENV}"
+fi
+printf '  lavapipe ICD: %s\n' "${icd}"
+if command -v vulkaninfo >/dev/null 2>&1; then
+    vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|driverName|apiVersion' | head -6 || true
+    # jammy's mesa is 23.x, which advertises Vulkan 1.3. The renderer enables
+    # acceleration-structure features; if this ever trips, say so here instead of
+    # leaving a device-selection failure twenty minutes later.
+    if ! vulkaninfo --summary 2>/dev/null | grep -qE 'apiVersion *= *1\.([4-9]|[1-9][0-9])'; then
+        echo '  warning: lavapipe reports a Vulkan API version below 1.4' >&2
+    fi
 fi
 
 if [ "${PROFILE}" = build ]; then
