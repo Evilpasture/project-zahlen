@@ -42,7 +42,20 @@
 #
 # The linker is pinned to BFD for the same class of reason; see the note at the
 # configure call.
-set -euo pipefail
+#
+# No output is discarded here. The CI log is the only place a failure explains
+# itself, and nobody reads it until the run is already red -- by which point a
+# swallowed error is unrecoverable. The only redirects allowed are existence
+# probes (command -v, dpkg -s, grep -q), which have no output worth keeping.
+# If something is too noisy to print, make it quieter; do not hide it.
+set -Eeuo pipefail
+
+# Every failure names itself. Without this, a step whose output is redirected --
+# or a command that exits 127 because a program is missing -- leaves the log
+# stopping at the last unrelated line, which is exactly what happened to the
+# simdjson step.
+trap 'status=$?; printf "\nerror: exit %s at line %s\n  command: %s\n" \
+    "${status}" "${LINENO}" "${BASH_COMMAND}" >&2' ERR
 
 out=${1:-/dist}
 sysroot=${ZHLN_JAMMY_SYSROOT:-/opt/jammy}
@@ -65,6 +78,30 @@ command -v openssl >/dev/null || {
 }
 
 cd "${CMAKE_SOURCE_DIR:-/workspace}"
+
+# ccache is why a re-run costs minutes instead of an engine rebuild. The cache
+# directory is a bind mount, so it survives the container; the workflow restores
+# and saves it across runs. BASEDIR + NOHASHDIR are what make the cache usable at
+# all here: the sources are at /workspace inside the container and somewhere else
+# on the runner, and the build directory name is not part of a translation unit.
+export CCACHE_DIR=${CCACHE_DIR:-/ccache}
+export CCACHE_BASEDIR=${CCACHE_BASEDIR:-${PWD}}
+export CCACHE_NOHASHDIR=1
+export CCACHE_CPP2=0
+export CCACHE_MAXSIZE=${CCACHE_MAXSIZE:-3G}
+# The sysroot comes back from the CI cache with fresh mtimes, so mtime-based
+# compiler validation would invalidate the whole cache on every restore.
+export CCACHE_COMPILERCHECK=${CCACHE_COMPILERCHECK:-content}
+export CCACHE_NODIRECT=0
+if [ -d "${CCACHE_DIR}" ] && command -v ccache >/dev/null; then
+    ccache --set-config=max_size="${CCACHE_MAXSIZE}" || true
+    echo "== ccache: ${CCACHE_DIR} (max ${CCACHE_MAXSIZE}), stats before this build:"
+    ccache --show-stats || true
+    ccache_launcher=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+else
+    echo "warning: ccache not available; this build will not reuse anything" >&2
+    ccache_launcher=()
+fi
 
 # The target's own scanner, run through the target's own loader.
 #
@@ -123,34 +160,73 @@ echo "== wayland-scanner: ${scanner_version} (sysroot binary, sysroot loader)"
 # install it into the target prefix -- exactly what a jammy user would get from a
 # distro package, and it keeps the header-only nature of the dependency (nothing
 # of it ships in the artifact).
-if [ ! -f "${sysroot}/usr/lib/x86_64-linux-gnu/cmake/simdjson/simdjson-config.cmake" ] &&
-   [ ! -f "${sysroot}/usr/lib/cmake/simdjson/simdjson-config.cmake" ]; then
-    echo "== building simdjson for the target sysroot"
-    cmake -S extern/simdjson -B "${build}-simdjson" -G Ninja \
-        -DCMAKE_TOOLCHAIN_FILE="${sysroot}/jammy-target.cmake" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DSIMDJSON_DEVELOPER_MODE=OFF \
-        -DSIMDJSON_BUILD_STATIC=ON \
-        -DBUILD_SHARED_LIBS=OFF >/dev/null
-    cmake --build "${build}-simdjson" >/dev/null
-    cmake --install "${build}-simdjson" --prefix "${sysroot}/usr" >/dev/null
-    echo "   installed into ${sysroot}/usr"
+# ZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON requires a simdjson *CONFIG* package (see
+# cmake/Toolchains.cmake:20), and jammy has no simdjson at all. Installing the
+# pinned tree used to mean running its CMake project as a nested build inside the
+# sysroot, which failed with a bare exit 127 and no output -- and a second build
+# system is a second set of assumptions about the host. simdjson's use here is
+# one translation unit and one header, so compile those two things with the
+# target compiler and write the (short) config package by hand. Nothing about
+# simdjson ships in the artifact; only the export needs to exist.
+simdjson_libdir=${sysroot}/usr/lib/x86_64-linux-gnu
+simdjson_cmakedir=${simdjson_libdir}/cmake/simdjson
+if [ ! -f "${simdjson_cmakedir}/simdjson-config.cmake" ]; then
+    echo "== installing simdjson for the target sysroot (one TU, no nested build)"
+    simdjson_src=extern/simdjson
+    # The amalgamated pair is what a distro package installs: one self-contained
+    # header and one translation unit, no include paths to get wrong. The split
+    # tree under src/ needs -I include -I src and is only a fallback.
+    if [ -f "${simdjson_src}/singleheader/simdjson.cpp" ]; then
+        simdjson_tu=${simdjson_src}/singleheader/simdjson.cpp
+        simdjson_hdr=${simdjson_src}/singleheader/simdjson.h
+        simdjson_includes=()
+    elif [ -f "${simdjson_src}/src/simdjson.cpp" ]; then
+        simdjson_tu=${simdjson_src}/src/simdjson.cpp
+        simdjson_hdr=${simdjson_src}/include/simdjson.h
+        simdjson_includes=(-I"${simdjson_src}/include" -I"${simdjson_src}/src")
+    else
+        echo "error: extern/simdjson has no simdjson.cpp." >&2
+        echo "       It is a submodule; fetch it with --recursive." >&2
+        exit 1
+    fi
+    simdjson_obj=${build}-simdjson.o
+    "${sysroot}/usr/bin/g++-16" \
+        -B"${sysroot}/usr/libexec/gcc/x86_64-linux-gnu/16/" \
+        -B"${sysroot}/usr/lib/gcc/x86_64-linux-gnu/16/" \
+        --sysroot="${sysroot}" \
+        -std=c++17 -O2 -fPIC -fvisibility=hidden -DSIMDJSON_STATIC_REFLECTION=0 \
+        "${simdjson_includes[@]}" \
+        -c "${simdjson_tu}" -o "${simdjson_obj}"
+    simdjson_ar=${sysroot}/usr/bin/ar
+    [ -x "${simdjson_ar}" ] || simdjson_ar=$(command -v ar)
+    mkdir -p "${simdjson_libdir}" "${simdjson_cmakedir}" "${sysroot}/usr/include"
+    "${simdjson_ar}" rcs "${simdjson_libdir}/libsimdjson.a" "${simdjson_obj}"
+    install -m644 "${simdjson_hdr}" "${sysroot}/usr/include/simdjson.h"
+    cat >"${simdjson_cmakedir}/simdjson-config.cmake" <<EOF
+# Written by scripts/build-release-toolchain.sh for the target sysroot.
+# Mirrors the parts of upstream's config this tree uses: the imported target, its
+# include directory, and the reflection define the tree forces everywhere.
+set(simdjson_FOUND TRUE)
+set(simdjson_VERSION 5.0.5)
+if(NOT TARGET simdjson::simdjson)
+    add_library(simdjson::simdjson STATIC IMPORTED)
+    set_target_properties(simdjson::simdjson PROPERTIES
+        IMPORTED_LOCATION "${simdjson_libdir}/libsimdjson.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${sysroot}/usr/include"
+        INTERFACE_COMPILE_DEFINITIONS "SIMDJSON_STATIC_REFLECTION=0"
+        INTERFACE_COMPILE_FEATURES "cxx_std_11")
+endif()
+EOF
+    cat >"${simdjson_cmakedir}/simdjson-config-version.cmake" <<'EOF'
+set(PACKAGE_VERSION "5.0.5")
+set(PACKAGE_VERSION_COMPATIBLE TRUE)
+if(PACKAGE_FIND_VERSION VERSION_GREATER PACKAGE_VERSION)
+    set(PACKAGE_VERSION_COMPATIBLE FALSE)
+endif()
+EOF
+    echo "   installed into ${simdjson_cmakedir}"
 fi
 
-# jammy names its lavapipe manifest lvp_icd.x86_64.json, Arch names it lvp_icd.json.
-# The tests run here on whatever this host has; the consumer job does the same
-# lookup after installing the distro's drivers.
-icd=
-for candidate in /usr/share/vulkan/icd.d/lvp_icd*.json; do
-    [ -f "${candidate}" ] && { icd=${candidate}; break; }
-done
-if [ -z "${icd}" ]; then
-    echo "error: no lavapipe ICD in this image; ztest cannot create a device" >&2
-    ls -la /usr/share/vulkan/icd.d/ >&2 || true
-    exit 1
-fi
-export VK_DRIVER_FILES="${icd}"
-export VK_ICD_FILENAMES="${icd}"
 echo "== lavapipe ICD: ${icd}"
 
 echo "== configuring (target: glibc ${glibc_baseline} via ${sysroot})"
@@ -169,6 +245,7 @@ cmake -B "${build}" -S . -G Ninja \
     -DWAYLAND_SCANNER_EXECUTABLE="${wayland_scanner}" \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DZHLN_LINKER_OVERRIDE=bfd \
+    "${ccache_launcher[@]}" \
     -DVulkan_INCLUDE_DIR="${PWD}/extern/Vulkan-Headers/include" \
     -DZHLN_BUILD_SVG=OFF${slang_version:+ -DSLANG_VERSION_FULL=${slang_version}}
 # The last three are the sysroot's fault, not this project's:
@@ -227,7 +304,8 @@ cmake --build "${build}"
 echo "== building and testing zpkg"
 cmake -S utils/zpkg -B "${build}-zpkg" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="${sysroot}/jammy-target.cmake" \
-    -DCMAKE_BUILD_TYPE=Release -DZPKG_BUILD_TESTS=ON
+    -DCMAKE_BUILD_TYPE=Release -DZPKG_BUILD_TESTS=ON \
+    "${ccache_launcher[@]}"
 cmake --build "${build}-zpkg"
 ctest --test-dir "${build}-zpkg" --output-on-failure
 

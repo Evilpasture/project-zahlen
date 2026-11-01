@@ -41,9 +41,11 @@ ipch/
 __pycache__/
 gcm.cache/
 
-# The Ubuntu 22.04 target sysroot (scripts/setup-jammy-target.sh) is ~865 MB of
-# apt output and is mounted into the build container, never baked into an image.
+# CI-only, mounted into the build container and never baked into an image:
+#   .jammy/   the Ubuntu 22.04 target sysroot (~1 GB of apt output)
+#   .ccache/  the compiler cache shared across runs (can be several GB)
 .jammy/
+.ccache/
 
 # Environments & heavy local assets
 .venv/

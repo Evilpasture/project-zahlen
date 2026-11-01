@@ -46,6 +46,7 @@ RUN pacman -Sy --noconfirm && \
     mold \
     cmake \
     ninja \
+    ccache \
     git \
     python \
     vulkan-icd-loader \

@@ -15,6 +15,12 @@
 #       bash scripts/build-release-toolchain.sh /dist
 #
 # The export directory is recorded in the generated toolchain file *by absolute
+#
+# No output is discarded here. The CI log is the only place a failure explains
+# itself, and nobody reads it until the run is already red -- by which point a
+# swallowed error is unrecoverable. The only redirects allowed are existence
+# probes (command -v, dpkg -s, grep -q), which have no output worth keeping.
+# If something is too noisy to print, make it quieter; do not hide it.
 # path*, so export it where it will later be mounted; mounting it elsewhere points
 # the build at a directory that does not exist. To move a finished sysroot,
 # re-export it instead of copying: --from-rootfs <old> --export <new> rewrites the
@@ -131,11 +137,11 @@ packages=(
 
 if [ -z "${from_rootfs}" ]; then
     echo "== installing the jammy target toolchain (glibc ${GLIBC_BASELINE})"
-    apt-get update -qq
+    apt-get update
     apt-get install -y --no-install-recommends ca-certificates curl gnupg software-properties-common binutils
     if ! grep -rqs "ubuntu-toolchain-r/test" /etc/apt/sources.list /etc/apt/sources.list.d/; then
         add-apt-repository -y ppa:ubuntu-toolchain-r/test
-        apt-get update -qq
+        apt-get update
     fi
     apt-get install -y --no-install-recommends "${packages[@]}"
     root=/
@@ -166,7 +172,7 @@ EOF
 compiler=$(command -v g++-16 || printf '%s/usr/bin/g++-16' "${root%/}")
 "${compiler}" -std=c++26 -O2 -o "${smoke}/smoke" "${smoke}/smoke.cpp"
 "${script_dir}/check-glibc-floor.sh" "${GLIBC_BASELINE}" "${smoke}/smoke"
-"${smoke}/smoke" >/dev/null || {
+"${smoke}/smoke" || {
     echo "error: the smoke binary did not run" >&2
     exit 1
 }

@@ -65,7 +65,7 @@ bad=()
 for file in "${candidates[@]}"; do
     # objdump on every non-ELF file in a package would bury the log in noise.
     head -c 4 "${file}" 2>/dev/null | grep -q $'\x7fELF' || continue
-    version=$(objdump -T "${file}" 2>/dev/null |
+    version=$(objdump -T "${file}" |
         grep -o 'GLIBC_[0-9][0-9.]*' | sort -Vu | tail -1 || true)
     [ -n "${version}" ] || continue
     if [ "$(printf '%s\n' "${version}" "${highest}" | sort -V | tail -1)" = "${version}" ] &&

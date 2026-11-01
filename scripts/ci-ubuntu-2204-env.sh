@@ -113,7 +113,7 @@ apt_install() {
 }
 
 step "base packages"
-asroot apt-get update -qq
+asroot apt-get update
 apt_install ca-certificates curl gnupg lsb-release apt-transport-https software-properties-common python3
 
 step "gcc ${GCC_VERSION} (jammy ships gcc-11; the tree needs -freflection)"
@@ -123,7 +123,7 @@ if ! dpkg -s "g++-${GCC_VERSION}" >/dev/null 2>&1; then
     # of leaving a confusing "c++ compiler not found" from CMake later.
     if ! grep -rqs "ubuntu-toolchain-r/test" /etc/apt/sources.list /etc/apt/sources.list.d/; then
         asroot add-apt-repository -y ppa:ubuntu-toolchain-r/test
-        asroot apt-get update -qq
+        asroot apt-get update
     fi
     if ! apt-cache show "g++-${GCC_VERSION}" >/dev/null 2>&1; then
         {
@@ -137,7 +137,7 @@ if ! dpkg -s "g++-${GCC_VERSION}" >/dev/null 2>&1; then
     fi
     apt_install "gcc-${GCC_VERSION}" "g++-${GCC_VERSION}"
 fi
-asroot update-alternatives --set "gcc" "/usr/bin/gcc-${GCC_VERSION}" >/dev/null 2>&1 || true
+asroot update-alternatives --set "gcc" "/usr/bin/gcc-${GCC_VERSION}" || true
 
 step "cmake >= 3.28 (jammy ships 3.22; the tree and the consumer both require 3.28)"
 cmake_ok() {
@@ -152,7 +152,7 @@ if ! cmake_ok; then
             asroot gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg
         echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ $(. /etc/os-release && printf '%s' "${UBUNTU_CODENAME:-jammy}") main" |
             asroot tee /etc/apt/sources.list.d/kitware.list >/dev/null
-        asroot apt-get update -qq
+        asroot apt-get update
     fi
     apt_install cmake
 fi
@@ -200,11 +200,11 @@ if [ -n "${GITHUB_ENV:-}" ]; then
 fi
 printf '  lavapipe ICD: %s\n' "${icd}"
 if command -v vulkaninfo >/dev/null 2>&1; then
-    vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|driverName|apiVersion' | head -6 || true
+    vulkaninfo --summary | grep -E 'deviceName|driverName|apiVersion' | head -6 || true
     # jammy's mesa is 23.x, which advertises Vulkan 1.3. The renderer enables
     # acceleration-structure features; if this ever trips, say so here instead of
     # leaving a device-selection failure twenty minutes later.
-    if ! vulkaninfo --summary 2>/dev/null | grep -qE 'apiVersion *= *1\.([4-9]|[1-9][0-9])'; then
+    if ! vulkaninfo --summary | grep -qE 'apiVersion *= *1\.([4-9]|[1-9][0-9])'; then
         echo '  warning: lavapipe reports a Vulkan API version below 1.4' >&2
     fi
 fi
@@ -262,7 +262,7 @@ if [ "${PROFILE}" = build ]; then
         asroot ldconfig
         rm -rf "${tmp}"
     fi
-    dxc --version >/dev/null || {
+    dxc --version || {
         echo "error: dxc is installed but does not run" >&2
         ldd "$(command -v dxc)" >&2 || true
         exit 1

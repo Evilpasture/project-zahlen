@@ -27,6 +27,12 @@
 # private key (GitHub secret) to sign with the project key. Without it an
 # ephemeral key is generated so forks can still produce a consistent release;
 # the fingerprint is printed either way, and users who care pin it.
+#
+# No output is discarded here. The CI log is the only place a failure explains
+# itself, and nobody reads it until the run is already red -- by which point a
+# swallowed error is unrecoverable. The only redirects allowed are existence
+# probes (command -v, dpkg -s, grep -q), which have no output worth keeping.
+# If something is too noisy to print, make it quieter; do not hide it.
 set -euo pipefail
 
 out=${1:?usage: scripts/package-toolchain.sh <out-dir> [build-dir]}
@@ -63,7 +69,7 @@ components=(Engine CommandLine Signal HostRunner Application UISchema Serializat
 printf 'toolchain: %s\npackaging %d components into %s\n' "${id}" "${#components[@]}" "${pkgs}"
 for component in "${components[@]}"; do
     stage=$(mktemp -d)
-    DESTDIR="${stage}" cmake --install "${build}" --prefix /usr --component "Zahlen${component}" >/dev/null
+    DESTDIR="${stage}" cmake --install "${build}" --prefix /usr --component "Zahlen${component}"
     archive="${pkgs}/zahlen-${component,,}-${id}.tar.gz"
     tar -C "${stage}" -czf "${archive}" usr
     # Every archive must identify its toolchain wherever it ends up on disk.
@@ -87,13 +93,13 @@ if [ -n "${ZHLN_RELEASE_KEY_PEM:-}" ]; then
     printf '%s' "${ZHLN_RELEASE_KEY_PEM}" | base64 -d >"${keyfile}"
     printf 'signing with the project key from ZHLN_RELEASE_KEY_PEM\n'
 else
-    openssl genpkey -algorithm ed25519 -out "${keyfile}" 2>/dev/null
+    openssl genpkey -algorithm ed25519 -out "${keyfile}"
     printf 'warning: no ZHLN_RELEASE_KEY_PEM; signing with a throwaway key.\n' >&2
     printf '         Users of this release must re-add the published key.\n' >&2
 fi
 
 pubfile="${pkgs}/zahlen-release-key.pub"
-openssl pkey -in "${keyfile}" -pubout -outform DER 2>/dev/null | tail -c 32 >"${tools}/release-key.raw"
+openssl pkey -in "${keyfile}" -pubout -outform DER | tail -c 32 >"${tools}/release-key.raw"
 base64 -w0 "${tools}/release-key.raw" >"${pubfile}"
 printf '\n' >>"${pubfile}"
 fingerprint=$(sha256sum "${tools}/release-key.raw" | cut -c1-32)
@@ -102,7 +108,7 @@ printf '%s\n' "${fingerprint}" >"${tools}/KEY-FINGERPRINT.txt"
 printf 'release key fingerprint: %s\n' "${fingerprint}"
 
 sign_file() {
-    openssl pkeyutl -sign -inkey "${keyfile}" -rawin -in "$1" -out "$1.sig" 2>/dev/null
+    openssl pkeyutl -sign -inkey "${keyfile}" -rawin -in "$1" -out "$1.sig"
     {
         printf '%s ' "${fingerprint}"
         base64 -w0 "$1.sig"
