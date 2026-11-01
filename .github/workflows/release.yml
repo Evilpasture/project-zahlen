@@ -36,11 +36,6 @@ on:
         description: 'GCC major for the toolchain build (reflection needs 16)'
         required: false
         default: '16'
-      wayland_only:
-        description: 'Build the release without the X11 fallback backend'
-        required: false
-        type: boolean
-        default: false
 
 # Releases are created and updated with the workflow token.
 permissions:
@@ -76,9 +71,13 @@ jobs:
       # copies are Arch binaries that cannot ship, the rest because the sysroot
       # deliberately holds no newer-than-jammy copy of them (simdjson 5.x, Vulkan
       # headers 1.4, GLFW 3.4) or holds none at all.
+      # --recursive is not optional: extern/slang builds from its own submodules
+      # (miniz, lz4, cmark, spirv-headers, spirv-tools, glslang, unordered_dense)
+      # and configures them as source directories. Without them the configure stops
+      # with "does not contain a CMakeLists.txt" for each one.
       - name: Fetch vendored trees
         run: |
-          git submodule update --init --depth 1 \
+          git submodule update --init --recursive --depth 1 \
             extern/JoltPhysics \
             extern/VulkanMemoryAllocator \
             extern/Vulkan-Headers \
@@ -93,6 +92,23 @@ jobs:
             extern/glfw \
             extern/simdjson \
             extern/slang
+
+      # slang's CMake takes its version from git tags (`git describe`), and the
+      # build context excludes .git, so it cannot see them from inside the image.
+      # Resolve the tag here and hand it over as SLANG_VERSION_FULL. A shallow
+      # submodule has no tags, so ask the remote for them explicitly.
+      - name: Resolve the vendored slang version
+        id: slang
+        run: |
+          git -C extern/slang fetch --tags --depth 1 origin 2>/dev/null || true
+          version=$(git -C extern/slang describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "${version}" ]; then
+            version=$(git -C extern/slang log -1 --format=%cd --date=format:%Y.%m.%d 2>/dev/null || true)
+            echo "warning: no slang tag found; using the checkout date '${version}'" >&2
+          fi
+          version=${version#v}
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "vendored slang version: ${version}"
 
       # Built before the sysroot exists, so the 865 MB sysroot never becomes part
       # of the Docker build context.
@@ -109,22 +125,16 @@ jobs:
       # absolute path, so exporting to one path and mounting at another would point
       # the build at a directory that does not exist.
       #
-      # Wayland is the target's window backend and the build checks for it, so the
-      # sysroot always gets libwayland-dev, libxkbcommon-dev, wayland-protocols and
-      # libwayland-bin (wayland-scanner). The X11 -dev packages are the fallback
-      # backend; `wayland_only` drops them and the engine then records no libX11
-      # dependency -- useful for a kiosk or a compositor-only machine, at the cost
-      # of not starting on an X11 session.
+      # Wayland is the target's window backend and the only one: the sysroot gets
+      # libwayland-dev, libxkbcommon-dev, wayland-protocols, libwayland-bin
+      # (wayland-scanner) and libdecor-0-dev, and no X11 headers at all.
       - name: Assemble the glibc 2.35 target sysroot
-        env:
-          WAYLAND_ONLY: ${{ inputs.wayland_only && '1' || '' }}
         run: |
           rm -rf .jammy
           docker run --rm \
             -v "${PWD}:/workspace" -w /workspace \
             -v "${PWD}/.jammy:/opt/jammy" \
-            ubuntu:22.04 bash scripts/setup-jammy-target.sh --export /opt/jammy \
-              ${WAYLAND_ONLY:+--no-x11}
+            ubuntu:22.04 bash scripts/setup-jammy-target.sh --export /opt/jammy
 
       - name: Build, test and package against that sysroot
         run: |
@@ -133,6 +143,7 @@ jobs:
             -v "${PWD}/.jammy:/opt/jammy" \
             -v "${PWD}/dist:/dist" \
             -e ZHLN_GLIBC_BASELINE="${GLIBC_BASELINE}" \
+            -e ZHLN_SLANG_VERSION="${{ steps.slang.outputs.version }}" \
             zahlen-builder:release bash scripts/build-release-toolchain.sh /dist
 
       # A second look from the host, on the packaged archives rather than a build

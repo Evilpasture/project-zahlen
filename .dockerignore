@@ -1,5 +1,9 @@
-# Ignore Git & Cloudflare wrangler state
+# Ignore Git & Cloudflare wrangler state. `**/.git` also covers the *files* a
+# submodule leaves behind (extern/slang/.git is a gitfile pointing at
+# ../.git/modules/...), which otherwise lands in the image and makes slang's
+# GitVersion.cmake announce that the checkout is not a valid repository.
 .git/
+**/.git
 .wrangler/
 
 # Build directories & binaries

@@ -271,21 +271,22 @@ fi
 
 if [ "${PROFILE}" = consumer ]; then
     step "consumer dependencies (runtime libraries the packages dlopen/link)"
-    # libzstd1/libatomic1 are DT_NEEDED of the engine package, and the Wayland/X11
-    # list is what the *vendored, static* GLFW resolves against once it is inside
-    # libzahlen_engine.so -- distro runtime libs, not -dev packages. Wayland is the
-    # primary backend (the release is refused without it); the X11 entries are only
-    # needed while the fallback backend is compiled in, and are harmless otherwise
-    # because a release built with --no-x11 records no libX11 dependency at all.
+    # libzstd1/libatomic1/libcurl4 are DT_NEEDED of the engine package, and the
+    # Wayland list is what the *vendored, static* GLFW resolves against once it is
+    # inside libzahlen_engine.so -- distro runtime libraries, not -dev packages.
+    #
+    # There is deliberately no X11 runtime library here, and no libglfw3: the
+    # release is Wayland-only and carries its own GLFW, so a machine with neither
+    # must be able to load and run the engine. If a regression reintroduces an X11
+    # or libglfw dependency, this list is what makes it fail loudly.
     #
     # libglfw3 is deliberately NOT installed any more. The release carries its own
     # GLFW, so a machine with no libglfw at all must be enough to load and run the
     # engine; installing jammy's 3.3 here would let a regression that needs 3.4's
     # platform APIs (glfwGetPlatform and friends) load and then fail at run time,
     # which is exactly the failure this job exists to catch at install time.
-    apt_install libzstd1 libatomic1 netpbm \
-        libwayland-client0 libwayland-cursor0 libwayland-egl1 libxkbcommon0 libdecor-0-0 \
-        libx11-6 libxrandr2 libxinerama1 libxcursor1 libxi6 libxext6
+    apt_install libzstd1 libatomic1 netpbm libcurl4 \
+        libwayland-client0 libwayland-cursor0 libwayland-egl1 libxkbcommon0 libdecor-0-0
 fi
 
 step "provisioned"

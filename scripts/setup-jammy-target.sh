@@ -41,7 +41,6 @@ set -euo pipefail
 export_dir=
 from_rootfs=
 keep_apt=0
-with_x11=1
 while [ "$#" -gt 0 ]; do
     case $1 in
         --export)
@@ -55,11 +54,6 @@ while [ "$#" -gt 0 ]; do
             from_rootfs=${1:?--from-rootfs needs a directory}
             ;;
         --keep-apt) keep_apt=1 ;;
-        --no-x11)
-            # Wayland-only target: GLFW then builds without its X11 backend, and
-            # the engine records no libX11 dependency. See the package note above.
-            with_x11=0
-            ;;
         -h | --help)
             sed -n '2,44p' "$0"
             exit 0
@@ -91,18 +85,19 @@ asroot() {
 # glfw is deliberately absent (jammy ships 3.3, the engine requires >= 3.4): the
 # probe falls back to extern/glfw, which is built statically for this target, so
 # the toolchain carries its own GLFW and the runtime needs no libglfw at all.
-# The Wayland and X11 *dev* packages below exist because that static build links
-# them:
 #
-#   Wayland   the primary backend. libwayland-bin is not optional -- it carries
-#             wayland-scanner, and GLFW generates its protocol bindings with it at
-#             build time. libdecor-0-dev is the decoration protocol library GLFW
-#             uses when the compositor has no server-side decorations.
-#   X11       the fallback backend, kept because Ubuntu 22.04 still ships X11
-#             sessions (NVIDIA's driver defaults to one) and the cost is one
-#             NEEDED entry. Build with --no-x11 for a Wayland-only tree: the GLFW
-#             probe then finds no X11 headers, compiles GLFW_BUILD_X11=OFF and the
-#             engine records no libX11 dependency at all.
+# Wayland is the window backend, and the only one: there are no X11 headers here
+# on purpose. GLFW's probe then compiles GLFW_BUILD_X11=OFF, so the released
+# engine records no libX11/libXcursor/libXi dependency and runs on a compositor-
+# only machine. libwayland-bin is not optional -- it carries wayland-scanner, and
+# GLFW generates its protocol bindings with it at build time; libdecor-0-dev is
+# the decoration library it uses when the compositor has no server-side ones.
+#
+# Want the X11 fallback for a desktop build? Add libx11-dev libxrandr-dev
+# libxinerama-dev libxcursor-dev libxi-dev libxext-dev to the list below and the
+# same GLFW probe picks it up. It is not in the release: on jammy that build also
+# needs FindX11 to succeed inside the sysroot, which it does not do reliably, and
+# a backend that is compiled but untested is worse than one that is absent.
 #
 # Two more absences are equally deliberate:
 #   slang           jammy has none, and zshader links libslang in-process, so it
@@ -122,38 +117,17 @@ packages=(
     linux-libc-dev
     libzstd-dev
     libluajit-5.1-dev
-    libx11-dev
-    libxrandr-dev
-    libxinerama-dev
-    libxcursor-dev
-    libxi-dev
-    libxext-dev
+    # extensions/net/HTTP and its dependents (CDN, GitHub) plus
+    # zahlen_project_light_client; without these they are skipped at configure
+    # time and the release quietly loses them.
+    libcurl4-openssl-dev
+    zlib1g-dev
     libwayland-dev
     libwayland-bin
     libxkbcommon-dev
     wayland-protocols
     libdecor-0-dev
 )
-
-# A Wayland-only target: the X11 -dev packages are what make GLFW's probe enable
-# its X11 backend, so dropping them is the whole switch. Nothing else in the tree
-# names X11, and GLFW then compiles with GLFW_BUILD_X11=OFF.
-if [ "${with_x11}" -eq 0 ]; then
-    if [ -n "${from_rootfs}" ]; then
-        echo "warning: --no-x11 cannot remove headers from ${from_rootfs}." >&2
-        echo "         The re-exported tree still has X11: GLFW will build that" >&2
-        echo "         backend. Build the tree from scratch to drop it." >&2
-        with_x11=1
-    fi
-    filtered=()
-    for pkg in "${packages[@]}"; do
-        case ${pkg} in
-            libx11-dev | libxrandr-dev | libxinerama-dev | libxcursor-dev | libxi-dev | libxext-dev) continue ;;
-        esac
-        filtered+=("${pkg}")
-    done
-    packages=("${filtered[@]}")
-fi
 
 if [ -z "${from_rootfs}" ]; then
     echo "== installing the jammy target toolchain (glibc ${GLIBC_BASELINE})"
@@ -277,8 +251,4 @@ printf '  compiler: %s/usr/bin/g++-16 (%s, the package a jammy user installs)\n'
     "$("${export_dir}/usr/bin/g++-16" --version | head -1)"
 printf '  wayland-scanner: %s (%s)\n' "${export_dir}/usr/bin/wayland-scanner" \
     "$("${export_dir}/usr/bin/wayland-scanner" --version 2>&1 | head -1 || echo missing)"
-if [ "${with_x11}" -eq 1 ]; then
-    printf '  window backends: wayland + x11 (GLFW builds both; Wayland is selected at run time)\n'
-else
-    printf '  window backends: wayland only (--no-x11)\n'
-fi
+printf '  window backend: wayland only (no X11 headers in the target)\n'
