@@ -183,6 +183,12 @@ auto Store::SetActive(const std::string& id) -> std::expected<void, Fail> {
 }
 
 auto Store::Prefix(const std::string& id) const -> std::expected<fs::path, Fail> {
+    // "Nothing is active" and "there is no store here" are different problems,
+    // and after somebody moves the root the second one is the answer; the first
+    // message sends them looking for a marker that was never the issue.
+    if (!PathExists(m_env.root)) {
+        return std::unexpected(Fail {"no store at " + ToUtf8(m_env.root) + "; set ZHLN_ROOT if it lives somewhere else"});
+    }
     std::string use = id;
     if (use.empty()) {
         auto current = Active();

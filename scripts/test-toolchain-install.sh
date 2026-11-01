@@ -160,20 +160,50 @@ if [ -n "$(unresolved_libraries "$cooker")" ]; then
 fi
 printf 'PASS: installed cooker resolves from the store (%s)\n' "$cooker"
 
-# The store is relocatable: active is a relative link, so moving the whole
-# directory must not break it. Nothing writes an absolute path into the store.
-mv "$HOME/.local/share/zahlen" "$HOME/.local/share/zahlen-moved"
-moved_prefix=$("$zpkg" prefix)
+# The store is relocatable: `active` is a relative link and the rpaths zpkg
+# leaves in installed binaries are $ORIGIN-relative, so moving the whole
+# directory must break neither. zpkg's default root still names the old path,
+# which no longer exists -- a relocated store is reached with ZHLN_ROOT, which is
+# the only thing a user could do either.
+default_root=$HOME/.local/share/zahlen
+moved_root=$default_root-moved
+mv "$default_root" "$moved_root"
+moved_prefix=$(ZHLN_ROOT="$moved_root" "$zpkg" prefix)
+case $moved_prefix in
+    "$moved_root"/*) ;;
+    *)
+        echo "FAIL: prefix after the move is ${moved_prefix}, expected it under ${moved_root}" >&2
+        exit 1
+        ;;
+esac
+# The marker has to still resolve, and it has to still be relative: an absolute
+# one would point back at the directory that no longer exists.
+if [ ! -e "$moved_root/active" ]; then
+    echo 'FAIL: the active marker no longer resolves after the store moved' >&2
+    exit 1
+fi
+if [ "$(readlink "$moved_root/active")" != "store/${id}" ]; then
+    echo "FAIL: active points at $(readlink "$moved_root/active"), expected store/${id}" >&2
+    exit 1
+fi
 # A relative rpath is what makes this work: the store moved, the binary did not
 # change, and zcook still resolves libzahlen_engine.so inside the new location.
-"$zpkg" which zcook >/dev/null
-moved_cooker=$("$zpkg" which zcook)
+moved_cooker=$(ZHLN_ROOT="$moved_root" "$zpkg" which zcook)
+test -x "$moved_cooker"
 if [ -n "$(unresolved_libraries "$moved_cooker")" ]; then
     echo 'FAIL: the cooker broke when the store moved; its rpath is absolute' >&2
     ldd "$moved_cooker" >&2
     exit 1
 fi
-mv "$HOME/.local/share/zahlen-moved" "$HOME/.local/share/zahlen"
+# Nothing zpkg wrote may record where the store used to be: a store that leaked an
+# absolute path works until the next move, and then fails somewhere else.
+# -I keeps debug info out of it; only text zpkg wrote is interesting here.
+if grep -rlF -I -- "$default_root/" "$moved_root/store" >/dev/null 2>&1; then
+    echo 'FAIL: the store recorded the absolute path it was installed into' >&2
+    grep -rlF -I -- "$default_root/" "$moved_root/store" >&2
+    exit 1
+fi
+mv "$moved_root" "$default_root"
 printf 'PASS: store relocates without rewriting anything\n'
 
 # --- the manager refuses what it must refuse ------------------------------

@@ -657,6 +657,73 @@ void TestArchiveLongNames() {
     Discard(directory);
 }
 
+// A store that moves has to keep working. `active` is a relative link and every
+// path zpkg writes is relative, so pointing the root at the new location is all
+// it takes. An absolute marker would follow the old path instead, and the
+// symptom would be "no active toolchain" -- which is what CI hit when
+// scripts/test-toolchain-install.sh moved the store out from under zpkg.
+void TestStoreRelocation() {
+    const fs::path directory = MakeTemp("relocate");
+    ZHLN::Env      env       = TestEnv(directory);
+    ZHLN::Store    store(env);
+
+    const fs::path output = directory / "out";
+    fs::create_directories(output);
+    PackageSpec engine;
+    engine.payload = {{"usr/lib/libzahlen_engine.so", "engine\n"}, {"usr/bin/zcook", "cooker\n"}};
+    WritePackage(output, engine);
+    WriteSums(output);
+
+    ZHLN::InstallOptions options;
+    options.requireChecksums = true;
+    auto report              = Take(store.Finish(Take(store.InstallDirectory(output, options))));
+    Expect(report.installed.size() == 1);
+    Expect(Take(store.Active()) == engine.id);
+
+    const fs::path moved = directory / "moved";
+    std::error_code ec;
+    fs::rename(ZHLN::Native(env.root), ZHLN::Native(moved), ec);
+    Expect(!ec);
+
+    ZHLN::Env movedEnv;
+    movedEnv.root   = moved;
+    movedEnv.binDir = directory / "bin";
+    ZHLN::Store movedStore(movedEnv);
+
+    Expect(Take(movedStore.Active()) == engine.id);
+    Expect(Take(movedStore.Prefix()) == movedStore.ToolchainDir(engine.id) / "usr");
+    Expect(ZHLN::PathExists(Take(movedStore.Prefix()) / "bin" / "zcook"));
+
+#if !defined(_WIN32)
+    // Windows may not create the mirror at all, which is why ACTIVE is the
+    // authority there; where it exists it must be relative.
+    Expect(ZHLN::PathExists(moved / "active"));
+    std::error_code linkError;
+    const fs::path  target = fs::read_symlink(ZHLN::Native(moved / "active"), linkError);
+    Expect(!linkError);
+    Expect(!target.is_absolute());
+    Expect(target == fs::path("store") / engine.id);
+#endif
+
+    // Nothing zpkg wrote may name the old location.
+    const fs::path metadata = movedStore.ToolchainDir(engine.id) / "zpkg" / "installed";
+    for (const auto& name: {engine.package + ".meta", engine.package + ".json", engine.package + ".files"}) {
+        const auto text = Take(ZHLN::ReadFile(metadata / name));
+        Expect(text.find(ZHLN::ToUtf8(env.root)) == std::string::npos);
+    }
+
+    // And a root that is not there says so, instead of blaming the marker.
+    ZHLN::Env absentEnv;
+    absentEnv.root   = directory / "absent";
+    absentEnv.binDir = directory / "bin";
+    const auto missing = ZHLN::Store(absentEnv).Prefix();
+    Expect(!missing);
+    if (!missing)
+        Expect(missing.error().message.find("no store at") != std::string::npos);
+
+    Discard(directory);
+}
+
 // Two managers must not work on one store at once, and the failure has to be a
 // refusal rather than a corrupted install. flock() and LockFileEx() are both
 // per-handle, so the second lock in this same process must fail on either
@@ -919,6 +986,7 @@ int main() {
     Run("archive-refusals", TestArchiveRefusals);
     Run("archive-long-names", TestArchiveLongNames);
     Run("store-lock", TestStoreLock);
+    Run("store-relocation", TestStoreRelocation);
     Run("store-lifecycle", TestStoreLifecycle);
     Run("checksum-and-signature-policy", TestChecksumAndSignaturePolicy);
     Run("remote", TestRemote);
