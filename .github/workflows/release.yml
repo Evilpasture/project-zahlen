@@ -1,0 +1,313 @@
+name: Release (Ubuntu 22.04 baseline)
+
+# What this lane is, and why it exists next to ci.yml.
+#
+# ci.yml builds on Arch and publishes container images. Those images carry their
+# own libc, so they are self-consistent -- but any native artifact taken out of
+# them needs whatever glibc the image had (2.43 at the time of writing, from
+# three sqrtf/atan2f relocations), which is newer than Ubuntu 24.04 and every
+# other LTS. The rule this workflow enforces is the one that matters to a user:
+# the released toolchain is compiled against glibc 2.35 (Ubuntu 22.04) and is
+# then installed, compiled against and run by a machine that has nothing but a
+# normal dev environment and the release itself.
+#
+# Two jobs, deliberately different in kind:
+#   toolchain  build on jammy, package, sign, publish to a GitHub Release.
+#   consume    NO container, NO checkout of build outputs: a fresh jammy runner
+#              downloads that release, installs it with zpkg as an unprivileged
+#              user, builds a consumer app against it and renders a cube on
+#              lavapipe. If this job passes, the release is usable.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create or update'
+        required: true
+        default: 'v0.1.0-baseline'
+      gcc_version:
+        description: 'GCC major for the toolchain build (reflection needs 16)'
+        required: false
+        default: '16'
+
+# Releases are created and updated with the workflow token.
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  GCC_VERSION: ${{ inputs.gcc_version || '16' }}
+  # Ubuntu 22.04 LTS. Anything a release links must stay at or below this, or
+  # the artifact only runs on a distro newer than the one it claims to target.
+  GLIBC_BASELINE: '2.35'
+
+# A release never runs concurrently with itself: two jobs publishing to the same
+# tag would upload half of one build and half of another.
+concurrency:
+  group: release-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  toolchain:
+    name: Toolchain + publish (jammy, glibc 2.35)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # jammy is older than what this tree expects in four places (glfw 3.3 vs
+      # the required 3.4, no simdjson 5.x, Vulkan headers 1.3 vs the 1.4 the
+      # renderer targets, no slang), so those come from the pinned submodules
+      # and cmake/ThirdParty.cmake's probes fall back to them automatically.
+      # Everything else keeps the vendored trees ci.yml already builds.
+      - name: Fetch vendored trees jammy does not provide
+        run: |
+          git submodule update --init --depth 1 \
+            extern/JoltPhysics \
+            extern/VulkanMemoryAllocator \
+            extern/SPIRV-Reflect \
+            extern/volk \
+            extern/meshoptimizer \
+            extern/mimalloc \
+            extern/miniaudio \
+            extern/cgltf \
+            extern/clay \
+            extern/stb \
+            extern/glfw \
+            extern/simdjson \
+            extern/slang \
+            extern/Vulkan-Headers
+
+      - name: Provision the environment
+        run: scripts/ci-ubuntu-2204-env.sh --build --gcc "${GCC_VERSION}"
+
+      # The flags are the image's, minus the two that only made sense inside it:
+      # ZHLN_IN_DOCKER (we are on a real distro, and lavapipe comes from apt)
+      # and any Arch-built Vulkan sandbox.
+      - name: Configure
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="gcc-${GCC_VERSION}" \
+            -DCMAKE_CXX_COMPILER="g++-${GCC_VERSION}" \
+            -DZHLN_BUILD_TESTS=ON \
+            -DZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON \
+            -DUSE_SANITIZERS=OFF \
+            -DZHLN_SLANG_VENDORED=ON \
+            -DZHLN_TEST_VULKAN_SANDBOX=OFF \
+            -DZHLN_HAS_BLENDER=OFF
+
+      - name: Build engine, cooker and tests
+        run: cmake --build build
+
+      - name: Build and test zpkg
+        run: |
+          cmake -S utils/zpkg -B build-zpkg -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DZPKG_BUILD_TESTS=ON
+          cmake --build build-zpkg
+          ctest --test-dir build-zpkg --output-on-failure
+
+      # The same suite ci.yml runs, on the distro the release targets. A release
+      # built here that fails its own tests must not be published.
+      - name: Test (ztest on lavapipe)
+        env:
+          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+        run: ./build/bin/ztest --test-dir build -V
+
+      - name: Package, sign and index the toolchain
+        run: scripts/package-toolchain.sh dist build
+
+      # The floor is a property of the linked symbol versions, not of the base
+      # image: this is the check that keeps a single call from moving it.
+      - name: Check the glibc floor
+        run: scripts/check-glibc-floor.sh "${GLIBC_BASELINE}" dist/packages
+
+      - name: Write release notes
+        run: |
+          id=$(sed -n 's/.*"id":"\([^"]*\)".*/\1/p' dist/packages/toolchain.json)
+          fingerprint=$(cat dist/tools/KEY-FINGERPRINT.txt)
+          floor=$(readlink -f /lib/x86_64-linux-gnu/libc.so.6 | xargs basename)
+          {
+            echo "Toolchain \`${id}\`, built on Ubuntu 22.04 with GCC ${GCC_VERSION}."
+            echo
+            echo "* glibc baseline: **${GLIBC_BASELINE}** (\`scripts/check-glibc-floor.sh\` passes)"
+            echo "* release key fingerprint: \`${fingerprint}\`"
+            echo "* built on: \`${floor}\`"
+            echo
+            echo '## Install'
+            echo
+            echo '```sh'
+            echo 'zpkg key add zahlen-release-key.pub --name "zahlen release"'
+            echo 'zpkg install . --require-checksums --require-signatures'
+            echo '```'
+            echo
+            echo '`zpkg install` needs the whole directory: `index.json` describes the'
+            echo 'archives, and `SHA256SUMS`/`SHA256SUMS.ed25519` cover them. The'
+            echo '`cube-consumer-*.tar.gz` bundle, the `zpkg` binary and `SHA256SUMS.tools`'
+            echo 'are not packages and are ignored by the installer.'
+            echo
+            echo '## Build against it'
+            echo
+            echo '```sh'
+            echo 'tar -xzf cube-consumer-*.tar.gz -C consumer'
+            echo 'cmake -S consumer -B consumer-build -G Ninja \'
+            echo '  -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-'"${GCC_VERSION}"' \'
+            echo '  -DCMAKE_PREFIX_PATH="$(zpkg prefix)"'
+            echo 'cmake --build consumer-build'
+            echo '```'
+            echo
+            echo "The toolchain pins its compiler: a consumer must use GCC"
+            echo "${GCC_VERSION} (\`$(${GCC_VERSION:+g++-${GCC_VERSION}} --version | head -1)\`), and the"
+            echo 'configure step refuses anything else. Binaries built here still'
+            echo 'require the build libstdc++ for end users; bundle it before shipping'
+            echo 'a game to machines that will not install GCC '"${GCC_VERSION}"'.'
+          } > dist/release-notes.md
+          cat dist/release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" dist/packages/* dist/tools/* --clobber
+          else
+            gh release create "${RELEASE_TAG}" \
+              --title "${RELEASE_TAG}" \
+              --notes-file dist/release-notes.md \
+              dist/packages/* dist/tools/*
+          fi
+          gh release view "${RELEASE_TAG}" --json assets \
+            --jq '.assets[] | "\(.size|tostring|.[0:7])B  \(.name)"' | sort
+
+      - name: Upload the packaged artifacts as a run artifact too
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zahlen-release-dist
+          path: |
+            dist/packages/
+            dist/tools/
+            dist/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  consume:
+    name: Consume the release (bare jammy, no container)
+    needs: toolchain
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      # This job deliberately downloads nothing but the release: the whole point
+      # is that the published artifacts are sufficient. The repository is here
+      # only for the environment script, which is the same one the build job ran
+      # -- that is what makes "the runtime deps" identical on both sides.
+      - name: Checkout repository (for the environment script only)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          sparse-checkout: scripts
+
+      - name: Download the published release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p dist
+          gh release download "${RELEASE_TAG}" -D dist
+          ls -la dist
+
+      # The compiler is not guessed from the workflow inputs: the toolchain
+      # descriptor in the release says which GCC built it, and the package
+      # config refuses any other compiler version.
+      - name: Read the toolchain descriptor
+        id: tc
+        run: |
+          id=$(sed -n 's/.*"id":"\([^"]*\)".*/\1/p' dist/toolchain.json)
+          gcc=$(sed -n 's/.*"compiler_version":"\([0-9][0-9]*\).*/\1/p' dist/toolchain.json)
+          profile=$(sed -n 's/.*"profile":"\([^"]*\)".*/\1/p' dist/toolchain.json)
+          test -n "${id}" && test -n "${gcc}"
+          echo "id=${id}" >> "$GITHUB_OUTPUT"
+          echo "gcc=${gcc}" >> "$GITHUB_OUTPUT"
+          echo "profile=${profile}" >> "$GITHUB_OUTPUT"
+          echo "toolchain ${id} (gcc ${gcc}, ${profile})"
+
+      - name: Provision a normal dev environment
+        run: scripts/ci-ubuntu-2204-env.sh --consumer --gcc "${{ steps.tc.outputs.gcc }}"
+
+      - name: Install the toolchain from the release, unprivileged
+        run: |
+          install -m755 dist/zpkg-linux-x86_64 "${HOME}/.local/bin/zpkg"
+          echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
+          export PATH="${HOME}/.local/bin:${PATH}"
+          zpkg --version
+          # The manager binary ships separately from the packages, so it has its
+          # own sums file (the packages' SHA256SUMS is zpkg's own contract).
+          ( cd dist && sha256sum -c SHA256SUMS.tools )
+          zpkg key add dist/zahlen-release-key.pub --name "zahlen release"
+          zpkg key list
+          # No ZHLN_ROOT: the default per-user store is what a developer gets.
+          zpkg install dist --require-checksums --require-signatures
+          zpkg list
+          zpkg prefix | tee "${RUNNER_TEMP}/prefix.txt"
+          zpkg which zcook | tee "${RUNNER_TEMP}/zcook.txt"
+
+      - name: Build the consumer app against the installed toolchain
+        run: |
+          prefix=$(cat "${RUNNER_TEMP}/prefix.txt")
+          mkdir -p consumer
+          tar -xzf "dist/cube-consumer-${{ steps.tc.outputs.id }}.tar.gz" -C consumer
+          cmake -S consumer -B consumer-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="gcc-${{ steps.tc.outputs.gcc }}" \
+            -DCMAKE_CXX_COMPILER="g++-${{ steps.tc.outputs.gcc }}" \
+            -DCMAKE_PREFIX_PATH="${prefix}" \
+            -DZahlen_SANITIZER_PROFILE="${{ steps.tc.outputs.profile }}"
+          cmake --build consumer-build --verbose
+          # Nothing may reach back into a checkout: the store is the only source.
+          if grep -Fq "${GITHUB_WORKSPACE}/src" consumer-build/build.ninja; then
+            echo 'FAIL: the consumer build references engine sources' >&2
+            grep -Fn "${GITHUB_WORKSPACE}/src" consumer-build/build.ninja >&2
+            exit 1
+          fi
+
+      # No GPU, no container, no LD_LIBRARY_PATH: lavapipe inside the distro's
+      # own Vulkan loader. The consumer writes a non-constant PPM or the step
+      # fails, so "it ran" cannot be a blank frame.
+      - name: Render a cube
+        run: |
+          mkdir -p out
+          export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+          export VK_ICD_FILENAMES="${VK_DRIVER_FILES}"
+          ./consumer-build/cube out/cube.ppm 2>&1 | tee out/render.log
+          grep -q 'nonconstant=True' out/render.log || {
+            echo 'FAIL: the rendered frame was blank' >&2
+            exit 1
+          }
+          pnmtopng out/cube.ppm >"out/zahlen-cube-${RELEASE_TAG}.png"
+          file "out/zahlen-cube-${RELEASE_TAG}.png"
+
+      # Same guard as the build side, but on what actually got installed into
+      # the user's store -- the artifact the user runs, not the build tree.
+      - name: Check the installed packages against the baseline
+        run: scripts/check-glibc-floor.sh "${GLIBC_BASELINE}" "$(cat "${RUNNER_TEMP}/prefix.txt")"
+
+      - name: Upload the frame and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zahlen-release-render
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Attach the rendered frame to the release
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${RELEASE_TAG}" "out/zahlen-cube-${RELEASE_TAG}.png" --clobber
