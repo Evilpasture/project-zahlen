@@ -8,6 +8,14 @@ leak:libxcb*
 leak:libwayland*
 leak:libdbus*
 
+# Mesa lavapipe (llvmpipe) leaks a small pthread_once-guarded init block during
+# vkCreateInstance, plus per-thread chunks reachable only from it.
+# Not ours: allocation stack is libvulkan.so.1 -> <ICD> -> pthread_once -> malloc.
+leak:libvulkan.so
+leak:libvulkan_lvp.so
+leak:lvp_icd.*
+leak:libLLVM
+
 # FreeType glyph & pattern caches
 leak:libfreetype*
 leak:libharfbuzz*

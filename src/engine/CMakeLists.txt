@@ -56,6 +56,26 @@ if(USE_SANITIZERS)
     target_compile_options(zahlen_sanitizer_options PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
     )
+    # The rules are #embed-ed from the paths exported here, the same way the
+    # default font reaches src/gui/FontLoader.cpp: absolute, so the directive
+    # cannot drift when a file moves, and never a run-time lookup. Only one
+    # level of backslash is needed around the quotes -- "PATH=\"${path}\"" reaches
+    # the compiler as -DPATH="/abs/path", which is a string literal; the doubled
+    # form emits -DPATH=\\\"/abs/path\\\" and fails to expand (see the note in
+    # SanitizerOptions.cpp). OBJECT_DEPENDS is what rebuilds this object when a
+    # rule changes: a preprocessor dependency file is not guaranteed to list an
+    # #embed-ed file.
+    foreach(rule_file IN ITEMS lsan.supp ubsan.supp)
+        if(NOT EXISTS "${PROJECT_SOURCE_DIR}/${rule_file}")
+            message(FATAL_ERROR "zahlen_sanitizer_options: '${rule_file}' is missing from the project root")
+        endif()
+    endforeach()
+    # Both definitions travel as one ;-list value: PROPERTIES pairs names with
+    # values, so a second bare argument would be read as another property name.
+    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/diagnostics/SanitizerOptions.cpp" PROPERTIES
+        COMPILE_DEFINITIONS "ZHLN_LSAN_SUPPRESSIONS_PATH=\"${PROJECT_SOURCE_DIR}/lsan.supp\";ZHLN_UBSAN_SUPPRESSIONS_PATH=\"${PROJECT_SOURCE_DIR}/ubsan.supp\""
+        OBJECT_DEPENDS "${PROJECT_SOURCE_DIR}/lsan.supp;${PROJECT_SOURCE_DIR}/ubsan.supp"
+    )
     target_sources(zahlen_engine INTERFACE
         $<BUILD_INTERFACE:$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:$<TARGET_OBJECTS:zahlen_sanitizer_options>>>
     )

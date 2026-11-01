@@ -35,4 +35,32 @@ int main() { return 0; }" _zahlen_stl_ok)
 endif()
 @ZHLN_SDK_DEPENDENCIES@
 include("${CMAKE_CURRENT_LIST_DIR}/Zahlen@ZHLN_SDK_PACKAGE@Targets.cmake")
+# An asan-ubsan SDK must put its option hooks in the consumer's executable, not
+# in libzahlen_engine.so: glibc resolves the sanitizer's own weak stubs from the
+# executable first, so a hook that only exists in a shared library is never
+# called, and every consumer silently loses the suppressions. The object is
+# referenced through this file's own location, so it survives prefix relocation.
+# Fail here, at configure time, rather than after a full build: without it the
+# run ends with driver-internal leaks reported against the consumer.
+if("@ZHLN_SDK_PACKAGE@" STREQUAL "Engine"
+   AND "@ZHLN_SDK_PROFILE@" STREQUAL "asan-ubsan"
+   AND TARGET Zahlen::Engine)
+    set(_zahlen_sanitizer_options_object
+        "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/zahlen/zahlen_sanitizer_options.o")
+    if(NOT EXISTS "${_zahlen_sanitizer_options_object}")
+        message(FATAL_ERROR
+            "Zahlen asan-ubsan SDK is missing ${_zahlen_sanitizer_options_object}: "
+            "consumer executables would run without the sanitizer option hooks")
+    endif()
+    # find_dependency() re-runs this file for every package that reaches Engine,
+    # so the attach has to be idempotent: linking the same object twice is a
+    # duplicate definition, not a no-op.
+    get_property(_zahlen_engine_links TARGET Zahlen::Engine PROPERTY INTERFACE_LINK_LIBRARIES)
+    if(NOT "${_zahlen_engine_links}" MATCHES "zahlen_sanitizer_options\\.o")
+        set_property(TARGET Zahlen::Engine APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+            "$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:${_zahlen_sanitizer_options_object}>")
+    endif()
+    unset(_zahlen_engine_links)
+    unset(_zahlen_sanitizer_options_object)
+endif()
 check_required_components(Zahlen@ZHLN_SDK_PACKAGE@)

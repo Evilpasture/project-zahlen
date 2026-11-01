@@ -155,6 +155,17 @@ if(ZHLN_NO_ANNOTATION_EXTRACT)
     target_compile_definitions(zahlen_engine INTERFACE ZHLN_NO_ANNOTATION_EXTRACT)
 endif()
 zhln_sdk_package(Engine TARGETS zahlen_engine Jolt HEADERS include)
+# The sanitizer option hooks must be linked into the consumer's executable:
+# libasan's weak stubs shadow anything defined inside libzahlen_engine.so, and
+# an exported INTERFACE source cannot carry a relocatable path, so the object is
+# installed next to the SDK and ZahlenEngineConfig.cmake attaches it. The rules
+# are already compiled into this object; there is no runtime file to find.
+if(TARGET zahlen_sanitizer_options)
+    install(FILES $<TARGET_OBJECTS:zahlen_sanitizer_options>
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen
+        RENAME zahlen_sanitizer_options.o
+        COMPONENT ZahlenEngine)
+endif()
 # Jolt's headers must retain their Jolt/ prefix.
 install(DIRECTORY extern/JoltPhysics/Jolt DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     COMPONENT ZahlenEngine FILES_MATCHING PATTERN "*.h" PATTERN "*.inl")
