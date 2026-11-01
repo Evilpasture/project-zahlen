@@ -313,7 +313,9 @@ when using Docker). Rendering features still depend on the Vulkan driver.
 CI builds and tests two independent `Release` variants. The **asan** variant
 uses ASan/UBSan; **release** sets `USE_SANITIZERS=OFF` and retains CMake's
 portable Release optimization flags (normally `-O3 -DNDEBUG` with GCC). It
-is the appropriate starting point for performance measurements. This does not
+is the appropriate starting point for performance measurements. Only the release
+variant is packaged and published: the sanitized build is a correctness probe and
+never leaves the runner that built it. This does not
 remove Vulkan validation, change renderer features, or enable CPU-specific
 `-march=native`/LTO. Compare the same workloads and runtime settings when timing.
 
@@ -322,23 +324,27 @@ For successful current-`main` runs GHCR publishes:
 | Image | ASan/UBSan | Use |
 | --- | --- | --- |
 | `ghcr.io/evilpasture/project-zahlen:latest` or `:release` | off | optimized runtime |
-| `ghcr.io/evilpasture/project-zahlen:asan` | on | instrumented runtime |
-| `ghcr.io/evilpasture/project-zahlen-builder:latest` or `:asan` | on | existing development workflow |
-| `ghcr.io/evilpasture/project-zahlen-builder:release` | off | prebuilt unsanitized dev/benchmark tree |
+| `ghcr.io/evilpasture/project-zahlen-builder:latest` or `:release` | off | prebuilt dev/benchmark tree |
 
-Both image packages also publish `:<commit-sha>-asan` and
-`:<commit-sha>-release` convenience tags. CI tests and packages the matching
-run-specific `:<sha>-<run-id>-<attempt>-<variant>` tag so overlapping reruns
-cannot replace the tested input. Registry tags are mutable; pin an image digest
-for strict reproducibility. The legacy builder `:<sha>` selects ASan; the
-legacy runtime `:<sha>` selects release. To use
-the unsanitized builder with `scripts/dev-container.sh`, set
-`ZHLN_DEV_IMAGE=ghcr.io/evilpasture/project-zahlen-builder:release` before
-`init`; `reset` the old container first. Both variants are tested before either
-runtime is promoted, and superseded commits are not promoted. Promotion updates
-several tags sequentially, so a failure during promotion can leave a partial
-update. Matrix jobs need enough concurrent GitHub runners to actually run in
-parallel, and two complete builds use more CI time and storage overall.
+Both packages also publish `:<commit-sha>-release` convenience tags, and CI
+tests and packages the matching run-specific `<sha>-<run-id>-<attempt>-release`
+tag so overlapping reruns cannot replace the tested input. Registry tags are
+mutable; pin an image digest for strict reproducibility. The legacy `:<sha>` tag
+on both packages selects release. Instrumented images are no longer published:
+build one locally with `--build-arg ZHLN_USE_SANITIZERS=ON`. Superseded commits
+are not promoted.
+Promotion updates several tags sequentially, so a failure during promotion can
+leave a partial update.
+
+The two variants are two workflows, not one matrix. `.github/workflows/ci.yml`
+is the release lane: it builds, tests, packages the optimized build and promotes
+`:latest`/`:release`/`-builder:latest`/`-builder:release`.
+`.github/workflows/ci-sanitizers.yml` is the ASan/UBSan lane: it builds the
+instrumented tree on its own runner and runs `ztest` against it, on every push
+and pull request plus nightly, publishing nothing. A matrix leg is part of a job
+id, so keeping both in one workflow made every release step wait for the hourly
+instrumented compile; split in two, a slow sanitizer run delays nothing that
+ships.
 
 For a local Docker build, pass `--build-arg ZHLN_USE_SANITIZERS=OFF` for release
 or `ON` for ASan/UBSan (the default), for either the `builder` or `runner`

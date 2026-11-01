@@ -1,0 +1,115 @@
+name: Zahlen sanitizers (ASan/UBSan)
+
+# The instrumentation lane: build the engine with ASan/UBSan and run ztest
+# against that build tree. That is the whole contract.
+#
+# No image is published, no package is installed, nothing is promoted. This lane
+# answers one question -- "does the engine still behave when every access is
+# checked" -- and the answer is not a deployment artifact.
+#
+# Two things brought it here:
+#   * It used to be a leg of the matrix in ci.yml, so every release step carried
+#     `needs: build`. A matrix leg is part of one job id, which made the whole
+#     release lane queue behind an hour of instrumented compile.
+#   * It used to build, push and promote a sanitized runtime image as well.
+#     Shipping images belong to the release lane; a probe is not a product.
+#
+# Build and test share a single job on purpose. There is nothing to hand over, so
+# the builder image is never pushed to or pulled from the registry -- it is built
+# on this runner and thrown away with it -- and a rerun of the job re-materializes
+# the compile from the Actions layer cache instead of transferring a multi-
+# gigabyte image.
+
+on:
+  push:
+    branches: [main, master]
+    # A documentation-only push cannot change what this lane measures.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main, master]
+  # The lane is expensive and it gates nothing, so let it also run on a schedule
+  # rather than only when somebody happens to push. Path filters are ignored for
+  # schedule and manual runs.
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only the libraries with no Arch package stay vendored. Slang, GLFW, simdjson,
+# Vulkan-Headers and LuaJIT are provisioned by the distro inside the image, so
+# cloning them (slang alone is the largest tree in the repo) is pure overhead:
+# their CMake probes prefer the system copy and every shipped compiler and
+# library they resolve to is a package. Jolt, VulkanMemoryAllocator,
+# meshoptimizer, SPIRV-Reflect, volk, mimalloc and the header-only
+# cgltf/stb/clay/miniaudio are added with add_subdirectory or included straight
+# out of extern/, so they must be present.
+env:
+  VENDORED_SUBMODULES: >-
+    extern/JoltPhysics
+    extern/VulkanMemoryAllocator
+    extern/SPIRV-Reflect
+    extern/volk
+    extern/meshoptimizer
+    extern/mimalloc
+    extern/miniaudio
+    extern/cgltf
+    extern/clay
+    extern/stb
+
+# PR updates supersede earlier runs of that PR. Pushes use unique groups so
+# independent commits can build and test concurrently instead of queueing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  asan:
+    name: ASan/UBSan (build + ztest)
+    runs-on: ubuntu-latest
+    # An instrumented compile that wedges must not hold the runner for the
+    # default six hours; this lane is allowed to be slow, not to be stuck.
+    timeout-minutes: 210
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Fetch vendored libraries
+        run: git submodule update --init --depth 1 ${VENDORED_SUBMODULES}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # `load: true` instead of `push: true`: the image must be runnable on this
+      # runner and nowhere else. No registry login, no packages:write.
+      - name: Build instrumented builder image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: builder
+          load: true
+          tags: zahlen-builder:asan
+          build-args: |
+            ZHLN_USE_SANITIZERS=ON
+          cache-from: type=gha,scope=zahlen-asan
+          cache-to: type=gha,scope=zahlen-asan,mode=max
+
+      - name: Run ztest suite
+        run: |
+          set -o pipefail
+          docker run --rm zahlen-builder:asan \
+            ./build/bin/ztest --test-dir build -V 2>&1 | tee ztest.log
+
+      - name: Upload ztest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ztest-log-asan
+          path: ztest.log
+          if-no-files-found: ignore
