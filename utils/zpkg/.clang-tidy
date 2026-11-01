@@ -1,0 +1,41 @@
+# zpkg's naming follows its neighbours, not its own taste: the engine
+# (include/Zahlen) and the sibling host tool (utils/zcook) both write
+# PascalCase functions and types, camelCase data, m_-prefixed private members
+# and unprefixed PascalCase constants.
+#
+# This file exists because the repository root .clang-tidy enables the whole
+# readability-* family but never sets readability-identifier-naming, so casing
+# is the one part of the house style nothing checked. zpkg is the first tree to
+# state it explicitly.
+---
+Checks: '-*,readability-identifier-naming'
+HeaderFilterRegex: 'utils/zpkg/.*'
+CheckOptions:
+  # ZHLN, as everywhere else in the repository: the manager is inside the engine's
+  # namespace, not beside it.
+  - {key: readability-identifier-naming.NamespaceCase,              value: UPPER_CASE}
+  # 'log' is the engine's own console namespace and is spelled the same here.
+  - {key: readability-identifier-naming.NamespaceIgnoredRegexp,     value: '^log$'}
+  - {key: readability-identifier-naming.ClassCase,                  value: CamelCase}
+  - {key: readability-identifier-naming.StructCase,                 value: CamelCase}
+  - {key: readability-identifier-naming.UnionCase,                  value: CamelCase}
+  - {key: readability-identifier-naming.EnumCase,                   value: CamelCase}
+  - {key: readability-identifier-naming.EnumConstantCase,           value: CamelCase}
+  - {key: readability-identifier-naming.TypeAliasCase,              value: CamelCase}
+  - {key: readability-identifier-naming.TypedefCase,                value: CamelCase}
+  - {key: readability-identifier-naming.FunctionCase,               value: CamelCase}
+  - {key: readability-identifier-naming.FunctionIgnoredRegexp,      value: '^main$'}
+  - {key: readability-identifier-naming.ClassMethodCase,            value: CamelCase}
+  - {key: readability-identifier-naming.ConstexprVariableCase,      value: CamelCase}
+  - {key: readability-identifier-naming.ClassConstantCase,          value: CamelCase}
+  - {key: readability-identifier-naming.GlobalConstantCase,         value: CamelCase}
+  - {key: readability-identifier-naming.StaticConstantCase,         value: CamelCase}
+  - {key: readability-identifier-naming.GlobalVariableCase,         value: camelBack}
+  - {key: readability-identifier-naming.StaticVariableCase,         value: camelBack}
+  - {key: readability-identifier-naming.PublicMemberCase,           value: camelBack}
+  - {key: readability-identifier-naming.ProtectedMemberCase,        value: camelBack}
+  - {key: readability-identifier-naming.PrivateMemberCase,          value: camelBack}
+  - {key: readability-identifier-naming.PrivateMemberPrefix,        value: 'm_'}
+  - {key: readability-identifier-naming.LocalVariableCase,          value: camelBack}
+  - {key: readability-identifier-naming.ParameterCase,              value: camelBack}
+  - {key: readability-identifier-naming.TypeTemplateParameterCase,  value: CamelCase}

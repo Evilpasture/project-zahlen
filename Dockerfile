@@ -116,7 +116,7 @@ ARG ZHLN_USE_SANITIZERS=ON
 RUN cmake -B build -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DZHLN_BUILD_TESTS=ON \
-    -DZHLN_INSTALL_SDK=ON \
+    -DZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON \
     -DUSE_SANITIZERS=${ZHLN_USE_SANITIZERS} \
     -DZHLN_IN_DOCKER=ON \
     -DZHLN_HAS_BLENDER=OFF \
@@ -124,6 +124,16 @@ RUN cmake -B build -S . -G Ninja \
 
 # 2. Build everything (Engine, Asset Cooker, ztest, and Test Executables)
 RUN cmake --build build
+
+# 2b. Build and test zpkg. It is a standalone CMake project on purpose: it must
+#     not inherit this tree's sanitizer flags, reflection step or -mavx2, because
+#     the manager has to run on a machine that has none of that yet. Running its
+#     tests here means the toolchain test below uses a manager that was proven
+#     before it managed anything.
+RUN cmake -S utils/zpkg -B build-zpkg -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DZPKG_BUILD_TESTS=ON && \
+    cmake --build build-zpkg && \
+    ctest --test-dir build-zpkg --output-on-failure
 
 # Verify that the chosen variant actually reached the linked binaries. This
 # catches accidentally packaging an ASan/UBSan engine as the speed build (or a

@@ -186,8 +186,8 @@ jobs:
           path: ztest.log
           if-no-files-found: ignore
 
-  sdk-test:
-    name: Installed app / Lavapipe (${{ matrix.variant }})
+  toolchain-test:
+    name: Installed packages / Lavapipe (${{ matrix.variant }})
     runs-on: ubuntu-latest
     needs: [prepare, build, test]
     strategy:
@@ -241,26 +241,64 @@ jobs:
           fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
-      - name: Render actual app/cube.cpp from installed packages with Lavapipe
+      # No sudo, no root, no LD_LIBRARY_PATH: the script re-executes itself as an
+      # unprivileged user and installs the packages with zpkg into ~/.local.
+      - name: Install engine packages with zpkg and render app/cube.cpp
         run: |
-          mkdir -p sdk-output
+          mkdir -p toolchain-output
           docker run --rm --entrypoint bash \
-            -v "$PWD/sdk-output:/sdk-output" \
-            "${{ steps.image.outputs.ref }}" scripts/test-installed-sdk.sh
+            -v "$PWD/toolchain-output:/pkg-output" \
+            "${{ steps.image.outputs.ref }}" scripts/test-toolchain-install.sh
 
-      - name: Upload split SDK packages and rendered frame
+      - name: Upload toolchain packages and rendered frame
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zahlen-sdk-${{ matrix.variant }}
-          path: sdk-output/
+          name: zahlen-toolchain-${{ matrix.variant }}
+          path: toolchain-output/
           if-no-files-found: error
 
+
+  # Windows is a shipping target for zpkg, and the Windows build is a different
+  # program underneath: extended-length paths, _wfopen instead of std::ofstream,
+  # LockFileEx instead of flock, no symlinked shims. None of that is exercised by
+  # the Linux lanes, so it is built and tested here rather than assumed.
+  zpkg-windows:
+    name: zpkg (Windows/MSVC)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # simdjson, zlib, zstd, OpenSSL and libcurl all ship CMake configs through
+      # vcpkg, which is what utils/zpkg/CMakeLists.txt looks for.
+      - name: Install dependencies
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install simdjson zlib zstd curl openssl --triplet x64-windows
+
+      - name: Configure
+        run: >
+          cmake -S utils/zpkg -B build-zpkg -A x64
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build
+        run: cmake --build build-zpkg --config Release
+
+      - name: Test
+        run: ctest --test-dir build-zpkg -C Release --output-on-failure
+
+      - name: Report what was built
+        run: build-zpkg/Release/zpkg.exe --version
 
   deploy:
     name: Package runtime (${{ matrix.variant }})
     runs-on: ubuntu-latest
-    needs: [prepare, build, test, sdk-test]
+    needs: [prepare, build, test, toolchain-test]
     strategy:
       fail-fast: false
       matrix:

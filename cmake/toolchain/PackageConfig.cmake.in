@@ -1,0 +1,66 @@
+@PACKAGE_INIT@
+include(CMakeFindDependencyMacro)
+if(CMAKE_CONFIGURATION_TYPES OR (CMAKE_BUILD_TYPE AND NOT CMAKE_BUILD_TYPE STREQUAL "Release"))
+    message(FATAL_ERROR "This Zahlen toolchain has a Release Jolt ABI; use a single-config Release consumer")
+endif()
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build configuration" FORCE)
+endif()
+# Do not silently accept a different compiler, CPU ABI, or instrumentation.
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "@CMAKE_CXX_COMPILER_ID@" OR
+   NOT CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "@CMAKE_CXX_COMPILER_VERSION@" OR
+   NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "@CMAKE_SYSTEM_PROCESSOR@")
+    message(FATAL_ERROR "Zahlen toolchain requires @CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@ on @CMAKE_SYSTEM_PROCESSOR@")
+endif()
+set(Zahlen_SANITIZER_PROFILE "release" CACHE STRING "Zahlen toolchain profile: release or asan-ubsan")
+if(NOT Zahlen_SANITIZER_PROFILE STREQUAL "@ZHLN_TOOLCHAIN_PROFILE@")
+    message(FATAL_ERROR "Zahlen profile mismatch: request @ZHLN_TOOLCHAIN_PROFILE@ explicitly")
+endif()
+get_property(_zahlen_abi GLOBAL PROPERTY Zahlen_TOOLCHAIN_ABI)
+if(_zahlen_abi AND NOT _zahlen_abi STREQUAL "@ZHLN_TOOLCHAIN_ABI@")
+    message(FATAL_ERROR "Cannot mix Zahlen packages from different toolchain builds")
+endif()
+set_property(GLOBAL PROPERTY Zahlen_TOOLCHAIN_ABI "@ZHLN_TOOLCHAIN_ABI@")
+if(NOT _zahlen_abi)
+    include(CheckCXXSourceCompiles)
+    unset(_zahlen_stl_ok CACHE)
+    check_cxx_source_compiles("#include <string>
+#if !defined(__GLIBCXX__) || __GLIBCXX__ != @ZHLN_TOOLCHAIN___GLIBCXX__@ || _GLIBCXX_USE_CXX11_ABI != @ZHLN_TOOLCHAIN__GLIBCXX_USE_CXX11_ABI@ || defined(_GLIBCXX_DEBUG)
+#error incompatible Zahlen standard library ABI
+#endif
+int main() { return 0; }" _zahlen_stl_ok)
+    if(NOT _zahlen_stl_ok)
+        message(FATAL_ERROR "Zahlen toolchain requires its build's libstdc++ ABI and version")
+    endif()
+endif()
+@ZHLN_TOOLCHAIN_DEPENDENCIES@
+include("${CMAKE_CURRENT_LIST_DIR}/Zahlen@ZHLN_TOOLCHAIN_PACKAGE@Targets.cmake")
+# An asan-ubsan toolchain must put its option hooks in the consumer's executable, not
+# in libzahlen_engine.so: glibc resolves the sanitizer's own weak stubs from the
+# executable first, so a hook that only exists in a shared library is never
+# called, and every consumer silently loses the suppressions. The object is
+# referenced through this file's own location, so it survives prefix relocation.
+# Fail here, at configure time, rather than after a full build: without it the
+# run ends with driver-internal leaks reported against the consumer.
+if("@ZHLN_TOOLCHAIN_PACKAGE@" STREQUAL "Engine"
+   AND "@ZHLN_TOOLCHAIN_PROFILE@" STREQUAL "asan-ubsan"
+   AND TARGET Zahlen::Engine)
+    set(_zahlen_sanitizer_options_object
+        "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/zahlen/zahlen_sanitizer_options.o")
+    if(NOT EXISTS "${_zahlen_sanitizer_options_object}")
+        message(FATAL_ERROR
+            "Zahlen asan-ubsan toolchain is missing ${_zahlen_sanitizer_options_object}: "
+            "consumer executables would run without the sanitizer option hooks")
+    endif()
+    # find_dependency() re-runs this file for every package that reaches Engine,
+    # so the attach has to be idempotent: linking the same object twice is a
+    # duplicate definition, not a no-op.
+    get_property(_zahlen_engine_links TARGET Zahlen::Engine PROPERTY INTERFACE_LINK_LIBRARIES)
+    if(NOT "${_zahlen_engine_links}" MATCHES "zahlen_sanitizer_options\\.o")
+        set_property(TARGET Zahlen::Engine APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+            "$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:${_zahlen_sanitizer_options_object}>")
+    endif()
+    unset(_zahlen_engine_links)
+    unset(_zahlen_sanitizer_options_object)
+endif()
+check_required_components(Zahlen@ZHLN_TOOLCHAIN_PACKAGE@)

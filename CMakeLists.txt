@@ -37,8 +37,8 @@ endif()
 
 project(zahlen VERSION 0.1.0 LANGUAGES C CXX ASM)
 
-option(ZHLN_INSTALL_SDK "Install independently consumable SDK packages" OFF)
-if(ZHLN_INSTALL_SDK)
+option(ZHLN_INSTALL_TOOLCHAIN_PACKAGES "Install independently consumable toolchain packages" OFF)
+if(ZHLN_INSTALL_TOOLCHAIN_PACKAGES)
     # Jolt is shipped with Engine, with the exact ABI used by this build.
     set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 endif()
@@ -643,6 +643,6 @@ if(ZHLN_SYNTAX_ONLY)
     include(SyntaxOnly)
 endif()
 
-if(ZHLN_INSTALL_SDK)
-    include(ZahlenSDK)
+if(ZHLN_INSTALL_TOOLCHAIN_PACKAGES)
+    include(Toolchains)
 endif()

@@ -54,7 +54,7 @@ bool WriteCapture(const char* path, const CapturedFrame& frame) {
 bool RunInstalledCubeSmoke(void (*createScene)(Engine&), const char* ppmPath) {
     validationErrors.store(0, std::memory_order_relaxed);
     EngineConfig config {
-        .appName = "Installed SDK cube",
+        .appName = "Installed toolchain cube",
         .width = 320,
         .height = 240,
         .vsync = false,

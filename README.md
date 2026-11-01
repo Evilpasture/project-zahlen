@@ -222,6 +222,25 @@ See [here](https://en.cppreference.com/cpp/compiler_support/26) for detailed com
 
 These packages are expected to be installed on the host operating system: Read the Dockerfile.
 
+## Installing engine packages without root
+
+Released toolchains are consumed with `zpkg`, a per-user package manager. It
+installs engine packages into `${XDG_DATA_HOME:-~/.local/share}/zahlen`, keeps
+each toolchain in its own immutable directory, and switches them with a single
+symlink. No root, no system prefix, no `LD_LIBRARY_PATH`:
+
+```sh
+zpkg install ./toolchain-output --require-checksums   # or ./zahlen-engine-*.tar.gz
+cmake -S my_game -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH="$(zpkg prefix)"
+zpkg list                                            # what is installed, active marked
+```
+
+Only `/usr/bin/zpkg` itself comes from the distribution. Development and the
+engine runtime stay entirely in user space; see
+[`packaging/README.md`](packaging/README.md) for the store layout, the package
+metadata, and the invariants CI enforces.
+
 ## Bundled / External Libraries
 These are located in the `extern/` and `third_party/` directories. To not update this everytime I add or remove a dependency, ls the directories. Take my words, it's all open source.
 

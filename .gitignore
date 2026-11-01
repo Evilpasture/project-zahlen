@@ -14,6 +14,9 @@
 
 # --- Build Artifacts ---
 build/
+# zpkg is a standalone project, so it gets its own build directory; see
+# utils/zpkg/CMakeLists.txt for why it is not part of the engine build.
+build-zpkg*/
 dist/
 target/
 bin/

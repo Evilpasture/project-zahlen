@@ -11,17 +11,17 @@
 // executable's weak stubs unless the strong definitions also link into the
 // executable itself.
 //
-// The same holds for a consumer of the installed SDK: the hook object rides on
+// The same holds for a consumer of an installed toolchain: the hook object rides
 // zahlen_engine as a $<BUILD_INTERFACE:...> source, which an exported target
 // drops, and an exported INTERFACE source cannot carry a relocatable path. The
-// SDK therefore installs this object and ZahlenEngineConfig.cmake attaches it
-// (see cmake/ZahlenSDK.cmake and cmake/sdk/PackageConfig.cmake.in). Without
+// toolchain therefore installs this object and ZahlenEngineConfig.cmake attaches it
+// (see cmake/Toolchains.cmake and cmake/toolchain/PackageConfig.cmake.in). Without
 // that, an asan-ubsan consumer runs with no rules at all and reports the
 // driver's own one-time-init leaks as if they were the application's.
 //
 // The rules are #embed-ed from lsan.supp / ubsan.supp, the same way the default
 // font and the cooked shader modules arrive, so there is no path to resolve at
-// startup: an installed prefix is relocated with mv, the SDK test hides
+// startup: an installed prefix is relocated with mv, the packaging test hides
 // /workspace on purpose, and the payload image has no source tree at all. A
 // suppressions=<path> flag naming a missing file is *fatal* (LeakSanitizer
 // prints "failed to read suppressions file" and dies before reporting
@@ -79,7 +79,7 @@ extern "C" {
     return "protect_shadow_gap=0:detect_leaks=1:symbolize=1:halt_on_error=1";
 }
 
-// print_suppressions stays 0 outside CI: the SDK test turns it on through
+// print_suppressions stays 0 outside CI: the packaging test turns it on through
 // LSAN_OPTIONS so a rule that stops matching is visible in the log.
 [[gnu::visibility("default")]] auto __lsan_default_options() -> const char* {
     return "print_suppressions=0";

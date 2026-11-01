@@ -4,6 +4,11 @@
 
 # Build directories & binaries
 build/
+# zpkg builds as a standalone project in its own directory (utils/zpkg). It is
+# git-ignored like build/ and must be docker-ignored for the same reason: a
+# CMakeCache.txt from the host names a source path that does not exist in the
+# image, and stage 2b then refuses to configure instead of building.
+build-zpkg*/
 dist/
 target/
 bin/
@@ -27,6 +32,7 @@ ipch/
 *.o
 *.obj
 .cache/
+.zahlen-dev/
 .pytest_cache/
 __pycache__/
 gcm.cache/
