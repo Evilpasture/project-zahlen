@@ -15,9 +15,13 @@
 # spawn 4 compiler/linker subprocesses, and cold configures short-circuit on
 # the first fastest available linker.
 
+set(ZHLN_LINKER_OVERRIDE "" CACHE STRING
+    "Use this linker instead of probing for the fastest one (bfd, gold, lld, mold)")
+
 if(NOT ZHLN_CACHED_LINKER_COMPILER STREQUAL "${CMAKE_CXX_COMPILER}"
    OR NOT ZHLN_CACHED_TARGET_TRIPLE
-   OR NOT ZHLN_CACHED_LINKER)
+   OR NOT ZHLN_CACHED_LINKER
+   OR ZHLN_LINKER_OVERRIDE)
     execute_process(
         COMMAND ${CMAKE_CXX_COMPILER} -dumpmachine
         OUTPUT_VARIABLE _zhln_triple
@@ -30,17 +34,28 @@ if(NOT ZHLN_CACHED_LINKER_COMPILER STREQUAL "${CMAKE_CXX_COMPILER}"
     endif()
 
     set(_zhln_linker "bfd")
-    execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=mold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE _mold_ver)
-    if(_mold_ver MATCHES "mold")
-        set(_zhln_linker "mold")
+    if(ZHLN_LINKER_OVERRIDE)
+        # A pinned linker is used verbatim: the probe below asks the compiler
+        # whether it *can* drive a linker, which is a different question from
+        # whether that linker can consume this link's inputs. When the target is
+        # a foreign sysroot, mold answers yes and then dies on GCC's own
+        # "INPUT ( AS_NEEDED ( -latomic ) )" script, which it cannot parse:
+        #   mold: fatal: <sysroot>/usr/lib/gcc/.../libatomic_asneeded.so:3:
+        #   library not found: AS_NEEDED
+        set(_zhln_linker "${ZHLN_LINKER_OVERRIDE}")
     else()
-        execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=lld -Wl,--version ERROR_QUIET OUTPUT_VARIABLE _lld_ver)
-        if(_lld_ver MATCHES "LLD")
-            set(_zhln_linker "lld")
+        execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=mold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE _mold_ver)
+        if(_mold_ver MATCHES "mold")
+            set(_zhln_linker "mold")
         else()
-            execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=gold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE _gold_ver)
-            if(_gold_ver MATCHES "GNU gold")
-                set(_zhln_linker "gold")
+            execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=lld -Wl,--version ERROR_QUIET OUTPUT_VARIABLE _lld_ver)
+            if(_lld_ver MATCHES "LLD")
+                set(_zhln_linker "lld")
+            else()
+                execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=gold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE _gold_ver)
+                if(_gold_ver MATCHES "GNU gold")
+                    set(_zhln_linker "gold")
+                endif()
             endif()
         endif()
     endif()

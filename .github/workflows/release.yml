@@ -12,7 +12,11 @@ name: Release (Ubuntu 22.04 baseline)
 # normal dev environment and the release itself.
 #
 # Two jobs, deliberately different in kind:
-#   toolchain  build on jammy, package, sign, publish to a GitHub Release.
+#   toolchain  build in the Arch builder image (where slang, dxc and the Vulkan
+#              stack are cheap) but compile and link against an Ubuntu 22.04
+#              sysroot, package, sign, publish to a GitHub Release. The compiler
+#              comes from that sysroot, so it is the very package a jammy user
+#              installs -- which is what the package config's compiler pin needs.
 #   consume    NO container, NO checkout of build outputs: a fresh jammy runner
 #              downloads that release, installs it with zpkg as an unprivileged
 #              user, builds a consumer app against it and renders a cube on
@@ -32,6 +36,11 @@ on:
         description: 'GCC major for the toolchain build (reflection needs 16)'
         required: false
         default: '16'
+      wayland_only:
+        description: 'Build the release without the X11 fallback backend'
+        required: false
+        type: boolean
+        default: false
 
 # Releases are created and updated with the workflow token.
 permissions:
@@ -52,25 +61,27 @@ concurrency:
 
 jobs:
   toolchain:
-    name: Toolchain + publish (jammy, glibc 2.35)
+    name: Toolchain (Arch builder, glibc 2.35 target)
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 240
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: false
 
-      # jammy is older than what this tree expects in four places (glfw 3.3 vs
-      # the required 3.4, no simdjson 5.x, Vulkan headers 1.3 vs the 1.4 the
-      # renderer targets, no slang), so those come from the pinned submodules
-      # and cmake/ThirdParty.cmake's probes fall back to them automatically.
-      # Everything else keeps the vendored trees ci.yml already builds.
-      - name: Fetch vendored trees jammy does not provide
+      # The image bakes the checkout into /workspace, so these have to be present
+      # before `docker build`. All fourteen are needed by a *release* build for a
+      # reason the journal records one by one: slang and glfw because the image's
+      # copies are Arch binaries that cannot ship, the rest because the sysroot
+      # deliberately holds no newer-than-jammy copy of them (simdjson 5.x, Vulkan
+      # headers 1.4, GLFW 3.4) or holds none at all.
+      - name: Fetch vendored trees
         run: |
           git submodule update --init --depth 1 \
             extern/JoltPhysics \
             extern/VulkanMemoryAllocator \
+            extern/Vulkan-Headers \
             extern/SPIRV-Reflect \
             extern/volk \
             extern/meshoptimizer \
@@ -81,69 +92,70 @@ jobs:
             extern/stb \
             extern/glfw \
             extern/simdjson \
-            extern/slang \
-            extern/Vulkan-Headers
+            extern/slang
 
-      - name: Provision the environment
-        run: scripts/ci-ubuntu-2204-env.sh --build --gcc "${GCC_VERSION}"
+      # Built before the sysroot exists, so the 865 MB sysroot never becomes part
+      # of the Docker build context.
+      - name: Build the Arch builder image
+        run: docker build --target builder -t zahlen-builder:release .
 
-      # The flags are the image's, minus the two that only made sense inside it:
-      # ZHLN_IN_DOCKER (we are on a real distro, and lavapipe comes from apt)
-      # and any Arch-built Vulkan sandbox.
-      - name: Configure
+      # The build host (Arch, glibc 2.44) and the target (jammy, glibc 2.35) are
+      # different on purpose: the container has every build dependency cheap, the
+      # sysroot decides what the artifact links against. apt runs in here only to
+      # resolve the jammy side's transitive libraries; nothing is compiled in it.
+      #
+      # The export path is /opt/jammy, which is also where the next step mounts it.
+      # That is not cosmetic: the generated toolchain file records the sysroot by
+      # absolute path, so exporting to one path and mounting at another would point
+      # the build at a directory that does not exist.
+      #
+      # Wayland is the target's window backend and the build checks for it, so the
+      # sysroot always gets libwayland-dev, libxkbcommon-dev, wayland-protocols and
+      # libwayland-bin (wayland-scanner). The X11 -dev packages are the fallback
+      # backend; `wayland_only` drops them and the engine then records no libX11
+      # dependency -- useful for a kiosk or a compositor-only machine, at the cost
+      # of not starting on an X11 session.
+      - name: Assemble the glibc 2.35 target sysroot
+        env:
+          WAYLAND_ONLY: ${{ inputs.wayland_only && '1' || '' }}
         run: |
-          cmake -B build -S . -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER="gcc-${GCC_VERSION}" \
-            -DCMAKE_CXX_COMPILER="g++-${GCC_VERSION}" \
-            -DZHLN_BUILD_TESTS=ON \
-            -DZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON \
-            -DUSE_SANITIZERS=OFF \
-            -DZHLN_SLANG_VENDORED=ON \
-            -DZHLN_TEST_VULKAN_SANDBOX=OFF \
-            -DZHLN_HAS_BLENDER=OFF
+          rm -rf .jammy
+          docker run --rm \
+            -v "${PWD}:/workspace" -w /workspace \
+            -v "${PWD}/.jammy:/opt/jammy" \
+            ubuntu:22.04 bash scripts/setup-jammy-target.sh --export /opt/jammy \
+              ${WAYLAND_ONLY:+--no-x11}
 
-      - name: Build engine, cooker and tests
-        run: cmake --build build
-
-      - name: Build and test zpkg
+      - name: Build, test and package against that sysroot
         run: |
-          cmake -S utils/zpkg -B build-zpkg -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DZPKG_BUILD_TESTS=ON
-          cmake --build build-zpkg
-          ctest --test-dir build-zpkg --output-on-failure
+          rm -rf dist
+          docker run --rm \
+            -v "${PWD}/.jammy:/opt/jammy" \
+            -v "${PWD}/dist:/dist" \
+            -e ZHLN_GLIBC_BASELINE="${GLIBC_BASELINE}" \
+            zahlen-builder:release bash scripts/build-release-toolchain.sh /dist
 
-      # The same suite ci.yml runs, on the distro the release targets. A release
-      # built here that fails its own tests must not be published.
-      # The environment step exports the ICD it found (jammy names the manifest
-      # lvp_icd.x86_64.json, Arch lvp_icd.json); the fallback keeps this step
-      # runnable on its own.
-      - name: Test (ztest on lavapipe)
-        run: |
-          export VK_DRIVER_FILES="${VK_DRIVER_FILES:-$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)}"
-          export VK_ICD_FILENAMES="${VK_DRIVER_FILES}"
-          echo "ICD: ${VK_DRIVER_FILES}"
-          ./build/bin/ztest --test-dir build -V
-
-      - name: Package, sign and index the toolchain
-        run: scripts/package-toolchain.sh dist build
-
-      # The floor is a property of the linked symbol versions, not of the base
-      # image: this is the check that keeps a single call from moving it.
-      - name: Check the glibc floor
-        run: scripts/check-glibc-floor.sh "${GLIBC_BASELINE}" dist/packages
+      # A second look from the host, on the packaged archives rather than a build
+      # tree: this is the same guard the consumer job applies after installing.
+      - name: Check the glibc floor of the published packages
+        run: scripts/check-glibc-floor.sh "${GLIBC_BASELINE}" dist/packages dist/tools
 
       - name: Write release notes
         run: |
           id=$(sed -n 's/.*"id":"\([^"]*\)".*/\1/p' dist/packages/toolchain.json)
           fingerprint=$(cat dist/tools/KEY-FINGERPRINT.txt)
-          floor=$(readlink -f /lib/x86_64-linux-gnu/libc.so.6 | xargs basename)
+          compiler=$(sed -n 's/.*"compiler":"\([^"]*\)".*/\1/p' dist/packages/toolchain.json)
+          compiler_version=$(sed -n 's/.*"compiler_version":"\([^"]*\)".*/\1/p' dist/packages/toolchain.json)
           {
-            echo "Toolchain \`${id}\`, built on Ubuntu 22.04 with GCC ${GCC_VERSION}."
+            echo "Toolchain \`${id}\`, ${compiler} ${compiler_version}."
             echo
-            echo "* glibc baseline: **${GLIBC_BASELINE}** (\`scripts/check-glibc-floor.sh\` passes)"
+            echo "* glibc baseline: **${GLIBC_BASELINE}**, enforced by \`scripts/check-glibc-floor.sh\`"
             echo "* release key fingerprint: \`${fingerprint}\`"
-            echo "* built on: \`${floor}\`"
+            backends=$(cat dist/window-backends.txt 2>/dev/null || echo 'wayland=ON x11=ON')
+            echo "* window backends: ${backends} (GLFW is vendored and static; Wayland is the primary backend)"
+            echo "* built in the Arch builder image, linked against an Ubuntu 22.04 sysroot"
+            echo '* with that distro'"'"'s own GCC 16 package, so a consumer can install the'
+            echo '  exact compiler this was built with.'
             echo
             echo '## Install'
             echo
@@ -152,26 +164,31 @@ jobs:
             echo 'zpkg install . --require-checksums --require-signatures'
             echo '```'
             echo
-            echo '`zpkg install` needs the whole directory: `index.json` describes the'
-            echo 'archives, and `SHA256SUMS`/`SHA256SUMS.ed25519` cover them. The'
-            echo '`cube-consumer-*.tar.gz` bundle, the `zpkg` binary and `SHA256SUMS.tools`'
-            echo 'are not packages and are ignored by the installer.'
-            echo
             echo '## Build against it'
             echo
             echo '```sh'
             echo 'tar -xzf cube-consumer-*.tar.gz -C consumer'
             echo 'cmake -S consumer -B consumer-build -G Ninja \'
-            echo '  -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-'"${GCC_VERSION}"' \'
+            echo '  -DCMAKE_BUILD_TYPE=Release \'
+            echo "  -DCMAKE_CXX_COMPILER=g++-${GCC_VERSION} \"
             echo '  -DCMAKE_PREFIX_PATH="$(zpkg prefix)"'
             echo 'cmake --build consumer-build'
             echo '```'
             echo
-            echo "The toolchain pins its compiler: a consumer must use GCC"
-            echo "${GCC_VERSION} (\`$(${GCC_VERSION:+g++-${GCC_VERSION}} --version | head -1)\`), and the"
-            echo 'configure step refuses anything else. Binaries built here still'
-            echo 'require the build libstdc++ for end users; bundle it before shipping'
-            echo 'a game to machines that will not install GCC '"${GCC_VERSION}"'.'
+            echo 'The toolchain pins its compiler. On Ubuntu 22.04 install the GCC 16'
+            echo 'package from the `ubuntu-toolchain-r/test` PPA:'
+            echo
+            echo '```sh'
+            echo 'sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test'
+            echo 'sudo apt-get update && sudo apt-get install -y g++-16'
+            echo '```'
+            echo
+            echo 'That is not only for building against the toolchain: the engine and the'
+            echo 'tools were compiled by that GCC, so the `libstdc++6` it brings is what'
+            echo 'they need at run time on 22.04. Nothing else is implied -- the release'
+            echo 'carries its own GLFW (static, inside `libzahlen_engine`), so no'
+            echo '`libglfw3` is required, and the GLIBC_2.35 floor is checked before'
+            echo 'anything is published.'
           } > dist/release-notes.md
           cat dist/release-notes.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -244,7 +261,7 @@ jobs:
           echo "toolchain ${id} (gcc ${gcc}, ${profile})"
 
       - name: Provision a normal dev environment
-        run: scripts/ci-ubuntu-2204-env.sh --consumer --gcc "${{ steps.tc.outputs.gcc }}"
+        run: scripts/ci-ubuntu-2204-env.sh --consumer --gcc "${{ steps.tc.outputs.gcc }}" --glibc-baseline "${GLIBC_BASELINE}"
 
       - name: Install the toolchain from the release, unprivileged
         run: |
