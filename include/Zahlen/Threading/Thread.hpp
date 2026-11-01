@@ -27,6 +27,11 @@ struct alignas(128) Fiber {
     bool              isMain;
     std::atomic<bool> isRunning;
     std::atomic<bool> taskDone {false};
+    // True while this fiber has an entry in a ready or background ring. A wake
+    // that arrives for a fiber already queued must not add a second entry: the
+    // second entry would resume a fiber that is no longer parked, and the task
+    // it would run no longer belongs to anyone.
+    std::atomic<bool> queued {false};
 
     static auto GetCurrent() noexcept -> Fiber*;
     static void Yield() noexcept;

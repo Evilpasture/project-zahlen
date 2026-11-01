@@ -146,17 +146,48 @@ void SetCurrentThreadHighPriority() noexcept {
     return slot < totalWorkers ? slot : 0;
 }
 
+enum class EnqueueResult : uint8_t {
+    Enqueued,
+    AlreadyQueued,
+};
+
+// A fiber may own at most one entry in a ready ring. Without this, two wakes
+// (a mutex signalling a fiber that a Wait() already parked, for instance) leave
+// two entries for one fiber, and the second entry resumes a fiber that has
+// already finished the task it was woken for -- running the previous caller's
+// closure, and decrementing the previous caller's Counter, after both are gone.
+[[nodiscard]] auto EnqueueFiber(BoundedFiberQueue& queue, Fiber* fiber) noexcept -> EnqueueResult {
+    const bool wasEmpty = !fiber->queued.exchange(true, std::memory_order::acq_rel);
+    if (!wasEmpty) {
+        return EnqueueResult::AlreadyQueued;
+    }
+    while (!queue.TryPush(fiber)) {
+        // Every ring is sized at twice the fiber count and a fiber owns at most
+        // one entry per ring, so it can only be full for a few instructions.
+        CPURelax();
+    }
+    return EnqueueResult::Enqueued;
+}
+
+[[nodiscard]] auto DequeueFiber(BoundedFiberQueue& queue) noexcept -> Fiber* {
+    Fiber* fiber = queue.TryPop();
+    if (fiber != nullptr) {
+        fiber->queued.store(false, std::memory_order::release);
+    }
+    return fiber;
+}
+
 [[nodiscard]] auto PopOrStealReady(uint32_t preferredSlot, uint32_t totalWorkers) noexcept -> Fiber* {
     if (totalWorkers == 0 || !s_workerSlots) {
         return nullptr;
     }
     const uint32_t base = ClampSlot(preferredSlot, totalWorkers);
-    if (Fiber* local = s_workerSlots[base].readyQueue.TryPop()) {
+    if (Fiber* local = DequeueFiber(s_workerSlots[base].readyQueue)) {
         return local;
     }
     for (uint32_t offset = 1; offset < totalWorkers; ++offset) {
         const uint32_t victim = (base + offset) % totalWorkers;
-        if (Fiber* stolen = s_workerSlots[victim].readyQueue.TryPop()) {
+        if (Fiber* stolen = DequeueFiber(s_workerSlots[victim].readyQueue)) {
             return stolen;
         }
     }
@@ -169,12 +200,12 @@ void SetCurrentThreadHighPriority() noexcept {
     }
     const uint32_t backgroundWorkers = totalWorkers - 1;
     const uint32_t base = ClampSlot(preferredSlot, backgroundWorkers);
-    if (Fiber* local = s_workerSlots[base].backgroundQueue.TryPop()) {
+    if (Fiber* local = DequeueFiber(s_workerSlots[base].backgroundQueue)) {
         return local;
     }
     for (uint32_t offset = 1; offset < backgroundWorkers; ++offset) {
         const uint32_t victim = (base + offset) % backgroundWorkers;
-        if (Fiber* stolen = s_workerSlots[victim].backgroundQueue.TryPop()) {
+        if (Fiber* stolen = DequeueFiber(s_workerSlots[victim].backgroundQueue)) {
             return stolen;
         }
     }
@@ -221,6 +252,12 @@ void RecycleFiber(Fiber* fiber, uint32_t preferredSlot, uint32_t totalWorkers) n
     if (fiber == nullptr || !fiber->taskDone.exchange(false, std::memory_order::acquire)) {
         return;
     }
+    // Only an idle fiber goes back in the pool. A fiber that still owns a ready
+    // entry comes back here through that entry instead; pooling it twice would
+    // let two dispatches fill the same fiber, dropping the first task.
+    if (fiber->queued.load(std::memory_order::acquire)) {
+        return;
+    }
     if (totalWorkers > 0 && s_workerSlots) {
         s_workerSlots[ClampSlot(preferredSlot, totalWorkers)].freeQueue.TryPush(fiber);
     }
@@ -247,12 +284,22 @@ void NotifyParkedWorkers(size_t pushedCount) noexcept {
 void FiberMain(void* arg) {
     auto* data = static_cast<FiberData*>(arg);
     while (true) {
-        if (data->task.func != nullptr) {
-            data->task.func(data->task.arg);
+        // Take the assignment before running it. A resume that carries no new
+        // task -- a wake that raced the completion of the previous one -- must
+        // run nothing and release nothing, because the closure it would call
+        // and the Counter it would decrement belong to a caller that has
+        // already returned.
+        const Task     task    = data->task;
+        Counter* const counter = data->counter;
+        data->task             = {};
+        data->counter          = nullptr;
+
+        if (task.func != nullptr) {
+            task.func(task.arg);
         }
 
-        if (data->counter != nullptr) {
-            data->counter->value.fetch_sub(1, std::memory_order::release);
+        if (counter != nullptr) {
+            counter->value.fetch_sub(1, std::memory_order::release);
         }
 
         Fiber::GetCurrent()->taskDone.store(true, std::memory_order::release);
@@ -412,7 +459,7 @@ auto DispatchBackground(const Task task, Counter* counter) noexcept
         counter->value.fetch_add(1, std::memory_order::relaxed);
     }
 
-    if (!s_workerSlots[targetSlot].backgroundQueue.TryPush(fiber)) {
+    if (EnqueueFiber(s_workerSlots[targetSlot].backgroundQueue, fiber) != EnqueueResult::Enqueued) {
         if (counter != nullptr) {
             counter->value.fetch_sub(1, std::memory_order::release);
         }
@@ -517,12 +564,29 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
             continue;
         }
 
+        // The assignment has to be in place before the fiber is visible to a
+        // worker, or it would run whatever it ran last.
         auto* data    = static_cast<FiberData*>(fiber->arg);
         data->task    = task;
         data->counter = counter;
 
         const uint32_t targetSlot = static_cast<uint32_t>((startTarget + i) % totalWorkers);
-        s_workerSlots[targetSlot].readyQueue.TryPush(fiber);
+        if (EnqueueFiber(s_workerSlots[targetSlot].readyQueue, fiber) != EnqueueResult::Enqueued) {
+            // The fiber already owns a ready entry, so it is not ours to fill:
+            // leave the slot empty, let that entry bring the fiber back to the
+            // pool, and run the task here rather than lose it and leave Wait()
+            // spinning on a count that can never reach zero.
+            data->task    = {};
+            data->counter = nullptr;
+            if (task.func != nullptr) {
+                task.func(task.arg);
+            }
+            if (counter != nullptr) {
+                counter->value.fetch_sub(1, std::memory_order::release);
+            }
+            continue;
+        }
+
         ++pushedCount;
     }
 
@@ -567,8 +631,12 @@ void Wait(Counter* counter) {
                 ++spinCount;
             }
         } else {
-            s_workerSlots[localSlot].readyQueue.TryPush(self);
-            NotifyParkedWorkers(1);
+            // A wake may already have queued this fiber; either way it runs
+            // again, so yielding is enough. The old code pushed a second entry
+            // in that case, which resumed the fiber twice.
+            if (EnqueueFiber(s_workerSlots[localSlot].readyQueue, self) == EnqueueResult::Enqueued) {
+                NotifyParkedWorkers(1);
+            }
             Fiber::Yield();
         }
     }
@@ -583,8 +651,9 @@ void WakeUp(ZHLN::Fiber* fiber) {
         return;
     }
     const uint32_t localSlot = ClampSlot(t_workerIndex, totalWorkers);
-    s_workerSlots[localSlot].readyQueue.TryPush(fiber);
-    NotifyParkedWorkers(1);
+    if (EnqueueFiber(s_workerSlots[localSlot].readyQueue, fiber) == EnqueueResult::Enqueued) {
+        NotifyParkedWorkers(1);
+    }
 }
 
 } // namespace ZHLN::TaskSystem
