@@ -261,6 +261,36 @@ std::string FieldString(const char* field, size_t size) {
     return std::string(field, length);
 }
 
+// A name that does not fit the 100-byte header field travels in a preceding GNU
+// 'L' (long name) or 'K' (long link) record. That record's size counts a
+// trailing NUL, so the string we read carries one; a NUL is not part of a name,
+// and keeping it would make ValidateMemberPath reject the writer's own archive
+// for "carrying a control character".
+void TrimAtNul(std::string& value) {
+    if (const size_t nul = value.find('\0'); nul != std::string::npos)
+        value.erase(nul);
+}
+
+// Paths quoted back to the user come straight out of the archive, so escape the
+// bytes that would otherwise break the message apart: a refused control
+// character has to be visible, not swallow the rest of the line.
+std::string QuoteForMessage(std::string_view value) {
+    std::string quoted;
+    quoted.reserve(value.size());
+    for (const char c: value) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (byte < 0x20 || byte == 0x7F) {
+            constexpr std::string_view digits = "0123456789abcdef";
+            quoted += "\\x";
+            quoted += digits[byte >> 4];
+            quoted += digits[byte & 0x0F];
+            continue;
+        }
+        quoted += c;
+    }
+    return quoted;
+}
+
 bool BlockIsZero(const char* block) {
     for (size_t i = 0; i < BlockSize; ++i) {
         if (block[i] != '\0')
@@ -345,7 +375,7 @@ auto ValidateMemberPath(std::string_view raw, std::string_view archiveName) -> s
         path.pop_back();
 
     const auto refuse = [&](std::string_view why) -> std::unexpected<Fail> {
-        return std::unexpected(Fail {std::string(archiveName) + " contains '" + std::string(raw) + "', " + std::string(why)});
+        return std::unexpected(Fail {std::string(archiveName) + " contains '" + QuoteForMessage(raw) + "', " + std::string(why)});
     };
 
     if (path.empty())
@@ -379,7 +409,7 @@ auto ValidateMemberPath(std::string_view raw, std::string_view archiveName) -> s
 // yet, and "it exists now" is not a property an attacker cannot change later.
 auto ValidateLinkTarget(const std::string& memberPath, const std::string& target, const std::string& archiveName) -> std::expected<void, Fail> {
     const auto refuse = [&](std::string_view why) -> std::unexpected<Fail> {
-        return std::unexpected(Fail {archiveName + ": link '" + memberPath + "' -> '" + target + "' " + std::string(why)});
+        return std::unexpected(Fail {archiveName + ": link '" + memberPath + "' -> '" + QuoteForMessage(target) + "' " + std::string(why)});
     };
     if (target.empty())
         return refuse("has an empty target");
@@ -536,12 +566,14 @@ auto Archive::Walk(bool extract, const fs::path& destination) -> std::expected<v
             auto stuffed = readData(longName);
             if (!stuffed)
                 return std::unexpected(std::move(stuffed.error()));
+            TrimAtNul(longName);
             continue;
         }
         if (type == 'K') { // GNU long link target
             auto stuffed = readData(longLink);
             if (!stuffed)
                 return std::unexpected(std::move(stuffed.error()));
+            TrimAtNul(longLink);
             continue;
         }
         if (type == 'x' || type == 'X') { // PAX per-file header
@@ -549,10 +581,14 @@ auto Archive::Walk(bool extract, const fs::path& destination) -> std::expected<v
             auto        stuffed = readData(records);
             if (!stuffed)
                 return std::unexpected(std::move(stuffed.error()));
-            if (auto value = PaxLookup(records, "path"); !value.empty())
+            if (auto value = PaxLookup(records, "path"); !value.empty()) {
+                TrimAtNul(value);
                 paxPath = value;
-            if (auto value = PaxLookup(records, "linkpath"); !value.empty())
+            }
+            if (auto value = PaxLookup(records, "linkpath"); !value.empty()) {
+                TrimAtNul(value);
                 paxLink = value;
+            }
             continue;
         }
         if (type == 'g') { // PAX global header: nothing we honour
@@ -601,10 +637,14 @@ auto Archive::Walk(bool extract, const fs::path& destination) -> std::expected<v
             case '3':
             case '4':
             case '6': {
-                return std::unexpected(Fail {archiveName + " contains '" + rawPath + "', which is a device or fifo and cannot be installed"});
+                return std::unexpected(
+                    Fail {archiveName + " contains '" + QuoteForMessage(rawPath) + "', which is a device or fifo and cannot be installed"}
+                );
             }
             default:
-                return std::unexpected(Fail {archiveName + " contains '" + rawPath + "', which has an unsupported tar entry type"});
+                return std::unexpected(
+                    Fail {archiveName + " contains '" + QuoteForMessage(rawPath) + "', which has an unsupported tar entry type"}
+                );
         }
 
         auto validated = ValidateMemberPath(rawPath, archiveName);

@@ -169,6 +169,14 @@ std::string BuildTar(const std::vector<TarEntry>& entries) {
     return out;
 }
 
+// GNU tar writes a member whose name does not fit the 100-byte header field as an
+// 'L' record holding the real name, NUL-terminated, followed by the member header
+// carrying a truncated name.
+void AppendGnuLongMember(std::vector<TarEntry>& entries, const std::string& path, const std::string& data) {
+    entries.push_back({"././@LongLink", path + std::string(1, '\0'), 'L'});
+    entries.push_back({path.substr(0, 100), data});
+}
+
 auto WriteTarGz(const fs::path& path, const std::vector<TarEntry>& entries) -> std::expected<void, ZHLN::Fail> {
     const std::string bytes = BuildTar(entries);
     gzFile            file  = gzopen(ZHLN::ToUtf8(path).c_str(), "wb6");
@@ -589,6 +597,66 @@ void TestArchiveRefusals() {
     Discard(directory);
 }
 
+// cmake's C++-module target files are long enough to leave the 100-byte name
+// field, so every component that ships them arrives through a GNU 'L' record.
+// The record's size counts the trailing NUL, and a reader that keeps it refuses
+// the archive cmake itself just produced -- which is what CI hit.
+void TestArchiveLongNames() {
+    const fs::path directory = MakeTemp("longnames");
+    PackageSpec    spec;
+
+    const std::string longPath = "usr/lib/cmake/ZahlenCharacterController/cxx-modules/cxx-modules-ZahlenCharacterControllerTargets-Release.cmake";
+    Expect(longPath.size() > 100);
+
+    {
+        auto entries = PackageEntries(spec);
+        AppendGnuLongMember(entries, longPath, "# targets\n");
+        const fs::path archive = directory / ("zahlen-long-" + spec.id + ".tar.gz");
+        Require(WriteTarGz(archive, entries));
+
+        auto opened = ZHLN::Archive::Open(archive);
+        if (!Has(opened)) {
+            Discard(directory);
+            return;
+        }
+        ZHLN::Archive& reader = *opened;
+        Require(reader.Scan());
+
+        bool sawLongMember = false;
+        for (const auto& member: reader.Members()) {
+            if (member.path == longPath)
+                sawLongMember = true;
+        }
+        Expect(sawLongMember);
+
+        const fs::path destination = directory / "store" / spec.id;
+        Require(reader.ExtractInto(destination));
+        Expect(Take(ZHLN::ReadFile(destination / fs::path(longPath))) == "# targets\n");
+    }
+
+    {
+        // Trimming the terminator is not a licence to accept control bytes the
+        // writer really put in the name -- and the refusal has to name the byte
+        // instead of being cut short by it.
+        auto entries = PackageEntries(spec);
+        AppendGnuLongMember(entries, "usr/lib/bad\x01name.so", "x\n");
+        const fs::path archive = directory / ("zahlen-control-" + spec.id + ".tar.gz");
+        Require(WriteTarGz(archive, entries));
+
+        auto opened = ZHLN::Archive::Open(archive);
+        if (Has(opened)) {
+            const auto refusal = opened->Scan();
+            Expect(!refusal);
+            if (!refusal) {
+                Expect(refusal.error().message.find("\\x01") != std::string::npos);
+                Expect(refusal.error().message.find('\x01') == std::string::npos);
+            }
+        }
+    }
+
+    Discard(directory);
+}
+
 // Two managers must not work on one store at once, and the failure has to be a
 // refusal rather than a corrupted install. flock() and LockFileEx() are both
 // per-handle, so the second lock in this same process must fail on either
@@ -849,6 +917,7 @@ int main() {
     Run("index-roundtrip", TestIndexRoundtrip);
     Run("archive-scan-and-extract", TestArchiveScanAndExtract);
     Run("archive-refusals", TestArchiveRefusals);
+    Run("archive-long-names", TestArchiveLongNames);
     Run("store-lock", TestStoreLock);
     Run("store-lifecycle", TestStoreLifecycle);
     Run("checksum-and-signature-policy", TestChecksumAndSignaturePolicy);
