@@ -23,9 +23,20 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # check-glibc-floor.sh is not provisioning, but the env script uses it to refuse a
-# dxc that the baseline cannot run, so it has to be present.
-COPY scripts/ci-ubuntu-2204-env.sh scripts/check-glibc-floor.sh /provision/
-RUN /provision/ci-ubuntu-2204-env.sh --build --gcc 16 && rm -rf /provision
+# dxc that the baseline cannot run, so it has to be present; the Slang installer uses
+# it the same way.
+COPY scripts/ci-ubuntu-2204-env.sh scripts/check-glibc-floor.sh \
+     scripts/install-slang-prebuilt.sh /provision/
+RUN /provision/ci-ubuntu-2204-env.sh --build --gcc 16
+
+# Slang, for cooking shaders during the build. It is a build-host dependency and
+# nothing it provides reaches a package (utils/zshader has no install rule), so it is
+# upstream's prebuilt -- built against glibc 2.17, measured against the 2.35 baseline
+# before it is installed -- rather than ~25 minutes of the pinned tree on every run.
+# The script also writes the CMake config upstream does not ship, because
+# cmake/ShaderCompilation.cmake resolves Slang with find_package(slang CONFIG).
+RUN /provision/install-slang-prebuilt.sh 2026.20 /opt/slang && rm -rf /provision
+ENV PATH=/opt/slang/bin:${PATH}
 
 # Not baked: the sources, the build tree, the ccache. `docker run -v $PWD:/workspace`
 # supplies the tree, so a source change never rebuilds this image.

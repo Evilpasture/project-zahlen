@@ -110,10 +110,10 @@ jobs:
             extern/simdjson \
             extern/slang
 
-      # slang's CMake takes its version from git tags (`git describe`), and the
-      # build context excludes .git, so it cannot see them from inside the image.
-      # Resolve the tag here and hand it over as SLANG_VERSION_FULL. A shallow
-      # submodule has no tags, so ask the remote for them explicitly.
+      # Only needed when ZHLN_SLANG_VENDORED=ON builds the pinned tree instead of
+      # using the prebuilt in the image: slang's own CMake takes its version from
+      # `git describe`, and a shallow submodule has no tags, so ask the remote for
+      # them explicitly and hand the result over as SLANG_VERSION_FULL.
       - name: Resolve the vendored slang version
         id: slang
         run: |

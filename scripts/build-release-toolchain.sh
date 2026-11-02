@@ -25,12 +25,13 @@
 # That is what makes the published floor a property of the flags rather than of
 # whichever machine happened to run the build.
 #
-# Two trees must come from source, and both for a measured reason:
-#   slang  zshader links libslang in-process, so it is a runtime dependency of a
-#          released tool. jammy has no slang at all.
+# One tree must come from source, for a measured reason:
 #   glfw   jammy ships 3.3 and the engine needs 3.4's platform APIs. Vendored, it is
 #          static inside libzahlen_engine.so, so the release needs no libglfw on the
 #          target machine.
+# Slang used to be the second, and is not any more: zshader is a build tool with no
+# install rule, so libslang cooks shaders during the build and reaches no package.
+# It comes from upstream's prebuilt tarball instead -- see section 3.
 #
 # The window backend is Wayland and the build refuses to publish without it. GLFW's
 # probe degrades silently -- no X11 headers means Wayland, neither means the null
@@ -111,6 +112,75 @@ fi
 echo "== lavapipe ICD: ${VK_DRIVER_FILES:-none found}"
 
 cd "${CMAKE_SOURCE_DIR:-/workspace}"
+
+# ------------------------------------------------------------- 2. git ownership
+# The container runs as root and the mounted checkout belongs to the runner, so git
+# refuses every repository in the tree:
+#
+#   fatal: detected dubious ownership in repository at '/workspace/extern/slang'
+#
+# That reads like noise from Slang's optional "user skills" step. It is not: Slang's
+# CMake derives SLANG_VERSION_NUMERIC and SLANG_VERSION_FULL from `git describe`
+# (cmake/GitVersion.cmake, before project()), so when git refuses, those variables
+# come out empty and every set_target_properties in Slang is handed one argument
+# fewer than it expects:
+#
+#   CMake Error at extern/slang/source/slang-rt/CMakeLists.txt:20 (set_target_properties):
+#     set_target_properties called with incorrect number of arguments.
+#
+# which is what a whole round was spent on. The wildcard form of safe.directory needs
+# a newer git than jammy's 2.34, so each repository is marked by path.
+while IFS= read -r gitpath; do
+    git config --global --add safe.directory "$(cd "$(dirname "${gitpath}")" && pwd)" || true
+done < <(find . -maxdepth 6 -name .git -print 2>/dev/null | sort -u)
+# Prove it, in one line, instead of letting Slang's CMake fail with a message that
+# names a file nobody has open.
+if [ -d extern/slang/.git ] || [ -f extern/slang/.git ]; then
+    slang_git=$(git -C extern/slang rev-parse --short HEAD 2>&1) || {
+        echo "error: git cannot read extern/slang: ${slang_git}" >&2
+        echo "       Slang takes its version from git describe; without it the configure" >&2
+        echo "       dies in set_target_properties with a misleading argument-count error." >&2
+        exit 1
+    }
+    echo "== extern/slang at ${slang_git} ($(git -C extern/slang describe --tags --abbrev=0 2>&1 | head -1))"
+fi
+
+# -------------------------------------------------------------------- 3. slang
+# Slang is a build-host dependency, not a released one: utils/zshader is a build tool
+# with no install rule, so it cooks shaders with slangc and nothing it links reaches a
+# package. Building the pinned extern/slang tree therefore costs ~25 minutes of every
+# run that is not a ccache hit to produce two things nobody ships.
+#
+# The prebuilt comes from docker/release-jammy.Dockerfile, which installs upstream's
+# release tarball -- built against glibc 2.17, measured -- plus the CMake config
+# upstream does not ship (scripts/install-slang-prebuilt.sh). -DZHLN_SLANG_VENDORED=ON
+# builds the pinned tree instead, for anyone who wants the exact submodule revision.
+slang_mode=${ZHLN_SLANG_VENDORED:-OFF}
+slang_prefix=${ZHLN_SLANG_PREFIX:-/opt/slang}
+slang_args=()
+if [ "${slang_mode}" = "ON" ]; then
+    echo "== slang: building the pinned extern/slang tree (ZHLN_SLANG_VENDORED=ON)"
+    slang_args+=(-DZHLN_SLANG_VENDORED=ON)
+    if [ -n "${slang_version}" ]; then
+        slang_args+=(-DSLANG_VERSION_FULL="${slang_version}")
+    fi
+else
+    [ -x "${slang_prefix}/bin/slangc" ] || {
+        echo "error: no prebuilt slangc at ${slang_prefix}/bin/slangc." >&2
+        echo "       scripts/install-slang-prebuilt.sh installs it; the release image" >&2
+        echo "       does that at build time. Or set ZHLN_SLANG_VENDORED=ON to build" >&2
+        echo "       the pinned tree instead." >&2
+        exit 1
+    }
+    [ -f "${slang_prefix}/lib/cmake/slang/slang-config.cmake" ] || {
+        echo "error: ${slang_prefix} has slangc but no CMake config package." >&2
+        echo "       cmake/ShaderCompilation.cmake resolves Slang with" >&2
+        echo "       find_package(slang CONFIG); re-run scripts/install-slang-prebuilt.sh." >&2
+        exit 1
+    }
+    echo "== slang: prebuilt $("${slang_prefix}/bin/slangc" -version 2>&1 | head -1) at ${slang_prefix}"
+    slang_args+=(-DCMAKE_PREFIX_PATH="${slang_prefix}" -DSLANG_EXECUTABLE="${slang_prefix}/bin/slangc")
+fi
 
 # ---------------------------------------------------------------- 2. ccache
 # ccache is why a re-run costs minutes instead of an engine rebuild. The cache
@@ -242,8 +312,13 @@ echo "== simdjson: ${simdjson_version:-unknown} CONFIG package in ${simdjson_cma
 
 # ------------------------------------------------------------- 5. configure
 echo "== configuring (native ${PRETTY_NAME:-jammy}, floor glibc ${glibc_baseline})"
-[ -n "${slang_version}" ] && echo "== vendored slang version: ${slang_version}" ||
-    echo "warning: no SLANG_VERSION_FULL given; slang will report 0.0.0-unknown" >&2
+if [ "${slang_mode}" = "ON" ]; then
+    if [ -n "${slang_version}" ]; then
+        echo "== vendored slang version: ${slang_version}"
+    else
+        echo "warning: no SLANG_VERSION_FULL given; slang will report 0.0.0-unknown" >&2
+    fi
+fi
 cmake -B "${build}" -S . -G Ninja \
     -DCMAKE_C_COMPILER="${CC}" \
     -DCMAKE_CXX_COMPILER="${CXX}" \
@@ -253,14 +328,14 @@ cmake -B "${build}" -S . -G Ninja \
     -DUSE_SANITIZERS=OFF \
     -DZHLN_HAS_BLENDER=OFF \
     -DZHLN_TEST_VULKAN_SANDBOX=OFF \
-    -DZHLN_SLANG_VENDORED=ON \
     -DZHLN_GLFW_VENDORED=ON \
+    "${slang_args[@]}" \
     -DWAYLAND_SCANNER_EXECUTABLE="$(command -v wayland-scanner)" \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DZHLN_LINKER_OVERRIDE=bfd \
     "${ccache_launcher[@]}" \
     -DVulkan_INCLUDE_DIR="${PWD}/extern/Vulkan-Headers/include" \
-    -DZHLN_BUILD_SVG=OFF${slang_version:+ -DSLANG_VERSION_FULL=${slang_version}}
+    -DZHLN_BUILD_SVG=OFF
 # Why each of the flags that is not obvious is here:
 #   ZHLN_SLANG_VENDORED / ZHLN_GLFW_VENDORED   see the header: jammy has no slang,
 #       and its GLFW is 3.3 where the engine needs 3.4's platform APIs.
