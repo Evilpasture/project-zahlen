@@ -213,6 +213,22 @@ if [ "${PROFILE}" = build ]; then
     step "engine build dependencies"
     apt_install libzstd-dev zlib1g-dev libssl-dev libcurl4-openssl-dev libluajit-5.1-dev libgtest-dev
     apt_install glslang-tools spirv-tools
+    # Needed by a *release* build specifically:
+    #   git, ccache, openssl   the checkout, the compiler cache, and the release
+    #                          signing key that scripts/package-toolchain.sh uses.
+    apt_install git ccache openssl
+    # The window stack, and the reason the release can be Wayland-only: GLFW is
+    # vendored (jammy ships 3.3, the engine needs 3.4's platform APIs) and is built
+    # here against these. libwayland-dev ships wayland-client.pc,
+    # wayland-cursor.pc and wayland-egl.pc -- all three are what
+    # cmake/ThirdParty.cmake's GLFW probe requires -- and wayland-scanner comes
+    # from libwayland-bin.
+    #
+    # No X11 development package is installed, deliberately. GLFW's probe degrades
+    # silently: with no X11 headers it builds Wayland, with neither it builds the
+    # null platform, and with both it builds both. The release wants exactly one
+    # answer, and the build asserts it after configure.
+    apt_install libwayland-dev libwayland-bin libxkbcommon-dev wayland-protocols libdecor-0-dev
 
     # Jolt compiles its own HLSL compute shaders with dxc, which it locates by
     # rewriting glslc's path. Ubuntu has no dxc package, so take a pinned

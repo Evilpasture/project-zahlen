@@ -2,46 +2,43 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Build the release toolchain inside the project's Arch builder image, linked
-# against the Ubuntu 22.04 sysroot instead of the container's own glibc.
+# Build the release inside a real Ubuntu 22.04 install.
 #
-#   docker run --rm \
-#       -v "$PWD/.jammy:/opt/jammy" -v "$PWD/dist:/dist" \
-#       zahlen-builder:release bash scripts/build-release-toolchain.sh /dist
+#   docker run --rm -v "$PWD:/workspace" -v "$PWD/dist:/dist" \
+#       -v "$PWD/.ccache:/ccache" -e CCACHE_DIR=/ccache \
+#       zahlen-release-builder:jammy bash scripts/build-release-toolchain.sh /dist
 #
-# The rule this script exists to keep: *nothing the image prebuilt may reach the
-# artifact*. The container is only where the build-time dependencies are cheap --
-# cmake, ninja, python, dxc (Jolt's HLSL passes) and a Vulkan loader for the
-# tests. Every library that ends up inside a package, or inside the NEEDED list
-# of one, is either
-#   * built here from source by the sysroot's g++-16 (engine, app, Jolt, zpkg,
-#     ztest, and the two vendored trees below), or
-#   * installed in the sysroot and therefore jammy's own (zstd, LuaJIT, libc,
-#     libstdc++, X11/Wayland for GLFW).
+# The host *is* the target. This runs inside docker/release-jammy.Dockerfile, which
+# is ubuntu:22.04 plus the jammy packages a build needs, so the glibc floor of every
+# published byte is the floor of the machine that produced it. There is no --sysroot,
+# no -B, no loader wrapper and no foreign binutils: the failures that design caused
+# (a compiler that could not find its own crt objects, a wayland-scanner that could
+# not find libxml2, and an `ar` linked against a libbfd that only existed inside the
+# sysroot) do not exist here to be worked around.
+#
+# The rule this script exists to keep: *nothing prebuilt by the image may reach the
+# artifact*. Everything that ships is either
+#   * built here from source by gcc-16 (engine, app, Jolt, zpkg, ztest, and the two
+#     vendored trees below), or
+#   * a jammy package, and therefore what a jammy user already has (zstd, LuaJIT,
+#     libstdc++, libwayland, libxkbcommon).
 # That is what makes the published floor a property of the flags rather than of
-# the machine that happened to run the build.
+# whichever machine happened to run the build.
 #
-# Two trees must come from source, and both for a *measured* reason:
+# Two trees must come from source, and both for a measured reason:
 #   slang  zshader links libslang in-process, so it is a runtime dependency of a
-#          released tool. The image's slangc/libslang are Arch binaries (the
-#          image's own engine measures GLIBC_2.43) and jammy has no slang at all.
-#   glfw   jammy ships 3.3 and the engine needs 3.4's platform APIs, so the image's
-#          3.5 would be linked instead -- as an Arch-built shared library the
-#          consumer does not have. Vendored, it is static inside libzahlen_engine
-#          and the release needs no libglfw on the target machine.
+#          released tool. jammy has no slang at all.
+#   glfw   jammy ships 3.3 and the engine needs 3.4's platform APIs. Vendored, it is
+#          static inside libzahlen_engine.so, so the release needs no libglfw on the
+#          target machine.
 #
-# The window backend is Wayland, and the build refuses to publish without it. GLFW
-# generates its protocol bindings with wayland-scanner at build time, and that
-# tool must be the *target's* (jammy's 1.20): the bindings it emits are compiled
-# against the sysroot's libwayland, and a newer host scanner can generate calls a
-# 1.20 client library does not export. It is also the step that silently degrades
-# -- with no scanner on PATH and no way to reach the sysroot's, GLFW drops its
-# Wayland backend and builds X11 instead, which is a release that cannot open a
-# window on a modern desktop. So the scanner is passed explicitly, and the
-# configure result is checked.
+# The window backend is Wayland and the build refuses to publish without it. GLFW's
+# probe degrades silently -- no X11 headers means Wayland, neither means the null
+# platform -- so the configure result is asserted below rather than assumed.
 #
-# The linker is pinned to BFD for the same class of reason; see the note at the
-# configure call.
+# The linker is pinned to BFD: not because anything here needs it, but so that a
+# mold installed into some future image cannot silently change what the release was
+# linked with. See cmake/LinkerConfig.cmake.
 #
 # No output is discarded here. The CI log is the only place a failure explains
 # itself, and nobody reads it until the run is already red -- by which point a
@@ -50,190 +47,206 @@
 # If something is too noisy to print, make it quieter; do not hide it.
 set -Eeuo pipefail
 
-# Every failure names itself. Without this, a step whose output is redirected --
-# or a command that exits 127 because a program is missing -- leaves the log
-# stopping at the last unrelated line, which is exactly what happened to the
-# simdjson step.
+# Every failure names itself. Without this, a step whose output is redirected -- or
+# a command that exits 127 because a program is missing -- leaves the log stopping
+# at the last unrelated line.
 trap 'status=$?; printf "\nerror: exit %s at line %s\n  command: %s\n" \
     "${status}" "${LINENO}" "${BASH_COMMAND}" >&2' ERR
 
 out=${1:-/dist}
-sysroot=${ZHLN_JAMMY_SYSROOT:-/opt/jammy}
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # The pinned slang is built here and its CMake reads the version from git tags,
-# which a submodule checkout inside a Docker context does not carry (the .git
-# gitfile is excluded from the context). The workflow resolves the tag and passes
-# it; without it slang reports 0.0.0-unknown and the release would ship that.
+# which a submodule checkout inside a Docker context does not carry. The workflow
+# resolves the tag and passes it; without it slang reports 0.0.0-unknown.
 slang_version=${ZHLN_SLANG_VERSION:-}
 build=${ZHLN_BUILD_DIR:-build-jammy}
 glibc_baseline=${ZHLN_GLIBC_BASELINE:-2.35}
 
-[ -f "${sysroot}/jammy-target.cmake" ] || {
-    echo "error: ${sysroot} has no jammy-target.cmake." >&2
-    echo "       Run scripts/setup-jammy-target.sh inside ubuntu:22.04 first." >&2
+# ------------------------------------------------------- 1. the host is the target
+if [ -r /etc/os-release ]; then
+    . /etc/os-release
+fi
+if [ "${ID:-}" != "ubuntu" ] || [ "${VERSION_ID:-}" != "22.04" ]; then
+    echo "error: this script builds inside Ubuntu 22.04; this is ${PRETTY_NAME:-an unknown system}." >&2
+    echo "       Use docker/release-jammy.Dockerfile. Cross-building against a sysroot" >&2
+    echo "       is precisely what this replaced: every failure in that design came" >&2
+    echo "       from running another distro's binaries on this one." >&2
     exit 1
-}
-command -v openssl >/dev/null || {
-    echo "error: openssl is required to sign the release" >&2
-    exit 1
-}
+fi
+host_glibc=$(ldd --version | awk 'NR==1{print $NF}')
+echo "== host: ${PRETTY_NAME}, glibc ${host_glibc}, release floor ${glibc_baseline}"
+if [ -n "${host_glibc}" ] && [ -n "${glibc_baseline}" ] && [ "${host_glibc}" != "${glibc_baseline}" ]; then
+    printf '   note: host glibc and the claimed floor differ; the floor check at the end decides.\n'
+fi
+
+CC=${ZHLN_CC:-gcc-16}
+CXX=${ZHLN_CXX:-g++-16}
+for tool in "${CC}" "${CXX}" wayland-scanner openssl; do
+    command -v "${tool}" >/dev/null || {
+        echo "error: ${tool} is not installed." >&2
+        echo "       scripts/ci-ubuntu-2204-env.sh --build installs the compiler, the" >&2
+        echo "       Wayland tools and openssl (jammy ships gcc-11; the tree needs" >&2
+        echo "       -freflection, which is why the toolchain PPA is used at all)." >&2
+        exit 1
+    }
+done
+# Both compilers explicitly: the env script points the `gcc` alternative at gcc-16,
+# but a configure that resolves `c++` on its own would silently pick jammy's g++-11
+# and fail much later, on -freflection.
+echo "== compiler: $("${CXX}" --version | head -1)"
+echo "== c compiler: $("${CC}" --version | head -1)"
+echo "== wayland-scanner: $(wayland-scanner --version 2>&1 | head -1)"
+echo "== linker: $(ld --version | head -1)"
+
+# lavapipe, for the test suite below. The ICD filename is not portable (Debian and
+# Ubuntu suffix it with the architecture), so find it rather than hardcode it.
+if [ -z "${VK_DRIVER_FILES:-}" ]; then
+    for candidate in /usr/share/vulkan/icd.d/lvp_icd*.json; do
+        [ -f "${candidate}" ] || continue
+        export VK_DRIVER_FILES=${candidate}
+        export VK_ICD_FILENAMES=${candidate}
+        break
+    done
+fi
+echo "== lavapipe ICD: ${VK_DRIVER_FILES:-none found}"
 
 cd "${CMAKE_SOURCE_DIR:-/workspace}"
 
+# ---------------------------------------------------------------- 2. ccache
 # ccache is why a re-run costs minutes instead of an engine rebuild. The cache
-# directory is a bind mount, so it survives the container; the workflow restores
-# and saves it across runs. BASEDIR + NOHASHDIR are what make the cache usable at
-# all here: the sources are at /workspace inside the container and somewhere else
-# on the runner, and the build directory name is not part of a translation unit.
+# directory is a bind mount, so it survives the container; the workflow restores and
+# saves it across runs. BASEDIR + NOHASHDIR are what make the cache usable at all
+# here: the sources are at /workspace inside the container and somewhere else on the
+# runner, and the build directory name is not part of a translation unit.
+#
+# ccache's boolean environment variables have a rule that is easy to get wrong: from
+# the environment, "0", "false", "no" and "disable" are *errors*, and every other
+# value means true. So `CCACHE_NODIRECT=0` -- "direct mode off" in the author's head,
+# an abort of every invocation in ccache's -- and `CCACHE_CPP2=0` right behind it.
+# Neither setting had any business being there: direct mode on and CPP2 off are the
+# defaults, and the fix for a setting with no business being set is to stop setting
+# it.
 export CCACHE_DIR=${CCACHE_DIR:-/ccache}
 export CCACHE_BASEDIR=${CCACHE_BASEDIR:-${PWD}}
-export CCACHE_NOHASHDIR=1
-export CCACHE_CPP2=0
+export CCACHE_NOHASHDIR=true
 export CCACHE_MAXSIZE=${CCACHE_MAXSIZE:-3G}
-# The sysroot comes back from the CI cache with fresh mtimes, so mtime-based
-# compiler validation would invalidate the whole cache on every restore.
 export CCACHE_COMPILERCHECK=${CCACHE_COMPILERCHECK:-content}
-export CCACHE_NODIRECT=0
+ccache_launcher=()
 if [ -d "${CCACHE_DIR}" ] && command -v ccache >/dev/null; then
-    ccache --set-config=max_size="${CCACHE_MAXSIZE}" || true
+    # Not `|| true`: caching is a requirement of this lane, and a ccache that cannot
+    # even read its own environment must fail here, in one second, rather than turn
+    # into a mysteriously slow build (or a wall of failing compiles).
+    ccache --set-config=max_size="${CCACHE_MAXSIZE}"
     echo "== ccache: ${CCACHE_DIR} (max ${CCACHE_MAXSIZE}), stats before this build:"
-    ccache --show-stats || true
+    ccache --show-stats
     ccache_launcher=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
 else
     echo "warning: ccache not available; this build will not reuse anything" >&2
-    ccache_launcher=()
 fi
 
-# The target's own scanner, run through the target's own loader.
-#
-# Two things are wrong with calling ${sysroot}/usr/bin/wayland-scanner directly.
-# First, -D skips CMake's find_program, and GLFW invokes the scanner through
-# execute_process, which does not fail the configure when the program cannot run
-# -- the breakage surfaces later as missing generated headers. Second, and this is
-# the one that actually bit: a jammy binary executed on the Arch host is loaded by
-# the *host's* ld.so, which searches host paths, so it cannot find the sysroot's
-# libxml2:
-#
-#   /opt/jammy/usr/bin/wayland-scanner: error while loading shared libraries:
-#   libxml2.so.2: cannot open shared object file
-#
-# So run it the way the target would: its own loader, with the sysroot's library
-# directories on the search path. A wrapper keeps that in one place, because GLFW
-# and the protocol rules invoke the scanner as a plain command.
-wayland_scanner_real=${sysroot}/usr/bin/wayland-scanner
-wayland_loader=${sysroot}/lib64/ld-linux-x86-64.so.2
-[ -x "${wayland_scanner_real}" ] || {
-    echo "error: ${wayland_scanner_real} is missing." >&2
-    echo "       The sysroot needs libwayland-bin; scripts/setup-jammy-target.sh" >&2
-    echo "       installs it. Without a scanner GLFW has no Wayland backend." >&2
-    exit 1
+# ------------------------------------------------------- 3. toolchain probe
+# Compile, archive and link a probe before the engine build starts, and check the
+# result against the floor. Cheap, and it means a broken toolchain costs seconds
+# instead of an hour.
+probe_dir=${build}-probe
+mkdir -p "${probe_dir}"
+cat >"${probe_dir}/probe.cpp" <<'EOF'
+#include <cstdio>
+#include <filesystem>
+#include <string>
+#include <vector>
+int main() {
+    std::vector<std::string> v {"zahlen"};
+    std::printf("%s %s\n", v[0].c_str(), std::filesystem::current_path().c_str());
+    return 0;
 }
-[ -x "${wayland_loader}" ] || {
-    echo "error: ${wayland_loader} is missing from the sysroot." >&2
-    exit 1
-}
-mkdir -p "${build}-tools"
-wayland_scanner="${build}-tools/wayland-scanner"
-cat >"${wayland_scanner}" <<EOF
-#!/bin/sh
-# Generated by scripts/build-release-toolchain.sh: the sysroot's scanner with the
-# sysroot's loader and libraries, so it runs on any build host.
-exec ${wayland_loader} \\
-    --library-path ${sysroot}/lib/x86_64-linux-gnu:${sysroot}/usr/lib/x86_64-linux-gnu \\
-    ${wayland_scanner_real} "\$@"
 EOF
-chmod 755 "${wayland_scanner}"
-scanner_version=$("${wayland_scanner}" --version 2>&1 | head -1)
-case ${scanner_version} in
-    wayland-scanner*) ;;
-    *)
-        echo "error: the sysroot's wayland-scanner does not run: ${scanner_version}" >&2
-        exit 1
-        ;;
-esac
-echo "== wayland-scanner: ${scanner_version} (sysroot binary, sysroot loader)"
+echo "== toolchain probe: compile, archive and link"
+"${CXX}" -std=c++17 -O2 -c "${probe_dir}/probe.cpp" -o "${probe_dir}/probe.o"
+ar rcs "${probe_dir}/libprobe.a" "${probe_dir}/probe.o"
+"${CXX}" -std=c++17 -O2 "${probe_dir}/probe.cpp" "${probe_dir}/libprobe.a" -o "${probe_dir}/probe"
+"${script_dir}/check-glibc-floor.sh" "${glibc_baseline}" "${probe_dir}/probe" || {
+    echo "error: a probe built by this toolchain does not meet the glibc baseline." >&2
+    exit 1
+}
 
-# --------------------------------------------------- 2. simdjson into the sysroot
-# ZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON requires a simdjson *CONFIG* package (see
-# cmake/Toolchains.cmake): the vendored single-header fallback is not exportable,
-# and `cmake --install --component ZahlenSerialization` fails without one. jammy
-# has no simdjson at all, so build the pinned tree with the *target* compiler and
-# install it into the target prefix -- exactly what a jammy user would get from a
-# distro package, and it keeps the header-only nature of the dependency (nothing
-# of it ships in the artifact).
-# ZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON requires a simdjson *CONFIG* package (see
-# cmake/Toolchains.cmake:20), and jammy has no simdjson at all. Installing the
-# pinned tree used to mean running its CMake project as a nested build inside the
-# sysroot, which failed with a bare exit 127 and no output -- and a second build
-# system is a second set of assumptions about the host. simdjson's use here is
-# one translation unit and one header, so compile those two things with the
-# target compiler and write the (short) config package by hand. Nothing about
-# simdjson ships in the artifact; only the export needs to exist.
-simdjson_libdir=${sysroot}/usr/lib/x86_64-linux-gnu
-simdjson_cmakedir=${simdjson_libdir}/cmake/simdjson
-if [ ! -f "${simdjson_cmakedir}/simdjson-config.cmake" ]; then
-    echo "== installing simdjson for the target sysroot (one TU, no nested build)"
-    simdjson_src=extern/simdjson
-    # The amalgamated pair is what a distro package installs: one self-contained
-    # header and one translation unit, no include paths to get wrong. The split
-    # tree under src/ needs -I include -I src and is only a fallback.
-    if [ -f "${simdjson_src}/singleheader/simdjson.cpp" ]; then
-        simdjson_tu=${simdjson_src}/singleheader/simdjson.cpp
-        simdjson_hdr=${simdjson_src}/singleheader/simdjson.h
-        simdjson_includes=()
-    elif [ -f "${simdjson_src}/src/simdjson.cpp" ]; then
-        simdjson_tu=${simdjson_src}/src/simdjson.cpp
-        simdjson_hdr=${simdjson_src}/include/simdjson.h
-        simdjson_includes=(-I"${simdjson_src}/include" -I"${simdjson_src}/src")
+# ccache, verified instead of assumed: two identical compiles, and the second must
+# be a hit. A ccache that is installed but not caching is indistinguishable from a
+# working one until you time the build.
+if [ -d "${CCACHE_DIR}" ] && command -v ccache >/dev/null; then
+    ccache_probe=${build}-ccache-probe
+    mkdir -p "${ccache_probe}"
+    printf 'int zahlen_ccache_probe;\n' >"${ccache_probe}/probe.c"
+    compile_ccache_probe() {
+        CCACHE_LOGFILE="${ccache_probe}/log" \
+            ccache "${CC}" -O2 -c "${ccache_probe}/probe.c" -o "${ccache_probe}/probe.o"
+    }
+    compile_ccache_probe
+    : >"${ccache_probe}/log"
+    compile_ccache_probe
+    if grep -q 'Result: .*cache_hit' "${ccache_probe}/log"; then
+        echo "== ccache: verified here (the second identical compile was a hit)"
     else
-        echo "error: extern/simdjson has no simdjson.cpp." >&2
-        echo "       It is a submodule; fetch it with --recursive." >&2
+        echo "error: ccache is not caching -- the second identical compile missed." >&2
+        sed -n 's/^/  ccache: /p' "${ccache_probe}/log" | tail -20 >&2
         exit 1
     fi
-    simdjson_obj=${build}-simdjson.o
-    "${sysroot}/usr/bin/g++-16" \
-        -B"${sysroot}/usr/libexec/gcc/x86_64-linux-gnu/16/" \
-        -B"${sysroot}/usr/lib/gcc/x86_64-linux-gnu/16/" \
-        --sysroot="${sysroot}" \
-        -std=c++17 -O2 -fPIC -fvisibility=hidden -DSIMDJSON_STATIC_REFLECTION=0 \
-        "${simdjson_includes[@]}" \
-        -c "${simdjson_tu}" -o "${simdjson_obj}"
-    simdjson_ar=${sysroot}/usr/bin/ar
-    [ -x "${simdjson_ar}" ] || simdjson_ar=$(command -v ar)
-    mkdir -p "${simdjson_libdir}" "${simdjson_cmakedir}" "${sysroot}/usr/include"
-    "${simdjson_ar}" rcs "${simdjson_libdir}/libsimdjson.a" "${simdjson_obj}"
-    install -m644 "${simdjson_hdr}" "${sysroot}/usr/include/simdjson.h"
-    cat >"${simdjson_cmakedir}/simdjson-config.cmake" <<EOF
-# Written by scripts/build-release-toolchain.sh for the target sysroot.
-# Mirrors the parts of upstream's config this tree uses: the imported target, its
-# include directory, and the reflection define the tree forces everywhere.
-set(simdjson_FOUND TRUE)
-set(simdjson_VERSION 5.0.5)
-if(NOT TARGET simdjson::simdjson)
-    add_library(simdjson::simdjson STATIC IMPORTED)
-    set_target_properties(simdjson::simdjson PROPERTIES
-        IMPORTED_LOCATION "${simdjson_libdir}/libsimdjson.a"
-        INTERFACE_INCLUDE_DIRECTORIES "${sysroot}/usr/include"
-        INTERFACE_COMPILE_DEFINITIONS "SIMDJSON_STATIC_REFLECTION=0"
-        INTERFACE_COMPILE_FEATURES "cxx_std_11")
-endif()
-EOF
-    cat >"${simdjson_cmakedir}/simdjson-config-version.cmake" <<'EOF'
-set(PACKAGE_VERSION "5.0.5")
-set(PACKAGE_VERSION_COMPATIBLE TRUE)
-if(PACKAGE_FIND_VERSION VERSION_GREATER PACKAGE_VERSION)
-    set(PACKAGE_VERSION_COMPATIBLE FALSE)
-endif()
-EOF
-    echo "   installed into ${simdjson_cmakedir}"
+    rm -rf "${ccache_probe}"
 fi
+rm -rf "${probe_dir}"
 
-echo "== lavapipe ICD: ${icd}"
+# --------------------------------------------------------------- 4. simdjson
+# ZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON requires a simdjson *CONFIG* package (see
+# cmake/Toolchains.cmake:20: the vendored single-header fallback is not exportable),
+# and jammy has no simdjson at all. Build the pinned tree with the native compiler
+# and install it into the system prefix -- exactly what a jammy user gets from
+# building it, and it keeps the header-only nature of the dependency (nothing of it
+# ships in the artifact; only the export needs to resolve).
+simdjson_prefix=/usr/local
+simdjson_cmakedir=
+for dir in "${simdjson_prefix}/lib/cmake/simdjson" \
+    "${simdjson_prefix}/lib/x86_64-linux-gnu/cmake/simdjson" \
+    "${simdjson_prefix}/share/cmake/simdjson"; do
+    [ -f "${dir}/simdjson-config.cmake" ] && simdjson_cmakedir=${dir} && break
+done
+if [ -z "${simdjson_cmakedir}" ]; then
+    echo "== building simdjson into ${simdjson_prefix}"
+    [ -f extern/simdjson/CMakeLists.txt ] || {
+        echo "error: extern/simdjson is not checked out." >&2
+        echo "       It is a submodule; fetch it with --recursive." >&2
+        exit 1
+    }
+    cmake -S extern/simdjson -B "${build}-simdjson" -G Ninja \
+        -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DSIMDJSON_DEVELOPER_MODE=OFF \
+        -DSIMDJSON_BUILD_STATIC=ON \
+        -DBUILD_SHARED_LIBS=OFF \
+        "${ccache_launcher[@]}"
+    cmake --build "${build}-simdjson"
+    cmake --install "${build}-simdjson" --prefix "${simdjson_prefix}"
+    for dir in "${simdjson_prefix}/lib/cmake/simdjson" \
+        "${simdjson_prefix}/lib/x86_64-linux-gnu/cmake/simdjson" \
+        "${simdjson_prefix}/share/cmake/simdjson"; do
+        [ -f "${dir}/simdjson-config.cmake" ] && simdjson_cmakedir=${dir} && break
+    done
+    [ -n "${simdjson_cmakedir}" ] || {
+        echo "error: simdjson installed but no simdjson-config.cmake was produced." >&2
+        exit 1
+    }
+fi
+# The version literal lives in the generated version file, not the config.
+simdjson_version=$(sed -n 's/^set(PACKAGE_VERSION "\([^"]*\)".*/\1/p' \
+    "${simdjson_cmakedir}/simdjson-config-version.cmake" | head -1)
+echo "== simdjson: ${simdjson_version:-unknown} CONFIG package in ${simdjson_cmakedir}"
 
-echo "== configuring (target: glibc ${glibc_baseline} via ${sysroot})"
+# ------------------------------------------------------------- 5. configure
+echo "== configuring (native ${PRETTY_NAME:-jammy}, floor glibc ${glibc_baseline})"
 [ -n "${slang_version}" ] && echo "== vendored slang version: ${slang_version}" ||
     echo "warning: no SLANG_VERSION_FULL given; slang will report 0.0.0-unknown" >&2
 cmake -B "${build}" -S . -G Ninja \
-    -DCMAKE_TOOLCHAIN_FILE="${sysroot}/jammy-target.cmake" \
+    -DCMAKE_C_COMPILER="${CC}" \
+    -DCMAKE_CXX_COMPILER="${CXX}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DZHLN_BUILD_TESTS=ON \
     -DZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON \
@@ -242,91 +255,90 @@ cmake -B "${build}" -S . -G Ninja \
     -DZHLN_TEST_VULKAN_SANDBOX=OFF \
     -DZHLN_SLANG_VENDORED=ON \
     -DZHLN_GLFW_VENDORED=ON \
-    -DWAYLAND_SCANNER_EXECUTABLE="${wayland_scanner}" \
+    -DWAYLAND_SCANNER_EXECUTABLE="$(command -v wayland-scanner)" \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DZHLN_LINKER_OVERRIDE=bfd \
     "${ccache_launcher[@]}" \
     -DVulkan_INCLUDE_DIR="${PWD}/extern/Vulkan-Headers/include" \
     -DZHLN_BUILD_SVG=OFF${slang_version:+ -DSLANG_VERSION_FULL=${slang_version}}
-# The last three are the sysroot's fault, not this project's:
-#   ZHLN_SLANG_VENDORED / ZHLN_GLFW_VENDORED   see the header.
-#   CMAKE_POSITION_INDEPENDENT_CODE            the vendored GLFW is static and
-#       gets folded into libzahlen_engine.so, so its objects have to be PIC.
-#   ZHLN_LINKER_OVERRIDE=bfd                   cmake/LinkerConfig.cmake would pick
-#       mold here, and mold cannot parse the "INPUT ( AS_NEEDED ( -latomic ) )"
-#       script that ships in GCC 16's own lib directory:
-#         mold: fatal: <sysroot>/usr/lib/gcc/x86_64-linux-gnu/16/
-#                      libatomic_asneeded.so:3: library not found: AS_NEEDED
-#       The probe cannot see that, because it only asks whether the compiler can
-#       drive mold. Pin what the sysroot can actually be linked with.
-#   Vulkan_INCLUDE_DIR        the sysroot deliberately has no Vulkan headers
-#       (jammy's are 1.3, the renderer targets 1.4), so find_package(Vulkan) fails
-#       and cmake/ThirdParty.cmake's Jolt block -- which seeds Vulkan_GLSLC_EXECUTABLE
-#       with dxc -- is skipped, leaving every Jolt shader rule to run a program
-#       named "Vulkan_GLSLC_EXECUTABLE-NOTFOUND". Naming the vendored 1.4 headers
-#       is enough to make Vulkan_FOUND true; the loader is a NEEDED soname.
+# Why each of the flags that is not obvious is here:
+#   ZHLN_SLANG_VENDORED / ZHLN_GLFW_VENDORED   see the header: jammy has no slang,
+#       and its GLFW is 3.3 where the engine needs 3.4's platform APIs.
+#   CMAKE_POSITION_INDEPENDENT_CODE            the vendored GLFW is static and gets
+#       folded into libzahlen_engine.so, so its objects have to be PIC.
+#   WAYLAND_SCANNER_EXECUTABLE                 explicit rather than found: GLFW
+#       invokes the scanner through execute_process, where a program that cannot run
+#       does not fail the configure -- it surfaces later as missing generated headers.
+#   ZHLN_LINKER_OVERRIDE=bfd                   determinism; see the header.
+#   Vulkan_INCLUDE_DIR        jammy deliberately has no libvulkan-dev: its headers
+#       are 1.3 and the renderer targets 1.4, so the vendored headers are the only
+#       correct ones. Without this, find_package(Vulkan) fails and
+#       cmake/ThirdParty.cmake's Jolt block -- which seeds Vulkan_GLSLC_EXECUTABLE
+#       with dxc -- is skipped, leaving every Jolt shader rule to run a program named
+#       "Vulkan_GLSLC_EXECUTABLE-NOTFOUND". Naming the vendored headers is enough to
+#       make Vulkan_FOUND true; the loader is a NEEDED soname the consumer supplies.
 #   ZHLN_BUILD_SVG=OFF        resvg is not packaged for jammy and building it needs
 #       cargo; without this the configure drops the plugin with a warning on every
 #       run. It is not one of the 16 released components.
-#   SLANG_VERSION_FULL        the pinned slang is built here, and its CMake can
-#       only read its version from git tags -- which a submodule checkout in a
-#       Docker context does not have. See the workflow, which passes the tag.
+#   SLANG_VERSION_FULL        the pinned slang is built here, and its CMake can only
+#       read its version from git tags -- which a submodule checkout in a Docker
+#       context does not have. See the workflow, which passes the tag.
 
 # A release must carry Wayland. This is the assertion that keeps a silent
-# degradation to X11-only from being published: it fails here, in the cheap place,
-# naming the reason.
+# degradation to X11-only -- or to no window backend at all -- from being published.
+# It fails here, in the cheap place, naming the reason.
 wayland_backend=$(sed -n 's/^GLFW_BUILD_WAYLAND:BOOL=//p' "${build}/CMakeCache.txt")
 x11_backend=$(sed -n 's/^GLFW_BUILD_X11:BOOL=//p' "${build}/CMakeCache.txt")
 echo "== GLFW backends from this configure: wayland=${wayland_backend:-unset} x11=${x11_backend:-unset}"
 if [ "${x11_backend}" = "ON" ]; then
     echo "error: this release build has GLFW's X11 backend enabled." >&2
-    echo "       The release is Wayland-only by design: the target sysroot must not" >&2
-    echo "       carry X11 headers (scripts/setup-jammy-target.sh installs none)." >&2
-    echo "       If this is deliberate, drop this check -- otherwise find out what" >&2
-    echo "       put libx11-dev into the sysroot." >&2
+    echo "       The release is Wayland-only by design, and the image installs no X11" >&2
+    echo "       development packages (scripts/ci-ubuntu-2204-env.sh --build). If they" >&2
+    echo "       appeared, find out what pulled them in." >&2
     exit 1
 fi
 if [ "${wayland_backend}" != "ON" ]; then
     echo "error: this configure did not enable GLFW's Wayland backend." >&2
     echo "       Expected GLFW_BUILD_WAYLAND=ON in ${build}/CMakeCache.txt." >&2
-    echo "       Check that the sysroot has libwayland-dev, libxkbcommon-dev," >&2
-    echo "       wayland-protocols and libwayland-bin, and that" >&2
-    echo "       WAYLAND_SCANNER_EXECUTABLE=${wayland_scanner} runs." >&2
+    echo "       Check that libwayland-dev, libxkbcommon-dev, wayland-protocols and" >&2
+    echo "       libwayland-bin are installed, and that" >&2
+    echo "       $(command -v wayland-scanner) runs." >&2
     exit 1
 fi
 
 echo "== building"
 cmake --build "${build}"
 
-# zpkg ships to the consumer, so it is built for the same target: it links
-# libstdc++ statically (see utils/zpkg/CMakeLists.txt) and would otherwise need
-# this container's newer glibc on the user's machine.
+# zpkg ships to the consumer, so it is built for the same target. It links libstdc++
+# statically (see utils/zpkg/CMakeLists.txt), so it runs on a jammy machine whose
+# libstdc++ is older than the PPA compiler's.
 echo "== building and testing zpkg"
 cmake -S utils/zpkg -B "${build}-zpkg" -G Ninja \
-    -DCMAKE_TOOLCHAIN_FILE="${sysroot}/jammy-target.cmake" \
+    -DCMAKE_C_COMPILER="${CC}" \
+    -DCMAKE_CXX_COMPILER="${CXX}" \
     -DCMAKE_BUILD_TYPE=Release -DZPKG_BUILD_TESTS=ON \
     "${ccache_launcher[@]}"
 cmake --build "${build}-zpkg"
 ctest --test-dir "${build}-zpkg" --output-on-failure
 
-# The bytes published are these bytes: 2.35 code runs on anything newer, so
-# running the suite in this container is a real smoke test of the release.
+# The bytes published are these bytes: 2.35 code runs on anything newer, so running
+# the suite here is a real smoke test of the release.
 echo "== running ztest on this host's lavapipe"
 "${build}/bin/ztest" --test-dir "${build}" -V
 
 echo "== packaging"
 ZPKG_BIN="${build}-zpkg/zpkg" scripts/package-toolchain.sh "${out}" "${build}"
 
-# The floor is a property of the linked symbol versions, not of the build host.
-# Both the packages and the loose tools are checked, because zpkg is a user-facing
-# binary that ships outside the package set.
+# The floor is a property of the linked symbol versions, not of the build host. Both
+# the packages and the loose tools are checked, because zpkg is a user-facing binary
+# that ships outside the package set.
 echo "== checking the glibc floor of everything that ships"
 scripts/check-glibc-floor.sh "${glibc_baseline}" "${out}/packages" "${out}/tools"
 
-# For the release notes: what a reader needs to know to run this, recorded where
-# the publishing step can read it rather than inferred there.
+# For the release notes: what a reader needs to know to run this, recorded where the
+# publishing step can read it rather than inferred there.
 printf 'wayland=%s x11=%s\n' "${wayland_backend}" "${x11_backend:-off}" >"${out}/window-backends.txt"
 
-printf '\nrelease toolchain built against glibc %s\n' "${glibc_baseline}"
+printf '\nrelease built on %s for glibc %s\n' "${PRETTY_NAME:-jammy}" "${glibc_baseline}"
 printf 'window stack: wayland=%s x11=%s (glfw vendored, static)\n' \
     "${wayland_backend}" "${x11_backend:-off}"

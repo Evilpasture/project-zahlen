@@ -42,9 +42,7 @@ __pycache__/
 gcm.cache/
 
 # CI-only, mounted into the build container and never baked into an image:
-#   .jammy/   the Ubuntu 22.04 target sysroot (~1 GB of apt output)
 #   .ccache/  the compiler cache shared across runs (can be several GB)
-.jammy/
 .ccache/
 
 # Environments & heavy local assets
