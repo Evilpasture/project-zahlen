@@ -73,7 +73,11 @@ for component in "${components[@]}"; do
     archive="${pkgs}/zahlen-${component,,}-${id}.tar.gz"
     tar -C "${stage}" -czf "${archive}" usr
     # Every archive must identify its toolchain wherever it ends up on disk.
-    tar -tzf "${archive}" | grep -q 'usr/share/zahlen/toolchain.json' || {
+    # grep reads every line on purpose: with `set -o pipefail`, `grep -q` exits as
+    # soon as it matches, tar takes SIGPIPE and the pipeline reports 141, so a
+    # perfectly good archive is rejected as missing its toolchain.json (measured
+    # on zahlen-cooker: pipeline status 141 with -q, 0 without).
+    tar -tzf "${archive}" | grep -F 'usr/share/zahlen/toolchain.json' >/dev/null || {
         echo "error: ${archive} has no usr/share/zahlen/toolchain.json" >&2
         rm -rf "${stage}"
         exit 1
