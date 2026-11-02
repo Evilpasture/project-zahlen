@@ -240,6 +240,27 @@ jobs:
           # stderr stays visible: an auth problem should say so, not look like a
           # missing release and send the run down the "create" branch.
           if gh release view "${RELEASE_TAG}" >/dev/null; then
+            # Package names carry the commit hash, so `--clobber` can only ever
+            # replace an asset built from the *same* commit: re-releasing the same
+            # tag from a newer commit leaves the previous generation in place,
+            # while the new SHA256SUMS describes only the new one. The release
+            # then holds two sets of packages, and `zpkg install
+            # --require-checksums` refuses the downloaded directory with
+            # "<pkg> ... is missing from dist/SHA256SUMS" -- which is exactly how
+            # the first green build after the dir fixes failed.
+            #
+            # A release has to carry one generation, so drop every asset this
+            # build is not about to re-upload: what stays is exactly `dist/`.
+            # That includes the rendered frame an earlier run attached -- the
+            # consumer job re-attaches it with `--clobber` when it renders, so
+            # the frame is missing only while a run is in flight or when the
+            # consumer half is failing, which is information rather than damage.
+            keep=$(cd dist && printf '%s\n' packages/* tools/* | sed 's|.*/||')
+            gh release view "${RELEASE_TAG}" --json assets --jq '.assets[].name' |
+              while IFS= read -r asset; do
+                printf '%s\n' "${keep}" | grep -Fxq -- "${asset}" ||
+                  gh release delete-asset "${RELEASE_TAG}" "${asset}" --yes
+              done
             gh release upload "${RELEASE_TAG}" dist/packages/* dist/tools/* --clobber
           else
             gh release create "${RELEASE_TAG}" \
