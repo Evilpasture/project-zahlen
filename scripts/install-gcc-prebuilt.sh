@@ -28,9 +28,19 @@ BASE_URL=${GCC_BASE_URL:-https://conda.anaconda.org/conda-forge}
 log() { printf '  %s\n' "$*"; }
 step() { printf '\n== %s\n' "$*"; }
 
-# Pinned artifacts. The package set is (C compiler, C++ compiler + libstdc++,
-# libstdc++ runtime, C++ headers, crt objects). Binutils, glibc headers and the
-# linker are the host's. Checksums are of the exact files this script was tested
+# Pinned artifacts: the C compiler, the C++ compiler + libstdc++, the libstdc++
+# runtime, the C++ headers, the crt objects, and binutils.
+#
+# binutils is pinned because GCC 16 emits `.base64` for large data blobs -- a
+# directive GAS only learned in 2.41 -- and jammy ships 2.38:
+#
+#     /tmp/ccyIOJ8t.s:90159: Error: unknown pseudo-op: `.base64'
+#
+# That is the same mistake as taking ninja's version from apt: one half of the
+# compiler pair pinned, the other half whatever the distro had. 2.46.1 is the
+# version the conda-forge gcc 16.2.0 packages were built against.
+#
+# The glibc headers stay the host's. Checksums are of the exact files this script was tested
 # with -- a rebuild of the same version elsewhere is a different artifact, so a
 # mismatch is a real signal, not noise.
 if [ "${GCC_VERSION}" != "16.2.0" ]; then
@@ -47,6 +57,7 @@ linux-64 gxx_impl_linux-64-16.2.0-h0d273dc_5.conda 0f6b73e3a0854d5f3d8e3635cae7d
 linux-64 libstdcxx-16.2.0-h934c35e_5.conda 38cadde30fad8f7c101f9eec79f60bf03fc99310c7195d23f8b30832516d666f
 noarch libstdcxx-devel_linux-64-16.2.0-h86e191b_105.conda db4009a129f73e5f4e301a06b443bb5d160dbd7a89685ca54db1f50cd47f6963
 noarch libgcc-devel_linux-64-16.2.0-he3ce08f_105.conda 8c50468146b12ae9f2c7b457aa54fef603f69f7c46d607d6c892c16d1c8d2f70
+linux-64 binutils_impl_linux-64-2.46.1-default_hfdba357_103.conda 98f9ddc6dc5d56a824b7eaea5bab6ad4bb47642288fc70d6b1b4024ac39d5595
 EOF
 )
 
@@ -123,10 +134,12 @@ while read -r subdir name want; do
 done <<< "${ARTIFACTS}"
 
 # The packages are built for the target triple `x86_64-conda-linux-gnu`, so the
-# driver looks for multiarch headers and start files under that name. Point it
-# at the host's directories instead: with --sysroot=/ in the wrappers below this
-# makes it a native compiler against jammy's glibc, not a cross compiler against
-# a bundled 2.17 sysroot.
+# driver looks for multiarch headers and start files under that name. Point it at the
+# host's directories, by flag rather than by symlink: these packages ship real
+# directories at x86_64-conda-linux-gnu/{include,lib} (binutils puts ldscripts
+# there), so a symlink at that path is not available -- and unpacking through one
+# would write into /usr as root.
+#
 # Determined without a compiler on purpose: this runs on a bare jammy image, where
 # there is no gcc yet -- asking one is what broke the first container build.
 detect_multiarch() {
@@ -144,7 +157,7 @@ detect_multiarch() {
             armhf) printf 'arm-linux-gnueabihf\n'; return 0 ;;
         esac
     fi
-    # Last resort: the directory that actually holds the C library start files.
+    # Last resort: the directory that actually holds the C library.
     local dir
     for dir in /usr/lib/*-linux-gnu*; do
         [ -e "${dir}/libc.so" ] || [ -e "${dir}/libc.so.6" ] || continue
@@ -158,13 +171,9 @@ if [ -z "${multiarch}" ]; then
     echo "error: cannot determine the host multiarch directory (dpkg and /usr/lib/*-linux-gnu*)" >&2
     exit 1
 fi
-mkdir -p "${PREFIX}/x86_64-conda-linux-gnu"
-ln -sfn "/usr/include/${multiarch}" "${PREFIX}/x86_64-conda-linux-gnu/include"
-ln -sfn "/usr/lib/${multiarch}" "${PREFIX}/x86_64-conda-linux-gnu/lib"
-log "multiarch: ${multiarch} (headers and libraries follow the host)"
+log "multiarch: ${multiarch} (headers and libraries come from the host)"
 if [ ! -d "/usr/include/${multiarch}" ]; then
-    # Not fatal: libc6-dev may not be installed yet, and a dangling symlink is
-    # resolved when it is. The probe below is what decides.
+    # Not fatal: libc6-dev may not be installed yet. The probe below is what decides.
     log "note: /usr/include/${multiarch} does not exist yet (libc6-dev not installed)"
 fi
 
@@ -181,9 +190,21 @@ for pair in "gcc:x86_64-conda-linux-gnu-gcc" "g++:x86_64-conda-linux-gnu-g++"; d
 # have. The LD_LIBRARY_PATH is for the driver's own runtime (cc1plus links
 # against the libstdc++ from the same download).
 prefix=\$(CDPATH= cd -- "\$(dirname -- "\$0")/.." && pwd)
+# --sysroot=/ is the first half of the trick: without it the driver uses the 2.17
+# sysroot these packages expect, not the host's glibc. The rest point the target
+# triple's search paths at the host's multiarch directories, replacing the symlinks
+# earlier versions of this script used (see the note above).
+#
+# PATH matters for the assembler: it is looked up as x86_64-conda-linux-gnu-as, and
+# jammy's 2.38 cannot assemble what this compiler emits (.base64).
+PATH="\${prefix}/bin:\${prefix}/x86_64-conda-linux-gnu/bin\${PATH:+:\${PATH}}" \\
 LD_LIBRARY_PATH="\${prefix}/lib\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}" \\
-    exec "\${prefix}/bin/${real}" --sysroot=/ "\$@"
+    exec "\${prefix}/bin/${real}" --sysroot=/ \\
+        -isystem "/usr/include/__MULTIARCH__" \\
+        -B"/usr/lib/__MULTIARCH__/" \\
+        -L"/usr/lib/__MULTIARCH__" "\$@"
 EOF
+    sed -i "s|__MULTIARCH__|${multiarch}|g" "${PREFIX}/bin/${short}-16"
     chmod 755 "${PREFIX}/bin/${short}-16"
 done
 
@@ -239,6 +260,24 @@ if ! "${probe}/probe" >/dev/null; then
 fi
 log "compiled, linked and ran a probe"
 
+# The assembler must come from here, not from the distro: the pair is verified
+# together or not at all.
+as_path=$("${PREFIX}/bin/g++-16" -print-prog-name=as 2>/dev/null || true)
+as_version=$("${as_path}" --version 2>/dev/null | head -1 || true)
+ld_path=$("${PREFIX}/bin/g++-16" -print-prog-name=ld 2>/dev/null || true)
+log "linker: $("${ld_path}" --version 2>/dev/null | head -1) (${ld_path})"
+case "${as_path}" in
+    "${PREFIX}"/*) log "assembler: ${as_version} (${as_path})" ;;
+    *)
+        {
+            echo "error: g++-16 resolves its assembler to ${as_path:-nothing}," >&2
+            echo "       which is outside ${PREFIX}; jammy's 2.38 cannot assemble" >&2
+            echo "       GCC 16 output (.base64). Keep ${PREFIX}/bin first on PATH." >&2
+        } >&2
+        exit 1
+        ;;
+esac
+
 if ! "${PREFIX}/bin/g++-16" -std=c++26 -freflection -fsyntax-only "${probe}/jolt.cpp"; then
     {
         echo "error: this gcc cannot compile Jolt's StaticArray/static-member pattern," >&2
@@ -247,6 +286,36 @@ if ! "${PREFIX}/bin/g++-16" -std=c++26 -freflection -fsyntax-only "${probe}/jolt
     exit 1
 fi
 log "compiles Jolt's static-member pattern (-freflection, -std=c++26)"
+
+# Large constant blobs make GCC 16 emit `.base64`, which GAS only learned in 2.41.
+# Assembling such a translation unit with the toolchain as installed is the check
+# that failed in CI, kept where it can fail in six seconds.
+cat > "${probe}/base64.cpp" <<'CPP'
+#include <cstdint>
+namespace {
+const std::uint64_t kTable[] = {
+#include "base64-values.inc"
+};
+}
+extern "C" unsigned long long zahlen_probe_first() { return kTable[0]; }
+CPP
+python3 - "${probe}/base64-values.inc" <<'PY'
+import random
+import sys
+
+random.seed(7)
+with open(sys.argv[1], 'w') as fh:
+    for _ in range(600):
+        fh.write('\t0x%016xULL,\n' % random.getrandbits(64))
+PY
+if ! "${PREFIX}/bin/g++-16" -std=c++17 -O2 -c "${probe}/base64.cpp" -o "${probe}/base64.o"; then
+    {
+        echo "error: this compiler and assembler pair cannot assemble GCC 16 output." >&2
+        echo "       '.base64' needs GAS 2.41 or newer; jammy ships 2.38." >&2
+    } >&2
+    exit 1
+fi
+log "assembles a translation unit that emits .base64"
 
 printf '\n== gcc: %s (%s/bin/g++-16)\n' "${version}" "${PREFIX}"
 printf '   add %s/bin to PATH; the wrappers carry --sysroot=/ themselves.\n' "${PREFIX}"

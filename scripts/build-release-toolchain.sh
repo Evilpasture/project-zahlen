@@ -110,6 +110,24 @@ if [ -z "${cxx_version}" ] || ! printf '%s\n%s\n' "${GCC_MIN}" "${cxx_version}" 
     } >&2
     exit 1
 fi
+# The assembler is half of the compiler pair, and the half jammy gets wrong: GCC 16
+# emits `.base64` for large data blobs, GAS only learned that directive in 2.41, and
+# jammy ships 2.38. Passing the driver a snippet that triggers it costs milliseconds
+# and fails here instead of 300 files into the build.
+as_bin=$("${CXX}" -print-prog-name=as 2>/dev/null || true)
+as_probe=$(mktemp)
+printf '\t.base64 "EjRWeJA="\n' >"${as_probe}.s"
+if ! "${as_bin}" "${as_probe}.s" -o "${as_probe}.o" >/dev/null 2>&1; then
+    {
+        echo "error: ${as_bin:-no assembler} cannot assemble .base64, which GCC 16 emits." >&2
+        echo "       GAS needs to be 2.41 or newer; jammy ships 2.38. scripts/" >&2
+        echo "       install-gcc-prebuilt.sh installs a matching binutils." >&2
+    } >&2
+    rm -f "${as_probe}.s" "${as_probe}.o"
+    exit 1
+fi
+rm -f "${as_probe}.s" "${as_probe}.o"
+echo "== assembler: $("${as_bin}" --version | head -1) (${as_bin})"
 echo "== compiler: $("${CXX}" --version | head -1)"
 echo "== c compiler: $("${CC}" --version | head -1)"
 echo "== wayland-scanner: $(wayland-scanner --version 2>&1 | head -1)"
