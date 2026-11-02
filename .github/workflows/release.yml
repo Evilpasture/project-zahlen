@@ -235,14 +235,28 @@ jobs:
           gh release view "${RELEASE_TAG}" --json assets \
             --jq '.assets[] | "\(.size|tostring|.[0:7])B  \(.name)"' | sort
 
-      # Saved even when the build failed: that is precisely the case where the next
-      # attempt should not start from zero.
+      # Saved even when the build failed -- that is precisely the case where the next
+      # attempt should not start from zero. ccache writes each object as it compiles,
+      # so a failure at 80% leaves 80% of the engine in here, and the next run
+      # recompiles only the rest.
+      #
+      # Two things are deliberate rather than tidy:
+      #   the key is written out here instead of taken from the restore step's
+      #     `cache-primary-key`, so a restore that failed (cache service, expired
+      #     entry) cannot leave this step with an empty key and lose the whole cache;
+      #   the directory is created first, because an earlier step can fail before
+      #     `mkdir -p .ccache` ever ran -- and `cache/save` treats a missing path as
+      #     an error, which would paint a second red step over the real failure.
+      - name: Make sure the compiler cache directory exists
+        if: always()
+        run: mkdir -p .ccache
+
       - name: Save the compiler cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
+          key: ccache-${{ github.run_id }}-${{ github.run_attempt }}
 
       # `if-no-files-found: warn`: when the build fails there is no dist/, and an
       # error here would just paint a second red step over the real failure.
