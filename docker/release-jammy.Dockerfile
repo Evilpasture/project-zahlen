@@ -9,9 +9,10 @@
 # are linked against a libbfd that exists only inside the sysroot. Each of those was
 # a separate failure, and each cost a build to find.
 #
-# Here none of it exists. gcc-16 (from the Ubuntu toolchain PPA, the only place a
-# compiler with -freflection exists for jammy), binutils, wayland-scanner and every
-# runtime library are jammy packages, natively linked against jammy's glibc. There
+# Here none of it exists. The compiler is a released GCC 16.2.0, downloaded and
+# pinned because jammy's archive stops at gcc-11 and its PPA offers only a trunk
+# snapshot that cannot compile Jolt; binutils, wayland-scanner and every runtime
+# library are jammy packages, natively linked against jammy's glibc. There
 # is no --sysroot, no loader wrapper, no toolchain file and no target prefix: the
 # artifact's floor is the floor of the machine that built it, which is the point.
 #
@@ -26,8 +27,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 # dxc that the baseline cannot run, so it has to be present; the Slang installer uses
 # it the same way.
 COPY scripts/ci-ubuntu-2204-env.sh scripts/check-glibc-floor.sh \
-     scripts/install-slang-prebuilt.sh /provision/
-RUN /provision/ci-ubuntu-2204-env.sh --build --gcc 16
+     scripts/install-slang-prebuilt.sh scripts/install-gcc-prebuilt.sh /provision/
+RUN /provision/ci-ubuntu-2204-env.sh --build
 
 # Slang, for cooking shaders during the build. It is a build-host dependency and
 # nothing it provides reaches a package (utils/zshader has no install rule), so it is

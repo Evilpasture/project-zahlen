@@ -35,9 +35,9 @@ on:
         required: true
         default: 'v0.1.0-baseline'
       gcc_version:
-        description: 'GCC major for the toolchain build (reflection needs 16)'
+        description: 'GCC version to download and build with (released 16.x; reflection needs 16)'
         required: false
-        default: '16'
+        default: '16.2.0'
 
 # Releases are created and updated with the workflow token.
 permissions:
@@ -45,7 +45,10 @@ permissions:
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-  GCC_VERSION: ${{ inputs.gcc_version || '16' }}
+  GCC_VERSION: ${{ inputs.gcc_version || '16.2.0' }}
+  # The installed binaries are named after the major (gcc-16 / g++-16), so the
+  # pin above can move to 16.3 without touching a single CMake flag.
+  GCC_BIN_SUFFIX: '16'
   # Ubuntu 22.04 LTS. Anything a release links must stay at or below this, or
   # the artifact only runs on a distro newer than the one it claims to target.
   GLIBC_BASELINE: '2.35'
@@ -196,18 +199,22 @@ jobs:
             echo 'tar -xzf cube-consumer-*.tar.gz -C consumer'
             echo 'cmake -S consumer -B consumer-build -G Ninja \'
             echo '  -DCMAKE_BUILD_TYPE=Release \'
-            echo "  -DCMAKE_CXX_COMPILER=g++-${GCC_VERSION} \"
+            echo "  -DCMAKE_CXX_COMPILER=g++-${GCC_BIN_SUFFIX} \"
             echo '  -DCMAKE_PREFIX_PATH="$(zpkg prefix)"'
             echo 'cmake --build consumer-build'
             echo '```'
             echo
-            echo 'The toolchain pins its compiler. On Ubuntu 22.04 install the GCC 16'
-            echo 'package from the `ubuntu-toolchain-r/test` PPA:'
+            echo 'The toolchain pins its compiler: a released GCC 16, not the trunk'
+            echo 'snapshot Ubuntu 22.04 offers. Get it with the script in this repository,'
+            echo 'which downloads it, checks the version and compiles a probe with it:'
             echo
             echo '```sh'
-            echo 'sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test'
-            echo 'sudo apt-get update && sudo apt-get install -y g++-16'
+            echo 'sudo scripts/install-gcc-prebuilt.sh 16.2.0 /opt/gcc16'
+            echo 'export PATH=/opt/gcc16/bin:$PATH'
             echo '```'
+            echo
+            echo 'Or `sudo scripts/ci-ubuntu-2204-env.sh --consumer`, which does that and'
+            echo 'installs the runtime libraries as well.'
             echo
             echo 'That is not only for building against the toolchain: the engine and the'
             echo 'tools were compiled by that GCC, so the `libstdc++6` it brings is what'

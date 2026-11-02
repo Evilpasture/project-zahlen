@@ -87,13 +87,29 @@ for tool in "${CC}" "${CXX}" wayland-scanner openssl; do
         echo "error: ${tool} is not installed." >&2
         echo "       scripts/ci-ubuntu-2204-env.sh --build installs the compiler, the" >&2
         echo "       Wayland tools and openssl (jammy ships gcc-11; the tree needs" >&2
-        echo "       -freflection, which is why the toolchain PPA is used at all)." >&2
+        echo "       -freflection, which is why a newer compiler is downloaded at all)." >&2
         exit 1
     }
 done
 # Both compilers explicitly: the env script points the `gcc` alternative at gcc-16,
 # but a configure that resolves `c++` on its own would silently pick jammy's g++-11
 # and fail much later, on -freflection.
+# A *released* GCC 16, not the trunk snapshot in jammy's PPA. `16-20260315` is the
+# only 16 apt offers for this distro and it rejects Jolt's
+# `static const StaticArray<Vec3, 1026>` member -- instantiated while Vec3 is still
+# incomplete -- which stops the build in the PCH of three targets. Released 14.2 and
+# 16.2 both defer that instantiation, so the version floor is the cheap detector;
+# scripts/install-gcc-prebuilt.sh compiles the construct as a self-test as well.
+GCC_MIN=${ZHLN_GCC_MIN:-16.1.1}
+cxx_version=$("${CXX}" -dumpfullversion -dumpversion 2>/dev/null | head -1)
+if [ -z "${cxx_version}" ] || ! printf '%s\n%s\n' "${GCC_MIN}" "${cxx_version}" | sort -V -C; then
+    {
+        echo "error: ${CXX} is ${cxx_version:-unversioned}; this release needs >= ${GCC_MIN}."
+        echo "       Older 16.x is a trunk snapshot that cannot compile Jolt; see"
+        echo "       scripts/install-gcc-prebuilt.sh for the pinned download."
+    } >&2
+    exit 1
+fi
 echo "== compiler: $("${CXX}" --version | head -1)"
 echo "== c compiler: $("${CC}" --version | head -1)"
 echo "== wayland-scanner: $(wayland-scanner --version 2>&1 | head -1)"

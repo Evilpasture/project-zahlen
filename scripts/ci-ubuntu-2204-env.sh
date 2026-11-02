@@ -12,7 +12,9 @@
 #                shader compilers the cooker and Jolt need, and lavapipe.
 #   --consumer   what a user needs to install a released toolchain with zpkg,
 #                compile a consumer against it and run it headless.
-#   --gcc <n>    compiler major to install (default 16: -freflection needs it).
+#   --gcc <ver>  compiler version to install (default 16.2.0; -freflection needs 16,
+#                and the release pins a released 16.x because the trunk snapshot
+#                that apt offers cannot compile Jolt).
 #
 # Deliberately NOT installed for --build, because jammy is older than what this
 # tree targets and the tree already carries the correct copies:
@@ -30,7 +32,12 @@
 set -euo pipefail
 
 PROG=${0##*/}
-GCC_VERSION=16
+# A released GCC 16.x, downloaded and pinned -- not whatever apt calls gcc-16.
+# jammy's PPA carries only a trunk snapshot (16-20260315) and the released 16.2.0
+# differs from it in exactly one way that matters here: it compiles Jolt.
+GCC_VERSION=16.2.0
+GCC_MIN=${ZHLN_GCC_MIN:-16.1.1}
+GCC_PREFIX=${ZHLN_GCC_PREFIX:-/opt/gcc16}
 PROFILE=
 # The distro the release claims. Tools fetched as prebuilts must also run here,
 # so this is the ceiling for them, not just for our own binaries.
@@ -49,11 +56,12 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 usage() {
     cat <<EOF
-usage: ${PROG} --build|--consumer [--gcc <major>] [--glibc-baseline <ver>]
+usage: ${PROG} --build|--consumer [--gcc <version>] [--glibc-baseline <ver>]
 
   --build             toolchain + engine build dependencies
   --consumer          dependencies for installing a released toolchain and running it
-  --gcc <n>           gcc/g++ major to install (default ${GCC_VERSION})
+  --gcc <ver>         gcc/g++ version to install (default ${GCC_VERSION}; a bare
+                      major means the pinned release for that major)
   --glibc-baseline <v> distro baseline fetched prebuilts must run on (default ${GLIBC_BASELINE})
 EOF
 }
@@ -63,7 +71,7 @@ while [ "$#" -gt 0 ]; do
         --build | --consumer) PROFILE=${1#--} ;;
         --gcc)
             shift
-            GCC_VERSION=${1:?--gcc needs a major version}
+            GCC_VERSION=${1:?--gcc needs a version, e.g. 16.2.0}
             ;;
         --glibc-baseline)
             shift
@@ -86,10 +94,16 @@ if [ -z "${PROFILE}" ]; then
     exit 64
 fi
 case ${GCC_VERSION} in
-    '' | *[!0-9]*)
-        echo "error: --gcc needs a number, got '${GCC_VERSION}'" >&2
+    '' | *[!0-9.]*)
+        echo "error: --gcc needs a version like 16.2.0, got '${GCC_VERSION}'" >&2
         exit 64
         ;;
+esac
+# The toolchain descriptor records the compiler *major* -- that is the number the
+# published package config checks -- so `--gcc 16` means "a released 16.x here", not
+# "whatever apt calls 16". Map it to the pinned release for that major.
+case ${GCC_VERSION} in
+    16) GCC_VERSION=16.2.0 ;;
 esac
 
 if [ "$(id -u)" -eq 0 ]; then
@@ -120,30 +134,27 @@ apt_install() {
 
 step "base packages"
 asroot apt-get update
-apt_install ca-certificates curl gnupg lsb-release apt-transport-https software-properties-common python3 unzip
+# zstd unpacks the compiler download; unzip unpacks the ninja one. No PPA any more:
+# the compiler is fetched rather than added as a repository.
+apt_install ca-certificates curl gnupg lsb-release apt-transport-https zstd python3 unzip
 
-step "gcc ${GCC_VERSION} (jammy ships gcc-11; the tree needs -freflection)"
-if ! dpkg -s "g++-${GCC_VERSION}" >/dev/null 2>&1; then
-    # The Ubuntu toolchain PPA is the only place a GCC this new exists for jammy.
-    # If the version is ever dropped there, the diagnostic below says so instead
-    # of leaving a confusing "c++ compiler not found" from CMake later.
-    if ! grep -rqs "ubuntu-toolchain-r/test" /etc/apt/sources.list /etc/apt/sources.list.d/; then
-        asroot add-apt-repository -y ppa:ubuntu-toolchain-r/test
-        asroot apt-get update
-    fi
-    if ! apt-cache show "g++-${GCC_VERSION}" >/dev/null 2>&1; then
-        {
-            echo "error: g++-${GCC_VERSION} is not available on this distro." >&2
-            echo "       available toolchain versions:" >&2
-            apt-cache search --names-only "^g\+\+-[0-9]+$" | sort >&2 || true
-            echo "       re-run with --gcc <major> to pick one; without native" >&2
-            echo "       -freflection the build falls back to scripts/transpile_reflection.py." >&2
-        } >&2
-        exit 1
-    fi
-    apt_install "gcc-${GCC_VERSION}" "g++-${GCC_VERSION}"
+step "gcc ${GCC_VERSION} (released, downloaded; jammy ships gcc-11 and its PPA has only a trunk snapshot of 16)"
+# The tree needs -freflection, so GCC 16 or newer. jammy's own archive stops at 11
+# and the ubuntu-toolchain-r/test PPA offers `16-20260315`, a trunk snapshot from
+# March: it rejects Jolt's `static const StaticArray<Vec3, 1026>` member and the
+# build dies in the PCH. Released GCC 16.2.0 compiles it; nothing in apt for this
+# distro is both new enough and released, so it is downloaded and pinned.
+if [ ! -x "${GCC_PREFIX}/bin/g++-16" ]; then
+    asroot "${script_dir}/install-gcc-prebuilt.sh" "${GCC_VERSION}" "${GCC_PREFIX}"
 fi
-asroot update-alternatives --set "gcc" "/usr/bin/gcc-${GCC_VERSION}" || true
+export PATH="${GCC_PREFIX}/bin:${PATH}"
+hash -r
+# PATH is enough for our own invocations; CMake and the compiler's own driver also
+# find it by name, and the wrappers add --sysroot=/ themselves.
+if ! g++-16 --version >/dev/null 2>&1; then
+    echo "error: g++-16 is not on PATH after installing into ${GCC_PREFIX}" >&2
+    exit 1
+fi
 
 step "cmake >= 3.28 (jammy ships 3.22; the tree and the consumer both require 3.28)"
 cmake_ok() {
@@ -345,7 +356,7 @@ step "provisioned"
     printf 'distro:       %s\n' "$(. /etc/os-release && printf '%s %s' "${NAME}" "${VERSION_ID}")"
     printf 'glibc:        %s\n' "$(ldd --version | awk 'NR==1{print $NF}')"
     printf 'baseline:     glibc %s (fetched prebuilts are held to it)\n' "${GLIBC_BASELINE}"
-    printf 'gcc:          %s\n' "$(g++-"${GCC_VERSION}" --version | awk 'NR==1{print $0}')"
+    printf 'gcc:          %s (%s)\n' "$(g++-16 --version | awk 'NR==1{print $0}')" "${GCC_PREFIX}/bin/g++-16"
     printf 'cmake:        %s\n' "$(cmake --version | awk 'NR==1{print $3}')"
     printf 'ninja:        %s\n' "$(ninja --version)"
     printf 'vulkan ICDs:  %s\n' "$(ls /usr/share/vulkan/icd.d/ | tr '\n' ' ')"
