@@ -11,7 +11,7 @@ name: Release (Ubuntu 22.04 baseline)
 # then installed, compiled against and run by a machine that has nothing but a
 # normal dev environment and the release itself.
 #
-# Two jobs, deliberately different in kind:
+# Three jobs, deliberately different in kind:
 #   toolchain  build *inside* Ubuntu 22.04 (docker/release-jammy.Dockerfile: apt
 #              packages, and GCC 16 from the Ubuntu toolchain PPA since the tree
 #              needs -freflection), package, sign, publish to a GitHub Release.
@@ -21,8 +21,16 @@ name: Release (Ubuntu 22.04 baseline)
 #              same compiler package a jammy user installs.
 #   consume    NO container, NO checkout of build outputs: a fresh jammy runner
 #              downloads that release, installs it with zpkg as an unprivileged
-#              user, builds a consumer app against it and renders a cube on
-#              lavapipe. If this job passes, the release is usable.
+#              user, builds a consumer app against it and checks the glibc floor
+#              of what got installed. If this job passes, the release installs,
+#              links and loads on jammy -- which is the claim the release makes.
+#   render     the frame itself, on a runner whose *driver* meets the engine's
+#              floor. jammy cannot be that runner: its Mesa is 23.x and lavapipe
+#              only grew VK_EXT_descriptor_heap in Mesa 26.2, which no PPA
+#              publishes for jammy. So this job runs on noble, installs the same
+#              published release, and runs the cube binary the jammy job built.
+#              The release under test does not change; only the machine with the
+#              Vulkan driver does.
 
 on:
   push:
@@ -391,13 +399,94 @@ jobs:
             exit 1
           fi
 
-      # No GPU, no container, no LD_LIBRARY_PATH: lavapipe inside the distro's
-      # own Vulkan loader. The consumer writes a non-constant PPM or the step
-      # fails, so "it ran" cannot be a blank frame.
+      # Rendering deliberately does not happen here. This job's lavapipe is
+      # jammy's Mesa 23.x, which does not expose VK_EXT_descriptor_heap or
+      # VK_KHR_maintenance5 -- the engine requires both (RenderInitDevice.cpp),
+      # so device creation cannot succeed on this runner no matter how the
+      # release was built. The `render` job runs the same binary on a driver
+      # above that floor. Handing it over keeps the two claims apart: this job
+      # proves the release *installs and links on jammy*, that one proves it
+      # *runs*.
+      - name: Hand the built consumer to the render job
+        uses: actions/upload-artifact@v4
+        with:
+          name: zahlen-consumer-cube
+          path: consumer-build/cube
+          if-no-files-found: error
+          retention-days: 7
+
+      # Same guard as the build side, but on what actually got installed into
+      # the user's store -- the artifact the user runs, not the build tree.
+      - name: Check the installed packages against the baseline
+        run: scripts/check-glibc-floor.sh "${GLIBC_BASELINE}" "$(cat "${RUNNER_TEMP}/prefix.txt")"
+
+  render:
+    name: Render the frame (driver above the engine's floor)
+    needs: consume
+    # noble, because it is the only LTS with a Mesa new enough to run this
+    # engine on a CPU: lavapipe implements VK_EXT_descriptor_heap first in Mesa
+    # 26.2, and kisak-mesa publishes 26.2.x for noble but not for jammy. The
+    # artifact under test is unchanged -- the release built on jammy, installed
+    # by the same zpkg, running the binary the consume job compiled.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Install a Vulkan driver the engine can use
+        run: |
+          sudo add-apt-repository -y ppa:kisak/kisak-mesa
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            mesa-vulkan-drivers libvulkan1 vulkan-tools netpbm
+          apt-cache policy mesa-vulkan-drivers | sed -n '1,4p' | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      # Say exactly what is missing rather than letting the cube fail at device
+      # creation with one line per extension.
+      - name: Check the driver against the extensions the engine requires
+        run: |
+          vulkaninfo > "${RUNNER_TEMP}/vulkaninfo.txt" 2>/dev/null || true
+          missing=
+          for ext in VK_EXT_descriptor_heap VK_KHR_maintenance5 VK_EXT_extended_dynamic_state3; do
+            grep -q -- "${ext}" "${RUNNER_TEMP}/vulkaninfo.txt" || missing="${missing} ${ext}"
+          done
+          if [ -n "${missing}" ]; then
+            echo "error: the installed driver does not expose:${missing}" >&2
+            echo "       this job needs Mesa 26.2 or newer (or NVIDIA 610+); the" >&2
+            echo "       engine requires these extensions at device creation." >&2
+            exit 1
+          fi
+          grep -E 'deviceName|driverInfo|apiVersion' "${RUNNER_TEMP}/vulkaninfo.txt" | head -3 \
+            | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      - name: Download the published release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p dist
+          gh release download "${RELEASE_TAG}" -D dist
+          ls -la dist | head
+
+      - name: Install it unprivileged
+        run: |
+          mkdir -p "${HOME}/.local/bin"
+          install -m755 dist/zpkg-linux-x86_64 "${HOME}/.local/bin/zpkg"
+          echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
+          export PATH="${HOME}/.local/bin:${PATH}"
+          ( cd dist && sha256sum -c SHA256SUMS.tools )
+          zpkg key add dist/zahlen-release-key.pub --name "zahlen release"
+          zpkg install dist --require-checksums --require-signatures
+
+      - name: Take the consumer the jammy job built
+        uses: actions/download-artifact@v4
+        with:
+          name: zahlen-consumer-cube
+          path: consumer-build
+
+      # The consumer writes a non-constant PPM or the step fails, so "it ran"
+      # cannot be a blank frame.
       - name: Render a cube
         run: |
           mkdir -p out
-          export VK_DRIVER_FILES="${VK_DRIVER_FILES:-$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)}"
+          export VK_DRIVER_FILES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
           export VK_ICD_FILENAMES="${VK_DRIVER_FILES}"
           echo "ICD: ${VK_DRIVER_FILES}"
           ./consumer-build/cube out/cube.ppm 2>&1 | tee out/render.log
@@ -407,11 +496,6 @@ jobs:
           }
           pnmtopng out/cube.ppm >"out/zahlen-cube-${RELEASE_TAG}.png"
           file "out/zahlen-cube-${RELEASE_TAG}.png"
-
-      # Same guard as the build side, but on what actually got installed into
-      # the user's store -- the artifact the user runs, not the build tree.
-      - name: Check the installed packages against the baseline
-        run: scripts/check-glibc-floor.sh "${GLIBC_BASELINE}" "$(cat "${RUNNER_TEMP}/prefix.txt")"
 
       - name: Upload the frame and logs
         if: always()
