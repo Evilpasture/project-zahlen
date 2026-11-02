@@ -153,8 +153,14 @@ jobs:
       # prefix to mount and nothing foreign to run.
       - name: Build, test and package
         run: |
+          # dist must exist here, created by this user, before docker runs: the
+          # daemon creates a missing bind-mount source as root, and then every
+          # write from the host into it fails -- `} > dist/release-notes.md` dies
+          # with "Permission denied" after a build that succeeded completely. The
+          # container still writes the packages as root; that is fine, they are
+          # only ever read.
           rm -rf dist
-          mkdir -p .ccache
+          mkdir -p dist .ccache
           docker run --rm \
             -v "${PWD}:/workspace" -w /workspace \
             -v "${PWD}/dist:/dist" \
