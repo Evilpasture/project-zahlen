@@ -435,8 +435,16 @@ jobs:
         run: |
           sudo add-apt-repository -y ppa:kisak/kisak-mesa
           sudo apt-get update -qq
+          # The driver, plus the runtime libraries `ci-ubuntu-2204-env.sh
+          # --consumer` installs on jammy, in noble's spelling (`libcurl4t64`):
+          # the engine's shared objects dlopen/link these before Vulkan is even
+          # reached, and this job runs the jammy-built cube on a machine that was
+          # never provisioned for it.
           sudo apt-get install -y --no-install-recommends \
-            mesa-vulkan-drivers libvulkan1 vulkan-tools netpbm
+            mesa-vulkan-drivers libvulkan1 vulkan-tools netpbm \
+            libzstd1 libatomic1 libcurl4t64 \
+            libwayland-client0 libwayland-cursor0 libwayland-egl1 \
+            libxkbcommon0 libdecor-0-0
           apt-cache policy mesa-vulkan-drivers | sed -n '1,4p' | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
       # Say exactly what is missing rather than letting the cube fail at device
@@ -457,9 +465,14 @@ jobs:
           grep -E 'deviceName|driverInfo|apiVersion' "${RUNNER_TEMP}/vulkaninfo.txt" | head -3 \
             | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
+      # No checkout in this job, so `gh` has no git remote to infer the
+      # repository from and fails with "failed to run git: fatal: not a git
+      # repository" before it ever reaches the network. GH_REPO says which
+      # repository directly, which is also why this job needs no source tree.
       - name: Download the published release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           mkdir -p dist
           gh release download "${RELEASE_TAG}" -D dist
@@ -510,4 +523,5 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: gh release upload "${RELEASE_TAG}" "out/zahlen-cube-${RELEASE_TAG}.png" --clobber
