@@ -142,7 +142,7 @@ void DumpFaultRegion(const void* faultAddress) noexcept {
 
             if (isTarget) {
                 offset += ZHLN::BufferPrint(
-                    lineBuf + offset, sizeof(lineBuf) - offset, "%s%02X%s ", Color::Red, std::to_integer<uint8_t>(raw_bytes[j]), Color::Reset
+                    lineBuf + offset, sizeof(lineBuf) - offset, "%s%02X%s ", Color::Red.data(), std::to_integer<uint8_t>(raw_bytes[j]), Color::Reset.data()
                 );
             } else {
                 offset += ZHLN::BufferPrint(lineBuf + offset, sizeof(lineBuf) - offset, "%02X ", std::to_integer<uint8_t>(raw_bytes[j]));

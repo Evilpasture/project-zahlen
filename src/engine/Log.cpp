@@ -68,18 +68,18 @@ constexpr auto SeverityTag(LogSeverity severity) noexcept -> std::string_view {
     return "INFO";
 }
 
-constexpr auto SeverityColor(LogSeverity severity) noexcept -> const char* {
+constexpr auto SeverityColor(LogSeverity severity) noexcept -> std::string_view {
     switch (severity) {
         case LogSeverity::Debug:
             return Color::Gray;
         case LogSeverity::Info:
-            return "";
+            return {};
         case LogSeverity::Warning:
             return Color::Yellow;
         case LogSeverity::Error:
             return Color::Red;
     }
-    return "";
+    return {};
 }
 
 auto ShouldColorize(FILE* stream) noexcept -> bool {

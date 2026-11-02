@@ -92,18 +92,25 @@ inline void Println(FILE* stream) noexcept {
 }
 
 namespace Color {
-inline constexpr char Reset[]   = "\033[0m";
-inline constexpr char Bold[]    = "\033[1m";
-inline constexpr char Dim[]     = "\033[2m";
-inline constexpr char Gray[]    = "\033[90m";
-inline constexpr char Cyan[]    = "\033[36m";
-inline constexpr char Yellow[]  = "\033[33m";
-inline constexpr char Green[]   = "\033[32m";
-inline constexpr char Red[]     = "\033[31m";
-inline constexpr char BCyan[]   = "\033[1;36m";
-inline constexpr char BGreen[]  = "\033[1;32m";
-inline constexpr char BYellow[] = "\033[1;33m";
-inline constexpr char BRed[]    = "\033[1;31m";
+// These were `char[N]` arrays, and that is what GCC 16.2 miscompiles: passing several
+// of them to one std::println/std::print next to string_view arguments, in a PIC
+// translation unit at -O1 or above, makes the call land on the array's address in
+// .rodata -- the process dies with SIGSEGV before a character is printed. As
+// `std::string_view` the same call sites format identically and the miscompile is out
+// of reach. Everything that needs a `const char*` now says `.data()`: the
+// array-to-pointer decay is gone from the places that were getting it silently.
+inline constexpr std::string_view Reset   = "\033[0m";
+inline constexpr std::string_view Bold    = "\033[1m";
+inline constexpr std::string_view Dim     = "\033[2m";
+inline constexpr std::string_view Gray    = "\033[90m";
+inline constexpr std::string_view Cyan    = "\033[36m";
+inline constexpr std::string_view Yellow  = "\033[33m";
+inline constexpr std::string_view Green   = "\033[32m";
+inline constexpr std::string_view Red     = "\033[31m";
+inline constexpr std::string_view BCyan   = "\033[1;36m";
+inline constexpr std::string_view BGreen  = "\033[1;32m";
+inline constexpr std::string_view BYellow = "\033[1;33m";
+inline constexpr std::string_view BRed    = "\033[1;31m";
 } // namespace Color
 
 }
