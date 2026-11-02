@@ -39,6 +39,12 @@ GLIBC_BASELINE=${ZHLN_GLIBC_BASELINE:-2.35}
 # the block that installs it for the measurement.
 DXC_TAG=v1.8.2505.1
 DXC_TARBALL=linux_dxc_2025_07_14.x86_64.tar.gz
+# jammy's ninja is 1.10.1 and CMake refuses to generate build files for C++20 modules
+# with anything older than 1.11 -- this tree has 28 module units, so the *build host*
+# needs a modern ninja the distro does not carry. Upstream publishes static-ish
+# release binaries built against very old glibc (measured: GLIBC_2.15), so it is
+# downloaded rather than packaged.
+NINJA_VERSION=${NINJA_VERSION:-1.13.2}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 usage() {
@@ -114,7 +120,7 @@ apt_install() {
 
 step "base packages"
 asroot apt-get update
-apt_install ca-certificates curl gnupg lsb-release apt-transport-https software-properties-common python3
+apt_install ca-certificates curl gnupg lsb-release apt-transport-https software-properties-common python3 unzip
 
 step "gcc ${GCC_VERSION} (jammy ships gcc-11; the tree needs -freflection)"
 if ! dpkg -s "g++-${GCC_VERSION}" >/dev/null 2>&1; then
@@ -168,8 +174,36 @@ if ! cmake_ok; then
     exit 1
 fi
 
-step "ninja + pkg-config"
-apt_install ninja-build pkg-config
+step "ninja >= 1.11 (jammy ships 1.10.1, which cannot scan C++20 modules)"
+apt_install pkg-config
+ninja_ok() {
+    command -v ninja >/dev/null || return 1
+    local v
+    v=$(ninja --version 2>&1 | head -1)
+    [ -n "${v}" ] && [ "$(printf '%s\n1.11\n' "${v}" | sort -V | head -1)" = "1.11" ]
+}
+if ! ninja_ok; then
+    # /usr/local/bin precedes /usr/bin on every normal PATH, so installing here
+    # shadows a distro ninja without removing it.
+    tmp_ninja=$(mktemp -d)
+    curl -fsSL -o "${tmp_ninja}/ninja.zip" \
+        "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-linux.zip"
+    unzip -q "${tmp_ninja}/ninja.zip" -d "${tmp_ninja}"
+    # Same rule as every other fetched prebuilt: it has to run on the baseline.
+    "${script_dir}/check-glibc-floor.sh" "${GLIBC_BASELINE}" "${tmp_ninja}/ninja" || {
+        echo "error: ninja ${NINJA_VERSION} cannot run on glibc ${GLIBC_BASELINE}." >&2
+        exit 1
+    }
+    asroot install -m755 "${tmp_ninja}/ninja" /usr/local/bin/ninja
+    rm -rf "${tmp_ninja}"
+    hash -r 2>/dev/null || true
+fi
+if ! ninja_ok; then
+    echo "error: could not provision ninja >= 1.11 (found: $(ninja --version 2>&1 | head -1))" >&2
+    echo "       CMake needs 1.11+ to generate build files for C++20 modules." >&2
+    exit 1
+fi
+printf '  ninja: %s (%s)\n' "$(ninja --version 2>&1 | head -1)" "$(command -v ninja)"
 
 step "vulkan runtime + lavapipe (CPU rendering)"
 apt_install libvulkan1 mesa-vulkan-drivers vulkan-tools

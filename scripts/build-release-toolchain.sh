@@ -98,6 +98,17 @@ echo "== compiler: $("${CXX}" --version | head -1)"
 echo "== c compiler: $("${CC}" --version | head -1)"
 echo "== wayland-scanner: $(wayland-scanner --version 2>&1 | head -1)"
 echo "== linker: $(ld --version | head -1)"
+# CMake refuses to generate build files for C++20 modules with ninja < 1.11, and this
+# tree has 28 module units -- so a distro ninja is not good enough. Fail here, before
+# six minutes of configure, if the host has the wrong one.
+ninja_version=$(ninja --version 2>&1 | head -1)
+if [ -z "${ninja_version}" ] || [ "$(printf '%s\n1.11\n' "${ninja_version}" | sort -V | head -1)" != "1.11" ]; then
+    echo "error: ninja ${ninja_version:-not found} cannot generate C++20 module builds." >&2
+    echo "       CMake needs 1.11 or newer. scripts/ci-ubuntu-2204-env.sh installs a" >&2
+    echo "       downloaded one into /usr/local/bin (jammy has 1.10.1)." >&2
+    exit 1
+fi
+echo "== ninja: ${ninja_version} ($(command -v ninja))"
 
 # lavapipe, for the test suite below. The ICD filename is not portable (Debian and
 # Ubuntu suffix it with the architecture), so find it rather than hardcode it.
@@ -142,7 +153,14 @@ if [ -d extern/slang/.git ] || [ -f extern/slang/.git ]; then
         echo "       dies in set_target_properties with a misleading argument-count error." >&2
         exit 1
     }
-    echo "== extern/slang at ${slang_git} ($(git -C extern/slang describe --tags --abbrev=0 2>&1 | head -1))"
+    # A shallow submodule has no tags, so `git describe` exits 128 here and that is
+    # fine -- it must not look like a failure, which is exactly what it did when this
+    # was a command substitution inside an echo under `set -o pipefail`.
+    if slang_tag=$(git -C extern/slang describe --tags --abbrev=0 2>&1); then
+        echo "== extern/slang at ${slang_git} (${slang_tag})"
+    else
+        echo "== extern/slang at ${slang_git} (no tag in this checkout)"
+    fi
 fi
 
 # -------------------------------------------------------------------- 3. slang
