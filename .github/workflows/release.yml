@@ -199,7 +199,7 @@ jobs:
             echo 'tar -xzf cube-consumer-*.tar.gz -C consumer'
             echo 'cmake -S consumer -B consumer-build -G Ninja \'
             echo '  -DCMAKE_BUILD_TYPE=Release \'
-            echo "  -DCMAKE_CXX_COMPILER=g++-${GCC_BIN_SUFFIX} \"
+            echo "  -DCMAKE_CXX_COMPILER=g++-${GCC_BIN_SUFFIX} \\"
             echo '  -DCMAKE_PREFIX_PATH="$(zpkg prefix)"'
             echo 'cmake --build consumer-build'
             echo '```'
