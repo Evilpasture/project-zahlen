@@ -331,6 +331,11 @@ jobs:
 
       - name: Install the toolchain from the release, unprivileged
         run: |
+          # A bare jammy runner has no ~/.local/bin and `install` does not create
+          # leading directories: without this the step dies before it installs
+          # anything, with "cannot create regular file ...: No such file or
+          # directory", on a release that is perfectly good.
+          mkdir -p "${HOME}/.local/bin"
           install -m755 dist/zpkg-linux-x86_64 "${HOME}/.local/bin/zpkg"
           echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
           export PATH="${HOME}/.local/bin:${PATH}"
