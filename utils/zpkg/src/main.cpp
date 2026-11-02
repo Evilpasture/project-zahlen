@@ -542,6 +542,15 @@ auto Run(int argc, char** argv) -> std::expected<void, Fail> {
     const Args& args = *parsed;
     log::SetQuiet(args.Has("quiet") || args.Has("q"));
 
+    // `index` reads the directory it is handed and writes --out; it never opens a
+    // store, so the elevated-install guard in ResolveEnv does not apply to it. That
+    // guard has to stay for the commands that do write into a user's data directory
+    // (`zpkg install` as root is still refused below), but gating `index` on it broke
+    // the release packaging: scripts/package-toolchain.sh runs zpkg inside a build
+    // container as root, where ResolveEnv failed with "refusing to run elevated".
+    if (command == "index")
+        return CommandIndex(args);
+
     auto resolved = ResolveEnv(args.Has("force"));
     if (!resolved)
         return std::unexpected(std::move(resolved.error()));
@@ -563,8 +572,6 @@ auto Run(int argc, char** argv) -> std::expected<void, Fail> {
         return CommandInstall(store, args);
     if (command == "verify")
         return CommandVerify(store, args);
-    if (command == "index")
-        return CommandIndex(args);
     if (command == "list")
         return CommandList(store, args);
     if (command == "info")
