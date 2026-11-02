@@ -83,8 +83,18 @@ void Configure(CURL* handle, const std::string& url) {
     curl_easy_setopt(handle, CURLOPT_LOW_SPEED_TIME, 60L);
     // A package manager is not a browser: no cookies, no redirects to other
     // schemes, no proxy guessing beyond the environment's own settings.
+#if LIBCURL_VERSION_NUM >= 0x075502
+    // As in extensions/net/HTTP: 7.85.2 replaced the CURLPROTO_* bitmask with a
+    // string, and the bitmask spelling is what an older libcurl has. Both mean the
+    // same thing here, and Ubuntu's 7.81 has only the bitmask -- zpkg is built
+    // against the distro's libcurl, so the string spelling cannot be assumed. The
+    // name lives in the branch that uses it, so the other has nothing to warn about.
     curl_easy_setopt(handle, CURLOPT_PROTOCOLS_STR, "http,https");
     curl_easy_setopt(handle, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(handle, CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(handle, CURLOPT_REDIR_PROTOCOLS, static_cast<long>(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
 }
 
 auto Check(CURLcode code, const std::string& url) -> std::expected<void, Fail> {
