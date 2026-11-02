@@ -217,8 +217,10 @@ jobs:
             echo 'installs the runtime libraries as well.'
             echo
             echo 'That is not only for building against the toolchain: the engine and the'
-            echo 'tools were compiled by that GCC, so the `libstdc++6` it brings is what'
-            echo 'they need at run time on 22.04. Nothing else is implied -- the release'
+            echo 'tools were compiled by that GCC, so they need its runtime at run time --'
+            echo '`GLIBCXX_3.4.36` and `GCC_13.0.0`, where 22.04 ships 3.4.30. The script'
+            echo 'installs that runtime and registers it with `ldconfig`, which is also why'
+            echo 'it has to run as root. Nothing else is implied -- the release'
             echo 'carries its own GLFW (static, inside `libzahlen_engine`), so no'
             echo '`libglfw3` is required, and the GLIBC_2.35 floor is checked before'
             echo 'anything is published.'

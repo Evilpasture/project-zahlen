@@ -209,6 +209,62 @@ EOF
 done
 
 # ---------------------------------------------------------------------------
+# The compiler's runtime is newer than the distro's, and that is not a detail:
+# jammy ships GLIBCXX_3.4.30 and GCC_12, a program from this compiler can need
+# GLIBCXX_3.4.36 and GCC_13.0.0, and every build tool the engine runs during the
+# build is such a program:
+#
+#     bin/zshader: /lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.36'
+#                  not found; ... `GCC_13.0.0' not found
+#
+# LD_LIBRARY_PATH is not a fix: the build sets it itself for shader cooking, which
+# silently replaces whatever we exported. Register the runtime with the dynamic
+# loader instead, so it is found through the cache no matter who sets what.
+if [ ! -e "${PREFIX}/lib/libgcc_s.so.1" ]; then
+    gcc_lib=$(ls -d "${PREFIX}"/lib/gcc/*/*/libgcc_s.so.1 2>/dev/null | head -1 || true)
+    if [ -n "${gcc_lib}" ]; then
+        ln -s "${gcc_lib#"${PREFIX}/lib/"}" "${PREFIX}/lib/libgcc_s.so.1"
+    fi
+fi
+if [ "$(id -u)" -eq 0 ] && [ -d /etc/ld.so.conf.d ]; then
+    # The "00-" is load-bearing. These files are included in alphabetical order by
+    # /etc/ld.so.conf, the distro's own `x86_64-linux-gnu.conf` lists /usr/local and
+    # /lib and sorts after plain names, and the loader takes the *first* cache entry
+    # for a soname -- so a file called `zahlen-gcc16.conf` loses to the distro's and
+    # the runtime is silently the old one. Verified below rather than assumed.
+    conf=/etc/ld.so.conf.d/00-zahlen-gcc16.conf
+    printf '%s\n' "${PREFIX}/lib" >"${conf}"
+    ldconfig_bin=$(command -v ldconfig || printf '/sbin/ldconfig')
+    if [ -x "${ldconfig_bin}" ]; then
+        "${ldconfig_bin}"
+        runtime=$("${ldconfig_bin}" -p 2>/dev/null | awk '/libstdc\+\+\.so\.6 /{print $NF; exit}')
+        gcc_runtime=$("${ldconfig_bin}" -p 2>/dev/null | awk '/libgcc_s\.so\.1 /{print $NF; exit}')
+        log "runtime registered with the loader (${conf})"
+        log "loader resolves libstdc++.so.6 -> ${runtime:-unknown}"
+        log "loader resolves libgcc_s.so.1   -> ${gcc_runtime:-unknown}"
+        case "${runtime}" in
+            "${PREFIX}"/*) ;;
+            *)
+                {
+                    echo "error: the loader still resolves libstdc++.so.6 to" >&2
+                    echo "       ${runtime:-nothing}, not to ${PREFIX}/lib." >&2
+                    echo "       Something earlier in /etc/ld.so.conf.d wins; see the" >&2
+                    echo "       comment above ${conf}." >&2
+                } >&2
+                exit 1
+                ;;
+        esac
+    fi
+else
+    {
+        echo "note: not running as root, so the runtime was not registered." >&2
+        echo "      Programs built with this compiler need GLIBCXX_3.4.36 and GCC_13.0.0," >&2
+        echo "      which the distro does not have. Either run this script as root, or" >&2
+        echo "      export LD_LIBRARY_PATH=${PREFIX}/lib before running them." >&2
+    } >&2
+fi
+
+# ---------------------------------------------------------------------------
 # Verify what was installed. The last check is the one that matters: trunk GCC
 # 16 refused Jolt's `static const StaticArray<Vec3, 1026>` member, and a
 # compiler that cannot compile that header cannot build this engine.
@@ -223,13 +279,18 @@ log "g++-16: ${version} (>= ${GCC_MIN})"
 
 probe="${work}/probe"
 mkdir -p "${probe}"
+# std::format is deliberate: it makes the probe link against the *newer* runtime
+# symbols, so "compiles and runs" here also means the loader can find the runtime
+# this compiler needs. A probe that only uses <cstdio> passes on a machine that
+# cannot run the build tools.
 cat > "${probe}/probe.cpp" <<'EOF'
 #include <cstdio>
-#include <vector>
+#include <format>
 #include <string>
+#include <vector>
 int main() {
     std::vector<std::string> v{"gcc"};
-    std::printf("%s %zu\n", v[0].c_str(), v.size());
+    std::printf("%s\n", std::format("{} {} runtime", v[0], v.size()).c_str());
     return 0;
 }
 EOF
@@ -258,7 +319,7 @@ if ! "${probe}/probe" >/dev/null; then
     echo "error: a program built with g++-16 does not run" >&2
     exit 1
 fi
-log "compiled, linked and ran a probe"
+log "compiled, linked and ran a probe (std::format, so the new runtime resolved)"
 
 # The assembler must come from here, not from the distro: the pair is verified
 # together or not at all.

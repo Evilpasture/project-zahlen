@@ -291,6 +291,24 @@ ar rcs "${probe_dir}/libprobe.a" "${probe_dir}/probe.o"
     echo "error: a probe built by this toolchain does not meet the glibc baseline." >&2
     exit 1
 }
+# Run it, not just link it. The engine's own build tools (zshader, zpkg) are built by
+# this compiler and started by the build, so a toolchain whose runtime the host
+# cannot load fails at the first cooked shader -- 90 steps in, which is where this
+# was found. One execution here turns that into a five-second failure.
+probe_out=$("${probe_dir}/probe" 2>&1) || {
+    {
+        echo "error: a probe built by this toolchain does not run on this host." >&2
+        printf '%s\n' "${probe_out}" >&2
+        echo "       Programs from this compiler need its runtime (GLIBCXX_3.4.36," >&2
+        echo "       GCC_13.0.0); jammy ships older ones. scripts/install-gcc-prebuilt.sh" >&2
+        echo "       registers ${ZHLN_GCC_PREFIX:-/opt/gcc16}/lib with ldconfig." >&2
+    } >&2
+    exit 1
+}
+ldconfig_bin=$(command -v ldconfig || printf '/sbin/ldconfig')
+libstdcxx_in_use=$("${ldconfig_bin}" -p 2>/dev/null | awk '/libstdc\+\+\.so\.6 /{print $NF; exit}' || true)
+echo "== probe: ${probe_out}"
+echo "== loader libstdc++: ${libstdcxx_in_use:-unknown}"
 
 # ccache, verified instead of assumed: two identical compiles, and the second must
 # be a hit. A ccache that is installed but not caching is indistinguishable from a
