@@ -274,6 +274,11 @@ if [ "${PROFILE}" = build ]; then
     #   git, ccache, openssl   the checkout, the compiler cache, and the release
     #                          signing key that scripts/package-toolchain.sh uses.
     apt_install git ccache openssl
+    # gdb is a build-host tool: when ztest reports a worker crash, its own handler is
+    # the thing that truncates the trace to two frames, because the stack it would
+    # walk is the part that got corrupted. The build script replays those cases under
+    # gdb with --ztest-worker removed, which is where a usable backtrace comes from.
+    apt_install gdb
     # The window stack, and the reason the release can be Wayland-only: GLFW is
     # vendored (jammy ships 3.3, the engine needs 3.4's platform APIs) and is built
     # here against these. libwayland-dev ships wayland-client.pc,

@@ -486,7 +486,57 @@ ctest --test-dir "${build}-zpkg" --output-on-failure
 # The bytes published are these bytes: 2.35 code runs on anything newer, so running
 # the suite here is a real smoke test of the release.
 echo "== running ztest on this host's lavapipe"
-"${build}/bin/ztest" --test-dir "${build}" -V
+ztest_log="${out}/ztest.log"
+mkdir -p "${out}"
+if ! "${build}/bin/ztest" --test-dir "${build}" -V 2>&1 | tee "${ztest_log}"; then
+    # A worker crash is reported as "Stack trace (2 frames)" ending in __sigaction:
+    # ztest's worker installs its own handler, and the handler cannot unwind a stack
+    # that is the thing being corrupted. The framework's own answer is
+    # `--allow-debugger`, which needs a terminal and therefore cannot be used here;
+    # this is the same replay without the prompt. Each case is selected by node ID
+    # and run without --ztest-worker, so the signal reaches gdb instead of the
+    # handler and the frames below the fault are real.
+    echo "== ztest failed; replaying the crashed cases under gdb"
+    echo "   (the worker's crash handler is what truncates its own traces)"
+    crashed=$(sed -n 's/^  \[ CRASH \] \([^ ]*\)$/\1/p' "${ztest_log}" | sort -u)
+    if [ -z "${crashed}" ]; then
+        echo "warning: no crashed cases were named in the log; nothing to replay" >&2
+    elif ! command -v gdb >/dev/null 2>&1; then
+        echo "warning: gdb is not installed; scripts/ci-ubuntu-2204-env.sh --build installs it" >&2
+    else
+        # A case that only crashes next to its neighbours is itself the finding, so
+        # a serial run of just the failures comes first: if that is clean, the crash
+        # needs the parallel session and the per-case replay below would say nothing.
+        if "${build}/bin/ztest" --test-dir "${build}" --lf --jobs 1 2>&1 | tail -n 20; then
+            echo "note: the failures did not reproduce serially -- they need the parallel session"
+        fi
+        # Bounded: six traces are enough to tell one bug from two, and a wedged case
+        # must not hold the runner. The list goes through a file rather than a pipe,
+        # because `printf | head` would SIGPIPE the writer and pipefail would end the
+        # script with 141 before the first trace. follow-fork-mode covers a replay that
+        # still shards into a worker; with a single node it is a no-op.
+        printf '%s\n' "${crashed}" > "${out}/crashed-cases.txt"
+        head -n 6 "${out}/crashed-cases.txt" > "${out}/crashed-cases-replayed.txt"
+        while read -r case_id; do
+            echo
+            echo "== gdb: ${case_id}"
+            timeout 180 gdb -batch -nx \
+                -ex 'set pagination off' \
+                -ex 'set confirm off' \
+                -ex 'set follow-fork-mode child' \
+                -ex 'set detach-on-fork on' \
+                -ex 'handle SIGPIPE nostop noprint pass' \
+                -ex run \
+                -ex 'echo \n== backtrace\n' \
+                -ex 'bt 40' \
+                -ex 'info registers rip rsp rbp' \
+                -ex 'x/6i $pc-16' \
+                --args "${build}/bin/ztest" --test-dir "${build}" "${case_id}" 2>&1 | tail -n 90 \
+                || echo "   (no backtrace: the case did not fault this time)"
+        done < "${out}/crashed-cases-replayed.txt"
+    fi
+    exit 1
+fi
 
 echo "== packaging"
 ZPKG_BIN="${build}-zpkg/zpkg" scripts/package-toolchain.sh "${out}" "${build}"
