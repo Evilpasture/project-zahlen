@@ -380,9 +380,25 @@ cmake -B "${build}" -S . -G Ninja \
 # A release must carry Wayland. This is the assertion that keeps a silent
 # degradation to X11-only -- or to no window backend at all -- from being published.
 # It fails here, in the cheap place, naming the reason.
-wayland_backend=$(sed -n 's/^GLFW_BUILD_WAYLAND:BOOL=//p' "${build}/CMakeCache.txt")
-x11_backend=$(sed -n 's/^GLFW_BUILD_X11:BOOL=//p' "${build}/CMakeCache.txt")
-echo "== GLFW backends from this configure: wayland=${wayland_backend:-unset} x11=${x11_backend:-unset}"
+# A CMake BOOL cache entry is whatever was assigned to it -- TRUE from a set(...)
+# with a boolean variable, ON from -D on the command line -- and both mean the same
+# thing. Comparing the raw string to "ON" is how a correct configure (wayland=TRUE,
+# x11=FALSE) was reported as "did not enable Wayland", which is a red build spent on
+# a spelling.
+cmake_bool() {
+    case $(printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]') in
+        ON | TRUE | 1 | YES | Y) printf 'ON\n' ;;
+        OFF | FALSE | 0 | NO | N) printf 'OFF\n' ;;
+        '') printf 'unset\n' ;;
+        *) printf '%s\n' "${1}" ;;
+    esac
+}
+wayland_raw=$(sed -n 's/^GLFW_BUILD_WAYLAND:BOOL=//p' "${build}/CMakeCache.txt")
+x11_raw=$(sed -n 's/^GLFW_BUILD_X11:BOOL=//p' "${build}/CMakeCache.txt")
+wayland_backend=$(cmake_bool "${wayland_raw}")
+x11_backend=$(cmake_bool "${x11_raw}")
+echo "== GLFW backends from this configure: wayland=${wayland_backend} x11=${x11_backend}" \
+    "(raw: ${wayland_raw:-absent} / ${x11_raw:-absent})"
 if [ "${x11_backend}" = "ON" ]; then
     echo "error: this release build has GLFW's X11 backend enabled." >&2
     echo "       The release is Wayland-only by design, and the image installs no X11" >&2
@@ -392,7 +408,8 @@ if [ "${x11_backend}" = "ON" ]; then
 fi
 if [ "${wayland_backend}" != "ON" ]; then
     echo "error: this configure did not enable GLFW's Wayland backend." >&2
-    echo "       Expected GLFW_BUILD_WAYLAND=ON in ${build}/CMakeCache.txt." >&2
+    echo "       Found GLFW_BUILD_WAYLAND=${wayland_raw:-<absent>} in ${build}/CMakeCache.txt," >&2
+    echo "       which does not mean enabled." >&2
     echo "       Check that libwayland-dev, libxkbcommon-dev, wayland-protocols and" >&2
     echo "       libwayland-bin are installed, and that" >&2
     echo "       $(command -v wayland-scanner) runs." >&2
