@@ -499,6 +499,14 @@ jobs:
       - name: Render a cube
         run: |
           mkdir -p out
+          # Artifacts do not carry file modes (upload-artifact: "all files will
+          # have 644"), so the binary the jammy job compiled arrives without its
+          # executable bit. Put it back; nothing else about the file changed.
+          chmod +x consumer-build/cube
+          # Without this, a cube that never ran only shows up as the `grep`
+          # below failing, which reports "the rendered frame was blank" -- the
+          # wrong diagnosis, as this very failure showed.
+          set -o pipefail
           export VK_DRIVER_FILES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
           export VK_ICD_FILENAMES="${VK_DRIVER_FILES}"
           echo "ICD: ${VK_DRIVER_FILES}"
