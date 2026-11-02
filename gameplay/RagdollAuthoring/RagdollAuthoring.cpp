@@ -1,6 +1,26 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// GCC 16.2.0 (the release toolchain) miscompiles the TU that instantiates the
+// ReflectLua patch templates when it is built with -O1..-O3 and -fPIC: the
+// `Value` cursor handed to the patch callback arrives with `_state` holding
+// the callback's own address, and the first lua_type() dereferences a code
+// address. Every TU in this tree is built with -fPIC because zahlen_engine is
+// SHARED, so the crash follows from the flags rather than from anything this
+// file does; ~all Lua cases take the same path and pass, which is why it shows
+// up as two seemingly unrelated segfaults (ReflectLuaSuite::
+// TestShippedConfigProfiles and ConsoleDebuggerTestSuite::
+// patch_applies_lua_table_and_rolls_back_on_error). GCC 16.2.1 fixes it but
+// conda-forge publishes no 16.2.1, so the lane keeps 16.2.0 and this file opts
+// its own translation unit out of inlining -- measured: the same source at
+// -O3 -fPIC is clean at -O0 and clean with inlining disabled, and stays broken
+// with every single inliner knob (-fno-ipa-sra, -fno-inline-small-functions,
+// -fno-inline-functions, -fno-early-inlining, -fno-tree-vectorize, ...) turned
+// off individually. See zahlen-release-2204.md, Follow-ups 22-23.
+#if defined(__GNUC__) && !defined(__clang__) && defined(__OPTIMIZE__)
+#pragma GCC optimize("no-inline")
+#endif
+
 // gameplay/RagdollAuthoring/RagdollAuthoring.cpp
 #include "RagdollAuthoring.hpp"
 
