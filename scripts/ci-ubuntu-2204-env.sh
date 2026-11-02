@@ -136,9 +136,15 @@ step "base packages"
 asroot apt-get update
 # zstd unpacks the compiler download; unzip unpacks the ninja one. No PPA any more:
 # the compiler is fetched rather than added as a repository.
-apt_install ca-certificates curl gnupg lsb-release apt-transport-https zstd python3 unzip
+#
+# binutils and libc6-dev are explicit because they used to be somebody else's job:
+# they arrived as dependencies of `apt install g++-16`, and a downloaded compiler
+# brings neither. Without them there is no `ld`, no crt1.o and no <bits/...>, and
+# the failure would land at the first link, long after this line.
+apt_install ca-certificates curl gnupg lsb-release apt-transport-https zstd python3 unzip \
+    binutils libc6-dev
 
-step "gcc ${GCC_VERSION} (released, downloaded; jammy ships gcc-11 and its PPA has only a trunk snapshot of 16)"
+step "gcc ${GCC_VERSION}"
 # The tree needs -freflection, so GCC 16 or newer. jammy's own archive stops at 11
 # and the ubuntu-toolchain-r/test PPA offers `16-20260315`, a trunk snapshot from
 # March: it rejects Jolt's `static const StaticArray<Vec3, 1026>` member and the
@@ -149,6 +155,12 @@ if [ ! -x "${GCC_PREFIX}/bin/g++-16" ]; then
 fi
 export PATH="${GCC_PREFIX}/bin:${PATH}"
 hash -r
+# The compiler is no longer in /usr/bin, so PATH has to be published rather than
+# just exported: the build runs in later workflow steps, and the image built by
+# docker/release-jammy.Dockerfile has its own ENV for the same reason.
+if [ -n "${GITHUB_PATH:-}" ]; then
+    printf '%s\n' "${GCC_PREFIX}/bin" >>"${GITHUB_PATH}"
+fi
 # PATH is enough for our own invocations; CMake and the compiler's own driver also
 # find it by name, and the wrappers add --sysroot=/ themselves.
 if ! g++-16 --version >/dev/null 2>&1; then

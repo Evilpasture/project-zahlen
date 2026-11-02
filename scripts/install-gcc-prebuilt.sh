@@ -127,15 +127,46 @@ done <<< "${ARTIFACTS}"
 # at the host's directories instead: with --sysroot=/ in the wrappers below this
 # makes it a native compiler against jammy's glibc, not a cross compiler against
 # a bundled 2.17 sysroot.
-multiarch=$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || gcc -dumpmachine)
-if [ -z "${multiarch}" ] || [ ! -d "/usr/include/${multiarch}" ]; then
-    echo "error: cannot determine the host multiarch include directory" >&2
+# Determined without a compiler on purpose: this runs on a bare jammy image, where
+# there is no gcc yet -- asking one is what broke the first container build.
+detect_multiarch() {
+    if command -v dpkg-architecture >/dev/null 2>&1; then
+        local m
+        m=$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || true)
+        if [ -n "${m}" ]; then printf '%s\n' "${m}"; return 0; fi
+    fi
+    # dpkg is always there; the multiarch tuple follows from the architecture.
+    if command -v dpkg >/dev/null 2>&1; then
+        case $(dpkg --print-architecture 2>/dev/null) in
+            amd64) printf 'x86_64-linux-gnu\n'; return 0 ;;
+            arm64) printf 'aarch64-linux-gnu\n'; return 0 ;;
+            i386) printf 'i386-linux-gnu\n'; return 0 ;;
+            armhf) printf 'arm-linux-gnueabihf\n'; return 0 ;;
+        esac
+    fi
+    # Last resort: the directory that actually holds the C library start files.
+    local dir
+    for dir in /usr/lib/*-linux-gnu*; do
+        [ -e "${dir}/libc.so" ] || [ -e "${dir}/libc.so.6" ] || continue
+        printf '%s\n' "${dir#/usr/lib/}"
+        return 0
+    done
+    return 1
+}
+multiarch=$(detect_multiarch || true)
+if [ -z "${multiarch}" ]; then
+    echo "error: cannot determine the host multiarch directory (dpkg and /usr/lib/*-linux-gnu*)" >&2
     exit 1
 fi
 mkdir -p "${PREFIX}/x86_64-conda-linux-gnu"
 ln -sfn "/usr/include/${multiarch}" "${PREFIX}/x86_64-conda-linux-gnu/include"
 ln -sfn "/usr/lib/${multiarch}" "${PREFIX}/x86_64-conda-linux-gnu/lib"
 log "multiarch: ${multiarch} (headers and libraries follow the host)"
+if [ ! -d "/usr/include/${multiarch}" ]; then
+    # Not fatal: libc6-dev may not be installed yet, and a dangling symlink is
+    # resolved when it is. The probe below is what decides.
+    log "note: /usr/include/${multiarch} does not exist yet (libc6-dev not installed)"
+fi
 
 mkdir -p "${PREFIX}/bin"
 for pair in "gcc:x86_64-conda-linux-gnu-gcc" "g++:x86_64-conda-linux-gnu-g++"; do

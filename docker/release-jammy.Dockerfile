@@ -30,6 +30,11 @@ COPY scripts/ci-ubuntu-2204-env.sh scripts/check-glibc-floor.sh \
      scripts/install-slang-prebuilt.sh scripts/install-gcc-prebuilt.sh /provision/
 RUN /provision/ci-ubuntu-2204-env.sh --build
 
+# The compiler is a download into /opt/gcc16, not an apt package in /usr/bin, so
+# the image has to carry the PATH itself. (The same line is published to
+# GITHUB_PATH when this script runs on a bare runner instead of in a build.)
+ENV PATH=/opt/gcc16/bin:${PATH}
+
 # Slang, for cooking shaders during the build. It is a build-host dependency and
 # nothing it provides reaches a package (utils/zshader has no install rule), so it is
 # upstream's prebuilt -- built against glibc 2.17, measured against the 2.35 baseline
