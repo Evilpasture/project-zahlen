@@ -498,7 +498,10 @@ if ! "${build}/bin/ztest" --test-dir "${build}" -V 2>&1 | tee "${ztest_log}"; th
     # handler and the frames below the fault are real.
     echo "== ztest failed; replaying the crashed cases under gdb"
     echo "   (the worker's crash handler is what truncates its own traces)"
-    crashed=$(sed -n 's/^  \[ CRASH \] \([^ ]*\)$/\1/p' "${ztest_log}" | sort -u)
+    # ztest colours its output even when stdout is a pipe, so the escape sequences
+    # have to go before the lines can be matched: without this the parser finds
+    # nothing and reports "no crashed cases" about a log full of them.
+    crashed=$(sed -e 's/\x1b\[[0-9;]*m//g' "${ztest_log}" | sed -n 's/^  \[ CRASH \] \([^ ]*\)$/\1/p' | sort -u)
     if [ -z "${crashed}" ]; then
         echo "warning: no crashed cases were named in the log; nothing to replay" >&2
     elif ! command -v gdb >/dev/null 2>&1; then
