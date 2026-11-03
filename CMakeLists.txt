@@ -130,6 +130,7 @@ include(PythonProbe)
 include(BlenderProbe)
 include(GovernanceChecks)
 include(ReflectionConfig)
+include(ToolchainCapabilities)
 
 option(ZHLN_DEV_MODE "Enable raw loose-file asset loading for development" ON)
 if(ZHLN_DEV_MODE)
@@ -205,6 +206,22 @@ if(COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
 elseif(COMPILER_HAS_REFLECTION_LATEST_FLAG)
     set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection-latest")
 endif()
+
+# The flags above record what the driver accepts. These probes record what it
+# produces, with the same flags, before anything is built: Jolt's incomplete
+# static data member (which is why a *released* GCC is required at all) and
+# `.base64` assembly (which is why the compiler's own binutils must be the one
+# that answers). See cmake/ToolchainCapabilities.cmake.
+set(_zhln_reflection_probe_flags "")
+if(COMPILER_HAS_REFLECTION)
+    set(_zhln_reflection_probe_flags "-freflection")
+    if(COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
+        string(APPEND _zhln_reflection_probe_flags " -fparameter-reflection")
+    elseif(COMPILER_HAS_REFLECTION_LATEST_FLAG)
+        string(APPEND _zhln_reflection_probe_flags " -freflection-latest")
+    endif()
+endif()
+zhln_probe_toolchain_capabilities("${_zhln_reflection_probe_flags}")
 
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
 string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
@@ -646,3 +663,10 @@ endif()
 if(ZHLN_INSTALL_TOOLCHAIN_PACKAGES)
     include(Toolchains)
 endif()
+
+# zahlen_engine and Jolt are the two shared objects the Engine package installs
+# (cmake/Toolchains.cmake: zhln_toolchain_package(Engine TARGETS ...)). With
+# ZHLN_GLIBC_BASELINE set -- the release lane sets it -- `--target glibc-floor`
+# holds them to the floor they ship with, before anything is packaged or signed.
+include(GlibcFloor)
+zhln_add_glibc_floor_check(zahlen_engine Jolt)

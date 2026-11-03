@@ -111,22 +111,11 @@ if [ -z "${cxx_version}" ] || ! printf '%s\n%s\n' "${GCC_MIN}" "${cxx_version}" 
     exit 1
 fi
 # The assembler is half of the compiler pair, and the half jammy gets wrong: GCC 16
-# emits `.base64` for large data blobs, GAS only learned that directive in 2.41, and
-# jammy ships 2.38. Passing the driver a snippet that triggers it costs milliseconds
-# and fails here instead of 300 files into the build.
+# emits `.base64` for large data blobs and GAS only learned that directive in 2.41.
+# It is not probed here any more -- cmake/ToolchainCapabilities.cmake compiles a
+# translation unit that makes this compiler emit it, at configure time, on every
+# machine instead of only in this lane. What remains here is the report.
 as_bin=$("${CXX}" -print-prog-name=as 2>/dev/null || true)
-as_probe=$(mktemp)
-printf '\t.base64 "EjRWeJA="\n' >"${as_probe}.s"
-if ! "${as_bin}" "${as_probe}.s" -o "${as_probe}.o" >/dev/null 2>&1; then
-    {
-        echo "error: ${as_bin:-no assembler} cannot assemble .base64, which GCC 16 emits." >&2
-        echo "       GAS needs to be 2.41 or newer; jammy ships 2.38. scripts/" >&2
-        echo "       install-gcc-prebuilt.sh installs a matching binutils." >&2
-    } >&2
-    rm -f "${as_probe}.s" "${as_probe}.o"
-    exit 1
-fi
-rm -f "${as_probe}.s" "${as_probe}.o"
 echo "== assembler: $("${as_bin}" --version | head -1) (${as_bin})"
 echo "== compiler: $("${CXX}" --version | head -1)"
 echo "== c compiler: $("${CC}" --version | head -1)"
@@ -266,38 +255,45 @@ else
     echo "warning: ccache not available; this build will not reuse anything" >&2
 fi
 
-# ------------------------------------------------------- 3. toolchain probe
-# Compile, archive and link a probe before the engine build starts, and check the
-# result against the floor. Cheap, and it means a broken toolchain costs seconds
-# instead of an hour.
+# ------------------------------------------------- 3. toolchain capability
+# This used to be a hand-written probe: compile a C++17 program, archive it, link
+# it, check the result against the glibc baseline and run it. Three quarters of
+# that is now done properly elsewhere -- cmake/ToolchainCapabilities.cmake runs
+# the behavioural probes (Jolt's incomplete static member, `.base64` assembly)
+# with the flags this build actually uses, at configure time, and the floor of the
+# real artifacts is `--target glibc-floor` further down.
+#
+# One quarter cannot move: whether *this host* can run what this compiler
+# produces. That is not a property of the toolchain and no CMake check may run a
+# compiled program (this tree is cross-compiled for MinGW and MSVC), so it is
+# still a probe here -- compile, link, and execute. The engine's own build tools
+# (zshader, zpkg) are built by this compiler and started by the build, so a
+# toolchain whose runtime the host cannot load fails at the first cooked shader,
+# 90 steps in, which is where this was found.
 probe_dir=${build}-probe
 mkdir -p "${probe_dir}"
+# std::format is deliberate: it makes the probe need the compiler's newer runtime
+# symbols (GLIBCXX_3.4.36, GCC_13.0.0), so "runs" here also means "the loader
+# finds the runtime this compiler needs". A <cstdio> probe passes on a machine
+# that cannot run the build tools.
 cat >"${probe_dir}/probe.cpp" <<'EOF'
 #include <cstdio>
-#include <filesystem>
+#include <format>
 #include <string>
 #include <vector>
 int main() {
     std::vector<std::string> v {"zahlen"};
-    std::printf("%s %s\n", v[0].c_str(), std::filesystem::current_path().c_str());
+    std::printf("%s %s\n", std::format("{}", v[0]).c_str(), v[0].c_str());
     return 0;
 }
 EOF
-echo "== toolchain probe: compile, archive and link"
-"${CXX}" -std=c++17 -O2 -c "${probe_dir}/probe.cpp" -o "${probe_dir}/probe.o"
-ar rcs "${probe_dir}/libprobe.a" "${probe_dir}/probe.o"
-"${CXX}" -std=c++17 -O2 "${probe_dir}/probe.cpp" "${probe_dir}/libprobe.a" -o "${probe_dir}/probe"
-"${script_dir}/check-glibc-floor.sh" "${glibc_baseline}" "${probe_dir}/probe" || {
-    echo "error: a probe built by this toolchain does not meet the glibc baseline." >&2
+if ! "${CXX}" -std=c++26 -O2 "${probe_dir}/probe.cpp" -o "${probe_dir}/probe"; then
+    echo "error: this toolchain cannot compile and link a trivial program." >&2
     exit 1
-}
-# Run it, not just link it. The engine's own build tools (zshader, zpkg) are built by
-# this compiler and started by the build, so a toolchain whose runtime the host
-# cannot load fails at the first cooked shader -- 90 steps in, which is where this
-# was found. One execution here turns that into a five-second failure.
+fi
 probe_out=$("${probe_dir}/probe" 2>&1) || {
     {
-        echo "error: a probe built by this toolchain does not run on this host." >&2
+        echo "error: a program built by this toolchain does not run on this host." >&2
         printf '%s\n' "${probe_out}" >&2
         echo "       Programs from this compiler need its runtime (GLIBCXX_3.4.36," >&2
         echo "       GCC_13.0.0); jammy ships older ones. scripts/install-gcc-prebuilt.sh" >&2
@@ -305,6 +301,7 @@ probe_out=$("${probe_dir}/probe" 2>&1) || {
     } >&2
     exit 1
 }
+rm -rf "${probe_dir}"
 ldconfig_bin=$(command -v ldconfig || printf '/sbin/ldconfig')
 libstdcxx_in_use=$("${ldconfig_bin}" -p 2>/dev/null | awk '/libstdc\+\+\.so\.6 /{print $NF; exit}' || true)
 echo "== probe: ${probe_out}"
@@ -333,7 +330,6 @@ if [ -d "${CCACHE_DIR}" ] && command -v ccache >/dev/null; then
     fi
     rm -rf "${ccache_probe}"
 fi
-rm -rf "${probe_dir}"
 
 # --------------------------------------------------------------- 4. simdjson
 # ZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON requires a simdjson *CONFIG* package (see
@@ -395,6 +391,7 @@ cmake -B "${build}" -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DZHLN_BUILD_TESTS=ON \
     -DZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON \
+    -DZHLN_GLIBC_BASELINE="${glibc_baseline}" \
     -DUSE_SANITIZERS=OFF \
     -DZHLN_HAS_BLENDER=OFF \
     -DZHLN_TEST_VULKAN_SANDBOX=OFF \
@@ -470,6 +467,12 @@ fi
 
 echo "== building"
 cmake --build "${build}"
+
+# The floor, on the artifacts this build just produced, rather than on a probe:
+# ZHLN_GLIBC_BASELINE reaches CMake above and cmake/GlibcFloor.cmake turns it into
+# this target over exactly what the Engine package installs.
+echo "== checking the glibc floor of what was built"
+cmake --build "${build}" --target glibc-floor
 
 # zpkg ships to the consumer, so it is built for the same target. It links libstdc++
 # statically (see utils/zpkg/CMakeLists.txt), so it runs on a jammy machine whose

@@ -294,22 +294,6 @@ int main() {
     return 0;
 }
 EOF
-cat > "${probe}/jolt.cpp" <<'EOF'
-// The construct that trunk GCC 16 rejected: a static data member whose type is
-// a class template instantiated while its element type is still incomplete.
-template <typename T, int N>
-struct StaticArray {
-protected:
-    int mSize = 0;
-    union { T mElements[N]; unsigned char mDummy; };
-};
-class alignas(16) Vec3 {
-public:
-    static const StaticArray<Vec3, 1026> sUnitSphere;
-    float x, y, z, w;
-};
-int main() { return 0; }
-EOF
 
 if ! "${PREFIX}/bin/g++-16" -std=c++26 -O2 "${probe}/probe.cpp" -o "${probe}/probe"; then
     echo "error: g++-16 cannot compile and link a trivial program" >&2
@@ -339,44 +323,14 @@ case "${as_path}" in
         ;;
 esac
 
-if ! "${PREFIX}/bin/g++-16" -std=c++26 -freflection -fsyntax-only "${probe}/jolt.cpp"; then
-    {
-        echo "error: this gcc cannot compile Jolt's StaticArray/static-member pattern," >&2
-        echo "       which extern/JoltPhysics needs; the build would stop at the PCH." >&2
-    } >&2
-    exit 1
-fi
-log "compiles Jolt's static-member pattern (-freflection, -std=c++26)"
-
-# Large constant blobs make GCC 16 emit `.base64`, which GAS only learned in 2.41.
-# Assembling such a translation unit with the toolchain as installed is the check
-# that failed in CI, kept where it can fail in six seconds.
-cat > "${probe}/base64.cpp" <<'CPP'
-#include <cstdint>
-namespace {
-const std::uint64_t kTable[] = {
-#include "base64-values.inc"
-};
-}
-extern "C" unsigned long long zahlen_probe_first() { return kTable[0]; }
-CPP
-python3 - "${probe}/base64-values.inc" <<'PY'
-import random
-import sys
-
-random.seed(7)
-with open(sys.argv[1], 'w') as fh:
-    for _ in range(600):
-        fh.write('\t0x%016xULL,\n' % random.getrandbits(64))
-PY
-if ! "${PREFIX}/bin/g++-16" -std=c++17 -O2 -c "${probe}/base64.cpp" -o "${probe}/base64.o"; then
-    {
-        echo "error: this compiler and assembler pair cannot assemble GCC 16 output." >&2
-        echo "       '.base64' needs GAS 2.41 or newer; jammy ships 2.38." >&2
-    } >&2
-    exit 1
-fi
-log "assembles a translation unit that emits .base64"
+# Two behavioural checks are deliberately *not* here: whether this gcc accepts
+# Jolt's static-member pattern, and whether its assembler accepts the `.base64`
+# directive. Both are questions about a compiler, and cmake/
+# ToolchainCapabilities.cmake now asks them at configure time, with the flags the
+# build actually uses -- so they answer for the engine, for the SDK, and for
+# anyone who points CMake at this prefix, not only for the machine that ran this
+# script. What stays here is what configure cannot see: that this prefix's own
+# binutils is the one that answers, which is the `as` path check above.
 
 printf '\n== gcc: %s (%s/bin/g++-16)\n' "${version}" "${PREFIX}"
 printf '   add %s/bin to PATH; the wrappers carry --sysroot=/ themselves.\n' "${PREFIX}"
