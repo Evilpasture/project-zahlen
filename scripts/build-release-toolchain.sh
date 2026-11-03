@@ -421,7 +421,7 @@ cmake -B "${build}" -S . -G Ninja \
 #       make Vulkan_FOUND true; the loader is a NEEDED soname the consumer supplies.
 #   ZHLN_BUILD_SVG=OFF        resvg is not packaged for jammy and building it needs
 #       cargo; without this the configure drops the plugin with a warning on every
-#       run. It is not one of the 16 released components.
+#       run. It is not one of the 17 released components.
 #   SLANG_VERSION_FULL        the pinned slang is built here, and its CMake can only
 #       read its version from git tags -- which a submodule checkout in a Docker
 #       context does not have. See the workflow, which passes the tag.

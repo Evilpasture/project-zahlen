@@ -24,7 +24,8 @@ void Usage() {
 
 Packages (the common case)
   install <path|dir>...        Install archives from a directory or file
-  install <remote>:<name>      Install from a configured remote
+  install <remote>             Install a configured remote's whole toolchain
+  install <remote>:<name>      Install that package and what it requires
   verify <path|dir|remote>     Check archives without installing anything
   list [--files] [--json]      Installed toolchains, active one marked
   info <toolchain-id>          Compiler, profile, ABI, packages, requirements
@@ -47,11 +48,12 @@ Publishing and trust
   remote remove <name>         Forget a remote
 
 Install options
-  --only <a,b,...>        Only these packages or components
+  --only <a,b,...>        Only these packages or components, with what they require
   --toolchain <id>        Which toolchain to take from a remote
   --require-checksums     Fail unless SHA256SUMS covers every archive
   -s, --require-signatures
                           Fail unless a trusted key signs the checksums
+  --ignore-missing        Install even if a required package is absent, and say so
   --force                 Overwrite, or remove the active toolchain
   -q, --quiet             Suppress per-file progress
 
@@ -136,6 +138,11 @@ auto ParseArgs(int argc, char** argv, int from, const std::set<std::string>& val
 struct Source {
     enum class Kind { Archive, Directory, Remote } kind = Kind::Archive;
     std::string value;
+    // The part after the colon in `remote:name`. It is a selection, not a name
+    // for the remote: `install up:zahlen-gltf` is `install up --only zahlen-gltf`
+    // plus that package's closure. Dropping it -- which is what this program used
+    // to do -- turns every package-named install into the whole toolchain.
+    std::string packages;
 };
 
 Source Classify(const std::string& text) {
@@ -153,8 +160,9 @@ Source Classify(const std::string& text) {
     }
     const size_t colon = text.find(':');
     if (colon != std::string::npos && colon > 0 && text.find('/') > colon) { // "name:rest", not "C:\dir" or "https://"
-        source.kind  = Source::Kind::Remote;
-        source.value = text.substr(0, colon);
+        source.kind     = Source::Kind::Remote;
+        source.value    = text.substr(0, colon);
+        source.packages = text.substr(colon + 1);
         return source;
     }
     source.kind  = Source::Kind::Archive; // will fail with "no such archive"
@@ -171,6 +179,7 @@ auto CommandInstall(Store& store, const Args& args) -> std::expected<void, Fail>
     options.requireChecksums  = args.Has("require-checksums");
     options.requireSignatures = args.Has("require-signatures") || args.Has("s");
     options.force             = args.Has("force");
+    options.ignoreMissing     = args.Has("ignore-missing");
     options.toolchain         = args.Value("toolchain");
     if (args.positional.empty())
         return std::unexpected(Fail {
@@ -182,6 +191,19 @@ auto CommandInstall(Store& store, const Args& args) -> std::expected<void, Fail>
     InstallReport report;
     for (const auto& text: args.positional) {
         const Source source = Classify(text);
+        if (source.kind == Source::Kind::Remote && !source.packages.empty()) {
+            // `remote:pkg` and `--only pkg` are the same request written twice.
+            // Accepting both invites a reader to think they mean different things.
+            if (!options.only.empty()) {
+                return std::unexpected(Fail {
+                    "'" + text + "' already names a package; drop --only, or drop the name and keep --only",
+                    UsageError
+                });
+            }
+            options.only = SplitList(source.packages);
+            if (options.only.empty())
+                return std::unexpected(Fail {"'" + text + "' has an empty package name after the colon", UsageError});
+        }
         switch (source.kind) {
             case Source::Kind::Archive: {
                 auto next = store.InstallArchive(FromUtf8(source.value), options, std::move(report));
@@ -209,7 +231,7 @@ auto CommandInstall(Store& store, const Args& args) -> std::expected<void, Fail>
             }
         }
     }
-    auto finished = store.Finish(std::move(report));
+    auto finished = store.Finish(std::move(report), options.ignoreMissing);
     if (!finished)
         return std::unexpected(std::move(finished.error()));
     return {};
@@ -227,6 +249,12 @@ auto CommandVerify(Store& store, const Args& args) -> std::expected<void, Fail> 
     for (const auto& text: args.positional) {
         const Source source = Classify(text);
         if (source.kind == Source::Kind::Remote) {
+            if (!source.packages.empty()) {
+                if (!options.only.empty()) {
+                    return std::unexpected(Fail {"'" + text + "' already names a package; drop --only", UsageError});
+                }
+                options.only = SplitList(source.packages);
+            }
             auto remoteChecked = VerifyRemote(store, source.value, options);
             if (!remoteChecked)
                 return std::unexpected(std::move(remoteChecked.error()));

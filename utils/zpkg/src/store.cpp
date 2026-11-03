@@ -26,6 +26,18 @@
 namespace ZHLN {
 
 namespace {
+std::string Join(const std::vector<std::string>& items, std::string_view separator) {
+    std::string out;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i != 0)
+            out += separator;
+        out += items[i];
+    }
+    return out;
+}
+} // namespace
+
+namespace {
 
 constexpr std::string_view ActiveFile = "ACTIVE";
 
@@ -659,34 +671,36 @@ auto Store::VerifyArchive(const fs::path& archivePath, const InstallOptions& opt
     return {};
 }
 
-auto Store::Finish(InstallReport report) -> std::expected<InstallReport, Fail> {
+auto Store::Finish(InstallReport report, bool ignoreMissing) -> std::expected<InstallReport, Fail> {
     if (report.installed.empty()) {
         log::Warn("nothing installed");
         return report;
     }
 
-    // Dependencies are stated, never solved. zpkg says what is missing once, so
-    // the developer decides the order instead of a solver deciding for them.
+    // Dependencies are stated, never solved -- but they are also never ignored.
+    // An incomplete prefix installs fine and then fails at find_package(), which
+    // is a long way from the command that caused it, so the command that caused
+    // it refuses instead. --ignore-missing is for the one case where a later
+    // command completes this toolchain.
     auto installed = Packages(report.toolchain);
     if (!installed)
         return std::unexpected(std::move(installed.error()));
     std::set<std::string> present;
     for (const auto& package: *installed)
         present.insert(package.info.package);
-    size_t missing = 0;
+    std::vector<std::string> missing;
     for (const auto& package: *installed) {
         for (const auto& requirement: package.info.dependencies) {
             if (present.count(requirement) != 0)
                 continue;
-            log::Warn(package.info.package + " needs " + requirement + ", which is not installed in " + report.toolchain);
-            report.missing.push_back(requirement);
-            ++missing;
+            if (std::find(missing.begin(), missing.end(), requirement) == missing.end())
+                missing.push_back(requirement);
         }
     }
-    if (missing != 0) {
-        log::Warn("install the missing packages from the same toolchain before building");
-    }
+    report.missing = missing;
 
+    // Activate and print the prefix first: a refused install still leaves a
+    // consistent store, and the path it prints is where the missing package goes.
     auto active = Active();
     if (!active)
         return std::unexpected(std::move(active.error()));
@@ -702,12 +716,26 @@ auto Store::Finish(InstallReport report) -> std::expected<InstallReport, Fail> {
     if (!prefix)
         return std::unexpected(std::move(prefix.error()));
     log::Say("prefix: " + ToUtf8(*prefix));
+
+    if (!missing.empty()) {
+        for (const auto& package: *installed) {
+            for (const auto& requirement: package.info.dependencies) {
+                if (present.count(requirement) == 0)
+                    log::Warn(package.info.package + " needs " + requirement + ", which is not installed in " + report.toolchain);
+            }
+        }
+        if (!ignoreMissing) {
+            return std::unexpected(Fail {
+                "this toolchain is incomplete: " + std::to_string(missing.size()) + " required package(s) are not installed (" + Join(missing, ", ") +
+                ")\n       a prefix that cannot find_package() its own dependencies is not an install"
+                "\n       add them with 'zpkg install <source> --only " + Join(missing, ",") + "', or pass --ignore-missing"
+            });
+        }
+        log::Warn("--ignore-missing: the prefix will not configure against the packages listed above");
+    }
     return report;
 }
 
-// ---------------------------------------------------------------------------
-// Removal
-// ---------------------------------------------------------------------------
 auto Store::RemoveToolchain(const std::string& id, bool force) -> std::expected<void, Fail> {
     auto named = CheckToolchainId(id);
     if (!named)

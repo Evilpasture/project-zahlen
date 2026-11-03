@@ -177,7 +177,8 @@ Invariants, each with a test behind it:
 | Command | Effect |
 |---|---|
 | `install <path\|dir>...` | verify, extract into `store/<id>/`, record the package |
-| `install <remote>:<name>` | install from a configured remote |
+| `install <remote>` | install that remote's whole toolchain |
+| `install <remote>:<name>` | install that package and everything it requires |
 | `verify <path\|dir\|remote>` | the same checks as install, writing nothing |
 | `list [--files] [--json]` | installed toolchains, active marked |
 | `use <id>` | repoint `ACTIVE` (future builds only) |
@@ -192,7 +193,37 @@ Invariants, each with a test behind it:
 | `remote add/list/remove` | register a path, `file://` or `https://` remote |
 
 Install options: `--only a,b`, `--toolchain <id>`, `--require-checksums`,
-`-s/--require-signatures`, `--force`, `--quiet`.
+`-s/--require-signatures`, `--ignore-missing`, `--force`, `--quiet`.
+
+## What a name selects
+
+`install <remote>:<name>` installs `name` **and its closure**, dependencies
+first. `<name>` may be a package (`zahlen-gltf`), a component (`GLTF`) or an
+exported target (`Zahlen::GLTF`); a name the remote does not publish is an error
+that lists what it does publish. Omitting the name installs the whole toolchain,
+which is what a first install of a release wants.
+
+```
+$ zpkg install upstream:zahlen-gltf
+  closure    3 of 16: zahlen-engine zahlen-uischema zahlen-serialization zahlen-gltf
+```
+
+`--only a,b` is the same request written the other way, and takes the same
+closure. Naming a package and passing `--only` together is refused rather than
+merged, because the two spellings would then disagree about what was asked for.
+
+The graph comes from the remote index when it carries one (`index.json` format 2,
+which `zpkg index` writes). A format-1 index -- every release published before
+this -- names no dependencies, so zpkg fetches the selected archives, reads their
+`requires[]` from `usr/share/zahlen/manifests/<package>.json`, and resolves from
+those. Either way the archives stay the authority; the index only saves the
+download of everything that is not in the closure.
+
+**A missing requirement is refused, not warned about.** An incomplete prefix
+installs cleanly and then fails at `find_package()`, which is far from the
+command that caused it, so `install` exits non-zero and names the packages that
+are absent. `--ignore-missing` keeps the old behaviour for the case where a
+second command is about to complete the toolchain.
 
 ## Signing
 

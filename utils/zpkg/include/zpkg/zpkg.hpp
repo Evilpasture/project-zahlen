@@ -25,7 +25,11 @@ namespace ZHLN {
 
 namespace fs = std::filesystem;
 
+// Manifests and toolchain.json are format 1 and always have been: they carry
+// requires[] from the first release. index.json is the document that did not,
+// and format 2 is the one that does -- see IndexPackage below.
 inline constexpr int              PackageFormat = 1;
+inline constexpr int              IndexFormat   = 2;
 inline constexpr std::string_view ToolVersion   = "2.0.0";
 inline constexpr std::string_view SignatureFile = "SHA256SUMS.ed25519";
 inline constexpr std::string_view SumsFile      = "SHA256SUMS";
@@ -205,6 +209,13 @@ struct IndexPackage {
     std::string file;
     std::string sha256;
     uint64_t    size = 0;
+    // Index format 2. The same graph the archive's manifest states, hoisted into
+    // the index so a closure can be resolved before a single byte of a 93 MB
+    // archive is downloaded. A format-1 index leaves both empty and zpkg falls
+    // back to reading each manifest after fetching it. (Named as the manifest
+    // names them: "requires" is a C++20 keyword and cannot be an identifier.)
+    std::vector<std::string> dependencies;
+    std::vector<std::string> provides;
 };
 struct IndexToolchain {
     std::string               id;
@@ -300,6 +311,11 @@ struct InstallOptions {
     // the per-archive SHA256SUMS is neither required nor meaningful.
     bool        prehashed = false;
     std::string toolchain; // remote selection
+    // A package that needs one the toolchain does not ship is a refusal, not a
+    // warning: the prefix would install and then fail at find_package(). This
+    // escape hatch exists for the one legitimate case -- installing a package
+    // into a toolchain that another command is about to complete.
+    bool ignoreMissing = false;
 };
 
 struct InstalledPackage {
@@ -342,8 +358,9 @@ class Store {
     auto InstallArchive(const fs::path& archive, const InstallOptions& options, InstallReport report = {}) -> std::expected<InstallReport, Fail>;
     auto InstallDirectory(const fs::path& dir, const InstallOptions& options, InstallReport report = {}) -> std::expected<InstallReport, Fail>;
     // Reports what is still missing and activates the toolchain if none is
-    // active. Returns the report with "missing" filled in.
-    auto Finish(InstallReport report) -> std::expected<InstallReport, Fail>;
+    // active. Returns the report with "missing" filled in, or refuses when a
+    // requirement is unsatisfied and the caller did not ask for a broken prefix.
+    auto Finish(InstallReport report, bool ignoreMissing = false) -> std::expected<InstallReport, Fail>;
 
     // Reads an archive fully -- layout, metadata, checksums, signatures -- and
     // writes nothing. `zpkg verify` runs this instead of extracting.
@@ -399,5 +416,26 @@ auto VerifyRemote(Store& store, const std::string& name, const InstallOptions& o
 
 // Publishes <dir>/index.json from the archives in <dir>.
 auto BuildIndex(const fs::path& dir) -> std::expected<std::vector<IndexToolchain>, Fail>;
+
+// ---------------------------------------------------------------------------
+// Selection and resolution
+// ---------------------------------------------------------------------------
+// The tokens a user types -- `zpkg install up:zahlen-gltf`, `--only Engine`,
+// `--only gltf` -- all have to reach the same package. Matching is by package
+// name, component name, "zahlen-" prefix or provided CMake target.
+bool PackageMatches(const IndexPackage& package, std::string_view want);
+
+// True when any package in the index states a requirement, i.e. when the
+// closure can be resolved without fetching. False for a format-1 index.
+bool ToolchainHasDependencies(const IndexToolchain& toolchain);
+
+struct Resolution {
+    std::vector<IndexPackage> packages; // dependencies before dependents
+    std::vector<std::string>  missing;  // required by a selected package, provided by none
+};
+// Expands `roots` over the requires[] graph in the index. A toolchain with
+// cycles resolves (nothing is lost); one with an unprovidable requirement
+// reports it in `missing` rather than inventing an order.
+auto ResolveClosure(const IndexToolchain& toolchain, const std::vector<IndexPackage>& roots) -> Resolution;
 
 } // namespace ZHLN

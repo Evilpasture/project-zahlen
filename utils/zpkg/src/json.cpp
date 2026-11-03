@@ -64,15 +64,19 @@ auto StringArray(element parent, const char* key, std::string_view origin, bool 
     return out;
 }
 
-auto RequireFormat(element parent, std::string_view origin) -> std::expected<int, Fail> {
+// A document version is a range, not a single number: zpkg has to keep reading
+// the indexes published before it learned to resolve closures, while refusing one
+// written by a version it cannot understand.
+auto RequireFormat(element parent, std::string_view origin, int minimum, int maximum) -> std::expected<int, Fail> {
     int64_t    format = 0;
     const auto error  = parent["format"].get_int64().get(format);
     if (error != simdjson::SUCCESS)
         return Bad(origin, "missing or non-numeric \"format\"");
-    if (format != PackageFormat) {
+    if (format < minimum || format > maximum) {
+        const std::string expects = minimum == maximum ? std::to_string(minimum) : std::to_string(minimum) + ".." + std::to_string(maximum);
         return Bad(
             origin,
-            "format " + std::to_string(format) + " is not supported by zpkg " + std::string(ToolVersion) + " (expects " + std::to_string(PackageFormat) + ")"
+            "format " + std::to_string(format) + " is not supported by zpkg " + std::string(ToolVersion) + " (expects " + expects + ")"
         );
     }
     return static_cast<int>(format);
@@ -131,7 +135,7 @@ auto ParseToolchainJson(std::string_view json, std::string_view origin) -> std::
     if (!document)
         return std::unexpected(std::move(document.error()));
 
-    auto format = RequireFormat(*document, origin);
+    auto format = RequireFormat(*document, origin, PackageFormat, PackageFormat);
     if (!format)
         return std::unexpected(std::move(format.error()));
     auto id = RequireString(*document, "id", origin);
@@ -159,7 +163,7 @@ auto ParseManifestJson(std::string_view json, std::string_view origin) -> std::e
     if (!document)
         return std::unexpected(std::move(document.error()));
 
-    auto format = RequireFormat(*document, origin);
+    auto format = RequireFormat(*document, origin, PackageFormat, PackageFormat);
     if (!format)
         return std::unexpected(std::move(format.error()));
     auto package = RequireString(*document, "package", origin);
@@ -194,7 +198,7 @@ auto ParseIndexJson(std::string_view json, std::string_view origin) -> std::expe
     if (!document)
         return std::unexpected(std::move(document.error()));
 
-    auto format = RequireFormat(*document, origin);
+    auto format = RequireFormat(*document, origin, PackageFormat, IndexFormat);
     if (!format)
         return std::unexpected(std::move(format.error()));
 
@@ -239,6 +243,15 @@ auto ParseIndexJson(std::string_view json, std::string_view origin) -> std::expe
             if (item["size"].get_int64().get(size) == simdjson::SUCCESS) {
                 package.size = static_cast<uint64_t>(size);
             }
+            // Format 1 indexes predate the graph and simply omit both arrays.
+            auto dependencies = StringArray(item, "requires", origin, false);
+            if (!dependencies)
+                return std::unexpected(std::move(dependencies.error()));
+            auto provides = StringArray(item, "provides", origin, false);
+            if (!provides)
+                return std::unexpected(std::move(provides.error()));
+            package.dependencies = std::move(*dependencies);
+            package.provides     = std::move(*provides);
             toolchain.packages.push_back(std::move(package));
         }
         index.toolchains.push_back(std::move(toolchain));
@@ -246,9 +259,21 @@ auto ParseIndexJson(std::string_view json, std::string_view origin) -> std::expe
     return index;
 }
 
+namespace {
+std::string JoinStrings(const std::vector<std::string>& items) {
+    std::string out;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i != 0)
+            out += ',';
+        out += '"' + Escape(items[i]) + '"';
+    }
+    return out;
+}
+} // namespace
+
 std::string BuildIndexJson(const std::vector<IndexToolchain>& toolchains) {
     std::ostringstream out;
-    out << "{\"format\":" << PackageFormat << ",\"toolchains\":[";
+    out << "{\"format\":" << IndexFormat << ",\"toolchains\":[";
     bool firstToolchain = true;
     for (const auto& toolchain: toolchains) {
         if (!firstToolchain)
@@ -262,7 +287,8 @@ std::string BuildIndexJson(const std::vector<IndexToolchain>& toolchains) {
                 out << ',';
             firstPackage = false;
             out << "\n    {\"package\":\"" << Escape(package.package) << "\",\"component\":\"" << Escape(package.component) << "\",\"file\":\""
-                << Escape(package.file) << "\",\"sha256\":\"" << Escape(package.sha256) << "\",\"size\":" << package.size << '}';
+                << Escape(package.file) << "\",\"sha256\":\"" << Escape(package.sha256) << "\",\"size\":" << package.size << ",\"requires\":[" << JoinStrings(package.dependencies)
+                << "],\"provides\":[" << JoinStrings(package.provides) << "]}";
         }
         out << "\n  ]}";
     }

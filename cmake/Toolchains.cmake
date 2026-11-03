@@ -249,6 +249,18 @@ zhln_toolchain_package(Camera TARGETS zahlen_camera DEPENDS Engine FreeCam HEADE
 zhln_toolchain_package(CharacterController TARGETS zahlen_character_controller DEPENDS Engine FreeCam HEADERS extensions/CharacterController)
 zhln_toolchain_package(SkeletalAnimation TARGETS zahlen_skeletal_animation DEPENDS Engine HEADERS extensions/Animation)
 zhln_toolchain_package(Animation TARGETS zahlen_animation DEPENDS Engine SkeletalAnimation CharacterController Camera FreeCam)
+# Serialization is a PRIVATE link of the plugin, which the export rewrites to
+# $<LINK_ONLY:...>; the exported interface still names Zahlen::Serialization, so
+# the package has to declare it or the consumer's find_package() fails on it.
+zhln_toolchain_package(Fonts TARGETS zahlen_fonts DEPENDS Engine Serialization HEADERS plugins/Fonts)
+# A font package with no font in it leaves the consumer back on the compiled-in
+# 32 px raster, which is exactly the state this package exists to end: the plugin
+# owns the fontbm .fnt + atlas path, and these 50 KB are what it feeds. The
+# vendored faces are licence-clean and already in the tree, so they travel with
+# the code that parses them.
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/resources/fonts/JetBrainsMonoNerdFontRegular/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/zahlen/fonts/JetBrainsMonoNerdFontRegular
+    COMPONENT ZahlenFonts)
 
 # --- Tools, not content ----------------------------------------------------
 # There is deliberately no Data package. What used to be one was the sandbox's

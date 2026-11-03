@@ -430,15 +430,39 @@ void TestIndexRoundtrip() {
     toolchain.id      = "0.1.0-abc-gcc-16.2.1-x86_64-release";
     toolchain.version = "0.1.0";
     toolchain.profile = "asan-ubsan";
-    toolchain.packages.push_back({"zahlen-engine", "Engine", "zahlen-engine.tar.gz", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", 123});
+    toolchain.packages.push_back(
+        {"zahlen-application",
+         "Application",
+         "zahlen-application.tar.gz",
+         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+         123,
+         {"zahlen-engine", "zahlen-hostrunner"},
+         {"Zahlen::Application"}}
+    );
     const std::string json   = ZHLN::BuildIndexJson({toolchain});
     const auto        parsed = Take(ZHLN::ParseIndexJson(json, "test"));
     Expect(parsed.toolchains.size() == 1);
     Expect(parsed.toolchains[0].id == toolchain.id);
     Expect(parsed.toolchains[0].profile == "asan-ubsan");
     Expect(parsed.toolchains[0].packages.size() == 1);
-    Expect(parsed.toolchains[0].packages[0].package == "zahlen-engine");
+    Expect(parsed.toolchains[0].packages[0].package == "zahlen-application");
     Expect(parsed.toolchains[0].packages[0].size == 123);
+    // The dependency graph survives the round trip. Without it a remote install
+    // can only discover requirements by downloading the archive and reading it.
+    Expect(parsed.toolchains[0].packages[0].dependencies.size() == 2);
+    Expect(parsed.toolchains[0].packages[0].dependencies[1] == "zahlen-hostrunner");
+    Expect(parsed.toolchains[0].packages[0].provides.size() == 1);
+    Expect(ZHLN::ToolchainHasDependencies(parsed.toolchains[0]));
+
+    // A format-1 index -- what every release published before this change -- is
+    // still readable, and is known not to carry the graph.
+    const std::string old = "{\"format\":1,\"toolchains\":[{\"id\":\"x\",\"version\":\"0.1.0\",\"profile\":\"release\","
+                            "\"packages\":[{\"package\":\"zahlen-engine\",\"component\":\"Engine\","
+                            "\"file\":\"e.tar.gz\",\"sha256\":\"00\",\"size\":1}]}]}";
+    const auto        legacy = Take(ZHLN::ParseIndexJson(old, "test"));
+    Expect(legacy.toolchains.size() == 1);
+    Expect(legacy.toolchains[0].packages[0].dependencies.empty());
+    Expect(!ZHLN::ToolchainHasDependencies(legacy.toolchains[0]));
 }
 
 void TestArchiveScanAndExtract() {
@@ -931,7 +955,9 @@ void TestRemote() {
         Require(ZHLN::WriteFile(published / "index.json", saved));
     }
 
-    // --only selection reaches the remote too.
+    // --only selection reaches the remote, and brings the closure with it:
+    // naming one package installs what it is built against, in dependency order.
+    // Naming nothing is what installs the whole toolchain.
     {
         ZHLN::Env   freshEnv = TestEnv(directory / "fresh2");
         ZHLN::Store fresh(freshEnv);
@@ -939,14 +965,169 @@ void TestRemote() {
         ZHLN::InstallOptions only;
         only.only       = {"Signal"};
         auto reportOnly = Take(ZHLN::InstallFromRemote(fresh, "local", only));
-        Expect(reportOnly.installed.size() == 1);
-        Expect(reportOnly.installed[0] == "zahlen-signal");
+        Expect(reportOnly.installed.size() == 2);
+        Expect(reportOnly.installed[0] == "zahlen-engine"); // dependency first
+        Expect(reportOnly.installed[1] == "zahlen-signal");
         reportOnly = Take(fresh.Finish(std::move(reportOnly)));
-        Expect(reportOnly.missing.size() == 1); // needs zahlen-engine
+        Expect(reportOnly.missing.empty());
     }
 
     Require(store.RemoteRemove("local"));
     Expect(Take(store.Remotes()).empty());
+
+    Discard(directory);
+}
+
+// The behaviour a package manager is judged on: what `install <remote>:<name>`
+// puts on disk. Before this test existed, the name after the colon was parsed
+// and thrown away, so every package-named install meant the whole toolchain.
+void TestRemoteClosure() {
+    const fs::path directory = MakeTemp("closure");
+    const fs::path published = directory / "published";
+    fs::create_directories(published);
+
+    PackageSpec engine;
+    PackageSpec signal;
+    signal.component         = "Signal";
+    signal.package           = "zahlen-signal";
+    signal.dependencies      = {"zahlen-engine"};
+    signal.provides          = {"Zahlen::Signal"};
+    PackageSpec application;
+    application.component    = "Application";
+    application.package      = "zahlen-application";
+    application.dependencies = {"zahlen-engine", "zahlen-signal"};
+    application.provides     = {"Zahlen::Application"};
+    WritePackage(published, engine);
+    WritePackage(published, signal);
+    WritePackage(published, application);
+
+    const std::string url = ZHLN::ToFileUrl(published);
+    const auto        index = Take(ZHLN::BuildIndex(published));
+    Expect(index.size() == 1);
+    Expect(ZHLN::ToolchainHasDependencies(index[0]));
+
+    // Selection tokens: package name, component name, and provided target all
+    // reach the same package.
+    for (const auto& package: index[0].packages) {
+        if (package.package != "zahlen-application")
+            continue;
+        Expect(ZHLN::PackageMatches(package, "zahlen-application"));
+        Expect(ZHLN::PackageMatches(package, "Application"));
+        Expect(ZHLN::PackageMatches(package, "application"));
+        Expect(ZHLN::PackageMatches(package, "Zahlen::Application"));
+        Expect(!ZHLN::PackageMatches(package, "zahlen-engine"));
+        Expect(!ZHLN::PackageMatches(package, ""));
+    }
+
+    Require(ZHLN::WriteFile(published / "index.json", ZHLN::BuildIndexJson(index)));
+
+    // A closure is resolved from the index alone.
+    {
+        const auto resolution = ZHLN::ResolveClosure(index[0], index[0].packages); // all three, as roots
+        Expect(resolution.packages.size() == 3);
+        Expect(resolution.missing.empty());
+        Expect(resolution.packages.back().package == "zahlen-application"); // dependents last
+    }
+
+    const auto install = [&](const std::string& root, const std::vector<std::string>& only, bool ignoreMissing) {
+        ZHLN::Env   env = TestEnv(directory / root);
+        ZHLN::Store store(env);
+        Require(store.RemoteAdd("local", url));
+        ZHLN::InstallOptions options;
+        options.only          = only;
+        options.ignoreMissing = ignoreMissing;
+        return ZHLN::InstallFromRemote(store, "local", options);
+    };
+
+    // One name, three packages, dependencies first.
+    {
+        ZHLN::Env   env = TestEnv(directory / "one");
+        ZHLN::Store store(env);
+        Require(store.RemoteAdd("local", url));
+        ZHLN::InstallOptions options;
+        options.only = {"zahlen-application"};
+        auto report  = Take(ZHLN::InstallFromRemote(store, "local", options));
+        Expect(report.installed.size() == 3);
+        Expect(report.installed[0] == "zahlen-engine");
+        Expect(report.installed[1] == "zahlen-signal");
+        Expect(report.installed[2] == "zahlen-application");
+        report = Take(store.Finish(std::move(report)));
+        Expect(report.missing.empty());
+    }
+
+    // A name the toolchain does not publish is refused, and the refusal lists
+    // what it does publish instead of installing everything.
+    {
+        const auto refused = install("unknown", {"zahlen-gltf"}, false);
+        ExpectError(refused);
+        if (!refused)
+            Expect(refused.error().message.find("publishes: zahlen-application") != std::string::npos);
+    }
+
+    // A requirement nothing in the toolchain provides is a refusal before any
+    // archive is fetched, and --ignore-missing is the only way past it.
+    {
+        PackageSpec ghost;
+        ghost.component    = "Ghost";
+        ghost.package      = "zahlen-ghost";
+        ghost.dependencies = {"zahlen-nowhere"};
+        WritePackage(published, ghost);
+        const auto withGhost = Take(ZHLN::BuildIndex(published));
+        Require(ZHLN::WriteFile(published / "index.json", ZHLN::BuildIndexJson(withGhost)));
+
+        const auto refused = install("ghost", {"zahlen-ghost"}, false);
+        ExpectError(refused);
+        if (!refused)
+            Expect(refused.error().message.find("zahlen-nowhere") != std::string::npos);
+
+        ZHLN::Env   env = TestEnv(directory / "ghost-ignored");
+        ZHLN::Store store(env);
+        Require(store.RemoteAdd("local", url));
+        ZHLN::InstallOptions options;
+        options.only          = {"zahlen-ghost"};
+        options.ignoreMissing = true;
+        auto report           = Take(ZHLN::InstallFromRemote(store, "local", options));
+        Expect(report.installed.size() == 1);
+        // The store still refuses to call the result buildable.
+        ExpectError(store.Finish(report, false));
+        const auto tolerated = Take(store.Finish(report, true));
+        Expect(tolerated.missing.size() == 1);
+        Expect(tolerated.missing[0] == "zahlen-nowhere");
+
+        Require(ZHLN::WriteFile(published / "index.json", ZHLN::BuildIndexJson(index)));
+        fs::remove(published / ("zahlen-ghost-0.1.0-abc1234-gcc-16.2.1-x86_64-release.tar.gz"));
+    }
+
+    // A format-1 index names no graph. The closure is then discovered from the
+    // archives' own manifests, which is what makes every already-published
+    // release resolve correctly without republishing it.
+    {
+        ZHLN::Index legacy;
+        legacy.format = 1;
+        ZHLN::IndexToolchain one;
+        one.id      = index[0].id;
+        one.version = index[0].version;
+        one.profile = index[0].profile;
+        for (const auto& package: index[0].packages) {
+            one.packages.push_back({package.package, package.component, package.file, package.sha256, package.size});
+        }
+        legacy.toolchains.push_back(one);
+        Expect(!ZHLN::ToolchainHasDependencies(legacy.toolchains[0]));
+        Require(ZHLN::WriteFile(published / "index.json", ZHLN::BuildIndexJson(legacy.toolchains)));
+
+        ZHLN::Env   env = TestEnv(directory / "legacy");
+        ZHLN::Store store(env);
+        Require(store.RemoteAdd("local", url));
+        ZHLN::InstallOptions options;
+        options.only = {"zahlen-application"};
+        auto report  = Take(ZHLN::InstallFromRemote(store, "local", options));
+        Expect(report.installed.size() == 3);
+        Expect(report.installed[0] == "zahlen-engine");
+        report = Take(store.Finish(std::move(report)));
+        Expect(report.missing.empty());
+
+        Require(ZHLN::WriteFile(published / "index.json", ZHLN::BuildIndexJson(index)));
+    }
 
     Discard(directory);
 }
@@ -990,6 +1171,7 @@ int main() {
     Run("store-lifecycle", TestStoreLifecycle);
     Run("checksum-and-signature-policy", TestChecksumAndSignaturePolicy);
     Run("remote", TestRemote);
+    Run("remote-closure", TestRemoteClosure);
     Run("path-rules", TestEnvRules);
 
     std::printf("%s: %d checks, %d failure(s)\n", failures == 0 ? "PASS" : "FAIL", checks, failures);
