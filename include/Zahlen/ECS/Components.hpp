@@ -69,7 +69,7 @@ struct Components {
     // Per-entity ambient cube (see DrawParams::ambientCube). Presence enables the
     // cube term in the material shader for this entity's mesh parts.
     struct AmbientCubeComponent {
-        std::array<JPH::Float4, 6> cube {};
+        std::array<ZHLN::Float4, 6> cube {};
     };
 
     struct MeshComponent {
@@ -105,7 +105,7 @@ struct Components {
     struct MorphTargetComponent {
         uint32_t    offset      = 0;
         uint32_t    activeCount = 0;
-        JPH::Float4 weights     = {0.0f, 0.0f, 0.0f, 0.0f}; // the same four lanes DrawParams carries
+        ZHLN::Float4 weights    = {0.0f, 0.0f, 0.0f, 0.0f}; // literally the four lanes DrawParams carries
     };
 
     struct LODComponent {

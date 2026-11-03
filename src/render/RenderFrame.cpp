@@ -226,7 +226,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
                 VkTransformMatrixKHR m;
                 for (int row = 0; row < 3; ++row) {
                     for (int col = 0; col < 4; ++col) {
-                        m.matrix[row][col] = t(row, col);
+                        m.matrix[row][col] = t.column[col][row];
                     }
                 }
                 return m;
@@ -323,12 +323,12 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
                 }
 
                 dst[vIdx++] = {
-                    .position = {line.start.GetX(), line.start.GetY(), line.start.GetZ()},
-                    .color    = Math::PackColor(line.colorStart.GetX(), line.colorStart.GetY(), line.colorStart.GetZ(), line.colorStart.GetW())
+                    .position = {line.start.x, line.start.y, line.start.z},
+                    .color    = Math::PackColor(line.colorStart.x, line.colorStart.y, line.colorStart.z, line.colorStart.w)
                 };
                 dst[vIdx++] = {
-                    .position = {line.end.GetX(), line.end.GetY(), line.end.GetZ()},
-                    .color    = Math::PackColor(line.colorEnd.GetX(), line.colorEnd.GetY(), line.colorEnd.GetZ(), line.colorEnd.GetW())
+                    .position = {line.end.x, line.end.y, line.end.z},
+                    .color    = Math::PackColor(line.colorEnd.x, line.colorEnd.y, line.colorEnd.z, line.colorEnd.w)
                 };
             }
             activeLineVertexCount = vIdx;

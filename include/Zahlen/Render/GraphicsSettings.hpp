@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <array>
 #include <cstdint>
 
@@ -48,7 +49,7 @@ struct GISettings {
     float                contrast      = 1.0f;
     float                saturation    = 1.0f;
     int                  tonemapper    = 3;
-    std::array<float, 3> colorFilter   = {1.0f, 1.0f, 1.0f};
+    ZHLN::Float3         colorFilter   = {1.0f, 1.0f, 1.0f};
 
     auto operator==(const GISettings&) const noexcept -> bool = default;
 };
@@ -80,13 +81,13 @@ struct EnvironmentSettings {
     int   fullBright      = 0;
     int   useLocalProbe   = 0;
 
-    std::array<float, 3> probeMin = {-22.0f, 0.0f, -22.0f};
-    std::array<float, 3> probeMax = {22.0f, 12.0f, 22.0f};
-    std::array<float, 3> probePos = {0.0f, 4.0f, 0.0f};
+    ZHLN::Float3 probeMin      = {-22.0f, 0.0f, -22.0f};
+    ZHLN::Float3 probeMax      = {22.0f, 12.0f, 22.0f};
+    ZHLN::Float3 probePos      = {0.0f, 4.0f, 0.0f};
 
-    std::array<float, 4> skyZenith  = {0.003f, 0.008f, 0.020f, 1.0f};
-    std::array<float, 4> skyHorizon = {0.015f, 0.035f, 0.080f, 1.0f};
-    std::array<float, 4> skyGround  = {0.001f, 0.001f, 0.003f, 1.0f};
+    ZHLN::Float4 skyZenith     = {0.003f, 0.008f, 0.020f, 1.0f};
+    ZHLN::Float4 skyHorizon    = {0.015f, 0.035f, 0.080f, 1.0f};
+    ZHLN::Float4 skyGround     = {0.001f, 0.001f, 0.003f, 1.0f};
 
     auto operator==(const EnvironmentSettings&) const noexcept -> bool = default;
 };

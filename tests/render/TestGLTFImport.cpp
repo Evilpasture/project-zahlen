@@ -1389,7 +1389,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = textured->parts[0].defaultMaterial;
-            if (material.emissiveFactor != JPH::Float4 {0.0f, 1.0f, 0.0f, 1.0f} || material.emissiveMap == ZHLN::TextureHandle::Invalid ||
+            if (material.emissiveFactor != ZHLN::Float4 {0.0f, 1.0f, 0.0f, 1.0f} || material.emissiveMap == ZHLN::TextureHandle::Invalid ||
                 material.emissiveMap != material.albedoMap || material.emissiveMap == material.pbrMap || IsFallbackTexture(material.emissiveMap)) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1570,7 +1570,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = prefab->parts[0].defaultMaterial;
-            if (material.baseColorFactor != JPH::Float4 {1.0f, 1.0f, 1.0f, 1.0f} || material.metallicFactor != 1.0f || material.roughnessFactor != 1.0f ||
+            if (material.baseColorFactor != ZHLN::Float4 {1.0f, 1.0f, 1.0f, 1.0f} || material.metallicFactor != 1.0f || material.roughnessFactor != 1.0f ||
                 material.albedoMap != ZHLN::TextureHandle::Invalid || material.pipeline == ZHLN::PipelineHandle::Invalid) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1771,7 +1771,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             auto& rc = engine->GetRenderContext();
-            if (material.sheenColorFactor != JPH::Float3 {0.25f, 0.5f, 0.75f} || std::abs(material.sheenRoughnessFactor - 0.35f) > 1e-5f ||
+            if (material.sheenColorFactor != ZHLN::Float3 {0.25f, 0.5f, 0.75f} || std::abs(material.sheenRoughnessFactor - 0.35f) > 1e-5f ||
                 material.sheenColorMap == ZHLN::TextureHandle::Invalid || material.sheenRoughnessMap == ZHLN::TextureHandle::Invalid ||
                 material.occlusionMap == ZHLN::TextureHandle::Invalid || material.albedoMap != material.sheenColorMap ||
                 material.pbrMap != material.sheenRoughnessMap || material.sheenRoughnessMap != material.occlusionMap ||
@@ -1781,7 +1781,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const ZHLN::Material defaults {};
-            if (defaults.sheenColorFactor != JPH::Float3 {0.0f, 0.0f, 0.0f} || defaults.sheenRoughnessFactor != 0.0f ||
+            if (defaults.sheenColorFactor != ZHLN::Float3 {0.0f, 0.0f, 0.0f} || defaults.sheenRoughnessFactor != 0.0f ||
                 defaults.textureTransforms != ZHLN::MaterialTextureTransforms {}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }

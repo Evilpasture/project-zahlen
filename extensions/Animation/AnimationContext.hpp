@@ -48,8 +48,8 @@ struct PlaybackState {
 };
 
 struct MorphSample {
-    uint32_t    activeCount = 0;
-    JPH::Float4 weights     = {0.0f, 0.0f, 0.0f, 0.0f};
+    uint32_t     activeCount = 0;
+    ZHLN::Float4 weights     = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
 struct SkeletonBinding {

@@ -74,7 +74,9 @@ enum class ShapeType : uint8_t { Box = 0, Sphere = 1, Capsule = 2, Cylinder = 3,
 enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
 
 struct ConstraintParams {
-    ZHLN::Float3 pivot;
+    // Explicitly zero: a container does not initialise itself, so the default the
+    // old NSDMI gave this pivot is now spelled where the policy belongs.
+    ZHLN::Float3 pivot {};
     ZHLN::Float3 axis {0.0f, 1.0f, 0.0f};
     float        limitMin;
     float        limitMax;

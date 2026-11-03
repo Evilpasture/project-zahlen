@@ -36,28 +36,29 @@ void AssignConverted(Dst& dst, const Src& src) {
         dst = src;
     } else if constexpr (std::is_same_v<D, bool> && std::is_arithmetic_v<S>) {
         dst = src != 0;
-    // Scene descriptions still store Jolt Float3 while the ECS component uses
-    // native Float3/Float4. Handle both directions; sky alpha is not part of
-    // the description and is restored as one when instantiating a scene.
-    } else if constexpr (std::is_same_v<D, JPH::Float3> && std::is_same_v<S, ZHLN::Float3>) {
-        dst = JPH::Float3 {src.x, src.y, src.z};
-    } else if constexpr (std::is_same_v<D, ZHLN::Float3> && std::is_same_v<S, JPH::Float3>) {
+    // The description and the settings component spell their vectors with the
+    // same containers now, so the only pair left with a shape difference is the
+    // sky: the component carries a fourth lane, the description does not. Sky
+    // alpha is not part of the description and is restored as one when a scene
+    // is instantiated.
+    } else if constexpr (std::is_same_v<D, ZHLN::Float3> && std::is_same_v<S, ZHLN::Float4>) {
         dst = ZHLN::Float3 {src.x, src.y, src.z};
-    } else if constexpr (std::is_same_v<D, JPH::Float3> && std::is_same_v<S, ZHLN::Float4>) {
-        dst = JPH::Float3 {src.x, src.y, src.z};
-    } else if constexpr (std::is_same_v<D, ZHLN::Float4> && std::is_same_v<S, JPH::Float3>) {
+    } else if constexpr (std::is_same_v<D, ZHLN::Float4> && std::is_same_v<S, ZHLN::Float3>) {
         dst = ZHLN::Float4 {src.x, src.y, src.z, 1.0f};
-    } else if constexpr (std::is_same_v<D, JPH::Float3> && std::is_same_v<S, JPH::Vec4>) {
-        dst = JPH::Float3 {src.GetX(), src.GetY(), src.GetZ()};
-    } else if constexpr (std::is_same_v<D, JPH::Vec4> && std::is_same_v<S, JPH::Float3>) {
-        dst = JPH::Vec4 {src.x, src.y, src.z, 1.0f};
-    } else if constexpr (std::is_same_v<D, JPH::Float3> && std::is_same_v<S, JPH::Vec3>) {
-        dst = JPH::Float3 {src.GetX(), src.GetY(), src.GetZ()};
-    } else if constexpr (std::is_same_v<D, JPH::Vec3> && std::is_same_v<S, JPH::Float3>) {
-        dst = JPH::Vec3 {src};
     } else if constexpr (std::is_arithmetic_v<D> && std::is_arithmetic_v<S>) {
         dst = static_cast<D>(src);
     }
+    // No final branch, deliberately. VisitFieldByName filters by field *name* with
+    // a run-time std::string_view comparison (Reflection/Structs.hpp), so this
+    // function is instantiated for every (destination type, source type) pair in
+    // the two structs -- the cartesian product -- and only the matching name ever
+    // calls it. A pair with no rule is therefore expected: it belongs to two
+    // fields that were never paired, and doing nothing is the correct answer.
+    // Do not turn this into a static_assert: it fires on all of those pairs.
+    //
+    // What guards the rules instead: SharesEveryField below pins the name set, and
+    // the pairs that do match are same-type except the sky, which the two
+    // Float3/Float4 rules above cover in both directions.
 }
 
 template <typename Dst, typename Src>
@@ -234,7 +235,9 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 if (entity.hasAmbientCube) {
                     for (uint32_t i = 0; i < recorded; ++i) {
                         registry.Add<Components::AmbientCubeComponent>(parts[i]);
-                        registry.Patch<Components::AmbientCubeComponent>(parts[i], [&](auto& c) { c.cube = entity.ambientCube; });
+                        registry.Patch<Components::AmbientCubeComponent>(parts[i], [&](auto& c) {
+                            c.cube = entity.ambientCube;
+                        });
                     }
                 }
 
@@ -340,8 +343,13 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 
 namespace {
 
-[[nodiscard]] auto ToDescriptionFloat3(const JPH::Vec3& v) noexcept -> JPH::Float3 {
-    return JPH::Float3 {v.GetX(), v.GetY(), v.GetZ()};
+// The description stores the same container the engine uses, so this no longer
+// packs anything: it names the boundary and accepts either spelling on the way
+// in (a container, or a Jolt vector out of the maths library). Kept as a function
+// so the description's spelling stays decided in one place rather than at eight
+// call sites.
+[[nodiscard]] auto ToDescriptionFloat3(ZHLN::Float3 v) noexcept -> ZHLN::Float3 {
+    return v;
 }
 
 [[nodiscard]] auto ToDescriptionTransform(const Components::TransformComponent& transform) noexcept -> Transform {
@@ -385,7 +393,7 @@ namespace {
         .baseColor             = gpu.has_value() ? gpu->baseColorFactor : defaults.baseColor,
         .roughness             = pbr ? pbr->roughness : defaults.roughness,
         .metallic              = pbr ? pbr->metallic : defaults.metallic,
-        .emissive              = gpu.has_value() ? JPH::Float3 {gpu->emissiveFactor.x, gpu->emissiveFactor.y, gpu->emissiveFactor.z} : defaults.emissive,
+        .emissive              = gpu.has_value() ? ZHLN::Float3 {gpu->emissiveFactor.x, gpu->emissiveFactor.y, gpu->emissiveFactor.z} : defaults.emissive,
         .emissiveVirtualLights = source.emissiveVirtualLights,
     };
 }

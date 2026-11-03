@@ -77,8 +77,8 @@ class Double3;
 // JPH::Float2 is the only other spelling of the same eight bytes.
 class [[nodiscard]] Float2 {
   public:
-    float x = 0.0f;
-    float y = 0.0f;
+    float x;
+    float y;
 
     constexpr Float2() noexcept = default;
     constexpr Float2(float inX, float inY) noexcept: x(inX), y(inY) {
@@ -101,9 +101,9 @@ class [[nodiscard]] Float2 {
 // Three floats, 12 bytes: positions, extents, directions, normals.
 class [[nodiscard]] Float3 {
   public:
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
+    float x;
+    float y;
+    float z;
 
     constexpr Float3() noexcept = default;
     constexpr Float3(float inX, float inY, float inZ) noexcept: x(inX), y(inY), z(inZ) {
@@ -157,10 +157,10 @@ class [[nodiscard]] Float3 {
 // the boundary already did: JPH::Float4 is both.
 class [[nodiscard]] Float4 {
   public:
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-    float w = 0.0f;
+    float x;
+    float y;
+    float z;
+    float w;
 
     constexpr Float4() noexcept = default;
     constexpr Float4(float inX, float inY, float inZ, float inW) noexcept: x(inX), y(inY), z(inZ), w(inW) {
@@ -225,9 +225,9 @@ class [[nodiscard]] Float4 {
 // Three doubles, 24 bytes: the world-space position of a double-precision build.
 class [[nodiscard]] Double3 {
   public:
-    double x = 0.0;
-    double y = 0.0;
-    double z = 0.0;
+    double x;
+    double y;
+    double z;
 
     constexpr Double3() noexcept = default;
     constexpr Double3(double inX, double inY, double inZ) noexcept: x(inX), y(inY), z(inZ) {
@@ -297,13 +297,15 @@ class [[nodiscard]] Double3 {
 // a Quat cannot be handed a colour, and a caller holding a Quat does not have to
 // remember whether this parameter is quaternion-first or colour-first.
 //
-// The default is the identity rotation, (0, 0, 0, 1), which is also Jolt's.
+// The container does not initialise itself -- the same rule as the lane pods -- so
+// the identity rotation is spelled `Quat {0.0f, 0.0f, 0.0f, 1.0f}` or taken from a
+// Jolt quaternion, never assumed.
 class [[nodiscard]] alignas(alignof(JPH::Quat)) Quat {
   public:
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-    float w = 1.0f;
+    float x;
+    float y;
+    float z;
+    float w;
 
     constexpr Quat() noexcept = default;
     constexpr Quat(float inX, float inY, float inZ, float inW) noexcept: x(inX), y(inY), z(inZ), w(inW) {
@@ -354,8 +356,10 @@ class [[nodiscard]] alignas(alignof(JPH::Quat)) Quat {
 class [[nodiscard]] alignas(alignof(JPH::Mat44)) Mat44 {
   public:
     // Element (row r, column c) is column[c][r]; the four floats of a column are
-    // what a shader reads as one float4.
-    Float4 column[4] {};
+    // what a shader reads as one float4. No initialiser: `{}` at the use site
+    // already means zero, and an initialiser here would cost the type its trivial
+    // default construction, which the draw queue's structs depend on.
+    Float4 column[4];
 
     constexpr Mat44() noexcept = default;
 
@@ -406,6 +410,11 @@ static_assert(sizeof(Float4) == sizeof(JPH::Float4) && alignof(Float4) == aligno
 static_assert(sizeof(Double3) == sizeof(JPH::Double3) && alignof(Double3) == alignof(JPH::Double3), "Double3 must stay layout-identical to JPH::Double3");
 static_assert(sizeof(Quat) == sizeof(JPH::Quat) && alignof(Quat) == alignof(JPH::Quat), "Quat must stay layout-identical to JPH::Quat");
 static_assert(sizeof(Mat44) == sizeof(JPH::Mat44) && alignof(Mat44) == alignof(JPH::Mat44), "Mat44 must stay layout-identical to JPH::Mat44");
+static_assert(
+    std::is_trivially_constructible_v<Float2> && std::is_trivially_constructible_v<Float3> && std::is_trivially_constructible_v<Float4> &&
+        std::is_trivially_constructible_v<Double3> && std::is_trivially_constructible_v<Quat> && std::is_trivially_constructible_v<Mat44>,
+    "a container gets memcpy'd into queues and task scratch; its default construction must stay trivial, so it must not initialise its lanes"
+);
 static_assert(
     std::is_trivially_copyable_v<Float2> && std::is_trivially_copyable_v<Float3> && std::is_trivially_copyable_v<Float4> &&
         std::is_trivially_copyable_v<Double3> && std::is_trivially_copyable_v<Quat> && std::is_trivially_copyable_v<Mat44>,

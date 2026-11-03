@@ -82,9 +82,8 @@ using MaterialSamplerAddresses                         = std::array<TextureSampl
 // Apply offset + rotation * scale to TEXCOORD_0 or TEXCOORD_1 per reference.
 //
 // The two 2-component fields are ZHLN::Float2: eight bytes, the storage a
-// JPH::Float2 holds, and the only 2D type in the engine's vocabulary -- Vec2 does
-// not exist in Jolt, and a std::array<float, 2> would be a third spelling of the
-// same eight bytes.
+// ZHLN::Float2 holds, and the only 2D type in the engine's vocabulary -- a
+// std::array<float, 2> would be a second spelling of the same eight bytes.
 struct MaterialTextureTransform {
     ZHLN::Float2   offset {0.0f, 0.0f};
     ZHLN::Float2   scale {1.0f, 1.0f};
@@ -133,8 +132,8 @@ struct Material {
     // AO and not material emission. It is sampled with the mesh's UV1.
     TextureHandle             bakedIrradianceMap       = TextureHandle::Invalid;
     float                     bakedIrradianceScale     = 1.0f;
-    JPH::Float4               baseColorFactor          = {1.0f, 1.0f, 1.0f, 1.0f};
-    JPH::Float4               emissiveFactor           = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::Float4              baseColorFactor          = {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::Float4              emissiveFactor           = {0.0f, 0.0f, 0.0f, 1.0f};
     float                     metallicFactor           = 1.0f;
     float                     roughnessFactor          = 1.0f;
     float                     alphaCutoff              = 0.5f;
@@ -161,7 +160,7 @@ struct Material {
     float                     anisotropyStrength       = 0.0f;
     float                     anisotropyRotation       = 0.0f; // Radians about the surface normal, from the tangent.
     TextureHandle             anisotropyMap            = TextureHandle::Invalid;
-    JPH::Float3               sheenColorFactor {0.0f, 0.0f, 0.0f};
+    ZHLN::Float3              sheenColorFactor {0.0f, 0.0f, 0.0f};
     float                     sheenRoughnessFactor = 0.0f;
     TextureHandle             sheenColorMap        = TextureHandle::Invalid;
     TextureHandle             sheenRoughnessMap    = TextureHandle::Invalid;
@@ -181,7 +180,7 @@ struct Material {
     bool                      environmentReflectionAlphaMask   = false;
     float                     environmentReflectionFactor     = 1.0f;
     float                     specularFactor       = 1.0f;
-    JPH::Float3               specularColorFactor {1.0f, 1.0f, 1.0f};
+    ZHLN::Float3              specularColorFactor {1.0f, 1.0f, 1.0f};
     TextureHandle             specularMap          = TextureHandle::Invalid;
     // Which half of the single KHR_materials_specular texture slot this
     // material's image carries: 0 = specularColorTexture.rgb and
@@ -239,8 +238,8 @@ struct MaterialDesc {
     float         alphaCutoff        = 0.5f;
     float         metallic           = 1.0f;
     float         roughness          = 1.0f;
-    JPH::Float4   baseColor          = {1.0f, 1.0f, 1.0f, 1.0f};
-    JPH::Float4   emissive           = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::Float4  baseColor          = {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::Float4  emissive           = {0.0f, 0.0f, 0.0f, 1.0f};
     float         transmissionFactor = 0.0f;
     TextureHandle transmissionMap    = TextureHandle::Invalid;
     float         iridescenceFactor  = 0.0f;
@@ -271,7 +270,7 @@ struct MaterialDesc {
     float                     anisotropyStrength       = 0.0f;
     float                     anisotropyRotation       = 0.0f; // KHR_materials_anisotropy radians.
     TextureHandle             anisotropyMap            = TextureHandle::Invalid;
-    JPH::Float3               sheenColorFactor {0.0f, 0.0f, 0.0f};
+    ZHLN::Float3              sheenColorFactor {0.0f, 0.0f, 0.0f};
     float                     sheenRoughnessFactor = 0.0f;
     TextureHandle             sheenColorMap        = TextureHandle::Invalid;
     TextureHandle             sheenRoughnessMap    = TextureHandle::Invalid;
@@ -286,7 +285,7 @@ struct MaterialDesc {
     bool                      environmentReflectionAlphaMask   = false;
     float                     environmentReflectionFactor     = 1.0f;
     float                     specularFactor       = 1.0f;
-    JPH::Float3               specularColorFactor {1.0f, 1.0f, 1.0f};
+    ZHLN::Float3              specularColorFactor {1.0f, 1.0f, 1.0f};
     TextureHandle             specularMap          = TextureHandle::Invalid;
     uint32_t                  specularTexMode      = 0;
     MaterialSamplerAddresses  textureSamplers {};
@@ -307,11 +306,11 @@ struct DrawParams {
     ZHLN::Mat44 transform        = ZHLN::Mat44::sIdentity();
     ZHLN::Mat44 prevTransform    = ZHLN::Mat44::sIdentity();
     float       cullRadius       = 1.0f;
-    JPH::Float3 localCenter      = {0.0f, 0.0f, 0.0f};
+    ZHLN::Float3 localCenter     = {0.0f, 0.0f, 0.0f};
     uint32_t    jointOffset      = 0;
     uint32_t    morphOffset      = 0;
     uint32_t    activeMorphCount = 0;
-    JPH::Float4 morphWeights     = {};
+    ZHLN::Float4 morphWeights    = {};
     DrawFlags   flags            = DrawFlags::None;
 
     BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
@@ -319,13 +318,13 @@ struct DrawParams {
     float roughness = -1.0f;
     float metallic  = -1.0f;
 
-    JPH::Float4 colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f};
-    JPH::Float4 emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f};
+    ZHLN::Float4 colorOverride   = {1.0f, 1.0f, 1.0f, -1.0f};
+    ZHLN::Float4 emissiveOverride  = {0.0f, 0.0f, 0.0f, -1.0f};
 
     // Optional ambient cube (+X,-X,+Y,-Y,+Z,-Z linear radiance) for meshes without
     // baked lightmaps. Only read when hasAmbientCube is set.
     bool                       hasAmbientCube = false;
-    std::array<JPH::Float4, 6> ambientCube {};
+    std::array<ZHLN::Float4, 6> ambientCube {};
 };
 
 struct CSGCutterParams {

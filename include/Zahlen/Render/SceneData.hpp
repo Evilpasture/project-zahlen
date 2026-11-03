@@ -20,19 +20,19 @@
 namespace ZHLN {
 
 struct BillboardQuad {
-    JPH::Vec3         position {};
+    ZHLN::Float3        position {};
     float             size     = 1.0f;
     float             rotation = 0.0f;
-    JPH::Vec4         color {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::Float4        color {1.0f, 1.0f, 1.0f, 1.0f};
     ParticleAlignment facing = ParticleAlignment::CameraBillboard;
-    JPH::Vec3         velocity {};
+    ZHLN::Float3        velocity {};
 };
 
 struct LineSegment {
-    JPH::Vec3 start {};
-    JPH::Vec3 end {};
-    JPH::Vec4 colorStart {1.0f, 1.0f, 1.0f, 1.0f};
-    JPH::Vec4 colorEnd {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::Float3 start {};
+    ZHLN::Float3 end {};
+    ZHLN::Float4 colorStart {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::Float4 colorEnd {1.0f, 1.0f, 1.0f, 1.0f};
 };
 
 struct ParticleEmitterSubmission {
@@ -62,7 +62,7 @@ struct SceneRenderPass {
     SceneView        view {};
     Camera           camera {};
     FrameData        frame {};
-    JPH::Mat44       shadowProjView = JPH::Mat44::sIdentity();
+    ZHLN::Mat44      shadowProjView = ZHLN::Mat44::sIdentity();
     GraphicsSettings settings {};
 };
 
@@ -87,7 +87,7 @@ struct SceneData {
     }
 
     void AddLine(ZHLN::Float3 start, ZHLN::Float3 end, ZHLN::Float4 colorStart, ZHLN::Float4 colorEnd) {
-        lines.push_back({static_cast<JPH::Vec3>(start), static_cast<JPH::Vec3>(end), static_cast<JPH::Vec4>(colorStart), static_cast<JPH::Vec4>(colorEnd)});
+        lines.push_back({start, end, colorStart, colorEnd});
     }
     void AddLine(ZHLN::Float3 start, ZHLN::Float3 end, ZHLN::Float4 color) {
         AddLine(start, end, color, color);

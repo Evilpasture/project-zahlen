@@ -19,7 +19,7 @@ void RenderContext::ClearDrawQueues() noexcept {
 }
 
 void RenderContext::SetFrameData(
-    const Camera& cam, const FrameData& frame, const JPH::Mat44& shadowProjView, std::span<const LightDesc> lights, float dt
+    const Camera& cam, const FrameData& frame, const ZHLN::Mat44& shadowProjView, std::span<const LightDesc> lights, float dt
 ) noexcept {
     _impl->shadowProjView       = shadowProjView;
     _impl->view_matrix          = cam.GetViewMatrix();

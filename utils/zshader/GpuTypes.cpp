@@ -9,8 +9,11 @@
 // walks the reflected layout: member
 // offsets, sizes, strides and alignments come from the compiler's own model.
 // The Slang type decides the C++ spelling by itself -- float2/float3/float4
-// to JPH::Float2/Float3/Float4, uint2/int2 to std::array lanes, float4x4 to
-// JPH::Mat44, a fixed array to std::array of its element, and enums to generated types.
+// to ZHLN::Float2/Float3/Float4, uint2/int2 to std::array lanes, float4x4 to
+// ZHLN::Mat44, a fixed array to std::array of its element, and enums to generated
+// types. Those four are the engine's own containers: the emitted struct is a
+// storage definition, so its members are the same value types the engine uses in
+// its hand-written structs, and no maths library appears in the generated header.
 // There is no table here restating either half, so a Slang edit carries its
 // spelling with it and nothing can skew a layout behind the shader's back.
 //
@@ -78,13 +81,13 @@ constexpr std::string_view kHeapStruct  = "DescriptorHeapPushData";
 // GPU enums are declared with an explicit uint underlying type in Slang. The
 // walk accepts their reflected four-byte layouts and uint32_t-valued cases only;
 // it does not translate or rename case lists by hand.
-// The storage spellings: Jolt's pod lane types, one per Slang float vector
-// width. JPH::Vec3/Vec4 are the *compute* types (16 bytes, 16-aligned, three
-// live lanes in a Vec3) and are never a storage destination.
-constexpr std::string_view kFloat2 = "::JPH::Float2";
-constexpr std::string_view kFloat3 = "::JPH::Float3";
-constexpr std::string_view kFloat4 = "::JPH::Float4";
-constexpr std::string_view kMat4   = "::JPH::Mat44";
+// The storage spellings: the engine's container types, one per Slang float
+// vector width. They carry no arithmetic -- the engine's implementations do maths
+// in their own library -- because a generated struct is a layout, not behaviour.
+constexpr std::string_view kFloat2 = "::ZHLN::Float2";
+constexpr std::string_view kFloat3 = "::ZHLN::Float3";
+constexpr std::string_view kFloat4 = "::ZHLN::Float4";
+constexpr std::string_view kMat4   = "::ZHLN::Mat44";
 
 constexpr auto kUniform = SLANG_PARAMETER_CATEGORY_UNIFORM;
 
@@ -286,9 +289,9 @@ auto SameEnum(const EnumDef& lhs, const EnumDef& rhs) -> bool {
     return true;
 }
 
-// The Slang-kind-to-C++ mapping for one member: float vectors are their Jolt
-// pod lane type, 32-bit integer vectors are std::array lanes, a float4x4 is
-// JPH::Mat44, scalar kinds map to stdint, and a Slang enum gets a generated
+// The Slang-kind-to-C++ mapping for one member: float vectors are their engine
+// container type, 32-bit integer vectors are std::array lanes, a float4x4 is
+// ZHLN::Mat44, scalar kinds map to stdint, and a Slang enum gets a generated
 // enum. Fixed arrays map to std::array when their reflected stride is tight.
 auto MapMember(
     std::string_view structName,
@@ -326,7 +329,7 @@ auto MapMember(
         const uint32_t rows = static_cast<uint32_t>(type->getRowCount());
         const uint32_t cols = static_cast<uint32_t>(type->getColumnCount());
         if (rows != 4 || cols != 4 || !isFloat32) {
-            Fail("gpu types: {}.{} is not a float4x4; only float4x4 matrices map to JPH::Mat44", structName, memberName);
+            Fail("gpu types: {}.{} is not a float4x4; only float4x4 matrices map to ZHLN::Mat44", structName, memberName);
         }
         if (layout->getMatrixLayoutMode() != SLANG_MATRIX_LAYOUT_COLUMN_MAJOR) {
             Fail("gpu types: {}.{} is not column-major; the host Mat44 assumes column-major", structName, memberName);
@@ -561,11 +564,7 @@ constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilp
 
 #pragma once
 
-#include <Jolt/Jolt.h> // First: Jolt wants Jolt.h before any of its own headers
-#include <Jolt/Math/Float2.h>
-#include <Jolt/Math/Float3.h>
-#include <Jolt/Math/Float4.h>
-#include <Jolt/Math/Mat44.h>
+#include <Zahlen/Math/ValueTypes.hpp> // the containers the members are spelled in
 
 #include "pipeline/PushDataLayout.hpp" // Vk::HeapPushDataLayout: kScenePushLayout's type
 

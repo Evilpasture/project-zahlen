@@ -200,7 +200,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 
         uint32_t                   morphOffset      = morphComp ? morphComp->offset : 0;
         uint32_t                   activeMorphCount = morphComp ? morphComp->activeCount : 0;
-        const JPH::Float4          morphWeights     = morphComp ? morphComp->weights : JPH::Float4 {};
+        const ZHLN::Float4         morphWeights     = morphComp ? morphComp->weights : ZHLN::Float4 {};
 
         BufferHandle scratchVbo = BufferHandle::Invalid;
         if (isSkinned) {
@@ -500,9 +500,9 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     frame.sunDirection           = sunDirection;
     frame.sunIntensity           = sunIntensity;
     frame.sunRadiance            = sunRadiance;
-    frame.probeMin               = JPH::Vec3 {gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2]};
-    frame.probeMax               = JPH::Vec3 {gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2]};
-    frame.probePos               = JPH::Vec3 {gfx.environment.probePos[0], gfx.environment.probePos[1], gfx.environment.probePos[2]};
+    frame.probeMin               = gfx.environment.probeMin;
+    frame.probeMax               = gfx.environment.probeMax;
+    frame.probePos               = gfx.environment.probePos;
     frame.useLocalProbe          = gfx.environment.useLocalProbe;
     frame.jitter                 = JPH::Vec4 {aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY};
     frame.enableRTR              = gfx.post.enableRTR;
@@ -512,11 +512,9 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     frame.shadowResolution       = gfx.shadows.resolution;
     frame.sunSize                = gfx.shadows.sunSize;
     frame.ambientExposure        = gfx.environment.ambientExposure;
-    frame.skyZenith = JPH::Vec4 {gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]};
-    frame.skyHorizon =
-        JPH::Vec4 {gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]};
-    frame.skyGround =
-        JPH::Vec4 {gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]};
+    frame.skyZenith  = gfx.environment.skyZenith;
+    frame.skyHorizon = gfx.environment.skyHorizon;
+    frame.skyGround  = gfx.environment.skyGround;
 
     scene.dt = dt;
 

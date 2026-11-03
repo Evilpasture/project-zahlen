@@ -121,8 +121,9 @@ auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t sha
         packed.outerConeCos = -1.0f;
     }
 
-    const JPH::Vec3 position = desc.position;
-    JPH::Vec4(worldToView * position, 1.0f).StoreFloat4(&packed.positionView);
+    const JPH::Vec3 position     = desc.position;
+    const JPH::Vec4 positionView = JPH::Vec4(worldToView * position, 1.0f);
+    packed.positionView          = ZHLN::Float4(positionView);
 
     if (desc.type == LightType::Area) {
         const JPH::Mat44 quad = desc.points;

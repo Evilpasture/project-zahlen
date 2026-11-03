@@ -154,7 +154,8 @@ auto AuthorPartsFromRecipe(const Skeleton& skeleton, const RagdollRecipe& recipe
         part.enableMotors     = spec.enableMotors;
         part.maxMotorForce    = spec.maxMotorForce;
 
-        const JPH::Mat44 bindPose = skeleton.joints[i].inverseBindMatrix.Inversed();
+        // The joint carries the container; the inverse is Jolt's to compute.
+        const JPH::Mat44 bindPose = JPH::Mat44(skeleton.joints[i].inverseBindMatrix).Inversed();
         part.position             = bindPose.GetTranslation();
         part.rotation             = bindPose.GetQuaternion().Normalized();
 

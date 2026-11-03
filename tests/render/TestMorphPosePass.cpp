@@ -273,10 +273,10 @@ struct MorphPosePassSuite {
         std::expected<void, ZHLN::ErrorCode> draw_params_own_morph_weights() {
             ZHLN::Components::MorphTargetComponent morph {.weights = {0.25f, 0.5f, 0.75f, 1.0f}};
             const ZHLN::DrawParams params {.morphWeights = morph.weights};
-            morph.weights = JPH::Float4 {};
+            morph.weights = ZHLN::Float4 {};
 
-            if (!ZHLN::Test::ExpectEq(params.morphWeights, JPH::Float4 {0.25f, 0.5f, 0.75f, 1.0f}) ||
-                !ZHLN::Test::ExpectEq(ZHLN::DrawParams {}.morphWeights, JPH::Float4 {})) {
+            if (!ZHLN::Test::ExpectEq(params.morphWeights, ZHLN::Float4 {0.25f, 0.5f, 0.75f, 1.0f}) ||
+                !ZHLN::Test::ExpectEq(ZHLN::DrawParams {}.morphWeights, ZHLN::Float4 {})) {
                 return std::unexpected(MorphPosePassTestError::MorphWeightsBorrowed);
             }
             return {};
@@ -315,7 +315,7 @@ struct MorphPosePassSuite {
             if (!ZHLN::Test::ExpectTrue(morph.has_value())) {
                 return std::unexpected(MorphPosePassTestError::MorphComponentMissing);
             }
-            const auto expected = JPH::Float4 {
+            const auto expected = ZHLN::Float4 {
                 MorphPosePassSuite::kDefaultMorphWeight0, MorphPosePassSuite::kDefaultMorphWeight1, 0.0f, 0.0f
             };
             if (!ZHLN::Test::ExpectEq(morph->weights, expected)) {

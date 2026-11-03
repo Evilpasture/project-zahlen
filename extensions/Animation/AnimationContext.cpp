@@ -118,7 +118,7 @@ void SampleTRSChannel(const AnimationChannel& channel, float time, SampledTRS& t
     }
     return MorphSample {
         .activeCount = count,
-        .weights     = JPH::Float4 {lanes[0], lanes[1], lanes[2], lanes[3]},
+        .weights     = ZHLN::Float4 {lanes[0], lanes[1], lanes[2], lanes[3]},
     };
 }
 

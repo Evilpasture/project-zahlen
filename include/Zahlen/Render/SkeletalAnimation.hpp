@@ -46,7 +46,7 @@ struct Joint {
     String64   name;
     int32_t    parentIndex       = -1;
     int32_t    nodeIndex         = -1;
-    JPH::Mat44 inverseBindMatrix = JPH::Mat44::sIdentity();
+    ZHLN::Mat44 inverseBindMatrix = ZHLN::Mat44::sIdentity();
 };
 
 struct Skeleton {

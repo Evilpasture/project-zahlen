@@ -196,7 +196,8 @@ struct SoATestSuite {
             bool   valid    = true;
             queue.Drain([&](const ZHLN::PoseUpload& upload) {
                 const float expectedX = upload.jointOffset == 4 ? 1.0f : 9.0f;
-                valid = valid && upload.matrices.size() == MatrixCount && upload.matrices.front().GetTranslation().GetX() == expectedX;
+                valid = valid && upload.matrices.size() == MatrixCount &&
+                        JPH::Mat44(upload.matrices.front()).GetTranslation().GetX() == expectedX;
                 ++consumed;
             });
             if (!valid || consumed != 2 || queue.Size() != 0) {

@@ -313,12 +313,14 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
             if (static_cast<uint32_t>(quad.facing) != alignment) {
                 continue;
             }
-            Particle packed {};
-            JPH::Vec4(quad.position, 1.0f).StoreFloat4(&packed.position);
-            JPH::Vec4(quad.facing == ParticleAlignment::VelocityStretched ? quad.velocity : JPH::Vec3::sZero(), 0.0f).StoreFloat4(&packed.velocity);
-            quad.color.StoreFloat4(&packed.color);
+            const JPH::Vec3 position = quad.position;
+            const JPH::Vec3 velocity = (quad.facing == ParticleAlignment::VelocityStretched) ? JPH::Vec3(quad.velocity) : JPH::Vec3::sZero();
 
-            JPH::Vec4(0.0f, 0.0f, quad.size, quad.rotation).StoreFloat4(&packed.params);
+            Particle packed {};
+            packed.position = ZHLN::Float4(JPH::Vec4(position, 1.0f));
+            packed.velocity = ZHLN::Float4(JPH::Vec4(velocity, 0.0f));
+            packed.color    = quad.color;
+            packed.params   = ZHLN::Float4(0.0f, 0.0f, quad.size, quad.rotation);
             _impl->billboardStaging.push_back(packed);
         }
 
@@ -855,7 +857,7 @@ void RenderContext::DrawDebugTriangles(std::span<const VertexPosition> positions
     Draw(material, debugMesh, {.transform = JPH::Mat44::sIdentity(), .prevTransform = JPH::Mat44::sIdentity(), .cullRadius = 10000.0f});
 }
 
-void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const JPH::Mat44> matrices) {
+void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat44> matrices) {
     if (matrices.empty()) {
         return;
     }

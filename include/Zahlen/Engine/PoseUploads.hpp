@@ -19,6 +19,7 @@
 // clang-format on
 #include <Jolt/Math/Mat44.h>
 #include <Zahlen/Core/Arena.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -34,7 +35,11 @@ struct PoseUpload {
     // First joint matrix this upload writes, in the renderer's skinning buffer.
     uint32_t jointOffset = 0;
     // Queue-owned storage, valid through the Drain() callbacks and invalid afterwards.
-    std::span<const JPH::Mat44> matrices;
+    // Owned matrices, not Jolt's: the queue sits on the boundary the renderer
+    // reads from, and the renderer's skinning API takes ZHLN::Mat44. The two are
+    // layout-identical, so a producer still handling Jolt matrices is converted
+    // once here rather than at every consumer.
+    std::span<const ZHLN::Mat44> matrices;
 };
 
 class PoseUploadQueue {
@@ -54,11 +59,23 @@ class PoseUploadQueue {
 
     // Copies into queue-owned arenas. The producer's matrices may be frame or
     // task scratch and need not remain alive through Present.
+    void Push(uint32_t jointOffset, std::span<const ZHLN::Mat44> matrices) {
+        PoseUpload upload {};
+        upload.jointOffset = jointOffset;
+        if (!matrices.empty()) {
+            auto* destination = static_cast<ZHLN::Mat44*>(Allocate(matrices.size_bytes(), alignof(ZHLN::Mat44)));
+            std::uninitialized_copy(matrices.begin(), matrices.end(), destination);
+            upload.matrices = {destination, matrices.size()};
+        }
+        _uploads.push_back(upload);
+    }
+
+    // The same upload from a producer that is still working in Jolt's matrices.
     void Push(uint32_t jointOffset, std::span<const JPH::Mat44> matrices) {
         PoseUpload upload {};
         upload.jointOffset = jointOffset;
         if (!matrices.empty()) {
-            auto* destination = static_cast<JPH::Mat44*>(Allocate(matrices.size_bytes(), alignof(JPH::Mat44)));
+            auto* destination = static_cast<ZHLN::Mat44*>(Allocate(matrices.size() * sizeof(ZHLN::Mat44), alignof(ZHLN::Mat44)));
             std::uninitialized_copy(matrices.begin(), matrices.end(), destination);
             upload.matrices = {destination, matrices.size()};
         }
@@ -72,17 +89,17 @@ class PoseUploadQueue {
     // Model-space joint transforms published ahead of ArticulationSystem for
     // skeletons that also drive a ragdoll. Stored in the same frame arena as
     // skinning palettes so ECS components never carry matrix arrays.
-    void PushKinematic(uint32_t jointOffset, std::span<const JPH::Mat44> modelJoints) {
-        std::span<const JPH::Mat44> stored;
+    void PushKinematic(uint32_t jointOffset, std::span<const ZHLN::Mat44> modelJoints) {
+        std::span<const ZHLN::Mat44> stored;
         if (!modelJoints.empty()) {
-            auto* destination = static_cast<JPH::Mat44*>(Allocate(modelJoints.size_bytes(), alignof(JPH::Mat44)));
+            auto* destination = static_cast<ZHLN::Mat44*>(Allocate(modelJoints.size_bytes(), alignof(ZHLN::Mat44)));
             std::uninitialized_copy(modelJoints.begin(), modelJoints.end(), destination);
             stored = {destination, modelJoints.size()};
         }
         for (PoseUpload& existing: _kinematicPoses) {
             if (existing.jointOffset == jointOffset) {
                 if (!existing.matrices.empty()) {
-                    std::destroy_n(const_cast<JPH::Mat44*>(existing.matrices.data()), existing.matrices.size());
+                    std::destroy_n(const_cast<ZHLN::Mat44*>(existing.matrices.data()), existing.matrices.size());
                 }
                 existing.matrices = stored;
                 return;
@@ -91,7 +108,12 @@ class PoseUploadQueue {
         _kinematicPoses.push_back(PoseUpload {.jointOffset = jointOffset, .matrices = stored});
     }
 
-    [[nodiscard]] auto KinematicPose(uint32_t jointOffset) const noexcept -> std::span<const JPH::Mat44> {
+    void PushKinematic(uint32_t jointOffset, std::span<const JPH::Mat44> modelJoints) {
+        std::vector<ZHLN::Mat44> converted(modelJoints.begin(), modelJoints.end());
+        PushKinematic(jointOffset, std::span<const ZHLN::Mat44> {converted.data(), converted.size()});
+    }
+
+    [[nodiscard]] auto KinematicPose(uint32_t jointOffset) const noexcept -> std::span<const ZHLN::Mat44> {
         for (const PoseUpload& entry: _kinematicPoses) {
             if (entry.jointOffset == jointOffset) {
                 return entry.matrices;
@@ -162,12 +184,12 @@ class PoseUploadQueue {
     void DestroyQueuedMatrices() noexcept {
         for (const PoseUpload& upload: _uploads) {
             if (!upload.matrices.empty()) {
-                std::destroy_n(const_cast<JPH::Mat44*>(upload.matrices.data()), upload.matrices.size());
+                std::destroy_n(const_cast<ZHLN::Mat44*>(upload.matrices.data()), upload.matrices.size());
             }
         }
         for (const PoseUpload& entry: _kinematicPoses) {
             if (!entry.matrices.empty()) {
-                std::destroy_n(const_cast<JPH::Mat44*>(entry.matrices.data()), entry.matrices.size());
+                std::destroy_n(const_cast<ZHLN::Mat44*>(entry.matrices.data()), entry.matrices.size());
             }
         }
     }

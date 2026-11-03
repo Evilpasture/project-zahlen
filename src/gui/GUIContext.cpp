@@ -193,8 +193,15 @@ auto ToClaySizing(const Sizing& s) noexcept -> Clay_SizingAxis {
     return CLAY_SIZING_FIT();
 }
 
-auto ToClayColor(const JPH::Vec4& c) noexcept -> Clay_Color {
-    return {(c.GetX() * 255.0f), (c.GetY() * 255.0f), (c.GetZ() * 255.0f), (c.GetW() * 255.0f)};
+auto ToClayColor(const ZHLN::Float4& c) noexcept -> Clay_Color {
+    return {(c.x * 255.0f), (c.y * 255.0f), (c.z * 255.0f), (c.w * 255.0f)};
+}
+
+// The container holds the lanes; the addition is Jolt's. Callers keep writing
+// colours as ZHLN::Float4 and this puts the maths where maths lives.
+auto Brighten(const ZHLN::Float4& color, float amount) noexcept -> ZHLN::Float4 {
+    const JPH::Vec4 lifted = static_cast<JPH::Vec4>(color) + JPH::Vec4(amount, amount, amount, 0.0f);
+    return ZHLN::Float4(lifted);
 }
 
 auto ToClayAlignX(Alignment align) noexcept -> Clay_LayoutAlignmentX {
@@ -776,7 +783,7 @@ void Frame::EndColumn() noexcept {
 void Frame::Text(std::string_view text, float fontSize, ZHLN::Float4 color) noexcept {
     assert(_impl != nullptr && _impl->inLayout);
     Clay_SetCurrentContext(_impl->clayContext);
-    Clay_TextElementConfig config = {.textColor = ToClayColor(static_cast<JPH::Vec4>(color)), .fontSize = static_cast<uint16_t>(fontSize)};
+    Clay_TextElementConfig config = {.textColor = ToClayColor(color), .fontSize = static_cast<uint16_t>(fontSize)};
     Clay__OpenTextElement(_impl->Intern(text), config);
 }
 
@@ -821,9 +828,8 @@ auto Frame::Button(std::string_view label, ZHLN::Float4 color, const Sizing& wid
              .padding         = {24, 24, 10, 10},
              .childAlignment  = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
              .layoutDirection = CLAY_LEFT_TO_RIGHT},
-        .backgroundColor = isHovered ? (isMouseDown ? ToClayColor(static_cast<JPH::Vec4>(color) + JPH::Vec4(0.22f, 0.22f, 0.22f, 0.0f)) :
-                                                      ToClayColor(static_cast<JPH::Vec4>(color) + JPH::Vec4(0.12f, 0.12f, 0.12f, 0.0f))) :
-                                       ToClayColor(static_cast<JPH::Vec4>(color)),
+        .backgroundColor = isHovered ? (isMouseDown ? ToClayColor(Brighten(color, 0.22f)) : ToClayColor(Brighten(color, 0.12f))) :
+                                       ToClayColor(color),
         .cornerRadius    = {6, 6, 6, 6}
     };
     Clay__ConfigureOpenElement(decl);

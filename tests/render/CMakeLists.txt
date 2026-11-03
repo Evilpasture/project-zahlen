@@ -204,9 +204,6 @@ zahlen_add_gpu_test_group(GPU_Application 120
     TestApplication.cpp
 )
 target_link_libraries(GPU_Application PRIVATE zahlen_application)
-if(TARGET zahlen_character_controller)
-    target_compile_definitions(GPU_Application PRIVATE ZHLN_TEST_APP_HAS_CHARACTER=1)
-endif()
 
 zahlen_add_gpu_test_group(GPU_Interface 180
     RunInterfaceTests.cpp

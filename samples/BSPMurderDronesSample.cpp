@@ -476,7 +476,7 @@ void UpdatePlayerRigAmbientCube(ZHLN::Engine& engine) {
     if (!ZHLN::BSP::SampleLeafAmbientCube(*g_rigCubeMap, src, cube)) {
         return;
     }
-    std::array<JPH::Float4, 6> engineCube {};
+    std::array<ZHLN::Float4, 6> engineCube {};
     for (size_t f = 0; f < 6; ++f) {
         const float k = g_rigImportOpts.propAmbientCubeScale;
         engineCube[f] = {cube[f][0] * k, cube[f][1] * k, cube[f][2] * k, 1.0f};

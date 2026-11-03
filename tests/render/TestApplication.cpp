@@ -91,9 +91,11 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         const auto modules = engine.GetInstalledModules();
         Expect(std::ranges::any_of(modules, [](const Module& module) { return module.name == "AppTestModule"; }));
         Expect(!std::ranges::any_of(modules, [](const Module& module) { return module.name == "FallbackScene"; }));
-#if defined(ZHLN_TEST_APP_HAS_CHARACTER)
-        Expect(modules.front().name == "CharacterController");
-#endif
+        // Application's default pass installs nothing: app/CMakeLists.txt leaves
+        // optional composition to the consuming application, so the first module
+        // is exactly the one this test's installer added. Anything ahead of it
+        // would mean a default module crept back in behind the composition API.
+        Expect(modules.front().name == "AppTestModule");
     });
 
     // A move-only callback proves Run does not copy its user's game logic.

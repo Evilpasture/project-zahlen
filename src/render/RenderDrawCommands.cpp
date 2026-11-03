@@ -107,7 +107,7 @@ struct InstanceDataDesc {
     uint32_t bakedIrradianceTex = kNoFilmTexture;
     float    bakedIrradianceScale = 1.0f;
     bool                       hasAmbientCube = false;
-    std::array<JPH::Float4, 6> ambientCube {};
+    std::array<ZHLN::Float4, 6> ambientCube {};
 
     uint32_t alphaMode    = 0;
     bool     isViewmodel  = false;
@@ -219,8 +219,8 @@ struct InstanceDataDesc {
         }
     }
 
-    std::array<JPH::Float4, kMaterialTextureSlotCount> uvRow0;
-    std::array<JPH::Float4, kMaterialTextureSlotCount> uvRow1;
+    std::array<ZHLN::Float4, kMaterialTextureSlotCount> uvRow0;
+    std::array<ZHLN::Float4, kMaterialTextureSlotCount> uvRow1;
     for (size_t slot = 0; slot < uvRow0.size(); ++slot) {
         const auto& transform = desc.textureTransforms[slot];
         const float c         = transform.rotation == 0.0f ? 1.0f : std::cos(transform.rotation);

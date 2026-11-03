@@ -31,22 +31,6 @@ using ShadowSettingsComponent      = Components::ShadowSettingsComponent;
     return reg.SingletonEntity<MainCameraTagComponent>();
 }
 
-[[nodiscard]] std::array<float, 3> ToArray3(const JPH::Vec3& v) noexcept {
-    return {v.GetX(), v.GetY(), v.GetZ()};
-}
-
-[[nodiscard]] std::array<float, 4> ToArray4(const JPH::Vec4& v) noexcept {
-    return {v.GetX(), v.GetY(), v.GetZ(), v.GetW()};
-}
-
-[[nodiscard]] JPH::Vec3 FromArray3(const std::array<float, 3>& a) noexcept {
-    return JPH::Vec3(a[0], a[1], a[2]);
-}
-
-[[nodiscard]] JPH::Vec4 FromArray4(const std::array<float, 4>& a) noexcept {
-    return JPH::Vec4(a[0], a[1], a[2], a[3]);
-}
-
 constexpr uint64_t kGovernorMarginThresholdNs = 2000000;
 constexpr uint32_t kGovernorPatienceFrames    = 90;
 
@@ -125,17 +109,17 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
         gfx.post.contrast      = pp->contrast;
         gfx.post.saturation    = pp->saturation;
         gfx.post.tonemapper    = pp->tonemapper;
-        gfx.post.colorFilter   = ToArray3(pp->colorFilter);
+        gfx.post.colorFilter   = pp->colorFilter;
 
         gfx.environment.ambientExposure = pp->ambientExposure;
         gfx.environment.fullBright      = pp->fullBright;
         gfx.environment.useLocalProbe   = pp->useLocalProbe;
-        gfx.environment.probeMin        = ToArray3(pp->probeMin);
-        gfx.environment.probeMax        = ToArray3(pp->probeMax);
-        gfx.environment.probePos        = ToArray3(pp->probePos);
-        gfx.environment.skyZenith          = ToArray4(pp->skyZenith);
-        gfx.environment.skyHorizon         = ToArray4(pp->skyHorizon);
-        gfx.environment.skyGround          = ToArray4(pp->skyGround);
+        gfx.environment.probeMin        = pp->probeMin;
+        gfx.environment.probeMax        = pp->probeMax;
+        gfx.environment.probePos        = pp->probePos;
+        gfx.environment.skyZenith          = pp->skyZenith;
+        gfx.environment.skyHorizon         = pp->skyHorizon;
+        gfx.environment.skyGround          = pp->skyGround;
     }
 
     if (const Entity shadowEnt = reg.SingletonEntity<ShadowSettingsComponent>(); shadowEnt != Entity::Null()) {
@@ -273,17 +257,17 @@ void ApplyGraphicsSettings(Engine& engine, const GraphicsSettings& settings) {
         pp.contrast          = gfx.post.contrast;
         pp.saturation        = gfx.post.saturation;
         pp.tonemapper        = gfx.post.tonemapper;
-        pp.colorFilter       = FromArray3(gfx.post.colorFilter);
+        pp.colorFilter       = gfx.post.colorFilter;
 
         pp.ambientExposure = gfx.environment.ambientExposure;
         pp.fullBright      = gfx.environment.fullBright;
         pp.useLocalProbe   = gfx.environment.useLocalProbe;
-        pp.probeMin        = FromArray3(gfx.environment.probeMin);
-        pp.probeMax        = FromArray3(gfx.environment.probeMax);
-        pp.probePos        = FromArray3(gfx.environment.probePos);
-        pp.skyZenith       = FromArray4(gfx.environment.skyZenith);
-        pp.skyHorizon      = FromArray4(gfx.environment.skyHorizon);
-        pp.skyGround       = FromArray4(gfx.environment.skyGround);
+        pp.probeMin        = gfx.environment.probeMin;
+        pp.probeMax        = gfx.environment.probeMax;
+        pp.probePos        = gfx.environment.probePos;
+        pp.skyZenith       = gfx.environment.skyZenith;
+        pp.skyHorizon      = gfx.environment.skyHorizon;
+        pp.skyGround       = gfx.environment.skyGround;
     });
 
     Entity shadowEnt = reg.SingletonEntity<ShadowSettingsComponent>();
