@@ -141,6 +141,9 @@ def get_git_tracked_files(
     ignore_configure=False,
     ignore_app=False,
     active_presets=None,
+    extra_ignore_paths=None,
+    ignore_headers=False,
+    ignore_shaders=False,
 ):
     extensions = {
         ".cpp",
@@ -173,6 +176,8 @@ def get_git_tracked_files(
 
     # Base ignore paths
     ignore_paths = {"third_party", "extern"}
+    if extra_ignore_paths:
+        ignore_paths.update(extra_ignore_paths)
     if ignore_tools:
         ignore_paths.add("utils")
     if ignore_scripts:
@@ -192,6 +197,12 @@ def get_git_tracked_files(
 
     if ignore_inlines:
         extensions.discard(".inl")
+    if ignore_headers:
+        extensions.difference_update({".hpp", ".h", ".inl"})
+    if ignore_shaders:
+        extensions.difference_update(
+            {".slang", ".glsl", ".vert", ".frag", ".hlsl", ".metal"}
+        )
 
     if os.path.isfile(target):
         # A file target bypasses extension/ignore filtering as before, but
@@ -312,6 +323,30 @@ def generate_snapshot_string(tracked_files, target_dir, active_presets=None):
     return "\n".join(lines)
 
 
+def print_stats(tracked_files):
+    """Print a byte/token budget per directory instead of writing a snapshot."""
+    from collections import defaultdict
+
+    budget = defaultdict(lambda: [0, 0, 0])  # files, chars, lines
+    for file_path in tracked_files:
+        try:
+            text = Path(file_path).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        parts = Path(file_path).parts
+        key = "/".join(parts[:2]) if len(parts) > 2 else parts[0]
+        budget[key][0] += 1
+        budget[key][1] += len(text)
+        budget[key][2] += text.count("\n") + 1
+    print(f"{'directory':<40} {'files':>6} {'chars':>12} {'~tokens':>10} {'lines':>9}")
+    tf = tc = tl = 0
+    for key, (n, chars, lines) in sorted(budget.items(), key=lambda kv: -kv[1][1]):
+        print(f"{key:<40} {n:>6} {chars:>12,} {round(chars / 4):>10,} {lines:>9,}")
+        tf += n; tc += chars; tl += lines
+    print(f"{'TOTAL':<40} {tf:>6} {tc:>12,} {round(tc / 4):>10,} {tl:>9,}")
+    print("Token estimate: chars / 4 (o200k_base is ~chars / 4.0 for this codebase).")
+
+
 def run_project_manager(
     target=".",
     ignore_demo=False,
@@ -324,6 +359,10 @@ def run_project_manager(
     ignore_configure=False,
     ignore_app=False,
     active_presets=None,
+    extra_ignore_paths=None,
+    ignore_headers=False,
+    ignore_shaders=False,
+    stats=False,
 ):
     tracked_files = get_git_tracked_files(
         target,
@@ -337,7 +376,13 @@ def run_project_manager(
         ignore_configure=ignore_configure,
         ignore_app=ignore_app,
         active_presets=active_presets,
+        extra_ignore_paths=extra_ignore_paths,
+        ignore_headers=ignore_headers,
+        ignore_shaders=ignore_shaders,
     )
+    if stats:
+        print_stats(tracked_files)
+        return
     if not tracked_files:
         scope_msg = (
             f"presets '{','.join(active_presets)}'" if active_presets else f"'{target}'"
@@ -506,6 +551,29 @@ if __name__ == "__main__":
         help="Ignore tools, app, scripts, tests, optional layers, samples, configure, and .inl files altogether.",
     )
 
+    parser.add_argument(
+        "--ignore-path",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="Ignore an extra directory name (repeatable), e.g. --ignore-path null.",
+    )
+    parser.add_argument(
+        "--ignore-headers",
+        action="store_true",
+        help="Ignore .hpp/.h/.inl files (declarations only; cuts ~40%% of the dump).",
+    )
+    parser.add_argument(
+        "--ignore-shaders",
+        action="store_true",
+        help="Ignore shader sources (.slang/.glsl/.vert/.frag/.hlsl/.metal).",
+    )
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Print a per-directory byte/token budget instead of writing a snapshot.",
+    )
+
     args = parser.parse_args()
 
     if args.ignore_all:
@@ -559,4 +627,8 @@ if __name__ == "__main__":
         ignore_samples=args.ignore_samples,
         ignore_configure=args.ignore_configure,
         active_presets=active_presets if active_presets else None,
+        extra_ignore_paths=args.ignore_path,
+        ignore_headers=args.ignore_headers,
+        ignore_shaders=args.ignore_shaders,
+        stats=args.stats,
     )
