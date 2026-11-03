@@ -288,7 +288,7 @@ struct AmbientOcclusionTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
             BuildAoScene(*engine);
 
             struct ModeRun {
@@ -450,7 +450,7 @@ struct AmbientOcclusionTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
             BuildAoScene(*engine);
             SetGiMode(*engine, 3);
             TickFrames(*engine, 8);

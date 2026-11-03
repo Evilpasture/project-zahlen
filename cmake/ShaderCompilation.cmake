@@ -585,10 +585,8 @@ endfunction()
 
 compile_shaders(zahlen_engine
     "${SHADER_SRC_DIR}/blit.slang"
-    "${SHADER_SRC_DIR}/taa.slang"
     "${SHADER_SRC_DIR}/ui.slang"
     "${SHADER_SRC_DIR}/fxaa.slang"
-    "${SHADER_SRC_DIR}/mlaa.slang"
 )
 
 # --- Scene shaders (basic.slang hosts the GlobalSceneRegistry ParameterBlock).
@@ -747,10 +745,6 @@ add_shader_target(vol_integrate_shader
     STAGES "${SHADER_SRC_DIR}/volumetric_integration.slang|CSMain|cs_6_0|SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH"
 )
 
-add_shader_target(vol_temporal_shader
-    STAGES "${SHADER_SRC_DIR}/volumetric_temporal.slang|CSMain|cs_6_0|SHADER_VOLUMETRIC_TEMPORAL_CS_PATH"
-)
-
 # --- GPU PARTICLE SHADERS ---
 
 add_shader_target(particle_update_shader
@@ -867,8 +861,6 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "BasicMeshForward=SHADER_BASIC_SLANG_MESH_FORWARD_PATH"
     "BlitVS=SHADER_BLIT_SLANG_VS_PATH"
     "BlitPS=SHADER_BLIT_SLANG_PS_PATH"
-    "TaaVS=SHADER_TAA_SLANG_VS_PATH"
-    "TaaPS=SHADER_TAA_SLANG_PS_PATH"
     "UiVS=SHADER_UI_SLANG_VS_PATH"
     "UiPS=SHADER_UI_SLANG_PS_PATH"
     "LightingVS=SHADER_LIGHTING_SLANG_VS_PATH"
@@ -879,8 +871,6 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "ReflectionNortPS=SHADER_REFLECTION_NORT_SLANG_PS_PATH"
     "FxaaVS=SHADER_FXAA_SLANG_VS_PATH"
     "FxaaPS=SHADER_FXAA_SLANG_PS_PATH"
-    "MlaaVS=SHADER_MLAA_SLANG_VS_PATH"
-    "MlaaPS=SHADER_MLAA_SLANG_PS_PATH"
     "SmaaEdgeVS=SHADER_SMAA_EDGE_VS_PATH"
     "SmaaEdgePS=SHADER_SMAA_EDGE_PS_PATH"
     "SmaaWeightVS=SHADER_SMAA_WEIGHT_VS_PATH"
@@ -901,7 +891,6 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "VolumetricFogInjectCS=SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH"
     "VolumetricLightInjectCS=SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH"
     "VolumetricIntegrationCS=SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH"
-    "VolumetricTemporalCS=SHADER_VOLUMETRIC_TEMPORAL_CS_PATH"
     "ParticleUpdateCS=SHADER_PARTICLE_UPDATE_CS_PATH"
     "ParticleRenderVS=SHADER_PARTICLE_RENDER_VS_PATH"
     "ParticleRenderPS=SHADER_PARTICLE_RENDER_PS_PATH"
@@ -964,7 +953,6 @@ set(ZHLN_SHADER_CATALOG_SETS
     "VolumetricFogInject=VolumetricFogInjectCS"
     "VolumetricLightInject=VolumetricLightInjectCS"
     "VolumetricIntegration=VolumetricIntegrationCS"
-    "VolumetricTemporal=VolumetricTemporalCS"
     "BloomThreshold=BloomThresholdCS"
     "BloomDown=BloomDownCS"
     "BloomUp=BloomUpCS"
@@ -972,9 +960,7 @@ set(ZHLN_SHADER_CATALOG_SETS
     "RcgiCascadeTraceMerge=RcgiCascadeTraceMergeCS"
     "RcgiResolve=RcgiResolveCS"
     "Gtao=GtaoCS"
-    "Taa=TaaPS"
     "Fxaa=FxaaPS"
-    "Mlaa=MlaaPS"
     "SmaaEdge=SmaaEdgePS"
     "SmaaWeight=SmaaWeightPS"
     "SmaaBlend=SmaaBlendPS"

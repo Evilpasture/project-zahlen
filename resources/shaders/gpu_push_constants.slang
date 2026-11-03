@@ -133,17 +133,6 @@ public struct FXAAPushConstants {
     public float _pad;
 };
 
-public struct MLAAPushConstants {
-    public float rcpFrameX;
-    public float rcpFrameY;
-    public float threshold;
-    public uint  maxSearchSteps;
-};
-
-public struct TAAPushConstants {
-    public float feedback;
-};
-
 public struct RcgiProbeSetupPushConstants {
     public uint2 fullRes;
     public uint2 alignedRes;
@@ -201,13 +190,6 @@ public struct VolumetricLightInjectPushConstants {
     public float ambientIntensity;
     public float phaseAnisotropy;
     public uint  enableShadows;
-};
-
-public struct VolumetricTemporalPushConstants {
-    public float temporalWeight;
-    public float clampStrength;
-    public uint  resetHistory;
-    public uint  _pad;
 };
 
 public struct BRDFLUTPush {

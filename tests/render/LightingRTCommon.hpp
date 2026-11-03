@@ -112,7 +112,7 @@ using ZHLN::Test::Image::WriteAmplifiedDiff;
 using ZHLN::Test::Image::WriteRegionCrop;
 
 using ZHLN::Test::Headless::Capture;
-using ZHLN::Test::Headless::DisableTAA;
+using ZHLN::Test::Headless::DisableAA;
 using ZHLN::Test::Headless::RunStableScene;
 using ZHLN::Test::Headless::StableRunResult;
 using ZHLN::Test::Headless::TickFrames;

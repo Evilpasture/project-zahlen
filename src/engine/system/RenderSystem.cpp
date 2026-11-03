@@ -482,10 +482,8 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     // The shadow planes are the culler's own: CullingSystem derives them from
     // the same sun and settings, and this matrix is what the passes consume.
 
-    const AAState& aaState = gfx.antiAliasing;
-
     // The frame's scene state, in the engine's own terms: the view, the sun, the
-    // sky, the probe, the jitter. The shader's struct is not this one -- the
+    // sky and the probe. The shader's struct is not this one -- the
     // renderer packs it (RenderContext::SetFrameData) and fills the lanes only it
     // knows, so nothing here is a w-lane of something else.
     const float frameClock = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep;
@@ -504,7 +502,6 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     frame.probeMax               = gfx.environment.probeMax;
     frame.probePos               = gfx.environment.probePos;
     frame.useLocalProbe          = gfx.environment.useLocalProbe;
-    frame.jitter                 = JPH::Vec4 {aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY};
     frame.enableRTR              = gfx.post.enableRTR;
     frame.fullBright             = gfx.environment.fullBright;
     frame.frameIndex             = static_cast<uint32_t>(engine.GetCurrentFrame());

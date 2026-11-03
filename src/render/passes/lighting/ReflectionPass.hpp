@@ -15,12 +15,11 @@ struct ReflectionPass:
         Vk::ShaderRead<Res_SceneColor>,
         Vk::ShaderRead<typename SurfaceTag::Normals>,
         Vk::ShaderRead<typename SurfaceTag::Depth>,
-        Vk::ShaderRead<Res_HiZ>,
         Vk::ShaderRead<Res_LightingGI>,
         Vk::ShaderRead<Res_LightingAo>,
         Vk::ShaderRead<Res_ShadowMap>,
         Vk::ShaderRead<Res_ShadowAtlas>,
-        Vk::ShaderReadGeneral<Res_VoxelResolved>,
+        Vk::ShaderReadGeneral<Res_VoxelInt>,
         Vk::ShaderRead<Res_RcgiProbes>,
         Vk::ShaderRead<Res_RcgiCascadeA>,
         Vk::ColorWrite<OutputTag>> {

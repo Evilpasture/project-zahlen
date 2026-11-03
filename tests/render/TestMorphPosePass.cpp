@@ -484,7 +484,7 @@ struct MorphPosePassSuite {
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;
-            ZHLN::Test::Headless::DisableTAA(*engine);
+            ZHLN::Test::Headless::DisableAA(*engine);
 
             auto material = MorphPosePassSuite::CreateMorphMaterial(rc);
             if (!material) {

@@ -36,14 +36,11 @@ public struct GpuAbiTypes {
     public BlitPushConstants blitPush;
 
     public FXAAPushConstants fxaaPush;
-    public MLAAPushConstants mlaaPush;
-    public TAAPushConstants taaPush;
     public RcgiProbeSetupPushConstants rcgiProbeSetupPush;
     public RcgiCascadePushConstants rcgiCascadePush;
     public RcgiResolvePushConstants rcgiResolvePush;
     public VolumetricFogPushConstants volumetricFogPush;
     public VolumetricLightInjectPushConstants volumetricLightInjectPush;
-    public VolumetricTemporalPushConstants volumetricTemporalPush;
     public BRDFLUTPush brdfLutPush;
     public IBLBakePush iblBakePush;
     public SMAALUTPush smaaLutPush;
@@ -103,14 +100,11 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += asuint(abi.thresholdPush.exposure);
     acc += asuint(abi.blitPush.colorFilter.x);
     acc += asuint(abi.fxaaPush.rcpFrameX);
-    acc += asuint(abi.mlaaPush.threshold);
-    acc += asuint(abi.taaPush.feedback);
     acc += abi.rcgiProbeSetupPush.cascadeIndex;
     acc += asuint(abi.rcgiCascadePush.tMax);
     acc += asuint(abi.rcgiResolvePush.giIntensity);
     acc += asuint(abi.volumetricFogPush.density);
     acc += asuint(abi.volumetricLightInjectPush.scatteringIntensity);
-    acc += asuint(abi.volumetricTemporalPush.clampStrength);
     acc += abi.brdfLutPush.width;
     acc += abi.iblBakePush.sampleCount;
     acc += abi.smaaLutPush.mode;

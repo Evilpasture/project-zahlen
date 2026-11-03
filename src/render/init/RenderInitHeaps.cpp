@@ -242,9 +242,7 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         heapManager, reflectionPipeline.pass.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler), Vk::SamplerSlot<"pointSampler">(pointSampler),
         Vk::SamplerSlot<"clampSampler">(clampSampler), Vk::SamplerSlot<"skySampler">(skySampler)
     );
-    Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, antiAliasing.taa.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler));
     Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, antiAliasing.fxaa.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler));
-    Vk::InitHeapPassSamplers<Shaders::Mlaa>(heapManager, antiAliasing.mlaa.heapBindings, Vk::SamplerSlot<"sPoint">(defaultSampler));
     Vk::InitHeapPassSamplers<Shaders::SmaaEdge>(heapManager, antiAliasing.smaaEdge.heapBindings, Vk::SamplerSlot<"pointSampler">(pointSampler));
     Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(
         heapManager, antiAliasing.smaaWeight.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultSampler), Vk::SamplerSlot<"pointSampler">(pointSampler)

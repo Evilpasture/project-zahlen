@@ -20,8 +20,8 @@
 //   * The engine's own profiler. CPUProfiler already holds every ScopedTimer in
 //     the frame -- physics, culling, gameplay, transform history, animation,
 //     the network step -- and GpuProfiler pushes a timestamp pair per stage per
-//     frame under the stage's reflected enumerator name (MainPass1, TAA,
-//     SmaaBlend, ...), so all 27 stage timings and their histories are measured
+//     frame under the stage's reflected enumerator name (MainPass1, SmaaEdge,
+//     SmaaBlend, ...), so all stage timings and their histories are measured
 //     every frame by the renderer already. Nothing in the tree reads them:
 //     IterateMetrics had no caller at all. This is that reader -- one row per
 //     metric, classified as a GPU stage or a CPU scope from its name.

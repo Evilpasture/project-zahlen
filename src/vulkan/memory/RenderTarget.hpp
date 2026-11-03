@@ -220,28 +220,6 @@ struct ImageFormat {
 template <VkFormat F>
 using FormatRenderTarget = RenderTarget<ImageFormat<F>>;
 
-// Logical DAG tags remain attached to their fields. Swap only the physical
-// allocations when temporal history changes roles across frames: std::swap
-// cannot exchange two differently tagged RenderTarget<T> types.
-template <typename A, typename B>
-void SwapBacking(RenderTarget<A>& lhs, RenderTarget<B>& rhs) noexcept {
-    static_assert(
-        RenderTarget<A>::format == RenderTarget<B>::format && RenderTarget<A>::aspect == RenderTarget<B>::aspect,
-        "Swapped backing images must share format and aspect"
-    );
-    static_assert(
-        std::is_same_v<typename RenderTarget<A>::Extent, typename RenderTarget<B>::Extent> &&
-            RenderTarget<A>::scale_divisor == RenderTarget<B>::scale_divisor && RenderTarget<A>::is_mipmapped == RenderTarget<B>::is_mipmapped,
-        "Swapped backing images must share dimensions and mip policy"
-    );
-    using std::swap;
-    swap(lhs.image, rhs.image);
-    swap(lhs.attachmentView, rhs.attachmentView);
-    swap(lhs.mipAttachmentViews, rhs.mipAttachmentViews);
-    swap(lhs.extent, rhs.extent);
-    swap(lhs.mipLevels, rhs.mipLevels);
-}
-
 template <VkImageLayout TargetLayout, typename GraphTag>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<GraphTag>& rt, Tag<TargetLayout>) noexcept;
 

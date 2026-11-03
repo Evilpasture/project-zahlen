@@ -202,7 +202,7 @@ struct UnlitMeasurement {
     if (engine == nullptr) {
         return out;
     }
-    ZHLN::Test::Headless::DisableTAA(*engine);
+    ZHLN::Test::Headless::DisableAA(*engine);
 
     if (!BuildUnlitBoxScene(*engine, emissiveFactor, glowIntensity, bloomStrength)) {
         return out;

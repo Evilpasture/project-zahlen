@@ -46,8 +46,6 @@ class TargetManager {
         Vk::RenderTarget<Res_VoxelMedia> voxelMedia;
         Vk::RenderTarget<Res_VoxelLight> voxelLight;
         Vk::RenderTarget<Res_VoxelInt> voxelIntegrated;
-        Vk::RenderTarget<Res_VoxelHist> voxelHistory;
-        Vk::RenderTarget<Res_VoxelResolved> voxelResolved;
         Vk::RenderTarget<Res_TransNorm> transNormalBuffer;
         Vk::RenderTarget<Res_TransAnisotropy> transAnisotropyBuffer;
         Vk::RenderTarget<Res_TransSheen> transSheenBuffer;

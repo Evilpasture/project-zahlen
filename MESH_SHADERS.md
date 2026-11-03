@@ -239,14 +239,12 @@ and quietly stay on the vertex pipeline forever — the feature would look
 
 The parity test controls for engine nondeterminism explicitly:
 
-* **TAA must be disabled at its source.** The camera's `AASettingsComponent` is
+* **AA must be disabled at its source.** The camera's `AASettingsComponent` is
   authoritative — `RenderSystem` re-pushes it into the `RenderContext` every
-  frame (so `RenderContext::SetAAState` alone is overwritten after one tick),
-  and while it says TAA, `CameraSystem` jitters the projection by a different
-  sub-pixel offset every frame. The first revision of this test missed that and
-  blamed the mesh path for jitter: identical coverage (0.015 %) and silhouette
-  (0.083 %), but 1.14 % of pixels differing with a max delta of 196 — the exact
-  fingerprint of a half-pixel shift on high-contrast edges.
+  frame (so `RenderContext::SetAAState` alone is overwritten after one tick).
+  Both remaining modes (FXAA and SMAA) are spatial edge filters, so leaving one
+  on changes pixels on every high-contrast edge and would swamp the geometry
+  comparison.
 * **Two-phase GPU culling is disabled process-wide** (`ZHLN_NO_GPU_CULLING`, set
   before any device exists). The mesh path bypasses indirect culling by design,
   so leaving it on would compare two *culling* strategies, and Hi-Z culling is
@@ -271,8 +269,8 @@ uniform shading change). Findings that shaped it:
   union), which flags even a 1-pixel shift at 1.3 % against a 0.5 % budget.
 * Two blank frames match perfectly, so the test independently requires both
   frames to contain >500 shaded pixels before comparing them.
-* TAA is switched off and `fullBright` enabled for the comparison, otherwise
-  jitter history and lighting noise dominate the diff.
+* AA is switched off and `fullBright` enabled for the comparison, otherwise
+  edge filtering and lighting noise dominate the diff.
 
 Every GPU test **skips** (does not fail) when the device lacks mesh shading, so
 the binary stays green on lavapipe and pre-Turing/pre-RDNA2 hardware.

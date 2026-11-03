@@ -206,7 +206,6 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
     if (aaEnt != Entity::Null()) {
         changed |= reg.Patch<AASettingsComponent>(aaEnt, [&gfx](AASettingsComponent& aa) {
             aa.state.mode        = gfx.antiAliasing.mode;
-            aa.state.taaFeedback = gfx.antiAliasing.taaFeedback;
         });
     }
 

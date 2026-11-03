@@ -254,9 +254,8 @@ Final values (the ones that matter):
 Write-back: `PostProcess/Shadow/RayTracing` on
 `GlobalSettingsTagComponent` singleton, AA on `MainCameraTagComponent`
 singleton. `Registry::Add` replaces, so whole components are built from the
-model. AA is the exception: `CameraSystem` advances `jitterX/Y`,
-`prevJitterX/Y`, `frameIndex` every frame (TAA history), so tier changes use
-`Patch` for knobs only, with fallback `Add` if absent.
+model. AA is the exception: the main camera owns that component, so tier
+changes use `Patch` for knobs only, with fallback `Add` if absent.
 
 Fidelity governor (`GraphicsSettingsSync.cpp`) steps quality down when present
 margin <2 ms for 90 frames, never up, never touches `Custom`. Studio look

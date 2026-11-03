@@ -31,6 +31,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         float3 inScattering = rawLight.rgb;
         float extinction    = rawLight.a;
 
+        // Injection samples the static slice center (z + 0.5)/Depth; integrate
+        // across the matching [z, z+1] boundaries in log-depth space.
         float nextDepth  = frame.nearZ * pow(frame.farZ / frame.nearZ, (float(z) + 1.0f) / float(Volumetric.Depth));
         float stepLength = nextDepth - prevDepth;
         prevDepth        = nextDepth;

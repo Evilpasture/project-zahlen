@@ -48,7 +48,6 @@ void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt
         Vk::MakePassPack(
             Passes::ClusterCullingPass {.cull = impl.culling, .frame = frame}, Passes::ComputePass<Passes::VolumetricFogInjectDesc> {.frame = frame},
             Passes::ComputePass<Passes::VolumetricLightInjectDesc> {.frame = frame}, Passes::ComputePass<Passes::VolumetricIntegrationDesc> {.frame = frame},
-            Passes::ComputePass<Passes::VolumetricTemporalDesc> {.frame = frame},
             Passes::ParticleUpdatePass {.particles = impl.particleUpdate, .frame = frame, .dt = dt},
             Passes::MeshParticleUpdatePass {.particles = impl.particleUpdate, .frame = frame, .dt = dt}
         )

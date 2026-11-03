@@ -50,9 +50,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
-    float2 uv     = (float2(tid.xy) + 0.5f) / float2(gridDim.xy);
-    float jitter  = TemporalHash2D(tid.xy, frame.camPos.w) - 0.5f;
-    float depthVS = frame.nearZ * pow(frame.farZ / frame.nearZ, (float(tid.z) + 0.5f + jitter * 0.5f) / float(Volumetric.Depth));
+    float2 uv = (float2(tid.xy) + 0.5f) / float2(gridDim.xy);
+    // Static slice center, matching the fog injection and integration shaders.
+    float depthVS = frame.nearZ * pow(frame.farZ / frame.nearZ, (float(tid.z) + 0.5f) / float(Volumetric.Depth));
 
     float4 clip          = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, 0.5f, 1.0f);
     float4 worldSpacePos = mul(frame.invViewProj, clip);

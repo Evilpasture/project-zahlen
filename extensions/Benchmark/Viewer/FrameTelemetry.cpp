@@ -35,7 +35,7 @@ namespace {
 }
 
 // GPU stages are recorded under their reflected enumerator name -- MainPass1,
-// TAA, VolumetricLightInject -- while every CPU ScopedTimer in the tree is
+// SmaaEdge, VolumetricLightInject -- while every CPU ScopedTimer in the tree is
 // named in prose: "Physics (JPH)", "ECS System: Native C++ Gameplay Update",
 // "Culling (ECS O(N))". By the time a reader sees a key the profiler has lost
 // any type information, so the name is the only signal there is: identifier

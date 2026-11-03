@@ -152,8 +152,6 @@ auto PackFrameData(const FrameData& frame) noexcept -> FrameUniforms {
     packed.probeMax = JPH::Float4 {frame.probeMax.x, frame.probeMax.y, frame.probeMax.z, 0.0f};
     packed.probePos = JPH::Float4 {frame.probePos.x, frame.probePos.y, frame.probePos.z, 0.0f};
 
-    packed.jitterParams = frame.jitter;
-
     packed.enableRTR        = frame.enableRTR;
     packed.fullBright       = frame.fullBright;
     packed.frameIndex       = frame.frameIndex;

@@ -54,7 +54,7 @@ enum class RenderPerfTestError : uint8_t {
     VolumetricsThroughputFailed    ZHLN_ANNOTATION(ZHLN::Description<"Volumetric fog and lighting injection failed throughput gate."> {}),
     DecalsThroughputFailed         ZHLN_ANNOTATION(ZHLN::Description<"Mass screen-space decal projection failed throughput gate."> {}),
     UICompositeThroughputFailed    ZHLN_ANNOTATION(ZHLN::Description<"Immediate-mode UI rendering and batch composition failed throughput gate."> {}),
-    PostProcessingThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Post-processing, TAA jitter, and tonemapping failed throughput gate."> {}),
+    PostProcessingThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Post-processing, spatial AA, and tonemapping failed throughput gate."> {}),
     RayTracingThroughputFailed     ZHLN_ANNOTATION(ZHLN::Description<"Hardware Ray Tracing (RTR / RT Shadows) failed throughput gate."> {}),
     UnifiedMasterBenchmarkFailed ZHLN_ANNOTATION(ZHLN::Description<"Unified master graphics benchmark failed performance or image verification criteria."> {}),
     ValidationErrorsRaised       ZHLN_ANNOTATION(ZHLN::Description<"Vulkan validation layer reported errors during benchmark execution."> {}),
@@ -574,7 +574,7 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
 
 auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Test::SetTimeout(30);
-    ZHLN::Println("\n  {}--- GPU Subsystem 7: Post-Processing & TAA Stack [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
+    ZHLN::Println("\n  {}--- GPU Subsystem 7: Post-Processing & AA Stack [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
     PrepareEngineForTest(engine);
 
@@ -582,8 +582,7 @@ auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> s
 
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) {
-            aa.state.mode        = ZHLN::AAMode::TAA;
-            aa.state.taaFeedback = 0.95f;
+            aa.state.mode        = ZHLN::AAMode::SMAA;
         });
     }
 
@@ -608,9 +607,9 @@ auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> s
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println(
-        "    [Post-Processing & TAA] 60 frames x (TAA + Tonemap + SSR + Vignette) in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs
+        "    [Post-Processing & AA] 60 frames x (SMAA + Tonemap + SSR + Vignette) in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs
     );
-    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.postprocess_taa_60f.val_on" : "render.postprocess_taa_60f.val_off", durationMs, 25.0);
+    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.postprocess_smaa_60f.val_on" : "render.postprocess_smaa_60f.val_off", durationMs, 25.0);
 
     return {};
 }
@@ -880,8 +879,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     // 8. Configure Post-Processing
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) {
-            aa.state.mode        = ZHLN::AAMode::TAA;
-            aa.state.taaFeedback = 0.95f;
+            aa.state.mode        = ZHLN::AAMode::SMAA;
         });
     }
 

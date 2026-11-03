@@ -113,7 +113,7 @@ const std::array<JPH::Vec3, 5> kCenters {
     const auto info = rc.GetInfo();
     if (meshShading && !info.meshShadingActive) return std::unexpected(NegativeScaleError::MeshPathInactive);
 
-    ZHLN::Test::Headless::DisableTAA(*engine);
+    ZHLN::Test::Headless::DisableAA(*engine);
     for (const auto e: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
         reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) {
             pp.fullBright = 0; // Must exercise front/back normal orientation.

@@ -12,7 +12,7 @@
 //   2. the same pane with blending off hides the wall.
 //
 // CreateBox does not set DrawFlags::ExcludeFromTLAS the way prefab Instantiation
-// does for alphaMode 2, so the glass mesh is patched after spawn. TAA is off
+// does for alphaMode 2, so the glass mesh is patched after spawn. AA is off
 // so a static scene stays static. Mesh shading is left alone (Hybrid).
 
 #include "TestsFramework.hpp"
@@ -161,7 +161,7 @@ struct PaneMeasurement {
         out.error = TransparentMaterialError::EngineInitFailed;
         return out;
     }
-    ZHLN::Test::Headless::DisableTAA(*engine);
+    ZHLN::Test::Headless::DisableAA(*engine);
     if (const SceneBuild built = SpawnWallAndPane(*engine, pane); built != SceneBuild::Ok) {
         out.error = built == SceneBuild::Camera ? TransparentMaterialError::CameraMissing : TransparentMaterialError::MaterialCreationFailed;
         return out;
@@ -269,7 +269,7 @@ struct TransparentMaterialsTestSuite {
         std::expected<void, ZHLN::ErrorCode> masked_transmission_and_texture_are_independent() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless masked transmission");
             if (engine == nullptr) return std::unexpected(TransparentMaterialError::EngineInitFailed);
-            ZHLN::Test::Headless::DisableTAA(*engine);
+            ZHLN::Test::Headless::DisableAA(*engine);
             auto& rc = engine->GetRenderContext();
             auto& reg = engine->GetRegistry();
 

@@ -1,6 +1,5 @@
 
 import gpu_push_constants;
-import hash;
 import uniforms;
 import volumetric_grid;
 
@@ -19,9 +18,10 @@ SamplerState noiseSampler;
 ConstantBuffer<FrameUniforms> frame;
 
 float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
-    float2 uv     = (float2(tid.xy) + 0.5f) / resolution;
-    float jitter  = TemporalHash2D(tid.xy, frame.camPos.w) - 0.5f;
-    float depthVS = frame.nearZ * pow(frame.farZ / frame.nearZ, (float(tid.z) + 0.5f + jitter * 0.5f) / float(Volumetric.Depth));
+    float2 uv = (float2(tid.xy) + 0.5f) / resolution;
+    // Static slice center: the (z + 0.5)/Depth sample the integrator's
+    // [z, z+1] boundaries bracket. No per-frame depth jitter.
+    float depthVS = frame.nearZ * pow(frame.farZ / frame.nearZ, (float(tid.z) + 0.5f) / float(Volumetric.Depth));
     outDepthVS    = depthVS;
 
     float4 clip          = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, 0.5f, 1.0f);

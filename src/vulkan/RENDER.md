@@ -396,6 +396,11 @@ module with fewer constants than `T` has fields is fine: the NoRT modules of
 `lighting.slang` and `reflection.slang` are built from the same table as their
 RT counterparts.
 
+In `reflection.slang` both ids are still live, but `ENABLE_SSR` no longer
+selects a screen-space raymarcher: the reflection ray is resolved with inline
+`RayQuery` against the TLAS first, and `ENABLE_SSR` only enables the on-screen
+`texLighting` cache for a hit that projects onto a directly visible pixel.
+
 ---
 
 ## 5. End-to-End Walkthrough

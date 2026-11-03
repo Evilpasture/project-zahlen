@@ -9,7 +9,8 @@
 // to be retuned, and a test that restates the table only reports that someone
 // edited two files. What is asserted is the shape a retune has to keep: tiers
 // are ordered by cost, detection reads the signature and nothing else, presets
-// never touch blit colour style, and ConfigEquals ignores per-frame jitter.
+// never touch blit colour style, and ConfigEquals compares the AA settings
+// rather than any per-frame state.
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Render/GraphicsSettings.hpp>
@@ -71,7 +72,7 @@ struct BlitStyle {
 // test that writes SMAA while checking a mode change writes the value it means
 // to move away from -- which is how a mode-change assertion stops asserting.
 [[nodiscard]] auto AADifferingFrom(AAMode current) -> AAMode {
-    for (const AAMode candidate: {AAMode::None, AAMode::FXAA, AAMode::MLAA, AAMode::TAA, AAMode::SMAA}) {
+    for (const AAMode candidate: {AAMode::None, AAMode::FXAA, AAMode::SMAA}) {
         if (candidate != current) {
             return candidate;
         }
@@ -203,7 +204,7 @@ struct GraphicsSettingsSuite {
             gfx.post.exposure *= 2.0f;
             gfx.environment.ambientExposure *= 2.0f;
             gfx.antiAliasing.fxaaSubpix *= 0.5f;
-            gfx.antiAliasing.mlaaMaxSearchSteps += 1;
+            gfx.antiAliasing.fxaaEdgeThreshold *= 0.5f;
             gfx.rayTracing.roughnessCutoff *= 0.5f;
             gfx.rayTracing.alphaTestingInBVH = !gfx.rayTracing.alphaTestingInBVH;
             if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::High)) {
@@ -289,18 +290,11 @@ struct GraphicsSettingsSuite {
             return {};
         }
 
-        // --- 7. ConfigEquals ignores jitter, catches configuration ------------
+        // --- 7. ConfigEquals catches configuration changes ----------------------
         std::expected<void, ZHLN::ErrorCode> config_equality_semantics() {
             GraphicsSettings a {};
             GraphicsSettings b {};
 
-            // Per-frame jitter state must never count as a config change. These
-            // are samples the AA pass writes every frame, not tuning values.
-            b.antiAliasing.jitterX     = 0.25f;
-            b.antiAliasing.jitterY     = -0.5f;
-            b.antiAliasing.prevJitterX = 0.125f;
-            b.antiAliasing.prevJitterY = -0.25f;
-            b.antiAliasing.frameIndex  = 128;
             if (!ZHLN::Test::ExpectTrue(a.ConfigEquals(b))) {
                 return std::unexpected(GraphicsSettingsTestError::ConfigEqualityFailed);
             }
@@ -312,9 +306,9 @@ struct GraphicsSettingsSuite {
                 return std::unexpected(GraphicsSettingsTestError::ConfigEqualityFailed);
             }
 
-            // AA mode is configuration; AA jitter is not. Move the mode to a
-            // different one -- the model's default is already SMAA, so writing
-            // SMAA here would be a no-op that passes for the wrong reason.
+            // AA mode is configuration. Move the mode to a different one -- the
+            // model's default is already SMAA, so writing SMAA here would be a
+            // no-op that passes for the wrong reason.
             b                   = a;
             b.antiAliasing.mode = AADifferingFrom(a.antiAliasing.mode);
             if (!ZHLN::Test::ExpectFalse(a.ConfigEquals(b))) {

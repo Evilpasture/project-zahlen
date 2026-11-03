@@ -226,11 +226,11 @@ the old bindless set array.
 * Compute: particle update, mesh-particle update, standalone BDA-based
   skinning (heap-mode push data with no descriptor mapping), HiZ generation
   (one block per mip, written while the mip is recorded), occlusion culling
-  (one block per pass), cluster bounds/culling, all five volumetric passes,
+  (one block per pass), cluster bounds/culling, the volumetric passes,
   procedural bake (immediate partition).
 * Post-processing: ambient, lighting, reflection (their RT/NoRT pipeline
   variants share one block per frame), translucent reflection, bloom (one block
-  per chain step), TAA/FXAA/MLAA/SMAA, blit.
+  per chain step), FXAA/SMAA, blit.
 * ImGui: there is no renderer backend or ImGui-owned GPU state. Dear ImGui is
   treated as a CPU-side producer; `BlitPass` consumes `ImDrawData`, expands it
   into the current frame `uiVbos`, and draws it with the normal `uiPipeline` and
@@ -303,7 +303,7 @@ the old bindless set array.
 
 - [x] Port HiZ / culling / cluster passes (image + buffer bindings).
 - [x] Port volumetric passes.
-- [x] Port post-processing (TAA/FXAA/MLAA/SMAA, bloom, blit).
+- [x] Port post-processing (FXAA/SMAA, bloom, blit).
 - [x] Port ambient/lighting/reflection passes.
 - [x] Port procedural bake compute.
 - [x] Remove the ImGui renderer backend; render `ImDrawData` directly in Blit/UI.

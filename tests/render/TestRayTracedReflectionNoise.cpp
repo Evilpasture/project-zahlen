@@ -3,10 +3,11 @@
 
 // tests/render/TestRayTracedReflectionNoise.cpp
 //
-// GPU-side verification of the deterministic 3-tier hybrid reflection pipeline:
-//   - Tier 1 (roughness < 0.20): 1 unjittered mirror ray (Hi-Z SSR -> TLAS fallback)
-//   - Tier 2 (0.20 <= roughness <= 0.40): deterministic ray + cone-traced mip LOD
+// GPU-side verification of the deterministic 3-tier reflection pipeline:
+//   - Tier 1 (roughness < 0.20): 1 unjittered mirror BVH ray, cache LOD 0
+//   - Tier 2 (0.20 <= roughness <= 0.40): same BVH ray + cone-traced cache LOD
 //   - Tier 3 (roughness > 0.40): 0 specular rays; Radiance Cascades / Split-Sum BRDF LUT
+//   The TLAS resolves every hit; screen space is only a radiance cache.
 //
 // Unlike the retired half-resolution 1-SPP VNDF blue-noise path, the 3-tier
 // pipeline has ZERO stochastic temporal jitter and ZERO specular A-trous
@@ -20,8 +21,9 @@
 //                    footprint without lattice artifacts or single-pixel holes.
 //   3. CONVERGENCE - the reflection is already converged on frame 1 (running-mean
 //                    residual ~ 0 without needing multi-frame accumulation).
-//   4. HYBRID & NO DEBRIS - Hi-Z SSR, TLAS inline fallback, and hybrid SSR+RTR
-//                    all light up the glossy band without isolated ray debris.
+//   4. HYBRID & NO DEBRIS - the BVH trace with and without the on-screen
+//                    radiance cache both light up the glossy band without
+//                    isolated ray debris.
 
 #include "helpers/ImageTesting.hpp"
 #include "RayTracedNoiseMetrics.hpp"
@@ -129,10 +131,6 @@ struct RayTracedReflectionNoiseTestSuite {
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
             reg.Patch<ZHLN::Components::AASettingsComponent>(e, [mode](auto& aa) {
                 aa.state.mode        = mode;
-                aa.state.jitterX     = 0.0f;
-                aa.state.jitterY     = 0.0f;
-                aa.state.prevJitterX = 0.0f;
-                aa.state.prevJitterY = 0.0f;
             });
         }
         engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = mode});
@@ -513,7 +511,7 @@ struct RayTracedReflectionNoiseTestSuite {
             return {};
         }
 
-        // Hybrid Hi-Z SSR + TLAS inline fallback must produce clean clustered
+        // TLAS trace + on-screen radiance cache must produce clean clustered
         // reflections with zero isolated single-pixel ray debris or fireflies.
         std::expected<void, ZHLN::ErrorCode> rtr_hybrid_ssr_and_tlas_have_no_ray_debris() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
@@ -556,7 +554,7 @@ struct RayTracedReflectionNoiseTestSuite {
                 return std::unexpected(ReflectionNoiseError::TemporalBoilDetected);
             }
 
-            ZHLN::Println("    [PASS] Hybrid Hi-Z SSR + TLAS reflection band is clean, stable, and free of ray debris.");
+            ZHLN::Println("    [PASS] TLAS + on-screen cache reflection band is clean, stable, and free of ray debris.");
             return {};
         }
     };

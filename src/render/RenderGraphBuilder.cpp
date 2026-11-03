@@ -117,21 +117,15 @@ auto GetRenderGraphDump(AAMode currentMode) noexcept -> std::string_view {
     using RenderGraphDetail::SceneGraphFor;
     using Vk::Debug::GraphVisualizer;
 
-    static constexpr auto vis_taa  = GraphVisualizer<SceneGraphFor<TAA>>::Visualize();
     static constexpr auto vis_smaa = GraphVisualizer<SceneGraphFor<SMAA>>::Visualize();
     static constexpr auto vis_fxaa = GraphVisualizer<SceneGraphFor<FXAA>>::Visualize();
-    static constexpr auto vis_mlaa = GraphVisualizer<SceneGraphFor<MLAA>>::Visualize();
     static constexpr auto vis_none = GraphVisualizer<SceneGraphFor<None>>::Visualize();
 
     switch (currentMode) {
-        case TAA:
-            return vis_taa.string_view();
         case SMAA:
             return vis_smaa.string_view();
         case FXAA:
             return vis_fxaa.string_view();
-        case MLAA:
-            return vis_mlaa.string_view();
         case None:
             return vis_none.string_view();
     }

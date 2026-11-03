@@ -39,7 +39,7 @@ struct ReflectionsTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             {
                 auto& reg = engine->GetRegistry();
@@ -206,7 +206,7 @@ struct ReflectionsTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             {
                 auto& reg = engine->GetRegistry();
@@ -465,7 +465,7 @@ struct ReflectionsTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             {
                 auto& reg = engine->GetRegistry();

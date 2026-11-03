@@ -57,7 +57,6 @@ enum class Stage : uint8_t {
     VolumetricFogInject,
     VolumetricLightInject,
     VolumetricIntegrate,
-    VolumetricTemporal,
     Lighting,
     Reflection,
     TransPrePass,
@@ -65,9 +64,7 @@ enum class Stage : uint8_t {
     Forward,
     BloomKawase,
     DecalPass,
-    TAA,
     FXAA,
-    MLAA,
     SmaaEdge,
     SmaaWeight,
     SmaaBlend,
@@ -89,7 +86,6 @@ enum class Stage : uint8_t {
     // its timing row. Hand-written passes still rely on this list being kept
     // current by hand.
     OpaqueSceneCopy,
-    SsrHiZGenerate,
     LightingMip,
     GTAO,
     RcgiCascade,

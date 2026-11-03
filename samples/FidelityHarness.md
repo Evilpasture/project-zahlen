@@ -66,7 +66,7 @@ that setting. Specifically:
   headless target is `R8G8B8A8_SRGB`, so the store encodes sRGB the way a
   swapchain does. A `_UNORM` target was writing the linear bytes into the PAM.
 * **Spatial SMAA** (`AAMode::SMAA`) smooths rasterized edges in the still,
-  including coverage at scene/background boundaries. It has no TAA camera jitter
+  including coverage at scene/background boundaries. It adds no camera jitter
   or history. Khronos goldens are antialiased; disabling every AA pass left
   obvious one-pixel stair steps even at the goldens' native 2x resolution.
   Use `--no-aa` to capture the unfiltered baseline for A/B comparison. Spatial

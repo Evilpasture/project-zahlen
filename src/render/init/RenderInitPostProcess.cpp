@@ -14,23 +14,9 @@
 
 namespace ZHLN {
 
-auto RenderContext::Impl::BuildTAAPipeline() -> std::expected<void, ErrorCode> {
-    return BuildPassHelper(
-        this, antiAliasing.taa, Vk::MakeStageSource<Shaders::Modules::TaaVS>(), Vk::MakeStageSource<Shaders::Modules::TaaPS>(),
-        {VK_FORMAT_R16G16B16A16_SFLOAT}
-    );
-}
-
 auto RenderContext::Impl::BuildFXAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
         this, antiAliasing.fxaa, Vk::MakeStageSource<Shaders::Modules::FxaaVS>(), Vk::MakeStageSource<Shaders::Modules::FxaaPS>(),
-        {VK_FORMAT_R16G16B16A16_SFLOAT}
-    );
-}
-
-auto RenderContext::Impl::BuildMLAAPipeline() -> std::expected<void, ErrorCode> {
-    return BuildPassHelper(
-        this, antiAliasing.mlaa, Vk::MakeStageSource<Shaders::Modules::MlaaVS>(), Vk::MakeStageSource<Shaders::Modules::MlaaPS>(),
         {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
@@ -231,24 +217,10 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
         .and_then([&]() -> std::expected<void, ErrorCode> {
             auto passes = std::make_tuple(
                 GraphicsPassDesc {
-                    .pass        = antiAliasing.taa,
-                    .name        = "TAA",
-                    .vs          = Vk::MakeStageSource<Shaders::Modules::TaaVS>(),
-                    .ps          = Vk::MakeStageSource<Shaders::Modules::TaaPS>(),
-                    .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
-                },
-                GraphicsPassDesc {
                     .pass        = antiAliasing.fxaa,
                     .name        = "FXAA",
                     .vs          = Vk::MakeStageSource<Shaders::Modules::FxaaVS>(),
                     .ps          = Vk::MakeStageSource<Shaders::Modules::FxaaPS>(),
-                    .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
-                },
-                GraphicsPassDesc {
-                    .pass        = antiAliasing.mlaa,
-                    .name        = "MLAA",
-                    .vs          = Vk::MakeStageSource<Shaders::Modules::MlaaVS>(),
-                    .ps          = Vk::MakeStageSource<Shaders::Modules::MlaaPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
@@ -314,7 +286,7 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
             return RegisterAndBuild(
                 this, "Volumetrics", [this]() -> std::expected<void, ErrorCode> { return fog.Build(*this); },
                 {Shaders::Modules::VolumetricClearCS::Path, Shaders::Modules::VolumetricFogInjectCS::Path, Shaders::Modules::VolumetricLightInjectCS::Path,
-                 Shaders::Modules::VolumetricIntegrationCS::Path, Shaders::Modules::VolumetricTemporalCS::Path}
+                 Shaders::Modules::VolumetricIntegrationCS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

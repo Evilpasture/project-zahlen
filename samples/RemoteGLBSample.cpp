@@ -718,19 +718,14 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     gfx.ApplyPreset(ZHLN::QualityLevel::Ultra);
 
     // --- sharpness vs noise tradeoff:
-    // Ultra defaults: TAA 0.95 (95% history) + 16 GI samples + 3 atrous passes
-    // = oil painting (albedo smeared). Previous fix 0.88 + 1 pass = sharp but
-    // RTR half-res 1 SPP VNDF sparkles like water.
-    // New: TAA 0.90 (more history than 0.88, less than 0.95) + 2 atrous passes
-    // cleans RT grain without smearing albedo too much. Floor roughness 0.03
-    // mirror tier (full-res warp-coherent ray) for clean reflection.
-    // Use SMAA for studio look: spatial only, no temporal smear, sharpest
-    // textures. TAA 0.95 is oil painting, even 0.90 still accumulates history.
-    // User reported Low (FXAA) looks best — SMAA is sharper than FXAA and
-    // still has edge AA. Keep TAA as option via quality tiers 2-4.
-    gfx.antiAliasing.mode        = ZHLN::AAMode::SMAA;
-    gfx.antiAliasing.taaFeedback = 0.90f;
-    gfx.post.giSamples           = 8;
+    // Ultra defaults (16 GI samples + 3 atrous passes) smear albedo like an oil
+    // painting; 1 atrous pass plus 8 GI samples keeps the mirror floor clean
+    // without the blur. Floor roughness 0.03 is the mirror tier (full-res
+    // warp-coherent ray) for a clean reflection.
+    // SMAA is spatial only: no temporal smear, sharpest textures. FXAA stays
+    // the Low/CPU tier fallback.
+    gfx.antiAliasing.mode = ZHLN::AAMode::SMAA;
+    gfx.post.giSamples    = 8;
 
     gfx.rayTracing.denoiserPasses    = 1; // was 2 — 2 still blurred albedo, 1 is enough with mirror floor
     gfx.rayTracing.reflectionSamples = 1;
@@ -810,10 +805,9 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
 // show what a preset is.
 //
 // Registry::Add replaces an existing instance, so the settings components are
-// built whole from the model. AA is the exception: CameraSystem advances
-// jitterX/Y, prevJitterX/Y and frameIndex inside that component every frame, and
-// a tier change must not throw the temporal history away, so only the knobs are
-// written there.
+// built whole from the model. AA is the exception: the main camera owns that
+// component, so a tier change patches its knobs in place instead of replacing
+// the component.
 void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& gfx) {
     auto&              reg      = engine.GetRegistry();
     const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -871,12 +865,9 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
     }
     if (!reg.Patch<ZHLN::Components::AASettingsComponent>(camera, [&gfx](auto& aa) -> auto {
             aa.state.mode                  = gfx.antiAliasing.mode;
-            aa.state.taaFeedback           = gfx.antiAliasing.taaFeedback;
             aa.state.fxaaSubpix            = gfx.antiAliasing.fxaaSubpix;
             aa.state.fxaaEdgeThreshold     = gfx.antiAliasing.fxaaEdgeThreshold;
             aa.state.fxaaEdgeThresholdMin  = gfx.antiAliasing.fxaaEdgeThresholdMin;
-            aa.state.mlaaThreshold         = gfx.antiAliasing.mlaaThreshold;
-            aa.state.mlaaMaxSearchSteps    = gfx.antiAliasing.mlaaMaxSearchSteps;
         })) {
         reg.Add(camera, ZHLN::Components::AASettingsComponent {.state = gfx.antiAliasing});
     }
@@ -933,8 +924,6 @@ void UpdateShadowExtent(ZHLN::Engine& engine, float orbitDistance, float maxOrbi
     switch (mode) {
         case ZHLN::AAMode::None: return "off";
         case ZHLN::AAMode::FXAA: return "FXAA";
-        case ZHLN::AAMode::MLAA: return "MLAA";
-        case ZHLN::AAMode::TAA: return "TAA";
         case ZHLN::AAMode::SMAA: return "SMAA";
     }
     return "unknown";
@@ -1335,13 +1324,8 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
         if (tier.level != ZHLN::QualityLevel::Custom) {
             gfx.ApplyPreset(tier.level);
             // Preset overwrote the sharpness tweaks — re-apply them. Ultra's
-            // 3 atrous passes + 0.95 TAA feedback is oil-painting, 1 pass +
-            // 0.88 feedback is sparkling water (1 SPP VNDF). Now: SMAA for
-            // Custom (sharpest), FXAA for Low, TAA 0.90 + 1 denoise for others,
-            // floor 0.03 mirror tier.
-            if (tier.level != ZHLN::QualityLevel::Low) {
-                gfx.antiAliasing.taaFeedback = 0.90f;
-            }
+            // 3 atrous passes smear albedo, so cap the denoiser at 1 pass and
+            // keep SMAA for Custom/Medium+, FXAA for Low.
             gfx.rayTracing.denoiserPasses    = std::min<uint32_t>(gfx.rayTracing.denoiserPasses, 1u);
             gfx.rayTracing.reflectionSamples = 1;
             gfx.rayTracing.shadowSamples     = 1;
@@ -1372,8 +1356,8 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
         gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0;
         state.settings = gfx;
         ApplyGraphicsSettings(engine, gfx);
-        ZHLN::Log("[RemoteGLB] Quality: {} ({} shadow map, {} GI samples, SSR {}, RTR {}, TAA fb {:.2f}, denoise {}).", QualityName(gfx.DetectPreset()), gfx.shadows.resolution,
-                  gfx.post.giSamples, gfx.post.enableSSR, gfx.post.enableRTR, gfx.antiAliasing.taaFeedback, gfx.rayTracing.denoiserPasses);
+        ZHLN::Log("[RemoteGLB] Quality: {} ({} shadow map, {} GI samples, SSR {}, RTR {}, AA {}, denoise {}).", QualityName(gfx.DetectPreset()), gfx.shadows.resolution,
+                  gfx.post.giSamples, gfx.post.enableSSR, gfx.post.enableRTR, AAName(gfx.antiAliasing.mode), gfx.rayTracing.denoiserPasses);
     }
 }
 

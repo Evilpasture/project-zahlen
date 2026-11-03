@@ -49,8 +49,7 @@ auto VolumetricFogSystem::Build(RenderContext::Impl& impl) -> std::expected<void
     return build(_clear, Vk::CreateShaderDesc<Shaders::Modules::VolumetricClearCS>())
         .and_then([&]() -> std::expected<void, ErrorCode> { return build(_fogInject, Vk::CreateShaderDesc<Shaders::Modules::VolumetricFogInjectCS>()); })
         .and_then([&]() -> std::expected<void, ErrorCode> { return build(_lightInject, Vk::CreateShaderDesc<Shaders::Modules::VolumetricLightInjectCS>()); })
-        .and_then([&]() -> std::expected<void, ErrorCode> { return build(_integrate, Vk::CreateShaderDesc<Shaders::Modules::VolumetricIntegrationCS>()); })
-        .and_then([&]() -> std::expected<void, ErrorCode> { return build(_temporal, Vk::CreateShaderDesc<Shaders::Modules::VolumetricTemporalCS>()); });
+        .and_then([&]() -> std::expected<void, ErrorCode> { return build(_integrate, Vk::CreateShaderDesc<Shaders::Modules::VolumetricIntegrationCS>()); });
 }
 
 auto VolumetricFogSystem::InitializeNoise(RenderContext::Impl& impl) -> std::expected<void, ErrorCode> {
@@ -76,10 +75,6 @@ void VolumetricFogSystem::DestroyNoise(Vk::Allocator& allocator) noexcept {
 }
 
 void VolumetricFogSystem::InitSamplers(RenderContext::Impl& impl) noexcept {
-    Vk::InitHeapPassSamplers<Shaders::VolumetricTemporal>(
-        impl.heapManager, _temporal.heapBindings, Vk::SamplerSlot<"linearSampler">(impl.defaultSampler)
-    );
-
     const Vk::Sampler repeatSampler = Vk::Sampler::LinearRepeat().WithoutMips();
     Vk::InitHeapPassSamplers<Shaders::VolumetricFogInject>(
         impl.heapManager, _fogInject.heapBindings, Vk::SamplerSlot<"noiseSampler">(repeatSampler)
@@ -103,10 +98,6 @@ auto VolumetricFogSystem::LightInject() noexcept -> Vk::FixedDoubleBufferedCompu
 
 auto VolumetricFogSystem::Integrate() noexcept -> Vk::FixedDoubleBufferedComputePass<VolumetricIntegrationLayout>& {
     return _integrate;
-}
-
-auto VolumetricFogSystem::Temporal() noexcept -> Vk::FixedDoubleBufferedComputePass<VolumetricTemporalLayout>& {
-    return _temporal;
 }
 
 auto VolumetricFogSystem::NoiseWrite() const noexcept -> Vk::ImageWrite {

@@ -43,7 +43,7 @@ SetThing(*engine, true);
 TickFrames(*engine, 4);
 const auto on = Capture(*engine, "thing_on.ppm");
 const auto diff = Image::CompareFrames(off, on);
-// pooled fraction, not a count: a one-pixel TAA edge cannot fail this
+// pooled fraction, not a count: a one-pixel AA edge cannot fail this
 ZHLN::Test::ExpectGt(diff.frac32, 0.001);
 ```
 

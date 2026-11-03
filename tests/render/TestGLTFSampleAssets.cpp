@@ -143,7 +143,7 @@ struct GLTFSampleAssetsTestSuite {
             }
             auto& rc     = engine->GetRenderContext();
             auto& assets = engine->GetAssetManager();
-            ZHLN::Test::Headless::DisableTAA(*engine);
+            ZHLN::Test::Headless::DisableAA(*engine);
 
             // Fidelity import units: authored linear emission, full texture
             // detail -- the same options the FidelityHarness renders with.

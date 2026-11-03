@@ -148,7 +148,7 @@ struct TextureTransformsTestSuite {
             if (engine == nullptr) return std::unexpected(TextureTransformError::EngineInitFailed);
             auto& rc  = engine->GetRenderContext();
             auto& reg = engine->GetRegistry();
-            ZHLN::Test::Headless::DisableTAA(*engine);
+            ZHLN::Test::Headless::DisableAA(*engine);
 
             for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
                 reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) {

@@ -10,7 +10,7 @@
 //   * a cascade shadow boundary crossing during motion (shadow popping),
 //   * a cluster z-slice boundary dropping a light at depth,
 //   * Hi-Z / culling popping far geometry in and out,
-//   * TAA / SSR / GI history buffers never converging on a static view,
+//   * SSR / GI history buffers never converging on a static view,
 //   * float precision artifacts (distance attenuation, depth reconstruction).
 //
 // Scenario layout (camera at the origin, yaw 90 => forward +Z, pitch 0):
@@ -343,20 +343,15 @@ void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 60.0f) 
     }
 }
 
-// TAA must be disabled at the component level: RenderSystem re-pushes the
+// AA must be disabled at the component level: RenderSystem re-pushes the
 // camera's AA state into the RenderContext every tick, so a SetAAState call
-// alone gets overwritten, and TAA jitter would dominate the frame-to-frame
-// comparison. (Same rationale as TestLightingRayTraced::DisableTAA.)
-void DisableTAA(ZHLN::Engine& engine) {
+// alone gets overwritten. Both remaining AA modes are spatial filters that
+// would perturb the frame-to-frame comparison at high-contrast edges.
+void DisableAA(ZHLN::Engine& engine) {
     auto& reg = engine.GetRegistry();
     for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
         reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
             aa.state.mode        = ZHLN::AAMode::None;
-            aa.state.jitterX     = 0.0f;
-            aa.state.jitterY     = 0.0f;
-            aa.state.prevJitterX = 0.0f;
-            aa.state.prevJitterY = 0.0f;
-            aa.state.frameIndex  = 0;
         });
     }
     engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
@@ -525,10 +520,10 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             auto& rc  = engine->GetRenderContext();
 
             // Deterministic frame-to-frame comparison needs the per-frame
-            // noise sources off (TAA jitter, rotating AO/GI pattern). SSR
+            // noise sources off (rotating AO/GI pattern). SSR
             // stays on (shipped default, converges on static views); RTR is
             // opt-in and covered by its own suites.
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
             ZHLN::Test::ExpectTrue(!settingsEnts.empty());
