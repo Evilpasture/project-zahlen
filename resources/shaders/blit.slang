@@ -2,6 +2,7 @@
 import gpu_push_constants;
 import pbr_helpers;
 import uniforms;
+import aa_common;
 
 struct VSOutput {
     float4 pos : SV_Position;
@@ -87,12 +88,39 @@ float3 LinearToSRGB(float3 color) {
     return float3(LinearChannelToSRGB(color.r), LinearChannelToSRGB(color.g), LinearChannelToSRGB(color.b));
 }
 
+// -----------------------------------------------------------------------------
+// AMD FSR1 RCAS, folded into the final tonemap / present pass.
+//
+// RCAS is a *non-scaling* sharpening filter that AMD specifies after EASU (or,
+// for a 1:1 pipeline like ours, after spatial AA). Rather than allocate a
+// separate RcasPass and an extra full-resolution RGBA16F target, the present
+// pass calls the shared AaRcasSharpenHdr() helper, which gathers the real 3x3
+// cross of the AA-result texture with exact integer Load()s at texel centers.
+//
+// RCAS requires {0..1} display-encoded color; the same reversible SRTM +
+// gamma 2.0 encode/decode pair used by SMAA supplies it, so the sharpened
+// result is written back into the HDR pipeline without clipping. This runs
+// after SmaaBlendPass and before exposure / tonemap / bloom / OETF, which is
+// the point in the frame where AMD recommends RCAS (post-AA, pre-grain/UI).
+//
+// `sharpness` comes from a fixed compile-time constant (0.2 stops), so the
+// BlitPushConstants ABI, GraphicsSettings and QualitySignature are untouched.
+// Define AA_RCAS_DISABLE at shader build time to A/B the filter.
+// -----------------------------------------------------------------------------
+
 // tonemapper push-constant IDs: 0 linear, 1 Narkowicz ACES, 2 Reinhard,
 // 3 Khronos PBR Neutral, 4 ACES Hill with the generator's 1/0.6 boost.
 float4 PSMain(VSOutput input) : SV_Target0 {
+#ifndef AA_RCAS_DISABLE
+    // Taps the AA result (AccumCurrent with SMAA/FXAA, HdrSceneColor without
+    // AA) with a true 3x3 neighborhood, then restores unclamped HDR. The
+    // center Load also supplies alpha, so there is no redundant sample.
+    float4 hdrSample = AaRcasSharpenHdr(input.uv, texInput, kAaRcasSharpness);
+#else
     float4 hdrSample = texInput.SampleLevel(smp, input.uv, 0);
-    float3 hdrColor  = hdrSample.rgb;
-    float alpha = hdrSample.a;
+#endif
+    float3 hdrColor = hdrSample.rgb;
+    float alpha      = hdrSample.a;
 
     if (pc.fullBright != 0) {
         return float4(pc.applySrgbOetf != 0 ? LinearToSRGB(hdrColor) : hdrColor, alpha);

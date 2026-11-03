@@ -29,7 +29,11 @@ void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     FullscreenPassRecorder<Shaders::SmaaEdge, Shaders::Modules::SmaaEdgeVS>::Record(frame, ctx, aa.smaaEdge, [&]() {
         const auto& inputColor = frame.graphResources.hdrSceneColor;
 
-        return MakeFullscreenPassArgs(MetricsOf(inputColor.extent), Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)));
+        return MakeFullscreenPassArgs(
+            MetricsOf(inputColor.extent), Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
+            Vk::Slot<"depthTex">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(frame.ActiveDepthTarget())),
+            Vk::Slot<"normRoughTex">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer))
+        );
     });
 }
 

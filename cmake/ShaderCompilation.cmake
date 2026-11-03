@@ -34,6 +34,7 @@ set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/hash.slang"
     "${SHADER_SRC_DIR}/common.slang"
     "${SHADER_SRC_DIR}/gpu_push_constants.slang"
+    "${SHADER_SRC_DIR}/aa_common.slang"
     "${SHADER_SRC_DIR}/descriptor_heap_layout.slang"
     "${SHADER_SRC_DIR}/cluster_grid.slang"
     "${SHADER_SRC_DIR}/cluster_math.slang"

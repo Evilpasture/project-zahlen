@@ -1,7 +1,10 @@
 
 import gpu_push_constants;
+import aa_common;
 
 #ifndef SMAA_THRESHOLD
+// Calibrated for display-encoded (gamma 2.0 / sRGB-ish) luma, which is what
+// AaPerceptualLuma() now supplies even though the input texture is RGBA16F.
 #define SMAA_THRESHOLD 0.1f
 #endif
 
@@ -21,6 +24,34 @@ import gpu_push_constants;
 #define SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR 2.0f
 #endif
 
+// -----------------------------------------------------------------------------
+// Depth / normal-crease edge detection (compile-time fixed thresholds).
+//
+// The renderer keeps SMAA in HDR, so a bright-but-flat wall can hide a genuine
+// silhouette from the luma detector. Two extra detectors are OR-ed into the
+// edge mask:
+//
+//  * Depth discontinuity: Res_Depth is a D32_SFLOAT hardware depth buffer
+//    (non-linear NDC Z). Normalizing the raw delta by (1 - nearer depth)
+//    restores a scale-free metric for both near and far geometry without
+//    needing inverse-projection uniforms in this pass. 0.1 flags a depth step
+//    of ~10% of the remaining NDC range while ignoring smooth slopes.
+//  * Normal crease: Res_NormRough.xy stores octahedron-encoded world normals.
+//    1 - dot(N, N_neighbor) = 0.15 corresponds to ~31 degrees, i.e. a hard
+//    crease rather than a curved surface.
+//
+// These are deliberately compile-time constants: no GraphicsSettings field, no
+// QualitySignature bit, no push-constant ABI change. Override with -D at
+// shader build time if a different title needs retuning.
+// -----------------------------------------------------------------------------
+#ifndef SMAA_DEPTH_EDGE_THRESHOLD
+#define SMAA_DEPTH_EDGE_THRESHOLD 0.1f
+#endif
+
+#ifndef SMAA_NORMAL_CREASE_THRESHOLD
+#define SMAA_NORMAL_CREASE_THRESHOLD 0.15f
+#endif
+
 static const int SMAA_AREATEX_MAX_DISTANCE      = 16;
 static const int SMAA_AREATEX_MAX_DISTANCE_DIAG = 20;
 static const float2 SMAA_AREATEX_PIXEL_SIZE     = float2(1.0f / 160.0f, 1.0f / 560.0f);
@@ -29,13 +60,20 @@ static const float2 SMAA_SEARCHTEX_SIZE         = float2(66.0f, 33.0f);
 static const float2 SMAA_SEARCHTEX_PACKED_SIZE  = float2(64.0f, 16.0f);
 static const float SMAA_CORNER_ROUNDING_NORM    = float(SMAA_CORNER_ROUNDING) / 100.0f;
 
+// Only the three entry-point variants need the push-constant payload. Keeping
+// it behind the stage defines lets the Slangpy / Lavapipe harness import this
+// file as a pure library module (slang-rhi has no push-constant binding type).
+// CMake always defines exactly one of these for every compiled SMAA target.
+#if defined(EDGE_PASS) || defined(WEIGHT_PASS) || defined(BLEND_PASS)
 [vk::push_constant]
 SmaaPushConstants pc;
-
 #define SMAA_RT_METRICS pc.rtMetrics
+#endif
 
 #if defined(EDGE_PASS)
 Texture2D colorTex;
+Texture2D<float> depthTex;
+Texture2D<float4> normRoughTex;
 SamplerState pointSampler;
 #endif
 
@@ -327,9 +365,34 @@ void DetectVerticalCornerPattern(Texture2D edgesTex, SamplerState smp, inout flo
 #endif
 }
 
-float SmaaPerceptualLuma(float3 hdrRgb) {
-    float lum = max(dot(max(hdrRgb, float3(0.0f)), float3(0.2126f, 0.7152f, 0.0722f)), 0.0f);
-    return sqrt(lum / (1.0f + lum));
+// Display-encoded luma from raw HDR scene color. The SRTM + gamma 2.0 pair is
+// exactly invertible (aa_common.slang), so it compresses highlights into the
+// {0..1} domain SMAA's 0.1 threshold was calibrated for without clipping them.
+[ForceInline]
+public float SmaaPerceptualLuma(float3 hdrRgb) {
+    return AaPerceptualLuma(AaPerceptualEncode(hdrRgb));
+}
+
+// Octahedron decode, identical to pbr_helpers.slang::UnpackNormalOctahedron.
+// Duplicated here so the three SMAA stage variants (and the standalone Slangpy
+// harness) do not have to import the whole PBR helper graph.
+[ForceInline]
+public float3 SmaaUnpackNormal(float2 packed01) {
+    float2 oct = packed01 * 2.0f - 1.0f;
+    float3 N   = float3(oct, 1.0f - abs(oct.x) - abs(oct.y));
+    float2 s   = float2(N.x >= 0.0f ? 1.0f : -1.0f, N.y >= 0.0f ? 1.0f : -1.0f);
+    if (N.z < 0.0f) {
+        N.xy = (1.0f - abs(N.yx)) * s;
+    }
+    return normalize(N);
+}
+
+// Scale-free discontinuity metric for non-linear hardware depth: d and dn are
+// NDC Z values. Dividing by the remaining NDC range (1 - nearer) makes a
+// distant silhouette as detectable as a near one.
+[ForceInline]
+public float SmaaDepthDelta(float d, float dn) {
+    return abs(d - dn) / max(1.0f - min(d, dn), 1e-3f);
 }
 
 public float2 LumaEdgeDetectionPS(float2 texcoord, float4 offset[3], Texture2D colorTex, SamplerState smp, float4 rtMetrics) {
@@ -361,6 +424,29 @@ public float2 LumaEdgeDetectionPS(float2 texcoord, float4 offset[3], Texture2D c
     edges.xy *= step(finalDelta, SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR * delta.xy);
 
     return edges;
+}
+
+// OR-combined edge detection: luma (with SMAA's own local-contrast adaptation)
+// | depth discontinuity | normal crease. `offset` is the standard SMAA 3x4
+// offset set from SmaaEdgeVS; offset[0].xy/.zw are left/top, so the extra
+// detectors use the same two neighbors.
+public float2 SmaaHybridEdgeDetectionPS(float2 texcoord, float4 offset[3], Texture2D colorTex, Texture2D<float> depthTex,
+                                        Texture2D<float4> normRoughTex, SamplerState smp, float4 rtMetrics) {
+    float2 edges = LumaEdgeDetectionPS(texcoord, offset, colorTex, smp, rtMetrics);
+
+    float  dC = depthTex.SampleLevel(smp, texcoord, 0.0f);
+    float  dL = depthTex.SampleLevel(smp, offset[0].xy, 0.0f);
+    float  dT = depthTex.SampleLevel(smp, offset[0].zw, 0.0f);
+    float2 depthEdges = step(float2(SMAA_DEPTH_EDGE_THRESHOLD),
+                             float2(SmaaDepthDelta(dC, dL), SmaaDepthDelta(dC, dT)));
+
+    float3 nC = SmaaUnpackNormal(normRoughTex.SampleLevel(smp, texcoord, 0.0f).xy);
+    float3 nL = SmaaUnpackNormal(normRoughTex.SampleLevel(smp, offset[0].xy, 0.0f).xy);
+    float3 nT = SmaaUnpackNormal(normRoughTex.SampleLevel(smp, offset[0].zw, 0.0f).xy);
+    float2 creaseEdges = step(float2(SMAA_NORMAL_CREASE_THRESHOLD),
+                              float2(1.0f - dot(nC, nL), 1.0f - dot(nC, nT)));
+
+    return max(edges, max(depthEdges, creaseEdges));
 }
 
 public float4 BlendingWeightCalculationPS(float2 texcoord, float2 pixcoord, float4 offset[3], Texture2D edgesTex, Texture2D areaTex, Texture2D searchTex,
@@ -436,6 +522,13 @@ public float4 BlendingWeightCalculationPS(float2 texcoord, float2 pixcoord, floa
     return weights;
 }
 
+// SMAA's neighborhood blend is a linear mix, which is only meaningful in the
+// display-encoded space its weights were derived for. Averaging raw RGBA16F
+// radiance at a bright edge loses the darker side of the edge entirely and
+// produces clipped highlights once the tonemapper sees them. Compress each tap
+// with the reversible SRTM + gamma 2.0 curve, mix there, then invert. The
+// unweighted fast path returns the source sample untouched, so pixels SMAA
+// does not touch are bit-exact and pay no round-trip cost.
 public float4 NeighborhoodBlendingPS(float2 texcoord, float4 offset, Texture2D colorTex, Texture2D blendTex, SamplerState smp, float4 rtMetrics) {
     float4 a;
     a.x  = blendTex.SampleLevel(smp, offset.xy, 0.0f).a;
@@ -456,10 +549,15 @@ public float4 NeighborhoodBlendingPS(float2 texcoord, float4 offset, Texture2D c
 
         float4 blendingCoord = blendingOffset * float4(rtMetrics.xy, -rtMetrics.xy) + texcoord.xyxy;
 
-        float4 color = blendingWeight.x * colorTex.SampleLevel(smp, blendingCoord.xy, 0.0f);
-        color += blendingWeight.y * colorTex.SampleLevel(smp, blendingCoord.zw, 0.0f);
+        float4 c0 = colorTex.SampleLevel(smp, blendingCoord.xy, 0.0f);
+        float4 c1 = colorTex.SampleLevel(smp, blendingCoord.zw, 0.0f);
 
-        return color;
+        float3 p0 = AaPerceptualEncode(c0.rgb);
+        float3 p1 = AaPerceptualEncode(c1.rgb);
+        float3 rgb = AaPerceptualDecode(blendingWeight.x * p0 + blendingWeight.y * p1);
+        float  alpha = blendingWeight.x * c0.a + blendingWeight.y * c1.a;
+
+        return float4(rgb, alpha);
     }
 }
 
@@ -484,7 +582,7 @@ EdgeVSOutput SmaaEdgeVS(uint vertexID: SV_VertexID) {
 
 [shader("fragment")]
 float4 SmaaEdgePS(EdgeVSOutput input) : SV_Target0 {
-    return float4(LumaEdgeDetectionPS(input.uv, input.offset, colorTex, pointSampler, SMAA_RT_METRICS), 0.0f, 0.0f);
+    return float4(SmaaHybridEdgeDetectionPS(input.uv, input.offset, colorTex, depthTex, normRoughTex, pointSampler, SMAA_RT_METRICS), 0.0f, 0.0f);
 }
 #endif
 
