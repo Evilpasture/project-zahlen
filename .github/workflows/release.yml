@@ -531,8 +531,13 @@ jobs:
           export VK_ICD_FILENAMES="${VK_DRIVER_FILES}"
           echo "ICD: ${VK_DRIVER_FILES}"
           ./consumer-build/cube out/cube.ppm 2>&1 | tee out/render.log
-          grep -q 'nonconstant=True' out/render.log || {
+          # Lowercase: the cube prints this with std::println("... nonconstant={}",
+          # bool), and std::format spells booleans true/false. The former
+          # `nonconstant=True` here could never match, so a perfectly good frame
+          # was reported as blank.
+          grep -q 'nonconstant=true' out/render.log || {
             echo 'FAIL: the rendered frame was blank' >&2
+            grep -F 'nonconstant=' out/render.log >&2 || true
             exit 1
           }
           pnmtopng out/cube.ppm >"out/zahlen-cube-${RELEASE_TAG}.png"
