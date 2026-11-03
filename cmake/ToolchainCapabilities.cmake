@@ -51,6 +51,7 @@ function(zhln_probe_toolchain_capabilities REFLECTION_FLAGS)
     # flag string is the one stale answer that would let the wrong compiler pass.
     if(DEFINED ZHLN_CAPABILITY_PROBE_FLAGS AND NOT ZHLN_CAPABILITY_PROBE_FLAGS STREQUAL REFLECTION_FLAGS)
         unset(ZHLN_COMPILER_HANDLES_INCOMPLETE_STATIC_MEMBER CACHE)
+        unset(ZHLN_TOOLCHAIN_ASSEMBLES_LARGE_CONSTANT_DATA CACHE)
         unset(ZHLN_COMPILER_EMITS_ASSEMBLABLE_BASE64 CACHE)
     endif()
     set(ZHLN_CAPABILITY_PROBE_FLAGS "${REFLECTION_FLAGS}" CACHE INTERNAL
@@ -97,25 +98,30 @@ int main() { return 0; }"
     message(STATUS "toolchain probes: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} compiles Jolt's static-member pattern")
 
     # -------------------------------------------------------- assembler ------
-    # GCC 16 emits `.base64` for large constant data and GAS only learned the
-    # directive in binutils 2.41, where jammy ships 2.38. The assembler is reached
-    # through PATH or -B, so a compiler that is correct on its own still fails 300
-    # files into a build when the distro's `as` is the one that answers. Compiling
-    # a translation unit like this one, rather than invoking `as` on a snippet as
-    # the release lane used to, tests the pair as the build actually forms it.
+    # GCC 16 writes `.base64` for large constant data, and GAS only learned that
+    # directive in binutils 2.41, where jammy ships 2.38. A compiler can be
+    # entirely correct and still fail 300 files into a build when the distro's
+    # `as` is the one that answers it.
     #
-    # The top-level `asm` is what makes the verdict reliable. Whether a particular
-    # release chooses `.base64` for a particular constant is its own business, and
-    # a probe that passes because the compiler happened not to use the directive
-    # is worse than no probe: it would report a broken binutils as fine. The
-    # array below reproduces the shape that triggered this in CI; the directive is
-    # emitted unconditionally, so the assembler has to accept it either way.
+    # The question is not which compiler this is but whether this toolchain can
+    # assemble the large constant data it produces, so the probe is a constant
+    # table compiled the way this build compiles, handed to whatever assembler
+    # the compiler reaches. A compiler that writes `.quad` never meets the
+    # problem and passes -- correctly: nothing in the build then needs an
+    # assembler feature binutils never had. A compiler that writes `.base64`
+    # puts its assembler on the spot here instead of in the middle of a link.
+    #
+    # This is why the probe is not a `.base64` snippet fed to the assembler, and
+    # not gated on a compiler ID: what is emitted is the optimiser's decision,
+    # so the probe runs with the build's own flags (try_compile inherits them),
+    # and the verdict is about this pair of programs rather than about a vendor.
     set(_probe_dir "${CMAKE_BINARY_DIR}/CMakeFiles/zhln-capabilities")
     file(MAKE_DIRECTORY "${_probe_dir}")
     # 600 distinct values from a fixed seed, so the translation unit is identical
     # on every machine and the cached verdict stays meaningful. Distinct because
-    # repeated constants let the assembler merge them, which makes the blob
-    # smaller than the one that trips this in practice.
+    # repeated constants get merged, which makes the table smaller than the one
+    # that trips this in practice; read through a volatile index so the table is
+    # not folded away before the assembler ever sees it.
     set(_seed 7)
     set(_blob "")
     foreach(_index RANGE 599)
@@ -128,24 +134,25 @@ int main() { return 0; }"
     set(CMAKE_REQUIRED_INCLUDES "${CMAKE_REQUIRED_INCLUDES}" "${_probe_dir}")
     check_cxx_source_compiles("
 #include <cstdint>
-asm(R\"(.base64 \"EjRWeJA=\")\");
 namespace {
 const std::uint64_t kTable[] = {
 #include \"base64-values.inc\"
 };
 }
-extern \"C\" unsigned long long zahlen_probe_first() { return kTable[0]; }
-int main() { return static_cast<int>(zahlen_probe_first() & 1u); }"
-        ZHLN_COMPILER_EMITS_ASSEMBLABLE_BASE64)
-    if(NOT ZHLN_COMPILER_EMITS_ASSEMBLABLE_BASE64)
+extern \"C\" unsigned long long zahlen_probe_at(int index) { return kTable[index]; }
+int main() {
+    volatile int index = 123;
+    return static_cast<int>(zahlen_probe_at(index) & 1u); }"
+        ZHLN_TOOLCHAIN_ASSEMBLES_LARGE_CONSTANT_DATA)
+    if(NOT ZHLN_TOOLCHAIN_ASSEMBLES_LARGE_CONSTANT_DATA)
         set(_msg "\n")
-        string(APPEND _msg "This toolchain cannot assemble what it emits.\n")
-        string(APPEND _msg "GCC 16 writes `.base64` for large constant data, and the assembler that answers for this compiler does not accept it. That is normally a binutils older than 2.41 reached through PATH -- Ubuntu 22.04 ships 2.38 -- rather than the binutils installed alongside the compiler.\n")
-        string(APPEND _msg "Compiler: ${CMAKE_CXX_COMPILER} (${CMAKE_CXX_COMPILER_VERSION}). The compiler's own output is in ${CMAKE_BINARY_DIR}/CMakeFiles/CMakeConfigureLog.yaml.\n")
-        string(APPEND _msg "Put the compiler's own binutils first on PATH -- scripts/install-gcc-prebuilt.sh installs a matching 2.46.1 and verifies PATH with -print-prog-name=as -- or set ZHLN_SKIP_TOOLCHAIN_CAPABILITY_PROBES=ON if this verdict is known to be wrong.")
+        string(APPEND _msg "This toolchain cannot assemble the constant data it compiles.\n")
+        string(APPEND _msg "Compiling a large constant table is enough to fail, so either the compiler hands the assembler a directive it does not implement -- `.base64`, which GCC 16 writes and binutils learned in 2.41 while Ubuntu 22.04 ships 2.38 -- or the compiler rejects the flags this build passes.\n")
+        string(APPEND _msg "Compiler: ${CMAKE_CXX_COMPILER} (${CMAKE_CXX_COMPILER_VERSION}). The failing command line and the compiler's own output are in ${CMAKE_BINARY_DIR}/CMakeFiles/CMakeConfigureLog.yaml.\n")
+        string(APPEND _msg "If it is the assembler, put the compiler's own binutils first on PATH -- scripts/install-gcc-prebuilt.sh installs a matching 2.46.1 and verifies PATH with -print-prog-name=as. Set ZHLN_SKIP_TOOLCHAIN_CAPABILITY_PROBES=ON only if this verdict is known to be wrong.")
         message(FATAL_ERROR "${_msg}")
     endif()
-    message(STATUS "toolchain probes: the assembler accepts GCC 16's .base64 output")
+    message(STATUS "toolchain probes: this toolchain assembles the large constant data it compiles")
 
     set(CMAKE_REQUIRED_FLAGS "${_saved_required_flags}")
     set(CMAKE_REQUIRED_INCLUDES "${_saved_required_includes}")

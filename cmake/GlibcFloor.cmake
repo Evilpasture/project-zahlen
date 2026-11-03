@@ -45,6 +45,13 @@ function(zhln_add_glibc_floor_check)
         message(WARNING "glibc floor: ${_ZHLN_GLIBC_FLOOR_SCRIPT} is missing; the check was not added")
         return()
     endif()
+    # Mach-O and PE have no versioned libc symbols, and the script reads ELF with
+    # readelf. Setting the baseline on a macOS or Windows build is a mistake worth
+    # naming rather than a cryptic failure from inside the script.
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(WARNING "glibc floor: ${CMAKE_SYSTEM_NAME} has no glibc symbol versions; the check was not added")
+        return()
+    endif()
     set(_artifacts "")
     set(_deps "")
     foreach(_target IN LISTS ARGN)
