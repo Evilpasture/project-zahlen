@@ -9,13 +9,15 @@
 #                         <d3d12/memory/BufferAddress.hpp>) via an include
 #                         root of src/d3d12/include. Private headers/sources
 #                         in src/d3d12 itself are NOT reachable through it.
-#   zahlen_d3d12          STATIC, the backend proper. Today that is the
-#                         Backend.cpp address-contract anchor plus
-#                         D3D12Conversions.cpp, which anchors
-#                         D3D12Conversions.hpp: the private neutral->D3D12
-#                         translation written against the real SDK
-#                         constants. device/queue/heap/resource TUs are
-#                         added to this target as they land.
+#   zahlen_d3d12          STATIC, the backend proper: the Backend.cpp
+#                         address-contract anchor, D3D12Conversions (the
+#                         private neutral->D3D12 translation against the
+#                         real SDK constants), enhanced-barrier recording
+#                         (Barriers), timeline fences (Fence), the global
+#                         descriptor heaps (DescriptorHeap), and buffer
+#                         creation (Buffers) on every host; DXGI device
+#                         bring-up (Context) and presentation (Swapchain)
+#                         on Windows.
 #
 # zahlen_direct3d / Zahlen::Direct3D are kept as aliases of the one real
 # target during the backend rename -- not a second archive built from the
@@ -55,7 +57,12 @@ if(NOT WIN32)
     )
 endif()
 
-add_library(zahlen_d3d12 STATIC Backend.cpp D3D12Conversions.cpp)
+# The portable core (address anchor, conversions, barrier synthesis,
+# timeline fences, descriptor heaps, buffers) compiles on every host --
+# non-Windows builds exercise it against the WSL header stubs. The DXGI
+# translation units (Context.cpp: factory/adapter/device; Swapchain.cpp:
+# presentation) are Windows-only and link the real SDK import libraries.
+add_library(zahlen_d3d12 STATIC Backend.cpp D3D12Conversions.cpp Barriers.cpp Fence.cpp DescriptorHeap.cpp Buffers.cpp)
 add_library(Zahlen::D3D12 ALIAS zahlen_d3d12)
 add_library(zahlen_direct3d ALIAS zahlen_d3d12)
 add_library(Zahlen::Direct3D ALIAS zahlen_d3d12)
@@ -82,3 +89,7 @@ target_include_directories(zahlen_d3d12 PRIVATE
     ${PROJECT_SOURCE_DIR}/src/vkd3d/include
 )
 target_link_libraries(zahlen_d3d12 PRIVATE zahlen_d3d12_address zahlen_directx_headers zahlen_warnings)
+if(WIN32)
+    target_sources(zahlen_d3d12 PRIVATE Context.cpp Swapchain.cpp)
+    target_link_libraries(zahlen_d3d12 PRIVATE d3d12 dxgi)
+endif()

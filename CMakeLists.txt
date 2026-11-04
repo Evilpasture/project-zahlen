@@ -520,6 +520,11 @@ zahlen_enable_reflection(zahlen_ecs)
 zahlen_enable_reflection(zahlen_gui)
 zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen_filesystem)
+# The D3D12 backend's error vocabulary (src/d3d12/D3D12Error.hpp) builds on
+# Zahlen::ErrorCode like the Vulkan side's does, so its TUs need the same
+# reflection flag set. The target is unconditional (src/d3d12 is always
+# added), so the enable is too.
+zahlen_enable_reflection(zahlen_d3d12)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zahlen_cube)
 if(TARGET zahlen_ui_editor)
