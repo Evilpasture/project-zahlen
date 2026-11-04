@@ -51,18 +51,18 @@ struct PipelineConfig {
     uint32_t                                 bindingCount   = 0;
     uint32_t                                 attributeCount = 0;
 
-    std::vector<VkFormat> colorFormats = {VK_FORMAT_B8G8R8A8_SRGB};
-    VkFormat              depthFormat  = VK_FORMAT_D32_SFLOAT;
+    std::vector<Vk::Format> colorFormats = {Vk::Format::B8G8R8A8Srgb};
+    Vk::Format              depthFormat  = Vk::Format::D32Sfloat;
 
-    VkPrimitiveTopology topology        = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPolygonMode       polygonMode     = VK_POLYGON_MODE_FILL;
-    VkCullModeFlags     cullMode        = VK_CULL_MODE_BACK_BIT;
+    Vk::PrimitiveTopology topology        = Vk::PrimitiveTopology::TriangleList;
+    Vk::PolygonMode       polygonMode     = Vk::PolygonMode::Fill;
+    Vk::CullMode     cullMode        = Vk::CullMode::Back;
     bool                dynamicCullMode = false;
-    VkFrontFace         frontFace       = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    Vk::FrontFace         frontFace       = Vk::FrontFace::CounterClockwise;
 
     bool        depthTest    = true;
     bool        depthWrite   = true;
-    VkCompareOp depthCompare = VK_COMPARE_OP_LESS;
+    Vk::CompareOp depthCompare = Vk::CompareOp::Less;
 
     bool blendEnable   = false;
     bool additiveBlend = false;
@@ -79,7 +79,7 @@ struct PipelineConfig {
                                                    VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 };
 
-[[nodiscard]] auto FormatHasStencil(VkFormat format) noexcept -> bool;
+[[nodiscard]] auto FormatHasStencil(Vk::Format format) noexcept -> bool;
 [[nodiscard]] auto ValidShader(const ShaderDesc& shader) noexcept -> bool;
 [[nodiscard]] auto ResolveComputeEntryPoint(const ShaderDesc& shader, std::span<char, 64> name) noexcept -> const char*;
 
@@ -130,28 +130,28 @@ class PipelineBuilder {
         return *this;
     }
 
-    auto Topology(VkPrimitiveTopology t) noexcept -> PipelineBuilder& {
+    auto Topology(Vk::PrimitiveTopology t) noexcept -> PipelineBuilder& {
         _cfg.topology = t;
         return *this;
     }
 
     auto Wireframe() noexcept -> PipelineBuilder& {
-        _cfg.polygonMode = VK_POLYGON_MODE_LINE;
+        _cfg.polygonMode = Vk::PolygonMode::Line;
         return *this;
     }
 
     auto CullNone() noexcept -> PipelineBuilder& {
-        _cfg.cullMode = VK_CULL_MODE_NONE;
+        _cfg.cullMode = Vk::CullMode::None;
         return *this;
     }
 
     auto CullFront() noexcept -> PipelineBuilder& {
-        _cfg.cullMode = VK_CULL_MODE_FRONT_BIT;
+        _cfg.cullMode = Vk::CullMode::Front;
         return *this;
     }
 
     auto CullBack() noexcept -> PipelineBuilder& {
-        _cfg.cullMode = VK_CULL_MODE_BACK_BIT;
+        _cfg.cullMode = Vk::CullMode::Back;
         return *this;
     }
 
@@ -175,7 +175,7 @@ class PipelineBuilder {
         return *this;
     }
 
-    auto DepthCompare(VkCompareOp op) noexcept -> PipelineBuilder& {
+    auto DepthCompare(Vk::CompareOp op) noexcept -> PipelineBuilder& {
         _cfg.depthCompare = op;
         return *this;
     }
@@ -220,21 +220,21 @@ class PipelineBuilder {
         return *this;
     }
 
-    auto ColorFormats(std::initializer_list<VkFormat> formats) & noexcept -> PipelineBuilder&
+    auto ColorFormats(std::initializer_list<Vk::Format> formats) & noexcept -> PipelineBuilder&
         requires std::same_as<Formats, RuntimeAttachmentFormats>
     {
         _cfg.colorFormats = formats;
         return *this;
     }
 
-    auto ColorFormats(std::span<const VkFormat> formats) & noexcept -> PipelineBuilder&
+    auto ColorFormats(std::span<const Vk::Format> formats) & noexcept -> PipelineBuilder&
         requires std::same_as<Formats, RuntimeAttachmentFormats>
     {
         _cfg.colorFormats.assign(formats.begin(), formats.end());
         return *this;
     }
 
-    auto DepthFormat(VkFormat f) & noexcept -> PipelineBuilder&
+    auto DepthFormat(Vk::Format f) & noexcept -> PipelineBuilder&
         requires std::same_as<Formats, RuntimeAttachmentFormats>
     {
         _cfg.depthFormat = f;
@@ -255,7 +255,7 @@ class PipelineBuilder {
     {
         _cfg.depthTest   = false;
         _cfg.depthWrite  = false;
-        _cfg.depthFormat = VK_FORMAT_UNDEFINED;
+        _cfg.depthFormat = Vk::Format::Undefined;
         return *this;
     }
 
@@ -307,7 +307,7 @@ class PipelineBuilder {
             stage_infos[stage_count] = VkPipelineShaderStageCreateInfo {
                 .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                 .pNext               = &module_infos[stage_count],
-                .stage               = shader.stage,
+                .stage               = ToVk(shader.stage),
                 .module              = VK_NULL_HANDLE,
                 .pName               = shader.entryPoint,
                 .pSpecializationInfo = config.specializationInfo,
@@ -335,7 +335,7 @@ class PipelineBuilder {
         };
         const VkPipelineInputAssemblyStateCreateInfo input_assembly {
             .sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-            .topology               = config.topology,
+            .topology               = ToVk(config.topology),
             .primitiveRestartEnable = VK_FALSE,
         };
         const VkPipelineViewportStateCreateInfo viewport_state {
@@ -345,9 +345,9 @@ class PipelineBuilder {
         };
         const VkPipelineRasterizationStateCreateInfo rasterizer {
             .sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-            .polygonMode = config.polygonMode,
-            .cullMode    = config.cullMode,
-            .frontFace   = config.frontFace,
+            .polygonMode = ToVk(config.polygonMode),
+            .cullMode    = ToVk(config.cullMode),
+            .frontFace   = ToVk(config.frontFace),
             .lineWidth   = 1.0F,
         };
         const VkPipelineMultisampleStateCreateInfo multisampling {
@@ -359,7 +359,7 @@ class PipelineBuilder {
             .sType             = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
             .depthTestEnable   = config.depthTest ? VK_TRUE : VK_FALSE,
             .depthWriteEnable  = config.depthWrite ? VK_TRUE : VK_FALSE,
-            .depthCompareOp    = config.depthCompare,
+            .depthCompareOp    = ToVk(config.depthCompare),
             .stencilTestEnable = config.stencil.has_value() ? VK_TRUE : VK_FALSE,
             .front             = config.stencil.has_value() ? config.stencil->front : no_stencil,
             .back              = config.stencil.has_value() ? config.stencil->back : no_stencil,
@@ -368,12 +368,12 @@ class PipelineBuilder {
         const VkColorComponentFlags write_mask = config.colorWriteEnable ? config.colorWriteMask : 0;
         const VkPipelineColorBlendAttachmentState blend_state {
             .blendEnable         = config.blendEnable ? VK_TRUE : VK_FALSE,
-            .srcColorBlendFactor = config.additiveBlend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA,
-            .dstColorBlendFactor = config.additiveBlend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-            .colorBlendOp        = VK_BLEND_OP_ADD,
-            .srcAlphaBlendFactor = config.preserveBlendAlpha ? VK_BLEND_FACTOR_ZERO : VK_BLEND_FACTOR_ONE,
-            .dstAlphaBlendFactor = (config.preserveBlendAlpha || config.accumulateBlendAlpha) ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ZERO,
-            .alphaBlendOp        = VK_BLEND_OP_ADD,
+            .srcColorBlendFactor = ToVk(config.additiveBlend ? Vk::BlendFactor::One : Vk::BlendFactor::SrcAlpha),
+            .dstColorBlendFactor = ToVk(config.additiveBlend ? Vk::BlendFactor::One : Vk::BlendFactor::OneMinusSrcAlpha),
+            .colorBlendOp        = ToVk(Vk::BlendOp::Add),
+            .srcAlphaBlendFactor = ToVk(config.preserveBlendAlpha ? Vk::BlendFactor::Zero : Vk::BlendFactor::One),
+            .dstAlphaBlendFactor = ToVk((config.preserveBlendAlpha || config.accumulateBlendAlpha) ? Vk::BlendFactor::One : Vk::BlendFactor::Zero),
+            .alphaBlendOp        = ToVk(Vk::BlendOp::Add),
             .colorWriteMask      = write_mask,
         };
         std::vector<VkPipelineColorBlendAttachmentState>  blend_attachments(config.colorFormats.size(), blend_state);
@@ -392,13 +392,18 @@ class PipelineBuilder {
             .dynamicStateCount = config.dynamicCullMode ? 3U : 2U,
             .pDynamicStates    = dynamic_states.data(),
         };
+        std::vector<VkFormat> raw_color_formats;
+        raw_color_formats.reserve(config.colorFormats.size());
+        for (const Vk::Format format: config.colorFormats) {
+            raw_color_formats.push_back(ToVk(format));
+        }
         const VkPipelineRenderingCreateInfo rendering_info {
             .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
             .viewMask                = config.viewMask,
-            .colorAttachmentCount    = static_cast<uint32_t>(config.colorFormats.size()),
-            .pColorAttachmentFormats = config.colorFormats.empty() ? nullptr : config.colorFormats.data(),
-            .depthAttachmentFormat   = config.depthFormat,
-            .stencilAttachmentFormat = FormatHasStencil(config.depthFormat) ? config.depthFormat : VK_FORMAT_UNDEFINED,
+            .colorAttachmentCount    = static_cast<uint32_t>(raw_color_formats.size()),
+            .pColorAttachmentFormats = raw_color_formats.empty() ? nullptr : raw_color_formats.data(),
+            .depthAttachmentFormat   = ToVk(config.depthFormat),
+            .stencilAttachmentFormat = ToVk(FormatHasStencil(config.depthFormat) ? config.depthFormat : Vk::Format::Undefined),
         };
         const VkPipelineCreateFlags2CreateInfoKHR heap_flags {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR,
@@ -449,13 +454,13 @@ class PipelineBuilder {
     [[nodiscard]] auto NoDepth() && noexcept -> PipelineBuilder<ColorCount, false, typename WithoutAttachmentDepth<Formats>::type> {
         _cfg.depthTest   = false;
         _cfg.depthWrite  = false;
-        _cfg.depthFormat = VK_FORMAT_UNDEFINED;
+        _cfg.depthFormat = Vk::Format::Undefined;
         return PipelineBuilder<ColorCount, false, typename WithoutAttachmentDepth<Formats>::type> {std::move(_cfg)};
     }
 
-    template <VkFormat Depth>
+    template <Vk::Format Depth>
     [[nodiscard]] auto DepthFormat() && noexcept -> PipelineBuilder<ColorCount, true, typename SetAttachmentDepth<Formats, Depth>::type> {
-        static_assert(Depth != VK_FORMAT_UNDEFINED, "A depth attachment needs a concrete format.");
+        static_assert(Depth != Vk::Format::Undefined, "A depth attachment needs a concrete format.");
         _cfg.depthFormat = Depth;
         return PipelineBuilder<ColorCount, true, typename SetAttachmentDepth<Formats, Depth>::type> {std::move(_cfg)};
     }
@@ -470,7 +475,7 @@ class PipelineBuilder {
             .failOp      = VK_STENCIL_OP_KEEP,
             .passOp      = VK_STENCIL_OP_REPLACE,
             .depthFailOp = VK_STENCIL_OP_KEEP,
-            .compareOp   = VK_COMPARE_OP_ALWAYS,
+            .compareOp   = ToVk(Vk::CompareOp::Always),
             .compareMask = mask,
             .writeMask   = mask,
             .reference   = ref,
@@ -478,12 +483,12 @@ class PipelineBuilder {
         return StencilOp(state, state);
     }
 
-    auto StencilCompareMask(VkCompareOp op, uint8_t ref = 1, uint8_t mask = 0xFF) noexcept -> PipelineBuilder& {
+    auto StencilCompareMask(Vk::CompareOp op, uint8_t ref = 1, uint8_t mask = 0xFF) noexcept -> PipelineBuilder& {
         const VkStencilOpState state = {
             .failOp      = VK_STENCIL_OP_KEEP,
             .passOp      = VK_STENCIL_OP_KEEP,
             .depthFailOp = VK_STENCIL_OP_KEEP,
-            .compareOp   = op,
+            .compareOp   = ToVk(op),
             .compareMask = mask,
             .writeMask   = 0x00,
             .reference   = ref,
@@ -504,27 +509,27 @@ class PipelineBuilder {
 
     template <size_t N>
         requires (N != std::dynamic_extent)
-    [[nodiscard]] auto ColorFormats(std::span<const VkFormat, N> formats) && noexcept -> PipelineBuilder<N, HasDepth> {
+    [[nodiscard]] auto ColorFormats(std::span<const Vk::Format, N> formats) && noexcept -> PipelineBuilder<N, HasDepth> {
         _cfg.colorFormats.assign(formats.begin(), formats.end());
         return PipelineBuilder<N, HasDepth> {std::move(_cfg)};
     }
 
     template <size_t N>
-    [[nodiscard]] auto ColorFormats(const std::array<VkFormat, N>& formats) && noexcept -> PipelineBuilder<N, HasDepth> {
-        return std::move(*this).ColorFormats(std::span<const VkFormat, N> {formats});
+    [[nodiscard]] auto ColorFormats(const std::array<Vk::Format, N>& formats) && noexcept -> PipelineBuilder<N, HasDepth> {
+        return std::move(*this).ColorFormats(std::span<const Vk::Format, N> {formats});
     }
 
-    template <VkFormat... Colors>
-    [[nodiscard]] auto ColorFormats() && noexcept -> PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>> {
-        static_assert(((Colors != VK_FORMAT_UNDEFINED) && ...), "Color attachments need concrete formats.");
+    template <Vk::Format... Colors>
+    [[nodiscard]] auto ColorFormats() && noexcept -> PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<Vk::Format::Undefined, Colors...>> {
+        static_assert(((Colors != Vk::Format::Undefined) && ...), "Color attachments need concrete formats.");
         _cfg.colorFormats = {Colors...};
-        return PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>> {std::move(_cfg)};
+        return PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<Vk::Format::Undefined, Colors...>> {std::move(_cfg)};
     }
 
     [[nodiscard]] auto Build(VkDevice device) const&& noexcept -> std::expected<TypedPipeline<ColorCount, HasDepth, Formats>, ErrorCode> {
         if constexpr (!std::same_as<Formats, RuntimeAttachmentFormats>) {
             static_assert(Formats::color_formats.size() == ColorCount, "Typed pipeline color count does not match its formats.");
-            static_assert(!HasDepth || Formats::depth_format != VK_FORMAT_UNDEFINED, "Typed pipeline must specify its depth attachment format.");
+            static_assert(!HasDepth || Formats::depth_format != Vk::Format::Undefined, "Typed pipeline must specify its depth attachment format.");
         }
         return Validate().and_then([&]() -> std::expected<TypedPipeline<ColorCount, HasDepth, Formats>, ErrorCode> {
             auto pipeline = CreatePipeline(device);
@@ -609,7 +614,7 @@ class ComputePipelineBuilder {
         const VkPipelineShaderStageCreateInfo stage_info {
             .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .pNext               = &module_info,
-            .stage               = VK_SHADER_STAGE_COMPUTE_BIT,
+            .stage               = ToVk(Vk::ShaderStage::Compute),
             .module              = VK_NULL_HANDLE,
             .pName               = entry_point,
             .pSpecializationInfo = _specialization_info,

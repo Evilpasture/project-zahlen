@@ -161,7 +161,7 @@ enum class ImageDimension : uint8_t {
 
 struct ImageConfig {
     ImageDimension          dimension = ImageDimension::Texture2D;
-    VkFormat                format = VK_FORMAT_UNDEFINED;
+    Vk::Format                format = Vk::Format::Undefined;
     VkExtent3D              extent {};
     uint32_t                mipLevels = 1;
     uint32_t                arrayLayers = 1;
@@ -172,7 +172,7 @@ struct ImageConfig {
     bool                    cubeCompatible = false;
 
     [[nodiscard]] static constexpr auto Texture2D(
-        VkExtent2D extent, VkFormat format, ImageUsage usage, uint32_t mipLevels = 1, uint32_t arrayLayers = 1
+        VkExtent2D extent, Vk::Format format, ImageUsage usage, uint32_t mipLevels = 1, uint32_t arrayLayers = 1
     ) noexcept -> ImageConfig {
         return {
             .dimension = ImageDimension::Texture2D,
@@ -184,7 +184,7 @@ struct ImageConfig {
         };
     }
 
-    [[nodiscard]] static constexpr auto Texture3D(VkExtent3D extent, VkFormat format, ImageUsage usage, uint32_t mipLevels = 1) noexcept
+    [[nodiscard]] static constexpr auto Texture3D(VkExtent3D extent, Vk::Format format, ImageUsage usage, uint32_t mipLevels = 1) noexcept
         -> ImageConfig {
         return {
             .dimension = ImageDimension::Texture3D,
@@ -197,7 +197,7 @@ struct ImageConfig {
     }
 
     [[nodiscard]] static constexpr auto Cube(
-        uint32_t size, VkFormat format, ImageUsage usage, uint32_t mipLevels = 1, uint32_t cubeCount = 1
+        uint32_t size, Vk::Format format, ImageUsage usage, uint32_t mipLevels = 1, uint32_t cubeCount = 1
     ) noexcept -> ImageConfig {
         return {
             .dimension = ImageDimension::Texture2D,
@@ -352,7 +352,7 @@ class Image {
     [[nodiscard]] static auto Create(Allocator& allocator, ImageConfig config) noexcept -> std::expected<Image, ErrorCode>;
 
     [[nodiscard]] constexpr auto View(
-        VkImageAspectFlags aspect = VK_IMAGE_ASPECT_NONE,
+        Vk::ImageAspect aspect = Vk::ImageAspect::None,
         uint32_t           baseMip = 0,
         uint32_t           mipCount = VK_REMAINING_MIP_LEVELS,
         uint32_t           baseLayer = 0,
@@ -364,7 +364,7 @@ class Image {
         const uint32_t levels          = mipCount == VK_REMAINING_MIP_LEVELS ? mipsAvailable : (mipCount < mipsAvailable ? mipCount : mipsAvailable);
         const uint32_t layers          = layerCount == VK_REMAINING_ARRAY_LAYERS ? layersAvailable : (layerCount < layersAvailable ? layerCount : layersAvailable);
 
-        const VkImageAspectFlags effectiveAspect = aspect != VK_IMAGE_ASPECT_NONE ? aspect : GetFormatAspect(_config.format);
+        const Vk::ImageAspect effectiveAspect = aspect != Vk::ImageAspect::None ? aspect : GetFormatAspect(_config.format);
 
         if (viewType == VK_IMAGE_VIEW_TYPE_MAX_ENUM) {
             if (_config.dimension == ImageDimension::Texture3D) {
@@ -394,7 +394,7 @@ class Image {
 
     [[nodiscard]] auto CreateAttachmentView(
         VkDevice           device,
-        VkImageAspectFlags aspect = VK_IMAGE_ASPECT_NONE,
+        Vk::ImageAspect aspect = Vk::ImageAspect::None,
         uint32_t           baseMip = 0,
         uint32_t           mipCount = VK_REMAINING_MIP_LEVELS,
         uint32_t           baseLayer = 0,
@@ -402,7 +402,7 @@ class Image {
         VkImageViewType    viewType = VK_IMAGE_VIEW_TYPE_MAX_ENUM
     ) const -> std::expected<AttachmentView, ErrorCode>;
 
-    [[nodiscard]] auto Format() const noexcept -> VkFormat {
+    [[nodiscard]] auto Format() const noexcept -> Vk::Format {
         return _config.format;
     }
     [[nodiscard]] auto Extent() const noexcept -> VkExtent3D {
@@ -469,28 +469,14 @@ inline void CopyBuffer(VkCommandBuffer cmd, BufferSlice src, BufferSlice dst) {
 
 inline BufferBarrier::BufferBarrier(
     const Buffer&         buffer,
-    VkPipelineStageFlags2 srcStage,
-    VkAccessFlags2        srcAccess,
-    VkPipelineStageFlags2 dstStage,
-    VkAccessFlags2        dstAccess,
+    Vk::PipelineStage srcStage,
+    Vk::Access        srcAccess,
+    Vk::PipelineStage dstStage,
+    Vk::Access        dstAccess,
     VkDeviceSize          offset,
     VkDeviceSize          size,
     uint32_t              srcQueueFamily,
     uint32_t              dstQueueFamily
-) noexcept:
-    BufferBarrier(buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess, offset, size, srcQueueFamily, dstQueueFamily) {
-}
-
-inline BufferBarrier::BufferBarrier(
-    const Buffer& buffer,
-    BarrierStage  srcStage,
-    BarrierAccess srcAccess,
-    BarrierStage  dstStage,
-    BarrierAccess dstAccess,
-    VkDeviceSize  offset,
-    VkDeviceSize  size,
-    uint32_t      srcQueueFamily,
-    uint32_t      dstQueueFamily
 ) noexcept:
     BufferBarrier(buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess, offset, size, srcQueueFamily, dstQueueFamily) {
 }
@@ -529,8 +515,8 @@ inline auto BufferBarrier::TransferToVertex(const Buffer& buffer, VkDeviceSize o
 
 inline auto BufferBarrier::QueueRelease(
     const Buffer&         buffer,
-    VkPipelineStageFlags2 srcStage,
-    VkAccessFlags2        srcAccess,
+    Vk::PipelineStage srcStage,
+    Vk::Access        srcAccess,
     uint32_t              srcQueueFamily,
     uint32_t              dstQueueFamily,
     VkDeviceSize          offset,
@@ -541,8 +527,8 @@ inline auto BufferBarrier::QueueRelease(
 
 inline auto BufferBarrier::QueueAcquire(
     const Buffer&         buffer,
-    VkPipelineStageFlags2 dstStage,
-    VkAccessFlags2        dstAccess,
+    Vk::PipelineStage dstStage,
+    Vk::Access        dstAccess,
     uint32_t              srcQueueFamily,
     uint32_t              dstQueueFamily,
     VkDeviceSize          offset,

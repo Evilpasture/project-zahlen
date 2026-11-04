@@ -32,8 +32,8 @@ struct ResourceName {
 
 template <
     ResourceName       Name,
-    VkFormat           Format,
-    VkImageAspectFlags Aspect       = GetFormatAspect(Format),
+    Vk::Format           Format,
+    Vk::ImageAspect Aspect       = GetFormatAspect(Format),
     bool               IsSwapchain  = false,
     bool               IsPersistent = false,
     uint32_t           ScaleDivisor = 1,
@@ -41,8 +41,8 @@ template <
     bool               IsMipmapped  = false>
 struct GraphImage {
     static constexpr auto               name          = Name;
-    static constexpr VkFormat           format        = Format;
-    static constexpr VkImageAspectFlags aspect        = Aspect;
+    static constexpr Vk::Format           format        = Format;
+    static constexpr Vk::ImageAspect aspect        = Aspect;
     static constexpr bool               is_swapchain  = IsSwapchain;
     static constexpr bool               is_persistent = IsPersistent;
     static constexpr uint32_t           scale_divisor = ScaleDivisor;

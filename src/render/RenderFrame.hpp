@@ -99,7 +99,7 @@ struct RenderFrame: FrameResources::Slice {
     const uint32_t& activeLineVertexCount;
 
     /// The depth target of the destination this frame presents into.
-    [[nodiscard]] auto ActiveDepthTarget() noexcept -> Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>&;
+    [[nodiscard]] auto ActiveDepthTarget() noexcept -> Vk::FormatRenderTarget<Vk::Format::D32SfloatS8Uint>&;
 };
 
 } // namespace ZHLN

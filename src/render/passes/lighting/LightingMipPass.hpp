@@ -18,7 +18,7 @@ struct LightingMipPass: Vk::RenderPass<"LightingMip", Vk::TransferDstWriteThenSh
         if (dst.mipLevels > 1) {
             Vk::GenerateMipmaps(cmd, dst.image.Handle(), dst.extent.width, dst.extent.height);
         } else {
-            dst.View().Mip(0).Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+            dst.View().Mip(0).Transition<Vk::ImageLayout::TransferDstOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);
         }
     }
 };

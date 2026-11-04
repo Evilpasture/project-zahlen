@@ -114,7 +114,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
 
         const uint32_t csmDrawCount = passDrawCounts[kCascadeSlot];
 
-        const auto shadowMapArrayImage = ctx.graphResources.shadowMap.AsSlice().Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
+        const auto shadowMapArrayImage = ctx.graphResources.shadowMap.AsSlice().Assume<Vk::ImageLayout::DepthAttachmentOptimal>();
 
         Vk::DynamicPass(shadowMapArrayImage.Extent())
             .ViewMask(ShadowRenderer::kCascadeViewMask)
@@ -169,9 +169,9 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         const auto atlasImage =
             Vk::ImageSlice {
                 ctx.graphResources.shadowAtlas.image.Handle(), ctx.renderer.targets.AtlasView(),
-                VkExtent2D {TargetManager::kShadowAtlasSize, TargetManager::kShadowAtlasSize}, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT
+                VkExtent2D {TargetManager::kShadowAtlasSize, TargetManager::kShadowAtlasSize}, Vk::Format::D32Sfloat, Vk::ImageAspect::Depth
             }
-                .Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
+                .Assume<Vk::ImageLayout::DepthAttachmentOptimal>();
 
         const auto tiles = ctx.renderer.shadowAtlas.Tiles();
 
@@ -201,7 +201,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         const ShadowAtlas::TileRect rect = ShadowAtlas::TileRectOf(tile);
 
                         Vk::ClearAttachment(
-                            cmd, VK_IMAGE_ASPECT_DEPTH_BIT, VkExtent2D {rect.size, rect.size}, VkClearValue {.depthStencil = {.depth = 1.0f, .stencil = 0}}
+                            cmd, Vk::ImageAspect::Depth, VkExtent2D {rect.size, rect.size}, VkClearValue {.depthStencil = {.depth = 1.0f, .stencil = 0}}
                         );
 
                         if (drawCount == 0) {

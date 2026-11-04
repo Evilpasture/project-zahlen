@@ -59,14 +59,27 @@ auto DescriptorTypeName(std::string_view path, VkDescriptorType type) -> std::st
     return name;
 }
 
-// The stage the module was compiled for, or a build error: a stage this engine
-// builds no pipeline for is not something the catalog can carry.
+// The stage the module was compiled for, as the Vk::ShaderStage enumerator the
+// generated header spells, or a build error: the catalog's Stage is typed in
+// the engine's scoped enum -- the ShaderProgram concept, ShaderStageSource's
+// NTTP and StageOf all read it as Vk::ShaderStage -- so a stage that enum does
+// not name (tessellation, geometry, ray tracing) is not something the catalog
+// can carry until the enum and the pipeline builders learn it together.
 auto StageName(std::string_view path, VkShaderStageFlagBits stage) -> std::string_view {
-    const std::string_view name = ZHLN::Reflect::EnumToString(stage);
-    if (name.empty() || name == kUnnamedEnumerator) {
-        Fail("{} is compiled for a stage this engine does not build pipelines for", path);
+    switch (stage) {
+    case VK_SHADER_STAGE_VERTEX_BIT:
+        return "Vertex";
+    case VK_SHADER_STAGE_FRAGMENT_BIT:
+        return "Fragment";
+    case VK_SHADER_STAGE_COMPUTE_BIT:
+        return "Compute";
+    case VK_SHADER_STAGE_TASK_BIT_EXT:
+        return "Task";
+    case VK_SHADER_STAGE_MESH_BIT_EXT:
+        return "Mesh";
+    default:
+        Fail("{} is compiled for a stage Vk::ShaderStage does not name, which this engine builds no pipeline for", path);
     }
-    return name;
 }
 
 // A binding the descriptor switch cannot place: the message carries the Slang

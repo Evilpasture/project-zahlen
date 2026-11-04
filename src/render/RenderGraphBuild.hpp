@@ -36,7 +36,7 @@
 
 namespace ZHLN::RenderGraphDetail {
 
-using SwapchainImage     = Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>;
+using SwapchainImage     = Vk::TypedImage<Vk::ImageLayout::ColorAttachmentOptimal>;
 using SwapchainImageFn   = FunctionRef<SwapchainImage() const>;
 using ScenePushConstants = Slang::ScenePassPushConstants;
 

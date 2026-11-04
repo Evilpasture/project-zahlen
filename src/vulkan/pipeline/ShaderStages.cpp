@@ -55,22 +55,22 @@ namespace {
     return name_copy;
 }
 
-[[nodiscard]] auto FallbackEntryPoint(const VkShaderStageFlagBits stage) noexcept -> const char* {
+[[nodiscard]] auto FallbackEntryPoint(const Vk::ShaderStage stage) noexcept -> const char* {
     switch (stage) {
-        case VK_SHADER_STAGE_VERTEX_BIT:
+        case Vk::ShaderStage::Vertex:
             return "VSMain";
-        case VK_SHADER_STAGE_FRAGMENT_BIT:
+        case Vk::ShaderStage::Fragment:
             return "PSMain";
-        case VK_SHADER_STAGE_TASK_BIT_EXT:
+        case Vk::ShaderStage::Task:
             return "TaskMain";
-        case VK_SHADER_STAGE_MESH_BIT_EXT:
+        case Vk::ShaderStage::Mesh:
             return "MeshMain";
         default:
             return "main";
     }
 }
 
-[[nodiscard]] auto MakeStage(const ShaderDesc& desc, const VkShaderStageFlagBits stage) noexcept -> std::optional<ShaderStageData> {
+[[nodiscard]] auto MakeStage(const ShaderDesc& desc, const Vk::ShaderStage stage) noexcept -> std::optional<ShaderStageData> {
     if (IsAbsent(desc)) {
         return ShaderStageData {};
     }
@@ -105,8 +105,8 @@ auto ShaderStagesView::Create(const ShaderDesc& vert, const ShaderDesc& frag) ->
     if (vert.code == nullptr || vert.size == 0) {
         return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }
-    auto vertex   = MakeStage(vert, VK_SHADER_STAGE_VERTEX_BIT);
-    auto fragment = MakeStage(frag, VK_SHADER_STAGE_FRAGMENT_BIT);
+    auto vertex   = MakeStage(vert, Vk::ShaderStage::Vertex);
+    auto fragment = MakeStage(frag, Vk::ShaderStage::Fragment);
     if (!vertex || !fragment) {
         return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
     }
@@ -121,9 +121,9 @@ auto ShaderStagesView::CreateMesh(const ShaderDesc& task, const ShaderDesc& mesh
     if (mesh.code == nullptr || mesh.size == 0) {
         return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }
-    auto task_stage = MakeStage(task, VK_SHADER_STAGE_TASK_BIT_EXT);
-    auto mesh_stage = MakeStage(mesh, VK_SHADER_STAGE_MESH_BIT_EXT);
-    auto fragment   = MakeStage(frag, VK_SHADER_STAGE_FRAGMENT_BIT);
+    auto task_stage = MakeStage(task, Vk::ShaderStage::Task);
+    auto mesh_stage = MakeStage(mesh, Vk::ShaderStage::Mesh);
+    auto fragment   = MakeStage(frag, Vk::ShaderStage::Fragment);
     if (!task_stage || !mesh_stage || !fragment) {
         return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
     }
@@ -153,7 +153,7 @@ auto OwnedShaderStages::MetadataOf(const ShaderStageData& shader) noexcept -> St
 }
 
 auto OwnedShaderStages::MakeStage(const ShaderBytecode& source, const StageMetadata& metadata) noexcept -> ShaderStageData {
-    if (metadata.stage == VkShaderStageFlagBits {}) {
+    if (metadata.stage == Vk::ShaderStage {}) {
         return {};
     }
     const ShaderDesc desc = CreateShaderDesc(source.Code());

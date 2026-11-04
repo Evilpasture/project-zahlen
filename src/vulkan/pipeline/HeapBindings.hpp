@@ -333,11 +333,11 @@ template <typename Arg>
                 return true;
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                batch.AddStorageImage(StorageImageHandle {slot}, view, VK_IMAGE_LAYOUT_GENERAL);
+                batch.AddStorageImage(StorageImageHandle {slot}, view, Vk::ImageLayout::General);
             } else {
-                VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                Vk::ImageLayout layout = Vk::ImageLayout::ShaderReadOnlyOptimal;
                 if constexpr (IsTypedImage<T>::value) {
-                    if constexpr (T::layout != VK_IMAGE_LAYOUT_UNDEFINED) {
+                    if constexpr (T::layout != Vk::ImageLayout::Undefined) {
                         layout = T::layout;
                     }
                 } else if constexpr (std::is_same_v<T, ImageWrite>) {

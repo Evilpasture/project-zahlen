@@ -107,7 +107,7 @@ void DispatchAAMode(
 } // namespace
 
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& sceneSettings) {
-    auto getSwapchainImage = [&]() -> RenderGraphDetail::SwapchainImage { return sceneTarget->Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(); };
+    auto getSwapchainImage = [&]() -> RenderGraphDetail::SwapchainImage { return sceneTarget->Assume<Vk::ImageLayout::ColorAttachmentOptimal>(); };
 
     DispatchAAMode(*this, cmd, sceneSettings.antiAliasing.mode, view, sceneSettings, getSwapchainImage);
 }

@@ -12,7 +12,7 @@
 namespace ZHLN {
 
 auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, ErrorCode> {
-    if (!proceduralBakeDescLayout.Build(ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::ProceduralBakeCS>(), VK_SHADER_STAGE_COMPUTE_BIT)) {
+    if (!proceduralBakeDescLayout.Build(ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::ProceduralBakeCS>(), Vk::ShaderStage::Compute)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -53,7 +53,7 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
 auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
     -> std::expected<TextureHandle, ErrorCode> {
     return Vk::Image::Create(
-               allocator, Vk::ImageConfig::Texture2D({width, height}, VK_FORMAT_R8G8B8A8_UNORM, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled)
+               allocator, Vk::ImageConfig::Texture2D({width, height}, Vk::Format::R8G8B8A8Unorm, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled)
     )
         .and_then([&, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<TextureHandle, ErrorCode> {
             defer                       _([&] { allocator.DestroyImage(gpuImage); });
@@ -65,7 +65,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
             if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapScope.Bind(cmd);
 
-                writeView.DiscardTo<VK_IMAGE_LAYOUT_GENERAL>(cmd);
+                writeView.DiscardTo<Vk::ImageLayout::General>(cmd);
 
                 compute.proceduralBake.BindVariant(cmd, variantIdx);
                 Vk::PushHeapData<Shaders::Modules::ProceduralBakeCS>(
@@ -74,7 +74,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                 Vk::PushHeapIndex(cmd, bakeHeapBindings.indexPushOffset, block.slot);
                 compute.proceduralBake.DispatchThreads(cmd, width, height, 1);
 
-                writeView.Transition<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+                writeView.Transition<Vk::ImageLayout::General, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);
             }); !immediate) [[unlikely]] {
                 return std::unexpected(immediate.error());
             }

@@ -16,47 +16,47 @@ struct FormatOf;
 
 template <>
 struct FormatOf<float> {
-    static constexpr auto value = VK_FORMAT_R32_SFLOAT;
+    static constexpr auto value = Vk::Format::R32Sfloat;
 };
 template <>
 struct FormatOf<uint32_t> {
-    static constexpr auto value = VK_FORMAT_R32_UINT;
+    static constexpr auto value = Vk::Format::R32Uint;
 };
 template <>
 struct FormatOf<int32_t> {
-    static constexpr auto value = VK_FORMAT_R32_SINT;
+    static constexpr auto value = Vk::Format::R32Sint;
 };
 template <>
 struct FormatOf<uint16_t[4]> {
-    static constexpr auto value = VK_FORMAT_R16G16B16A16_UINT;
+    static constexpr auto value = Vk::Format::R16G16B16A16Uint;
 };
 template <>
 struct FormatOf<float[4]> {
-    static constexpr auto value = VK_FORMAT_R32G32B32A32_SFLOAT;
+    static constexpr auto value = Vk::Format::R32G32B32A32Sfloat;
 };
 template <>
 struct FormatOf<std::array<float, 2>> {
-    static constexpr auto value = VK_FORMAT_R32G32_SFLOAT;
+    static constexpr auto value = Vk::Format::R32G32Sfloat;
 };
 template <>
 struct FormatOf<std::array<float, 3>> {
-    static constexpr auto value = VK_FORMAT_R32G32B32_SFLOAT;
+    static constexpr auto value = Vk::Format::R32G32B32Sfloat;
 };
 template <>
 struct FormatOf<std::array<float, 4>> {
-    static constexpr auto value = VK_FORMAT_R32G32B32A32_SFLOAT;
+    static constexpr auto value = Vk::Format::R32G32B32A32Sfloat;
 };
 template <>
 struct FormatOf<std::array<uint32_t, 2>> {
-    static constexpr auto value = VK_FORMAT_R32G32_UINT;
+    static constexpr auto value = Vk::Format::R32G32Uint;
 };
 template <>
 struct FormatOf<std::array<uint32_t, 3>> {
-    static constexpr auto value = VK_FORMAT_R32G32B32_UINT;
+    static constexpr auto value = Vk::Format::R32G32B32Uint;
 };
 template <>
 struct FormatOf<std::array<uint32_t, 4>> {
-    static constexpr auto value = VK_FORMAT_R32G32B32A32_UINT;
+    static constexpr auto value = Vk::Format::R32G32B32A32Uint;
 };
 
 template <typename T>
@@ -78,7 +78,7 @@ struct AutoReflectAttributes {
 
         ZHLN::Reflect::ForEachFieldInfo<T>([&]<typename FieldType>(std::string_view , std::size_t offset) {
             attrs[location] = VkVertexInputAttributeDescription {
-                .location = location, .binding = 0, .format = FormatOf<FieldType>::value, .offset = static_cast<uint32_t>(offset)
+                .location = location, .binding = 0, .format = ToVk(FormatOf<FieldType>::value), .offset = static_cast<uint32_t>(offset)
             };
             location++;
         });

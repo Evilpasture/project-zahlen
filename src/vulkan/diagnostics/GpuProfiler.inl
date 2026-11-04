@@ -174,7 +174,7 @@ void GpuProfiler<EnumT>::WriteStart(VkCommandBuffer cmd, uint32_t frameIndex, En
 
     const uint32_t slot = Vk::FrameSlot(frameIndex);
     _recordedMasks[slot] |= (uint64_t {1} << stage_idx);
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[slot], query_idx);
+    vkCmdWriteTimestamp2(cmd, ToVk(Vk::PipelineStage::StageNone), _pools[slot], query_idx);
 
     if (_statsEnabled) {
         vkCmdBeginQuery(cmd, _statsPools[slot], stage_idx, 0);
@@ -198,7 +198,7 @@ void GpuProfiler<EnumT>::WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex, Enum
         _statsEndMasks[slot] |= (uint64_t {1} << stage_idx);
     }
 
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[slot], query_idx);
+    vkCmdWriteTimestamp2(cmd, ToVk(Vk::PipelineStage::StageNone), _pools[slot], query_idx);
 }
 
 template <typename EnumT>

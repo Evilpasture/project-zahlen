@@ -147,7 +147,7 @@ bool ReflectedLayout::Build(VkDevice, ShaderStagesView shaders) noexcept {
     return BuildInto(*this, builder);
 }
 
-bool ReflectedLayout::Build(VkDevice, const ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept {
+bool ReflectedLayout::Build(VkDevice, const ShaderDesc& shader, Vk::ShaderStage stage) noexcept {
     ReflectedLayoutBuilder builder;
     builder.AddStageUnsafe(shader, stage);
     return BuildInto(*this, builder);
@@ -161,7 +161,7 @@ bool ReflectedLayout::Build(VkDevice, std::span<const ReflectedStageInput> stage
     return BuildInto(*this, builder);
 }
 
-void ReflectedLayoutBuilder::AddStageUnsafe(const ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
+void ReflectedLayoutBuilder::AddStageUnsafe(const ShaderDesc& desc, Vk::ShaderStage stage) noexcept {
     if ((desc.code != nullptr) && desc.size > 0 && _stageCount < _stages.size()) {
         _stages[_stageCount++] = {.code = desc.code, .size = desc.size, .stage = stage};
     }
@@ -175,7 +175,7 @@ auto ReflectedLayoutBuilder::BuildUnsafe(std::span<ReflectedSet, 4> out) noexcep
     struct MergedBinding {
         VkDescriptorType         type   = VK_DESCRIPTOR_TYPE_MAX_ENUM;
         uint32_t                 count  = 0;
-        VkShaderStageFlags       stages = 0;
+        Vk::ShaderStage       stages = Vk::ShaderStage::None;
         VkDescriptorBindingFlags flags  = 0;
         std::string              name;
     };

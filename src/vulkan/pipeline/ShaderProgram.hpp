@@ -95,7 +95,7 @@ concept ShaderProgram = requires {
     typename T::Resources;
     typename T::Samplers;
     { T::EntryPoint } -> std::convertible_to<std::string_view>;
-    { T::Stage } -> std::convertible_to<VkShaderStageFlagBits>;
+    { T::Stage } -> std::convertible_to<Vk::ShaderStage>;
     { T::Path } -> std::convertible_to<const char*>;
     { T::Bytes() } -> std::same_as<std::span<const uint8_t>>;
 };
@@ -320,7 +320,7 @@ template <ShaderProgram Program>
 }
 
 template <ShaderProgram Program>
-[[nodiscard]] consteval auto StageOf() noexcept -> VkShaderStageFlagBits {
+[[nodiscard]] consteval auto StageOf() noexcept -> Vk::ShaderStage {
     return Program::Stage;
 }
 

@@ -20,8 +20,8 @@ namespace ZHLN::Vk {
 // allocation policy is opt-in through the tag, never required for raw targets.
 template <typename T>
 struct TargetTraits {
-    static constexpr VkFormat           format = T::format;
-    static constexpr VkImageAspectFlags aspect = [] {
+    static constexpr Vk::Format           format = T::format;
+    static constexpr Vk::ImageAspect aspect = [] {
         if constexpr (requires { T::aspect; })
             return T::aspect;
         else
@@ -72,8 +72,8 @@ struct RenderTarget {
     using TagType                                     = Tag;
     using Traits                                      = TargetTraits<Tag>;
     static constexpr std::string_view   name          = Traits::name;
-    static constexpr VkFormat           format        = Traits::format;
-    static constexpr VkImageAspectFlags aspect        = Traits::aspect;
+    static constexpr Vk::Format           format        = Traits::format;
+    static constexpr Vk::ImageAspect aspect        = Traits::aspect;
     static constexpr bool               is_swapchain  = Traits::is_swapchain;
     static constexpr bool               is_persistent = Traits::is_persistent;
     static constexpr uint32_t           scale_divisor = Traits::scale_divisor;
@@ -82,7 +82,7 @@ struct RenderTarget {
 
     static_assert(scale_divisor > 0, "Render target scale divisor must be nonzero");
     static_assert(!is_3d || (!is_mipmapped && scale_divisor == 1), "3D targets do not use 2D mip/scaling policy");
-    static_assert(!is_mipmapped || (aspect & VK_IMAGE_ASPECT_COLOR_BIT) != 0, "Mipmapped graph targets must be color images");
+    static_assert(!is_mipmapped || Has(aspect, Vk::ImageAspect::Color), "Mipmapped graph targets must be color images");
 
     // Keep extent's dimensional type: many callers pass a 2D extent directly
     // to DynamicPass, while voxel targets must retain their depth dimension.
@@ -103,19 +103,19 @@ struct RenderTarget {
     [[nodiscard]] auto View() const noexcept -> ImageView {
         return image.View().WithAspect(aspect);
     }
-    [[nodiscard]] auto State() const noexcept -> TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> {
-        return AsSlice().template Assume<VK_IMAGE_LAYOUT_UNDEFINED>();
+    [[nodiscard]] auto State() const noexcept -> TypedImage<Vk::ImageLayout::Undefined> {
+        return AsSlice().template Assume<Vk::ImageLayout::Undefined>();
     }
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
         return ImageSlice {image.Handle(), attachmentView, extent, format, aspect};
     }
 
-    template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+    template <Vk::ImageLayout OldLayout, Vk::ImageLayout NewLayout>
     void Transition(VkCommandBuffer cmd) const noexcept {
         View().template Transition<OldLayout, NewLayout>(cmd);
     }
 
-    template <VkImageLayout TargetLayout>
+    template <Vk::ImageLayout TargetLayout>
     void DiscardTo(VkCommandBuffer cmd) const noexcept {
         View().template DiscardTo<TargetLayout>(cmd);
     }
@@ -168,7 +168,7 @@ struct RenderTarget {
         } else {
             rt.extent        = {std::max(1u, fullExtent.width / scale_divisor), std::max(1u, fullExtent.height / scale_divisor)};
             ImageUsage usage = ImageUsage::Sampled | extraUsage;
-            if constexpr ((aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0)
+            if constexpr (Has(aspect, Vk::ImageAspect::Depth))
                 usage |= ImageUsage::DepthStencilAttachment;
             else
                 usage |= ImageUsage::ColorAttachment;
@@ -211,20 +211,20 @@ struct RenderTarget {
 };
 
 // An untagged physical allocation still has a format and inferred aspect.
-template <VkFormat F, VkImageAspectFlags Aspect = GetFormatAspect(F)>
+template <Vk::Format F, Vk::ImageAspect Aspect = GetFormatAspect(F)>
 struct ImageFormat {
-    static constexpr VkFormat           format = F;
-    static constexpr VkImageAspectFlags aspect = Aspect;
+    static constexpr Vk::Format           format = F;
+    static constexpr Vk::ImageAspect aspect = Aspect;
 };
 
-template <VkFormat F>
+template <Vk::Format F>
 using FormatRenderTarget = RenderTarget<ImageFormat<F>>;
 
-template <VkImageLayout TargetLayout, typename GraphTag>
+template <Vk::ImageLayout TargetLayout, typename GraphTag>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<GraphTag>& rt, Tag<TargetLayout>) noexcept;
 
-template <VkImageLayout L, typename Tag>
-Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<Tag>& rt, VkImageAspectFlags aspect = RenderTarget<Tag>::aspect) {
+template <Vk::ImageLayout L, typename Tag>
+Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<Tag>& rt, Vk::ImageAspect aspect = RenderTarget<Tag>::aspect) {
     return rt.AsSlice().template Assume<L>(aspect);
 }
 
@@ -233,8 +233,8 @@ template <typename Usage>
 struct UsageLayout {
     static_assert(requires { typename Usage::Resource; }, "UsageLayout requires a valid Vk::Usage type.");
 
-    static constexpr VkImageLayout      layout = Usage::layout;
-    static constexpr VkImageAspectFlags aspect = Usage::Resource::aspect;
+    static constexpr Vk::ImageLayout      layout = Usage::layout;
+    static constexpr Vk::ImageAspect aspect = Usage::Resource::aspect;
 };
 
 template <typename Usage, typename T>
@@ -243,15 +243,15 @@ template <typename Usage, typename T>
     return AssumeLayout<Layout::layout>(resource, Layout::aspect);
 }
 
-template <VkImageLayout TargetLayout, typename T>
+template <Vk::ImageLayout TargetLayout, typename T>
 constexpr auto TransitionSingle(VkCommandBuffer cmd, const T& res) noexcept {
     return std::get<0>(TransitionBatch<TargetLayout>(cmd, res));
 }
 
-template <VkImageLayout TargetLayout, typename... Resources>
+template <Vk::ImageLayout TargetLayout, typename... Resources>
 [[nodiscard]] constexpr auto TransitionBatch(VkCommandBuffer cmd, const Resources&... resources) noexcept;
 
-template <VkImageLayout L, typename Tuple>
+template <Vk::ImageLayout L, typename Tuple>
 [[nodiscard]] auto TransitionAllTo(VkCommandBuffer cmd, const Tuple& atts) {
     return std::apply([&](const auto&... a) { return Vk::TransitionBatch<L>(cmd, a...); }, atts);
 }
@@ -288,7 +288,7 @@ struct RenderTargetBundle {
         return result;
     }
 
-    template <VkImageLayout TargetLayout>
+    template <Vk::ImageLayout TargetLayout>
     [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd) const noexcept {
         return std::apply([&](const auto&... t) { return TransitionBatch<TargetLayout>(cmd, t...); }, targets);
     }
@@ -302,9 +302,9 @@ template <typename... Ts>
 template <typename... Images>
 [[nodiscard]] auto ClearAndPrepareGroup(VkCommandBuffer cmd, VkExtent2D extent, Color4 clear, Images&... imgs) {
     auto bundle = Vk::TieTargets(imgs...);
-    auto atts   = bundle.template Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
+    auto atts   = bundle.template Transition<Vk::ImageLayout::ColorAttachmentOptimal>(cmd);
     Vk::DynamicPass(extent).AddColorGroup(atts, ColorOp::Clear(clear)).Execute(cmd, []() {});
-    return TransitionAllTo<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts);
+    return TransitionAllTo<Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd, atts);
 }
 
 } // namespace ZHLN::Vk

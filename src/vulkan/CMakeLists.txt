@@ -1,8 +1,9 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Header-only seam for the one vulkan header the joint VkD3D contract
-# (src/vkd3d) is allowed to see: <vulkan/memory/DeviceAddress.hpp>, exported
+# Header-only seam for the vulkan headers the joint VkD3D contract
+# (src/vkd3d) is allowed to see: <vulkan/Enums.hpp> and
+# <vulkan/memory/DeviceAddress.hpp>, exported
 # from include/ -- the rest of src/vulkan stays private to zahlen_vulkan.
 # DeviceAddress.hpp includes <volk.h>, so the seam also carries the volk /
 # Vulkan-Headers usage requirements it needs to stand alone (mirroring how

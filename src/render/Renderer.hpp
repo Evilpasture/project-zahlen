@@ -40,7 +40,7 @@ struct IBLPayload {
     Vk::Image                visualSkyImage;
     Vk::ImageView            visualSkyView;
     std::array<JPH::Vec4, 9> shCoeffs {};
-    VkFormat                 prefilteredFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+    Vk::Format                 prefilteredFormat = Vk::Format::R16G16B16A16Sfloat;
     uint64_t                 contentHash       = 0;
     int                      environmentMode   = 0;
 
@@ -88,7 +88,7 @@ struct Renderer {
 
     Vk::SwapchainPresenter presenter;
     // Primary scene depth is a renderer resource, not part of presentation state.
-    Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> primaryDepthTarget;
+    Vk::FormatRenderTarget<Vk::Format::D32SfloatS8Uint> primaryDepthTarget;
     FrameDestinations                                    destinations;
 
     DrawQueueManager queues;
@@ -232,7 +232,7 @@ struct Renderer {
         return presenter;
     }
 
-    [[nodiscard]] auto ActiveDepthTarget() noexcept -> Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>& {
+    [[nodiscard]] auto ActiveDepthTarget() noexcept -> Vk::FormatRenderTarget<Vk::Format::D32SfloatS8Uint>& {
         if (auto active = destinations.Active(); active && !active->IsPrimary()) {
             return active->depthTarget;
         }

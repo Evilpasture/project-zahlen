@@ -75,7 +75,7 @@ struct Module {
     std::string      symbol; // shader_lighting_slang_ps_path
     std::string      path;   // the cooked .spv, as the build named it
     std::string      entryPoint;
-    std::string_view stage; // "VK_SHADER_STAGE_FRAGMENT_BIT", the enumerator's own name
+    std::string_view stage; // "Fragment": the Vk::ShaderStage enumerator the generated Stage spells
     bool             reflected = false;
     std::array<uint32_t, 3> localSize {1, 1, 1}; // compute: [numthreads], from Slang's reflection of the entry point
     std::vector<Descriptor> resources;

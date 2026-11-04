@@ -11,6 +11,7 @@ set_target_properties(HostBlitSwapchain PROPERTIES
 
 target_link_libraries(HostBlitSwapchain PRIVATE
     Vulkan-Headers
+    zahlen_vulkan_address # HostBlit.hpp names Vk::Format / Vk::ImageLayout from <vulkan/Enums.hpp>, on every platform
     zahlen_warnings
 )
 target_include_directories(HostBlitSwapchain SYSTEM PRIVATE

@@ -27,11 +27,11 @@ auto RenderContext::Impl::BuildEmissivePipeline() -> std::expected<void, ErrorCo
             return Vk::PipelineBuilder {}
                 .Shaders(shaders.View())
                 .HeapMappings(sceneMappings, sceneMappings)
-                .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
-                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .ColorFormats({Vk::Format::R16G16B16A16Sfloat})
+                .DepthFormat(Vk::Format::D32SfloatS8Uint)
                 .DepthTest(true)
                 .DepthWrite(false)
-                .DepthCompare(VK_COMPARE_OP_LESS_OR_EQUAL)
+                .DepthCompare(Vk::CompareOp::LessOrEqual)
                 .DynamicCullMode()
                 .AdditiveRGBPreserveAlpha()
                 .ColorWriteMask(Vk::ColorAttachmentWriteMask<Passes::EmissivePass, Res_LightingGI>())
@@ -56,8 +56,8 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
             return Vk::PipelineBuilder {}
                 .Shaders(shaders.View())
                 .HeapMappings(sceneMappings, sceneMappings)
-                .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
-                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .ColorFormats({Vk::Format::R16G16B16A16Sfloat})
+                .DepthFormat(Vk::Format::D32SfloatS8Uint)
                 .DepthTest(true)
                 .DepthWrite(false)
                 .AdditiveBlend()
@@ -85,7 +85,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                 .Shaders(shaders.View())
                 .HeapMappings(sceneMappings, sceneMappings)
                 .ColorFormats(ActiveGBuffer::array)
-                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthFormat(Vk::Format::D32SfloatS8Uint)
                 .DepthTest(true)
                 .DepthWrite(true)
                 .CullBack()
@@ -102,7 +102,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                         .Shaders(shaders.View())
                         .HeapMappings(sceneMappings, sceneMappings)
                         .DepthOnly()
-                        .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                        .DepthFormat(Vk::Format::D32Sfloat)
                         .ViewMask(ShadowRenderer::kCascadeViewMask)
                         .CullNone()
                         .Binaries(&pipelineBinaries)
@@ -160,11 +160,11 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<1, true> {}
                 .Shaders(shaders.View())
-                .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
-                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .ColorFormats({Vk::Format::R16G16B16A16Sfloat})
+                .DepthFormat(Vk::Format::D32SfloatS8Uint)
                 .DepthTest(true)
                 .DepthWrite(false)
-                .Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
+                .Topology(Vk::PrimitiveTopology::LineList)
                 .CullNone()
                 .AlphaBlend()
                 .Binaries(&pipelineBinaries)
@@ -207,11 +207,11 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
 }
 
 auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode> {
-    static constexpr std::array<VkFormat, 2> decalFormats = {Res_SceneColor::format, Res_NormRough::format};
+    static constexpr std::array<Vk::Format, 2> decalFormats = {Res_SceneColor::format, Res_NormRough::format};
 
     const std::array reflectInputs = {
-        Vk::ReflectedStageInput {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
-        Vk::ReflectedStageInput {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+        Vk::ReflectedStageInput {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalVS>(), .stage = Vk::ShaderStage::Vertex},
+        Vk::ReflectedStageInput {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalPS>(), .stage = Vk::ShaderStage::Fragment},
     };
     if (!decals.layout.Build(ctx.Device(), std::span {reflectInputs})) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -229,7 +229,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
                 .Shaders(shaders.View())
                 .HeapMappings(decalMappings, decalMappings)
                 .ColorFormats(decalFormats)
-                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthFormat(Vk::Format::D32SfloatS8Uint)
                 .DepthTest(true)
                 .DepthWrite(false)
                 .CullFront()
@@ -256,7 +256,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
         .Shaders(stages)
         .HeapMappings(sceneMappings, sceneMappings)
         .ColorFormats(ActiveGBuffer::array)
-        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+        .DepthFormat(Vk::Format::D32SfloatS8Uint)
         .DepthTest(true)
         .DepthWrite(false)
         .CullNone()
@@ -271,11 +271,11 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .Shaders(stages)
                 .HeapMappings(sceneMappings, sceneMappings)
                 .ColorFormats(ActiveGBuffer::array)
-                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthFormat(Vk::Format::D32SfloatS8Uint)
                 .DepthTest(true)
                 .DepthWrite(true)
                 .CullBack()
-                .StencilCompareMask(VK_COMPARE_OP_NOT_EQUAL, 1)
+                .StencilCompareMask(Vk::CompareOp::NotEqual, 1)
                 .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> ErrorCode { return e; });
@@ -287,11 +287,11 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .Shaders(stages)
                 .HeapMappings(sceneMappings, sceneMappings)
                 .ColorFormats(ActiveGBuffer::array)
-                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthFormat(Vk::Format::D32SfloatS8Uint)
                 .DepthTest(true)
                 .DepthWrite(true)
                 .CullBack()
-                .StencilCompareMask(VK_COMPARE_OP_EQUAL, 1)
+                .StencilCompareMask(Vk::CompareOp::Equal, 1)
                 .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> ErrorCode { return e; });
@@ -330,7 +330,7 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
 
 auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
     auto shader = Vk::CreateShaderDesc<Shaders::Modules::HizGenerateCS>();
-    if (!culling.hizDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+    if (!culling.hizDescLayout.Build(ctx.Device(), shader, Vk::ShaderStage::Compute)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -349,7 +349,7 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
 
 auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCode> {
     auto cullingShader = Vk::CreateShaderDesc<Shaders::Modules::CullingCS>();
-    if (!culling.cullingLayout.Build(ctx.Device(), cullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+    if (!culling.cullingLayout.Build(ctx.Device(), cullingShader, Vk::ShaderStage::Compute)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -434,7 +434,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             }
             clusterBoundsBuffer = std::move(*bounds);
 
-            if (!culling.clusterCullingDescLayout.Build(ctx.Device(), clusterCullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+            if (!culling.clusterCullingDescLayout.Build(ctx.Device(), clusterCullingShader, Vk::ShaderStage::Compute)) {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(
@@ -488,7 +488,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             auto bDesc = Vk::CreateShaderDesc<Shaders::Modules::ClusterBoundsCS>();
-            if (!culling.clusterBoundsDescLayout.Build(ctx.Device(), bDesc, VK_SHADER_STAGE_COMPUTE_BIT)) {
+            if (!culling.clusterBoundsDescLayout.Build(ctx.Device(), bDesc, Vk::ShaderStage::Compute)) {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(

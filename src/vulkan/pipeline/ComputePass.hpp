@@ -503,7 +503,7 @@ struct DoubleBufferedComputePass {
         PipelineBinaryStore* binaries = nullptr
     ) noexcept {
         auto reflectedGroupSize = ReflectComputeThreadGroupSize(shader);
-        if (!layoutInstance.Build(device, shader, VK_SHADER_STAGE_COMPUTE_BIT) || !reflectedGroupSize) {
+        if (!layoutInstance.Build(device, shader, Vk::ShaderStage::Compute) || !reflectedGroupSize) {
             return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
         }
         threadGroupSize = *reflectedGroupSize;

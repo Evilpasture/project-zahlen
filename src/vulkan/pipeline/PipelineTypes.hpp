@@ -18,32 +18,32 @@ namespace ZHLN::Vk {
 
 struct RuntimeAttachmentFormats {};
 
-template <VkFormat DepthFormat, VkFormat... ColorFormats>
+template <Vk::Format DepthFormat, Vk::Format... ColorFormats>
 struct AttachmentFormats {
-    static constexpr VkFormat depth_format = DepthFormat;
-    static constexpr std::array<VkFormat, sizeof...(ColorFormats)> color_formats {ColorFormats...};
+    static constexpr Vk::Format depth_format = DepthFormat;
+    static constexpr std::array<Vk::Format, sizeof...(ColorFormats)> color_formats {ColorFormats...};
 };
 
-template <typename Formats, VkFormat... Added>
+template <typename Formats, Vk::Format... Added>
 struct AppendAttachmentColors {
     using type = RuntimeAttachmentFormats;
 };
 
-template <VkFormat Depth, VkFormat... Colors, VkFormat... Added>
+template <Vk::Format Depth, Vk::Format... Colors, Vk::Format... Added>
 struct AppendAttachmentColors<AttachmentFormats<Depth, Colors...>, Added...> {
     using type = std::conditional_t<
-        ((Added != VK_FORMAT_UNDEFINED) && ...), AttachmentFormats<Depth, Colors..., Added...>, RuntimeAttachmentFormats
+        ((Added != Vk::Format::Undefined) && ...), AttachmentFormats<Depth, Colors..., Added...>, RuntimeAttachmentFormats
     >;
 };
 
-template <typename Formats, VkFormat Depth>
+template <typename Formats, Vk::Format Depth>
 struct SetAttachmentDepth {
     using type = RuntimeAttachmentFormats;
 };
 
-template <VkFormat OldDepth, VkFormat... Colors, VkFormat Depth>
+template <Vk::Format OldDepth, Vk::Format... Colors, Vk::Format Depth>
 struct SetAttachmentDepth<AttachmentFormats<OldDepth, Colors...>, Depth> {
-    using type = std::conditional_t<Depth == VK_FORMAT_UNDEFINED, RuntimeAttachmentFormats, AttachmentFormats<Depth, Colors...>>;
+    using type = std::conditional_t<Depth == Vk::Format::Undefined, RuntimeAttachmentFormats, AttachmentFormats<Depth, Colors...>>;
 };
 
 template <typename Formats>
@@ -51,9 +51,9 @@ struct WithoutAttachmentDepth {
     using type = RuntimeAttachmentFormats;
 };
 
-template <VkFormat Depth, VkFormat... Colors>
+template <Vk::Format Depth, Vk::Format... Colors>
 struct WithoutAttachmentDepth<AttachmentFormats<Depth, Colors...>> {
-    using type = AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>;
+    using type = AttachmentFormats<Vk::Format::Undefined, Colors...>;
 };
 
 template <typename Formats>
@@ -61,7 +61,7 @@ struct ClearAttachmentColors {
     using type = RuntimeAttachmentFormats;
 };
 
-template <VkFormat Depth, VkFormat... Colors>
+template <Vk::Format Depth, Vk::Format... Colors>
 struct ClearAttachmentColors<AttachmentFormats<Depth, Colors...>> {
     using type = AttachmentFormats<Depth>;
 };

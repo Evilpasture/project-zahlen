@@ -90,7 +90,7 @@ class Sampler {
     // to border so a lookup outside the map compares as "far", and the compare
     // enabled. The three settings travel together because a shadow sampler with
     // any one of them missing reads the depth texture as a colour.
-    [[nodiscard]] static constexpr auto Shadow(VkCompareOp op = VK_COMPARE_OP_LESS_OR_EQUAL) noexcept -> Sampler {
+    [[nodiscard]] static constexpr auto Shadow(Vk::CompareOp op = Vk::CompareOp::LessOrEqual) noexcept -> Sampler {
         return LinearClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).WithDepthCompare(op);
     }
 
@@ -161,7 +161,7 @@ class Sampler {
         return result;
     }
 
-    [[nodiscard]] constexpr auto WithDepthCompare(VkCompareOp op = VK_COMPARE_OP_LESS_OR_EQUAL) const noexcept -> Sampler {
+    [[nodiscard]] constexpr auto WithDepthCompare(Vk::CompareOp op = Vk::CompareOp::LessOrEqual) const noexcept -> Sampler {
         Sampler result = *this;
         result._state  = Field(result._state, kCompareOpShift, kThreeBitMask, CompareOpToken(op)) | kCompareBit;
         return result;
@@ -169,7 +169,7 @@ class Sampler {
 
     [[nodiscard]] constexpr auto WithoutDepthCompare() const noexcept -> Sampler {
         Sampler result = *this;
-        result._state  = Field(result._state & ~kCompareBit, kCompareOpShift, kThreeBitMask, CompareOpToken(VK_COMPARE_OP_ALWAYS));
+        result._state  = Field(result._state & ~kCompareBit, kCompareOpShift, kThreeBitMask, CompareOpToken(Vk::CompareOp::Always));
         return result;
     }
 
@@ -218,9 +218,9 @@ class Sampler {
             .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
             .pNext                   = nullptr,
             .flags                   = 0,
-            .magFilter               = DecodeFilter(filterToken),
-            .minFilter               = DecodeFilter(filterToken),
-            .mipmapMode              = DecodeMipmapMode(filterToken),
+            .magFilter               = ToVk(DecodeFilter(filterToken)),
+            .minFilter               = ToVk(DecodeFilter(filterToken)),
+            .mipmapMode              = ToVk(DecodeMipmapMode(filterToken)),
             .addressModeU            = DecodeAddress(TokenAt(kAddressUShift, kTwoBitMask)),
             .addressModeV            = DecodeAddress(TokenAt(kAddressVShift, kTwoBitMask)),
             .addressModeW            = DecodeAddress(TokenAt(kAddressWShift, kTwoBitMask)),
@@ -228,7 +228,7 @@ class Sampler {
             .anisotropyEnable        = anisotropic ? VK_TRUE : VK_FALSE,
             .maxAnisotropy           = anisotropic ? _maxAnisotropy : 1.0F,
             .compareEnable           = DepthCompare() ? VK_TRUE : VK_FALSE,
-            .compareOp               = DecodeCompareOp(TokenAt(kCompareOpShift, kThreeBitMask)),
+            .compareOp               = ToVk(DecodeCompareOp(TokenAt(kCompareOpShift, kThreeBitMask))),
             .minLod                  = _minLod,
             .maxLod                  = _maxLod,
             .borderColor             = DecodeBorder(TokenAt(kBorderShift, kThreeBitMask)),
@@ -301,16 +301,16 @@ class Sampler {
         }
     }
 
-    [[nodiscard]] static constexpr auto CompareOpToken(VkCompareOp value) noexcept -> uint32_t {
+    [[nodiscard]] static constexpr auto CompareOpToken(Vk::CompareOp value) noexcept -> uint32_t {
         switch (value) {
-            case VK_COMPARE_OP_NEVER: return 0;
-            case VK_COMPARE_OP_LESS: return 1;
-            case VK_COMPARE_OP_EQUAL: return 2;
-            case VK_COMPARE_OP_LESS_OR_EQUAL: return 3;
-            case VK_COMPARE_OP_GREATER: return 4;
-            case VK_COMPARE_OP_NOT_EQUAL: return 5;
-            case VK_COMPARE_OP_GREATER_OR_EQUAL: return 6;
-            case VK_COMPARE_OP_ALWAYS: return 7;
+            case Vk::CompareOp::Never: return 0;
+            case Vk::CompareOp::Less: return 1;
+            case Vk::CompareOp::Equal: return 2;
+            case Vk::CompareOp::LessOrEqual: return 3;
+            case Vk::CompareOp::Greater: return 4;
+            case Vk::CompareOp::NotEqual: return 5;
+            case Vk::CompareOp::GreaterOrEqual: return 6;
+            case Vk::CompareOp::Always: return 7;
             default: return 7;
         }
     }
@@ -319,11 +319,11 @@ class Sampler {
     // encoder produces, so there is one definition of every ordering, and a
     // token that is not recognised decodes as the default AsCreateInfo() would
     // have written had the caller never touched the field.
-    [[nodiscard]] static constexpr auto DecodeFilter(uint32_t token) noexcept -> VkFilter {
-        return token == FilterToken(SamplerFilter::Nearest) ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+    [[nodiscard]] static constexpr auto DecodeFilter(uint32_t token) noexcept -> Vk::Filter {
+        return token == FilterToken(SamplerFilter::Nearest) ? Vk::Filter::Nearest : Vk::Filter::Linear;
     }
-    [[nodiscard]] static constexpr auto DecodeMipmapMode(uint32_t token) noexcept -> VkSamplerMipmapMode {
-        return token == FilterToken(SamplerFilter::Nearest) ? VK_SAMPLER_MIPMAP_MODE_NEAREST : VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    [[nodiscard]] static constexpr auto DecodeMipmapMode(uint32_t token) noexcept -> Vk::SamplerMipmapMode {
+        return token == FilterToken(SamplerFilter::Nearest) ? Vk::SamplerMipmapMode::Nearest : Vk::SamplerMipmapMode::Linear;
     }
     [[nodiscard]] static constexpr auto DecodeAddress(uint32_t token) noexcept -> VkSamplerAddressMode {
         switch (token) {
@@ -343,16 +343,16 @@ class Sampler {
             default: return VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
         }
     }
-    [[nodiscard]] static constexpr auto DecodeCompareOp(uint32_t token) noexcept -> VkCompareOp {
+    [[nodiscard]] static constexpr auto DecodeCompareOp(uint32_t token) noexcept -> Vk::CompareOp {
         switch (token) {
-            case 0: return VK_COMPARE_OP_NEVER;
-            case 1: return VK_COMPARE_OP_LESS;
-            case 2: return VK_COMPARE_OP_EQUAL;
-            case 3: return VK_COMPARE_OP_LESS_OR_EQUAL;
-            case 4: return VK_COMPARE_OP_GREATER;
-            case 5: return VK_COMPARE_OP_NOT_EQUAL;
-            case 6: return VK_COMPARE_OP_GREATER_OR_EQUAL;
-            default: return VK_COMPARE_OP_ALWAYS;
+            case 0: return Vk::CompareOp::Never;
+            case 1: return Vk::CompareOp::Less;
+            case 2: return Vk::CompareOp::Equal;
+            case 3: return Vk::CompareOp::LessOrEqual;
+            case 4: return Vk::CompareOp::Greater;
+            case 5: return Vk::CompareOp::NotEqual;
+            case 6: return Vk::CompareOp::GreaterOrEqual;
+            default: return Vk::CompareOp::Always;
         }
     }
 
@@ -360,7 +360,7 @@ class Sampler {
     // = float transparent black, compare op = Always (inert while the compare is
     // off), anisotropy off and bound to 1.
     static constexpr auto DefaultState() noexcept -> uint32_t {
-        return (FilterToken(SamplerFilter::Linear) << kFilterShift) | (CompareOpToken(VK_COMPARE_OP_ALWAYS) << kCompareOpShift);
+        return (FilterToken(SamplerFilter::Linear) << kFilterShift) | (CompareOpToken(Vk::CompareOp::Always) << kCompareOpShift);
     }
 
     uint32_t _state         = DefaultState();    // 4 bytes: see the token lanes above
@@ -383,20 +383,20 @@ static_assert(std::is_trivially_copyable_v<Sampler>);
 // the engine -- reads a field back.
 
 // The default is the linear-repeat sampler, and every Vulkan-only field is fixed.
-static_assert(Sampler {}.AsCreateInfo().magFilter == VK_FILTER_LINEAR && Sampler {}.AsCreateInfo().minFilter == VK_FILTER_LINEAR);
-static_assert(Sampler {}.AsCreateInfo().mipmapMode == VK_SAMPLER_MIPMAP_MODE_LINEAR);
+static_assert(Sampler {}.AsCreateInfo().magFilter == ToVk(Vk::Filter::Linear) && Sampler {}.AsCreateInfo().minFilter == ToVk(Vk::Filter::Linear));
+static_assert(Sampler {}.AsCreateInfo().mipmapMode == ToVk(Vk::SamplerMipmapMode::Linear));
 static_assert(Sampler {}.AsCreateInfo().addressModeU == VK_SAMPLER_ADDRESS_MODE_REPEAT);
 static_assert(Sampler {}.AsCreateInfo().addressModeV == VK_SAMPLER_ADDRESS_MODE_REPEAT);
 static_assert(Sampler {}.AsCreateInfo().addressModeW == VK_SAMPLER_ADDRESS_MODE_REPEAT);
 static_assert(Sampler {}.AsCreateInfo().anisotropyEnable == VK_FALSE && Sampler {}.AsCreateInfo().maxAnisotropy == 1.0F);
-static_assert(Sampler {}.AsCreateInfo().compareEnable == VK_FALSE && Sampler {}.AsCreateInfo().compareOp == VK_COMPARE_OP_ALWAYS);
+static_assert(Sampler {}.AsCreateInfo().compareEnable == VK_FALSE && Sampler {}.AsCreateInfo().compareOp == ToVk(Vk::CompareOp::Always));
 static_assert(Sampler {}.AsCreateInfo().borderColor == VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK);
 static_assert(Sampler {}.AsCreateInfo().maxLod == VK_LOD_CLAMP_NONE && Sampler {}.AsCreateInfo().unnormalizedCoordinates == VK_FALSE);
 static_assert(Sampler {}.Valid() && Sampler {}.Mipmapped()); // the default LOD window spans 0..clamp-none
 
 // Presets reach the driver as the filter they name.
-static_assert(Sampler::NearestClampToEdge().AsCreateInfo().minFilter == VK_FILTER_NEAREST);
-static_assert(Sampler::NearestClampToEdge().AsCreateInfo().mipmapMode == VK_SAMPLER_MIPMAP_MODE_NEAREST);
+static_assert(Sampler::NearestClampToEdge().AsCreateInfo().minFilter == ToVk(Vk::Filter::Nearest));
+static_assert(Sampler::NearestClampToEdge().AsCreateInfo().mipmapMode == ToVk(Vk::SamplerMipmapMode::Nearest));
 static_assert(Sampler::NearestClampToEdge().AsCreateInfo().addressModeU == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
 static_assert(Sampler::NearestClampToEdge().AsCreateInfo().addressModeW == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
 
@@ -416,14 +416,14 @@ static_assert(Sampler::LinearClampToBorder(VK_BORDER_COLOR_INT_OPAQUE_WHITE).AsC
 
 // The shadow sampler is compare + border + linear in one value.
 static_assert(Sampler::Shadow().AsCreateInfo().compareEnable == VK_TRUE);
-static_assert(Sampler::Shadow().AsCreateInfo().compareOp == VK_COMPARE_OP_LESS_OR_EQUAL);
+static_assert(Sampler::Shadow().AsCreateInfo().compareOp == ToVk(Vk::CompareOp::LessOrEqual));
 static_assert(Sampler::Shadow().AsCreateInfo().borderColor == VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE);
-static_assert(Sampler::Shadow(VK_COMPARE_OP_GREATER).AsCreateInfo().compareOp == VK_COMPARE_OP_GREATER);
+static_assert(Sampler::Shadow(Vk::CompareOp::Greater).AsCreateInfo().compareOp == ToVk(Vk::CompareOp::Greater));
 static_assert(Sampler::Shadow().DepthCompare() && Sampler::Shadow().ClampsToBorder());
 
 // Anisotropy promotes the filter, and a bound below 1 is clamped rather than
 // written into the create info.
-static_assert(Sampler::NearestRepeat().WithAnisotropy(8.0F).AsCreateInfo().minFilter == VK_FILTER_LINEAR);
+static_assert(Sampler::NearestRepeat().WithAnisotropy(8.0F).AsCreateInfo().minFilter == ToVk(Vk::Filter::Linear));
 static_assert(Sampler::NearestRepeat().WithAnisotropy(8.0F).AsCreateInfo().anisotropyEnable == VK_TRUE);
 static_assert(Sampler::NearestRepeat().WithAnisotropy(8.0F).AsCreateInfo().maxAnisotropy == 8.0F);
 static_assert(Sampler::NearestRepeat().WithAnisotropy(0.25F).AsCreateInfo().maxAnisotropy == 1.0F);

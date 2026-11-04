@@ -223,20 +223,20 @@ void GeometryManager::RecordPendingUpdates(VkCommandBuffer cmd) noexcept {
         return;
     }
 
-    VkPipelineStageFlags2 dstStage =
-        VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT |
-        VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-        VK_PIPELINE_STAGE_2_COPY_BIT;
-    VkAccessFlags2 dstAccess =
-        VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT | VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_UNIFORM_READ_BIT |
-        VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT |
-        VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    Vk::PipelineStage dstStage =
+        Vk::PipelineStage::Indirect | Vk::PipelineStage::IndexInput | Vk::PipelineStage::VertexAttributeInput |
+        Vk::PipelineStage::Vertex | Vk::PipelineStage::Fragment | Vk::PipelineStage::Compute |
+        Vk::PipelineStage::Copy;
+    Vk::Access dstAccess =
+        Vk::Access::IndirectRead | Vk::Access::IndexRead | Vk::Access::VertexAttributeRead | Vk::Access::UniformRead |
+        Vk::Access::ShaderRead | Vk::Access::ShaderStorageRead | Vk::Access::ShaderStorageWrite | Vk::Access::TransferRead |
+        Vk::Access::TransferWrite;
     if (_ctx.RayTracingSupported()) {
-        dstStage |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
-        dstAccess |= VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        dstStage |= Vk::PipelineStage::AccelerationStructureBuild;
+        dstAccess |= Vk::Access::AccelerationStructureRead;
     }
 
-    Vk::MemoryBarrier {VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, dstStage, dstAccess}.Record(cmd);
+    Vk::MemoryBarrier {Vk::PipelineStage::Copy, Vk::Access::TransferWrite, dstStage, dstAccess}.Record(cmd);
 }
 
 void GeometryManager::AdvanceUploadFrame() noexcept {

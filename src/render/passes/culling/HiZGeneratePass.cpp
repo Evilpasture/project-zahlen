@@ -41,9 +41,9 @@ void GenerateHiZPyramid(VkCommandBuffer cmd, CullingResources& cull, RenderFrame
 
         const auto inDepth = mip == 0 ?
                                  Vk::ImageWrite {frame.ActiveDepthTarget().image.View()} :
-                                 Vk::ImageWrite {frame.graphResources.hizMap.image.View(VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 1), VK_IMAGE_LAYOUT_GENERAL};
+                                 Vk::ImageWrite {frame.graphResources.hizMap.image.View(Vk::ImageAspect::Color, mip - 1, 1), Vk::ImageLayout::General};
         const auto block   = frame.renderer.heapManager.WriteHeapParameters<Shaders::Hiz>(
-            cull.hizHeapBindings, Vk::Slot<"inDepth">(inDepth), Vk::Slot<"outDepth">(frame.graphResources.hizMap.image.View(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1))
+            cull.hizHeapBindings, Vk::Slot<"inDepth">(inDepth), Vk::Slot<"outDepth">(frame.graphResources.hizMap.image.View(Vk::ImageAspect::Color, mip, 1))
         );
         cull.hizGeneratePass.DispatchHeapIndexedThreads<Shaders::Modules::HizGenerateCS>(cmd, block, dstW, dstH, 1, hizPC);
     }

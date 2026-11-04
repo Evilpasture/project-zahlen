@@ -102,10 +102,10 @@ std::expected<void, ErrorCode> QueueSubmit(
     ExecutableCommands command,
     const VkSemaphore waitSemaphore,
     const uint64_t waitValue,
-    const VkPipelineStageFlags2 waitStage,
+    const Vk::PipelineStage waitStage,
     const VkSemaphore signalSemaphore,
     const uint64_t signalValue,
-    const VkPipelineStageFlags2 signalStage
+    const Vk::PipelineStage signalStage
 ) noexcept {
     const SemaphoreSubmit waitInfo   = SemaphoreSubmit::Timeline(waitSemaphore, waitValue, waitStage);
     const SemaphoreSubmit signalInfo = SemaphoreSubmit::Timeline(signalSemaphore, signalValue, signalStage);
@@ -120,7 +120,7 @@ std::expected<void, ErrorCode> SubmitAndWait(
     ExecutableCommands command,
     const VkSemaphore waitSemaphore,
     const uint64_t waitValue,
-    const VkPipelineStageFlags2 waitStage
+    const Vk::PipelineStage waitStage
 ) noexcept {
     auto submitted = QueueSubmit(queue, std::move(command), waitSemaphore, waitValue, waitStage);
     if (!submitted) [[unlikely]] {

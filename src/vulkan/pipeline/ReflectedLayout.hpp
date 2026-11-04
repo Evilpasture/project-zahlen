@@ -23,7 +23,7 @@ struct ReflectedBinding {
     uint32_t                 binding         = 0;
     VkDescriptorType         descriptorType  = VK_DESCRIPTOR_TYPE_MAX_ENUM;
     uint32_t                 descriptorCount = 1;
-    VkShaderStageFlags       stageFlags      = 0;
+    Vk::ShaderStage       stageFlags      = Vk::ShaderStage::None;
     VkDescriptorBindingFlags bindingFlags    = 0;
     std::string              name;
 };
@@ -34,7 +34,7 @@ struct ReflectedSet {
 
 struct ReflectedStageInput {
     ShaderDesc       shader;
-    VkShaderStageFlagBits stage;
+    Vk::ShaderStage stage;
 };
 
 struct ReflectedLayout {
@@ -54,7 +54,7 @@ struct ReflectedLayout {
 
     bool Build(VkDevice device, ShaderStagesView shaders) noexcept;
 
-    bool Build(VkDevice device, const ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept;
+    bool Build(VkDevice device, const ShaderDesc& shader, Vk::ShaderStage stage) noexcept;
 
     bool Build(VkDevice device, std::span<const ReflectedStageInput> stages) noexcept;
 };
@@ -76,7 +76,7 @@ class ReflectedLayoutBuilder {
     ReflectedLayoutBuilder& operator=(const ReflectedLayoutBuilder&) = delete;
     ~ReflectedLayoutBuilder() noexcept                               = default;
 
-    void AddStageUnsafe(const ShaderDesc& desc, VkShaderStageFlags stage) noexcept;
+    void AddStageUnsafe(const ShaderDesc& desc, Vk::ShaderStage stage) noexcept;
 
     [[nodiscard]] auto BuildUnsafe(std::span<ReflectedSet, 4> out) noexcept -> bool;
 
@@ -84,7 +84,7 @@ class ReflectedLayoutBuilder {
     struct StageData {
         const uint32_t*    code  = nullptr;
         size_t             size  = 0;
-        VkShaderStageFlags stage = 0;
+        Vk::ShaderStage stage = Vk::ShaderStage::None;
     };
     std::array<StageData, 8> _stages {};
     uint32_t                 _stageCount = 0;

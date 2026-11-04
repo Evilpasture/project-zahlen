@@ -17,19 +17,19 @@ namespace ZHLN::Passes {
 template <AAMode Mode>
 using BlitInputRes = std::conditional_t<Mode != AAMode::None, Res_AccumCurrent, Res_HdrSceneColor>;
 
-[[nodiscard]] constexpr auto NeedsManualSrgbOetf(const VkFormat format) noexcept -> bool {
+[[nodiscard]] constexpr auto NeedsManualSrgbOetf(const Vk::Format format) noexcept -> bool {
     switch (format) {
-        case VK_FORMAT_UNDEFINED:
-        case VK_FORMAT_R8_SRGB:
-        case VK_FORMAT_R8G8_SRGB:
-        case VK_FORMAT_R8G8B8_SRGB:
-        case VK_FORMAT_B8G8R8_SRGB:
-        case VK_FORMAT_R8G8B8A8_SRGB:
-        case VK_FORMAT_B8G8R8A8_SRGB:
-        case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
-        case VK_FORMAT_R16G16B16A16_SFLOAT:
-        case VK_FORMAT_R32G32B32A32_SFLOAT:
-        case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
+        case Vk::Format::Undefined:
+        case Vk::Format::R8Srgb:
+        case Vk::Format::R8G8Srgb:
+        case Vk::Format::R8G8B8Srgb:
+        case Vk::Format::B8G8R8Srgb:
+        case Vk::Format::R8G8B8A8Srgb:
+        case Vk::Format::B8G8R8A8Srgb:
+        case Vk::Format::A8B8G8R8SrgbPack32:
+        case Vk::Format::R16G16B16A16Sfloat:
+        case Vk::Format::R32G32B32A32Sfloat:
+        case Vk::Format::B10G11R11UfloatPack32:
             return false;
         default:
             return true;
@@ -39,7 +39,7 @@ using BlitInputRes = std::conditional_t<Mode != AAMode::None, Res_AccumCurrent, 
 template <AAMode Mode>
 struct TonemapBlitPass:
     Vk::RenderPass<"Blit", Vk::ShaderRead<BlitInputRes<Mode>>, Vk::ShaderRead<Res_BloomFinal>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_Swapchain>> {
-    using SwapchainImageFn = FunctionRef<Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>() const>;
+    using SwapchainImageFn = FunctionRef<Vk::TypedImage<Vk::ImageLayout::ColorAttachmentOptimal>() const>;
 
     PostProcessResources& post;
     RenderFrame&          frame;

@@ -44,3 +44,6 @@
 [submodule "extern/SPIRV-Reflect"]
 	path = extern/SPIRV-Reflect
 	url = https://github.com/KhronosGroup/SPIRV-Reflect.git
+[submodule "extern/DirectX-Headers"]
+	path = extern/DirectX-Headers
+	url = https://github.com/microsoft/DirectX-Headers.git

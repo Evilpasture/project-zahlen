@@ -19,11 +19,11 @@ class CommandEncoder;
 namespace ZHLN {
 
 using SupportedUITargetFormats = std::integer_sequence<
-    VkFormat, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_R8G8B8A8_UNORM,
-    VK_FORMAT_R16G16B16A16_SFLOAT>;
+    Vk::Format, Vk::Format::B8G8R8A8Srgb, Vk::Format::B8G8R8A8Unorm, Vk::Format::R8G8B8A8Srgb, Vk::Format::R8G8B8A8Unorm,
+    Vk::Format::R16G16B16A16Sfloat>;
 
-template <VkFormat Format>
-using UIColorPass = Vk::DynamicPass<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, Format>>;
+template <Vk::Format Format>
+using UIColorPass = Vk::DynamicPass<1, false, Vk::AttachmentFormats<Vk::Format::Undefined, Format>>;
 
 class UIRenderer {
   public:
@@ -40,13 +40,13 @@ class UIRenderer {
 
     void BeginFrame() noexcept;
 
-    [[nodiscard]] auto SupportsFormat(VkFormat colorFormat) const noexcept -> bool;
+    [[nodiscard]] auto SupportsFormat(Vk::Format colorFormat) const noexcept -> bool;
 
-    template <VkFormat Format>
+    template <Vk::Format Format>
     void Record(const UIColorPass<Format>& pass, Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex,
                 UIDrawData uiData) noexcept;
 
-    void RecordFallback(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, VkFormat colorFormat,
+    void RecordFallback(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, Vk::Format colorFormat,
                         UIDrawData uiData) noexcept;
 
   private:

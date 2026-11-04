@@ -36,7 +36,7 @@ inline constexpr Color4 kClearColorAnisotropy = {.r = 0.0f, .g = 0.0f, .b = 0.0f
 inline constexpr Color4 kClearColorSheen      = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 inline constexpr float  kClearDepthValue      = 1.0f;
 
-inline constexpr VkShaderStageFlags kCommonStages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+inline constexpr Vk::ShaderStage kCommonStages = Vk::ShaderStage::Vertex | Vk::ShaderStage::Fragment | Vk::ShaderStage::Compute;
 
 inline constexpr uint32_t kGpuCullingMaxInstances        = 8192;
 inline constexpr uint32_t kGpuCullingMaxBatches          = 256;

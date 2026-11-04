@@ -22,8 +22,8 @@ inline void CopyImageToBuffer(
     const VkImage            srcImage,
     const VkBuffer           dstBuffer,
     const VkExtent2D         extent,
-    const VkImageLayout      layout,
-    const VkImageAspectFlags aspect
+    const Vk::ImageLayout      layout,
+    const Vk::ImageAspect aspect
 ) noexcept {
     const VkBufferImageCopy2 region {
         .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
@@ -31,7 +31,7 @@ inline void CopyImageToBuffer(
         .bufferImageHeight = extent.height,
         .imageSubresource =
             {
-                .aspectMask     = aspect,
+                .aspectMask     = ToVk(aspect),
                 .mipLevel       = 0,
                 .baseArrayLayer = 0,
                 .layerCount     = 1,
@@ -41,7 +41,7 @@ inline void CopyImageToBuffer(
     const VkCopyImageToBufferInfo2 info {
         .sType          = VK_STRUCTURE_TYPE_COPY_IMAGE_TO_BUFFER_INFO_2,
         .srcImage       = srcImage,
-        .srcImageLayout = layout,
+        .srcImageLayout = ToVk(layout),
         .dstBuffer      = dstBuffer,
         .regionCount    = 1,
         .pRegions       = &region,
@@ -52,21 +52,21 @@ inline void CopyImageToBuffer(
 inline void CopyImage(
     const VkCommandBuffer cmd,
     const VkImage         srcImage,
-    const VkImageLayout   srcLayout,
+    const Vk::ImageLayout   srcLayout,
     const VkImage         dstImage,
-    const VkImageLayout   dstLayout,
+    const Vk::ImageLayout   dstLayout,
     const VkExtent3D      extent
 ) noexcept {
     const VkImageCopy2 region {
         .sType = VK_STRUCTURE_TYPE_IMAGE_COPY_2,
         .srcSubresource =
             {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .aspectMask = ToVk(Vk::ImageAspect::Color),
                 .layerCount = 1,
             },
         .dstSubresource =
             {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .aspectMask = ToVk(Vk::ImageAspect::Color),
                 .layerCount = 1,
             },
         .extent = extent,
@@ -74,9 +74,9 @@ inline void CopyImage(
     const VkCopyImageInfo2 info {
         .sType          = VK_STRUCTURE_TYPE_COPY_IMAGE_INFO_2,
         .srcImage       = srcImage,
-        .srcImageLayout = srcLayout,
+        .srcImageLayout = ToVk(srcLayout),
         .dstImage       = dstImage,
-        .dstImageLayout = dstLayout,
+        .dstImageLayout = ToVk(dstLayout),
         .regionCount    = 1,
         .pRegions       = &region,
     };
@@ -103,7 +103,7 @@ inline void GenerateMipmaps(
     const VkImage               image,
     const uint32_t              width,
     const uint32_t              height,
-    const VkPipelineStageFlags2 shaderReadStage
+    const Vk::PipelineStage shaderReadStage
 ) noexcept {
     GenerateMipmaps(cmd, image, width, height, GetMipLevels(width, height), shaderReadStage);
 }
@@ -114,7 +114,7 @@ inline void GenerateMipmaps(
     const uint32_t              width,
     const uint32_t              height,
     const uint32_t              mipLevels,
-    const VkPipelineStageFlags2 shaderReadStage
+    const Vk::PipelineStage shaderReadStage
 ) noexcept {
     if (cmd == VK_NULL_HANDLE || image == VK_NULL_HANDLE || width == 0 || height == 0 || mipLevels == 0) {
         return;
@@ -124,7 +124,7 @@ inline void GenerateMipmaps(
     uint32_t mipHeight = height;
     for (uint32_t mip = 1; mip < mipLevels; ++mip) {
         const VkImageSubresourceRange srcMipRange {
-            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .aspectMask     = ToVk(Vk::ImageAspect::Color),
             .baseMipLevel   = mip - 1,
             .levelCount     = 1,
             .baseArrayLayer = 0,
@@ -133,34 +133,34 @@ inline void GenerateMipmaps(
         ImageBarrier::Transition(
             image,
             srcMipRange,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_READ_BIT
+            Vk::ImageLayout::TransferDstOptimal,
+            Vk::ImageLayout::TransferSrcOptimal,
+            Vk::PipelineStage::Transfer,
+            Vk::Access::TransferWrite,
+            Vk::PipelineStage::Transfer,
+            Vk::Access::TransferRead
         )
             .Record(cmd);
 
         const int32_t     nextWidth  = static_cast<int32_t>(std::max(mipWidth / 2, 1U));
         const int32_t     nextHeight = static_cast<int32_t>(std::max(mipHeight / 2, 1U));
         const VkImageBlit blit {
-            .srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = mip - 1, .layerCount = 1},
+            .srcSubresource = {.aspectMask = ToVk(Vk::ImageAspect::Color), .mipLevel = mip - 1, .layerCount = 1},
             .srcOffsets     = {{0, 0, 0}, {static_cast<int32_t>(mipWidth), static_cast<int32_t>(mipHeight), 1}},
-            .dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = mip, .layerCount = 1},
+            .dstSubresource = {.aspectMask = ToVk(Vk::ImageAspect::Color), .mipLevel = mip, .layerCount = 1},
             .dstOffsets     = {{0, 0, 0}, {nextWidth, nextHeight, 1}},
         };
-        vkCmdBlitImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+        vkCmdBlitImage(cmd, image, ToVk(Vk::ImageLayout::TransferSrcOptimal), image, ToVk(Vk::ImageLayout::TransferDstOptimal), 1, &blit, ToVk(Vk::Filter::Linear));
 
         ImageBarrier::Transition(
             image,
             srcMipRange,
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_READ_BIT,
+            Vk::ImageLayout::TransferSrcOptimal,
+            Vk::ImageLayout::ShaderReadOnlyOptimal,
+            Vk::PipelineStage::Transfer,
+            Vk::Access::TransferRead,
             shaderReadStage,
-            VK_ACCESS_2_SHADER_READ_BIT
+            Vk::Access::ShaderRead
         )
             .Record(cmd);
 
@@ -169,7 +169,7 @@ inline void GenerateMipmaps(
     }
 
     const VkImageSubresourceRange lastMipRange {
-        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .aspectMask     = ToVk(Vk::ImageAspect::Color),
         .baseMipLevel   = mipLevels - 1,
         .levelCount     = 1,
         .baseArrayLayer = 0,
@@ -178,12 +178,12 @@ inline void GenerateMipmaps(
     ImageBarrier::Transition(
         image,
         lastMipRange,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        Vk::ImageLayout::TransferDstOptimal,
+        Vk::ImageLayout::ShaderReadOnlyOptimal,
+        Vk::PipelineStage::Transfer,
+        Vk::Access::TransferWrite,
         shaderReadStage,
-        VK_ACCESS_2_SHADER_READ_BIT
+        Vk::Access::ShaderRead
     )
         .Record(cmd);
 }

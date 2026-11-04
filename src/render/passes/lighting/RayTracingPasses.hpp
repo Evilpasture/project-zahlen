@@ -60,7 +60,7 @@ struct GtaoDesc {
             push, VkExtent3D {frame.graphResources.ao.extent.width, frame.graphResources.ao.extent.height, 1},
             Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
             Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
-            Vk::Slot<"frame">(frame.frameUniformBuffers), Vk::Slot<"outAo">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.ao))
+            Vk::Slot<"frame">(frame.frameUniformBuffers), Vk::Slot<"outAo">(Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.ao))
         );
     }
 };
@@ -96,9 +96,9 @@ struct RcgiCascadePass:
 
         const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget());
         const auto normal   = Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer);
-        const auto probes   = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rcgiProbes);
-        const auto cascadeA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rcgiCascadeA);
-        const auto cascadeB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rcgiCascadeB);
+        const auto probes   = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.rcgiProbes);
+        const auto cascadeA = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.rcgiCascadeA);
+        const auto cascadeB = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.rcgiCascadeB);
 
         const Vk::AsAddressWrite tlas {.address = frame.tlasAddresses.Get()};
 
@@ -155,7 +155,7 @@ struct RcgiCascadePass:
             chain.Step<Shaders::RcgiCascadeTraceMerge>(
                 frame.renderer.lighting.rcgiCascadeTraceMerge, VkExtent3D {alignedExt.width, alignedExt.height, 1u}, push, Vk::Slot<"inProbes">(probes),
                 Vk::Slot<"inUpperCascade">(inUpper), Vk::Slot<"outCascade">(outCasc), Vk::Slot<"tlas">(tlas),
-                Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.View(VK_IMAGE_ASPECT_DEPTH_BIT)),
+                Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.View(Vk::ImageAspect::Depth)),
                 Vk::Slot<"shadowTiles">(frame.shadowTileBuffers), Vk::Slot<"frame">(frame.frameUniformBuffers),
                 Vk::Slot<"g_instances">(frame.instanceDataBuffers), Vk::Slot<"lights">(frame.lightStorageBuffers)
             );

@@ -19,13 +19,13 @@ namespace {
 static_assert(
     [] {
         constexpr auto colorA =
-            Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_R8G8B8A8_UNORM}.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+            Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, Vk::Format::R8G8B8A8Unorm}.Assume<Vk::ImageLayout::ColorAttachmentOptimal>();
         constexpr auto colorB =
-            Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_B8G8R8A8_SRGB}.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
-        constexpr auto depthStencil = Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_D32_SFLOAT_S8_UINT}
-                                          .Assume<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>();
+            Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, Vk::Format::B8G8R8A8Srgb}.Assume<Vk::ImageLayout::ColorAttachmentOptimal>();
+        constexpr auto depthStencil = Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, Vk::Format::D32SfloatS8Uint}
+                                          .Assume<Vk::ImageLayout::DepthStencilAttachmentOptimal>();
         constexpr auto depthOnly =
-            Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_D32_SFLOAT}.Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
+            Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, Vk::Format::D32Sfloat}.Assume<Vk::ImageLayout::DepthAttachmentOptimal>();
 
         constexpr auto pass = Vk::DynamicPass(VkExtent2D {.width = 64, .height = 32})
                                   .Viewport(2.0F, 3.0F, 30.0F, 20.0F)
@@ -47,11 +47,12 @@ static_assert(
         VkCommandBufferInheritanceRenderingInfo noStencilInfo {};
         [[maybe_unused]] const void* noStencilHead = noStencil.Link(nullptr, noStencilInfo);
 
-        return info.colorAttachmentCount == 2 && info.pColorAttachmentFormats != nullptr && info.pColorAttachmentFormats[0] == colorA.GetFormat() &&
-               info.pColorAttachmentFormats[1] == colorB.GetFormat() && info.depthAttachmentFormat == depthStencil.GetFormat() &&
-               info.stencilAttachmentFormat == depthStencil.GetFormat() && info.viewMask == 3 && info.rasterizationSamples == VK_SAMPLE_COUNT_1_BIT &&
+        return info.colorAttachmentCount == 2 && info.pColorAttachmentFormats != nullptr && info.pColorAttachmentFormats[0] == Vk::ToVk(colorA.GetFormat()) &&
+               info.pColorAttachmentFormats[1] == Vk::ToVk(colorB.GetFormat()) && info.depthAttachmentFormat == Vk::ToVk(depthStencil.GetFormat()) &&
+               info.stencilAttachmentFormat == Vk::ToVk(depthStencil.GetFormat()) && info.viewMask == 3 && info.rasterizationSamples == VK_SAMPLE_COUNT_1_BIT &&
                noStencilInfo.colorAttachmentCount == 0 && noStencilInfo.pColorAttachmentFormats == nullptr &&
-               noStencilInfo.depthAttachmentFormat == depthOnly.GetFormat() && noStencilInfo.stencilAttachmentFormat == VK_FORMAT_UNDEFINED;
+               noStencilInfo.depthAttachmentFormat == Vk::ToVk(depthOnly.GetFormat()) &&
+               noStencilInfo.stencilAttachmentFormat == Vk::ToVk(Vk::Format::Undefined);
     }(),
     "Secondary inheritance must match the DynamicPass's bound runtime attachments."
 );

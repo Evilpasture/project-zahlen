@@ -13,15 +13,15 @@
 
 namespace ZHLN::Vk {
 
-template <VkImageLayout Layout, VkFormat Format>
+template <Vk::ImageLayout Layout, Vk::Format Format>
 struct TypedImage;
 
 struct ImageSlice {
     VkImage            image = VK_NULL_HANDLE;
     VkImageView        attachmentView = VK_NULL_HANDLE;
     VkExtent3D         extent {};
-    VkFormat           format = VK_FORMAT_UNDEFINED;
-    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    Vk::Format           format = Vk::Format::Undefined;
+    Vk::ImageAspect aspect = Vk::ImageAspect::Color;
     uint32_t           baseMip = 0;
     uint32_t           mipCount = 1;
     uint32_t           baseLayer = 0;
@@ -31,12 +31,12 @@ struct ImageSlice {
     constexpr ImageSlice() noexcept = default;
 
     constexpr ImageSlice(
-        VkImage img, VkImageView attachment, VkExtent2D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_COLOR_BIT
+        VkImage img, VkImageView attachment, VkExtent2D ext, Vk::Format fmt, Vk::ImageAspect asp = Vk::ImageAspect::Color
     ) noexcept:
         image(img), attachmentView(attachment), extent({ext.width, ext.height, 1}), format(fmt), aspect(asp) {
     }
     constexpr ImageSlice(
-        VkImage img, VkImageView attachment, VkExtent3D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_COLOR_BIT
+        VkImage img, VkImageView attachment, VkExtent3D ext, Vk::Format fmt, Vk::ImageAspect asp = Vk::ImageAspect::Color
     ) noexcept:
         image(img), attachmentView(attachment), extent(ext), format(fmt), aspect(asp) {
     }
@@ -51,9 +51,9 @@ struct ImageSlice {
     }
 
     ImageSlice(
-        VkImage img, const AttachmentView& owner, VkExtent3D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_NONE
+        VkImage img, const AttachmentView& owner, VkExtent3D ext, Vk::Format fmt, Vk::ImageAspect asp = Vk::ImageAspect::None
     ) noexcept:
-        image(img), attachmentView(owner.Get()), extent(ext), format(fmt), aspect(asp != VK_IMAGE_ASPECT_NONE ? asp : owner.AspectFlags()) {
+        image(img), attachmentView(owner.Get()), extent(ext), format(fmt), aspect(asp != Vk::ImageAspect::None ? asp : owner.AspectFlags()) {
         const VkImageSubresourceRange range = owner.View().SubresourceRange();
         baseMip                              = range.baseMipLevel;
         mipCount                             = range.levelCount;
@@ -62,7 +62,7 @@ struct ImageSlice {
         viewType                             = owner.View().ViewType();
     }
     ImageSlice(
-        VkImage img, const AttachmentView& owner, VkExtent2D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_NONE
+        VkImage img, const AttachmentView& owner, VkExtent2D ext, Vk::Format fmt, Vk::ImageAspect asp = Vk::ImageAspect::None
     ) noexcept:
         ImageSlice(img, owner, VkExtent3D {ext.width, ext.height, 1}, fmt, asp) {
     }
@@ -80,22 +80,22 @@ struct ImageSlice {
         };
     }
 
-    template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+    template <Vk::ImageLayout OldLayout, Vk::ImageLayout NewLayout>
     void Transition(VkCommandBuffer cmd) const noexcept;
 
-    template <VkImageLayout TargetLayout>
+    template <Vk::ImageLayout TargetLayout>
     void DiscardTo(VkCommandBuffer cmd) const noexcept;
 
-    void Transition(VkCommandBuffer cmd, VkImageLayout oldLayout, VkImageLayout newLayout) const noexcept;
+    void Transition(VkCommandBuffer cmd, Vk::ImageLayout oldLayout, Vk::ImageLayout newLayout) const noexcept;
 
     void Transition(
         VkCommandBuffer       cmd,
-        VkImageLayout         oldLayout,
-        VkImageLayout         newLayout,
-        VkPipelineStageFlags2 srcStage,
-        VkAccessFlags2        srcAccess,
-        VkPipelineStageFlags2 dstStage,
-        VkAccessFlags2        dstAccess
+        Vk::ImageLayout         oldLayout,
+        Vk::ImageLayout         newLayout,
+        Vk::PipelineStage srcStage,
+        Vk::Access        srcAccess,
+        Vk::PipelineStage dstStage,
+        Vk::Access        dstAccess
     ) const noexcept;
 
     [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage {
@@ -114,18 +114,18 @@ struct ImageSlice {
         return {.width = extent.width, .height = extent.height};
     }
 
-    template <VkImageLayout Layout>
-    [[nodiscard]] constexpr auto Assume(VkImageAspectFlags imageAspect) const noexcept -> TypedImage<Layout, VK_FORMAT_UNDEFINED>;
-    template <VkImageLayout Layout>
-    [[nodiscard]] constexpr auto Assume() const noexcept -> TypedImage<Layout, VK_FORMAT_UNDEFINED>;
+    template <Vk::ImageLayout Layout>
+    [[nodiscard]] constexpr auto Assume(Vk::ImageAspect imageAspect) const noexcept -> TypedImage<Layout, Vk::Format::Undefined>;
+    template <Vk::ImageLayout Layout>
+    [[nodiscard]] constexpr auto Assume() const noexcept -> TypedImage<Layout, Vk::Format::Undefined>;
 
-    template <VkFormat Format, VkImageLayout Layout>
-    [[nodiscard]] constexpr auto MatchFormat(VkImageAspectFlags imageAspect) const noexcept -> std::optional<TypedImage<Layout, Format>>;
-    template <VkFormat Format, VkImageLayout Layout>
+    template <Vk::Format Format, Vk::ImageLayout Layout>
+    [[nodiscard]] constexpr auto MatchFormat(Vk::ImageAspect imageAspect) const noexcept -> std::optional<TypedImage<Layout, Format>>;
+    template <Vk::Format Format, Vk::ImageLayout Layout>
     [[nodiscard]] constexpr auto MatchFormat() const noexcept -> std::optional<TypedImage<Layout, Format>>;
 };
 
 static_assert(std::is_trivially_copyable_v<ImageSlice>);
-static_assert(ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {7, 8}, VK_FORMAT_UNDEFINED}.extent.depth == 1);
+static_assert(ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {7, 8}, Vk::Format::Undefined}.extent.depth == 1);
 
 } // namespace ZHLN::Vk

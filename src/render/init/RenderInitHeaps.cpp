@@ -42,12 +42,12 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
         .and_then([&](auto&& basicStages) -> std::expected<void, ErrorCode> {
             const auto basicView     = basicStages.View();
             const auto reflectInputs = std::to_array<Vk::ReflectedStageInput>({
-                {.shader = basicView.Vertex(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
-                {.shader = basicView.Fragment(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
-                {.shader = Vk::CreateShaderDesc<Shaders::Modules::ShadowAtlasVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
-                {.shader = Vk::CreateShaderDesc<Shaders::Modules::ForwardPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
-                {.shader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>(), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
-                {.shader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>(), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
+                {.shader = basicView.Vertex(), .stage = Vk::ShaderStage::Vertex},
+                {.shader = basicView.Fragment(), .stage = Vk::ShaderStage::Fragment},
+                {.shader = Vk::CreateShaderDesc<Shaders::Modules::ShadowAtlasVS>(), .stage = Vk::ShaderStage::Vertex},
+                {.shader = Vk::CreateShaderDesc<Shaders::Modules::ForwardPS>(), .stage = Vk::ShaderStage::Fragment},
+                {.shader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>(), .stage = Vk::ShaderStage::Compute},
+                {.shader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>(), .stage = Vk::ShaderStage::Compute},
             });
             if (!bindlessLayout.Build(ctx.Device(), std::span {reflectInputs})) {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -207,10 +207,10 @@ void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
 
 void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
     if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredView.Handle() != VK_NULL_HANDLE) {
-        heapManager.BindImage(iblPrefilteredSlot, iblPayload.prefilteredView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        heapManager.BindImage(iblPrefilteredSlot, iblPayload.prefilteredView, Vk::ImageLayout::ShaderReadOnlyOptimal);
     }
     if (bindlessLayout.HasBinding(0, 8) && iblPayload.brdfLutView.Handle() != VK_NULL_HANDLE) {
-        heapManager.BindImage(iblBrdfLutSlot, iblPayload.brdfLutView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        heapManager.BindImage(iblBrdfLutSlot, iblPayload.brdfLutView, Vk::ImageLayout::ShaderReadOnlyOptimal);
     }
 }
 
@@ -223,7 +223,7 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
         return;
     }
 
-    heapManager.BindImage(transLightingSlot, graphResources.transLightingTarget.image.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    heapManager.BindImage(transLightingSlot, graphResources.transLightingTarget.image.View(), Vk::ImageLayout::ShaderReadOnlyOptimal);
 }
 
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
@@ -329,7 +329,7 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     }
 
     constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
-    auto           makeLtc   = [&] { return Vk::Image::Create(allocator, Vk::ImageConfig::Texture2D({64, 64}, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage)); };
+    auto           makeLtc   = [&] { return Vk::Image::Create(allocator, Vk::ImageConfig::Texture2D({64, 64}, Vk::Format::R16G16B16A16Sfloat, kLtcUsage)); };
     bool           submitted = false;
     auto           matImg    = makeLtc();
     if (!matImg) {
@@ -376,7 +376,7 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
 
 auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void, ErrorCode> {
     const auto shader = Vk::CreateShaderDesc<Shaders::Modules::ProceduralBakeCS>();
-    if (!proceduralBakeDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+    if (!proceduralBakeDescLayout.Build(ctx.Device(), shader, Vk::ShaderStage::Compute)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     if (auto built = Vk::BuildHeapPassBindings(
@@ -387,7 +387,7 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
     }
 
     const auto iblShader = Vk::CreateShaderDesc<Shaders::Modules::IblSpecularCS>();
-    if (!iblBakeDescLayout.Build(ctx.Device(), iblShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+    if (!iblBakeDescLayout.Build(ctx.Device(), iblShader, Vk::ShaderStage::Compute)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     if (auto built = Vk::BuildHeapPassBindings(

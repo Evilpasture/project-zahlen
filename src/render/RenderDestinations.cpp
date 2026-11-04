@@ -67,7 +67,7 @@ auto RenderContext::Impl::EnsureDepthTarget(FrameDestinations::Window& destinati
         return {};
     }
 
-    auto created = Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+    auto created = Vk::FormatRenderTarget<Vk::Format::D32SfloatS8Uint>::Create(
         allocator, ctx.Device(), extent, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
     );
     if (!created) {
@@ -80,8 +80,8 @@ auto RenderContext::Impl::EnsureDepthTarget(FrameDestinations::Window& destinati
     if (destination.IsPrimary()) {
         if (auto immediate = Vk::ExecuteImmediate(
                 ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
-                    target.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(cmd);
-                    target.Transition<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+                    target.DiscardTo<Vk::ImageLayout::DepthStencilAttachmentOptimal>(cmd);
+                    target.Transition<Vk::ImageLayout::DepthStencilAttachmentOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);
                 }
             );
             !immediate) {
@@ -89,7 +89,7 @@ auto RenderContext::Impl::EnsureDepthTarget(FrameDestinations::Window& destinati
             return std::unexpected(immediate.error());
         }
         if (decalDepthSlot.Valid()) {
-            heapManager.BindImage(decalDepthSlot, target.image.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            heapManager.BindImage(decalDepthSlot, target.image.View(), Vk::ImageLayout::ShaderReadOnlyOptimal);
         }
         Vk::Debug::SetImageName(ctx, target.image.Handle(), "DepthTarget");
     } else {

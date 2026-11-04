@@ -138,7 +138,7 @@ class FrameSync {
 
         // 1. Wait on swapchain acquire (imageAvailable) — only when presenting to swapchain
         if (presentWaitSemaphore != VK_NULL_HANDLE && _frames[s].imageAvailable != VK_NULL_HANDLE) {
-            sync.waitInfos[sync.waitCount++] = SemaphoreSubmit::Binary(_frames[s].imageAvailable, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            sync.waitInfos[sync.waitCount++] = SemaphoreSubmit::Binary(_frames[s].imageAvailable, Vk::PipelineStage::ColorAttachment);
         }
 
         // 2. Add extra external waits (e.g. async compute, transfer)
@@ -152,13 +152,13 @@ class FrameSync {
         // 3. Step timeline and prepare signals
         const uint64_t next_value            = ++_graphicsTimelineValues[s];
         sync.submissionValue                 = next_value;
-        sync.signalInfos[sync.signalCount++] = SemaphoreSubmit::Timeline(_frames[s].graphicsTimeline, next_value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+        sync.signalInfos[sync.signalCount++] = SemaphoreSubmit::Timeline(_frames[s].graphicsTimeline, next_value, Vk::PipelineStage::AllCommands);
 
         // 4. Signal present semaphore if swapchain is active
         if (presentWaitSemaphore != VK_NULL_HANDLE) {
             ZHLN::PanicIf(sync.signalCount >= GraphicsSubmitSync::kMaxSignals, "GraphicsSubmitSync signal capacity exceeded");
             if (sync.signalCount < GraphicsSubmitSync::kMaxSignals) {
-                sync.signalInfos[sync.signalCount++] = SemaphoreSubmit::Binary(presentWaitSemaphore, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+                sync.signalInfos[sync.signalCount++] = SemaphoreSubmit::Binary(presentWaitSemaphore, Vk::PipelineStage::AllGraphics);
             }
         }
 
@@ -175,7 +175,7 @@ class FrameSync {
         const uint32_t s   = slot % N;
         const uint64_t val = ++_timelineValues[s];
         return ComputeSubmitSync {
-            .signal        = SemaphoreSubmit::Timeline(_frames[s].computeTimeline, val, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
+            .signal        = SemaphoreSubmit::Timeline(_frames[s].computeTimeline, val, Vk::PipelineStage::Compute),
             .timelineValue = val,
         };
     }
@@ -185,7 +185,7 @@ class FrameSync {
     }
 
     /// Builds a dependency for a stage waiting on compute simulation.
-    [[nodiscard]] auto GetComputeWaitDependency(uint32_t slot, VkPipelineStageFlags2 stage) const noexcept -> std::optional<SemaphoreSubmit> {
+    [[nodiscard]] auto GetComputeWaitDependency(uint32_t slot, Vk::PipelineStage stage) const noexcept -> std::optional<SemaphoreSubmit> {
         const uint32_t s   = slot % N;
         const uint64_t val = _computeValuesSubmitted[s];
         if (val > 0 && _frames[s].computeTimeline != VK_NULL_HANDLE) {
@@ -195,7 +195,7 @@ class FrameSync {
     }
 
     /// Builds a dependency for a stage waiting on a prior graphics submission.
-    [[nodiscard]] auto GetGraphicsWaitDependency(uint32_t slot, VkPipelineStageFlags2 stage) const noexcept -> std::optional<SemaphoreSubmit> {
+    [[nodiscard]] auto GetGraphicsWaitDependency(uint32_t slot, Vk::PipelineStage stage) const noexcept -> std::optional<SemaphoreSubmit> {
         const uint32_t s   = slot % N;
         const uint64_t val = _graphicsValuesSubmitted[s];
         if (val > 0 && _frames[s].graphicsTimeline != VK_NULL_HANDLE) {

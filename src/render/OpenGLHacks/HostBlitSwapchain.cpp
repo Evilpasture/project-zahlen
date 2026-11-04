@@ -130,7 +130,7 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
     return true;
 }
 
-bool ReadBackPixels(Vk::ImageView view, uint32_t width, uint32_t height, VkImageLayout srcLayout) noexcept {
+bool ReadBackPixels(Vk::ImageView view, uint32_t width, uint32_t height, Vk::ImageLayout srcLayout) noexcept {
     auto acquired = g.ring.Acquire();
     if (!acquired) { return false; }
     auto slot = *acquired;
@@ -139,15 +139,15 @@ bool ReadBackPixels(Vk::ImageView view, uint32_t width, uint32_t height, VkImage
     const VkCommandBuffer cmd = recording->Handle();
 
     view.Transition(
-        cmd, srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
-        VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT
+        cmd, srcLayout, Vk::ImageLayout::TransferSrcOptimal, Vk::PipelineStage::AllCommands, Vk::Access::MemoryWrite,
+        Vk::PipelineStage::Transfer, Vk::Access::TransferRead
     );
 
     Vk::CopyImageToBuffer(cmd, view.Handle(), g.staging, VkExtent2D {width, height});
 
     view.Transition(
-        cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, VK_PIPELINE_STAGE_2_TRANSFER_BIT, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-        VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
+        cmd, Vk::ImageLayout::TransferSrcOptimal, srcLayout, Vk::PipelineStage::Transfer, 0, Vk::PipelineStage::AllCommands,
+        Vk::Access::MemoryRead | Vk::Access::MemoryWrite
     );
 
     auto executable = std::move(*recording).End();
@@ -190,7 +190,7 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
     return g.glWindow;
 }
 
-void GlBlit(uint32_t width, uint32_t height, VkFormat format) noexcept {
+void GlBlit(uint32_t width, uint32_t height, Vk::Format format) noexcept {
     int fbW = 0;
     int fbH = 0;
     glfwGetFramebufferSize(glfwGetCurrentContext(), &fbW, &fbH);
@@ -202,13 +202,13 @@ void GlBlit(uint32_t width, uint32_t height, VkFormat format) noexcept {
     GLenum glType   = GL_UNSIGNED_INT_8_8_8_8_REV;
 
     switch (format) {
-        case VK_FORMAT_R8G8B8A8_UNORM:
-        case VK_FORMAT_R8G8B8A8_SRGB:
+        case Vk::Format::R8G8B8A8Unorm:
+        case Vk::Format::R8G8B8A8Srgb:
             glFormat = GL_RGBA;
             glType   = GL_UNSIGNED_BYTE;
             break;
-        case VK_FORMAT_R8G8B8_UNORM:
-        case VK_FORMAT_R8G8B8_SRGB:
+        case Vk::Format::R8G8B8Unorm:
+        case Vk::Format::R8G8B8Srgb:
             glFormat = GL_RGB;
             glType   = GL_UNSIGNED_BYTE;
             break;
@@ -260,7 +260,7 @@ void Shutdown() noexcept;
     return true;
 }
 
-[[nodiscard]] bool Present(const ZHLN::Vk::Image& src, void* nativeWindow, uint32_t width, uint32_t height, VkFormat format, VkImageLayout srcLayout) noexcept {
+[[nodiscard]] bool Present(const ZHLN::Vk::Image& src, void* nativeWindow, uint32_t width, uint32_t height, Vk::Format format, Vk::ImageLayout srcLayout) noexcept {
     if (!g.ready || !src.Valid() || width == 0 || height == 0)
         return false;
 
@@ -320,7 +320,7 @@ namespace ZHLN::HostBlit {
     return false;
 }
 
-[[nodiscard]] bool Present(const ZHLN::Vk::Image&, void*, uint32_t, uint32_t, VkFormat, VkImageLayout) noexcept {
+[[nodiscard]] bool Present(const ZHLN::Vk::Image&, void*, uint32_t, uint32_t, Vk::Format, Vk::ImageLayout) noexcept {
     return false;
 }
 

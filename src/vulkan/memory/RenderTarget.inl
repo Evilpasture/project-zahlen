@@ -9,9 +9,9 @@ namespace TemplatedDetail {
 template <typename T>
 struct ResourceTraits;
 
-template <VkImageLayout Layout, VkFormat Format>
+template <Vk::ImageLayout Layout, Vk::Format Format>
 struct ResourceTraits<TypedImage<Layout, Format>> {
-    static constexpr VkImageLayout old_layout = Layout;
+    static constexpr Vk::ImageLayout old_layout = Layout;
     static constexpr auto GetSlice(const TypedImage<Layout, Format>& res) noexcept -> const ImageSlice& {
         return res.Raw();
     }
@@ -19,7 +19,7 @@ struct ResourceTraits<TypedImage<Layout, Format>> {
 
 template <typename GraphTag>
 struct ResourceTraits<RenderTarget<GraphTag>> {
-    static constexpr VkImageLayout old_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    static constexpr Vk::ImageLayout old_layout = Vk::ImageLayout::Undefined;
     static auto GetSlice(const RenderTarget<GraphTag>& res) noexcept -> ImageSlice {
         return res.AsSlice();
     }
@@ -27,12 +27,12 @@ struct ResourceTraits<RenderTarget<GraphTag>> {
 
 }
 
-template <VkImageLayout TargetLayout, typename GraphTag>
+template <Vk::ImageLayout TargetLayout, typename GraphTag>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<GraphTag>& rt, Tag<TargetLayout> ) noexcept {
     return TransitionSingle<TargetLayout>(cmd, rt);
 }
 
-template <VkImageLayout TargetLayout, typename... Resources>
+template <Vk::ImageLayout TargetLayout, typename... Resources>
 [[nodiscard]] constexpr auto TransitionBatch(VkCommandBuffer cmd, const Resources&... resources) noexcept {
     constexpr size_t count = sizeof...(Resources);
     if constexpr (count == 0) {
@@ -43,7 +43,7 @@ template <VkImageLayout TargetLayout, typename... Resources>
 
         auto populate_barrier = [&](const auto& res) {
             using Traits                       = TemplatedDetail::ResourceTraits<std::decay_t<decltype(res)>>;
-            constexpr VkImageLayout old_layout = Traits::old_layout;
+            constexpr Vk::ImageLayout old_layout = Traits::old_layout;
             const ImageSlice        slice      = Traits::GetSlice(res);
             barriers[idx++]                    = ImageBarrier::Transition<old_layout, TargetLayout>(slice);
         };

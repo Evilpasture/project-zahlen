@@ -9,7 +9,7 @@
 
 namespace ZHLN {
 
-template <VkImageLayout ColorL, VkImageLayout DepthL>
+template <Vk::ImageLayout ColorL, Vk::ImageLayout DepthL>
 struct SceneResources {
     Vk::TypedImage<ColorL> sceneColor;
     Vk::TypedImage<ColorL> velocity;
@@ -22,7 +22,7 @@ struct GroupRange {
     const NativeMaterial* material;
     uint32_t              start;
     uint32_t              count;
-    VkCullModeFlags       cullMode;
+    Vk::CullMode       cullMode;
 };
 
 struct CsgResources {

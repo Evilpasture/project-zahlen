@@ -13,13 +13,13 @@ namespace ZHLN::Vk {
 
 struct ImageWrite {
     ImageView     view {};
-    VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    Vk::ImageLayout layout = Vk::ImageLayout::ShaderReadOnlyOptimal;
 
     ImageWrite() = default;
-    explicit ImageWrite(ImageView imageView, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
+    explicit ImageWrite(ImageView imageView, Vk::ImageLayout imageLayout = Vk::ImageLayout::ShaderReadOnlyOptimal) noexcept:
         view(imageView), layout(imageLayout) {
     }
-    explicit ImageWrite(const ImageSlice& source, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
+    explicit ImageWrite(const ImageSlice& source, Vk::ImageLayout imageLayout = Vk::ImageLayout::ShaderReadOnlyOptimal) noexcept:
         view(source.View()), layout(imageLayout) {
     }
 };
@@ -41,7 +41,7 @@ struct NamedSlot {
 
 template <typename T>
 struct IsTypedImage: std::false_type {};
-template <VkImageLayout L, VkFormat F>
+template <Vk::ImageLayout L, Vk::Format F>
 struct IsTypedImage<TypedImage<L, F>>: std::true_type {};
 
 namespace TemplatedDetail {

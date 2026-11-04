@@ -36,7 +36,7 @@ void RtgiCompositePass::operator()(VkCommandBuffer cmd) const noexcept {
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"inProbes">(Vk::Assume<Vk::ComputeRead<Res_RcgiProbes>>(frame.graphResources.rcgiProbes)),
         Vk::Slot<"inCascade0">(Vk::Assume<Vk::ComputeRead<Res_RcgiCascadeA>>(frame.graphResources.rcgiCascadeA)), Vk::Slot<"frame">(frame.frameUniformBuffers),
-        Vk::Slot<"outLighting">(Vk::ImageWrite {frame.graphResources.lightingGI.image.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, 1), VK_IMAGE_LAYOUT_GENERAL})
+        Vk::Slot<"outLighting">(Vk::ImageWrite {frame.graphResources.lightingGI.image.View(Vk::ImageAspect::Color, 0, 1), Vk::ImageLayout::General})
     );
 }
 

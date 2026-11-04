@@ -39,7 +39,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         presentationTarget.SetFramebufferExtent(targetExt.width, targetExt.height);
     }
 
-    auto depthTarget = Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+    auto depthTarget = Vk::FormatRenderTarget<Vk::Format::D32SfloatS8Uint>::Create(
         allocator, ctx.Device(), targetExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
     );
     if (!depthTarget) {
@@ -81,11 +81,11 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         Vk::ClearColorAndTransition(cmd, Color4 {}, accumulationHistory.Current(), accumulationHistory.Previous());
 
         if (decalDepthSlot.Valid()) {
-            heapManager.BindImage(decalDepthSlot, primaryDepthTarget.image.View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            heapManager.BindImage(decalDepthSlot, primaryDepthTarget.image.View(), Vk::ImageLayout::ShaderReadOnlyOptimal);
         }
 
-        primaryDepthTarget.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(cmd);
-        primaryDepthTarget.Transition<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+        primaryDepthTarget.DiscardTo<Vk::ImageLayout::DepthStencilAttachmentOptimal>(cmd);
+        primaryDepthTarget.Transition<Vk::ImageLayout::DepthStencilAttachmentOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);
     }); !immediate) [[unlikely]] {
         return std::unexpected(immediate.error());
     }

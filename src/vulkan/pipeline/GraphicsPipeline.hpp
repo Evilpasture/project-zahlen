@@ -86,7 +86,7 @@ template <typename Usage>
                       typename Usage::Resource;
                       Usage::layout;
                   }) {
-        return Usage::layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        return Usage::layout == Vk::ImageLayout::ColorAttachmentOptimal;
     } else {
         return false;
     }
@@ -98,7 +98,7 @@ template <typename Usage>
                       typename Usage::Resource;
                       Usage::layout;
                   }) {
-        return Usage::layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL || Usage::layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        return Usage::layout == Vk::ImageLayout::DepthAttachmentOptimal || Usage::layout == Vk::ImageLayout::DepthStencilAttachmentOptimal;
     } else {
         return false;
     }
@@ -115,7 +115,7 @@ template <typename UsageList, size_t... Index>
 }
 
 template <typename UsageList, size_t Index, size_t N>
-consteval void AppendColorFormat(std::array<VkFormat, N>& formats, size_t& outIndex) noexcept {
+consteval void AppendColorFormat(std::array<Vk::Format, N>& formats, size_t& outIndex) noexcept {
     using Usage = typename UsageList::template type<Index>;
     if constexpr (IsColorAttachmentUsage<Usage>()) {
         using Resource      = typename Usage::Resource;
@@ -143,15 +143,15 @@ template <typename UsageList, size_t... Index>
 template <typename UsageList, size_t... Index>
 [[nodiscard]] consteval auto MakeColorFormats(std::index_sequence<Index...>) noexcept {
     constexpr size_t            count = CountColorAttachments<UsageList>(std::index_sequence<Index...> {});
-    std::array<VkFormat, count> formats {};
+    std::array<Vk::Format, count> formats {};
     size_t                      out_index = 0;
     (AppendColorFormat<UsageList, Index>(formats, out_index), ...);
     return formats;
 }
 
 template <typename UsageList, size_t... Index>
-[[nodiscard]] consteval auto FindDepthFormat(std::index_sequence<Index...>) noexcept -> VkFormat {
-    VkFormat format = VK_FORMAT_UNDEFINED;
+[[nodiscard]] consteval auto FindDepthFormat(std::index_sequence<Index...>) noexcept -> Vk::Format {
+    Vk::Format format = Vk::Format::Undefined;
     (
         [&] {
             using Usage = typename UsageList::template type<Index>;
@@ -175,11 +175,11 @@ struct PassPushConstants<PassContract, std::void_t<typename PassContract::PushCo
 };
 
 template <typename PassContract>
-[[nodiscard]] consteval auto PassTopology() noexcept -> VkPrimitiveTopology {
+[[nodiscard]] consteval auto PassTopology() noexcept -> Vk::PrimitiveTopology {
     if constexpr (requires { PassContract::topology; }) {
         return PassContract::topology;
     } else {
-        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        return Vk::PrimitiveTopology::TriangleList;
     }
 }
 
@@ -193,11 +193,11 @@ template <typename PassContract>
 }
 
 template <typename PassContract>
-[[nodiscard]] consteval auto PassCullMode() noexcept -> VkCullModeFlags {
+[[nodiscard]] consteval auto PassCullMode() noexcept -> Vk::CullMode {
     if constexpr (requires { PassContract::cull_mode; }) {
         return PassContract::cull_mode;
     } else {
-        return VK_CULL_MODE_BACK_BIT;
+        return Vk::CullMode::Back;
     }
 }
 
@@ -220,11 +220,11 @@ template <typename PassContract>
 }
 
 template <typename PassContract>
-[[nodiscard]] consteval auto PassPolygonMode() noexcept -> VkPolygonMode {
+[[nodiscard]] consteval auto PassPolygonMode() noexcept -> Vk::PolygonMode {
     if constexpr (requires { PassContract::polygon_mode; }) {
         return PassContract::polygon_mode;
     } else {
-        return VK_POLYGON_MODE_FILL;
+        return Vk::PolygonMode::Fill;
     }
 }
 
@@ -253,18 +253,18 @@ struct PassAttachmentFormats {
     static constexpr size_t   depth_count   = PipelineDetail::CountDepthAttachments<UsageList>(k_usage_indices);
     static constexpr auto     color_formats = PipelineDetail::MakeColorFormats<UsageList>(k_usage_indices);
     static constexpr auto     color_masks   = PipelineDetail::MakeColorMasks<UsageList>(k_usage_indices);
-    static constexpr VkFormat depth_format  = PipelineDetail::FindDepthFormat<UsageList>(k_usage_indices);
+    static constexpr Vk::Format depth_format  = PipelineDetail::FindDepthFormat<UsageList>(k_usage_indices);
     static constexpr bool     has_depth     = depth_count != 0;
 
     static_assert(depth_count <= 1, "A graphics pass contract may declare at most one depth attachment.");
     static_assert(
         [] {
-            for (VkFormat format: color_formats) {
-                if (format == VK_FORMAT_UNDEFINED) {
+            for (Vk::Format format: color_formats) {
+                if (format == Vk::Format::Undefined) {
                     return false;
                 }
             }
-            return !has_depth || depth_format != VK_FORMAT_UNDEFINED;
+            return !has_depth || depth_format != Vk::Format::Undefined;
         }(),
         "Pass attachment formats must be statically known Vulkan formats."
     );
@@ -279,8 +279,8 @@ struct GraphicsShaderModules<Vertex, Fragment> {
 
     static constexpr bool is_mesh_pipeline = false;
 
-    static_assert(StageOf<Vertex>() == VK_SHADER_STAGE_VERTEX_BIT, "GraphicsShaderModules<VS, PS> requires a vertex shader first.");
-    static_assert(StageOf<Fragment>() == VK_SHADER_STAGE_FRAGMENT_BIT, "GraphicsShaderModules<VS, PS> requires a fragment shader second.");
+    static_assert(StageOf<Vertex>() == Vk::ShaderStage::Vertex, "GraphicsShaderModules<VS, PS> requires a vertex shader first.");
+    static_assert(StageOf<Fragment>() == Vk::ShaderStage::Fragment, "GraphicsShaderModules<VS, PS> requires a fragment shader second.");
 
     template <typename Push>
     [[nodiscard]] static consteval auto PushLayoutMatches() noexcept -> bool {
@@ -312,9 +312,9 @@ struct GraphicsShaderModules<Task, Mesh, Fragment> {
 
     static constexpr bool is_mesh_pipeline = true;
 
-    static_assert(StageOf<Task>() == VK_SHADER_STAGE_TASK_BIT_EXT, "GraphicsShaderModules<TS, MS, PS> requires a task shader first.");
-    static_assert(StageOf<Mesh>() == VK_SHADER_STAGE_MESH_BIT_EXT, "GraphicsShaderModules<TS, MS, PS> requires a mesh shader second.");
-    static_assert(StageOf<Fragment>() == VK_SHADER_STAGE_FRAGMENT_BIT, "GraphicsShaderModules<TS, MS, PS> requires a fragment shader third.");
+    static_assert(StageOf<Task>() == Vk::ShaderStage::Task, "GraphicsShaderModules<TS, MS, PS> requires a task shader first.");
+    static_assert(StageOf<Mesh>() == Vk::ShaderStage::Mesh, "GraphicsShaderModules<TS, MS, PS> requires a mesh shader second.");
+    static_assert(StageOf<Fragment>() == Vk::ShaderStage::Fragment, "GraphicsShaderModules<TS, MS, PS> requires a fragment shader third.");
 
     template <typename Push>
     [[nodiscard]] static consteval auto PushLayoutMatches() noexcept -> bool {
@@ -350,7 +350,7 @@ concept GraphicsShaderModule = requires {
 
 template <ShaderProgram ShaderModule, typename PushConstants = void>
 struct ComputePipeline {
-    static_assert(StageOf<ShaderModule>() == VK_SHADER_STAGE_COMPUTE_BIT, "ComputePipeline requires a compute ShaderProgram.");
+    static_assert(StageOf<ShaderModule>() == Vk::ShaderStage::Compute, "ComputePipeline requires a compute ShaderProgram.");
 
     static_assert(
         [] {
@@ -454,7 +454,7 @@ struct GraphicsPipeline {
             .depthFormat     = Attachments::depth_format,
             .topology        = PipelineDetail::PassTopology<PassContract>(),
             .polygonMode     = PipelineDetail::PassPolygonMode<PassContract>(),
-            .cullMode        = HasFlag(Flags, MaterialFlags::DoubleSided) ? VK_CULL_MODE_NONE : PipelineDetail::PassCullMode<PassContract>(),
+            .cullMode        = HasFlag(Flags, MaterialFlags::DoubleSided) ? Vk::CullMode::None : PipelineDetail::PassCullMode<PassContract>(),
             .dynamicCullMode = true,
             .depthTest       = Attachments::has_depth && PipelineDetail::PassDepthTest<PassContract>(),
             .depthWrite = HasFlag(Flags, MaterialFlags::DepthWrite) ? true :

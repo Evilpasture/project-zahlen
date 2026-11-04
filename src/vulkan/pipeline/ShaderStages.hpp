@@ -31,7 +31,7 @@ enum class ShaderStageCreationError : uint8_t {
 struct ShaderStageData {
     const uint32_t*       code = nullptr;
     size_t                size = 0;
-    VkShaderStageFlagBits stage {};
+    Vk::ShaderStage stage {};
     char                  entryPoint[64] {};
     uint32_t              viewMask = 0;
 };
@@ -52,19 +52,19 @@ template <typename T, size_t Extent>
     return {.code = std::bit_cast<const uint32_t*>(codeSpan.data()), .size = codeSpan.size_bytes(), .entry_point = entry};
 }
 
-template <VkShaderStageFlagBits Stage>
+template <Vk::ShaderStage Stage>
 struct ShaderStageSource {
-    static constexpr VkShaderStageFlagBits stage = Stage;
+    static constexpr Vk::ShaderStage stage = Stage;
     const char*                            path  = nullptr;
     std::span<const uint8_t>               fallback {};
     const char*                            entryPoint = nullptr;
 };
 
-using VertexStageSource   = ShaderStageSource<VK_SHADER_STAGE_VERTEX_BIT>;
-using FragmentStageSource = ShaderStageSource<VK_SHADER_STAGE_FRAGMENT_BIT>;
-using ComputeStageSource  = ShaderStageSource<VK_SHADER_STAGE_COMPUTE_BIT>;
-using TaskStageSource     = ShaderStageSource<VK_SHADER_STAGE_TASK_BIT_EXT>;
-using MeshStageSource     = ShaderStageSource<VK_SHADER_STAGE_MESH_BIT_EXT>;
+using VertexStageSource   = ShaderStageSource<Vk::ShaderStage::Vertex>;
+using FragmentStageSource = ShaderStageSource<Vk::ShaderStage::Fragment>;
+using ComputeStageSource  = ShaderStageSource<Vk::ShaderStage::Compute>;
+using TaskStageSource     = ShaderStageSource<Vk::ShaderStage::Task>;
+using MeshStageSource     = ShaderStageSource<Vk::ShaderStage::Mesh>;
 
 template <ShaderProgram Module>
 [[nodiscard]] auto MakeStageSource() noexcept -> ShaderStageSource<Module::Stage> {
@@ -81,8 +81,8 @@ class ShaderStagesView {
     template <ShaderProgram Vert, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto Create() -> std::expected<ShaderStagesView, ErrorCode> {
-        static_assert(StageOf<Vert>() == VK_SHADER_STAGE_VERTEX_BIT, "Create() wants a vertex module first (<ShaderBindings.hpp>)");
-        static_assert(StageOf<Frag>() == VK_SHADER_STAGE_FRAGMENT_BIT, "Create() wants a fragment module second (<ShaderBindings.hpp>)");
+        static_assert(StageOf<Vert>() == Vk::ShaderStage::Vertex, "Create() wants a vertex module first (<ShaderBindings.hpp>)");
+        static_assert(StageOf<Frag>() == Vk::ShaderStage::Fragment, "Create() wants a fragment module second (<ShaderBindings.hpp>)");
         return Create(CreateShaderDesc<Vert>(), CreateShaderDesc<Frag>());
     }
 
@@ -92,9 +92,9 @@ class ShaderStagesView {
     template <ShaderProgram Task, ShaderProgram Mesh, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto CreateMesh() -> std::expected<ShaderStagesView, ErrorCode> {
-        static_assert(StageOf<Task>() == VK_SHADER_STAGE_TASK_BIT_EXT, "CreateMesh() wants a task module first (<ShaderBindings.hpp>)");
-        static_assert(StageOf<Mesh>() == VK_SHADER_STAGE_MESH_BIT_EXT, "CreateMesh() wants a mesh module second (<ShaderBindings.hpp>)");
-        static_assert(StageOf<Frag>() == VK_SHADER_STAGE_FRAGMENT_BIT, "CreateMesh() wants a fragment module third (<ShaderBindings.hpp>)");
+        static_assert(StageOf<Task>() == Vk::ShaderStage::Task, "CreateMesh() wants a task module first (<ShaderBindings.hpp>)");
+        static_assert(StageOf<Mesh>() == Vk::ShaderStage::Mesh, "CreateMesh() wants a mesh module second (<ShaderBindings.hpp>)");
+        static_assert(StageOf<Frag>() == Vk::ShaderStage::Fragment, "CreateMesh() wants a fragment module third (<ShaderBindings.hpp>)");
         return CreateMesh(CreateShaderDesc<Task>(), CreateShaderDesc<Mesh>(), CreateShaderDesc<Frag>());
     }
 
@@ -159,7 +159,7 @@ class OwnedShaderStages {
 
   private:
     struct StageMetadata {
-        VkShaderStageFlagBits stage {};
+        Vk::ShaderStage stage {};
         std::array<char, 64>  entryPoint {};
         uint32_t              viewMask = 0;
     };

@@ -14,13 +14,13 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
     using namespace Shaders;
 
     const auto srcHdr     = Vk::Assume<Vk::ComputeRead<Res_HdrSceneColor>>(frame.graphResources.hdrSceneColor);
-    const auto thresh     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomThresholdTarget);
-    const auto down1      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomDown1);
-    const auto down2      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomDown2);
-    const auto down3      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomDown3);
-    const auto up2        = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomUp2);
-    const auto up1        = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomUp1);
-    const auto bloomFinal = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.bloomFinalTarget);
+    const auto thresh     = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.bloomThresholdTarget);
+    const auto down1      = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.bloomDown1);
+    const auto down2      = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.bloomDown2);
+    const auto down3      = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.bloomDown3);
+    const auto up2        = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.bloomUp2);
+    const auto up1        = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.bloomUp1);
+    const auto bloomFinal = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.bloomFinalTarget);
 
     Vk::ComputeChain thresholdChain(frame.renderer.heapManager, cmd);
     Vk::ComputeChain downChain(frame.renderer.heapManager, cmd);

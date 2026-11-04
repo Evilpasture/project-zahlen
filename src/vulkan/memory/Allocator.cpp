@@ -395,7 +395,7 @@ auto UploadToBuffer(Allocator& allocatorRef, VkCommandBuffer cmd, Buffer& dst, c
 
 auto Image::Create(Allocator& allocatorRef, ImageConfig config) noexcept -> std::expected<Image, ErrorCode> {
     using enum ImageCreationError;
-    if (!allocatorRef.Valid() || config.format == VK_FORMAT_UNDEFINED || config.extent.width == 0 || config.extent.height == 0 || config.extent.depth == 0 ||
+    if (!allocatorRef.Valid() || config.format == Vk::Format::Undefined || config.extent.width == 0 || config.extent.height == 0 || config.extent.depth == 0 ||
         config.mipLevels == 0 || config.arrayLayers == 0 || config.usage == ImageUsage::None) {
         return std::unexpected(InvalidConfiguration);
     }
@@ -431,7 +431,7 @@ auto Image::Create(Allocator& allocatorRef, ImageConfig config) noexcept -> std:
         .pNext                 = nullptr,
         .flags                 = config.cubeCompatible ? static_cast<VkImageCreateFlags>(VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) : VkImageCreateFlags {},
         .imageType             = imageType,
-        .format                = config.format,
+        .format                = ToVk(config.format),
         .extent                = config.extent,
         .mipLevels             = config.mipLevels,
         .arrayLayers           = config.arrayLayers,
@@ -441,7 +441,7 @@ auto Image::Create(Allocator& allocatorRef, ImageConfig config) noexcept -> std:
         .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = 0,
         .pQueueFamilyIndices   = nullptr,
-        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
+        .initialLayout         = ToVk(Vk::ImageLayout::Undefined),
     };
 
     VmaAllocator                  allocator  = allocatorRef.Handle();
@@ -483,7 +483,7 @@ auto Image::Create(Allocator& allocatorRef, ImageConfig config) noexcept -> std:
 
 auto AttachmentView::Create(VkDevice device, ImageView view) -> std::expected<AttachmentView, ErrorCode> {
     using enum AttachmentViewCreationError;
-    if (device == VK_NULL_HANDLE || !view.Valid() || view.Aspect() == VK_IMAGE_ASPECT_NONE) {
+    if (device == VK_NULL_HANDLE || !view.Valid() || view.Aspect() == Vk::ImageAspect::None) {
         return std::unexpected(InvalidConfiguration);
     }
 
@@ -491,7 +491,7 @@ auto AttachmentView::Create(VkDevice device, ImageView view) -> std::expected<At
     VkImageViewCreateInfo info = view.AsCreateInfo();
     // AsCreateInfo() narrows combined depth/stencil to DEPTH for descriptors; an attachment
     // view keeps the exact aspect it was asked for (the Image::CreateAttachmentView contract).
-    info.subresourceRange.aspectMask = view.Aspect();
+    info.subresourceRange.aspectMask = ToVk(view.Aspect());
     if (info.subresourceRange.levelCount == 0 || info.subresourceRange.layerCount == 0) {
         return std::unexpected(InvalidConfiguration);
     }
@@ -513,7 +513,7 @@ auto AttachmentView::Create(VkDevice device, ImageView view) -> std::expected<At
 
 auto Image::CreateAttachmentView(
     VkDevice           device,
-    VkImageAspectFlags aspect,
+    Vk::ImageAspect aspect,
     uint32_t           baseMip,
     uint32_t           mipCount,
     uint32_t           baseLayer,
@@ -529,9 +529,9 @@ auto Image::CreateAttachmentView(
         (layerCount != VK_REMAINING_ARRAY_LAYERS && (layerCount == 0 || layerCount > _config.arrayLayers - baseLayer))) {
         return std::unexpected(InvalidConfiguration);
     }
-    const VkImageAspectFlags effectiveAspect = aspect != VK_IMAGE_ASPECT_NONE ? aspect : GetFormatAspect(_config.format);
-    const VkImageAspectFlags formatAspect    = GetFormatAspect(_config.format);
-    if (effectiveAspect == VK_IMAGE_ASPECT_NONE || (effectiveAspect & formatAspect) != effectiveAspect) {
+    const Vk::ImageAspect effectiveAspect = aspect != Vk::ImageAspect::None ? aspect : GetFormatAspect(_config.format);
+    const Vk::ImageAspect formatAspect    = GetFormatAspect(_config.format);
+    if (effectiveAspect == Vk::ImageAspect::None || (effectiveAspect & formatAspect) != effectiveAspect) {
         return std::unexpected(InvalidConfiguration);
     }
     if (viewType == VK_IMAGE_VIEW_TYPE_3D && (_config.dimension != ImageDimension::Texture3D || baseLayer != 0)) {
@@ -734,7 +734,7 @@ auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noex
 auto StagingRingBuffer::Submit(ExecutableCommands cmds) noexcept -> std::expected<uint64_t, ErrorCode> {
     const uint64_t nextValue = _timelineValue + 1;
     if (auto res = QueueSubmit(
-            _queue, std::move(cmds), VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _timelineSemaphore.Get(), nextValue, VK_PIPELINE_STAGE_2_COPY_BIT
+            _queue, std::move(cmds), VK_NULL_HANDLE, 0, Vk::PipelineStage::StageNone, _timelineSemaphore.Get(), nextValue, Vk::PipelineStage::Copy
         );
         !res) [[unlikely]] {
         return std::unexpected(res.error());

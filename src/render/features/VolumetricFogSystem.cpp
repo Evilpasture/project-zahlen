@@ -60,7 +60,7 @@ auto VolumetricFogSystem::InitializeNoise(RenderContext::Impl& impl) -> std::exp
     return Vk::TextureUploader(impl.ctx, impl.allocator, impl.stagingRingBuffer, impl.graphicsCmdRing)
         .Upload3D(
             {.data = pixels.data(), .width = kVolumetricNoiseSize, .height = kVolumetricNoiseSize, .depth = kVolumetricNoiseSize,
-             .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Volumetric.Noise3D"}
+             .format = Vk::Format::R8G8B8A8Unorm, .debugName = "Volumetric.Noise3D"}
         )
         .transform([this, &impl](Vk::TextureResource tex) -> void {
             DestroyNoise(impl.allocator);

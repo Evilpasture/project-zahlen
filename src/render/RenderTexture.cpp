@@ -12,7 +12,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
         return std::unexpected(Vk::DescriptorHeapError::AllocationFailed);
     }
 
-    const VkFormat format = hdr ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
+    const Vk::Format format = hdr ? Vk::Format::R16G16B16A16Sfloat : Vk::Format::R8G8B8A8Unorm;
     const Vk::ImageUsage usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferSrc;
 
     const auto imageConfig = Vk::ImageConfig::Texture2D({width, height}, format, usage);

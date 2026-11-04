@@ -523,11 +523,11 @@ auto RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte>
 }
 
 static_assert(ActiveGBuffer::count == 4, "The compact deferred path owns SceneColor, Velocity, NormRough and the BakedMask ownership field only.");
-static_assert(ActiveGBuffer::array[3] == VK_FORMAT_R8_UINT, "The baked-light ownership field is one R8 lane of bits, not a weight.");
-static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
+static_assert(ActiveGBuffer::array[3] == Vk::Format::R8Uint, "The baked-light ownership field is one R8 lane of bits, not a weight.");
+static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::depth_format == Vk::Format::D32SfloatS8Uint);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_count == 1);
-static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_formats[0] == VK_FORMAT_R16G16B16A16_SFLOAT);
-static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
+static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_formats[0] == Vk::Format::R16G16B16A16Sfloat);
+static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::depth_format == Vk::Format::D32SfloatS8Uint);
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
     const bool transmission  = !desc.unlit && desc.transmissionFactor > 0.0f;
@@ -666,7 +666,7 @@ auto RenderContext::CreateTextureHDR(std::string_view name, std::span<const std:
     if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 8 || rgba16f.size() != static_cast<size_t>(pixels) * 8u) {
         return std::unexpected(TextureDataError::InvalidPixels);
     }
-    return _impl->textureManager.Upload(name, rgba16f.data(), extent.width, extent.height, VK_FORMAT_R16G16B16A16_SFLOAT, generateMips);
+    return _impl->textureManager.Upload(name, rgba16f.data(), extent.width, extent.height, Vk::Format::R16G16B16A16Sfloat, generateMips);
 }
 
 auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode> {
@@ -693,7 +693,7 @@ void RenderContext::UnloadTexture(TextureHandle handle) {
 }
 
 auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode> {
-    constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    constexpr Vk::Format kFormat = Vk::Format::R8G8B8A8Unorm;
 
     const size_t bytes = Resource::blue_noise_rgba.size();
     const auto   side  = static_cast<size_t>(std::sqrt(static_cast<double>(bytes) / 4));
@@ -723,7 +723,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     if (auto immediate = Vk::ExecuteImmediate(
             ctx, graphicsCmdRing, stagingRingBuffer,
             [&](VkCommandBuffer cmd) {
-                view.DiscardTo<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd);
+                view.DiscardTo<Vk::ImageLayout::TransferDstOptimal>(cmd);
 
                 const VkBufferImageCopy2 region = {
                     .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
@@ -731,12 +731,12 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
                     .bufferOffset      = staging.slice.offset,
                     .bufferRowLength   = 0,
                     .bufferImageHeight = 0,
-                    .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+                    .imageSubresource  = {.aspectMask = ToVk(Vk::ImageAspect::Color), .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
                     .imageOffset       = {},
                     .imageExtent       = {w, h, 1},
                 };
                 Vk::CopyBufferToImage(cmd, staging.slice.buffer, image.Handle(), region);
-                view.Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+                view.Transition<Vk::ImageLayout::TransferDstOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);
             }
         );
         !immediate) [[unlikely]] {
@@ -1006,7 +1006,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
 
     auto submitted = Vk::SubmitAndWait(
         impl.ctx.GraphicsQueue(), std::move(*executable), impl.transferRingBuffer.GetSemaphore(), impl.transferRingBuffer.GetCurrentValue(),
-        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+        Vk::PipelineStage::AccelerationStructureBuild
     );
     if (!submitted) {
         vkQueueWaitIdle(impl.ctx.GraphicsQueue());
@@ -1060,7 +1060,7 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
         const auto&   frameImage   = *dest->acquired;
         VkImage       source       = frameImage.image.Handle();
         VkExtent2D    extent       = frameImage.image.Extent2D();
-        VkImageLayout sourceLayout = Vk::ToVkImageLayout(frameImage.layout);
+        Vk::ImageLayout sourceLayout = Vk::ToVkImageLayout(frameImage.layout);
 
         const auto imageBytes = static_cast<size_t>(extent.width) * extent.height * 4u;
 
@@ -1077,23 +1077,23 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
                     frameImage.image.Transition(
                         cmd,
                         sourceLayout,
-                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                        VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                        VK_ACCESS_2_TRANSFER_READ_BIT
+                        Vk::ImageLayout::TransferSrcOptimal,
+                        Vk::PipelineStage::AllCommands,
+                        Vk::Access::ColorWrite | Vk::Access::ShaderWrite | Vk::Access::TransferWrite,
+                        Vk::PipelineStage::Transfer,
+                        Vk::Access::TransferRead
                     );
 
                     Vk::CopyImageToBuffer(cmd, source, stagingBuffer.Handle(), extent);
 
                     frameImage.image.Transition(
                         cmd,
-                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                        VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                        VK_ACCESS_2_TRANSFER_READ_BIT,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
+                        Vk::ImageLayout::TransferSrcOptimal,
+                        Vk::ImageLayout::ColorAttachmentOptimal,
+                        Vk::PipelineStage::Transfer,
+                        Vk::Access::TransferRead,
+                        Vk::PipelineStage::ColorAttachment,
+                        Vk::Access::ColorWrite
                     );
                 }
             );
@@ -1152,9 +1152,9 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
             impl->ctx, impl->graphicsCmdRing,
             [&](VkCommandBuffer cmd) -> void {
                 const auto& hdrTarget = impl->graphResources.hdrSceneColor;
-                hdrTarget.Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd);
+                hdrTarget.Transition<Vk::ImageLayout::ShaderReadOnlyOptimal, Vk::ImageLayout::TransferSrcOptimal>(cmd);
                 Vk::CopyImageToBuffer(cmd, hdrTarget.image.Handle(), stagingBuffer.Handle(), extent);
-                hdrTarget.Transition<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+                hdrTarget.Transition<Vk::ImageLayout::TransferSrcOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);
             }
         );
         !immediate) [[unlikely]] {

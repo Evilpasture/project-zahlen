@@ -20,8 +20,8 @@ namespace ZHLN::Vk {
 // where the Vulkan API consumes them.
 class GeometryView {
   public:
-    /// A VkIndexType does not fit in the one byte this view has for it
-    /// (VK_INDEX_TYPE_NONE_KHR is 1000165000), so the width is stored as a token.
+    /// A Vk::IndexType does not fit in the one byte this view has for it
+    /// (Vk::IndexType::None is 1000165000), so the width is stored as a token.
     enum class IndexFormat : uint8_t {
         None   = 0,
         UInt16 = 1,
@@ -39,7 +39,7 @@ class GeometryView {
         VkDeviceAddress vertexAddr,
         uint32_t        vertexCount,
         uint32_t        vertexStride,
-        VkFormat        vertexFormat = VK_FORMAT_R32G32B32_SFLOAT
+        Vk::Format        vertexFormat = Vk::Format::R32G32B32Sfloat
     ) noexcept -> GeometryView {
         GeometryView g;
         g._vertexAddr   = vertexAddr;
@@ -55,7 +55,7 @@ class GeometryView {
     [[nodiscard]] static constexpr auto Triangles(
         DeviceAddress<VertexT> vertexAddr,
         uint32_t               vertexCount,
-        VkFormat               vertexFormat = VK_FORMAT_R32G32B32_SFLOAT
+        Vk::Format               vertexFormat = Vk::Format::R32G32B32Sfloat
     ) noexcept -> GeometryView {
         return Triangles(vertexAddr.Get(), vertexCount, static_cast<uint32_t>(sizeof(VertexT)), vertexFormat);
     }
@@ -69,7 +69,7 @@ class GeometryView {
     [[nodiscard]] static constexpr auto Triangles(
         DeviceAddress<> vertexAddr,
         uint32_t        vertexCount,
-        VkFormat        vertexFormat = VK_FORMAT_R32G32B32_SFLOAT
+        Vk::Format        vertexFormat = Vk::Format::R32G32B32Sfloat
     ) noexcept -> GeometryView {
         return Triangles(vertexAddr.Get(), vertexCount, static_cast<uint32_t>(sizeof(VertexT)), vertexFormat);
     }
@@ -79,7 +79,7 @@ class GeometryView {
         DeviceAddress<void> vertexAddr,
         uint32_t            vertexCount,
         uint32_t            vertexStride,
-        VkFormat            vertexFormat = VK_FORMAT_R32G32B32_SFLOAT
+        Vk::Format            vertexFormat = Vk::Format::R32G32B32Sfloat
     ) noexcept -> GeometryView {
         return Triangles(vertexAddr.Get(), vertexCount, vertexStride, vertexFormat);
     }
@@ -91,7 +91,7 @@ class GeometryView {
     [[nodiscard]] constexpr auto Indexed(
         VkDeviceAddress indexAddr,
         uint32_t        indexCount,
-        VkIndexType     indexType = VK_INDEX_TYPE_UINT32
+        Vk::IndexType     indexType = Vk::IndexType::Uint32
     ) const noexcept -> GeometryView {
         GeometryView copy = *this;
         copy._indexAddr   = indexAddr;
@@ -103,21 +103,21 @@ class GeometryView {
     template <typename IndexT>
         requires (!std::is_void_v<IndexT>)
     [[nodiscard]] constexpr auto Indexed(DeviceAddress<IndexT> indexAddr, uint32_t indexCount) const noexcept -> GeometryView {
-        constexpr VkIndexType type = (sizeof(IndexT) == 2) ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+        constexpr Vk::IndexType type = (sizeof(IndexT) == 2) ? Vk::IndexType::Uint16 : Vk::IndexType::Uint32;
         return Indexed(indexAddr.Get(), indexCount, type);
     }
 
     /// Untyped index address: the index width cannot be deduced from DeviceAddress<>,
     /// so 32-bit is the assumption.
     [[nodiscard]] constexpr auto Indexed(DeviceAddress<> indexAddr, uint32_t indexCount) const noexcept -> GeometryView {
-        return Indexed(indexAddr.Get(), indexCount, VK_INDEX_TYPE_UINT32);
+        return Indexed(indexAddr.Get(), indexCount, Vk::IndexType::Uint32);
     }
 
     /// Conditional indexing: automatically returns an unindexed view if addr is 0/nullptr or count is 0
     [[nodiscard]] constexpr auto MaybeIndexed(
         VkDeviceAddress indexAddr,
         uint32_t        indexCount,
-        VkIndexType     indexType = VK_INDEX_TYPE_UINT32
+        Vk::IndexType     indexType = Vk::IndexType::Uint32
     ) const noexcept -> GeometryView {
         if (indexAddr == 0 || indexCount == 0) {
             GeometryView copy = *this;
@@ -132,12 +132,12 @@ class GeometryView {
     template <typename IndexT>
         requires (!std::is_void_v<IndexT>)
     [[nodiscard]] constexpr auto MaybeIndexed(DeviceAddress<IndexT> indexAddr, uint32_t indexCount) const noexcept -> GeometryView {
-        return MaybeIndexed(indexAddr.Get(), indexCount, (sizeof(IndexT) == 2) ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+        return MaybeIndexed(indexAddr.Get(), indexCount, (sizeof(IndexT) == 2) ? Vk::IndexType::Uint16 : Vk::IndexType::Uint32);
     }
 
     /// Untyped index address; see Indexed(DeviceAddress<>).
     [[nodiscard]] constexpr auto MaybeIndexed(DeviceAddress<> indexAddr, uint32_t indexCount) const noexcept -> GeometryView {
-        return MaybeIndexed(indexAddr.Get(), indexCount, VK_INDEX_TYPE_UINT32);
+        return MaybeIndexed(indexAddr.Get(), indexCount, Vk::IndexType::Uint32);
     }
 
     [[nodiscard]] constexpr auto Opaque(bool isOpaque = true) const noexcept -> GeometryView {
@@ -187,8 +187,8 @@ class GeometryView {
     [[nodiscard]] constexpr auto VertexCount() const noexcept -> uint32_t { return _vertexCount; }
     [[nodiscard]] constexpr auto IndexCount() const noexcept -> uint32_t { return _indexCount; }
     [[nodiscard]] constexpr auto VertexStride() const noexcept -> uint32_t { return _vertexStride; }
-    [[nodiscard]] constexpr auto VertexFormat() const noexcept -> VkFormat { return static_cast<VkFormat>(_vertexFormat); }
-    [[nodiscard]] constexpr auto IndexType() const noexcept -> VkIndexType { return DecodeIndexType(); }
+    [[nodiscard]] constexpr auto VertexFormat() const noexcept -> Vk::Format { return static_cast<Vk::Format>(_vertexFormat); }
+    [[nodiscard]] constexpr auto IndexType() const noexcept -> Vk::IndexType { return DecodeIndexType(); }
     [[nodiscard]] constexpr auto Flags() const noexcept -> VkGeometryFlagsKHR { return _flags; }
     [[nodiscard]] constexpr auto HasIndices() const noexcept -> bool { return _indexAddr != 0 && _indexFormat != IndexFormat::None; }
     [[nodiscard]] constexpr auto PrimitiveCount() const noexcept -> uint32_t {
@@ -216,7 +216,7 @@ class GeometryView {
                     .vertexStride  = _vertexStride,
                     .maxVertex     = _vertexCount > 0 ? _vertexCount - 1 : 0,
                     // The API requires NONE whenever indexData is null.
-                    .indexType     = HasIndices() ? DecodeIndexType() : VK_INDEX_TYPE_NONE_KHR,
+                    .indexType     = ToVk(HasIndices() ? DecodeIndexType() : Vk::IndexType::None),
                     .indexData     = {.deviceAddress = _indexAddr},
                     .transformData = {.deviceAddress = 0},
                 }
@@ -235,19 +235,19 @@ class GeometryView {
     }
 
   private:
-    [[nodiscard]] static constexpr auto EncodeIndexType(VkIndexType type) noexcept -> IndexFormat {
+    [[nodiscard]] static constexpr auto EncodeIndexType(Vk::IndexType type) noexcept -> IndexFormat {
         switch (type) {
-            case VK_INDEX_TYPE_UINT16: return IndexFormat::UInt16;
-            case VK_INDEX_TYPE_UINT32: return IndexFormat::UInt32;
+            case Vk::IndexType::Uint16: return IndexFormat::UInt16;
+            case Vk::IndexType::Uint32: return IndexFormat::UInt32;
             default:                   return IndexFormat::None;
         }
     }
 
-    [[nodiscard]] constexpr auto DecodeIndexType() const noexcept -> VkIndexType {
+    [[nodiscard]] constexpr auto DecodeIndexType() const noexcept -> Vk::IndexType {
         switch (_indexFormat) {
-            case IndexFormat::UInt16: return VK_INDEX_TYPE_UINT16;
-            case IndexFormat::UInt32: return VK_INDEX_TYPE_UINT32;
-            default:                  return VK_INDEX_TYPE_NONE_KHR;
+            case IndexFormat::UInt16: return Vk::IndexType::Uint16;
+            case IndexFormat::UInt32: return Vk::IndexType::Uint32;
+            default:                  return Vk::IndexType::None;
         }
     }
 

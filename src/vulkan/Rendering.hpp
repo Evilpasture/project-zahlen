@@ -7,6 +7,8 @@
 
 #include "VulkanHeader.hpp" // IWYU pragma: keep
 
+#include <vulkan/Enums.hpp> // IWYU pragma: keep
+
 // clang-format off
 // IWYU pragma: begin_exports
 #include <algorithm>

@@ -51,7 +51,7 @@ void SubmitDrawInstanced(
 ) noexcept {
     const auto* nativeMat   = drawCmd.material;
     const auto  doubleSided = (drawCmd.instanceData.flags & (1U << 9U)) != 0;
-    encoder.SetCullMode(doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
+    encoder.SetCullMode(doubleSided ? Vk::CullMode::None : Vk::CullMode::Back);
 
     if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
         encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
@@ -90,7 +90,7 @@ void Draw3DParticles(RenderFrame& ctx, Vk::CommandEncoder& encoder, const MeshPa
 
 void Draw3DParticleShadows(RenderFrame& ctx, Vk::CommandEncoder& encoder, const MeshParticlePipelines& particles) noexcept;
 
-using GBufferTargets = SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>;
+using GBufferTargets = SceneResources<Vk::ImageLayout::ColorAttachmentOptimal, Vk::ImageLayout::DepthStencilAttachmentOptimal>;
 
 [[nodiscard]] auto GBufferSceneTargets(RenderFrame& frame) noexcept -> GBufferTargets;
 

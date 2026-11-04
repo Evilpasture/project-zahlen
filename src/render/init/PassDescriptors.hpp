@@ -16,12 +16,12 @@ struct GraphicsPassDesc {
     const char*             name {};
     Vk::VertexStageSource   vs;
     Vk::FragmentStageSource ps;
-    VkFormat                colorFormat;
+    Vk::Format                colorFormat;
     bool                    additive = false;
 };
 
 template <typename PassT>
-GraphicsPassDesc(PassT&, const char*, Vk::VertexStageSource, Vk::FragmentStageSource, VkFormat, bool = false) -> GraphicsPassDesc<PassT>;
+GraphicsPassDesc(PassT&, const char*, Vk::VertexStageSource, Vk::FragmentStageSource, Vk::Format, bool = false) -> GraphicsPassDesc<PassT>;
 
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassHelper(
@@ -29,7 +29,7 @@ template <typename LayoutT>
     Vk::FullscreenPass<LayoutT>&   pass,
     Vk::VertexStageSource           vs,
     Vk::FragmentStageSource         ps,
-    std::initializer_list<VkFormat> colorFormats,
+    std::initializer_list<Vk::Format> colorFormats,
     bool                            additive = false,
     const Vk::HeapMappingTable*     extraMappings = nullptr
 ) noexcept -> std::expected<void, ErrorCode> {
@@ -47,7 +47,7 @@ template <typename LayoutT>
     Vk::FullscreenPass<LayoutT>&         pass,
     Vk::VertexStageSource                 vs,
     Vk::FragmentStageSource               ps,
-    std::initializer_list<VkFormat>       colorFormats,
+    std::initializer_list<Vk::Format>       colorFormats,
     std::span<const VkSpecializationInfo> specInfos,
     bool                                  additive = false,
     const Vk::HeapMappingTable*           extraMappings = nullptr

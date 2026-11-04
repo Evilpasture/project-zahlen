@@ -100,13 +100,13 @@ auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uin
 
 void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, VkBuffer stagingBuf, VkDeviceSize offset) {
     const VkImageSubresourceRange allMipsRange {
-        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .aspectMask     = ToVk(Vk::ImageAspect::Color),
         .baseMipLevel   = 0,
         .levelCount     = mipLevels,
         .baseArrayLayer = 0,
         .layerCount     = 1,
     };
-    ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(dstImage, allMipsRange).Record(_recorder.Handle());
+    ImageBarrier::DiscardTo<Vk::ImageLayout::TransferDstOptimal>(dstImage, allMipsRange).Record(_recorder.Handle());
 
     const VkBufferImageCopy2 region {
         .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
@@ -115,7 +115,7 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
         .bufferImageHeight = 0,
         .imageSubresource =
             {
-                .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                .aspectMask     = ToVk(Vk::ImageAspect::Color),
                 .mipLevel       = 0,
                 .baseArrayLayer = 0,
                 .layerCount     = 1,
@@ -126,22 +126,22 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
     CopyBufferToImage(_recorder.Handle(), stagingBuf, dstImage, region);
 
     if (mipLevels > 1) {
-        GenerateMipmaps(_recorder.Handle(), dstImage, w, h, mipLevels, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+        GenerateMipmaps(_recorder.Handle(), dstImage, w, h, mipLevels, Vk::PipelineStage::Fragment);
     } else {
-        ImageBarrier::Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(dstImage, allMipsRange)
+        ImageBarrier::Transition<Vk::ImageLayout::TransferDstOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(dstImage, allMipsRange)
             .Record(_recorder.Handle());
     }
 }
 
 void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer stagingBuf, uint32_t baseSize, uint32_t mipLevels) {
     const VkImageSubresourceRange cubeRange {
-        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .aspectMask     = ToVk(Vk::ImageAspect::Color),
         .baseMipLevel   = 0,
         .levelCount     = mipLevels,
         .baseArrayLayer = 0,
         .layerCount     = 6,
     };
-    ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(dstImage, cubeRange).Record(_recorder.Handle());
+    ImageBarrier::DiscardTo<Vk::ImageLayout::TransferDstOptimal>(dstImage, cubeRange).Record(_recorder.Handle());
 
     size_t current_offset = 0;
     for (uint32_t mip = 0; mip < mipLevels; ++mip) {
@@ -155,7 +155,7 @@ void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer staging
                 .bufferOffset      = current_offset + (face * face_size),
                 .bufferRowLength   = {},
                 .bufferImageHeight = {},
-                .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = mip, .baseArrayLayer = face, .layerCount = 1},
+                .imageSubresource  = {.aspectMask = ToVk(Vk::ImageAspect::Color), .mipLevel = mip, .baseArrayLayer = face, .layerCount = 1},
                 .imageOffset       = {},
                 .imageExtent       = {.width = mip_size, .height = mip_size, .depth = 1},
             };
@@ -165,7 +165,7 @@ void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer staging
         current_offset += (face_size * 6);
     }
 
-    ImageBarrier::Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(dstImage, cubeRange)
+    ImageBarrier::Transition<Vk::ImageLayout::TransferDstOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(dstImage, cubeRange)
         .Record(_recorder.Handle());
 }
 
@@ -183,7 +183,7 @@ auto StagingContext::ExecuteAsync() && -> std::expected<SubmittedStagingWork, Er
     if (!timeline) [[unlikely]] {
         return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
-    const auto signal = SemaphoreSubmit::Timeline(*timeline, 1, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+    const auto signal = SemaphoreSubmit::Timeline(*timeline, 1, Vk::PipelineStage::AllCommands);
     if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::move(*executable), {}, std::span<const SemaphoreSubmit> {&signal, 1}); !result) {
         // Drain the queue before the owning handle destroys the semaphore; the
         // submission may have been accepted even though the call reported failure.

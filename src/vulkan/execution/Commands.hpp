@@ -174,7 +174,7 @@ class CommandRing {
     }
     [[nodiscard]] auto Submit(VkQueue queue, Slot slot, ExecutableCommands cmds) noexcept -> std::expected<void, ErrorCode> {
         const uint64_t value  = _nextValue.fetch_add(1, std::memory_order_relaxed) + 1;
-        const auto     signal = SemaphoreSubmit::Timeline(_timeline, value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+        const auto     signal = SemaphoreSubmit::Timeline(_timeline, value, Vk::PipelineStage::AllCommands);
         auto           result = QueueSubmit(queue, std::move(cmds), {}, std::span<const SemaphoreSubmit> {&signal, 1});
         if (result)
             _completionValues[slot.index] = value;
@@ -294,7 +294,7 @@ class CommandEncoder {
   public:
     VkCommandBuffer cmd          = VK_NULL_HANDLE;
     VkPipeline      lastPipeline = VK_NULL_HANDLE;
-    VkCullModeFlags lastCullMode = VK_CULL_MODE_BACK_BIT;
+    Vk::CullMode lastCullMode = Vk::CullMode::Back;
     bool            hasCullMode  = false;
 
     CommandEncoder() = default;
@@ -308,9 +308,9 @@ class CommandEncoder {
         }
     }
 
-    void SetCullMode(VkCullModeFlags mode) noexcept {
+    void SetCullMode(Vk::CullMode mode) noexcept {
         if (!hasCullMode || lastCullMode != mode) {
-            vkCmdSetCullMode(cmd, mode);
+            vkCmdSetCullMode(cmd, ToVk(mode));
             lastCullMode = mode;
             hasCullMode  = true;
         }

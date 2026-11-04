@@ -85,14 +85,14 @@ template <typename T, typename Enumerate>
     return VK_PRESENT_MODE_MAX_ENUM_KHR;
 }
 
-[[nodiscard]] constexpr auto MatchingSrgbFormat(const VkFormat format) noexcept -> VkFormat {
+[[nodiscard]] constexpr auto MatchingSrgbFormat(const Vk::Format format) noexcept -> Vk::Format {
     switch (format) {
-        case VK_FORMAT_B8G8R8A8_UNORM:
-            return VK_FORMAT_B8G8R8A8_SRGB;
-        case VK_FORMAT_R8G8B8A8_UNORM:
-            return VK_FORMAT_R8G8B8A8_SRGB;
-        case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
-            return VK_FORMAT_A8B8G8R8_SRGB_PACK32;
+        case Vk::Format::B8G8R8A8Unorm:
+            return Vk::Format::B8G8R8A8Srgb;
+        case Vk::Format::R8G8B8A8Unorm:
+            return Vk::Format::R8G8B8A8Srgb;
+        case Vk::Format::A8B8G8R8UnormPack32:
+            return Vk::Format::A8B8G8R8SrgbPack32;
         default:
             return format;
     }
@@ -102,33 +102,33 @@ template <typename T, typename Enumerate>
     if (formats.empty()) {
         return VkSurfaceFormatKHR {};
     }
-    if (formats.size() == 1 && formats.front().format == VK_FORMAT_UNDEFINED) {
+    if (formats.size() == 1 && Vk::FromVk(formats.front().format) == Vk::Format::Undefined) {
         return VkSurfaceFormatKHR {
-            .format     = VK_FORMAT_B8G8R8A8_SRGB,
+            .format     = ToVk(Vk::Format::B8G8R8A8Srgb),
             .colorSpace = formats.front().colorSpace,
         };
     }
 
-    constexpr std::array<VkFormat, 6> preferred_formats {
-        VK_FORMAT_B8G8R8A8_SRGB,
-        VK_FORMAT_R8G8B8A8_SRGB,
-        VK_FORMAT_A8B8G8R8_SRGB_PACK32,
-        VK_FORMAT_B8G8R8A8_UNORM,
-        VK_FORMAT_R8G8B8A8_UNORM,
-        VK_FORMAT_A8B8G8R8_UNORM_PACK32,
+    constexpr std::array<Vk::Format, 6> preferred_formats {
+        Vk::Format::B8G8R8A8Srgb,
+        Vk::Format::R8G8B8A8Srgb,
+        Vk::Format::A8B8G8R8SrgbPack32,
+        Vk::Format::B8G8R8A8Unorm,
+        Vk::Format::R8G8B8A8Unorm,
+        Vk::Format::A8B8G8R8UnormPack32,
     };
 
-    for (const VkFormat wanted: preferred_formats) {
+    for (const Vk::Format wanted: preferred_formats) {
         const auto match = std::ranges::find_if(formats, [wanted](const VkSurfaceFormatKHR& format) {
-            return format.format == wanted && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+            return Vk::FromVk(format.format) == wanted && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
         });
         if (match != formats.end()) {
             return *match;
         }
     }
 
-    for (const VkFormat wanted: preferred_formats) {
-        const auto match = std::ranges::find_if(formats, [wanted](const VkSurfaceFormatKHR& format) { return format.format == wanted; });
+    for (const Vk::Format wanted: preferred_formats) {
+        const auto match = std::ranges::find_if(formats, [wanted](const VkSurfaceFormatKHR& format) { return Vk::FromVk(format.format) == wanted; });
         if (match != formats.end()) {
             return *match;
         }
@@ -264,10 +264,10 @@ auto Swapchain::Rebuild(
                                  static_cast<VkSwapchainCreateFlagsKHR>(VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT | VK_SWAPCHAIN_CREATE_PRESENT_ID_2_BIT_KHR) :
                                  VkSwapchainCreateFlagsKHR {0};
 
-    const VkFormat srgb_view_format = (format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) ? MatchingSrgbFormat(format.format) : format.format;
-    bool           use_mutable_srgb = allowMutableFormat && srgb_view_format != format.format && (!Valid() || _mutableViewActive);
+    const Vk::Format srgb_view_format = (format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) ? MatchingSrgbFormat(Vk::FromVk(format.format)) : Vk::FromVk(format.format);
+    bool           use_mutable_srgb = allowMutableFormat && srgb_view_format != Vk::FromVk(format.format) && (!Valid() || _mutableViewActive);
 
-    const std::array<VkFormat, 2>   view_formats {format.format, srgb_view_format};
+    const std::array<VkFormat, 2> view_formats {format.format, ToVk(srgb_view_format)};
     const VkImageFormatListCreateInfo format_list_info {
         .sType           = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO,
         .pNext           = base_pnext,
@@ -314,7 +314,7 @@ auto Swapchain::Rebuild(
         return std::unexpected(images_result.error());
     }
 
-    const VkFormat view_format = use_mutable_srgb ? srgb_view_format : format.format;
+    const Vk::Format view_format = use_mutable_srgb ? srgb_view_format : Vk::FromVk(format.format);
 
     SwapchainData next {
         .handle      = new_handle,
@@ -329,7 +329,7 @@ auto Swapchain::Rebuild(
     next.views.resize(next.images.size(), VK_NULL_HANDLE);
 
     for (size_t i = 0; i < next.images.size(); ++i) {
-        const ImageView swapView {next.images[i], view_format, VK_IMAGE_ASPECT_COLOR_BIT};
+        const ImageView swapView {next.images[i], view_format, Vk::ImageAspect::Color};
         // The create info exists only across the vkCreateImageView call.
         const VkImageViewCreateInfo view_info = swapView.AsCreateInfo();
 

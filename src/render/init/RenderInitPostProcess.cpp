@@ -18,7 +18,7 @@ namespace ZHLN {
 auto RenderContext::Impl::BuildFXAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
         this, antiAliasing.fxaa, Vk::MakeStageSource<Shaders::Modules::FxaaVS>(), Vk::MakeStageSource<Shaders::Modules::FxaaPS>(),
-        {VK_FORMAT_R16G16B16A16_SFLOAT}
+        {Vk::Format::R16G16B16A16Sfloat}
     );
 }
 
@@ -28,7 +28,7 @@ auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, ErrorCode> 
     // vk::constant_id values from SMAA.slang.
     return BuildPassHelper(
                this, antiAliasing.smaaEdge, Vk::MakeStageSource<Shaders::Modules::SmaaEdgeVS>(),
-               Vk::MakeStageSource<Shaders::Modules::SmaaEdgePS>(), {VK_FORMAT_R8G8_UNORM}
+               Vk::MakeStageSource<Shaders::Modules::SmaaEdgePS>(), {Vk::Format::R8G8Unorm}
     )
         .and_then([&]() -> std::expected<void, ErrorCode> {
             // One pair of SPIR-V modules, three VkPipelines. BuildPassVariants
@@ -46,13 +46,13 @@ auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, ErrorCode> 
 
             return BuildPassVariants(
                 this, antiAliasing.smaaWeight, Vk::MakeStageSource<Shaders::Modules::SmaaWeightVS>(),
-                Vk::MakeStageSource<Shaders::Modules::SmaaWeightPS>(), {VK_FORMAT_R8G8B8A8_UNORM}, specInfos
+                Vk::MakeStageSource<Shaders::Modules::SmaaWeightPS>(), {Vk::Format::R8G8B8A8Unorm}, specInfos
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildPassHelper(
                 this, antiAliasing.smaaBlend, Vk::MakeStageSource<Shaders::Modules::SmaaBlendVS>(),
-                Vk::MakeStageSource<Shaders::Modules::SmaaBlendPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
+                Vk::MakeStageSource<Shaders::Modules::SmaaBlendPS>(), {Vk::Format::R16G16B16A16Sfloat}
             );
         });
 }
@@ -67,7 +67,7 @@ template <Vk::ShaderProgram Module, typename PushConstants>
 auto BuildBoundTyped(RenderContext::Impl& impl, Vk::BoundComputePass<Vk::TypedComputePass<Module, PushConstants>>& bound) -> std::expected<void, ErrorCode> {
     const auto          shader = Vk::CreateShaderDesc<Module>();
     Vk::ReflectedLayout layout;
-    if (!layout.Build(impl.ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+    if (!layout.Build(impl.ctx.Device(), shader, Vk::ShaderStage::Compute)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     if (auto built =
@@ -85,7 +85,7 @@ auto BuildBoundDynamic(RenderContext::Impl& impl, Vk::BoundComputePass<Vk::Dynam
     -> std::expected<void, ErrorCode> {
     const auto          shader = Vk::CreateShaderDesc(spirv);
     Vk::ReflectedLayout layout;
-    if (!layout.Build(impl.ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+    if (!layout.Build(impl.ctx.Device(), shader, Vk::ShaderStage::Compute)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     if (auto built =
@@ -140,12 +140,12 @@ auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, ErrorCode> {
     return Vk::CreateHeapComputePass(ctx.Device(), shader, mappingArena.Map(bakeHeapBindings.mappings), bakeHeapBindings.indexPushOffset, &pipelineBinaries)
         .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, ErrorCode> {
             return BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(
-                       pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0}
+                       pass, 160, 560, Vk::Format::R8G8B8A8Unorm, SMAALUTPush {.width = 160, .height = 560, .mode = 0}
             )
                 .and_then([&](uint32_t areaIdx) -> std::expected<uint32_t, ErrorCode> {
                     antiAliasing.smaaAreaTexIdx = areaIdx;
                     return BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(
-                        pass, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1}
+                        pass, 64, 16, Vk::Format::R8G8B8A8Unorm, SMAALUTPush {.width = 64, .height = 16, .mode = 1}
                     );
                 })
                 .transform([&](uint32_t searchIdx) -> void {
@@ -173,12 +173,12 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCo
     if (ctx.RayTracingSupported()) {
         return BuildPassVariants(
             this, post.lighting, Vk::MakeStageSource<Shaders::Modules::LightingVS>(),
-            Vk::MakeStageSource<Shaders::Modules::LightingPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R8_UNORM}, specInfos
+            Vk::MakeStageSource<Shaders::Modules::LightingPS>(), {Vk::Format::R16G16B16A16Sfloat, Vk::Format::R8Unorm}, specInfos
         );
     }
     return BuildPassVariants(
         this, post.lighting, Vk::MakeStageSource<Shaders::Modules::LightingNortVS>(),
-        Vk::MakeStageSource<Shaders::Modules::LightingNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R8_UNORM}, specInfos
+        Vk::MakeStageSource<Shaders::Modules::LightingNortPS>(), {Vk::Format::R16G16B16A16Sfloat, Vk::Format::R8Unorm}, specInfos
     );
 }
 
@@ -200,12 +200,12 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
     if (ctx.RayTracingSupported()) {
         return BuildPassVariants(
             this, reflectionPipeline.pass, Vk::MakeStageSource<Shaders::Modules::ReflectionVS>(),
-            Vk::MakeStageSource<Shaders::Modules::ReflectionPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, false, &sceneSet1HeapMappings
+            Vk::MakeStageSource<Shaders::Modules::ReflectionPS>(), {Vk::Format::R16G16B16A16Sfloat}, specInfos, false, &sceneSet1HeapMappings
         );
     }
     return BuildPassVariants(
         this, reflectionPipeline.pass, Vk::MakeStageSource<Shaders::Modules::ReflectionNortVS>(),
-        Vk::MakeStageSource<Shaders::Modules::ReflectionNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, false, &sceneSet1HeapMappings
+        Vk::MakeStageSource<Shaders::Modules::ReflectionNortPS>(), {Vk::Format::R16G16B16A16Sfloat}, specInfos, false, &sceneSet1HeapMappings
     );
 }
 
@@ -238,7 +238,7 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
                     .name        = "FXAA",
                     .vs          = Vk::MakeStageSource<Shaders::Modules::FxaaVS>(),
                     .ps          = Vk::MakeStageSource<Shaders::Modules::FxaaPS>(),
-                    .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
+                    .colorFormat = Vk::Format::R16G16B16A16Sfloat
                 },
                 // The SMAA pack is built by BuildSMAAPipeline() below, not by
                 // BuildDescribedPass: the weight pass needs three specialized

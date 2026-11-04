@@ -13,7 +13,7 @@ auto TargetManager::CreateCascadeViews(VkDevice device, const Vk::Image& image) 
     ZHLN::Array<Vk::AttachmentView> out;
     out.resize(kCascades);
     for (uint32_t i = 0; i < kCascades; ++i) {
-        auto view_res = image.CreateAttachmentView(device, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, i, 1, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
+        auto view_res = image.CreateAttachmentView(device, Vk::ImageAspect::Depth, 0, 1, i, 1, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
         if (!view_res) {
             return std::unexpected(view_res.error());
         }
@@ -116,7 +116,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _graph.shadowAtlas.Destroy(_allocator);
     _graph.shadowAtlas = std::move(*sa_res);
 
-    auto atlas_res = _graph.shadowAtlas.image.CreateAttachmentView(_ctx.Device(), VK_IMAGE_ASPECT_DEPTH_BIT);
+    auto atlas_res = _graph.shadowAtlas.image.CreateAttachmentView(_ctx.Device(), Vk::ImageAspect::Depth);
     if (!atlas_res) {
         return std::unexpected(atlas_res.error());
     }
@@ -131,8 +131,8 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
             [&](VkCommandBuffer cmd) -> void {
                 const std::array shadows = {_graph.shadowMap.View(), _shadowMapPrev.View(), _graph.shadowAtlas.View()};
                 for (const auto& view: shadows) {
-                    view.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd);
-                    view.Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+                    view.DiscardTo<Vk::ImageLayout::DepthAttachmentOptimal>(cmd);
+                    view.Transition<Vk::ImageLayout::DepthAttachmentOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);
                 }
             }
         );
@@ -188,8 +188,8 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
                 [&](VkCommandBuffer cmd) -> void {
                     const std::array shadows = {_graph.shadowMap.View(), _shadowMapPrev.View()};
                     for (const auto& view: shadows) {
-                        view.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd);
-                        view.Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+                        view.DiscardTo<Vk::ImageLayout::DepthAttachmentOptimal>(cmd);
+                        view.Transition<Vk::ImageLayout::DepthAttachmentOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);
                     }
                 }
             );
@@ -203,7 +203,7 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
 }
 
 void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
-    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(
+    Vk::ClearColorAndTransition<Vk::ImageLayout::Undefined, Vk::ImageLayout::General>(
         cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, _graph.voxelMedia, _graph.voxelLight, _graph.voxelIntegrated
     );
 
@@ -217,8 +217,8 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
     std::array<Vk::ImageBarrier, colorTargets.size()> toColor {};
     std::array<Vk::ImageBarrier, colorTargets.size()> toRead {};
     for (size_t i = 0; i < colorTargets.size(); ++i) {
-        toColor[i] = Vk::ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(colorTargets[i]);
-        toRead[i]  = Vk::ImageBarrier::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(colorTargets[i]);
+        toColor[i] = Vk::ImageBarrier::DiscardTo<Vk::ImageLayout::ColorAttachmentOptimal>(colorTargets[i]);
+        toRead[i]  = Vk::ImageBarrier::Transition<Vk::ImageLayout::ColorAttachmentOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(colorTargets[i]);
     }
     Vk::ImageBarrier::Record(cmd, toColor);
     Vk::ImageBarrier::Record(cmd, toRead);
@@ -230,12 +230,12 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
     };
     std::array<Vk::ImageBarrier, generalTargets.size()> toGeneral {};
     for (size_t i = 0; i < generalTargets.size(); ++i) {
-        toGeneral[i] = Vk::ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_GENERAL>(generalTargets[i]);
+        toGeneral[i] = Vk::ImageBarrier::DiscardTo<Vk::ImageLayout::General>(generalTargets[i]);
     }
     Vk::ImageBarrier::Record(cmd, toGeneral);
 
-    _graph.transDepthBuffer.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(cmd);
-    _graph.transDepthBuffer.Transition<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+    _graph.transDepthBuffer.DiscardTo<Vk::ImageLayout::DepthStencilAttachmentOptimal>(cmd);
+    _graph.transDepthBuffer.Transition<Vk::ImageLayout::DepthStencilAttachmentOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);
 
     Vk::ClearColorAndTransition(cmd, _graph.hizMap, 1.0f);
 }

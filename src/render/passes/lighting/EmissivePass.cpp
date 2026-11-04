@@ -23,7 +23,7 @@ void EmissivePass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto& lightingTarget = frame.graphResources.lightingGI;
     const auto  lighting       = Vk::ImageSlice {
         lightingTarget.image.Handle(), lightingTarget.mipAttachmentViews[0], lightingTarget.extent, Res_LightingGI::format
-    }.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+    }.Assume<Vk::ImageLayout::ColorAttachmentOptimal>();
     const auto  depth = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.ActiveDepthTarget());
 
     Vk::DynamicPass(lighting.Extent()).Viewport(sceneVp).LoadColor(lighting).LoadDepth(depth).Execute(cmd, [&]() {

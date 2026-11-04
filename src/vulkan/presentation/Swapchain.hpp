@@ -35,7 +35,7 @@ struct SwapchainData {
     std::vector<VkImage>     images;
     std::vector<VkImageView> views;
     uint32_t                 imageCount = 0;
-    VkFormat                 format     = VK_FORMAT_UNDEFINED;
+    Vk::Format                 format     = Vk::Format::Undefined;
     VkExtent2D               extent {};
     VkPresentModeKHR         presentMode = VK_PRESENT_MODE_MAX_ENUM_KHR;
 };

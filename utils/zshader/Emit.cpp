@@ -270,10 +270,10 @@ auto EmitHeader(const Options& options) -> std::string {
         out.Line("    using Samplers  = {};", BindingList(module.samplers, true, kSlotIndent));
         out.Raw(kHeaderEntryPoint);
         out.Line("    static constexpr const char*           EntryPoint = \"{}\";", module.entryPoint);
-        out.Line("    static constexpr VkShaderStageFlagBits Stage      = {};", module.stage);
+        out.Line("    static constexpr Vk::ShaderStage Stage = Vk::ShaderStage::{};", module.stage);
         out.Raw(kHeaderSource);
         out.Line("    static constexpr const char* Path = \"{}\";", AsLiteral(module.path));
-        if (module.stage == "VK_SHADER_STAGE_COMPUTE_BIT") {
+        if (module.stage == "Compute") {
             // The threadgroup size the entry point declares: Slang's own
             // reflection of [numthreads] (SlangReflect.cpp), which is the only
             // place the number is read. Dispatch math keys off it at compile

@@ -27,7 +27,7 @@ enum class AttachmentViewCreationError : uint8_t {
     InvalidConfiguration ZHLN_ANNOTATION(ZHLN::Description<"Invalid image view configuration">{}),
 };
 
-[[nodiscard]] constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags;
+[[nodiscard]] constexpr auto GetFormatAspect(Vk::Format format) noexcept -> Vk::ImageAspect;
 
 // A value-type description of a view onto an image. This is what renderer code
 // passes around; the VkImageViewCreateInfo is only synthesized where the
@@ -41,8 +41,8 @@ class ImageView {
 
     constexpr ImageView(
         VkImage            image,
-        VkFormat           format,
-        VkImageAspectFlags aspect,
+        Vk::Format           format,
+        Vk::ImageAspect aspect,
         uint8_t            baseMip    = 0,
         uint8_t            mipCount   = kRemainingMips,
         uint16_t           baseLayer  = 0,
@@ -63,19 +63,19 @@ class ImageView {
     // Observers
     // -------------------------------------------------------------------------
     [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage { return _image; }
-    [[nodiscard]] constexpr auto Format() const noexcept -> VkFormat { return _format; }
-    [[nodiscard]] constexpr auto Aspect() const noexcept -> VkImageAspectFlags { return _aspect; }
+    [[nodiscard]] constexpr auto Format() const noexcept -> Vk::Format { return _format; }
+    [[nodiscard]] constexpr auto Aspect() const noexcept -> Vk::ImageAspect { return _aspect; }
     [[nodiscard]] constexpr auto ViewType() const noexcept -> VkImageViewType {
         return static_cast<VkImageViewType>(_viewType);
     }
     [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
-        return _image != VK_NULL_HANDLE && _format != VK_FORMAT_UNDEFINED;
+        return _image != VK_NULL_HANDLE && _format != Vk::Format::Undefined;
     }
     explicit constexpr operator bool() const noexcept { return Valid(); }
 
     [[nodiscard]] constexpr auto SubresourceRange() const noexcept -> VkImageSubresourceRange {
         return {
-            .aspectMask     = _aspect,
+            .aspectMask     = ToVk(_aspect),
             .baseMipLevel   = _baseMip,
             .levelCount     = _mipCount == kRemainingMips ? VK_REMAINING_MIP_LEVELS : _mipCount,
             .baseArrayLayer = _baseLayer,
@@ -124,7 +124,7 @@ class ImageView {
         return slice;
     }
 
-    [[nodiscard]] constexpr auto WithAspect(VkImageAspectFlags aspect) const noexcept -> ImageView {
+    [[nodiscard]] constexpr auto WithAspect(Vk::ImageAspect aspect) const noexcept -> ImageView {
         ImageView slice = *this;
         slice._aspect   = aspect;
         return slice;
@@ -151,11 +151,11 @@ class ImageView {
     // -------------------------------------------------------------------------
     /// Synthesizes the 80-byte C struct directly onto the stack for API calls
     [[nodiscard]] constexpr auto AsCreateInfo() const noexcept -> VkImageViewCreateInfo {
-        VkImageAspectFlags descriptorAspect = _aspect;
+        Vk::ImageAspect descriptorAspect = _aspect;
         // Combined depth/stencil cannot be sampled together in descriptors; default to depth
-        if ((descriptorAspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) ==
-            (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
-            descriptorAspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        if ((descriptorAspect & (Vk::ImageAspect::Depth | Vk::ImageAspect::Stencil)) ==
+            (Vk::ImageAspect::Depth | Vk::ImageAspect::Stencil)) {
+            descriptorAspect = Vk::ImageAspect::Depth;
         }
 
         return {
@@ -164,7 +164,7 @@ class ImageView {
             .flags            = 0,
             .image            = _image,
             .viewType         = ViewType(),
-            .format           = _format,
+            .format           = ToVk(_format),
             .components       = {
                 .r = VK_COMPONENT_SWIZZLE_IDENTITY,
                 .g = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -172,7 +172,7 @@ class ImageView {
                 .a = VK_COMPONENT_SWIZZLE_IDENTITY
             },
             .subresourceRange = {
-                .aspectMask     = descriptorAspect,
+                .aspectMask     = ToVk(descriptorAspect),
                 .baseMipLevel   = _baseMip,
                 .levelCount     = _mipCount == kRemainingMips ? VK_REMAINING_MIP_LEVELS : _mipCount,
                 .baseArrayLayer = _baseLayer,
@@ -185,33 +185,33 @@ class ImageView {
     // "Tell, Don't Ask": Synchronization Command Injection
     // -------------------------------------------------------------------------
     /// Deduces stages and accesses from LayoutTraits<OldLayout> / LayoutTraits<NewLayout>.
-    template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+    template <Vk::ImageLayout OldLayout, Vk::ImageLayout NewLayout>
     void Transition(VkCommandBuffer cmd) const noexcept;
 
-    /// Discards existing contents (VK_IMAGE_LAYOUT_UNDEFINED -> TargetLayout).
-    template <VkImageLayout TargetLayout>
+    /// Discards existing contents (Vk::ImageLayout::Undefined -> TargetLayout).
+    template <Vk::ImageLayout TargetLayout>
     void DiscardTo(VkCommandBuffer cmd) const noexcept;
 
     /// Runtime layout transition deriving conservative sync masks from oldLayout / newLayout.
-    void Transition(VkCommandBuffer cmd, VkImageLayout oldLayout, VkImageLayout newLayout) const noexcept;
+    void Transition(VkCommandBuffer cmd, Vk::ImageLayout oldLayout, Vk::ImageLayout newLayout) const noexcept;
 
     /// Explicit stage/access override without exposing raw handle or subresource range.
     void Transition(
         VkCommandBuffer       cmd,
-        VkImageLayout         oldLayout,
-        VkImageLayout         newLayout,
-        VkPipelineStageFlags2 srcStage,
-        VkAccessFlags2        srcAccess,
-        VkPipelineStageFlags2 dstStage,
-        VkAccessFlags2        dstAccess
+        Vk::ImageLayout         oldLayout,
+        Vk::ImageLayout         newLayout,
+        Vk::PipelineStage srcStage,
+        Vk::Access        srcAccess,
+        Vk::PipelineStage dstStage,
+        Vk::Access        dstAccess
     ) const noexcept;
 
     friend constexpr auto operator==(const ImageView&, const ImageView&) noexcept -> bool = default;
 
   private:
     VkImage            _image         = VK_NULL_HANDLE; // 8 bytes
-    VkFormat           _format        = VK_FORMAT_UNDEFINED; // 4 bytes
-    VkImageAspectFlags _aspect        = 0;              // 4 bytes
+    Vk::Format           _format        = Vk::Format::Undefined; // 4 bytes
+    Vk::ImageAspect _aspect        = Vk::ImageAspect::None;              // 4 bytes
     uint16_t           _baseLayer     = 0;              // 2 bytes
     uint16_t           _layerCount    = 1;              // 2 bytes
     uint8_t            _baseMip       = 0;              // 1 byte
@@ -245,8 +245,8 @@ class AttachmentView {
 
     /// The value-type description this view was created from; no VkImageViewCreateInfo is stored.
     [[nodiscard]] constexpr auto View() const noexcept -> const ImageView& { return _view; }
-    [[nodiscard]] constexpr auto Format() const noexcept -> VkFormat { return _view.Format(); }
-    [[nodiscard]] constexpr auto AspectFlags() const noexcept -> VkImageAspectFlags { return _view.Aspect(); }
+    [[nodiscard]] constexpr auto Format() const noexcept -> Vk::Format { return _view.Format(); }
+    [[nodiscard]] constexpr auto AspectFlags() const noexcept -> Vk::ImageAspect { return _view.Aspect(); }
     [[nodiscard]] auto Valid() const noexcept -> bool { return _handle.Valid(); }
     explicit operator bool() const noexcept { return Valid(); }
     [[nodiscard]] auto Release() noexcept -> VkImageView {

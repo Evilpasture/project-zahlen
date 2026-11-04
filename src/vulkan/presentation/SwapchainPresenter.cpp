@@ -171,7 +171,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     };
 }
 
-void SwapchainPresenter::PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept {
+void SwapchainPresenter::PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, Vk::ImageLayout currentLayout) const noexcept {
     if (swapchain.Valid() && recorder) {
         ImageBarrier::PreparePresent(swapchain.Get().images[imageIndex], currentLayout).Record(recorder.Handle());
     }

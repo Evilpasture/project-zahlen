@@ -22,89 +22,89 @@
 namespace ZHLN::Vk {
 
 struct LayoutSyncInfo {
-    VkPipelineStageFlags2 stage;
-    VkAccessFlags2        access;
+    Vk::PipelineStage stage;
+    Vk::Access        access;
     std::string_view      name;
 };
 
-[[nodiscard]] constexpr auto GetLayoutSyncInfo(VkImageLayout layout, bool isSource) noexcept -> LayoutSyncInfo {
+[[nodiscard]] constexpr auto GetLayoutSyncInfo(Vk::ImageLayout layout, bool isSource) noexcept -> LayoutSyncInfo {
     switch (layout) {
-        case VK_IMAGE_LAYOUT_UNDEFINED:
-            return {.stage = VK_PIPELINE_STAGE_2_NONE, .access = 0, .name = "UNDEFINED"};
+        case Vk::ImageLayout::Undefined:
+            return {.stage = Vk::PipelineStage::StageNone, .access = Vk::Access::AccessNone, .name = "UNDEFINED"};
 
-        case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+        case Vk::ImageLayout::ColorAttachmentOptimal:
             return {
-                .stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .access = isSource ? VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT : (VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT),
+                .stage  = Vk::PipelineStage::ColorAttachment,
+                .access = isSource ? Vk::Access::ColorWrite : (Vk::Access::ColorRead | Vk::Access::ColorWrite),
                 .name   = "COLOR_ATTACHMENT_OPTIMAL",
             };
 
-        case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+        case Vk::ImageLayout::DepthAttachmentOptimal:
             return {
-                .stage  = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                .access = isSource ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT :
-                                     (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT),
+                .stage  = Vk::PipelineStage::EarlyFragment | Vk::PipelineStage::LateFragment,
+                .access = isSource ? Vk::Access::DepthWrite :
+                                     (Vk::Access::DepthRead | Vk::Access::DepthWrite),
                 .name   = "DEPTH_ATTACHMENT_OPTIMAL",
             };
 
-        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+        case Vk::ImageLayout::DepthStencilAttachmentOptimal:
             return {
-                .stage  = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                .access = isSource ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT :
-                                     (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT),
+                .stage  = Vk::PipelineStage::EarlyFragment | Vk::PipelineStage::LateFragment,
+                .access = isSource ? Vk::Access::DepthWrite :
+                                     (Vk::Access::DepthRead | Vk::Access::DepthWrite),
                 .name   = "DEPTH_STENCIL_ATTACHMENT_OPTIMAL",
             };
 
-        case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+        case Vk::ImageLayout::ShaderReadOnlyOptimal:
             return {
-                .stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                .access = VK_ACCESS_2_SHADER_READ_BIT,
+                .stage  = Vk::PipelineStage::Fragment | Vk::PipelineStage::Compute,
+                .access = Vk::Access::ShaderRead,
                 .name   = "SHADER_READ_ONLY_OPTIMAL",
             };
 
-        case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-            return {.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, .access = 0, .name = "PRESENT_SRC_KHR"};
+        case Vk::ImageLayout::PresentSrc:
+            return {.stage = Vk::PipelineStage::ColorAttachment, .access = Vk::Access::AccessNone, .name = "PRESENT_SRC_KHR"};
 
-        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-            return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_WRITE_BIT, .name = "TRANSFER_DST_OPTIMAL"};
+        case Vk::ImageLayout::TransferDstOptimal:
+            return {.stage = Vk::PipelineStage::Transfer, .access = Vk::Access::TransferWrite, .name = "TRANSFER_DST_OPTIMAL"};
 
-        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-            return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_READ_BIT, .name = "TRANSFER_SRC_OPTIMAL"};
+        case Vk::ImageLayout::TransferSrcOptimal:
+            return {.stage = Vk::PipelineStage::Transfer, .access = Vk::Access::TransferRead, .name = "TRANSFER_SRC_OPTIMAL"};
 
-        case VK_IMAGE_LAYOUT_GENERAL:
+        case Vk::ImageLayout::General:
             return {
-                .stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+                .stage  = Vk::PipelineStage::AllCommands,
+                .access = Vk::Access::ShaderRead | Vk::Access::ShaderWrite,
                 .name   = "GENERAL",
             };
 
         default:
             return {
-                .stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .access = isSource ? VK_ACCESS_2_MEMORY_WRITE_BIT : VK_ACCESS_2_MEMORY_READ_BIT,
+                .stage  = Vk::PipelineStage::AllCommands,
+                .access = isSource ? Vk::Access::MemoryWrite : Vk::Access::MemoryRead,
                 .name   = "UNKNOWN_OR_CUSTOM_LAYOUT",
             };
     }
 }
 
-template <VkImageLayout Layout>
+template <Vk::ImageLayout Layout>
 struct LayoutTraits {
     static constexpr auto             kInfo = GetLayoutSyncInfo(Layout, false);
     static constexpr std::string_view kName = kInfo.name;
 
-    static constexpr VkPipelineStageFlags2 kStage = []() constexpr {
-        if constexpr (Layout == VK_IMAGE_LAYOUT_UNDEFINED) {
-            return VK_PIPELINE_STAGE_2_NONE;
-        } else if constexpr (Layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-            return VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-        } else if constexpr (Layout == VK_IMAGE_LAYOUT_GENERAL) {
-            return VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    static constexpr Vk::PipelineStage kStage = []() constexpr {
+        if constexpr (Layout == Vk::ImageLayout::Undefined) {
+            return Vk::PipelineStage::StageNone;
+        } else if constexpr (Layout == Vk::ImageLayout::ShaderReadOnlyOptimal) {
+            return Vk::PipelineStage::Fragment;
+        } else if constexpr (Layout == Vk::ImageLayout::General) {
+            return Vk::PipelineStage::Compute;
         } else {
             return kInfo.stage;
         }
     }();
 
-    static constexpr VkAccessFlags2 kAccess = kInfo.access;
+    static constexpr Vk::Access kAccess = kInfo.access;
 };
 
 // A compact 64-byte (one cache line) value-type description of an image memory
@@ -127,7 +127,7 @@ class ImageBarrier {
     // -------------------------------------------------------------------------
 
     /// Automatic layout transition for any ImageView (deduces aspect, subresource range, stages, and accesses).
-    template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+    template <Vk::ImageLayout OldLayout, Vk::ImageLayout NewLayout>
     [[nodiscard]] static constexpr auto Transition(ImageView view) noexcept -> ImageBarrier {
         using Src = LayoutTraits<OldLayout>;
         using Dst = LayoutTraits<NewLayout>;
@@ -135,13 +135,13 @@ class ImageBarrier {
     }
 
     /// Automatic layout transition for an ImageSlice.
-    template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+    template <Vk::ImageLayout OldLayout, Vk::ImageLayout NewLayout>
     [[nodiscard]] static constexpr auto Transition(const ImageSlice& slice) noexcept -> ImageBarrier {
         return Transition<OldLayout, NewLayout>(slice.View());
     }
 
     /// Automatic layout transition for an explicit subresource range when only a raw VkImage handle is available.
-    template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+    template <Vk::ImageLayout OldLayout, Vk::ImageLayout NewLayout>
     [[nodiscard]] static constexpr auto Transition(VkImage image, const VkImageSubresourceRange& range) noexcept -> ImageBarrier {
         using Src = LayoutTraits<OldLayout>;
         using Dst = LayoutTraits<NewLayout>;
@@ -149,37 +149,37 @@ class ImageBarrier {
     }
 
     /// Runtime layout transition deriving conservative sync masks from oldLayout / newLayout.
-    [[nodiscard]] static constexpr auto Transition(ImageView view, VkImageLayout oldLayout, VkImageLayout newLayout) noexcept -> ImageBarrier {
+    [[nodiscard]] static constexpr auto Transition(ImageView view, Vk::ImageLayout oldLayout, Vk::ImageLayout newLayout) noexcept -> ImageBarrier {
         const LayoutSyncInfo src = GetLayoutSyncInfo(oldLayout, true);
         const LayoutSyncInfo dst = GetLayoutSyncInfo(newLayout, false);
         return FromRange(view.Handle(), view.SubresourceRange(), oldLayout, newLayout, src.stage, src.access, dst.stage, dst.access);
     }
 
-    [[nodiscard]] static constexpr auto Transition(const ImageSlice& slice, VkImageLayout oldLayout, VkImageLayout newLayout) noexcept -> ImageBarrier {
+    [[nodiscard]] static constexpr auto Transition(const ImageSlice& slice, Vk::ImageLayout oldLayout, Vk::ImageLayout newLayout) noexcept -> ImageBarrier {
         return Transition(slice.View(), oldLayout, newLayout);
     }
 
     /// Transition with explicit stage/access override (e.g. non-default pipeline stages or frame-graph state tables).
     [[nodiscard]] static constexpr auto Transition(
         ImageView             view,
-        VkImageLayout         oldLayout,
-        VkImageLayout         newLayout,
-        VkPipelineStageFlags2 srcStage,
-        VkAccessFlags2        srcAccess,
-        VkPipelineStageFlags2 dstStage,
-        VkAccessFlags2        dstAccess
+        Vk::ImageLayout         oldLayout,
+        Vk::ImageLayout         newLayout,
+        Vk::PipelineStage srcStage,
+        Vk::Access        srcAccess,
+        Vk::PipelineStage dstStage,
+        Vk::Access        dstAccess
     ) noexcept -> ImageBarrier {
         return FromRange(view.Handle(), view.SubresourceRange(), oldLayout, newLayout, srcStage, srcAccess, dstStage, dstAccess);
     }
 
     [[nodiscard]] static constexpr auto Transition(
         const ImageSlice&     slice,
-        VkImageLayout         oldLayout,
-        VkImageLayout         newLayout,
-        VkPipelineStageFlags2 srcStage,
-        VkAccessFlags2        srcAccess,
-        VkPipelineStageFlags2 dstStage,
-        VkAccessFlags2        dstAccess
+        Vk::ImageLayout         oldLayout,
+        Vk::ImageLayout         newLayout,
+        Vk::PipelineStage srcStage,
+        Vk::Access        srcAccess,
+        Vk::PipelineStage dstStage,
+        Vk::Access        dstAccess
     ) noexcept -> ImageBarrier {
         return Transition(slice.View(), oldLayout, newLayout, srcStage, srcAccess, dstStage, dstAccess);
     }
@@ -187,46 +187,46 @@ class ImageBarrier {
     [[nodiscard]] static constexpr auto Transition(
         VkImage                        image,
         const VkImageSubresourceRange& range,
-        VkImageLayout                  oldLayout,
-        VkImageLayout                  newLayout,
-        VkPipelineStageFlags2          srcStage,
-        VkAccessFlags2                 srcAccess,
-        VkPipelineStageFlags2          dstStage,
-        VkAccessFlags2                 dstAccess
+        Vk::ImageLayout                  oldLayout,
+        Vk::ImageLayout                  newLayout,
+        Vk::PipelineStage          srcStage,
+        Vk::Access                 srcAccess,
+        Vk::PipelineStage          dstStage,
+        Vk::Access                 dstAccess
     ) noexcept -> ImageBarrier {
         return FromRange(image, range, oldLayout, newLayout, srcStage, srcAccess, dstStage, dstAccess);
     }
 
     /// Specialized factory for swapchain presentation handoff.
-    [[nodiscard]] static constexpr auto PreparePresent(VkImage swapchainImage, VkImageLayout currentLayout) noexcept -> ImageBarrier {
+    [[nodiscard]] static constexpr auto PreparePresent(VkImage swapchainImage, Vk::ImageLayout currentLayout) noexcept -> ImageBarrier {
         return FromRange(
             swapchainImage,
             VkImageSubresourceRange {
-                .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                .aspectMask     = ToVk(Vk::ImageAspect::Color),
                 .baseMipLevel   = 0,
                 .levelCount     = 1,
                 .baseArrayLayer = 0,
                 .layerCount     = 1,
             },
-            currentLayout, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0
+            currentLayout, Vk::ImageLayout::PresentSrc, Vk::PipelineStage::AllCommands,
+            Vk::Access::ColorWrite | Vk::Access::ShaderWrite | Vk::Access::TransferWrite, Vk::PipelineStage::BottomOfPipe, Vk::Access::AccessNone
         );
     }
 
-    /// Discard existing contents (VK_IMAGE_LAYOUT_UNDEFINED -> TargetLayout).
-    template <VkImageLayout TargetLayout>
+    /// Discard existing contents (Vk::ImageLayout::Undefined -> TargetLayout).
+    template <Vk::ImageLayout TargetLayout>
     [[nodiscard]] static constexpr auto DiscardTo(ImageView view) noexcept -> ImageBarrier {
-        return Transition<VK_IMAGE_LAYOUT_UNDEFINED, TargetLayout>(view);
+        return Transition<Vk::ImageLayout::Undefined, TargetLayout>(view);
     }
 
-    template <VkImageLayout TargetLayout>
+    template <Vk::ImageLayout TargetLayout>
     [[nodiscard]] static constexpr auto DiscardTo(const ImageSlice& slice) noexcept -> ImageBarrier {
         return DiscardTo<TargetLayout>(slice.View());
     }
 
-    template <VkImageLayout TargetLayout>
+    template <Vk::ImageLayout TargetLayout>
     [[nodiscard]] static constexpr auto DiscardTo(VkImage image, const VkImageSubresourceRange& range) noexcept -> ImageBarrier {
-        return Transition<VK_IMAGE_LAYOUT_UNDEFINED, TargetLayout>(image, range);
+        return Transition<Vk::ImageLayout::Undefined, TargetLayout>(image, range);
     }
 
     [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
@@ -312,17 +312,17 @@ class ImageBarrier {
         return {
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .pNext               = nullptr,
-            .srcStageMask        = _srcStage,
-            .srcAccessMask       = _srcAccess,
-            .dstStageMask        = _dstStage,
-            .dstAccessMask       = _dstAccess,
-            .oldLayout           = _oldLayout,
-            .newLayout           = _newLayout,
+            .srcStageMask        = ToVk(_srcStage),
+            .srcAccessMask       = ToVk(_srcAccess),
+            .dstStageMask        = ToVk(_dstStage),
+            .dstAccessMask       = ToVk(_dstAccess),
+            .oldLayout           = ToVk(_oldLayout),
+            .newLayout           = ToVk(_newLayout),
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image               = _image,
             .subresourceRange    = {
-                .aspectMask     = _aspect,
+                .aspectMask     = ToVk(_aspect),
                 .baseMipLevel   = _baseMipLevel,
                 .levelCount     = _levelCount == kRemainingMips ? VK_REMAINING_MIP_LEVELS : static_cast<uint32_t>(_levelCount),
                 .baseArrayLayer = _baseArrayLayer,
@@ -335,12 +335,12 @@ class ImageBarrier {
     [[nodiscard]] static constexpr auto FromRange(
         VkImage                       image,
         const VkImageSubresourceRange range,
-        VkImageLayout                 oldLayout,
-        VkImageLayout                 newLayout,
-        VkPipelineStageFlags2         srcStage,
-        VkAccessFlags2                srcAccess,
-        VkPipelineStageFlags2         dstStage,
-        VkAccessFlags2                dstAccess
+        Vk::ImageLayout                 oldLayout,
+        Vk::ImageLayout                 newLayout,
+        Vk::PipelineStage         srcStage,
+        Vk::Access                srcAccess,
+        Vk::PipelineStage         dstStage,
+        Vk::Access                dstAccess
     ) noexcept -> ImageBarrier {
         ImageBarrier b {};
         b._image          = image;
@@ -350,7 +350,7 @@ class ImageBarrier {
         b._dstAccess      = dstAccess;
         b._oldLayout      = oldLayout;
         b._newLayout      = newLayout;
-        b._aspect         = range.aspectMask;
+        b._aspect         = static_cast<Vk::ImageAspect>(range.aspectMask);
         b._baseArrayLayer = range.baseArrayLayer;
         b._layerCount     = range.layerCount;
         b._baseMipLevel   = static_cast<uint16_t>(range.baseMipLevel);
@@ -359,13 +359,13 @@ class ImageBarrier {
     }
 
     VkImage               _image          = VK_NULL_HANDLE;            // 8 bytes
-    VkPipelineStageFlags2 _srcStage       = VK_PIPELINE_STAGE_2_NONE;  // 8 bytes
-    VkAccessFlags2        _srcAccess      = 0;                         // 8 bytes
-    VkPipelineStageFlags2 _dstStage       = VK_PIPELINE_STAGE_2_NONE;  // 8 bytes
-    VkAccessFlags2        _dstAccess      = 0;                         // 8 bytes
-    VkImageLayout         _oldLayout      = VK_IMAGE_LAYOUT_UNDEFINED; // 4 bytes
-    VkImageLayout         _newLayout      = VK_IMAGE_LAYOUT_UNDEFINED; // 4 bytes
-    VkImageAspectFlags    _aspect         = VK_IMAGE_ASPECT_COLOR_BIT; // 4 bytes
+    Vk::PipelineStage _srcStage       = Vk::PipelineStage::StageNone;  // 8 bytes
+    Vk::Access        _srcAccess      = Vk::Access::AccessNone;                         // 8 bytes
+    Vk::PipelineStage _dstStage       = Vk::PipelineStage::StageNone;  // 8 bytes
+    Vk::Access        _dstAccess      = Vk::Access::AccessNone;                         // 8 bytes
+    Vk::ImageLayout         _oldLayout      = Vk::ImageLayout::Undefined; // 4 bytes
+    Vk::ImageLayout         _newLayout      = Vk::ImageLayout::Undefined; // 4 bytes
+    Vk::ImageAspect    _aspect         = Vk::ImageAspect::Color; // 4 bytes
     uint32_t              _baseArrayLayer = 0;                         // 4 bytes
     uint32_t              _layerCount     = VK_REMAINING_ARRAY_LAYERS; // 4 bytes
     uint16_t              _baseMipLevel   = 0;                         // 2 bytes
@@ -382,13 +382,9 @@ class MemoryBarrier {
   public:
     constexpr MemoryBarrier() noexcept = default;
 
-    constexpr MemoryBarrier(VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess, VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess) noexcept:
+    // BarrierStage/BarrierAccess parameters resolve here too: they are aliases of these types (RenderQueue.hpp).
+    constexpr MemoryBarrier(Vk::PipelineStage srcStage, Vk::Access srcAccess, Vk::PipelineStage dstStage, Vk::Access dstAccess) noexcept:
         _srcStage(srcStage), _srcAccess(srcAccess), _dstStage(dstStage), _dstAccess(dstAccess) {
-    }
-
-    constexpr MemoryBarrier(BarrierStage srcStage, BarrierAccess srcAccess, BarrierStage dstStage, BarrierAccess dstAccess) noexcept:
-        _srcStage(static_cast<VkPipelineStageFlags2>(srcStage)), _srcAccess(static_cast<VkAccessFlags2>(srcAccess)),
-        _dstStage(static_cast<VkPipelineStageFlags2>(dstStage)), _dstAccess(static_cast<VkAccessFlags2>(dstAccess)) {
     }
 
     // -------------------------------------------------------------------------
@@ -398,91 +394,91 @@ class MemoryBarrier {
     /// Compute shader write to compute shader read (e.g. mip pyramids, Kawase bloom chains).
     [[nodiscard]] static constexpr auto ComputeWriteToRead() noexcept -> MemoryBarrier {
         return {
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            VK_ACCESS_2_SHADER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            VK_ACCESS_2_SHADER_READ_BIT,
+            Vk::PipelineStage::Compute,
+            Vk::Access::ShaderWrite,
+            Vk::PipelineStage::Compute,
+            Vk::Access::ShaderRead,
         };
     }
 
     /// Compute shader write to indirect draw argument consumption (e.g. GPU frustum/HiZ culling).
     [[nodiscard]] static constexpr auto ComputeToIndirect() noexcept -> MemoryBarrier {
         return {
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            VK_ACCESS_2_SHADER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+            Vk::PipelineStage::Compute,
+            Vk::Access::ShaderWrite,
+            Vk::PipelineStage::Indirect,
+            Vk::Access::IndirectRead,
         };
     }
 
     /// Compute write to subsequent vertex/fragment shader reads.
     [[nodiscard]] static constexpr auto ComputeToShaderRead() noexcept -> MemoryBarrier {
         return {
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            VK_ACCESS_2_SHADER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_2_SHADER_READ_BIT,
+            Vk::PipelineStage::Compute,
+            Vk::Access::ShaderWrite,
+            Vk::PipelineStage::Vertex | Vk::PipelineStage::Fragment,
+            Vk::Access::ShaderRead,
         };
     }
 
     /// Transfer write to indirect draw argument consumption.
     [[nodiscard]] static constexpr auto TransferToIndirect() noexcept -> MemoryBarrier {
         return {
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+            Vk::PipelineStage::Transfer | Vk::PipelineStage::Copy,
+            Vk::Access::TransferWrite,
+            Vk::PipelineStage::Indirect,
+            Vk::Access::IndirectRead,
         };
     }
 
     /// Transfer/copy write to subsequent indirect/index/shader/uniform graphics reads.
     [[nodiscard]] static constexpr auto TransferToGraphics() noexcept -> MemoryBarrier {
         return {
-            VK_PIPELINE_STAGE_2_COPY_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_UNIFORM_READ_BIT,
+            Vk::PipelineStage::Copy,
+            Vk::Access::TransferWrite,
+            Vk::PipelineStage::Indirect | Vk::PipelineStage::IndexInput | Vk::PipelineStage::Vertex |
+                Vk::PipelineStage::Fragment,
+            Vk::Access::IndirectRead | Vk::Access::IndexRead | Vk::Access::ShaderRead | Vk::Access::UniformRead,
         };
     }
 
     /// Serialize overlapping staged copy writes targeting the same destination buffer.
     [[nodiscard]] static constexpr auto CopyWriteToWrite() noexcept -> MemoryBarrier {
         return {
-            VK_PIPELINE_STAGE_2_COPY_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_COPY_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            Vk::PipelineStage::Copy,
+            Vk::Access::TransferWrite,
+            Vk::PipelineStage::Copy,
+            Vk::Access::TransferWrite,
         };
     }
 
     /// Staged buffer copy write to BLAS/TLAS build geometry input read.
     [[nodiscard]] static constexpr auto TransferToAccelerationStructureBuild() noexcept -> MemoryBarrier {
         return {
-            VK_PIPELINE_STAGE_2_COPY_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-            VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR,
+            Vk::PipelineStage::Copy,
+            Vk::Access::TransferWrite,
+            Vk::PipelineStage::AccelerationStructureBuild,
+            Vk::Access::AccelerationStructureRead,
         };
     }
 
     /// BLAS build write to subsequent TLAS build read.
     [[nodiscard]] static constexpr auto AccelerationStructureBuildToBuild() noexcept -> MemoryBarrier {
         return {
-            VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-            VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
-            VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-            VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR,
+            Vk::PipelineStage::AccelerationStructureBuild,
+            Vk::Access::AccelerationStructureWrite,
+            Vk::PipelineStage::AccelerationStructureBuild,
+            Vk::Access::AccelerationStructureRead,
         };
     }
 
     /// TLAS build write to ray-query / trace reads in fragment and compute shaders.
     [[nodiscard]] static constexpr auto AccelerationStructureBuildToTrace() noexcept -> MemoryBarrier {
         return {
-            VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-            VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR,
+            Vk::PipelineStage::AccelerationStructureBuild,
+            Vk::Access::AccelerationStructureWrite,
+            Vk::PipelineStage::Fragment | Vk::PipelineStage::Compute,
+            Vk::Access::ShaderRead | Vk::Access::AccelerationStructureRead,
         };
     }
 
@@ -558,18 +554,18 @@ class MemoryBarrier {
         return {
             .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
             .pNext         = nullptr,
-            .srcStageMask  = _srcStage,
-            .srcAccessMask = _srcAccess,
-            .dstStageMask  = _dstStage,
-            .dstAccessMask = _dstAccess,
+            .srcStageMask  = ToVk(_srcStage),
+            .srcAccessMask = ToVk(_srcAccess),
+            .dstStageMask  = ToVk(_dstStage),
+            .dstAccessMask = ToVk(_dstAccess),
         };
     }
 
   private:
-    VkPipelineStageFlags2 _srcStage  = VK_PIPELINE_STAGE_2_NONE;
-    VkAccessFlags2        _srcAccess = 0;
-    VkPipelineStageFlags2 _dstStage  = VK_PIPELINE_STAGE_2_NONE;
-    VkAccessFlags2        _dstAccess = 0;
+    Vk::PipelineStage _srcStage  = Vk::PipelineStage::StageNone;
+    Vk::Access        _srcAccess = Vk::Access::AccessNone;
+    Vk::PipelineStage _dstStage  = Vk::PipelineStage::StageNone;
+    Vk::Access        _dstAccess = Vk::Access::AccessNone;
 };
 
 static_assert(sizeof(MemoryBarrier) == 32, "MemoryBarrier must be exactly 32 bytes.");
@@ -592,10 +588,10 @@ class BufferBarrier {
 
     constexpr BufferBarrier(
         VkBuffer              buffer,
-        VkPipelineStageFlags2 srcStage,
-        VkAccessFlags2        srcAccess,
-        VkPipelineStageFlags2 dstStage,
-        VkAccessFlags2        dstAccess,
+        Vk::PipelineStage srcStage,
+        Vk::Access        srcAccess,
+        Vk::PipelineStage dstStage,
+        Vk::Access        dstAccess,
         VkDeviceSize          offset         = 0,
         VkDeviceSize          size           = VK_WHOLE_SIZE,
         uint32_t              srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
@@ -606,84 +602,26 @@ class BufferBarrier {
     }
 
     constexpr BufferBarrier(
-        VkBuffer      buffer,
-        BarrierStage  srcStage,
-        BarrierAccess srcAccess,
-        BarrierStage  dstStage,
-        BarrierAccess dstAccess,
-        VkDeviceSize  offset         = 0,
-        VkDeviceSize  size           = VK_WHOLE_SIZE,
-        uint32_t      srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
-        uint32_t      dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
-    ) noexcept:
-        BufferBarrier(
-            buffer,
-            static_cast<VkPipelineStageFlags2>(srcStage),
-            static_cast<VkAccessFlags2>(srcAccess),
-            static_cast<VkPipelineStageFlags2>(dstStage),
-            static_cast<VkAccessFlags2>(dstAccess),
-            offset,
-            size,
-            srcQueueFamily,
-            dstQueueFamily
-        ) {
-    }
-
-    constexpr BufferBarrier(
         BufferSlice           slice,
-        VkPipelineStageFlags2 srcStage,
-        VkAccessFlags2        srcAccess,
-        VkPipelineStageFlags2 dstStage,
-        VkAccessFlags2        dstAccess,
+        Vk::PipelineStage srcStage,
+        Vk::Access        srcAccess,
+        Vk::PipelineStage dstStage,
+        Vk::Access        dstAccess,
         uint32_t              srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
         uint32_t              dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
     ) noexcept: BufferBarrier(slice.buffer, srcStage, srcAccess, dstStage, dstAccess, slice.offset, slice.size, srcQueueFamily, dstQueueFamily) {
     }
 
-    constexpr BufferBarrier(
-        BufferSlice   slice,
-        BarrierStage  srcStage,
-        BarrierAccess srcAccess,
-        BarrierStage  dstStage,
-        BarrierAccess dstAccess,
-        uint32_t      srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
-        uint32_t      dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
-    ) noexcept:
-        BufferBarrier(
-            slice.buffer,
-            static_cast<VkPipelineStageFlags2>(srcStage),
-            static_cast<VkAccessFlags2>(srcAccess),
-            static_cast<VkPipelineStageFlags2>(dstStage),
-            static_cast<VkAccessFlags2>(dstAccess),
-            slice.offset,
-            slice.size,
-            srcQueueFamily,
-            dstQueueFamily
-        ) {
-    }
-
     BufferBarrier(
         const Buffer&         buffer,
-        VkPipelineStageFlags2 srcStage,
-        VkAccessFlags2        srcAccess,
-        VkPipelineStageFlags2 dstStage,
-        VkAccessFlags2        dstAccess,
+        Vk::PipelineStage srcStage,
+        Vk::Access        srcAccess,
+        Vk::PipelineStage dstStage,
+        Vk::Access        dstAccess,
         VkDeviceSize          offset         = 0,
         VkDeviceSize          size           = VK_WHOLE_SIZE,
         uint32_t              srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
         uint32_t              dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
-    ) noexcept;
-
-    BufferBarrier(
-        const Buffer& buffer,
-        BarrierStage  srcStage,
-        BarrierAccess srcAccess,
-        BarrierStage  dstStage,
-        BarrierAccess dstAccess,
-        VkDeviceSize  offset         = 0,
-        VkDeviceSize  size           = VK_WHOLE_SIZE,
-        uint32_t      srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
-        uint32_t      dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
     ) noexcept;
 
     // -------------------------------------------------------------------------
@@ -695,10 +633,10 @@ class BufferBarrier {
         TransferToCompute(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
         return {
             buffer,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+            Vk::PipelineStage::Transfer,
+            Vk::Access::TransferWrite,
+            Vk::PipelineStage::Compute,
+            Vk::Access::ShaderRead | Vk::Access::ShaderWrite,
             offset,
             size,
         };
@@ -715,10 +653,10 @@ class BufferBarrier {
         ComputeToTransfer(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
         return {
             buffer,
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            Vk::PipelineStage::Compute,
+            Vk::Access::ShaderRead | Vk::Access::ShaderWrite,
+            Vk::PipelineStage::Transfer,
+            Vk::Access::TransferWrite,
             offset,
             size,
         };
@@ -735,10 +673,10 @@ class BufferBarrier {
         IndirectToTransfer(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
         return {
             buffer,
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-            VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            Vk::PipelineStage::Compute | Vk::PipelineStage::Indirect,
+            Vk::Access::ShaderWrite | Vk::Access::IndirectRead,
+            Vk::PipelineStage::Transfer,
+            Vk::Access::TransferWrite,
             offset,
             size,
         };
@@ -755,10 +693,10 @@ class BufferBarrier {
         ComputeToIndirect(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
         return {
             buffer,
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            VK_ACCESS_2_SHADER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+            Vk::PipelineStage::Compute,
+            Vk::Access::ShaderWrite,
+            Vk::PipelineStage::Indirect,
+            Vk::Access::IndirectRead,
             offset,
             size,
         };
@@ -775,10 +713,10 @@ class BufferBarrier {
         ComputeWriteToRead(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
         return {
             buffer,
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            VK_ACCESS_2_SHADER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            VK_ACCESS_2_SHADER_READ_BIT,
+            Vk::PipelineStage::Compute,
+            Vk::Access::ShaderWrite,
+            Vk::PipelineStage::Compute,
+            Vk::Access::ShaderRead,
             offset,
             size,
         };
@@ -794,7 +732,7 @@ class BufferBarrier {
     [[nodiscard]] static constexpr auto
         CopyWriteToWrite(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
         return {
-            buffer, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, offset, size,
+            buffer, Vk::PipelineStage::Copy, Vk::Access::TransferWrite, Vk::PipelineStage::Copy, Vk::Access::TransferWrite, offset, size,
         };
     }
 
@@ -809,10 +747,10 @@ class BufferBarrier {
         TransferToIndirect(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
         return {
             buffer,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+            Vk::PipelineStage::Transfer,
+            Vk::Access::TransferWrite,
+            Vk::PipelineStage::Indirect,
+            Vk::Access::IndirectRead,
             offset,
             size,
         };
@@ -829,10 +767,10 @@ class BufferBarrier {
         TransferToVertex(VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept -> BufferBarrier {
         return {
             buffer,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-            VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+            Vk::PipelineStage::Transfer,
+            Vk::Access::TransferWrite,
+            Vk::PipelineStage::VertexInput | Vk::PipelineStage::Vertex,
+            Vk::Access::VertexAttributeRead | Vk::Access::IndexRead | Vk::Access::ShaderRead,
             offset,
             size,
         };
@@ -847,28 +785,28 @@ class BufferBarrier {
     /// Queue-family ownership release on the source queue.
     [[nodiscard]] static constexpr auto QueueRelease(
         VkBuffer              buffer,
-        VkPipelineStageFlags2 srcStage,
-        VkAccessFlags2        srcAccess,
+        Vk::PipelineStage srcStage,
+        Vk::Access        srcAccess,
         uint32_t              srcQueueFamily,
         uint32_t              dstQueueFamily,
         VkDeviceSize          offset = 0,
         VkDeviceSize          size   = VK_WHOLE_SIZE
     ) noexcept -> BufferBarrier {
         return {
-            buffer, srcStage, srcAccess, VK_PIPELINE_STAGE_2_NONE, 0, offset, size, srcQueueFamily, dstQueueFamily,
+            buffer, srcStage, srcAccess, Vk::PipelineStage::StageNone, Vk::Access::AccessNone, offset, size, srcQueueFamily, dstQueueFamily,
         };
     }
 
     [[nodiscard]] static constexpr auto
-        QueueRelease(BufferSlice slice, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess, uint32_t srcQueueFamily, uint32_t dstQueueFamily) noexcept
+        QueueRelease(BufferSlice slice, Vk::PipelineStage srcStage, Vk::Access srcAccess, uint32_t srcQueueFamily, uint32_t dstQueueFamily) noexcept
         -> BufferBarrier {
         return QueueRelease(slice.buffer, srcStage, srcAccess, srcQueueFamily, dstQueueFamily, slice.offset, slice.size);
     }
 
     [[nodiscard]] static auto QueueRelease(
         const Buffer&         buffer,
-        VkPipelineStageFlags2 srcStage,
-        VkAccessFlags2        srcAccess,
+        Vk::PipelineStage srcStage,
+        Vk::Access        srcAccess,
         uint32_t              srcQueueFamily,
         uint32_t              dstQueueFamily,
         VkDeviceSize          offset = 0,
@@ -878,28 +816,28 @@ class BufferBarrier {
     /// Queue-family ownership acquire on the destination queue.
     [[nodiscard]] static constexpr auto QueueAcquire(
         VkBuffer              buffer,
-        VkPipelineStageFlags2 dstStage,
-        VkAccessFlags2        dstAccess,
+        Vk::PipelineStage dstStage,
+        Vk::Access        dstAccess,
         uint32_t              srcQueueFamily,
         uint32_t              dstQueueFamily,
         VkDeviceSize          offset = 0,
         VkDeviceSize          size   = VK_WHOLE_SIZE
     ) noexcept -> BufferBarrier {
         return {
-            buffer, VK_PIPELINE_STAGE_2_NONE, 0, dstStage, dstAccess, offset, size, srcQueueFamily, dstQueueFamily,
+            buffer, Vk::PipelineStage::StageNone, Vk::Access::AccessNone, dstStage, dstAccess, offset, size, srcQueueFamily, dstQueueFamily,
         };
     }
 
     [[nodiscard]] static constexpr auto
-        QueueAcquire(BufferSlice slice, VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess, uint32_t srcQueueFamily, uint32_t dstQueueFamily) noexcept
+        QueueAcquire(BufferSlice slice, Vk::PipelineStage dstStage, Vk::Access dstAccess, uint32_t srcQueueFamily, uint32_t dstQueueFamily) noexcept
         -> BufferBarrier {
         return QueueAcquire(slice.buffer, dstStage, dstAccess, srcQueueFamily, dstQueueFamily, slice.offset, slice.size);
     }
 
     [[nodiscard]] static auto QueueAcquire(
         const Buffer&         buffer,
-        VkPipelineStageFlags2 dstStage,
-        VkAccessFlags2        dstAccess,
+        Vk::PipelineStage dstStage,
+        Vk::Access        dstAccess,
         uint32_t              srcQueueFamily,
         uint32_t              dstQueueFamily,
         VkDeviceSize          offset = 0,
@@ -1003,10 +941,10 @@ class BufferBarrier {
         return {
             .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
             .pNext               = nullptr,
-            .srcStageMask        = _srcStage,
-            .srcAccessMask       = _srcAccess,
-            .dstStageMask        = _dstStage,
-            .dstAccessMask       = _dstAccess,
+            .srcStageMask        = ToVk(_srcStage),
+            .srcAccessMask       = ToVk(_srcAccess),
+            .dstStageMask        = ToVk(_dstStage),
+            .dstAccessMask       = ToVk(_dstAccess),
             .srcQueueFamilyIndex = _srcQueueFamily,
             .dstQueueFamilyIndex = _dstQueueFamily,
             .buffer              = _buffer,
@@ -1025,10 +963,10 @@ class BufferBarrier {
     VkBuffer              _buffer         = VK_NULL_HANDLE;
     VkDeviceSize          _offset         = 0;
     VkDeviceSize          _size           = VK_WHOLE_SIZE;
-    VkPipelineStageFlags2 _srcStage       = VK_PIPELINE_STAGE_2_NONE;
-    VkAccessFlags2        _srcAccess      = 0;
-    VkPipelineStageFlags2 _dstStage       = VK_PIPELINE_STAGE_2_NONE;
-    VkAccessFlags2        _dstAccess      = 0;
+    Vk::PipelineStage _srcStage       = Vk::PipelineStage::StageNone;
+    Vk::Access        _srcAccess      = Vk::Access::AccessNone;
+    Vk::PipelineStage _dstStage       = Vk::PipelineStage::StageNone;
+    Vk::Access        _dstAccess      = Vk::Access::AccessNone;
     uint32_t              _srcQueueFamily = VK_QUEUE_FAMILY_IGNORED;
     uint32_t              _dstQueueFamily = VK_QUEUE_FAMILY_IGNORED;
 };
@@ -1040,54 +978,54 @@ static_assert(std::is_trivially_copyable_v<BufferBarrier>);
 // Inline ImageView & ImageSlice Synchronization Delegations
 // -----------------------------------------------------------------------------
 
-template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+template <Vk::ImageLayout OldLayout, Vk::ImageLayout NewLayout>
 inline void ImageView::Transition(VkCommandBuffer cmd) const noexcept {
     ImageBarrier::Transition<OldLayout, NewLayout>(*this).Record(cmd);
 }
 
-template <VkImageLayout TargetLayout>
+template <Vk::ImageLayout TargetLayout>
 inline void ImageView::DiscardTo(VkCommandBuffer cmd) const noexcept {
     ImageBarrier::DiscardTo<TargetLayout>(*this).Record(cmd);
 }
 
-inline void ImageView::Transition(VkCommandBuffer cmd, VkImageLayout oldLayout, VkImageLayout newLayout) const noexcept {
+inline void ImageView::Transition(VkCommandBuffer cmd, Vk::ImageLayout oldLayout, Vk::ImageLayout newLayout) const noexcept {
     ImageBarrier::Transition(*this, oldLayout, newLayout).Record(cmd);
 }
 
 inline void ImageView::Transition(
     VkCommandBuffer       cmd,
-    VkImageLayout         oldLayout,
-    VkImageLayout         newLayout,
-    VkPipelineStageFlags2 srcStage,
-    VkAccessFlags2        srcAccess,
-    VkPipelineStageFlags2 dstStage,
-    VkAccessFlags2        dstAccess
+    Vk::ImageLayout         oldLayout,
+    Vk::ImageLayout         newLayout,
+    Vk::PipelineStage srcStage,
+    Vk::Access        srcAccess,
+    Vk::PipelineStage dstStage,
+    Vk::Access        dstAccess
 ) const noexcept {
     ImageBarrier::Transition(*this, oldLayout, newLayout, srcStage, srcAccess, dstStage, dstAccess).Record(cmd);
 }
 
-template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+template <Vk::ImageLayout OldLayout, Vk::ImageLayout NewLayout>
 inline void ImageSlice::Transition(VkCommandBuffer cmd) const noexcept {
     View().Transition<OldLayout, NewLayout>(cmd);
 }
 
-template <VkImageLayout TargetLayout>
+template <Vk::ImageLayout TargetLayout>
 inline void ImageSlice::DiscardTo(VkCommandBuffer cmd) const noexcept {
     View().DiscardTo<TargetLayout>(cmd);
 }
 
-inline void ImageSlice::Transition(VkCommandBuffer cmd, VkImageLayout oldLayout, VkImageLayout newLayout) const noexcept {
+inline void ImageSlice::Transition(VkCommandBuffer cmd, Vk::ImageLayout oldLayout, Vk::ImageLayout newLayout) const noexcept {
     View().Transition(cmd, oldLayout, newLayout);
 }
 
 inline void ImageSlice::Transition(
     VkCommandBuffer       cmd,
-    VkImageLayout         oldLayout,
-    VkImageLayout         newLayout,
-    VkPipelineStageFlags2 srcStage,
-    VkAccessFlags2        srcAccess,
-    VkPipelineStageFlags2 dstStage,
-    VkAccessFlags2        dstAccess
+    Vk::ImageLayout         oldLayout,
+    Vk::ImageLayout         newLayout,
+    Vk::PipelineStage srcStage,
+    Vk::Access        srcAccess,
+    Vk::PipelineStage dstStage,
+    Vk::Access        dstAccess
 ) const noexcept {
     View().Transition(cmd, oldLayout, newLayout, srcStage, srcAccess, dstStage, dstAccess);
 }
@@ -1097,30 +1035,30 @@ inline void ImageSlice::Transition(
 // -----------------------------------------------------------------------------
 static_assert([]() consteval {
     const ImageView depthArray {
-        VK_NULL_HANDLE, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT, 0, ImageView::kRemainingMips, 0, 4, VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+        VK_NULL_HANDLE, Vk::Format::D32Sfloat, Vk::ImageAspect::Depth, 0, ImageView::kRemainingMips, 0, 4, VK_IMAGE_VIEW_TYPE_2D_ARRAY,
     };
-    const VkImageMemoryBarrier2 vk = ImageBarrier::Transition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(depthArray).AsVkBarrier();
-    return vk.sType == VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 && vk.oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
-           vk.newLayout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL && vk.srcStageMask == VK_PIPELINE_STAGE_2_NONE && vk.srcAccessMask == 0 &&
-           vk.dstStageMask == (VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT) &&
-           vk.subresourceRange.aspectMask == VK_IMAGE_ASPECT_DEPTH_BIT && vk.subresourceRange.levelCount == VK_REMAINING_MIP_LEVELS &&
+    const VkImageMemoryBarrier2 vk = ImageBarrier::Transition<Vk::ImageLayout::Undefined, Vk::ImageLayout::DepthAttachmentOptimal>(depthArray).AsVkBarrier();
+    return vk.sType == VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 && vk.oldLayout == ToVk(Vk::ImageLayout::Undefined) &&
+           vk.newLayout == ToVk(Vk::ImageLayout::DepthAttachmentOptimal) && vk.srcStageMask == ToVk(Vk::PipelineStage::StageNone) && vk.srcAccessMask == 0 &&
+           vk.dstStageMask == ToVk(Vk::PipelineStage::EarlyFragment | Vk::PipelineStage::LateFragment) &&
+           vk.subresourceRange.aspectMask == ToVk(Vk::ImageAspect::Depth) && vk.subresourceRange.levelCount == VK_REMAINING_MIP_LEVELS &&
            vk.subresourceRange.layerCount == 4;
 }());
 
 static_assert([]() consteval {
-    const VkImageMemoryBarrier2 present = ImageBarrier::PreparePresent(VK_NULL_HANDLE, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL).AsVkBarrier();
-    return present.oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && present.newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR &&
-           present.dstStageMask == VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT && present.dstAccessMask == 0 && present.subresourceRange.levelCount == 1 &&
+    const VkImageMemoryBarrier2 present = ImageBarrier::PreparePresent(VK_NULL_HANDLE, Vk::ImageLayout::ColorAttachmentOptimal).AsVkBarrier();
+    return present.oldLayout == ToVk(Vk::ImageLayout::ColorAttachmentOptimal) && present.newLayout == ToVk(Vk::ImageLayout::PresentSrc) &&
+           present.dstStageMask == ToVk(Vk::PipelineStage::BottomOfPipe) && present.dstAccessMask == 0 && present.subresourceRange.levelCount == 1 &&
            present.subresourceRange.layerCount == 1;
 }());
 
 static_assert([]() consteval {
     const VkMemoryBarrier2 c2r = MemoryBarrier::ComputeWriteToRead().AsVkBarrier();
     const VkMemoryBarrier2 c2i = MemoryBarrier::ComputeToIndirect().AsVkBarrier();
-    return c2r.sType == VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 && c2r.srcStageMask == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT &&
-           c2r.srcAccessMask == VK_ACCESS_2_SHADER_WRITE_BIT && c2r.dstStageMask == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT &&
-           c2r.dstAccessMask == VK_ACCESS_2_SHADER_READ_BIT && c2i.dstStageMask == VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT &&
-           c2i.dstAccessMask == VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+    return c2r.sType == VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 && c2r.srcStageMask == ToVk(Vk::PipelineStage::Compute) &&
+           c2r.srcAccessMask == ToVk(Vk::Access::ShaderWrite) && c2r.dstStageMask == ToVk(Vk::PipelineStage::Compute) &&
+           c2r.dstAccessMask == ToVk(Vk::Access::ShaderRead) && c2i.dstStageMask == ToVk(Vk::PipelineStage::Indirect) &&
+           c2i.dstAccessMask == ToVk(Vk::Access::IndirectRead);
 }());
 
 static_assert([]() consteval {
@@ -1128,19 +1066,19 @@ static_assert([]() consteval {
     const VkBufferMemoryBarrier2 t2c = BufferBarrier::TransferToCompute(subSlice).AsVkBarrier();
     const VkBufferMemoryBarrier2 i2t = BufferBarrier::IndirectToTransfer(VK_NULL_HANDLE, 64, 512).AsVkBarrier();
     const VkBufferMemoryBarrier2 rel =
-        BufferBarrier::QueueRelease(subSlice, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, 2, 0).AsVkBarrier();
+        BufferBarrier::QueueRelease(subSlice, Vk::PipelineStage::Transfer, Vk::Access::TransferWrite, 2, 0).AsVkBarrier();
     const VkBufferMemoryBarrier2 acq =
-        BufferBarrier::QueueAcquire(subSlice, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT, 2, 0).AsVkBarrier();
+        BufferBarrier::QueueAcquire(subSlice, Vk::PipelineStage::Compute, Vk::Access::ShaderRead, 2, 0).AsVkBarrier();
 
     return t2c.sType == VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 && t2c.pNext == nullptr && t2c.offset == 256 && t2c.size == 1024 &&
-           t2c.srcStageMask == VK_PIPELINE_STAGE_2_TRANSFER_BIT && t2c.srcAccessMask == VK_ACCESS_2_TRANSFER_WRITE_BIT &&
-           t2c.dstStageMask == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT && t2c.dstAccessMask == (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT) &&
+           t2c.srcStageMask == ToVk(Vk::PipelineStage::Transfer) && t2c.srcAccessMask == ToVk(Vk::Access::TransferWrite) &&
+           t2c.dstStageMask == ToVk(Vk::PipelineStage::Compute) && t2c.dstAccessMask == ToVk((Vk::Access::ShaderRead | Vk::Access::ShaderWrite)) &&
            t2c.srcQueueFamilyIndex == VK_QUEUE_FAMILY_IGNORED && t2c.dstQueueFamilyIndex == VK_QUEUE_FAMILY_IGNORED && i2t.offset == 64 && i2t.size == 512 &&
-           i2t.srcStageMask == (VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT) &&
-           i2t.srcAccessMask == (VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT) &&
-           i2t.dstStageMask == VK_PIPELINE_STAGE_2_TRANSFER_BIT && i2t.dstAccessMask == VK_ACCESS_2_TRANSFER_WRITE_BIT &&
-           rel.dstStageMask == VK_PIPELINE_STAGE_2_NONE && rel.dstAccessMask == 0 && rel.srcQueueFamilyIndex == 2 && rel.dstQueueFamilyIndex == 0 &&
-           acq.srcStageMask == VK_PIPELINE_STAGE_2_NONE && acq.srcAccessMask == 0 && acq.srcQueueFamilyIndex == 2 && acq.dstQueueFamilyIndex == 0 &&
+           i2t.srcStageMask == ToVk((Vk::PipelineStage::Compute | Vk::PipelineStage::Indirect)) &&
+           i2t.srcAccessMask == ToVk((Vk::Access::ShaderWrite | Vk::Access::IndirectRead)) &&
+           i2t.dstStageMask == ToVk(Vk::PipelineStage::Transfer) && i2t.dstAccessMask == ToVk(Vk::Access::TransferWrite) &&
+           rel.dstStageMask == ToVk(Vk::PipelineStage::StageNone) && rel.dstAccessMask == 0 && rel.srcQueueFamilyIndex == 2 && rel.dstQueueFamilyIndex == 0 &&
+           acq.srcStageMask == ToVk(Vk::PipelineStage::StageNone) && acq.srcAccessMask == 0 && acq.srcQueueFamilyIndex == 2 && acq.dstQueueFamilyIndex == 0 &&
            !BufferBarrier {}.Valid();
 }());
 

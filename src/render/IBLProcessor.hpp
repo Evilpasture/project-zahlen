@@ -53,7 +53,7 @@ class IBLProcessor {
             return std::unexpected(EnvironmentBakeError::RadianceTooLarge);
         }
 
-        const VkFormat cubeFormat      = VK_FORMAT_R16G16B16A16_SFLOAT;
+        const Vk::Format cubeFormat      = Vk::Format::R16G16B16A16Sfloat;
         const bool     useVisualSky    = hasRadiance && radiance.visualRgba != nullptr && radiance.renderSkybox != 0;
         const int      environmentMode = hasRadiance ? (radiance.renderSkybox == 0 ? 2 : (useVisualSky ? 3 : 1)) : 0;
 
@@ -85,7 +85,7 @@ class IBLProcessor {
         });
 
         auto lutImg = Vk::Image::Create(
-            impl.allocator, Vk::ImageConfig::Texture2D({kLutSize, kLutSize}, VK_FORMAT_R8G8B8A8_UNORM, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled)
+            impl.allocator, Vk::ImageConfig::Texture2D({kLutSize, kLutSize}, Vk::Format::R8G8B8A8Unorm, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled)
         );
         auto specImg =
             Vk::Image::Create(impl.allocator, Vk::ImageConfig::Cube(kBaseSize, cubeFormat, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, kMipLevels));
@@ -98,12 +98,12 @@ class IBLProcessor {
         payload.prefilteredFormat = cubeFormat;
         payload.environmentMode   = environmentMode;
         payload.brdfLutView       = payload.brdfLutImage.View();
-        payload.prefilteredView   = payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, kMipLevels);
+        payload.prefilteredView   = payload.prefilteredImage.View(Vk::ImageAspect::Color, 0, kMipLevels);
 
         if (useVisualSky) {
             auto skyImg = Vk::Image::Create(
                 impl.allocator, Vk::ImageConfig::Texture2D(
-                                    {radiance.width, radiance.height}, VK_FORMAT_R32G32B32A32_SFLOAT, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled
+                                    {radiance.width, radiance.height}, Vk::Format::R32G32B32A32Sfloat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled
                                 )
             );
             if (!skyImg) {
@@ -146,11 +146,11 @@ class IBLProcessor {
         auto       heapScope   = impl.heapManager.CreateImmediateScope();
         const auto brdfBlock   = heapScope.WriteParameters<Shaders::Bake>(impl.bakeHeapBindings, Vk::Slot<"outTexture">(payload.brdfLutImage.View()));
 
-        const Vk::ImageView radianceView  = stagedInput->image.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, stagedInput->mipLevels);
+        const Vk::ImageView radianceView  = stagedInput->image.View(Vk::ImageAspect::Color, 0, stagedInput->mipLevels);
         const auto          specMipBlocks = [&] {
             std::array<Vk::HeapBlockBase, kMipLevels> blocks {};
             for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-                const auto mipView = payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
+                const auto mipView = payload.prefilteredImage.View(Vk::ImageAspect::Color, mip, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
                 blocks[mip]        = heapScope.WriteParameters<Shaders::IblBake>(
                     impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(mipView), Vk::Slot<"radianceMap">(radianceView)
                 );
@@ -161,7 +161,7 @@ class IBLProcessor {
         const auto shBlock = !hasPreparedSH ?
                                  heapScope.WriteParameters<Shaders::IblBake>(
                                      impl.iblBakeHeapBindings,
-                                     Vk::Slot<"outTexture">(payload.prefilteredImage.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY)),
+                                     Vk::Slot<"outTexture">(payload.prefilteredImage.View(Vk::ImageAspect::Color, 0, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY)),
                                      Vk::Slot<"radianceMap">(radianceView)
                                  ) :
                                  Vk::HeapBlockBase {};
@@ -176,8 +176,8 @@ class IBLProcessor {
 
                     Vk::ImageBarrier::Record(
                         cmd, std::array {
-                                 Vk::ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_GENERAL>(payload.brdfLutView),
-                                 Vk::ImageBarrier::DiscardTo<VK_IMAGE_LAYOUT_GENERAL>(payload.prefilteredView),
+                                 Vk::ImageBarrier::DiscardTo<Vk::ImageLayout::General>(payload.brdfLutView),
+                                 Vk::ImageBarrier::DiscardTo<Vk::ImageLayout::General>(payload.prefilteredView),
                              }
                     );
 
@@ -207,8 +207,8 @@ class IBLProcessor {
 
                     Vk::ImageBarrier::Record(
                         cmd, std::array {
-                                 Vk::ImageBarrier::Transition<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(payload.brdfLutView),
-                                 Vk::ImageBarrier::Transition<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(payload.prefilteredView),
+                                 Vk::ImageBarrier::Transition<Vk::ImageLayout::General, Vk::ImageLayout::ShaderReadOnlyOptimal>(payload.brdfLutView),
+                                 Vk::ImageBarrier::Transition<Vk::ImageLayout::General, Vk::ImageLayout::ShaderReadOnlyOptimal>(payload.prefilteredView),
                              }
                     );
                 }
@@ -254,18 +254,18 @@ class IBLProcessor {
         }
 
         void RecordUpload(VkCommandBuffer cmd, Vk::ImageView visualSky) const noexcept {
-            const Vk::ImageView radianceView = image.View(VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels);
-            radianceView.DiscardTo<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd);
+            const Vk::ImageView radianceView = image.View(Vk::ImageAspect::Color, 0, mipLevels);
+            radianceView.DiscardTo<Vk::ImageLayout::TransferDstOptimal>(cmd);
 
             const VkBufferImageCopy2 region {
                 .sType            = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-                .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+                .imageSubresource = {.aspectMask = ToVk(Vk::ImageAspect::Color), .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
                 .imageExtent      = {width, height, 1},
             };
             Vk::CopyBufferToImage(cmd, staging.Handle(), image.Handle(), region);
 
             if (gpuSourceMips) {
-                Vk::GenerateMipmaps(cmd, image.Handle(), width, height, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+                Vk::GenerateMipmaps(cmd, image.Handle(), width, height, Vk::PipelineStage::Compute);
             } else {
                 if (cpuSourceMips) {
                     for (uint32_t mip = 1; mip < mipLevels; ++mip) {
@@ -278,21 +278,21 @@ class IBLProcessor {
                 }
                 radianceView.Transition(
                     cmd,
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                    VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_READ_BIT
+                    Vk::ImageLayout::TransferDstOptimal,
+                    Vk::ImageLayout::ShaderReadOnlyOptimal,
+                    Vk::PipelineStage::Transfer,
+                    Vk::Access::TransferWrite,
+                    Vk::PipelineStage::Compute,
+                    Vk::Access::ShaderRead
                 );
             }
 
             if (visualSky.Valid()) {
-                visualSky.DiscardTo<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd);
+                visualSky.DiscardTo<Vk::ImageLayout::TransferDstOptimal>(cmd);
                 auto visualRegion         = region;
                 visualRegion.bufferOffset = visualOffset * sizeof(float);
                 Vk::CopyBufferToImage(cmd, staging.Handle(), visualSky.Handle(), visualRegion);
-                visualSky.Transition<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+                visualSky.Transition<Vk::ImageLayout::TransferDstOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);
             }
         }
     };
@@ -307,7 +307,7 @@ class IBLProcessor {
 
         if (hasRadiance) {
             VkFormatProperties props {};
-            vkGetPhysicalDeviceFormatProperties(impl.ctx.Physical(), VK_FORMAT_R32G32B32A32_SFLOAT, &props);
+            vkGetPhysicalDeviceFormatProperties(impl.ctx.Physical(), Vk::ToVk(Vk::Format::R32G32B32A32Sfloat), &props);
             if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) == 0) {
                 return std::unexpected(EnvironmentBakeError::RadianceFilteringUnsupported);
             }
@@ -331,7 +331,7 @@ class IBLProcessor {
         auto imgRes = Vk::Image::Create(
             impl.allocator,
             Vk::ImageConfig::Texture2D(
-                {out.width, out.height}, VK_FORMAT_R32G32B32A32_SFLOAT,
+                {out.width, out.height}, Vk::Format::R32G32B32A32Sfloat,
                 Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled | (out.gpuSourceMips ? Vk::ImageUsage::TransferSrc : Vk::ImageUsage::None), out.mipLevels
             )
         );

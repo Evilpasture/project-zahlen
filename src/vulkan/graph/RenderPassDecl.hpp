@@ -48,9 +48,9 @@ struct EmptyUsageTag {
     static constexpr auto                  name   = ResourceName("DummyResource");
     static constexpr bool                  is_swapchain  = false;
     static constexpr bool                  is_persistent = false;
-    static constexpr VkImageLayout         layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    static constexpr VkPipelineStageFlags2 stage  = VK_PIPELINE_STAGE_2_NONE;
-    static constexpr VkAccessFlags2        access = 0;
+    static constexpr Vk::ImageLayout         layout = Vk::ImageLayout::Undefined;
+    static constexpr Vk::PipelineStage stage  = Vk::PipelineStage::StageNone;
+    static constexpr Vk::Access        access = Vk::Access::AccessNone;
 };
 
 } // namespace TemplatedDetail
@@ -64,82 +64,82 @@ struct TypeList<> {
 };
 
 template <
-    typename Image, VkImageLayout Layout, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
-    VkImageLayout FinalLayout = Layout, VkPipelineStageFlags2 FinalStage = Stage, VkAccessFlags2 FinalAccess = Access,
+    typename Image, Vk::ImageLayout Layout, Vk::PipelineStage Stage, Vk::Access Access,
+    Vk::ImageLayout FinalLayout = Layout, Vk::PipelineStage FinalStage = Stage, Vk::Access FinalAccess = Access,
     VkColorComponentFlags ChannelMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT>
 struct Usage {
     using Resource                                      = Image;
-    static constexpr VkImageLayout         layout       = Layout;
-    static constexpr VkPipelineStageFlags2 stage        = Stage;
-    static constexpr VkAccessFlags2        access       = Access;
-    static constexpr VkImageLayout         final_layout = FinalLayout;
-    static constexpr VkPipelineStageFlags2 final_stage  = FinalStage;
-    static constexpr VkAccessFlags2        final_access = FinalAccess;
+    static constexpr Vk::ImageLayout         layout       = Layout;
+    static constexpr Vk::PipelineStage stage        = Stage;
+    static constexpr Vk::Access        access       = Access;
+    static constexpr Vk::ImageLayout         final_layout = FinalLayout;
+    static constexpr Vk::PipelineStage final_stage  = FinalStage;
+    static constexpr Vk::Access        final_access = FinalAccess;
     static constexpr VkColorComponentFlags channel_mask = ChannelMask;
 };
 
 template <typename Image>
 using ColorWrite = Usage<
     Image,
-    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT>;
+    Vk::ImageLayout::ColorAttachmentOptimal,
+    Vk::PipelineStage::ColorAttachment,
+    Vk::Access::ColorWrite | Vk::Access::ColorRead>;
 
 // Full Vulkan image synchronization is still required: this mask only
 // constrains the pipeline's color writes, not barriers or shader declarations.
 template <typename Image>
 using ColorWriteRGB = Usage<
-    Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
-    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+    Image, Vk::ImageLayout::ColorAttachmentOptimal,
+    Vk::PipelineStage::ColorAttachment,
+    Vk::Access::ColorWrite | Vk::Access::ColorRead,
+    Vk::ImageLayout::ColorAttachmentOptimal, Vk::PipelineStage::ColorAttachment,
+    Vk::Access::ColorWrite | Vk::Access::ColorRead,
     VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT>;
 
 template <typename Image>
-using ShaderRead = Usage<Image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
+using ShaderRead = Usage<Image, Vk::ImageLayout::ShaderReadOnlyOptimal, Vk::PipelineStage::Fragment, Vk::Access::ShaderRead>;
 
 template <typename Image>
 using DepthWrite = Usage<
     Image,
-    VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-    VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT>;
+    Vk::ImageLayout::DepthAttachmentOptimal,
+    Vk::PipelineStage::EarlyFragment | Vk::PipelineStage::LateFragment,
+    Vk::Access::DepthRead | Vk::Access::DepthWrite>;
 
 template <typename Image>
 using DepthStencilWrite = Usage<
     Image,
-    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT>;
+    Vk::ImageLayout::DepthStencilAttachmentOptimal,
+    Vk::PipelineStage::EarlyFragment | Vk::PipelineStage::LateFragment,
+    Vk::Access::DepthRead | Vk::Access::DepthWrite>;
 
 template <typename Image>
-using ComputeWrite = Usage<Image, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT>;
+using ComputeWrite = Usage<Image, Vk::ImageLayout::General, Vk::PipelineStage::Compute, Vk::Access::ShaderWrite | Vk::Access::ShaderRead>;
 
 template <typename Image>
-using ComputeRead = Usage<Image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
+using ComputeRead = Usage<Image, Vk::ImageLayout::ShaderReadOnlyOptimal, Vk::PipelineStage::Compute, Vk::Access::ShaderRead>;
 
 template <typename Image>
 using FragmentAndComputeRead = Usage<
-    Image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
+    Image, Vk::ImageLayout::ShaderReadOnlyOptimal,
+    Vk::PipelineStage::Fragment | Vk::PipelineStage::Compute, Vk::Access::ShaderRead>;
 
 template <typename Image>
-using ComputeReadGeneral = Usage<Image, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
+using ComputeReadGeneral = Usage<Image, Vk::ImageLayout::General, Vk::PipelineStage::Compute, Vk::Access::ShaderRead>;
 
 template <typename Image>
-using TransferSrcRead = Usage<Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT>;
+using TransferSrcRead = Usage<Image, Vk::ImageLayout::TransferSrcOptimal, Vk::PipelineStage::Transfer, Vk::Access::TransferRead>;
 
 template <typename Image>
-using TransferDstWrite = Usage<Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT>;
+using TransferDstWrite = Usage<Image, Vk::ImageLayout::TransferDstOptimal, Vk::PipelineStage::Transfer, Vk::Access::TransferWrite>;
 
 template <typename Image>
 using TransferDstWriteThenShaderRead = Usage<
-    Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
+    Image, Vk::ImageLayout::TransferDstOptimal, Vk::PipelineStage::Transfer, Vk::Access::TransferWrite,
+    Vk::ImageLayout::ShaderReadOnlyOptimal, Vk::PipelineStage::Fragment, Vk::Access::ShaderRead>;
 
 template <typename Image>
-using ShaderReadGeneral = Usage<Image, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
+using ShaderReadGeneral = Usage<Image, Vk::ImageLayout::General, Vk::PipelineStage::Fragment, Vk::Access::ShaderRead>;
 
 template <typename T>
 concept FrameGraphPass = requires {
@@ -176,17 +176,17 @@ template <typename U>
 struct IsColorAttachment: std::false_type {};
 
 template <
-    typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
-    VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess, VkColorComponentFlags Mask>
-struct IsColorAttachment<Usage<Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess, Mask>>: std::true_type {};
+    typename Image, Vk::PipelineStage Stage, Vk::Access Access,
+    Vk::ImageLayout FinalLayout, Vk::PipelineStage FinalStage, Vk::Access FinalAccess, VkColorComponentFlags Mask>
+struct IsColorAttachment<Usage<Image, Vk::ImageLayout::ColorAttachmentOptimal, Stage, Access, FinalLayout, FinalStage, FinalAccess, Mask>>: std::true_type {};
 
 template <typename U>
 struct IsDepthAttachment: std::false_type {};
 
 template <
-    typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
-    VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess, VkColorComponentFlags Mask>
-struct IsDepthAttachment<Usage<Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess, Mask>>: std::true_type {};
+    typename Image, Vk::PipelineStage Stage, Vk::Access Access,
+    Vk::ImageLayout FinalLayout, Vk::PipelineStage FinalStage, Vk::Access FinalAccess, VkColorComponentFlags Mask>
+struct IsDepthAttachment<Usage<Image, Vk::ImageLayout::DepthAttachmentOptimal, Stage, Access, FinalLayout, FinalStage, FinalAccess, Mask>>: std::true_type {};
 
 } // namespace TemplatedDetail
 

@@ -91,11 +91,11 @@ namespace Resource {
 
 struct RenderContext::Impl: Renderer {
     struct RenderState {
-        SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> initialState;
-        Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>                                           finalColor;
-        Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>                                           bloomFinal;
-        SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> resourcesForAA;
-        SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> aaResult;
+        SceneResources<Vk::ImageLayout::ShaderReadOnlyOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal> initialState;
+        Vk::TypedImage<Vk::ImageLayout::ShaderReadOnlyOptimal>                                           finalColor;
+        Vk::TypedImage<Vk::ImageLayout::ShaderReadOnlyOptimal>                                           bloomFinal;
+        SceneResources<Vk::ImageLayout::ShaderReadOnlyOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal> resourcesForAA;
+        SceneResources<Vk::ImageLayout::ShaderReadOnlyOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal> aaResult;
     };
 
     static constexpr uint32_t SHADOW_RES   = TargetManager::kShadowResolution;
@@ -199,7 +199,7 @@ struct RenderContext::Impl: Renderer {
     void                                         InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
     template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
-    [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
+    [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, Vk::Format format, const PushT& push)
         -> std::expected<uint32_t, ErrorCode>;
 
     Vk::ReflectedLayout proceduralBakeDescLayout;
@@ -431,7 +431,7 @@ struct RenderContext::Impl: Renderer {
 };
 
 template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
-auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
+auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, Vk::Format format, const PushT& push)
     -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
     const auto imageConfig = Vk::ImageConfig::Texture2D({width, height}, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled);
@@ -445,9 +445,9 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
                 ctx, graphicsCmdRing,
                 [&](VkCommandBuffer cmd) -> auto {
                     heapScope.Bind(cmd);
-                    view.DiscardTo<VK_IMAGE_LAYOUT_GENERAL>(cmd);
+                    view.DiscardTo<Vk::ImageLayout::General>(cmd);
                     pass.DispatchHeapIndexedThreads<Modules...>(cmd, block, width, height, 1, push);
-                    view.Transition<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+                    view.Transition<Vk::ImageLayout::General, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);
                 }
             );
             !immediate) [[unlikely]] {
@@ -475,7 +475,7 @@ inline std::vector<uint32_t> LoadShaderSpv(std::string_view path) noexcept {
     return buffer;
 }
 
-template <VkShaderStageFlagBits Stage>
+template <Vk::ShaderStage Stage>
 [[nodiscard]] inline auto LoadShaderData(const Vk::ShaderStageSource<Stage>& src) -> Vk::ShaderBytecode {
     if constexpr (isDev) {
         auto disk = LoadShaderSpv(src.path);
@@ -520,17 +520,17 @@ template <typename T = Vk::Buffer, typename... Args>
 
 template <>
 struct ZHLN::Vk::FormatOf<float[3]> {
-    static constexpr auto value = VK_FORMAT_R32G32B32_SFLOAT;
+    static constexpr auto value = Vk::Format::R32G32B32Sfloat;
 };
 template <>
 struct ZHLN::Vk::FormatOf<ZHLN::Packed1010102> {
-    static constexpr auto value = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+    static constexpr auto value = Vk::Format::A2B10G10R10UnormPack32;
 };
 template <>
 struct ZHLN::Vk::FormatOf<ZHLN::PackedHalf2> {
-    static constexpr auto value = VK_FORMAT_R16G16_SFLOAT;
+    static constexpr auto value = Vk::Format::R16G16Sfloat;
 };
 template <>
 struct ZHLN::Vk::FormatOf<ZHLN::PackedRGBA8> {
-    static constexpr auto value = VK_FORMAT_R8G8B8A8_UNORM;
+    static constexpr auto value = Vk::Format::R8G8B8A8Unorm;
 };

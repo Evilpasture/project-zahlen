@@ -11,8 +11,8 @@
 
 namespace ZHLN::Vk {
 
-auto FormatHasStencil(const VkFormat format) noexcept -> bool {
-    return format == VK_FORMAT_D16_UNORM_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT;
+auto FormatHasStencil(const Vk::Format format) noexcept -> bool {
+    return format == Vk::Format::D16UnormS8Uint || format == Vk::Format::D24UnormS8Uint || format == Vk::Format::D32SfloatS8Uint;
 }
 
 auto ResolveComputeEntryPoint(const ShaderDesc& shader, const std::span<char, 64> name) noexcept -> const char* {

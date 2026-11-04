@@ -23,9 +23,9 @@ struct DummyResource {
 };
 struct DummyUsage {
     using Resource                                = DummyResource;
-    static constexpr VkImageLayout         layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    static constexpr VkPipelineStageFlags2 stage  = VK_PIPELINE_STAGE_2_NONE;
-    static constexpr VkAccessFlags2        access = 0;
+    static constexpr Vk::ImageLayout         layout = Vk::ImageLayout::Undefined;
+    static constexpr Vk::PipelineStage stage  = Vk::PipelineStage::StageNone;
+    static constexpr Vk::Access        access = Vk::Access::AccessNone;
 };
 }
 
@@ -148,21 +148,21 @@ template <typename ResourceList, typename Target>
 consteval auto GetResourceIndex() -> size_t;
 
 struct ResourceState {
-    VkImageLayout         layout            = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkPipelineStageFlags2 stage             = VK_PIPELINE_STAGE_2_NONE;
-    VkAccessFlags2        access            = 0;
+    Vk::ImageLayout         layout            = Vk::ImageLayout::Undefined;
+    Vk::PipelineStage stage             = Vk::PipelineStage::StageNone;
+    Vk::Access        access            = Vk::Access::AccessNone;
     size_t                lastWritePass     = 999999;
     bool                  fromPreviousFrame = false;
 };
 
-constexpr VkAccessFlags2 WriteMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-                                     VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_HOST_WRITE_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+constexpr Vk::Access WriteMask = Vk::Access::ShaderWrite | Vk::Access::ColorWrite | Vk::Access::DepthWrite |
+                                     Vk::Access::TransferWrite | Vk::Access::HostWrite | Vk::Access::MemoryWrite;
 
 template <typename U>
-struct IsAnyWrite: std::bool_constant<(U::access & WriteMask) != 0> {};
+struct IsAnyWrite: std::bool_constant<Has(U::access, WriteMask)> {};
 
 template <typename U>
-struct IsAnyRead: std::bool_constant<(U::access & WriteMask) == 0> {};
+struct IsAnyRead: std::bool_constant<!Has(U::access, WriteMask)> {};
 
 template <typename ListA, typename ListB>
 struct HasIntersection: std::false_type {};
@@ -180,7 +180,7 @@ struct PassFootprint {
         constexpr size_t index = GetResourceIndex<Resources, typename Usage::Resource>();
         static_assert(index < kMaxResources, "The frame graph's hazard masks hold 64 resources; widen them before the graph reaches 65.");
         const uint64_t bit = uint64_t {1} << index;
-        accumulated[(Usage::access & WriteMask) != 0 ? 0 : 1] |= bit;
+        accumulated[Has(Usage::access, WriteMask) ? 0 : 1] |= bit;
         return accumulated;
     }
 
@@ -196,12 +196,12 @@ struct PassFootprint {
 
 template <ResourceState Prev, typename Usage, size_t PassIndex>
 struct NeedsBarrier {
-    static constexpr bool is_prev_write = (Prev.access & WriteMask) != 0;
-    static constexpr bool is_curr_write = (Usage::access & WriteMask) != 0;
+    static constexpr bool is_prev_write = Has(Prev.access, WriteMask);
+    static constexpr bool is_curr_write = Has(Usage::access, WriteMask);
 
     static constexpr bool value = (is_curr_write && (Prev.fromPreviousFrame || (Prev.lastWritePass < PassIndex))) ||
                                   (is_prev_write && !is_curr_write && (Prev.lastWritePass < PassIndex)) || (Prev.layout != Usage::layout) ||
-                                  (Prev.layout == VK_IMAGE_LAYOUT_UNDEFINED);
+                                  (Prev.layout == Vk::ImageLayout::Undefined);
 };
 
 template <typename ResourceList, typename... Passes>
@@ -469,9 +469,9 @@ constexpr auto MakeRef(const T& resource) noexcept -> ImageSlice;
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept;
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, VkFormat format = Tag::format) noexcept;
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, Vk::Format format = Tag::format) noexcept;
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, VkFormat format = Tag::format) noexcept;
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, Vk::Format format = Tag::format) noexcept;
 
 }
 

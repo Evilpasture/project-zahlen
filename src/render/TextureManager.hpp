@@ -24,19 +24,19 @@ static constexpr uint32_t kFallbackBlackTextureIndex  = 0;
 static constexpr uint32_t kFallbackWhiteTextureIndex  = 1;
 static constexpr uint32_t kFallbackNormalTextureIndex = 2;
 
-[[nodiscard]] constexpr VkFormat Rgba8Format(bool isSRGB) noexcept {
-    return isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+[[nodiscard]] constexpr Vk::Format Rgba8Format(bool isSRGB) noexcept {
+    return isSRGB ? Vk::Format::R8G8B8A8Srgb : Vk::Format::R8G8B8A8Unorm;
 }
 
 // The generic uploader handles only renderer-exposed RGBA texture formats.
 // Keeping the byte size beside those public formats prevents an HDR upload
 // from being silently truncated to the old four-byte RGBA8 staging size.
-[[nodiscard]] constexpr size_t TextureTexelBytes(VkFormat format) noexcept {
+[[nodiscard]] constexpr size_t TextureTexelBytes(Vk::Format format) noexcept {
     switch (format) {
-        case VK_FORMAT_R8G8B8A8_UNORM:
-        case VK_FORMAT_R8G8B8A8_SRGB:
+        case Vk::Format::R8G8B8A8Unorm:
+        case Vk::Format::R8G8B8A8Srgb:
             return 4u;
-        case VK_FORMAT_R16G16B16A16_SFLOAT:
+        case Vk::Format::R16G16B16A16Sfloat:
             return 8u;
         default:
             return 0u;
@@ -66,9 +66,9 @@ class TextureManager {
         return Vk::TextureHandle {_bindlessBaseSlot};
     }
 
-    [[nodiscard]] auto Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true)
+    [[nodiscard]] auto Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, Vk::Format format, bool generateMips = true)
         -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true)
+    [[nodiscard]] auto UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, Vk::Format format, bool generateMips = true)
         -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height) -> std::expected<TextureHandle, ErrorCode>;
@@ -81,7 +81,7 @@ class TextureManager {
     void Reset();
 
     [[nodiscard]] auto
-        Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true) -> std::expected<uint32_t, ErrorCode>;
+        Upload2D(const void* data, uint32_t width, uint32_t height, Vk::Format format, bool generateMips = true) -> std::expected<uint32_t, ErrorCode>;
     [[nodiscard]] auto Adopt(Vk::Image image, Vk::ImageView view) -> std::expected<uint32_t, ErrorCode>;
     void               BeginFrame(uint32_t frameIndex) noexcept;
     void               ReleaseSlot(uint32_t bindlessIndex) noexcept;
@@ -106,7 +106,7 @@ class TextureManager {
         TextureHandle handle = TextureHandle::Invalid;
         std::string   identifier;
         bool          named            = false;
-        VkFormat      format           = VK_FORMAT_UNDEFINED;
+        Vk::Format      format           = Vk::Format::Undefined;
         uint32_t      width            = 0;
         uint32_t      height           = 0;
         uint64_t      pixelHash        = 0;
@@ -119,7 +119,7 @@ class TextureManager {
         Vk::ImageView view;
     };
 
-    [[nodiscard]] TextureHandle RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, uint32_t width, uint32_t height);
+    [[nodiscard]] TextureHandle RegisterAnonymous(uint32_t bindlessIndex, Vk::Format format, uint32_t width, uint32_t height);
     void                        WriteSlotToHeap(uint32_t bindlessIndex, Vk::ImageView view) noexcept;
     void                        RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept;
     void                        DestroyAllSlots() noexcept;

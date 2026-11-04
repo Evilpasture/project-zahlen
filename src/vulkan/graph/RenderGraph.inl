@@ -216,7 +216,7 @@ consteval auto ComputeStateTable() {
                             } else {
                                 return (
                                     (std::is_same_v<typename Usages::template type<Js>::Resource, R> &&
-                                     ((Usages::template type<Js>::access & WriteMask) != 0)) ||
+                                     (Has(Usages::template type<Js>::access, WriteMask))) ||
                                     ...
                                 );
                             }
@@ -229,9 +229,9 @@ consteval auto ComputeStateTable() {
                 if constexpr (!is_written) {
 
                     constexpr auto first_usage_info = []() consteval {
-                        VkImageLayout         layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                        VkPipelineStageFlags2 stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-                        VkAccessFlags2        access = VK_ACCESS_2_SHADER_READ_BIT;
+                        Vk::ImageLayout         layout = Vk::ImageLayout::ShaderReadOnlyOptimal;
+                        Vk::PipelineStage stage  = Vk::PipelineStage::Fragment;
+                        Vk::Access        access = Vk::Access::ShaderRead;
                         bool                  found  = false;
 
                         auto check_pass = [&]<typename Pass>() {
@@ -265,9 +265,9 @@ consteval auto ComputeStateTable() {
                 } else {
 
                     current_states[I] = ResourceState {
-                        .layout            = VK_IMAGE_LAYOUT_UNDEFINED,
-                        .stage             = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-                        .access            = 0,
+                        .layout            = Vk::ImageLayout::Undefined,
+                        .stage             = Vk::PipelineStage::TopOfPipe,
+                        .access            = Vk::Access::AccessNone,
                         .lastWritePass     = 999999,
                         .fromPreviousFrame = false
                     };
@@ -293,7 +293,7 @@ consteval auto ComputeStateTable() {
                             using Img              = typename U::Resource;
                             constexpr size_t r_idx = GetResourceIndex<ResourceList, Img>();
 
-                            constexpr bool is_write = (U::access & WriteMask) != 0;
+                            constexpr bool is_write = Has(U::access, WriteMask);
 
                             current_states[r_idx] = ResourceState {
                                 .layout            = U::final_layout,
@@ -330,7 +330,7 @@ consteval auto ComputeStateTable() {
                             } else {
                                 return (
                                     (std::is_same_v<typename Usages::template type<Js>::Resource, R> &&
-                                     ((Usages::template type<Js>::access & WriteMask) != 0)) ||
+                                     (Has(Usages::template type<Js>::access, WriteMask))) ||
                                     ...
                                 );
                             }
@@ -342,15 +342,15 @@ consteval auto ComputeStateTable() {
 
                 if constexpr (R::is_swapchain) {
                     current_states[I] = ResourceState {
-                        .layout            = VK_IMAGE_LAYOUT_UNDEFINED,
-                        .stage             = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                        .access            = 0,
+                        .layout            = Vk::ImageLayout::Undefined,
+                        .stage             = Vk::PipelineStage::ColorAttachment,
+                        .access            = Vk::Access::AccessNone,
                         .lastWritePass     = 999999,
                         .fromPreviousFrame = false
                     };
                 } else if constexpr (is_written && !R::is_persistent) {
                     current_states[I] = ResourceState {
-                        .layout = VK_IMAGE_LAYOUT_UNDEFINED, .stage = VK_PIPELINE_STAGE_2_NONE, .access = 0, .lastWritePass = 999999, .fromPreviousFrame = false
+                        .layout = Vk::ImageLayout::Undefined, .stage = Vk::PipelineStage::StageNone, .access = Vk::Access::AccessNone, .lastWritePass = 999999, .fromPreviousFrame = false
                     };
                 } else if constexpr (!is_written) {
 
@@ -705,7 +705,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
          const auto&      res   = bindings[r_idx];
 
          constexpr auto     prev_state = CompileTimeFrameGraph<Passes...>::StateTable[PassIndex][r_idx];
-         VkAttachmentLoadOp load_op    = (prev_state.layout == VK_IMAGE_LAYOUT_UNDEFINED) ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+         Vk::AttachmentLoadOp load_op    = (prev_state.layout == Vk::ImageLayout::Undefined) ? Vk::AttachmentLoadOp::Clear : Vk::AttachmentLoadOp::Load;
 
          constexpr Color4 clear_color = ClearColorOf<Img>::value;
 
@@ -713,12 +713,12 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
              .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
              .pNext              = nullptr,
              .imageView          = res.attachmentView,
-             .imageLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+             .imageLayout        = ToVk(Vk::ImageLayout::ColorAttachmentOptimal),
              .resolveMode        = VK_RESOLVE_MODE_NONE,
              .resolveImageView   = VK_NULL_HANDLE,
-             .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-             .loadOp             = load_op,
-             .storeOp            = VK_ATTACHMENT_STORE_OP_STORE,
+             .resolveImageLayout = ToVk(Vk::ImageLayout::Undefined),
+             .loadOp             = ToVk(load_op),
+             .storeOp            = ToVk(Vk::AttachmentStoreOp::Store),
              .clearValue         = {.color = {.float32 = {clear_color.r, clear_color.g, clear_color.b, clear_color.a}}}
          };
      }()),
@@ -741,18 +741,18 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
         const auto&      res   = bindings[r_idx];
 
         constexpr auto     prev_state = CompileTimeFrameGraph<Passes...>::StateTable[PassIndex][r_idx];
-        VkAttachmentLoadOp load_op    = (prev_state.layout == VK_IMAGE_LAYOUT_UNDEFINED) ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+        Vk::AttachmentLoadOp load_op    = (prev_state.layout == Vk::ImageLayout::Undefined) ? Vk::AttachmentLoadOp::Clear : Vk::AttachmentLoadOp::Load;
 
         outDepth = {
             .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext              = nullptr,
             .imageView          = res.attachmentView,
-            .imageLayout        = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            .imageLayout        = ToVk(Vk::ImageLayout::DepthAttachmentOptimal),
             .resolveMode        = VK_RESOLVE_MODE_NONE,
             .resolveImageView   = VK_NULL_HANDLE,
-            .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .loadOp             = load_op,
-            .storeOp            = VK_ATTACHMENT_STORE_OP_STORE,
+            .resolveImageLayout = ToVk(Vk::ImageLayout::Undefined),
+            .loadOp             = ToVk(load_op),
+            .storeOp            = ToVk(Vk::AttachmentStoreOp::Store),
             .clearValue         = {.depthStencil = {.depth = 1.0F, .stencil = 0}}
         };
         return true;
@@ -778,12 +778,12 @@ constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept {
 }
 
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, VkFormat format) noexcept {
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, Vk::Format format) noexcept {
     return ImageSlice {handle, view, extent, format, Tag::aspect};
 }
 
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, VkFormat format) noexcept {
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, Vk::Format format) noexcept {
     return ImageSlice {handle, view, extent, format, Tag::aspect};
 }
 
@@ -829,13 +829,13 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
 
         constexpr bool layout_changed = (prev_state.layout != UsageType::layout);
 
-        constexpr bool is_prev_write = (prev_state.access & ZHLN::Vk::TemplatedDetail::WriteMask) != 0;
-        constexpr bool is_curr_write = (UsageType::access & ZHLN::Vk::TemplatedDetail::WriteMask) != 0;
+        constexpr bool is_prev_write = Has(prev_state.access, ZHLN::Vk::TemplatedDetail::WriteMask);
+        constexpr bool is_curr_write = Has(UsageType::access, ZHLN::Vk::TemplatedDetail::WriteMask);
 
         constexpr bool write_hazard = (is_curr_write && (prev_state.fromPreviousFrame || (prev_state.lastWritePass < PassIdx))) ||
                                       (is_prev_write && !is_curr_write && (prev_state.lastWritePass < PassIdx));
 
-        constexpr bool needs_barrier = layout_changed || write_hazard || (prev_state.layout == VK_IMAGE_LAYOUT_UNDEFINED);
+        constexpr bool needs_barrier = layout_changed || write_hazard || (prev_state.layout == Vk::ImageLayout::Undefined);
 
         if constexpr (needs_barrier) {
             msg.append("          Layout: ");

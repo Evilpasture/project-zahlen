@@ -33,7 +33,7 @@ RenderFrame::RenderFrame(Renderer& renderer, uint32_t inFlight) noexcept:
     meshShading(renderer.MeshShadingActive()), activeLineVertexCount(renderer.activeLineVertexCount) {
 }
 
-auto RenderFrame::ActiveDepthTarget() noexcept -> Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>& {
+auto RenderFrame::ActiveDepthTarget() noexcept -> Vk::FormatRenderTarget<Vk::Format::D32SfloatS8Uint>& {
     return renderer.ActiveDepthTarget();
 }
 

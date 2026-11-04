@@ -22,9 +22,9 @@ auto RenderContext::Impl::ReconcileDestination(FrameDestinations::Window& dest, 
     }
 
     const VkCommandBuffer cmd = recorder.Handle();
-    image.image.DiscardTo<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
+    image.image.DiscardTo<Vk::ImageLayout::ColorAttachmentOptimal>(cmd);
     Vk::DynamicPass(image.image.Extent2D())
-        .ClearColor(image.image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(), kClearColorScene)
+        .ClearColor(image.image.Assume<Vk::ImageLayout::ColorAttachmentOptimal>(), kClearColorScene)
         .Execute(cmd, [] {});
     image.layout = Vk::AttachmentLayout::ColorAttachment;
 
@@ -77,14 +77,14 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
         uint32_t waitCount = 0;
         const uint64_t stagingValue = transferRingBuffer.GetCurrentValue();
         if (transferRingBuffer.GetSemaphore() != VK_NULL_HANDLE && stagingValue > 0) {
-            waits[waitCount++] = Vk::SemaphoreSubmit::Timeline(transferRingBuffer.GetSemaphore(), stagingValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+            waits[waitCount++] = Vk::SemaphoreSubmit::Timeline(transferRingBuffer.GetSemaphore(), stagingValue, Vk::PipelineStage::AllCommands);
         }
 
         // Overlap CPU frame N with GPU frame N-1 without GPU render-target hazards:
         // order this window's graphics submission behind the previous frame slot's
         // graphics timeline on the GPU rather than stalling the CPU in BeginFrame.
         if (auto prevGfxDep = destPresenter.sync.GetGraphicsWaitDependency(
-                Vk::PreviousFrameSlot(destPresenter.frameIndex), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+                Vk::PreviousFrameSlot(destPresenter.frameIndex), Vk::PipelineStage::AllCommands
             )) {
             waits[waitCount++] = *prevGfxDep;
         }
@@ -96,7 +96,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
             }
         }
 
-        const VkImageLayout currentLayout = Vk::ToVkImageLayout(*reconciled);
+        const Vk::ImageLayout currentLayout = Vk::ToVkImageLayout(*reconciled);
         destPresenter.PreparePresent(recording->recorder, dest.acquired->imageIndex, currentLayout);
         auto executable = std::move(recording->recorder).End();
         if (!executable) {
@@ -139,7 +139,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
                 if (blitTarget.Valid()) {
                     if (!HostBlit::Present(
                             blitTarget.image, nullptr, blitTarget.extent.width, blitTarget.extent.height, Vk::kHeadlessColorFormat,
-                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                            Vk::ImageLayout::ColorAttachmentOptimal
                         )) {
                         dest.target->Close();
                     }

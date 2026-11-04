@@ -26,12 +26,12 @@ class Context;
     ExecutableCommands    cmd,
     VkSemaphore           waitSemaphore = VK_NULL_HANDLE,
     uint64_t              waitValue     = 0,
-    VkPipelineStageFlags2 waitStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+    Vk::PipelineStage waitStage     = Vk::PipelineStage::AllCommands
 ) noexcept;
 
-inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
-    VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+inline constexpr Vk::PipelineStage kAsyncComputeConsumerStages =
+    Vk::PipelineStage::Indirect | Vk::PipelineStage::VertexInput | Vk::PipelineStage::Vertex |
+    Vk::PipelineStage::Fragment | Vk::PipelineStage::Compute;
 
 // Compact 24-byte representation of a semaphore synchronization point.
 //
@@ -41,29 +41,29 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
 struct SemaphoreSubmit {
     VkSemaphore           semaphore = VK_NULL_HANDLE;                       // 8 bytes
     uint64_t              value     = 0;                                    // 8 bytes (0 => binary semaphore)
-    VkPipelineStageFlags2 stage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; // 8 bytes
+    Vk::PipelineStage stage     = Vk::PipelineStage::AllCommands; // 8 bytes
 
     // -------------------------------------------------------------------------
     // "Tell, Don't Ask" Factories
     // -------------------------------------------------------------------------
     [[nodiscard]] static constexpr auto
-        Binary(VkSemaphore sem, VkPipelineStageFlags2 stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept -> SemaphoreSubmit {
+        Binary(VkSemaphore sem, Vk::PipelineStage stageMask = Vk::PipelineStage::AllCommands) noexcept -> SemaphoreSubmit {
         return {.semaphore = sem, .value = 0, .stage = stageMask};
     }
 
     [[nodiscard]] static constexpr auto
-        Timeline(VkSemaphore sem, uint64_t val, VkPipelineStageFlags2 stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept -> SemaphoreSubmit {
+        Timeline(VkSemaphore sem, uint64_t val, Vk::PipelineStage stageMask = Vk::PipelineStage::AllCommands) noexcept -> SemaphoreSubmit {
         return {.semaphore = sem, .value = val, .stage = stageMask};
     }
 
     // Owning handles are only borrowed here: submitting never takes ownership.
     [[nodiscard]] static constexpr auto
-        Binary(const Semaphore& sem, VkPipelineStageFlags2 stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept -> SemaphoreSubmit {
+        Binary(const Semaphore& sem, Vk::PipelineStage stageMask = Vk::PipelineStage::AllCommands) noexcept -> SemaphoreSubmit {
         return Binary(sem.Get(), stageMask);
     }
 
     [[nodiscard]] static constexpr auto
-        Timeline(const Semaphore& sem, uint64_t val, VkPipelineStageFlags2 stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept -> SemaphoreSubmit {
+        Timeline(const Semaphore& sem, uint64_t val, Vk::PipelineStage stageMask = Vk::PipelineStage::AllCommands) noexcept -> SemaphoreSubmit {
         return Timeline(sem.Get(), val, stageMask);
     }
 
@@ -91,7 +91,7 @@ struct SemaphoreSubmit {
             .pNext       = nullptr,
             .semaphore   = semaphore,
             .value       = value,
-            .stageMask   = stage,
+            .stageMask   = ToVk(stage),
             .deviceIndex = 0,
         };
     }
@@ -111,52 +111,17 @@ static_assert(std::is_trivially_copyable_v<SemaphoreSubmit>);
     ExecutableCommands cmd,
     VkSemaphore waitSemaphore = VK_NULL_HANDLE,
     uint64_t waitValue = 0,
-    VkPipelineStageFlags2 waitStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    Vk::PipelineStage waitStage = Vk::PipelineStage::AllCommands,
     VkSemaphore signalSemaphore = VK_NULL_HANDLE,
     uint64_t signalValue = 0,
-    VkPipelineStageFlags2 signalStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+    Vk::PipelineStage signalStage = Vk::PipelineStage::AllCommands
 ) noexcept -> std::expected<void, ErrorCode>;
 
-// NOLINTNEXTLINE(performance-enum-size)
-enum class BarrierStage : VkPipelineStageFlags2 {
-    StageNone                  = 0,
-    TopOfPipe                  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-    BottomOfPipe               = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-    Compute                    = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-    Fragment                   = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-    Vertex                     = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-    ColorAttachment            = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-    EarlyFragment              = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-    LateFragment               = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-    Indirect                   = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-    Transfer                   = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-    Copy                       = VK_PIPELINE_STAGE_2_COPY_BIT,
-    Clear                      = VK_PIPELINE_STAGE_2_CLEAR_BIT,
-    Host                       = VK_PIPELINE_STAGE_2_HOST_BIT,
-    AccelerationStructureBuild = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
-};
-
-// NOLINTNEXTLINE(performance-enum-size)
-enum class BarrierAccess : VkAccessFlags2 {
-    AccessNone    = 0,
-    ShaderRead    = VK_ACCESS_2_SHADER_READ_BIT,
-    ShaderWrite   = VK_ACCESS_2_SHADER_WRITE_BIT,
-    IndirectRead  = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
-    TransferRead  = VK_ACCESS_2_TRANSFER_READ_BIT,
-    TransferWrite = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-    HostRead      = VK_ACCESS_2_HOST_READ_BIT,
-    HostWrite     = VK_ACCESS_2_HOST_WRITE_BIT,
-    ColorRead     = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
-    ColorWrite    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-    DepthRead     = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
-    DepthWrite    = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-
-    AccelerationStructureRead  = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR,
-    AccelerationStructureWrite = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR
-};
-
-[[nodiscard]] constexpr auto operator|(BarrierStage a, BarrierStage b) noexcept -> BarrierStage;
-[[nodiscard]] constexpr auto operator|(BarrierAccess a, BarrierAccess b) noexcept -> BarrierAccess;
+// BarrierStage/BarrierAccess are the RenderQueue-facing names for the
+// seam-exported Vk::PipelineStage / Vk::Access (include/vulkan/Enums.hpp);
+// the | / & / Has operators live there too.
+using BarrierStage  = PipelineStage;
+using BarrierAccess = Access;
 
 enum class QueueType : uint8_t { Graphics, Compute, Transfer };
 
@@ -181,10 +146,10 @@ template <QueueType QType>
     ExecutableCommands cmd,
     VkSemaphore waitSemaphore = VK_NULL_HANDLE,
     uint64_t waitValue = 0,
-    VkPipelineStageFlags2 waitStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    Vk::PipelineStage waitStage = Vk::PipelineStage::AllCommands,
     VkSemaphore signalSemaphore = VK_NULL_HANDLE,
     uint64_t signalValue = 0,
-    VkPipelineStageFlags2 signalStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+    Vk::PipelineStage signalStage = Vk::PipelineStage::AllCommands
 ) noexcept -> std::expected<void, ErrorCode> {
     return QueueSubmit(
         ResolveQueue<QType>(ctx), std::move(cmd), waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage

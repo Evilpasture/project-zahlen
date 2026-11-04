@@ -90,10 +90,10 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
     std::array<Vk::SemaphoreSubmit, 2> waits {};
     uint32_t                           waitCount = 0;
     const uint32_t                     prevSlot  = Vk::PreviousFrameSlot(slot);
-    if (auto prevGfxDep = impl.presenter.sync.GetGraphicsWaitDependency(prevSlot, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)) {
+    if (auto prevGfxDep = impl.presenter.sync.GetGraphicsWaitDependency(prevSlot, Vk::PipelineStage::Compute)) {
         waits[waitCount++] = *prevGfxDep;
     }
-    if (auto prevCompDep = impl.presenter.sync.GetComputeWaitDependency(prevSlot, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)) {
+    if (auto prevCompDep = impl.presenter.sync.GetComputeWaitDependency(prevSlot, Vk::PipelineStage::Compute)) {
         waits[waitCount++] = *prevCompDep;
     }
 

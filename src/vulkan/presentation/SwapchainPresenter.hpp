@@ -35,7 +35,7 @@ struct SwapchainTarget {
     bool       presentable = false;
 };
 
-inline constexpr VkFormat kHeadlessColorFormat = VK_FORMAT_R8G8B8A8_SRGB;
+inline constexpr Vk::Format kHeadlessColorFormat = Vk::Format::R8G8B8A8Srgb;
 
 class SwapchainPresenter {
   public:
@@ -70,7 +70,7 @@ class SwapchainPresenter {
 
     [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> PresentationOutcome<SwapchainTarget>;
 
-    void PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept;
+    void PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, Vk::ImageLayout currentLayout) const noexcept;
 
     [[nodiscard]] auto Present(
         VkQueue                          graphicsQueue,
@@ -84,7 +84,7 @@ class SwapchainPresenter {
         frameIndex = NextFrameSlot(frameIndex);
     }
 
-    [[nodiscard]] auto GetPresentFormat() const noexcept -> VkFormat {
+    [[nodiscard]] auto GetPresentFormat() const noexcept -> Vk::Format {
         return swapchain.Valid() ? swapchain.Get().format : kHeadlessColorFormat;
     }
 

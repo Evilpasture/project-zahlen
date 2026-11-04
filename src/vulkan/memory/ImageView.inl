@@ -3,21 +3,21 @@
 
 namespace ZHLN::Vk {
 
-constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags {
+constexpr auto GetFormatAspect(Vk::Format format) noexcept -> Vk::ImageAspect {
     switch (format) {
-        case VK_FORMAT_UNDEFINED: return VK_IMAGE_ASPECT_NONE;
-        case VK_FORMAT_D16_UNORM:
-        case VK_FORMAT_X8_D24_UNORM_PACK32:
-        case VK_FORMAT_D32_SFLOAT:
-            return VK_IMAGE_ASPECT_DEPTH_BIT;
-        case VK_FORMAT_S8_UINT:
-            return VK_IMAGE_ASPECT_STENCIL_BIT;
-        case VK_FORMAT_D16_UNORM_S8_UINT:
-        case VK_FORMAT_D24_UNORM_S8_UINT:
-        case VK_FORMAT_D32_SFLOAT_S8_UINT:
-            return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        case Vk::Format::Undefined: return Vk::ImageAspect::None;
+        case Vk::Format::D16Unorm:
+        case Vk::Format::X8D24UnormPack32:
+        case Vk::Format::D32Sfloat:
+            return Vk::ImageAspect::Depth;
+        case Vk::Format::S8Uint:
+            return Vk::ImageAspect::Stencil;
+        case Vk::Format::D16UnormS8Uint:
+        case Vk::Format::D24UnormS8Uint:
+        case Vk::Format::D32SfloatS8Uint:
+            return Vk::ImageAspect::Depth | Vk::ImageAspect::Stencil;
         default:
-            return VK_IMAGE_ASPECT_COLOR_BIT;
+            return Vk::ImageAspect::Color;
     }
 }
 
