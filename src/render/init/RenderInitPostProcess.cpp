@@ -5,6 +5,7 @@
 #include "../Resources.hpp"
 #include "PassDescriptors.hpp"
 #include "pipeline/ComputePass.hpp"
+#include "../passes/aa/SMAAVariants.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
@@ -22,14 +23,30 @@ auto RenderContext::Impl::BuildFXAAPipeline() -> std::expected<void, ErrorCode> 
 }
 
 auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, ErrorCode> {
+    // Edge detection and neighborhood blending have no specialization: one
+    // pipeline each. Only the weight pass carries the two search-radius
+    // vk::constant_id values from SMAA.slang.
     return BuildPassHelper(
                this, antiAliasing.smaaEdge, Vk::MakeStageSource<Shaders::Modules::SmaaEdgeVS>(),
                Vk::MakeStageSource<Shaders::Modules::SmaaEdgePS>(), {VK_FORMAT_R8G8_UNORM}
     )
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return BuildPassHelper(
+            // One pair of SPIR-V modules, three VkPipelines. BuildPassVariants
+            // -> BuildHeapVariants gives the same VkSpecializationInfo to BOTH
+            // stages, so SmaaWeightVS's search window (offset[2]) and
+            // SmaaWeightPS's [loop] search bounds always agree. The variants
+            // live in FullscreenPass::pipelines; the single `pipeline` field
+            // stays empty and the draw must select by index (SMAAPasses.cpp).
+            //
+            // kSmaaWeightVariants has static storage duration, which is what
+            // VkSpecializationInfo::pData needs out to pipeline creation.
+            Vk::Specialization<Passes::SmaaWeightSpec> spec;
+            Reflect::ForEachFieldInfo<Passes::SmaaWeightSpec>(spec);
+            const auto specInfos = spec.Infos(std::span {Passes::kSmaaWeightVariants});
+
+            return BuildPassVariants(
                 this, antiAliasing.smaaWeight, Vk::MakeStageSource<Shaders::Modules::SmaaWeightVS>(),
-                Vk::MakeStageSource<Shaders::Modules::SmaaWeightPS>(), {VK_FORMAT_R8G8B8A8_UNORM}
+                Vk::MakeStageSource<Shaders::Modules::SmaaWeightPS>(), {VK_FORMAT_R8G8B8A8_UNORM}, specInfos
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
@@ -223,27 +240,10 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
                     .ps          = Vk::MakeStageSource<Shaders::Modules::FxaaPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
-                GraphicsPassDesc {
-                    .pass        = antiAliasing.smaaEdge,
-                    .name        = "SMAA Edge Detection",
-                    .vs          = Vk::MakeStageSource<Shaders::Modules::SmaaEdgeVS>(),
-                    .ps          = Vk::MakeStageSource<Shaders::Modules::SmaaEdgePS>(),
-                    .colorFormat = VK_FORMAT_R8G8_UNORM
-                },
-                GraphicsPassDesc {
-                    .pass        = antiAliasing.smaaWeight,
-                    .name        = "SMAA Blending Weight",
-                    .vs          = Vk::MakeStageSource<Shaders::Modules::SmaaWeightVS>(),
-                    .ps          = Vk::MakeStageSource<Shaders::Modules::SmaaWeightPS>(),
-                    .colorFormat = VK_FORMAT_R8G8B8A8_UNORM
-                },
-                GraphicsPassDesc {
-                    .pass        = antiAliasing.smaaBlend,
-                    .name        = "SMAA Neighborhood Blend",
-                    .vs          = Vk::MakeStageSource<Shaders::Modules::SmaaBlendVS>(),
-                    .ps          = Vk::MakeStageSource<Shaders::Modules::SmaaBlendPS>(),
-                    .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
-                },
+                // The SMAA pack is built by BuildSMAAPipeline() below, not by
+                // BuildDescribedPass: the weight pass needs three specialized
+                // pipeline variants, and a plain hot-reload rebuild would call
+                // BuildPassHelper and silently discard them.
                 GraphicsPassDesc {
                     .pass        = post.blit,
                     .name        = "Blit",
@@ -259,6 +259,16 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
                     return fold;
                 },
                 passes
+            );
+        })
+        .and_then([&]() -> std::expected<void, ErrorCode> {
+            // All three SMAA passes rebuild together on a shader reload, so the
+            // weight variants are always regenerated with the same tier table.
+            return RegisterAndBuild(
+                this, "SMAA", [this]() -> std::expected<void, ErrorCode> { return BuildSMAAPipeline(); },
+                {Shaders::Modules::SmaaEdgeVS::Path, Shaders::Modules::SmaaEdgePS::Path,
+                 Shaders::Modules::SmaaWeightVS::Path, Shaders::Modules::SmaaWeightPS::Path,
+                 Shaders::Modules::SmaaBlendVS::Path, Shaders::Modules::SmaaBlendPS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

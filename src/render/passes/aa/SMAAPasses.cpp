@@ -5,6 +5,7 @@
 #include "Renderer.hpp"
 #include "passes/FullscreenPassRecorder.hpp"
 #include "passes/aa/AntiAliasingResources.hpp"
+#include "passes/aa/SMAAVariants.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {
@@ -38,16 +39,25 @@ void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
 }
 
 void SmaaWeightPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    FullscreenPassRecorder<Shaders::SmaaWeight, Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>::Record(frame, ctx, aa.smaaWeight, [&]() {
-        const auto& areaView   = frame.renderer.textureManager.View(aa.smaaAreaTexIdx);
-        const auto& searchView = frame.renderer.textureManager.View(aa.smaaSearchTexIdx);
+    const auto  extent       = frame.graphResources.smaaWeightTarget.extent;
+    const auto& areaView     = frame.renderer.textureManager.View(aa.smaaAreaTexIdx);
+    const auto& searchView   = frame.renderer.textureManager.View(aa.smaaSearchTexIdx);
+    const auto  variantIndex = SmaaWeightVariantForExtent(extent);
 
-        return MakeFullscreenPassArgs(
-            MetricsOf(frame.graphResources.smaaWeightTarget.extent),
-            Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(frame.graphResources.smaaEdgeTarget)), Vk::Slot<"areaTex">(areaView),
-            Vk::Slot<"searchTex">(searchView)
-        );
-    });
+    const auto block = aa.smaaWeight.WriteHeapParameters<Shaders::SmaaWeight>(
+        frame.renderer.heapManager, Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(frame.graphResources.smaaEdgeTarget)),
+        Vk::Slot<"areaTex">(areaView), Vk::Slot<"searchTex">(searchView)
+    );
+
+    // The three pipelines were built at init (BuildSMAAPipeline), so the
+    // resolution tier only picks an index -- no shader cook or pipeline create
+    // on resize. Typestate: From proves the variant's bounds and validity,
+    // Create the non-zero heap push; ExecuteHeap cannot be reached otherwise.
+    if (const auto active = Vk::ActivePipeline::From(aa.smaaWeight.pipelines, variantIndex)) {
+        if (const auto heap = Vk::BoundHeapPass::Create(aa.smaaWeight.heapBindings.indexPushOffset, block.slot)) {
+            aa.smaaWeight.ExecuteHeap<Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>(ctx, *active, *heap, MetricsOf(extent));
+        }
+    }
 }
 
 void SmaaBlendPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {

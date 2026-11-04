@@ -8,13 +8,30 @@ import aa_common;
 #define SMAA_THRESHOLD 0.1f
 #endif
 
-#ifndef SMAA_MAX_SEARCH_STEPS
-#define SMAA_MAX_SEARCH_STEPS 16
-#endif
+// -----------------------------------------------------------------------------
+// Search radius is a Vulkan specialization constant, not a preprocessor macro.
+//
+// A #define is baked into the SPIR-V at shader-cook time, so changing it would
+// require recompiling the shader and rebuilding the pipeline. Declaring them as
+// [[vk::constant_id(N)]] instead lets one pair of SPIR-V modules serve every
+// resolution tier: RenderInitPostProcess.cpp precompiles three VkPipeline
+// variants with VkSpecializationInfo, and SmaaWeightPass binds the one that
+// matches the current target height. No pipeline is created on resize.
+//
+// SpecId 0 / 1 must stay in this order: Vk::Specialization<SmaaWeightSpec>
+// assigns constantID from field declaration order. Defaults (16 / 8) are the
+// standard SMAA HIGH preset, and every tier stays within the official ULTRA
+// budget (32 / 16) that the baked area and search LUTs support.
+//
+// The search loops below are [loop], NOT [unroll]: an unrolled loop would bake
+// the default trip count into the control flow and specialization would have
+// nothing left to override.
+// -----------------------------------------------------------------------------
+[[vk::constant_id(0)]]
+public const int SMAA_MAX_SEARCH_STEPS = 16;
 
-#ifndef SMAA_MAX_SEARCH_STEPS_DIAG
-#define SMAA_MAX_SEARCH_STEPS_DIAG 8
-#endif
+[[vk::constant_id(1)]]
+public const int SMAA_MAX_SEARCH_STEPS_DIAG = 8;
 
 #ifndef SMAA_CORNER_ROUNDING
 #define SMAA_CORNER_ROUNDING 25
@@ -118,7 +135,7 @@ float2 SearchDiag1(Texture2D edgesTex, SamplerState smp, float2 texcoord, float2
     float4 coord = float4(texcoord, -1.0f, 1.0f);
     float3 t     = float3(rtMetrics.xy, 1.0f);
 
-    [unroll]
+    [loop]
     for (int i = 0; i < SMAA_MAX_SEARCH_STEPS_DIAG; ++i) {
         if (coord.z >= float(SMAA_MAX_SEARCH_STEPS_DIAG - 1) || coord.w <= 0.9f) {
             break;
@@ -135,7 +152,7 @@ float2 SearchDiag2(Texture2D edgesTex, SamplerState smp, float2 texcoord, float2
     coord.x += 0.25f * rtMetrics.x;
     float3 t = float3(rtMetrics.xy, 1.0f);
 
-    [unroll]
+    [loop]
     for (int i = 0; i < SMAA_MAX_SEARCH_STEPS_DIAG; ++i) {
         if (coord.z >= float(SMAA_MAX_SEARCH_STEPS_DIAG - 1) || coord.w <= 0.9f) {
             break;
@@ -266,7 +283,7 @@ float SearchLength(Texture2D searchTex, SamplerState smp, float2 e, float offset
 float SearchXLeft(Texture2D edgesTex, Texture2D searchTex, SamplerState linearSmp, SamplerState pointSmp, float2 texcoord, float end, float4 rtMetrics) {
     float2 e = float2(0.0f, 1.0f);
 
-    [unroll]
+    [loop]
     for (int i = 0; i < SMAA_MAX_SEARCH_STEPS; ++i) {
         if (texcoord.x <= end || e.g <= 0.8281f || e.r != 0.0f) {
             break;
@@ -282,7 +299,7 @@ float SearchXLeft(Texture2D edgesTex, Texture2D searchTex, SamplerState linearSm
 float SearchXRight(Texture2D edgesTex, Texture2D searchTex, SamplerState linearSmp, SamplerState pointSmp, float2 texcoord, float end, float4 rtMetrics) {
     float2 e = float2(0.0f, 1.0f);
 
-    [unroll]
+    [loop]
     for (int i = 0; i < SMAA_MAX_SEARCH_STEPS; ++i) {
         if (texcoord.x >= end || e.g <= 0.8281f || e.r != 0.0f) {
             break;
@@ -297,7 +314,7 @@ float SearchXRight(Texture2D edgesTex, Texture2D searchTex, SamplerState linearS
 float SearchYUp(Texture2D edgesTex, Texture2D searchTex, SamplerState linearSmp, SamplerState pointSmp, float2 texcoord, float end, float4 rtMetrics) {
     float2 e = float2(1.0f, 0.0f);
 
-    [unroll]
+    [loop]
     for (int i = 0; i < SMAA_MAX_SEARCH_STEPS; ++i) {
         if (texcoord.y <= end || e.r <= 0.8281f || e.g != 0.0f) {
             break;
@@ -312,7 +329,7 @@ float SearchYUp(Texture2D edgesTex, Texture2D searchTex, SamplerState linearSmp,
 float SearchYDown(Texture2D edgesTex, Texture2D searchTex, SamplerState linearSmp, SamplerState pointSmp, float2 texcoord, float end, float4 rtMetrics) {
     float2 e = float2(1.0f, 0.0f);
 
-    [unroll]
+    [loop]
     for (int i = 0; i < SMAA_MAX_SEARCH_STEPS; ++i) {
         if (texcoord.y >= end || e.r <= 0.8281f || e.g != 0.0f) {
             break;
