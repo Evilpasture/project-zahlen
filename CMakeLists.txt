@@ -173,11 +173,41 @@ include(ThirdParty)
 
 add_subdirectory(src/presentation)
 add_subdirectory(src/window)
+add_subdirectory(src/d3d12)
 if(ZHLN_BUILD_RENDER)
     add_subdirectory(src/vulkan)
 else()
     message(STATUS "ZHLN_BUILD_RENDER=OFF: skipping Vulkan, Slang shader compilation, and zahlen_render GPU passes (linking world-only null RenderContext)")
 endif()
+
+# Shared address contract: renderer integration is intentionally deferred, so
+# src/render continues to link and use zahlen_vulkan directly for now. This is a
+# concrete target so CI can compile-check the bridge independently of the heavy
+# renderer target.
+add_library(zahlen_vkd3d STATIC src/vkd3d/GpuAddress.cpp)
+add_library(Zahlen::VkD3D ALIAS zahlen_vkd3d)
+set_target_properties(zahlen_vkd3d PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+target_compile_features(zahlen_vkd3d PRIVATE cxx_std_26)
+target_include_directories(zahlen_vkd3d PRIVATE
+    "${PROJECT_SOURCE_DIR}"
+    "${PROJECT_SOURCE_DIR}/include"
+)
+target_compile_options(zahlen_vkd3d PRIVATE -fno-exceptions -fno-rtti)
+# Select packed-address arithmetic only at the joint backend boundary; engine
+# and pass sources do not branch on this definition.
+target_compile_definitions(zahlen_vkd3d PUBLIC ZHLN_GPU_ADDRESS_D3D12=1)
+target_link_libraries(zahlen_vkd3d PRIVATE zahlen_direct3d zahlen_warnings)
+if(TARGET zahlen_vulkan)
+    target_link_libraries(zahlen_vkd3d PRIVATE zahlen_vulkan)
+else()
+    message(FATAL_ERROR "zahlen_vkd3d requires ZHLN_BUILD_RENDER=ON so Vulkan headers and zahlen_vulkan are available")
+endif()
+
 add_subdirectory(src/threading)
 add_subdirectory(src/filesystem)
 add_subdirectory(src/physics)

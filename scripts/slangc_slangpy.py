@@ -19,6 +19,7 @@ import ctypes
 import glob
 import importlib.util
 import os
+import re
 import sys
 
 SPIRV_MAGIC = 0x07230203
@@ -109,8 +110,17 @@ def _diagnostics(slang: ctypes.CDLL, request: ctypes.c_void_p) -> str:
 
 
 def main(argv: list[str]) -> int:
+    # CMake probes the same spelling as upstream slangc. Keep the shim
+    # probeable so the project's Slang version gate can compare the compiler
+    # and linked C API library.
+    if argv == ["-version"]:
+        match = re.search(r"([0-9]{4}\.[0-9]+)", os.path.basename(find_slang_library()))
+        print(match.group(1) if match else "Slang version unknown")
+        return 0
+
     # Everything except -o is handed to the compiler verbatim; -o is satisfied
-    # from the code blob it hands back.
+    # from the code blob it hands back. Slang does not currently provide these
+    # target macros itself, so mirror the target selection for gpu_memory.slang.
     compiler_args: list[str] = []
     output_path: str | None = None
 
@@ -122,6 +132,18 @@ def main(argv: list[str]) -> int:
             continue
         compiler_args.append(argv[index])
         index += 1
+
+    target_macro = None
+    if "-target" in compiler_args:
+        target_index = compiler_args.index("-target")
+        if target_index + 1 < len(compiler_args):
+            target_macro = {
+                "spirv": "__TARGET_SPIRV__",
+                "dxil": "__TARGET_DXIL__",
+                "hlsl": "__TARGET_HLSL__",
+            }.get(compiler_args[target_index + 1].lower())
+    if target_macro and not any(arg.startswith(f"-D{target_macro}") for arg in compiler_args):
+        compiler_args.append(f"-D{target_macro}=1")
 
     if not compiler_args or output_path is None:
         print("usage: slangc_slangpy.py <input> [options] -o <output>", file=sys.stderr)

@@ -43,6 +43,7 @@ set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/particles.slang"
     "${SHADER_SRC_DIR}/material_model.slang"
     "${SHADER_SRC_DIR}/gpu_buffer.slang"
+    "${SHADER_SRC_DIR}/gpu_memory.slang"
     "${SHADER_SRC_DIR}/math/math.slang"
     "${SHADER_SRC_DIR}/math/phase.slang"
     "${SHADER_SRC_DIR}/math/transform.slang"
@@ -425,6 +426,10 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
     get_filename_component(FILE_NAME ${SHADER_PATH} NAME_WE)
     set(OUTPUT_SPV "${GEN_INCLUDE_DIR}/${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv")
     set(EXTRA_ARGS ${ARGN})
+    # Slang does not predefine these target selector macros. Keep target
+    # selection in the compile setup so shader sources only import the
+    # backend-lowering module and never choose a backend themselves.
+    list(APPEND EXTRA_ARGS -D__TARGET_SPIRV__=1)
 
     # Map HLSL-style profiles to Slang's stage names
     set(SLANG_STAGE ${STAGE})

@@ -99,6 +99,7 @@ def compile_one(lib, gsession, shader_path: Path, entry: str, stage: str, extra:
         b"-entry", entry.encode(),
         b"-stage", stage.encode(),
         b"-target", b"spirv",
+        b"-D__TARGET_SPIRV__=1",
         b"-fvk-use-entrypoint-name",
         b"-matrix-layout-column-major",
         b"-I", str(REPO / "resources" / "shaders").encode(),
