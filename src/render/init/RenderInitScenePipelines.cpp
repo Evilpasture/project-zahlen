@@ -470,8 +470,10 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                                 [&](VkCommandBuffer cmd) -> void {
                                     Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
                                     Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
-                                    frames.clusterGridBuffers[i].SyncForComputeReadWrite(cmd);
-                                    frames.globalCounterBuffers[i].SyncForComputeReadWrite(cmd);
+                                    Vk::Buffer::SyncAll(cmd, {
+                                        frames.clusterGridBuffers[i].BarrierForComputeReadWrite(),
+                                        frames.globalCounterBuffers[i].BarrierForComputeReadWrite(),
+                                    });
                                 }
                             );
                             !immediate) [[unlikely]] {

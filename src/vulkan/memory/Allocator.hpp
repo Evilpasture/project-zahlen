@@ -8,6 +8,7 @@
 #endif
 
 #include <Zahlen/Threading/Mutex.hpp>
+#include <initializer_list>
 #include <span>
 
 #include "ImageView.hpp"
@@ -285,6 +286,20 @@ class Buffer {
     void SyncIndirectForTransferWrite(VkCommandBuffer cmd) const noexcept; // indirect consumption -> transfer write
     void SyncCopyWriteToWrite(VkCommandBuffer cmd, VkDeviceSize offset, VkDeviceSize size) const noexcept; // serialize overlapping staged copy writes
 
+    // The same hazards as barrier values, for SyncAll: adjacent buffer
+    // syncs on one command buffer should reach the driver as ONE barrier
+    // submission, not one vkCmdPipelineBarrier2 per buffer.
+    [[nodiscard]] auto BarrierForComputeRead() const noexcept -> BufferBarrier;
+    [[nodiscard]] auto BarrierForComputeReadWrite() const noexcept -> BufferBarrier;
+    [[nodiscard]] auto BarrierForIndirectRead() const noexcept -> BufferBarrier;
+    [[nodiscard]] auto BarrierComputeForTransferWrite() const noexcept -> BufferBarrier;
+    [[nodiscard]] auto BarrierIndirectForTransferWrite() const noexcept -> BufferBarrier;
+    [[nodiscard]] auto BarrierCopyWriteToWrite(VkDeviceSize offset, VkDeviceSize size) const noexcept -> BufferBarrier;
+
+    static void SyncAll(VkCommandBuffer cmd, std::initializer_list<BufferBarrier> barriers) noexcept {
+        BufferBarrier::Record(cmd, std::span<const BufferBarrier> {barriers.begin(), barriers.size()});
+    }
+
     struct MappedRegion {
         MappedRegion() = default;
         ~MappedRegion() noexcept;
@@ -510,6 +525,30 @@ inline auto BufferBarrier::ComputeToIndirect(const Buffer& buffer, VkDeviceSize 
 
 inline auto BufferBarrier::ComputeWriteToRead(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
     return ComputeWriteToRead(buffer.Handle(), offset, size);
+}
+
+inline auto Buffer::BarrierForComputeRead() const noexcept -> BufferBarrier {
+    return BufferBarrier::ComputeWriteToRead(*this);
+}
+
+inline auto Buffer::BarrierForComputeReadWrite() const noexcept -> BufferBarrier {
+    return BufferBarrier::TransferToCompute(*this);
+}
+
+inline auto Buffer::BarrierForIndirectRead() const noexcept -> BufferBarrier {
+    return BufferBarrier::ComputeToIndirect(*this);
+}
+
+inline auto Buffer::BarrierComputeForTransferWrite() const noexcept -> BufferBarrier {
+    return BufferBarrier::ComputeToTransfer(*this);
+}
+
+inline auto Buffer::BarrierIndirectForTransferWrite() const noexcept -> BufferBarrier {
+    return BufferBarrier::IndirectToTransfer(*this);
+}
+
+inline auto Buffer::BarrierCopyWriteToWrite(VkDeviceSize offset, VkDeviceSize size) const noexcept -> BufferBarrier {
+    return BufferBarrier::CopyWriteToWrite(*this, offset, size);
 }
 
 inline void Buffer::SyncForComputeRead(VkCommandBuffer cmd) const noexcept {

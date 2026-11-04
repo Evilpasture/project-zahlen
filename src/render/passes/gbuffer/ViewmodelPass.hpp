@@ -21,7 +21,7 @@ struct ViewmodelPass:
         Vk::DepthStencilWrite<Res_Depth>> {
     RenderFrame& frame;
 
-    void operator()(VkCommandBuffer cmd) const noexcept;
+    void operator()(Vk::RasterPassContextBase& pass) const noexcept;
 };
 
 } // namespace ZHLN::Passes

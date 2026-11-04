@@ -8,31 +8,18 @@
 
 namespace ZHLN::Passes {
 
-// Manual scope: the pass wraps its own Vk::DynamicPass. GBufferBasePass ran
-// first and cleared the shared targets; this pass loads them and stamps the
-// skybox scenery. That scenery is ordinary geometry in the same world, so it
-// is ordered by plain depth: it fills the pixels the map left empty and is
-// occluded wherever the map is nearer. (It used to be forced behind the world
-// by a second depth band; that split is retired.)
-void BackgroundGBufferPass::operator()(VkCommandBuffer cmd) const noexcept {
-    Vk::CommandEncoder encoder(cmd);
-    const auto         sceneVp = frame.viewport;
-    const auto  in      = GBufferSceneTargets(frame);
+// Graph scope: the graph opens rendering on the declared G-buffer targets.
+// GBufferBasePass ran first and cleared the shared targets; the state table
+// therefore loads them here, and this pass stamps the skybox scenery. That
+// scenery is ordinary geometry in the same world, so it is ordered by plain
+// depth: it fills the pixels the map left empty and is occluded wherever the
+// map is nearer. (It used to be forced behind the world by a second depth
+// band; that split is retired.)
+void BackgroundGBufferPass::operator()(Vk::RasterPassContextBase& pass) const noexcept {
+    pass.SetViewport(frame.viewport);
 
-    // Vk::DynamicPass(in.sceneColor.Extent())
-    //     .Viewport(sceneVp)
-    //     .ClearColor(in.sceneColor, kClearColorScene)
-    //     .ClearColor(in.velocity, kClearColorVelocity)
-    //     .ClearColor(in.normRough, kClearColorNormalRoughness)
-    //     .ClearDepth(in.depth, kClearDepthValue)
-    Vk::DynamicPass(in.sceneColor.Extent())
-        .Viewport(sceneVp)
-        .LoadColor(in.sceneColor)
-        .LoadColor(in.velocity)
-        .LoadColor(in.normRough)
-        .LoadColor(in.bakedMask)
-        .LoadDepth(in.depth)
-        .Execute(cmd, [&]() {
+    Vk::CommandEncoder encoder(pass.Cmd());
+    {
             for (size_t i = 0; i < frame.renderer.queues.Draws().size(); ++i) {
                 const auto& drawCmd = frame.renderer.queues.Draws()[i];
                 if ((drawCmd.flags & DrawFlags::Background) == DrawFlags::None || !IsVisibleIn(drawCmd.flags, RenderPassType::Main) ||
@@ -50,7 +37,7 @@ void BackgroundGBufferPass::operator()(VkCommandBuffer cmd) const noexcept {
                 // SubmitDrawInstanced already falls back to that pipeline.
                 SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, frame.meshShading);
             }
-        });
+    }
 }
 
 } // namespace ZHLN::Passes

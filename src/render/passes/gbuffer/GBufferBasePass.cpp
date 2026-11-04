@@ -96,9 +96,11 @@ void RecordGpuCulled(
     );
     cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
-    ctx.indirectCommandsBuffers.SyncForIndirectRead(cmd);
-    ctx.secondPassCandidatesBuffers.SyncForComputeRead(cmd);
-    countBuf.SyncForComputeRead(cmd);
+    Vk::Buffer::SyncAll(cmd, {
+        ctx.indirectCommandsBuffers.BarrierForIndirectRead(),
+        ctx.secondPassCandidatesBuffers.BarrierForComputeRead(),
+        countBuf.BarrierForComputeRead(),
+    });
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)
