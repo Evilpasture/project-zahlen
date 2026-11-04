@@ -42,7 +42,6 @@ public struct FrameUniforms {
     public float4 probeMin;
     public float4 probeMax;
     public float4 probePos;
-    public float4 jitterParams;
     public int enableRTR;
     public float sunSize;
 
@@ -78,17 +77,9 @@ public struct GISettings {
 
 public struct AAState {
     public uint mode;
-    public float taaFeedback;
-    public float jitterX;
-    public float jitterY;
-    public float prevJitterX;
-    public float prevJitterY;
-    public uint frameIndex;
     public float fxaaSubpix;
     public float fxaaEdgeThreshold;
     public float fxaaEdgeThresholdMin;
-    public float mlaaThreshold;
-    public uint mlaaMaxSearchSteps;
 };
 
 // One rectangular tile of the shadow atlas: the light-space transform the tile

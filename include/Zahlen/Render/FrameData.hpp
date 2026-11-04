@@ -6,7 +6,7 @@
 // What the engine hands the renderer once a frame: the scene state it authored.
 //
 // Two structs, one boundary. `FrameData` carries the view, the sun, the sky, the
-// probe and the jitter -- plus the settings the frame was authored with. `LightDesc`
+// probe -- plus the settings the frame was authored with. `LightDesc`
 // carries one light of the scene. Both are Jolt's compute types in named fields: no
 // padding a shader needs, no lane sharing, no field the renderer owns. The clock is
 // `frameClock`, not `camPos.w`; intensity is `sunIntensity`, not `lightDir.w`; a flag
@@ -46,9 +46,6 @@ struct FrameData {
     ZHLN::Float4 skyZenith {0.0f, 0.0f, 0.0f, 1.0f};
     ZHLN::Float4 skyHorizon {0.0f, 0.0f, 0.0f, 1.0f};
     ZHLN::Float4 skyGround {0.0f, 0.0f, 0.0f, 1.0f};
-
-    // This frame's temporal jitter in x/y and the previous frame's in z/w.
-    ZHLN::Float4 jitter {};
 
     // The settings the frame was authored with; the same member types
     // GraphicsSettings holds, so nothing is converted on the way in.

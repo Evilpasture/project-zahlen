@@ -402,9 +402,7 @@ struct RenderContext::Impl: Renderer {
     [[nodiscard]] std::expected<void, ErrorCode> BuildPostProcessResources();
     [[nodiscard]] std::expected<void, ErrorCode> BakeSMAALUTs();
 
-    [[nodiscard]] std::expected<void, ErrorCode> BuildTAAPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> BuildFXAAPipeline();
-    [[nodiscard]] std::expected<void, ErrorCode> BuildMLAAPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> BuildSMAAPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> BuildLightingPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> BuildReflectionPipelines();

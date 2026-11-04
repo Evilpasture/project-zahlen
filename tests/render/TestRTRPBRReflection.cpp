@@ -167,16 +167,11 @@ struct RTRPBRReflectionTestSuite {
         });
     }
 
-    static void DisableTAAAndFreeCam(ZHLN::Engine& engine) {
+    static void DisableAAAndFreeCam(ZHLN::Engine& engine) {
         auto& reg = engine.GetRegistry();
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
             reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
                 aa.state.mode        = ZHLN::AAMode::None;
-                aa.state.jitterX     = 0.0f;
-                aa.state.jitterY     = 0.0f;
-                aa.state.prevJitterX = 0.0f;
-                aa.state.prevJitterY = 0.0f;
-                aa.state.frameIndex  = 0;
             });
         }
         engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
@@ -292,7 +287,7 @@ struct RTRPBRReflectionTestSuite {
             return s;
         }
 
-        DisableTAAAndFreeCam(*s.engine);
+        DisableAAAndFreeCam(*s.engine);
         // Build the TLAS on the default (SSR) path first. Flipping RTR on a
         // cold context with no acceleration structure is how the previous
         // suite TDR'd; that is a hang, not a colour bug.

@@ -181,7 +181,7 @@ new machine seeds that machine's baseline, and every run after compares. A
 *changed* golden is a failure, which is the whole point.
 
 The `.json` sidecar records everything that has to match for a comparison to be
-meaningful: image size, disable-TAA flag, warmup frame count, fixed `dt`, the
+meaningful: image size, disable-AA flag, warmup frame count, fixed `dt`, the
 graphics-settings hash, and the source path of the test. Mismatched sidecar →
 skip with a reason, never a red X.
 
@@ -196,7 +196,7 @@ unavailable" and skip rather than fail.
 **What "matching" means.** Not per-pixel equality. `Image::CompareFrames`
 already computes what is needed — mean absolute channel error and the fraction
 of pixels over 12 and over 32 — and the gate should be on those *pooled*
-fractions (e.g. `frac32 < 0.02`), not on counts, so a one-pixel-wide TAA edge
+fractions (e.g. `frac32 < 0.02`), not on counts, so a one-pixel-wide AA edge
 or a denoiser jitter cannot fail a run. Downsampling the comparison to a fixed
 size (say 320x240 for a 640x480 capture) buys a lot of tolerance for free and
 makes the stored golden ~10x smaller. If pooled fractions turn out to need
@@ -204,7 +204,7 @@ per-test hand-holding, the upgrade is FLIP, not more thresholds.
 
 **Determinism requirements per scene.** A golden is only reproducible if the
 scene is. The harness must provide, and every converted scene must use:
-- `ZHLN::Test::Headless::DisableTAA(engine)` — exists (`HeadlessEngineFixture.hpp:355`)
+- `ZHLN::Test::Headless::DisableAA(engine)` — exists (`HeadlessEngineFixture.hpp`)
 - a fixed warmup frame count through `TickFrames(engine, n, dt)` — exists (`:377`)
 - no wall-clock-driven animation, and seeded RNG for anything stochastic
   (particles, RT sample offsets) — needs a per-scene audit, this is the real work

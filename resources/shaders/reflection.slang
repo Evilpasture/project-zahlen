@@ -40,7 +40,6 @@ Texture2D<float4>              texInput;
 SamplerState                   smp;
 Texture2D<float>               texDepth;
 Texture2D<float4>              texNormalRoughness;
-Texture2D<float>               texHiZ;
 SamplerState                   pointSampler;
 TextureCube<float4>            texEnvMap;      // conditioned IBL, never used as the cooked visible sky
 Texture2D<float4>              texSkyEquirect; // original HDR only when environmentMode == 3
@@ -179,53 +178,33 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         litColor = litColorRaw.rgb;
 
         const bool wantRTR = (ENABLE_RTR != 0) && (pc.enableRTR != 0);
-        const bool wantSSR = (ENABLE_SSR != 0) && (pc.enableSSR != 0);
+        // `enableSSR` no longer selects a screen-space raymarcher. It gates the
+        // on-screen radiance cache instead: the BVH resolves the 3D hit first,
+        // and `texLighting` is consulted only when that hit is directly visible.
+        const bool useScreenCache = (ENABLE_SSR != 0) && (pc.enableSSR != 0);
 
         // Tier 1 (roughness < 0.20) & Tier 2 (0.20 <= roughness <= 0.40):
-        //   1 deterministic ray along R = reflect(-V, N)
-        //   Step A: Hierarchical min-depth Hi-Z SSR -> cone-footprint mip of texLighting
-        //   Step B: On Hi-Z miss / screen-edge fade, hardware TLAS inline fallback along R
-        if (roughness <= kReflMaxTrace && NdotV > 1e-4f && (wantSSR || wantRTR)) {
+        //   1 deterministic BVH ray along R = reflect(-V, N), traced FIRST.
+        //   The hardware TLAS owns 100% of intersection testing in world space;
+        //   screen space is only an acceleration cache for the radiance of a hit
+        //   that projects onto a directly visible pixel. No Hi-Z march, no
+        //   depth/thickness cut, no screen-edge confidence fade, no SSR pop.
+        if (roughness <= kReflMaxTrace && NdotV > 1e-4f && wantRTR) {
             uint lightW = 0u, lightH = 0u, lightingMips = 1u;
             texLighting.GetDimensions(0u, lightW, lightH, lightingMips);
             float projScaleY = 1.0f / max(abs(frame.invProj[1][1]), 0.1f);
 
-            float  ssrConfidence = 0.0f;
-            float3 ssrColor      = float3(0.0f);
-
-            if (wantSSR) {
-                float3       biasedStart = worldPos + N * max(0.025f, viewDepth * 0.002f);
-                const bool   useHiZ      = (pc.translucentSurface == 0);
-                SsrHitResult ssrHit      = RaymarchHiZDeterministic(
-                    worldPos, biasedStart, R, N, roughness, useHiZ, texHiZ, texDepth, texNormalRoughness, pointSampler,
-                    pc.viewProj, pc.invViewProj, frame.invProj);
-
-                if (ssrHit.confidence > 0.0f) {
-                    float  coneLod   = ComputeReflectionConeLod(
-                        roughness, ssrHit.hitDist, ssrHit.hitViewW, frame.screenResolution, projScaleY, lightingMips);
-                    float4 ssrSample = texLighting.SampleLevel(smp, ssrHit.uv, coneLod);
-                    if (ssrSample.a > 1e-3f) {
-                        ssrColor      = ssrSample.rgb / max(ssrSample.a, 0.05f);
-                        ssrConfidence = ssrHit.confidence * saturate(ssrSample.a * 2.0f);
-                    }
-                }
-            }
-
-            float  finalConfidence = ssrConfidence;
-            float3 reflectionColor = ssrColor;
+            float  finalConfidence = 0.0f;
+            float3 reflectionColor = float3(0.0f);
 
 #ifndef DISABLE_RTR
-            // Fire the TLAS ray only when SSR is disabled or did not resolve a
-            // full-confidence on-screen hit (off-screen, behind camera, or grazing border).
-            if (wantRTR && ssrConfidence < 0.98f) {
-                RtrWorldHitResult tlasHit = TraceDeterministicRtrFallback(
-                    worldPos, N, R, roughness, prefilteredColor, projScaleY, lightingMips, tlas, frame, g_instances,
-                    texDepth, texNormalRoughness, texLighting, smp, pointSampler);
+            RtrWorldHitResult tlasHit = TraceDeterministicRtrFallback(
+                worldPos, N, R, roughness, prefilteredColor, projScaleY, lightingMips, tlas, frame, g_instances,
+                texDepth, texNormalRoughness, texLighting, smp, pointSampler, useScreenCache);
 
-                if (tlasHit.confidence > 0.0f) {
-                    reflectionColor = lerp(tlasHit.radiance, ssrColor, ssrConfidence);
-                    finalConfidence = max(ssrConfidence, tlasHit.confidence);
-                }
+            if (tlasHit.confidence > 0.0f) {
+                reflectionColor = tlasHit.radiance;
+                finalConfidence = tlasHit.confidence;
             }
 #endif
 

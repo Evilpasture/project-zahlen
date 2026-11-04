@@ -37,21 +37,9 @@ void CameraSystem::Update(ECS::Registry& reg, Extent2D res, float , float ) {
             JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix(static_cast<float>(res.width) / res.height);
             cComp->unjitteredViewProj = unjitteredProj * cam.GetViewMatrix();
 
-            auto aaComp = reg.Get<Components::AASettingsComponent>(e);
-            if (aaComp && aaComp->state.mode == AAMode::TAA) {
-                aaComp->state.frameIndex++;
-                cComp->viewProj = cam.GetJitteredProjectionMatrix(static_cast<float>(res.width) / res.height, res.width, res.height, aaComp->state) *
-                                  cam.GetViewMatrix();
-            } else {
-                if (aaComp) {
-                    aaComp->state.frameIndex = 0;
-                    aaComp->state.jitterX     = 0.0f;
-                    aaComp->state.jitterY     = 0.0f;
-                    aaComp->state.prevJitterX = 0.0f;
-                    aaComp->state.prevJitterY = 0.0f;
-                }
-                cComp->viewProj = cComp->unjitteredViewProj;
-            }
+            // Both remaining AA modes are spatial post-processes; the camera
+            // projection itself is never jittered.
+            cComp->viewProj = cComp->unjitteredViewProj;
 
             cComp->frameCounter++;
         }

@@ -465,22 +465,16 @@ struct MeshShaderTestSuite {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
                 }
 
-                // ...and TAA has to be switched off AT ITS SOURCE. The camera's
+                // ...and AA has to be switched off AT ITS SOURCE. The camera's
                 // AASettingsComponent is authoritative: RenderSystem re-pushes it
                 // into the RenderContext every frame (so RenderContext::SetAAState
-                // alone is overwritten after one tick), and while it says TAA,
-                // CameraSystem jitters the projection matrix by a different
-                // sub-pixel offset every frame. Two captures taken at different
-                // jitter offsets differ on every high-contrast edge in the frame,
-                // which has nothing to do with the geometry pipeline.
+                // alone is overwritten after one tick). Both remaining modes are
+                // spatial edge filters, so leaving one on changes the pixels at
+                // every high-contrast edge, which has nothing to do with the
+                // geometry pipeline.
                 for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
                     reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
                         aa.state.mode        = ZHLN::AAMode::None;
-                        aa.state.jitterX     = 0.0f;
-                        aa.state.jitterY     = 0.0f;
-                        aa.state.prevJitterX = 0.0f;
-                        aa.state.prevJitterY = 0.0f;
-                        aa.state.frameIndex  = 0;
                     });
                 }
                 rc.SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
@@ -517,8 +511,8 @@ struct MeshShaderTestSuite {
             // engine. The vertex engine captures twice (control); a second
             // engine with mesh shading on captures once. Without this control
             // there is no way to tell a real path divergence from engine noise
-            // -- an earlier revision of this test blamed the mesh path for TAA
-            // jitter for exactly that reason.
+            // -- an earlier revision of this test blamed the mesh path for
+            // per-frame camera jitter for exactly that reason.
             // Any VUID raised from here on is attributable to the frames this
             // test renders. A suite that prints validation errors and still
             // reports PASS is not verifying anything.
@@ -691,11 +685,6 @@ struct MeshShaderTestSuite {
                 for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
                     reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
                         aa.state.mode = ZHLN::AAMode::None;
-                        aa.state.jitterX = 0;
-                        aa.state.jitterY = 0;
-                        aa.state.prevJitterX = 0;
-                        aa.state.prevJitterY = 0;
-                        aa.state.frameIndex = 0;
                     });
                 }
                 engine.GetRenderContext().SetAAState(ZHLN::AAState{.mode = ZHLN::AAMode::None});
@@ -855,7 +844,7 @@ struct MeshShaderTestSuite {
             }
 
             auto setupBackplane = [](ZHLN::Engine& engine) -> bool {
-                ZHLN::Test::Headless::DisableTAA(engine);
+                ZHLN::Test::Headless::DisableAA(engine);
                 auto& reg = engine.GetRegistry();
                 for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) {

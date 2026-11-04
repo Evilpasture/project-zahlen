@@ -12,23 +12,14 @@ namespace ZHLN {
 enum class QualityLevel : uint8_t { Low = 0, Medium, High, Ultra, Custom };
 
 // NOLINTNEXTLINE(performance-enum-size)
-enum class AAMode : uint32_t { None = 0, FXAA, MLAA, TAA, SMAA };
+enum class AAMode : uint32_t { None = 0, FXAA, SMAA };
 
 struct AAState {
     AAMode mode = AAMode::SMAA;
 
-    float    taaFeedback = 0.95f;
-    float    jitterX     = 0.0f;
-    float    jitterY     = 0.0f;
-    float    prevJitterX = 0.0f;
-    float    prevJitterY = 0.0f;
-    uint32_t frameIndex  = 0;
-
-    float    fxaaSubpix           = 0.75f;
-    float    fxaaEdgeThreshold    = 0.166f;
-    float    fxaaEdgeThresholdMin = 0.0833f;
-    float    mlaaThreshold        = 0.1f;
-    uint32_t mlaaMaxSearchSteps   = 16;
+    float fxaaSubpix           = 0.75f;
+    float fxaaEdgeThreshold    = 0.166f;
+    float fxaaEdgeThresholdMin = 0.0833f;
 };
 
 struct GISettings {
@@ -50,6 +41,13 @@ struct GISettings {
     float                saturation    = 1.0f;
     int                  tonemapper    = 3;
     ZHLN::Float3         colorFilter   = {1.0f, 1.0f, 1.0f};
+
+    // Runtime RCAS dial forwarded to BlitPushConstants.rcasSharpness. 0.0 turns
+    // sharpening off; positive values are AMD's exp2(-stops) sharpness, 0.2
+    // stops being the default. Deliberately absent from QualitySignature: this
+    // is a subjective look control, not a quality tier, so retuning it never
+    // changes preset detection.
+    float                rcasSharpness = 0.8705505632961241f; // exp2(-0.2)
 
     auto operator==(const GISettings&) const noexcept -> bool = default;
 };
@@ -102,7 +100,6 @@ struct GraphicsSettings {
 
     struct QualitySignature {
         AAMode   antiAliasMode       = AAMode::SMAA;
-        float    taaFeedback         = 0.95f;
         uint32_t shadowResolution    = 2048;
         uint32_t giSamples           = 8;
         int      enableSSR           = 0;
@@ -119,7 +116,6 @@ struct GraphicsSettings {
     [[nodiscard]] constexpr auto Signature() const noexcept -> QualitySignature {
         return QualitySignature {
             .antiAliasMode       = antiAliasing.mode,
-            .taaFeedback         = antiAliasing.taaFeedback,
             .shadowResolution    = shadows.resolution,
             .giSamples           = static_cast<uint32_t>(post.giSamples),
             .enableSSR           = post.enableSSR,
@@ -206,12 +202,10 @@ struct GraphicsSettings {
     }
 
     [[nodiscard]] constexpr auto ConfigEquals(const GraphicsSettings& other) const noexcept -> bool {
-        const bool aaMatches = antiAliasing.mode == other.antiAliasing.mode && antiAliasing.taaFeedback == other.antiAliasing.taaFeedback &&
+        const bool aaMatches = antiAliasing.mode == other.antiAliasing.mode &&
                                antiAliasing.fxaaSubpix == other.antiAliasing.fxaaSubpix &&
                                antiAliasing.fxaaEdgeThreshold == other.antiAliasing.fxaaEdgeThreshold &&
-                               antiAliasing.fxaaEdgeThresholdMin == other.antiAliasing.fxaaEdgeThresholdMin &&
-                               antiAliasing.mlaaThreshold == other.antiAliasing.mlaaThreshold &&
-                               antiAliasing.mlaaMaxSearchSteps == other.antiAliasing.mlaaMaxSearchSteps;
+                               antiAliasing.fxaaEdgeThresholdMin == other.antiAliasing.fxaaEdgeThresholdMin;
         return aaMatches && post == other.post && shadows == other.shadows && rayTracing == other.rayTracing && environment == other.environment;
     }
 };
@@ -221,6 +215,7 @@ static_assert([] -> bool {
     const GraphicsSettings settings {};
     return settings.antiAliasing.mode == AAMode::SMAA && settings.post.mode == 0 && settings.post.giIntensity == 1.0f
            && settings.post.enableSSR == 0 && settings.post.enableRTR == 0 && settings.post.exposure == 1.0f
+           && settings.post.rcasSharpness > 0.0f
            && settings.post.bloomStrength == 0.0f && settings.post.glowIntensity == 0.0f && settings.post.vignetteIntensity == 0.0f
            && settings.post.tonemapper == 3 && settings.shadows.resolution == 2048
            && !settings.rayTracing.enableShadows && !settings.rayTracing.enableReflections && !settings.rayTracing.enableDiffuseGI

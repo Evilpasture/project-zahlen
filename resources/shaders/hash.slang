@@ -37,12 +37,6 @@ public float GetStableWeylNoise(uint2 pixelPos, float timeOffset) {
 }
 
 [ForceInline]
-public float TemporalHash2D(uint2 tid, float timeOffset) {
-    float spatial = frac(float(tid.x * 12664589 + tid.y * 9546283) * 0.6180339887f);
-    return frac(spatial + timeOffset * 60.0f * 0.6180339887f);
-}
-
-[ForceInline]
 public float GetNoise3D(uint3 tid, float time) {
     uint h = tid.x * 1597334673U + tid.y * 3812015801U + tid.z * 2798796415U;
     h ^= (h >> 16);

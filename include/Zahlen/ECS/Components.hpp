@@ -236,6 +236,8 @@ struct Components {
         float        saturation    = 1.0f;
         int          tonemapper    = 3;
         ZHLN::Float3 colorFilter   = {1.0f, 1.0f, 1.0f};
+        // Mirrors GISettings::rcasSharpness; 0.0 disables the post-AA RCAS pass.
+        float        rcasSharpness = 0.8705505632961241f;
 
         float        ambientExposure = 1.0f;
         ZHLN::Float3 probeMin        = {-22.0f, 0.0f, -22.0f};

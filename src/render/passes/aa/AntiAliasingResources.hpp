@@ -8,17 +8,13 @@
 
 namespace ZHLN {
 
-using TAALayout        = Vk::ReflectedLayout;
 using FXAALayout       = Vk::ReflectedLayout;
-using MLAALayout       = Vk::ReflectedLayout;
 using SMAAEdgeLayout   = Vk::ReflectedLayout;
 using SMAAWeightLayout = Vk::ReflectedLayout;
 using SMAABlendLayout  = Vk::ReflectedLayout;
 
 struct AntiAliasingResources {
-    Vk::FullscreenPass<TAALayout>        taa;
     Vk::FullscreenPass<FXAALayout>       fxaa;
-    Vk::FullscreenPass<MLAALayout>       mlaa;
     Vk::FullscreenPass<SMAAEdgeLayout>   smaaEdge;
     Vk::FullscreenPass<SMAAWeightLayout> smaaWeight;
     Vk::FullscreenPass<SMAABlendLayout>  smaaBlend;

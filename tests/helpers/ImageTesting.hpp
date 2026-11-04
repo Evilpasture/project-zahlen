@@ -1081,7 +1081,7 @@ struct NoiseFloor {
 }
 
 // Box-downsampled copy, for pooled A/B comparisons that must ignore
-// one-pixel TAA edges and denoiser jitter. Compare the outputs with
+// one-pixel AA edges and denoiser jitter. Compare the outputs with
 // CompareFrames and gate on the pooled fractions, not on counts.
 [[nodiscard]] inline RgbImage DownsampleBox(const RgbImage& img, int outWidth, int outHeight) {
     RgbImage out;

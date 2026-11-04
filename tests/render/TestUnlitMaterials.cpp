@@ -72,7 +72,7 @@ struct MeanRgb {
 
 void ConfigureUnlitCapture(ZHLN::Engine& engine) {
     auto& reg = engine.GetRegistry();
-    ZHLN::Test::Headless::DisableTAA(engine);
+    ZHLN::Test::Headless::DisableAA(engine);
     for (const ZHLN::Entity settings: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
         reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
             pp.fullBright        = 0; // fullBright bypasses all shading: it cannot detect an unlit regression.

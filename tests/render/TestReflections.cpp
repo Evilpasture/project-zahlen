@@ -39,7 +39,7 @@ struct ReflectionsTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             {
                 auto& reg = engine->GetRegistry();
@@ -51,7 +51,7 @@ struct ReflectionsTestSuite {
                         pp.fullBright      = 0;
                         pp.ambientExposure = 6.0f;
                         pp.enableSSR       = 1;
-                        pp.enableRTR       = 0;
+                        pp.enableRTR       = 1;   // BVH ray gate: reflection.slang only traces when wantRTR
                     });
                 }
 
@@ -110,13 +110,13 @@ struct ReflectionsTestSuite {
             // speckled -- and needs different things looked at.
             bool reflectionMissing = false;
 
-            // NOTE: this scene runs SSR-only (enableRTR = 0 above), so the A/B
-            // flips SSR, not RTR -- the test name is historical. The old gate
-            // counted red pixels in the lower half, but the scene's own sun
-            // (140) plus ambient exposure wash the 1x emitter below the red
-            // threshold even in direct view, so a perfect reflection still
-            // read 0. Flipping the switch detects ANY reflection -- red,
-            // white, or otherwise. (Artifact shape -- debris, speckle -- is
+            // Retrained against scripts/pipeline_harness/baselines/measurements.json.
+            // The reflection ray now lives behind wantRTR (the TLAS/BVH-first
+            // gate), while enableSSR only gates the texLighting screen cache.
+            // So the A/B flips enableRTR: with it off there is no BVH ray at
+            // all and the polished surface falls back to IBL. Flipping the
+            // switch detects ANY reflection -- red, white, or otherwise, with
+            // or without the cache. (Artifact shape -- debris, speckle -- is
             // owned by the RayTracedReflectionNoise suite, which measures it
             // against the noise floor instead of absolute counts.)
             const auto stable = RunStableScene(
@@ -142,12 +142,12 @@ struct ReflectionsTestSuite {
                     auto&      reg      = eng.GetRegistry();
                     const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                     if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableSSR = 0; });
+                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 0; });
                     }
                     TickFrames(eng, 2);
-                    const RgbImage off = Capture(eng, "headless_lighting_rt_reflect_ssr_off.ppm");
+                    const RgbImage off = Capture(eng, "headless_lighting_rt_reflect_rtr_off.ppm");
                     if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableSSR = 1; });
+                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 1; });
                     }
                     if (!ZHLN::Test::ExpectTrue(off.Valid())) {
                         captureFailed = true;
@@ -158,20 +158,23 @@ struct ReflectionsTestSuite {
                     const RgbImage cropB         = ZHLN::Test::Image::CropImage(onB, kReflectionCrop);
                     const RgbImage cropOff       = ZHLN::Test::Image::CropImage(off, kReflectionCrop);
                     const double   cropPixels    = static_cast<double>(cropA.width * cropA.height);
-                    const double   noiseChanged  = CompareFrames(cropA, cropB).frac32 * cropPixels;
-                    const double   signalChanged = CompareFrames(cropA, cropOff).frac32 * cropPixels;
+                    const double   noiseFrac     = CompareFrames(cropA, cropB).frac32;
+                    const double   signalFrac    = CompareFrames(cropA, cropOff).frac32;
                     ZHLN::Println(
-                        "    [INFO] SSR reflection A/B in mirror crop: on/on changed={:.1f}px, on/off changed={:.1f}px ({} crop px)",
-                        noiseChanged, signalChanged, cropA.width * cropA.height
+                        "    [INFO] RTR reflection A/B in mirror crop: on/on frac32={:.4f} ({:.1f}px), on/off frac32={:.4f} ({:.1f}px), {} crop px",
+                        noiseFrac, noiseFrac * cropPixels, signalFrac, signalFrac * cropPixels, cropA.width * cropA.height
                     );
 
-                    // Coverage is changed pixels when the switch flips: the
-                    // blob is ~200px, so 24 (the old coverage number) keeps
-                    // its meaning while the noise term keeps bit-exact runs
-                    // honest. A polished surface showing nothing at all is the
-                    // SSR -> IBL fallback, not an artifact in a reflection
-                    // that does exist.
-                    const bool reflectionPresent = ZHLN::Test::ExpectGt(signalChanged, std::max(24.0, 5.0 * noiseChanged));
+                    // Pooled fraction, not a pixel count: the 24px floor graded
+                    // blob size on one GPU and failed when the ray gate moved.
+                    // Harness baseline: signalFrac=0.729, noiseFrac=0.000 in
+                    // this crop (bit-exact repeat frames). 0.001 is the
+                    // adopted presence floor (tests/INVARIANT_TESTING.md) --
+                    // "a reflection exists", not "the blob is this big".
+                    // The 5x noise term keeps bit-exact runs honest.
+                    constexpr double kReflectionPresenceFrac = 0.001;
+                    const bool reflectionPresent = ZHLN::Test::ExpectGt(
+                        signalFrac, std::max(kReflectionPresenceFrac, 5.0 * noiseFrac));
                     reflectionMissing = !reflectionPresent;
                     return reflectionPresent;
                 },
@@ -206,7 +209,7 @@ struct ReflectionsTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             {
                 auto& reg = engine->GetRegistry();
@@ -218,7 +221,7 @@ struct ReflectionsTestSuite {
                         pp.fullBright      = 0;
                         pp.ambientExposure = 6.0f;
                         pp.enableSSR       = 1;
-                        pp.enableRTR       = 0;
+                        pp.enableRTR       = 1;   // BVH ray gate: reflection.slang only traces when wantRTR
                         pp.giMode          = 0;
                     });
                 }
@@ -304,11 +307,13 @@ struct ReflectionsTestSuite {
                 *engine, 8, "multi_emissive_sources_and_surface_reflection_interaction",
                 [&](ZHLN::Engine& eng) -> bool {
                     captureFailed = false;
-                    // Two SSR-on frames (noise baseline) plus one SSR-off
+                    // Two RTR-on frames (noise baseline) plus one RTR-off
                     // frame: the A/B proves a reflection lands in each strip,
                     // the cross-strip ordering below proves each strip carries
-                    // its own emitter's hue. The switch is restored before
-                    // returning so RunStableScene retries see the same scene.
+                    // its own emitter's hue. enableRTR is the ray gate now;
+                    // flipping enableSSR would only toggle the screen cache.
+                    // The switch is restored before returning so RunStableScene
+                    // retries see the same scene.
                     const RgbImage frame = Capture(eng, "headless_lighting_multi_emissive.ppm");
                     const RgbImage onB   = Capture(eng, "headless_lighting_multi_emissive_b.ppm");
                     if (!(ZHLN::Test::ExpectTrue(frame.Valid()) && ZHLN::Test::ExpectTrue(onB.Valid()))) {
@@ -319,12 +324,12 @@ struct ReflectionsTestSuite {
                     auto&      reg      = eng.GetRegistry();
                     const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                     if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableSSR = 0; });
+                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 0; });
                     }
                     TickFrames(eng, 2);
-                    const RgbImage off = Capture(eng, "headless_lighting_multi_emissive_ssr_off.ppm");
+                    const RgbImage off = Capture(eng, "headless_lighting_multi_emissive_rtr_off.ppm");
                     if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableSSR = 1; });
+                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 1; });
                     }
                     if (!ZHLN::Test::ExpectTrue(off.Valid())) {
                         captureFailed = true;
@@ -359,41 +364,47 @@ struct ReflectionsTestSuite {
                         reflStripYel.meanB, reflStripYel.yellowMix
                     );
 
-                    // Per-strip SSR A/B: changed pixels when the switch flips,
-                    // against the on/on noise in the same strip. A presence
-                    // floor of 2px only asks "a systematic change exists" --
-                    // blob sizes vary wildly by emitter (red ~112px, green
-                    // ~15px), so any shared absolute floor either misses green
-                    // or grades blob size instead of the reflection.
+                    // Per-strip RTR A/B: pooled frac32 when the ray gate flips,
+                    // against the on/on noise in the same strip. Harness
+                    // baseline: signal frac32 0.984..1.000 in every strip,
+                    // noise 0.000 (bit-exact repeat frames). The 2px floor was
+                    // a count on one frame; 0.001 is the adopted presence floor
+                    // and does not grade blob size (red and green blobs differ
+                    // by ~7x in area, which is exactly why a count was brittle).
                     const auto stripAB = [&](double x0, double x1) {
                         const ZHLN::Test::Image::NormalizedRect rect {.x0 = x0, .y0 = 0.52, .x1 = x1, .y1 = 0.95};
-                        const RgbImage a  = ZHLN::Test::Image::CropImage(frame, rect);
-                        const RgbImage b  = ZHLN::Test::Image::CropImage(onB, rect);
-                        const RgbImage o  = ZHLN::Test::Image::CropImage(off, rect);
-                        const double   px = static_cast<double>(a.width * a.height);
-                        return std::array<double, 2> {CompareFrames(a, o).frac32 * px, CompareFrames(a, b).frac32 * px};
+                        const RgbImage a = ZHLN::Test::Image::CropImage(frame, rect);
+                        const RgbImage b = ZHLN::Test::Image::CropImage(onB, rect);
+                        const RgbImage o = ZHLN::Test::Image::CropImage(off, rect);
+                        return std::array<double, 2> {CompareFrames(a, o).frac32, CompareFrames(a, b).frac32};
                     };
                     const auto [redSig, redNoise] = stripAB(0.20, 0.36);
                     const auto [grnSig, grnNoise] = stripAB(0.38, 0.48);
                     const auto [bluSig, bluNoise] = stripAB(0.52, 0.62);
                     const auto [yelSig, yelNoise] = stripAB(0.64, 0.80);
                     ZHLN::Println(
-                        "      strip on/off changed px (noise): red={:.1f} ({:.1f}) green={:.1f} ({:.1f}) blue={:.1f} ({:.1f}) yellow={:.1f} ({:.1f})",
+                        "      strip on/off frac32 (noise): red={:.4f} ({:.4f}) green={:.4f} ({:.4f}) blue={:.4f} ({:.4f}) yellow={:.4f} ({:.4f})",
                         redSig, redNoise, grnSig, grnNoise, bluSig, bluNoise, yelSig, yelNoise
                     );
-                    const bool redAB = ZHLN::Test::ExpectGt(redSig, std::max(2.0, 5.0 * redNoise));
-                    const bool grnAB = ZHLN::Test::ExpectGt(grnSig, std::max(2.0, 5.0 * grnNoise));
-                    const bool bluAB = ZHLN::Test::ExpectGt(bluSig, std::max(2.0, 5.0 * bluNoise));
-                    const bool yelAB = ZHLN::Test::ExpectGt(yelSig, std::max(2.0, 5.0 * yelNoise));
+                    constexpr double kStripPresenceFrac = 0.001;
+                    const bool redAB = ZHLN::Test::ExpectGt(redSig, std::max(kStripPresenceFrac, 5.0 * redNoise));
+                    const bool grnAB = ZHLN::Test::ExpectGt(grnSig, std::max(kStripPresenceFrac, 5.0 * grnNoise));
+                    const bool bluAB = ZHLN::Test::ExpectGt(bluSig, std::max(kStripPresenceFrac, 5.0 * bluNoise));
+                    const bool yelAB = ZHLN::Test::ExpectGt(yelSig, std::max(kStripPresenceFrac, 5.0 * yelNoise));
 
                     // 1. Spatial mirror correspondence. The strips are ~100x
                     // the blob area, so strip MEANS can never show the
                     // reflection (a perfect 200px blob moves a 21kpx sky-blue
-                    // mean by <1 luma); the old 1.3x mean ratios were
-                    // unachievable by construction. Order dominant COUNTS
-                    // across strips instead: the sky contributes zero to every
-                    // detector's floors except blue's, so each strip must
-                    // carry its own hue most.
+                    // mean by <1 luma). Dominant COUNTS were the second
+                    // attempt: their r>=45 floor and +10u/+5u margins encoded
+                    // one frame on one GPU and read all-zero after the ray gate
+                    // moved. Ask for a hue SHARE instead (the adopted shape in
+                    // tests/INVARIANT_TESTING.md): the level floor is relative
+                    // to each window's own brightest pixel, so exposure,
+                    // tonemap and IBL changes move both sides together.
+                    // Harness baseline: owning strip 0.99..1.00, all others
+                    // 0.00. Blue keeps its A/B gate below (sky passes any blue
+                    // detector), so it has no colour-ordering gate.
                     ZHLN::Println(
                         "      dominant red/grn per strip: s1={}/{} s2={}/{} s3={}/{} s4={}/{}", reflStripRed.dominantRed, reflStripRed.dominantGrn,
                         reflStripGrn.dominantRed, reflStripGrn.dominantGrn, reflStripBlu.dominantRed, reflStripBlu.dominantGrn,
@@ -404,25 +415,52 @@ struct ReflectionsTestSuite {
                         reflStripGrn.dominantBlu, reflStripGrn.yellowMix, reflStripBlu.dominantBlu, reflStripBlu.yellowMix,
                         reflStripYel.dominantBlu, reflStripYel.yellowMix
                     );
+                    const auto stripRect = [](double x0, double x1) {
+                        return ZHLN::Test::Image::NormalizedRect {.x0 = x0, .y0 = 0.52, .x1 = x1, .y1 = 0.95};
+                    };
+                    using ZHLN::Test::Image::HueChannel;
+                    const auto hueShares = [&](double x0, double x1) {
+                        const auto r = stripRect(x0, x1);
+                        // [0]=red [1]=green [2]=blue [3]=yellow
+                        return std::array<double, 4> {
+                            ZHLN::Test::Image::DominantHueShare(frame, r, HueChannel::Red),
+                            ZHLN::Test::Image::DominantHueShare(frame, r, HueChannel::Green),
+                            ZHLN::Test::Image::DominantHueShare(frame, r, HueChannel::Blue),
+                            ZHLN::Test::Image::YellowShare(frame, r),
+                        };
+                    };
+                    const auto sRed = hueShares(0.20, 0.36);
+                    const auto sGrn = hueShares(0.38, 0.48);
+                    const auto sBlu = hueShares(0.52, 0.62);
+                    const auto sYel = hueShares(0.64, 0.80);
+                    ZHLN::Println(
+                        "      hue share red/grn/blu/yel: s1={:.3f}/{:.3f}/{:.3f}/{:.3f} s2={:.3f}/{:.3f}/{:.3f}/{:.3f} "
+                        "s3={:.3f}/{:.3f}/{:.3f}/{:.3f} s4={:.3f}/{:.3f}/{:.3f}/{:.3f}",
+                        sRed[0], sRed[1], sRed[2], sRed[3], sGrn[0], sGrn[1], sGrn[2], sGrn[3],
+                        sBlu[0], sBlu[1], sBlu[2], sBlu[3], sYel[0], sYel[1], sYel[2], sYel[3]
+                    );
+
+                    // 0.01 is the adopted presence share ("existence, not
+                    // look"); 1.5x is a ratio, so a grade change cannot fail
+                    // it. Harness measured 0.99..1.00 vs 0.00 on every hue.
+                    constexpr double kHuePresenceShare = 0.01;
+                    constexpr double kHueLeadRatio     = 1.5;
+                    const auto       max3              = [](double a, double b, double c) { return std::max(a, std::max(b, c)); };
                     // strip 1 mirrors the red emitter
-                    const bool reflRedOk = ZHLN::Test::ExpectGt(reflStripRed.dominantRed, reflStripGrn.dominantRed + 10u) &&
-                                           ZHLN::Test::ExpectGt(reflStripRed.dominantRed, reflStripBlu.dominantRed + 10u) &&
-                                           ZHLN::Test::ExpectGt(reflStripRed.dominantRed, reflStripYel.dominantRed + 10u);
-                    // strip 2 mirrors the green emitter (smaller margin: the green blob is dimmer)
-                    const bool reflGrnOk = ZHLN::Test::ExpectGt(reflStripGrn.dominantGrn, reflStripRed.dominantGrn + 5u) &&
-                                           ZHLN::Test::ExpectGt(reflStripGrn.dominantGrn, reflStripBlu.dominantGrn + 5u) &&
-                                           ZHLN::Test::ExpectGt(reflStripGrn.dominantGrn, reflStripYel.dominantGrn + 5u);
+                    const bool reflRedOk = ZHLN::Test::ExpectGt(sRed[0], kHuePresenceShare) &&
+                                           ZHLN::Test::ExpectGt(sRed[0], kHueLeadRatio * max3(sGrn[0], sBlu[0], sYel[0]));
+                    // strip 2 mirrors the green emitter
+                    const bool reflGrnOk = ZHLN::Test::ExpectGt(sGrn[1], kHuePresenceShare) &&
+                                           ZHLN::Test::ExpectGt(sGrn[1], kHueLeadRatio * max3(sRed[1], sBlu[1], sYel[1]));
                     // strip 3 mirrors the blue emitter: blue-on-blue is
-                    // unmeasurable by color (the sky passes any blue count),
-                    // so the strip A/B above owns blue and there is no color
+                    // unmeasurable by colour (the sky passes any blue detector),
+                    // so the strip A/B above owns blue and there is no colour
                     // ordering gate for it.
                     const bool reflBluOk = bluAB;
-                    // Yellow has no single dominant channel to lean on, so its
-                    // signature is the R+G mix count leading the other strips.
-                    // strip 4 mirrors the yellow emitter
-                    const bool reflYelOk = ZHLN::Test::ExpectGt(reflStripYel.yellowMix, reflStripRed.yellowMix + 10u) &&
-                                           ZHLN::Test::ExpectGt(reflStripYel.yellowMix, reflStripGrn.yellowMix + 10u) &&
-                                           ZHLN::Test::ExpectGt(reflStripYel.yellowMix, reflStripBlu.yellowMix + 10u);
+                    // Yellow has no single dominant channel, so its signature
+                    // is the R+G share leading the other strips.
+                    const bool reflYelOk = ZHLN::Test::ExpectGt(sYel[3], kHuePresenceShare) &&
+                                           ZHLN::Test::ExpectGt(sYel[3], kHueLeadRatio * max3(sRed[3], sGrn[3], sBlu[3]));
 
                     // 2. Validate Upper Direct Emission visibility. The peak-luma guard
                     // stays absolute: it only asserts the emitters are directly visible
@@ -465,7 +503,7 @@ struct ReflectionsTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             {
                 auto& reg = engine->GetRegistry();
@@ -478,7 +516,7 @@ struct ReflectionsTestSuite {
                         pp.exposure        = 0.015f;
                         pp.ambientExposure = 6.0f;
                         pp.enableSSR       = 1;
-                        pp.enableRTR       = 0;
+                        pp.enableRTR       = 1;   // BVH ray gate: reflection.slang only traces when wantRTR
                         pp.giMode          = 0;
                     });
                 }

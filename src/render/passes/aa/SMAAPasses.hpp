@@ -12,7 +12,11 @@ struct RenderFrame;
 
 namespace ZHLN::Passes {
 
-struct SmaaEdgePass: Vk::RenderPass<"SmaaEdge", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ColorWrite<Res_SmaaEdge>> {
+// Depth and normal/roughness are read by the hybrid edge detector so that
+// silhouettes and hard creases survive even where HDR luma is locally flat.
+struct SmaaEdgePass:
+    Vk::RenderPass<"SmaaEdge", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>,
+                   Vk::ColorWrite<Res_SmaaEdge>> {
     AntiAliasingResources& aa;
     RenderFrame&           frame;
 

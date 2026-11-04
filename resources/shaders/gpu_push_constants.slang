@@ -117,6 +117,7 @@ public struct BlitPushConstants {
     public int tonemapper;
     public float3 colorFilter;
     public int applySrgbOetf;
+    public float rcasSharpness; // 0.0 = Off / Soft, > 0.0 = Sharpened (default ~0.87f)
 };
 
 // --- The remaining push-payload exports (migrated 2026-10-18 from the host
@@ -131,17 +132,6 @@ public struct FXAAPushConstants {
     public float edgeThreshold;
     public float edgeThresholdMin;
     public float _pad;
-};
-
-public struct MLAAPushConstants {
-    public float rcpFrameX;
-    public float rcpFrameY;
-    public float threshold;
-    public uint  maxSearchSteps;
-};
-
-public struct TAAPushConstants {
-    public float feedback;
 };
 
 public struct RcgiProbeSetupPushConstants {
@@ -201,13 +191,6 @@ public struct VolumetricLightInjectPushConstants {
     public float ambientIntensity;
     public float phaseAnisotropy;
     public uint  enableShadows;
-};
-
-public struct VolumetricTemporalPushConstants {
-    public float temporalWeight;
-    public float clampStrength;
-    public uint  resetHistory;
-    public uint  _pad;
 };
 
 public struct BRDFLUTPush {

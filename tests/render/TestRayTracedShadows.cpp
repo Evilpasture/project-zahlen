@@ -42,7 +42,7 @@ struct RayTracedShadowsTestSuite {
                 return {};
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             {
                 auto& reg = engine->GetRegistry();

@@ -33,7 +33,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
-// DisableTAA calls Registry::GetEntitiesWith and Registry::Patch directly.
+// DisableAA calls Registry::GetEntitiesWith and Registry::Patch directly.
 // <Zahlen/Engine/Engine.hpp> only forward-declares ECS::Registry, so this header must
 // not rely on the including translation unit having pulled the definition in
 // first -- that is what made it compile only when a suite happened to include
@@ -378,21 +378,16 @@ class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
     EngineHandle _handle;
 };
 
-// Turns off TAA and zeroes the jitter history.
+// Turns off anti-aliasing.
 //
-// A stability test measures frame-to-frame change; TAA's own accumulation
-// would be the largest source of it, so every scene that asserts on stability
-// or on exact pixel values disables this first.
-inline void DisableTAA(ZHLN::Engine& engine) {
+// A stability test measures frame-to-frame change, and both remaining AA modes
+// are spatial edge filters that perturb high-contrast pixels. Every scene that
+// asserts on stability or on exact pixel values disables AA first.
+inline void DisableAA(ZHLN::Engine& engine) {
     auto& reg = engine.GetRegistry();
     for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
         reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
             aa.state.mode        = ZHLN::AAMode::None;
-            aa.state.jitterX     = 0.0f;
-            aa.state.jitterY     = 0.0f;
-            aa.state.prevJitterX = 0.0f;
-            aa.state.prevJitterY = 0.0f;
-            aa.state.frameIndex  = 0;
         });
     }
     engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});

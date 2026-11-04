@@ -386,10 +386,17 @@ public float3 EvaluateRcgiHitRadiance(RcgiHitSurface surf, float3 incomingRayDir
 }
 
 // ============================================================================
-// Deterministic 3-Tier Hybrid Specular Reflection Helpers
-//   Tier 1 (roughness < 0.20):       1 unjittered ray (Hi-Z SSR -> TLAS), LOD 0
-//   Tier 2 (0.20 <= roughness <= 0.40): Central ray + cone-footprint mip LOD
+// Deterministic 3-Tier Specular Reflection Helpers (TLAS first)
+//   Tier 1 (roughness < 0.20):       1 unjittered BVH ray, cache LOD 0
+//   Tier 2 (0.20 <= roughness <= 0.40): same ray + cone-footprint cache LOD
 //   Tier 3 (roughness > 0.40):       0 rays — RCGI C0/C1 cones + Split-Sum IBL
+//
+// Every traced tier resolves its hit with inline RayQuery against the TLAS.
+// Screen space is only an acceleration cache: a hit that projects onto a
+// directly visible pixel reads texLighting at the cone LOD, everything else is
+// shaded from the TLAS hit surface. There is no screen-space raymarch here --
+// no Hierarchical-Z traversal, no depth/thickness cut, no screen-edge
+// confidence fade and no history-driven popping.
 // ============================================================================
 
 public static const float kReflSharpCutoff = 0.20f;
@@ -411,175 +418,9 @@ public float ComputeReflectionConeLod(float roughness, float hitDist, float hitV
     return clamp(log2(footprintTexels), 0.0f, maxLod);
 }
 
-public struct SsrHitResult {
-    public float2 uv;
-    public float  hitDist;
-    public float  hitViewW;
-    public float  confidence;
-};
-
-public SsrHitResult RaymarchHiZDeterministic(float3 worldPos, float3 startPosWS, float3 R, float3 N, float roughness, bool useHiZ,
-                                             Texture2D<float> texHiZ, Texture2D<float> texDepth, Texture2D<float4> texNormalRoughness,
-                                             SamplerState pointSampler, float4x4 viewProj, float4x4 invViewProj, float4x4 invProj) {
-    SsrHitResult res;
-    res.uv         = float2(-1.0f, -1.0f);
-    res.hitDist    = 0.0f;
-    res.hitViewW   = 1.0f;
-    res.confidence = 0.0f;
-
-    float  maxDist  = lerp(45.0f, 18.0f, saturate(roughness * 2.5f));
-    float3 endPosWS = startPosWS + R * maxDist;
-
-    float4 startClip = mul(viewProj, float4(startPosWS, 1.0f));
-    float4 endClip   = mul(viewProj, float4(endPosWS, 1.0f));
-    if (startClip.w <= 0.1f)
-        return res;
-
-    if (endClip.w < 0.25f) {
-        float denom = endClip.w - startClip.w;
-        if (abs(denom) < 1e-6f)
-            return res;
-        float tClip = (0.25f - startClip.w) / denom;
-        if (tClip <= 0.0f)
-            return res;
-        endPosWS = lerp(startPosWS, endPosWS, saturate(tClip));
-        endClip  = mul(viewProj, float4(endPosWS, 1.0f));
-    }
-
-    float  invW0 = 1.0f / startClip.w;
-    float  invW1 = 1.0f / endClip.w;
-    float3 ndc0  = startClip.xyz * invW0;
-    float3 ndc1  = endClip.xyz * invW1;
-
-    float3 P0 = float3(ndc0.xy * 0.5f + 0.5f, ndc0.z);
-    float3 P1 = float3(ndc1.xy * 0.5f + 0.5f, ndc1.z);
-    float3 D  = P1 - P0;
-
-    uint fullW = 0u, fullH = 0u;
-    texDepth.GetDimensions(fullW, fullH);
-    if (fullW == 0u || fullH == 0u)
-        return res;
-
-    uint hizW = 0u, hizH = 0u, hizMips = 1u;
-    if (useHiZ) {
-        texHiZ.GetDimensions(0u, hizW, hizH, hizMips);
-        if (hizW != fullW || hizH != fullH) {
-            useHiZ = false;
-        }
-    }
-
-    float2 fullDim = float2(fullW, fullH);
-    float2 deltaPx = D.xy * fullDim;
-    float  pxLen   = length(deltaPx);
-    if (pxLen < 1.0f)
-        return res;
-
-    // Start 1.5 pixels clear of the origin texel with zero stochastic dither.
-    float tau       = clamp(1.5f / pxLen, 0.001f, 0.05f);
-    float epsTau    = max(0.10f / pxLen, 1e-5f);
-    float linearStep = max(1.0f / 96.0f, epsTau);
-    int   level     = 0;
-    int   maxLevel  = useHiZ ? int(min(max(hizMips, 1u) - 1u, 6u)) : 0;
-
-    bool   activeX  = abs(deltaPx.x) > 1e-3f;
-    bool   activeY  = abs(deltaPx.y) > 1e-3f;
-    float2 safeInvD = float2(
-        activeX ? (1.0f / D.x) : 1e7f,
-        activeY ? (1.0f / D.y) : 1e7f);
-
-    [loop]
-    for (int iter = 0; iter < 160; ++iter) {
-        if (tau >= 1.0f)
-            break;
-
-        float2 uv = P0.xy + D.xy * tau;
-        if (any(uv <= 0.002f) || any(uv >= 0.998f))
-            break;
-
-        int2  mipDim   = max(int2(1, 1), int2(int(fullW) >> level, int(fullH) >> level));
-        int2  cell     = clamp(int2(uv * float2(mipDim)), int2(0, 0), mipDim - int2(1, 1));
-        float tauNext  = tau + linearStep;
-        if (useHiZ) {
-            float2 cellMinUV = float2(cell) / float2(mipDim);
-            float2 cellMaxUV = float2(cell + int2(1, 1)) / float2(mipDim);
-            float2 boundUV   = float2(D.x >= 0.0f ? cellMaxUV.x : cellMinUV.x, D.y >= 0.0f ? cellMaxUV.y : cellMinUV.y);
-            float2 tCross    = (boundUV - P0.xy) * safeInvD;
-            float  tauExit   = min(activeX ? tCross.x : 1.0f, activeY ? tCross.y : 1.0f);
-            tauNext          = max(tauExit, tau) + epsTau;
-        }
-        float tauClamp = min(tauNext, 1.0f);
-
-        float minCellZ = (useHiZ && level > 0)
-            ? texHiZ.Load(int3(cell, level)).r
-            : (useHiZ ? texDepth.Load(int3(cell, 0)).r : texDepth.SampleLevel(pointSampler, uv, 0).r);
-        float rayZ0    = P0.z + D.z * tau;
-        float rayZ1    = P0.z + D.z * tauClamp;
-        float segMaxZ  = max(rayZ0, rayZ1);
-
-        // Ray segment is strictly closer to the camera than the nearest pixel in this cell.
-        if (segMaxZ < minCellZ) {
-            tau = tauNext;
-            if (useHiZ && level < maxLevel) {
-                // Uludag (GPU Pro 5) parity check: only promote to `level + 1` when
-                // crossing into a NEW parent `2x2` cell so receding rays never
-                // ping-pong against the nearer sibling subcell they just exited!
-                int2 nextCell = clamp(int2((P0.xy + D.xy * tau) * float2(mipDim)), int2(0, 0), mipDim - int2(1, 1));
-                if (any((nextCell >> 1) != (cell >> 1))) {
-                    level += 1;
-                }
-            }
-            continue;
-        }
-
-        // Potential intersection inside coarse cell: refine down to mip 0.
-        if (level > 0) {
-            level -= 1;
-            continue;
-        }
-
-        // Exact mip-0 pixel check.
-        if (minCellZ < 0.99999f) {
-            float surfViewW = abs(LinearizeDepth(minCellZ, invProj));
-            float rayW0     = 1.0f / max(lerp(invW0, invW1, tau), 1e-6f);
-            float rayW1     = 1.0f / max(lerp(invW0, invW1, tauClamp), 1e-6f);
-            float segMinW   = min(rayW0, rayW1);
-            float segMaxW   = max(rayW0, rayW1);
-            float thickBias = 0.015f + surfViewW * 0.002f;
-            float maxThick  = max(0.35f, surfViewW * 0.045f);
-
-            if (segMaxW >= (surfViewW - thickBias) && segMinW <= (surfViewW + maxThick)) {
-                float4 nrRaw    = texNormalRoughness.Load(int3(cell, 0));
-                float3 hitNorm  = UnpackNormalOctahedron(nrRaw.xy * 2.0f - 1.0f);
-                // Require the reflection ray to enter the front hemisphere of the hit
-                // surface (`dot(hitNorm, R) < -0.01f`): rejects both back-facing foreground
-                // silhouettes and grazing rays receding away from their own mirror plane.
-                if (nrRaw.z > 0.0f && dot(hitNorm, R) < -0.01f) {
-                    float  zSpan        = rayZ1 - rayZ0;
-                    float  fracHit      = (abs(zSpan) > 1e-6f) ? saturate((minCellZ - rayZ0) / zSpan) : 0.5f;
-                    float  tauExact     = lerp(tau, tauClamp, fracHit);
-                    float2 hitUV        = clamp(P0.xy + D.xy * tauExact, float2(0.001f), float2(0.999f));
-                    float2 cellCenterUV = (float2(cell) + 0.5f) / float2(mipDim);
-                    float3 hitWS        = ReconstructWorldPos(cellCenterUV, minCellZ, invViewProj);
-                    float  distFromStart = length(hitWS - startPosWS);
-
-                    if (dot(hitWS - worldPos, N) > max(0.03f, distFromStart * 0.015f)) {
-                        float  distFade   = saturate(1.0f - distFromStart / maxDist);
-                        float2 edgeFactor = smoothstep(0.0f, 0.06f, hitUV) * smoothstep(1.0f, 0.94f, hitUV);
-                        res.uv            = hitUV;
-                        res.hitDist       = distFromStart;
-                        res.hitViewW      = surfViewW;
-                        res.confidence    = (distFade * distFade) * (edgeFactor.x * edgeFactor.y);
-                        return res;
-                    }
-                }
-            }
-        }
-
-        tau = tauNext;
-    }
-
-    return res;
-}
+// Inline BVH trace is the PRIMARY hit test. `useScreenCache` lets an
+// on-screen hit reuse already-lit `texLighting` radiance instead of
+// re-shading it; it never changes how the 3D hit is found.
 
 public struct RtrWorldHitResult {
     public float3 radiance;
@@ -590,7 +431,7 @@ public RtrWorldHitResult TraceDeterministicRtrFallback(
     float3 worldPos, float3 N, float3 R, float roughness, float3 prefilteredEnvAlongR, float projScaleY, uint lightingMips,
     RaytracingAccelerationStructure tlas, ConstantBuffer<FrameUniforms> frame, StructuredBuffer<InstanceData> instances,
     Texture2D<float> texDepth, Texture2D<float4> texNormalRoughness, Texture2D<float4> texLighting,
-    SamplerState linearSmp, SamplerState pointSampler) {
+    SamplerState linearSmp, SamplerState pointSampler, bool useScreenCache) {
     RtrWorldHitResult outRes;
     outRes.radiance   = float3(0.0f);
     outRes.confidence = 0.0f;
@@ -628,14 +469,17 @@ public RtrWorldHitResult TraceDeterministicRtrFallback(
         rayT,
         instances);
 
-    // Check if the 3D hit projects onto a directly visible screen-space pixel:
-    // if so, sample the mipmapped `texLighting` buffer (which already holds
-    // direct lights + shadows + RCGI indirect + deferred emissive draws!) at
-    // the exact cone-footprint LOD.
+    // Screen space is an acceleration CACHE, never a raymarcher: the 3D hit is
+    // already resolved by the BVH above. If it projects onto a directly visible
+    // screen pixel, reuse the mipmapped `texLighting` radiance (direct lights +
+    // shadows + RCGI indirect + deferred emissive draws) at the exact cone LOD.
+    // `edgeMask` only validates that cache lookup -- it is NOT a confidence or
+    // vignette fade on the reflection; an invalid cache falls through to the
+    // TLAS-shaded color below.
     float  onScreenWeight = 0.0f;
     float3 screenColor    = float3(0.0f);
     float4 hitClip        = mul(frame.viewProj, float4(surf.worldPos, 1.0f));
-    if (hitClip.w > 0.1f) {
+    if (useScreenCache && hitClip.w > 0.1f) {
         float2 projUV     = (hitClip.xy / hitClip.w) * 0.5f + 0.5f;
         float2 edgeFactor = smoothstep(0.0f, 0.04f, projUV) * smoothstep(1.0f, 0.96f, projUV);
         float  edgeMask   = edgeFactor.x * edgeFactor.y;
@@ -682,7 +526,7 @@ public RtrWorldHitResult TraceDeterministicRtrFallback(
         }
     }
 
-    // Off-screen / screen-occluded shading fallback
+    // Off-screen / cache-disabled / screen-occluded shading fallback
     float3 offscreenColor = float3(0.0f);
     if (onScreenWeight < 0.999f) {
         if (surf.isUnlit) {

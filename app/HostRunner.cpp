@@ -64,17 +64,15 @@ auto ParseEngineConfig(
     cli.WithConfig(config);
     bool graphRequested = false;
     cli.Add(CliFlag {
-        .key = "--print-graph", .placeholder = "[none|fxaa|mlaa|taa|smaa]",
+        .key = "--print-graph", .placeholder = "[none|fxaa|smaa]",
         .description = "Print the compile-time render graph and stop",
         .action = [&graphRequested](std::string_view value) -> std::expected<void, CommandLineError> {
             std::string mode(value);
             std::ranges::transform(mode, mode.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            AAMode selected = AAMode::TAA;
+            AAMode selected = AAMode::SMAA;
             if (mode == "none") selected = AAMode::None;
             else if (mode == "fxaa") selected = AAMode::FXAA;
-            else if (mode == "mlaa") selected = AAMode::MLAA;
-            else if (mode.empty() || mode == "taa") selected = AAMode::TAA;
-            else if (mode == "smaa") selected = AAMode::SMAA;
+            else if (mode.empty() || mode == "smaa") selected = AAMode::SMAA;
             else return std::unexpected(CommandLineError::InvalidValue);
             std::println("{}", GetRenderGraphDump(selected));
             graphRequested = true;

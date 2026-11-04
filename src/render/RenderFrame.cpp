@@ -611,7 +611,6 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 
     std::swap(_impl->graphResources.shadowMap, _impl->targets.ShadowMapPrev());
     _impl->targets.SwapCascadeViews();
-    Vk::SwapBacking(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
 
     return SummarizePresentations(windows);
 }

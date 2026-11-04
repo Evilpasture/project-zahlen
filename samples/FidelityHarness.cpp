@@ -342,7 +342,7 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 // The Khronos fidelity generator's glTF Sample Viewer look: factor-1 exposure,
 // ACES Hill RRT+ODT with its historical 1/0.6 exposure boost, no bloom, no
 // vignette, no contrast/SAT grade, no AO/GI term over the IBL, no SSR/RTR
-// reflections, spatial SMAA (without TAA's jitter/history), and no added studio
+// reflections, spatial SMAA, and no added studio
 // lights. The viewer's interactive default is PBR Neutral; its generator wrapper
 // explicitly overrides that with ACES_HILL_EXPOSURE_BOOST.
 //
@@ -475,12 +475,9 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
     }
     if (!registry.Patch<ZHLN::Components::AASettingsComponent>(camera, [&gfx](auto& aa) -> auto {
             aa.state.mode                 = gfx.antiAliasing.mode;
-            aa.state.taaFeedback          = gfx.antiAliasing.taaFeedback;
             aa.state.fxaaSubpix           = gfx.antiAliasing.fxaaSubpix;
             aa.state.fxaaEdgeThreshold    = gfx.antiAliasing.fxaaEdgeThreshold;
             aa.state.fxaaEdgeThresholdMin = gfx.antiAliasing.fxaaEdgeThresholdMin;
-            aa.state.mlaaThreshold        = gfx.antiAliasing.mlaaThreshold;
-            aa.state.mlaaMaxSearchSteps   = gfx.antiAliasing.mlaaMaxSearchSteps;
         })) {
         registry.Add(camera, ZHLN::Components::AASettingsComponent {.state = gfx.antiAliasing});
     }

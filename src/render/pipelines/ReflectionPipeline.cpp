@@ -26,11 +26,11 @@ void ReflectionPipeline::Dispatch(
     const auto block = pass.WriteHeapParameters<Shaders::Reflection>(
         frame.renderer.heapManager, Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
         Vk::Slot<"texDepth">(surface.depth), Vk::Slot<"texNormalRoughness">(surface.normals),
-        Vk::Slot<"texHiZ">(Vk::Assume<Vk::ShaderRead<Res_HiZ>>(frame.graphResources.hizMap)), Vk::Slot<"texEnvMap">(inputs.prefiltered),
+        Vk::Slot<"texEnvMap">(inputs.prefiltered),
         Vk::Slot<"texSkyEquirect">(inputs.visualSky), Vk::Slot<"frame">(frame.frameUniformBuffers), Vk::Slot<"brdfLUT">(inputs.brdfLut),
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ShaderRead<Res_LightingGI>>(frame.graphResources.lightingGI)),
         Vk::Slot<"texLightingAo">(Vk::Assume<Vk::ShaderRead<Res_LightingAo>>(frame.graphResources.lightingAo)),
-        Vk::Slot<"texVoxelIntegrated">(Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(frame.graphResources.voxelResolved)),
+        Vk::Slot<"texVoxelIntegrated">(Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelInt>>(frame.graphResources.voxelIntegrated)),
         Vk::Slot<"g_instances">(frame.instanceDataBuffers), Vk::Slot<"tlas">(inputs.tlas),
         Vk::Slot<"texRcgiProbes">(Vk::Assume<Vk::ShaderRead<Res_RcgiProbes>>(frame.graphResources.rcgiProbes)),
         Vk::Slot<"texRcgiCascade0">(Vk::Assume<Vk::ShaderRead<Res_RcgiCascadeA>>(frame.graphResources.rcgiCascadeA))

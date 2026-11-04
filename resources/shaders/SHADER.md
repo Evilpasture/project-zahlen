@@ -26,6 +26,13 @@ alpha. These structs are shader-local, not a host material ABI or runtime
 material-type dispatch. Forward transmission retains its separate refractive
 shading path.
 
+`material_model.slang` also widens the GGX lobe before the G-buffer write:
+Toksvig variance from the mip-filtered normal map plus geometric curvature
+(`ddx`/`ddy` of the interpolated normal) are added in alpha space. With TAA
+removed this is the only specular-antialiasing filter left; the two scale
+constants at the top of that module are the tuning knobs. It widens the base,
+sheen and clearcoat roughnesses; it never changes the shading normal itself.
+
 `gpu_buffer.slang` supplies `GPUBuffer<T>` for typed loads, stores and uint
 atomics through buffer device addresses. It is a non-owning, unchecked shader
 view; callers must retain their existing zero-address and bounds guards.

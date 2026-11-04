@@ -6,7 +6,7 @@ it's obvious it's an aaa rendereing pipeline obv
 
 abstarfads the dam n pases 
 
-FXAAPass, MLAAPass etc wiht identical aboierkptae, cefresat a psot proces pass template oder CRTP bas
+FXAAPass etc wiht identical aboierkptae, cefresat a psot proces pass template oder CRTP bas
 
 und elinmatne target reflecti n in targetmanger
 

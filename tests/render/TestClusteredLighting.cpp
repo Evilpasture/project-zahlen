@@ -40,7 +40,7 @@ struct ClusteredLightingTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             {
                 auto& reg = engine->GetRegistry();
@@ -232,7 +232,7 @@ struct ClusteredLightingTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             ZHLN::Entity redLight = ZHLN::Entity::Null();
             {
@@ -469,7 +469,7 @@ struct ClusteredLightingTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             const JPH::Vec3 lightPos(6.4f, 2.4f, 5.0f);
 
@@ -606,7 +606,7 @@ struct ClusteredLightingTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             {
                 auto& reg = engine->GetRegistry();
@@ -867,7 +867,7 @@ struct ClusteredLightingTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            DisableTAA(*engine);
+            DisableAA(*engine);
 
             {
                 auto& reg = engine->GetRegistry();

@@ -422,7 +422,7 @@ struct PBRTestSuite {
             }
             auto& reg = engine->GetRegistry();
             auto& rc = engine->GetRenderContext();
-            ZHLN::Test::Headless::DisableTAA(*engine);
+            ZHLN::Test::Headless::DisableAA(*engine);
             const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
             if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
             for (const ZHLN::Entity camera: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
@@ -568,7 +568,7 @@ struct PBRTestSuite {
             if (!engine) return std::unexpected(PBRTestError::EngineInitFailed);
             auto& reg = engine->GetRegistry();
             auto& rc = engine->GetRenderContext();
-            ZHLN::Test::Headless::DisableTAA(*engine);
+            ZHLN::Test::Headless::DisableAA(*engine);
             const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
             if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
             for (const ZHLN::Entity camera: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>())
@@ -667,7 +667,7 @@ struct PBRTestSuite {
         std::expected<void, ZHLN::ErrorCode> pbr_black_emissive_texture_preserves_metal_ibl() {
             auto engine = CreateTestEngine(640, 480);
             if (!engine) return std::unexpected(PBRTestError::EngineInitFailed);
-            ZHLN::Test::Headless::DisableTAA(*engine);
+            ZHLN::Test::Headless::DisableAA(*engine);
             auto& reg = engine->GetRegistry();
             auto& rc = engine->GetRenderContext();
             const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();

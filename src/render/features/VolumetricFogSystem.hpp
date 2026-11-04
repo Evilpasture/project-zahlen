@@ -14,7 +14,6 @@ using VolumetricClearLayout       = Vk::ReflectedLayout;
 using VolumetricFogInjectLayout   = Vk::ReflectedLayout;
 using VolumetricLightInjectLayout = Vk::ReflectedLayout;
 using VolumetricIntegrationLayout = Vk::ReflectedLayout;
-using VolumetricTemporalLayout    = Vk::ReflectedLayout;
 
 class VolumetricFogSystem {
   public:
@@ -36,7 +35,6 @@ class VolumetricFogSystem {
     [[nodiscard]] auto FogInject() noexcept -> Vk::FixedDoubleBufferedComputePass<VolumetricFogInjectLayout>&;
     [[nodiscard]] auto LightInject() noexcept -> Vk::FixedDoubleBufferedComputePass<VolumetricLightInjectLayout>&;
     [[nodiscard]] auto Integrate() noexcept -> Vk::FixedDoubleBufferedComputePass<VolumetricIntegrationLayout>&;
-    [[nodiscard]] auto Temporal() noexcept -> Vk::FixedDoubleBufferedComputePass<VolumetricTemporalLayout>&;
 
     [[nodiscard]] auto NoiseWrite() const noexcept -> Vk::ImageWrite;
 
@@ -47,7 +45,6 @@ class VolumetricFogSystem {
     Vk::FixedDoubleBufferedComputePass<VolumetricFogInjectLayout>   _fogInject;
     Vk::FixedDoubleBufferedComputePass<VolumetricLightInjectLayout> _lightInject;
     Vk::FixedDoubleBufferedComputePass<VolumetricIntegrationLayout> _integrate;
-    Vk::FixedDoubleBufferedComputePass<VolumetricTemporalLayout>    _temporal;
 
     Vk::Image     _noiseImage;
     Vk::ImageView _noiseView;

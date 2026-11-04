@@ -204,7 +204,7 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
 
 void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
     Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(
-        cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, _graph.voxelMedia, _graph.voxelLight, _graph.voxelIntegrated, _graph.voxelHistory, _graph.voxelResolved
+        cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, _graph.voxelMedia, _graph.voxelLight, _graph.voxelIntegrated
     );
 
     const std::array colorTargets = {

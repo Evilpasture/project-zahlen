@@ -590,7 +590,7 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 [ ForwardPass (Particles/Fog) ] <── [ TranslucentReflectionPass ]
          │
          ▼
-[ BloomPass (Kawase Dual-Filter) ] ──> [ Anti-Aliasing (TAA/SMAA/FXAA/MLAA) ]
+[ BloomPass (Kawase Dual-Filter) ] ──> [ Anti-Aliasing (FXAA/SMAA) ]
                                                        │
                                                        ▼
                                               [ BlitPass & ImGui / UI ] ──> [ Swapchain ]
@@ -605,7 +605,7 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 * **TranslucentPrePass & TranslucentReflectionPass**: Evaluates scene reflections for glass and refractive surfaces.
 * **ForwardPass**: Draws particle emitters, volumetric fog integration, and transparent quads.
 * **BloomPass**: Dual-Kawase downsampling and upsampling blur pyramid.
-* **Anti-Aliasing**: Applies TAA, SMAA, FXAA, or MLAA.
+* **Anti-Aliasing**: Applies FXAA or SMAA.
 * **BlitPass**: ACES tonemapping, vignette, immediate-mode UI rendering, and presentation.
 
 ---

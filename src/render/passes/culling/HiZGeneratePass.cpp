@@ -55,11 +55,4 @@ void HiZGeneratePass::operator()(VkCommandBuffer cmd) const noexcept {
     GenerateHiZPyramid(cmd, cull, frame, 0u);
 }
 
-void SsrHiZGeneratePass::operator()(VkCommandBuffer cmd) const noexcept {
-    if (frame.settings.post.enableSSR == 0 || frame.settings.environment.fullBright != 0) {
-        return;
-    }
-    GenerateHiZPyramid(cmd, cull, frame, 1u);
-}
-
 } // namespace ZHLN::Passes

@@ -18,6 +18,10 @@ namespace ZHLN::Passes {
 // size is reflected from the shader), which is why their descriptors carry no
 // meaningful extent; the slot writes and zeroed push payloads are the former
 // per-pass operator() bodies, verbatim.
+//
+// VolumetricIntegration writes Res_VoxelInt for the current frame; the
+// reflection passes sample that volume directly. There is no history target,
+// no resolve target and no per-frame swap.
 
 struct VolumetricFogInjectDesc {
     static constexpr auto name = Vk::ResourceName("VolumetricFogInject");
@@ -80,29 +84,6 @@ struct VolumetricIntegrationDesc {
             frame.renderer.fog.VoxelDispatchExtent(),
             Vk::Slot<"inVoxelLight">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(frame.graphResources.voxelLight)),
             Vk::Slot<"outVoxelIntegrated">(Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(frame.graphResources.voxelIntegrated)),
-            Vk::Slot<"frame">(frame.frameUniformBuffers)
-        );
-    }
-};
-
-struct VolumetricTemporalDesc {
-    static constexpr auto name = Vk::ResourceName("VolumetricTemporal");
-    using Usages = Vk::TypeList<Vk::ComputeReadGeneral<Res_VoxelInt>, Vk::ComputeReadGeneral<Res_VoxelHist>, Vk::ComputeWrite<Res_VoxelResolved>>;
-    using ShaderDecl           = Shaders::VolumetricTemporal;
-    using ShaderModule         = Shaders::Modules::VolumetricTemporalCS;
-    using PushConstants        = VolumetricTemporalPushConstants;
-
-    [[nodiscard]] static auto GetPass(RenderFrame& frame) noexcept -> Vk::FixedDoubleBufferedComputePass<VolumetricTemporalLayout>& {
-        return frame.renderer.fog.Temporal();
-    }
-
-    [[nodiscard]] static auto Prepare(RenderFrame& frame, const Slang::ScenePassPushConstants&) noexcept {
-        const VolumetricTemporalPushConstants temporalPC = {};
-        return MakeComputePassArgs(
-            temporalPC, frame.renderer.fog.VoxelDispatchExtent(),
-            Vk::Slot<"inVoxelIntegratedCurrent">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(frame.graphResources.voxelIntegrated)),
-            Vk::Slot<"inVoxelIntegratedHistory">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(frame.graphResources.voxelHistory)),
-            Vk::Slot<"outVoxelIntegratedResolved">(Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(frame.graphResources.voxelResolved)),
             Vk::Slot<"frame">(frame.frameUniformBuffers)
         );
     }

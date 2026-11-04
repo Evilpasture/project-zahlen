@@ -123,6 +123,51 @@ public float3 TransformNormalSample(float3 mapN, MaterialSampleInputs i, uint sl
                   dot(mapN.xy, y) / max(length(y), 1e-6f), mapN.z);
 }
 
+// --- Specular antialiasing: Toksvig + geometric curvature -------------------
+//
+// TAA used to average sub-pixel specular shimmer across frames. With the
+// temporal path gone, the GGX lobe has to be widened where the material is
+// evaluated, before roughness reaches the G-buffer or the forward BRDF. Both
+// terms estimate the normal *variance* inside one pixel footprint; variance
+// is additive in alpha (= roughness^2) space, so one sqrt combines them:
+//
+//     alpha' = min(alpha + sigma_toksvig^2 + sigma_curvature^2, 1)
+//
+// Toksvig reads the mean resultant length of a mip-filtered tangent-space
+// normal: a texel that averaged many directions is shorter than one unit, and
+// an unfiltered unit normal contributes exactly zero. Geometric curvature
+// reads ddx/ddy of the interpolated geometric normal and catches silhouettes,
+// hard edges and dense geometry that no normal-map mip chain can see. That
+// derivative read is a fragment-stage operation, like math.transform's
+// PerturbNormal; every evaluate() caller is a fragment entry point.
+//
+// These two scales are the tuning knobs. Raising them trades a little extra
+// highlight softness for less shimmer on minified or highly curved surfaces.
+public static const float kToksvigVarianceScale   = 1.0f;
+public static const float kCurvatureVarianceScale = 0.25f;
+
+[ForceInline]
+public float ToksvigVariance(float3 decodedNormalMap) {
+    const float meanLength = saturate(length(decodedNormalMap));
+    // (1 - |N|) / |N|, clamped so a fully averaged texel cannot push the
+    // roughness past one. SampleMaterialTexture uses implicit-LOD Sample(),
+    // so the mip chain really does shorten the decoded normal.
+    return kToksvigVarianceScale * min((1.0f - meanLength) / max(meanLength, 1.0e-3f), 1.0f);
+}
+
+[ForceInline]
+public float GeometricCurvatureVariance(float3 geometricNormal) {
+    const float3 dNdx = ddx(geometricNormal);
+    const float3 dNdy = ddy(geometricNormal);
+    return kCurvatureVarianceScale * (dot(dNdx, dNdx) + dot(dNdy, dNdy));
+}
+
+[ForceInline]
+public float FilterSpecularRoughness(float roughness, float normalVariance) {
+    const float alpha = roughness * roughness;
+    return saturate(sqrt(alpha + max(normalVariance, 0.0f)));
+}
+
 // Baked irradiance is intentionally not a MaterialTextureSlot: all sixteen
 // glTF sampler/UV-transform lanes are already occupied, while Source VRAD uses
 // immutable atlas UV1 coordinates and clamp sampling. It also must not travel
@@ -223,12 +268,19 @@ public struct StandardPBRMaterial : IMaterial {
             s.occlusion = lerp(1.0f, texel, saturate(i.occlusionStrength));
         }
 
+        // Curvature is read from the interpolated geometric normal before the
+        // normal-map branch, so every invocation of evaluate() computes it.
+        float normalVariance = GeometricCurvatureVariance(i.geometricNormal);
         s.normal = i.geometricNormal;
         if (i.normalIndex != 2 && i.hasTangent) {
             float3 normalMap = SampleMaterialTexture(i.normalIndex, MaterialTextureUV(i, kSamplerNormal), i.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
+            // Toksvig reads the mip-averaged length before the UV rotation
+            // rescales xy and before the sample is renormalized.
+            normalVariance += ToksvigVariance(normalMap);
             normalMap = TransformNormalSample(normalMap, i, kSamplerNormal);
             s.normal = normalize(normalMap.x * i.tangentDirection + normalMap.y * i.bitangentDirection + normalMap.z * i.geometricNormal);
         }
+        s.roughness = FilterSpecularRoughness(s.roughness, normalVariance);
         s.clearcoat  = float4(0.0f);
         s.anisotropy = float4(0.0f, 0.0f, 0.0f, s.occlusion);
         float3 sheenColor = saturate(i.sheenParams.rgb);
@@ -244,7 +296,9 @@ public struct StandardPBRMaterial : IMaterial {
                                                        i.samplerCodes, kSamplerSheenRoughness).a;
             }
         }
-        s.sheen = float4(sheenColor, sheenRoughness);
+        // Sheen is a broad lobe but still a specular one; widen it with the
+        // same footprint variance so it does not shimmer under minification.
+        s.sheen = float4(sheenColor, FilterSpecularRoughness(sheenRoughness, normalVariance));
         return s;
     }
 };
@@ -290,6 +344,7 @@ public struct ClearCoatMaterial : IMaterial {
         float3 coatNormal = i.geometricNormal;
         float coatFactor = i.coatParams.x;
         float coatRough = i.coatParams.y;
+        float coatVariance = GeometricCurvatureVariance(i.geometricNormal);
         if (coatFactor > 0.0f && i.coatTextures.x != 0xFFFFu) {
             coatFactor *= SampleMaterialTexture(i.coatTextures.x, MaterialTextureUV(i, kSamplerClearcoat), i.samplerCodes, kSamplerClearcoat).r;
         }
@@ -300,10 +355,12 @@ public struct ClearCoatMaterial : IMaterial {
         coatRough = saturate(coatRough);
         if (coatFactor > 1.0f / 255.0f && i.coatTextures.z != 0xFFFFu && i.hasTangent) {
             float3 mapN = SampleMaterialTexture(i.coatTextures.z, MaterialTextureUV(i, kSamplerClearcoatNormal), i.samplerCodes, kSamplerClearcoatNormal).rgb * 2.0f - 1.0f;
+            coatVariance += ToksvigVariance(mapN);
             mapN.xy *= i.coatParams.z;
             mapN = TransformNormalSample(mapN, i, kSamplerClearcoatNormal);
             coatNormal = normalize(mapN.x * i.tangentDirection + mapN.y * i.bitangentDirection + mapN.z * i.geometricNormal);
         }
+        coatRough = FilterSpecularRoughness(coatRough, coatVariance);
         float2 packedCoat = PackNormalOctahedron(coatNormal) * 0.5f + 0.5f;
         s.clearcoat = coatFactor > 1.0f / 255.0f ? float4(packedCoat, coatRough, coatFactor) : float4(0.0f);
         s.anisotropy = SampleMaterialAnisotropy(s.normal, i.tangentDirection, i.bitangentDirection,

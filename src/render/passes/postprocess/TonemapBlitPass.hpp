@@ -73,7 +73,8 @@ struct TonemapBlitPass:
                     .saturation        = frame.settings.post.saturation,
                     .tonemapper        = frame.settings.post.tonemapper,
                     .colorFilter       = {frame.settings.post.colorFilter[0], frame.settings.post.colorFilter[1], frame.settings.post.colorFilter[2]},
-                    .applySrgbOetf     = NeedsManualSrgbOetf(swapchainTarget.GetFormat()) ? 1 : 0
+                    .applySrgbOetf     = NeedsManualSrgbOetf(swapchainTarget.GetFormat()) ? 1 : 0,
+                    .rcasSharpness     = frame.settings.post.rcasSharpness
                 };
 
                 return MakeFullscreenPassArgs(
