@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import common;
-import gpu_buffer;
 import instance_data;
 import material_model;
 import math.transform;

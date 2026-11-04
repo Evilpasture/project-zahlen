@@ -22,6 +22,21 @@ public struct ScenePassPushConstants {
     public int translucentSurface;
 };
 
+// D3D12 / DXIL binding convention (the CMake half -- ZHLN_DXIL_PROFILE and
+// ZHLN_DXIL_ROOT_SIGNATURE -- lives in cmake/ShaderCompilation.cmake):
+//   space0, b0  Root constants: the pass payload. ScenePassPushConstants is
+//               the shared prefix; per-pass *Constants structs are the same
+//               payload family. Budget 64 DWORDs, matching the host-side
+//               GpuAbi::kScenePassPayloadBytes ceiling on the Vulkan push
+//               blob, so a payload that fits one backend fits the other.
+//   space0, b1  CBV: DescriptorHeapPushData below (frame addresses +
+//               heapIndex). Vulkan pushes both halves as one push-constant
+//               blob; D3D12 splits them across b0/b1 as stated here.
+//   (implicit)  ResourceDescriptorHeap / SamplerDescriptorHeap: SM 6.6
+//               bindless heaps take no descriptor table in the signature;
+//               gpu_memory.slang indexes ResourceDescriptorHeap directly.
+// [vk::push_constant] declarations in the passes stay as they are: Slang
+// lowers them to the push blob on SPIR-V and to this root layout on DXIL.
 public struct DescriptorHeapPushData {
     public ScenePassPushConstants passData;
 

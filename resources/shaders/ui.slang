@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import gpu_buffer;
+import gpu_memory;
 import gpu_push_constants;
 import instance_data;
 import vertex_format;
@@ -26,8 +26,8 @@ struct UIVSOutput {
 UIVSOutput VSMain(uint vertexId: SV_VertexID) {
     UIVSOutput output;
 
-    GPUBuffer<float3> posPool = GPUBuffer<float3>(uiObj.posAddress);
-    GPUBuffer<VertexSurface> surfaces = GPUBuffer<VertexSurface>(uiObj.surfaceAddress);
+    DeviceAddress<float3> posPool = DeviceAddress<float3>(uiObj.posAddress);
+    DeviceAddress<VertexSurface> surfaces = DeviceAddress<VertexSurface>(uiObj.surfaceAddress);
 
     float3 position = posPool.load(vertexId);
     VertexSurface surface = surfaces.load(vertexId);

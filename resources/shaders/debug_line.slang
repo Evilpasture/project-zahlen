@@ -11,7 +11,7 @@
 // (kSkyDepthSplit) or the line fails the depth test against world geometry.
 
 import gpu_push_constants;
-import gpu_buffer;
+import gpu_memory;
 import instance_data;
 
 struct LineVertex {
@@ -39,7 +39,7 @@ float4 UnpackRGBA8(uint packed) {
 [shader("vertex")]
 VSOutput VSMain(uint vertexId : SV_VertexID) {
     VSOutput output;
-    GPUBuffer<LineVertex> vertices = GPUBuffer<LineVertex>(pc.vertexBufferAddress);
+    DeviceAddress<LineVertex> vertices = DeviceAddress<LineVertex>(pc.vertexBufferAddress);
     LineVertex v = vertices.load(vertexId);
 
     output.pos   = mul(pc.viewProj, float4(v.position, 1.0f));

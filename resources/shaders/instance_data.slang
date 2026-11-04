@@ -4,7 +4,7 @@
 module instance_data;
 
 import vertex_format;
-import gpu_buffer;
+import gpu_memory;
 
 // InstanceData.flags layout beyond the material byte (see BuildGPUInstanceData):
 // bit 8 skinned, 9 double-sided, 10 transmission, 11 unlit, 12 mirrored,
@@ -349,7 +349,7 @@ public extension InstanceData {
     public uint fetchIndex(uint indexId) {
         if (this.iboAddress == 0)
             return indexId;
-        return GPUBuffer<uint>(this.iboAddress).load(indexId);
+        return DeviceAddress<uint>(this.iboAddress).load(indexId);
     }
 
     // Our vertex draws use sequential SV_VulkanVertexID and fetch the index
@@ -370,19 +370,19 @@ public extension InstanceData {
     public float3 fetchPosition(uint vertexId) {
         if (this.posAddress == 0)
             return float3(0.0f);
-        GPUBuffer<float> values = GPUBuffer<float>(this.posAddress);
+        DeviceAddress<float> values = DeviceAddress<float>(this.posAddress);
         uint valueOffset = vertexId * 3u;
         return float3(values.load(valueOffset), values.load(valueOffset + 1u), values.load(valueOffset + 2u));
     }
 
     [ForceInline]
     public VertexTangentFrame fetchTangentFrame(uint vertexId) {
-        return GPUBuffer<VertexTangentFrame>(this.tangentFrameAddress).load(vertexId);
+        return DeviceAddress<VertexTangentFrame>(this.tangentFrameAddress).load(vertexId);
     }
 
     [ForceInline]
     public VertexSurface fetchSurface(uint vertexId) {
-        return GPUBuffer<VertexSurface>(this.surfaceAddress).load(vertexId);
+        return DeviceAddress<VertexSurface>(this.surfaceAddress).load(vertexId);
     }
 
     [ForceInline]
@@ -392,17 +392,17 @@ public extension InstanceData {
 
     [ForceInline]
     public GPUMeshlet fetchMeshlet(uint meshletIndex) {
-        return GPUBuffer<GPUMeshlet>(this.meshletAddress).load(meshletIndex);
+        return DeviceAddress<GPUMeshlet>(this.meshletAddress).load(meshletIndex);
     }
 
     [ForceInline]
     public uint fetchMeshletVertex(uint vertexOffset, uint local) {
-        return GPUBuffer<uint>(this.meshletVertexAddress).load(vertexOffset + local);
+        return DeviceAddress<uint>(this.meshletVertexAddress).load(vertexOffset + local);
     }
 
     [ForceInline]
     public uint3 fetchMeshletTriangle(uint triangleOffset, uint triangleIndex) {
-        GPUBuffer<uint> words = GPUBuffer<uint>(this.meshletTriAddress);
+        DeviceAddress<uint> words = DeviceAddress<uint>(this.meshletTriAddress);
         uint byteBase = triangleOffset + (triangleIndex * 3u);
 
         uint b0 = (words.load((byteBase + 0u) >> 2u) >> (((byteBase + 0u) & 3u) * 8u)) & 0xFFu;
@@ -419,7 +419,7 @@ public extension InstanceData {
 
     [ForceInline]
     public SkinVertex fetchSkin(uint vertexId) {
-        GPUBuffer<uint> words = GPUBuffer<uint>(this.skinAddress);
+        DeviceAddress<uint> words = DeviceAddress<uint>(this.skinAddress);
         uint wordOffset = vertexId * 3u;
         SkinVertex result;
         result.joints  = uint2(words.load(wordOffset), words.load(wordOffset + 1u));

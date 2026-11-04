@@ -42,7 +42,6 @@ set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/vertex_format.slang"
     "${SHADER_SRC_DIR}/particles.slang"
     "${SHADER_SRC_DIR}/material_model.slang"
-    "${SHADER_SRC_DIR}/gpu_buffer.slang"
     "${SHADER_SRC_DIR}/gpu_memory.slang"
     "${SHADER_SRC_DIR}/math/math.slang"
     "${SHADER_SRC_DIR}/math/phase.slang"
@@ -417,6 +416,36 @@ else()
         "Slang versions: not probeable (${ZHLN_SLANG_TARGET} is built in this tree, and slangc is one this build makes); "
         "the known-bad version gate does not apply")
 endif()
+
+# ----------------------------------------------------------------------------
+# D3D12 / DXIL binding convention (formulated here; consumed by the DXIL
+# cook and by ID3D12RootSignature creation when the native backend lands --
+# todo/vkd3d_backend_infrastructure.md, native-backend phase). State it once
+# so the shader ABI, the future compile_dxil, and the C++ root-signature
+# object cannot drift apart:
+#
+#   space0, b0  Root constants: the pass payload (ScenePassPushConstants and
+#               every per-pass *Constants struct that today rides
+#               [vk::push_constant]). Budget: 64 DWORDs, the same ceiling
+#               GpuAbi::kScenePassPayloadBytes enforces on the Vulkan push
+#               blob, so a payload that fits one backend fits the other.
+#   space0, b1  CBV: DescriptorHeapPushData (frame device addresses +
+#               heapIndex). On Vulkan these bytes are the tail of the same
+#               push blob; on D3D12 they are a root CBV instead.
+#   (implicit)  ResourceDescriptorHeap / SamplerDescriptorHeap: SM 6.6
+#               bindless heaps need no descriptor table in the signature;
+#               shaders index them directly (see gpu_memory.slang).
+#
+# The DXIL profile is sm_6_6: ResourceDescriptorHeap indexing and the
+# enhanced-barrier-era resource model both require it. SLANG_ENABLE_DXIL
+# stays OFF in the vendored build above until a DXIL cook actually consumes
+# this -- flipping it now would rebuild the pinned Slang for no consumer.
+# ----------------------------------------------------------------------------
+set(ZHLN_DXIL_PROFILE "sm_6_6")
+set(ZHLN_DXIL_ROOT_SIGNATURE
+    "RootConstants(num32BitConstants=64, b0, space=0, visibility=SHADER_VISIBILITY_ALL), \
+CBV(b1, space=0)"
+)
 
 # ----------------------------------------------------------------------------
 # compile_slang: compiles a single Slang entry point to SPIR-V.

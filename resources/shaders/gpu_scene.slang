@@ -4,7 +4,7 @@
 module gpu_scene;
 
 import common;
-import gpu_buffer;
+import gpu_memory;
 import uniforms;
 
 public struct GPUDrawIndirectCommand {
@@ -39,22 +39,22 @@ void CompactMain(uint3 tid: SV_DispatchThreadID) {
     if (tid.x >= pc.srcCount)
         return;
 
-    GPUBuffer<InstanceData> src = GPUBuffer<InstanceData>(pc.srcInstancesAddr);
+    DeviceAddress<InstanceData> src = DeviceAddress<InstanceData>(pc.srcInstancesAddr);
     InstanceData inst = src.load(tid.x);
 
     bool visible = inst.vertexCount > 0 && inst.cullRadius > 0.0f;
     if (!visible)
         return;
 
-    GPUBuffer<uint> counter = GPUBuffer<uint>(pc.counterAddr);
+    DeviceAddress<uint> counter = DeviceAddress<uint>(pc.counterAddr);
     uint slot = counter.atomicAdd(0u, 1u);
     if (slot >= pc.maxDstCount)
         return;
 
-    GPUBuffer<InstanceData> dst = GPUBuffer<InstanceData>(pc.dstInstancesAddr);
+    DeviceAddress<InstanceData> dst = DeviceAddress<InstanceData>(pc.dstInstancesAddr);
     dst.store(slot, inst);
 
-    GPUBuffer<GPUDrawIndirectCommand> cmds = GPUBuffer<GPUDrawIndirectCommand>(pc.drawCmdsAddr);
+    DeviceAddress<GPUDrawIndirectCommand> cmds = DeviceAddress<GPUDrawIndirectCommand>(pc.drawCmdsAddr);
     if (cmds.isValid()) {
         GPUDrawIndirectCommand cmd;
         cmd.vertexCount   = (inst.indexCount > 0) ? inst.indexCount : inst.vertexCount;
@@ -64,7 +64,7 @@ void CompactMain(uint3 tid: SV_DispatchThreadID) {
         cmds.store(slot, cmd);
     }
 
-    GPUBuffer<GPUMeshTasksIndirectCommand> meshCmds = GPUBuffer<GPUMeshTasksIndirectCommand>(pc.meshCmdsAddr);
+    DeviceAddress<GPUMeshTasksIndirectCommand> meshCmds = DeviceAddress<GPUMeshTasksIndirectCommand>(pc.meshCmdsAddr);
     if (meshCmds.isValid() && inst.meshletCount > 0) {
         GPUMeshTasksIndirectCommand meshCmd;
         meshCmd.groupCountX = (inst.meshletCount + 31u) / 32u;

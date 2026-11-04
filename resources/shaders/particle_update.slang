@@ -1,7 +1,7 @@
 
 import gpu_push_constants;
 import common;
-import gpu_buffer;
+import gpu_memory;
 import particles;
 import uniforms;
 
@@ -14,7 +14,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint idx = tid.x;
     if (idx >= pc.particleCount)
         return;
-    GPUBuffer<Particle> particleList = GPUBuffer<Particle>(pc.particleBufferAddr);
+    DeviceAddress<Particle> particleList = DeviceAddress<Particle>(pc.particleBufferAddr);
     Particle part = particleList.load(idx);
 
     float dt = pc.deltaTime;

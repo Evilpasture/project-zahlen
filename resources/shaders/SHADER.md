@@ -33,14 +33,27 @@ removed this is the only specular-antialiasing filter left; the two scale
 constants at the top of that module are the tuning knobs. It widens the base,
 sheen and clearcoat roughnesses; it never changes the shading normal itself.
 
-`gpu_buffer.slang` supplies `GPUBuffer<T>` for typed loads, stores and uint
-atomics through buffer device addresses. It is a non-owning, unchecked shader
-view; callers must retain their existing zero-address and bounds guards.
-Host-visible `uint64_t` addresses stay scalar in push data, instance data and
-heap layouts, so this wrapper adds no descriptor or host ABI fields. Meshlets
-load typed through `GPUBuffer<GPUMeshlet>`; packed skin data still uses word
-buffers with its existing byte stride.
+`gpu_memory.slang` supplies `DeviceAddress<T>` for typed loads, stores and uint
+atomics through buffer device addresses. It is the single shader-side module
+that knows the backend lowering: physical buffer addresses on SPIR-V,
+{one-based heap slot, byte offset} into `ResourceDescriptorHeap` on DXIL. It
+is a non-owning, unchecked shader view; callers must retain their existing
+zero-address and bounds guards. Host-visible `uint64_t` addresses stay scalar
+in push data, instance data and heap layouts, so this wrapper adds no
+descriptor or host ABI fields. Meshlets load typed through
+`DeviceAddress<GPUMeshlet>`; packed skin data still uses word buffers with its
+existing byte stride. (`gpu_buffer.slang`/`GPUBuffer<T>` is retired; do not
+reintroduce raw pointer casts outside `gpu_memory.slang`.)
 The intentional invalid-pointer diagnostic in `hang_gpu.slang` stays raw.
+
+Push constants have a fixed D3D12 reading (formulated in
+`descriptor_heap_layout.slang`, with the slangc/CMake half in
+`cmake/ShaderCompilation.cmake`): space 0 `b0` is root constants holding the
+pass payload (64-DWORD budget, the same ceiling as the Vulkan push blob),
+space 0 `b1` is a CBV over `DescriptorHeapPushData`, and the SM 6.6 bindless
+heaps (`ResourceDescriptorHeap` / `SamplerDescriptorHeap`) are implicit — no
+descriptor tables. Passes keep declaring `[vk::push_constant]`; Slang lowers
+it to the push blob on SPIR-V and to this root layout on DXIL.
 
 Descriptor binding authority lives in the shaders: the C++ side reflects
 the compiled SPIR-V (`ReflectedLayout`) instead of declaring static
@@ -89,5 +102,5 @@ generated size (8) is its `StructuredBuffer` stride, not the 16-byte
 `utils/zshader/GpuTypes.cpp`). `GPUMeshlet` generates like the rest: its field
 order (`coneCutoff` between the `float3`s) seats every member with no implicit
 pad under any layout, so the emitted offsets are asserted in the generated
-header and `fetchMeshlet` is a typed `GPUBuffer` load. Do not reorder the Slang
+header and `fetchMeshlet` is a typed `DeviceAddress` load. Do not reorder the Slang
 declaration.

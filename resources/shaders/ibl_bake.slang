@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import gpu_push_constants;
-import gpu_buffer;
+import gpu_memory;
 import sampling;
 
 [vk::push_constant]
@@ -112,7 +112,7 @@ void SHMain(uint3 tid: SV_DispatchThreadID, uint gtid: SV_GroupThreadID) {
     GroupMemoryBarrierWithGroupSync();
 
     if (gtid == 0) {
-        GPUBuffer<float4> sh = GPUBuffer<float4>(pc.outAddr);
+        DeviceAddress<float4> sh = DeviceAddress<float4>(pc.outAddr);
         [unroll]
         for (int c = 0; c < 9; ++c) {
             float3 acc = float3(0.0f, 0.0f, 0.0f);

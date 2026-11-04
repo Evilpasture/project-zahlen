@@ -3,7 +3,6 @@
 
 module rcgi_common;
 
-import gpu_buffer;
 import instance_data;
 import pbr_helpers;
 import uniforms;

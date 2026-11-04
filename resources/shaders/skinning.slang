@@ -1,4 +1,4 @@
-import gpu_buffer;
+import gpu_memory;
 import gpu_push_constants;
 import vertex_format;
 
@@ -28,7 +28,7 @@ uint PackNormal(float3 n, float w) {
     return (ws << 30) | (zs << 20) | (ys << 10) | xs;
 }
 
-float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOffset, GPUBuffer<GPUJoint> jointsPool) {
+float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOffset, DeviceAddress<GPUJoint> jointsPool) {
     float wSum = weights.x + weights.y + weights.z + weights.w;
     if (wSum < 1e-4f) {
         return position;
@@ -47,7 +47,7 @@ float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOff
     return pos;
 }
 
-float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointOffset, GPUBuffer<GPUJoint> jointsPool) {
+float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointOffset, DeviceAddress<GPUJoint> jointsPool) {
     float wSum = weights.x + weights.y + weights.z + weights.w;
     if (wSum < 1e-4f) {
         return direction;
@@ -81,12 +81,12 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (tid.x >= pcs.vertexCount)
         return;
 
-    GPUBuffer<float> inPosValues = GPUBuffer<float>(pcs.inPosAddr);
-    GPUBuffer<VertexTangentFrame> inFrames = GPUBuffer<VertexTangentFrame>(pcs.inFrameAddr);
-    GPUBuffer<float> outPosValues = GPUBuffer<float>(pcs.outPosAddr);
-    GPUBuffer<VertexTangentFrame> outFrames = GPUBuffer<VertexTangentFrame>(pcs.outFrameAddr);
-    GPUBuffer<GPUJoint> jointsPool = GPUBuffer<GPUJoint>(pcs.jointsAddr);
-    GPUBuffer<float4> morphDeltasPool = GPUBuffer<float4>(pcs.morphDeltasAddr);
+    DeviceAddress<float> inPosValues = DeviceAddress<float>(pcs.inPosAddr);
+    DeviceAddress<VertexTangentFrame> inFrames = DeviceAddress<VertexTangentFrame>(pcs.inFrameAddr);
+    DeviceAddress<float> outPosValues = DeviceAddress<float>(pcs.outPosAddr);
+    DeviceAddress<VertexTangentFrame> outFrames = DeviceAddress<VertexTangentFrame>(pcs.outFrameAddr);
+    DeviceAddress<GPUJoint> jointsPool = DeviceAddress<GPUJoint>(pcs.jointsAddr);
+    DeviceAddress<float4> morphDeltasPool = DeviceAddress<float4>(pcs.morphDeltasAddr);
 
     uint posOffset  = tid.x * 3u;
     float3 localPos = float3(inPosValues.load(posOffset), inPosValues.load(posOffset + 1u), inPosValues.load(posOffset + 2u));
@@ -99,7 +99,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float4 weights = float4(1.0f, 0.0f, 0.0f, 0.0f);
 
     if (pcs.inSkinAddr != 0) {
-        GPUBuffer<uint> skinWords = GPUBuffer<uint>(pcs.inSkinAddr);
+        DeviceAddress<uint> skinWords = DeviceAddress<uint>(pcs.inSkinAddr);
         uint skinOffset = tid.x * 3u;
         joints          = UnpackJoints(uint2(skinWords.load(skinOffset), skinWords.load(skinOffset + 1u)));
         weights         = UnpackWeights(skinWords.load(skinOffset + 2u));

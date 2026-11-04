@@ -11,16 +11,16 @@ from pathlib import Path
 # Subsystem directory & file mappings based on repo layout
 PRESETS = {
     "test": [
-        "tests",                        # suites, fixtures, CMake lists, and test docs
-        "utils/ztest",                  # runner, debugger replay, and smoke tests
-        "utils/fidelity",               # standalone render-fidelity test tooling
+        "tests",  # suites, fixtures, CMake lists, and test docs
+        "utils/ztest",  # runner, debugger replay, and smoke tests
+        "utils/fidelity",  # standalone render-fidelity test tooling
         "scripts/run_fidelity.sh",
         "scripts/capture_fidelity.sh",
         "samples/FidelityHarness.cpp",
         "samples/FidelityHarness.md",
-        "cmake/ZTest.cmake",            # worker/manifest integration
-        "cmake/Sanitizers.cmake",       # test environment and sanitizer runtime
-        "cmake/VulkanSandbox.cmake",    # test sandbox environment
+        "cmake/ZTest.cmake",  # worker/manifest integration
+        "cmake/Sanitizers.cmake",  # test environment and sanitizer runtime
+        "cmake/VulkanSandbox.cmake",  # test sandbox environment
         "configure/check_tests_public_api.py",
         "extensions/Signal/WorkerCrashReports.cpp",
         "extensions/Signal/WorkerCrashReports.hpp",
@@ -30,6 +30,8 @@ PRESETS = {
         "include/Zahlen/Render/Meshlet.hpp",
         "src/render",
         "src/vulkan",
+        "src/d3d12",  # D3D12 backend (incl. the d3d12 seam headers)
+        "src/vkd3d",  # joint Vk/D3D12 layer (neutral enums, address contract)
         "resources/shaders",
         "modules/zahlen-render.cppm",
         "cmake/ShaderCompilation.cmake",
@@ -342,7 +344,9 @@ def print_stats(tracked_files):
     tf = tc = tl = 0
     for key, (n, chars, lines) in sorted(budget.items(), key=lambda kv: -kv[1][1]):
         print(f"{key:<40} {n:>6} {chars:>12,} {round(chars / 4):>10,} {lines:>9,}")
-        tf += n; tc += chars; tl += lines
+        tf += n
+        tc += chars
+        tl += lines
     print(f"{'TOTAL':<40} {tf:>6} {tc:>12,} {round(tc / 4):>10,} {tl:>9,}")
     print("Token estimate: chars / 4 (o200k_base is ~chars / 4.0 for this codebase).")
 
@@ -466,7 +470,9 @@ if __name__ == "__main__":
         help=f"Comma-separated list of presets to dump: {', '.join(PRESETS.keys())}",
     )
     parser.add_argument(
-        "--render-only", action="store_true", help="Dump Render, Vulkan, and Shaders."
+        "--render-only",
+        action="store_true",
+        help="Dump Render, Vulkan, D3D12, VkD3D, and Shaders.",
     )
     parser.add_argument(
         "--physics-only", action="store_true", help="Dump Physics subsystem."
@@ -501,7 +507,8 @@ if __name__ == "__main__":
         help="Dump Math3D, Geometry, and Math utilities.",
     )
     parser.add_argument(
-        "--test-only", action="store_true",
+        "--test-only",
+        action="store_true",
         help="Dump test suites, ztest infrastructure, and render-fidelity harness files.",
     )
 

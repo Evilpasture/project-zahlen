@@ -1,6 +1,6 @@
 
 import common;
-import gpu_buffer;
+import gpu_memory;
 import gpu_push_constants;
 import material_model;
 import math.transform;
@@ -51,7 +51,7 @@ struct PSOutput {
 VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint viewId: SV_ViewID) {
     VSOutput output;
 
-    GPUBuffer<Particle3D> particles = GPUBuffer<Particle3D>(mp_pc.particleBufferAddr);
+    DeviceAddress<Particle3D> particles = DeviceAddress<Particle3D>(mp_pc.particleBufferAddr);
     Particle3D p = particles.load(instanceId);
 
     if (p.params.x >= p.params.y || p.params.y <= 0.0f) {
@@ -75,11 +75,11 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
 
     uint actualVertexId = vertexId;
     if (mp_pc.iboAddress != 0) {
-        GPUBuffer<uint> indices = GPUBuffer<uint>(mp_pc.iboAddress);
+        DeviceAddress<uint> indices = DeviceAddress<uint>(mp_pc.iboAddress);
         actualVertexId = indices.load(vertexId);
     }
 
-    GPUBuffer<float> positionValues = GPUBuffer<float>(mp_pc.posAddress);
+    DeviceAddress<float> positionValues = DeviceAddress<float>(mp_pc.posAddress);
     uint positionOffset = actualVertexId * 3u;
     float3 localPos = float3(positionValues.load(positionOffset), positionValues.load(positionOffset + 1u), positionValues.load(positionOffset + 2u));
     float3 scaledPos = localPos * p.position.w;
@@ -104,14 +104,14 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
     output.tangent = float4(1.0f, 0.0f, 0.0f, 1.0f);
     output.uv      = float2(0.0f, 0.0f);
     if (mp_pc.tangentFrameAddress != 0) {
-        VertexTangentFrame frame = GPUBuffer<VertexTangentFrame>(mp_pc.tangentFrameAddress).load(actualVertexId);
+        VertexTangentFrame frame = DeviceAddress<VertexTangentFrame>(mp_pc.tangentFrameAddress).load(actualVertexId);
         Quaternion rotation = Quaternion(p.rotation);
         output.normal = normalize(rotation.rotate(frame.unpackedNormal.xyz));
         float4 tangent = frame.unpackedTangent;
         output.tangent = float4(normalize(rotation.rotate(tangent.xyz)), tangent.w);
     }
     if (mp_pc.surfaceAddress != 0) {
-        VertexSurface surface = GPUBuffer<VertexSurface>(mp_pc.surfaceAddress).load(actualVertexId);
+        VertexSurface surface = DeviceAddress<VertexSurface>(mp_pc.surfaceAddress).load(actualVertexId);
         output.uv = surface.unpackedUV;
     }
 
