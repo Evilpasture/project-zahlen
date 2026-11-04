@@ -14,6 +14,13 @@
 # NOT ${PROJECT_SOURCE_DIR}/src (and not ${PROJECT_SOURCE_DIR}): that one
 # -I would make every private header in every src/ subsystem includable
 # from here, which is the leak check_subsystem_boundaries.py rejects.
+#
+# The neutral vocabulary lives at include/vkd3d/Enums.hpp (pure enums, no
+# backend values) so the d3d12 backend can read it through this same
+# seam-shaped root for its private D3D12Conversions.hpp; the
+# neutral<->Vulkan conversion stays private in VulkanConversions.hpp.
+# zahlen_vkd3d itself never sees a DirectX header: the D3D12 conversion
+# direction belongs to zahlen_d3d12 alone.
 if(NOT TARGET zahlen_vulkan_address)
     message(FATAL_ERROR "zahlen_vkd3d requires ZHLN_BUILD_RENDER=ON so the zahlen_vulkan_address seam (src/vulkan) is available")
 endif()
@@ -29,6 +36,7 @@ set_target_properties(zahlen_vkd3d PROPERTIES
 target_compile_features(zahlen_vkd3d PRIVATE cxx_std_26)
 target_include_directories(zahlen_vkd3d PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/include
 )
 target_compile_options(zahlen_vkd3d PRIVATE -fno-exceptions -fno-rtti)
