@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/culling/HiZGeneratePass.hpp"
+
+#include <vkd3d/Barriers.hpp>
+#include <vkd3d/VulkanBarriers.hpp>
 #include "RenderFrame.hpp"
 #include "Renderer.hpp"
 #include "passes/culling/CullingResources.hpp"
@@ -22,7 +25,7 @@ void GenerateHiZPyramid(VkCommandBuffer cmd, CullingResources& cull, RenderFrame
 
     for (uint32_t mip = 0; mip < mips; ++mip) {
         if (mip > 0) {
-            Vk::MemoryBarrier::ComputeWriteToRead().Record(cmd);
+            VkD3D::MemoryBarrier::ComputeWriteToRead().Record(cmd);
         }
 
         const uint32_t srcW = std::max(1u, width >> (mip == 0 ? 0 : mip - 1));

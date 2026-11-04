@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/postprocess/BloomPass.hpp"
+
+#include <vkd3d/Barriers.hpp>
+#include <vkd3d/VulkanBarriers.hpp>
 #include "PassPayloads.hpp"
 #include "RenderFrame.hpp"
 #include "Renderer.hpp"
@@ -47,13 +50,13 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
         frame.renderer.post.bloomThreshold, thresh.Extent(), thresholdPush, Vk::Slot<"texInput">(srcHdr), Vk::Slot<"outImage">(thresh)
     );
 
-    Vk::MemoryBarrier::ComputeWriteToRead().Record(cmd);
+    VkD3D::MemoryBarrier::ComputeWriteToRead().Record(cmd);
 
     downChain.Step<BloomDown>(frame.renderer.post.bloomDown, down1.Extent(), Kawase(0, thresh), Vk::Slot<"texInput">(thresh), Vk::Slot<"outImage">(down1));
     downChain.Step<BloomDown>(frame.renderer.post.bloomDown, down2.Extent(), Kawase(0, down1), Vk::Slot<"texInput">(down1), Vk::Slot<"outImage">(down2));
     downChain.Step<BloomDown>(frame.renderer.post.bloomDown, down3.Extent(), Kawase(0, down2), Vk::Slot<"texInput">(down2), Vk::Slot<"outImage">(down3));
 
-    Vk::MemoryBarrier::ComputeWriteToRead().Record(cmd);
+    VkD3D::MemoryBarrier::ComputeWriteToRead().Record(cmd);
 
     upChain.Step<BloomUp>(
         frame.renderer.post.bloomUp, up2.Extent(), Kawase(1, down3), Vk::Slot<"texInput">(down3), Vk::Slot<"texLow">(down2), Vk::Slot<"outImage">(up2)

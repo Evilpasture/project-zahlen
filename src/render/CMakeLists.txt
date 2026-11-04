@@ -153,6 +153,10 @@ target_include_directories(zahlen_render PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/init
     ${PROJECT_SOURCE_DIR}/src/vulkan
+    # The joint layer's public headers (<vkd3d/Barriers.hpp>,
+    # <vkd3d/VulkanBarriers.hpp>, <vkd3d/VulkanConversions.hpp>): render
+    # speaks VkD3D for barriers now. Path-only, no link.
+    ${PROJECT_SOURCE_DIR}/src/vkd3d/include
 )
 
 target_include_directories(zahlen_render SYSTEM PRIVATE

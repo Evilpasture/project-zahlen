@@ -1,11 +1,14 @@
 #pragma once
 
-// Neutral <-> Vulkan conversion. The neutral vocabulary (VkD3D::*) is
-// defined by <vkd3d/Enums.hpp>; the Vulkan spellings by the vulkan seam
-// (<vulkan/Enums.hpp>, whose values ARE the VK_* constants, so these
-// converters are static_casts, not tables). The D3D12 direction lives in
-// src/d3d12/D3D12Conversions.hpp -- nothing here names a D3D12 value,
-// and the D3D12 backend never includes this header.
+// Neutral <-> Vulkan conversion, owned by the joint layer (src/vkd3d).
+// The neutral vocabulary (VkD3D::*) is defined by <vkd3d/Enums.hpp>; the
+// Vulkan spellings by the vulkan seam (<vulkan/Enums.hpp>, whose values
+// ARE the VK_* constants, so these converters are static_casts, not
+// tables). The D3D12 direction lives in src/vkd3d/D3D12Conversions.hpp
+// -- nothing here names a D3D12 value, and neither backend includes this
+// header. Consumers: the zahlen_vkd3d anchor TU (compile-time spot
+// checks) and the Vulkan barrier synthesis (<vkd3d/VulkanBarriers.hpp>),
+// plus renderer code straddling the seam during the migration.
 
 #include <vulkan/Enums.hpp>
 #include <vkd3d/Enums.hpp>
@@ -153,6 +156,30 @@ namespace ZHLN::VkD3D {
     return result;
 }
 
+[[nodiscard]] constexpr auto FromVk(Vk::PipelineStage stage) noexcept -> PipelineStage {
+    PipelineStage result = PipelineStage::None;
+    if (Vk::Has(stage, Vk::PipelineStage::TopOfPipe)) { result = result | PipelineStage::TopOfPipe; }
+    if (Vk::Has(stage, Vk::PipelineStage::BottomOfPipe)) { result = result | PipelineStage::BottomOfPipe; }
+    if (Vk::Has(stage, Vk::PipelineStage::AllCommands)) { result = result | PipelineStage::AllCommands; }
+    if (Vk::Has(stage, Vk::PipelineStage::AllGraphics)) { result = result | PipelineStage::AllGraphics; }
+    if (Vk::Has(stage, Vk::PipelineStage::Compute)) { result = result | PipelineStage::Compute; }
+    if (Vk::Has(stage, Vk::PipelineStage::Fragment)) { result = result | PipelineStage::Fragment; }
+    if (Vk::Has(stage, Vk::PipelineStage::Vertex)) { result = result | PipelineStage::Vertex; }
+    if (Vk::Has(stage, Vk::PipelineStage::ColorAttachment)) { result = result | PipelineStage::ColorAttachment; }
+    if (Vk::Has(stage, Vk::PipelineStage::EarlyFragment)) { result = result | PipelineStage::EarlyFragment; }
+    if (Vk::Has(stage, Vk::PipelineStage::LateFragment)) { result = result | PipelineStage::LateFragment; }
+    if (Vk::Has(stage, Vk::PipelineStage::Indirect)) { result = result | PipelineStage::Indirect; }
+    if (Vk::Has(stage, Vk::PipelineStage::Transfer)) { result = result | PipelineStage::Transfer; }
+    if (Vk::Has(stage, Vk::PipelineStage::Copy)) { result = result | PipelineStage::Copy; }
+    if (Vk::Has(stage, Vk::PipelineStage::Clear)) { result = result | PipelineStage::Clear; }
+    if (Vk::Has(stage, Vk::PipelineStage::Host)) { result = result | PipelineStage::Host; }
+    if (Vk::Has(stage, Vk::PipelineStage::IndexInput)) { result = result | PipelineStage::IndexInput; }
+    if (Vk::Has(stage, Vk::PipelineStage::VertexInput)) { result = result | PipelineStage::VertexInput; }
+    if (Vk::Has(stage, Vk::PipelineStage::VertexAttributeInput)) { result = result | PipelineStage::VertexAttributeInput; }
+    if (Vk::Has(stage, Vk::PipelineStage::AccelerationStructureBuild)) { result = result | PipelineStage::AccelerationStructureBuild; }
+    return result;
+}
+
 [[nodiscard]] constexpr auto ToVk(Access access) noexcept -> Vk::Access {
     Vk::Access result = Vk::Access::AccessNone;
     if (Has(access, Access::ShaderRead)) { result = result | Vk::Access::ShaderRead; }
@@ -178,11 +205,44 @@ namespace ZHLN::VkD3D {
     return result;
 }
 
+[[nodiscard]] constexpr auto FromVk(Vk::Access access) noexcept -> Access {
+    Access result = Access::None;
+    if (Vk::Has(access, Vk::Access::ShaderRead)) { result = result | Access::ShaderRead; }
+    if (Vk::Has(access, Vk::Access::ShaderWrite)) { result = result | Access::ShaderWrite; }
+    if (Vk::Has(access, Vk::Access::ShaderStorageRead)) { result = result | Access::ShaderStorageRead; }
+    if (Vk::Has(access, Vk::Access::ShaderStorageWrite)) { result = result | Access::ShaderStorageWrite; }
+    if (Vk::Has(access, Vk::Access::UniformRead)) { result = result | Access::UniformRead; }
+    if (Vk::Has(access, Vk::Access::IndirectRead)) { result = result | Access::IndirectRead; }
+    if (Vk::Has(access, Vk::Access::IndexRead)) { result = result | Access::IndexRead; }
+    if (Vk::Has(access, Vk::Access::VertexAttributeRead)) { result = result | Access::VertexAttributeRead; }
+    if (Vk::Has(access, Vk::Access::TransferRead)) { result = result | Access::TransferRead; }
+    if (Vk::Has(access, Vk::Access::TransferWrite)) { result = result | Access::TransferWrite; }
+    if (Vk::Has(access, Vk::Access::HostRead)) { result = result | Access::HostRead; }
+    if (Vk::Has(access, Vk::Access::HostWrite)) { result = result | Access::HostWrite; }
+    if (Vk::Has(access, Vk::Access::MemoryRead)) { result = result | Access::MemoryRead; }
+    if (Vk::Has(access, Vk::Access::MemoryWrite)) { result = result | Access::MemoryWrite; }
+    if (Vk::Has(access, Vk::Access::ColorRead)) { result = result | Access::ColorRead; }
+    if (Vk::Has(access, Vk::Access::ColorWrite)) { result = result | Access::ColorWrite; }
+    if (Vk::Has(access, Vk::Access::DepthRead)) { result = result | Access::DepthRead; }
+    if (Vk::Has(access, Vk::Access::DepthWrite)) { result = result | Access::DepthWrite; }
+    if (Vk::Has(access, Vk::Access::AccelerationStructureRead)) { result = result | Access::AccelerationStructureRead; }
+    if (Vk::Has(access, Vk::Access::AccelerationStructureWrite)) { result = result | Access::AccelerationStructureWrite; }
+    return result;
+}
+
 [[nodiscard]] constexpr auto ToVk(ImageAspect aspect) noexcept -> Vk::ImageAspect {
     Vk::ImageAspect result = Vk::ImageAspect::None;
     if ((aspect & ImageAspect::Color) != ImageAspect::None) { result = result | Vk::ImageAspect::Color; }
     if ((aspect & ImageAspect::Depth) != ImageAspect::None) { result = result | Vk::ImageAspect::Depth; }
     if ((aspect & ImageAspect::Stencil) != ImageAspect::None) { result = result | Vk::ImageAspect::Stencil; }
+    return result;
+}
+
+[[nodiscard]] constexpr auto FromVk(Vk::ImageAspect aspect) noexcept -> ImageAspect {
+    ImageAspect result = ImageAspect::None;
+    if (Vk::Has(aspect, Vk::ImageAspect::Color)) { result = result | ImageAspect::Color; }
+    if (Vk::Has(aspect, Vk::ImageAspect::Depth)) { result = result | ImageAspect::Depth; }
+    if (Vk::Has(aspect, Vk::ImageAspect::Stencil)) { result = result | ImageAspect::Stencil; }
     return result;
 }
 

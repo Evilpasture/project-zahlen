@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TargetManager.hpp"
+
+#include <vkd3d/Barriers.hpp>
+#include <vkd3d/VulkanBarriers.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
@@ -214,25 +217,27 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         _graph.smaaWeightTarget.View(), _graph.transNormalBuffer.View(),  _graph.transAnisotropyBuffer.View(),
         _graph.transSheenBuffer.View(), _graph.transLightingTarget.View(),
     };
-    std::array<Vk::ImageBarrier, colorTargets.size()> toColor {};
-    std::array<Vk::ImageBarrier, colorTargets.size()> toRead {};
+    std::array<VkD3D::ImageBarrier, colorTargets.size()> toColor {};
+    std::array<VkD3D::ImageBarrier, colorTargets.size()> toRead {};
     for (size_t i = 0; i < colorTargets.size(); ++i) {
-        toColor[i] = Vk::ImageBarrier::DiscardTo<Vk::ImageLayout::ColorAttachmentOptimal>(colorTargets[i]);
-        toRead[i]  = Vk::ImageBarrier::Transition<Vk::ImageLayout::ColorAttachmentOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(colorTargets[i]);
+        toColor[i] = VkD3D::ImageBarrier::DiscardTo<VkD3D::ImageLayout::ColorAttachmentOptimal>(colorTargets[i]);
+        toRead[i]  = VkD3D::ImageBarrier::Transition<VkD3D::ImageLayout::ColorAttachmentOptimal, VkD3D::ImageLayout::ShaderReadOnlyOptimal>(
+            colorTargets[i]
+        );
     }
-    Vk::ImageBarrier::Record(cmd, toColor);
-    Vk::ImageBarrier::Record(cmd, toRead);
+    VkD3D::ImageBarrier::Record(cmd, toColor);
+    VkD3D::ImageBarrier::Record(cmd, toRead);
 
     const std::array generalTargets = {
         _graph.bloomThresholdTarget.View(), _graph.bloomDown1.View(), _graph.bloomDown2.View(),      _graph.bloomDown3.View(),
         _graph.bloomUp2.View(),             _graph.bloomUp1.View(),   _graph.bloomFinalTarget.View(), _graph.rcgiProbes.View(),
         _graph.rcgiCascadeA.View(),         _graph.rcgiCascadeB.View(),
     };
-    std::array<Vk::ImageBarrier, generalTargets.size()> toGeneral {};
+    std::array<VkD3D::ImageBarrier, generalTargets.size()> toGeneral {};
     for (size_t i = 0; i < generalTargets.size(); ++i) {
-        toGeneral[i] = Vk::ImageBarrier::DiscardTo<Vk::ImageLayout::General>(generalTargets[i]);
+        toGeneral[i] = VkD3D::ImageBarrier::DiscardTo<VkD3D::ImageLayout::General>(generalTargets[i]);
     }
-    Vk::ImageBarrier::Record(cmd, toGeneral);
+    VkD3D::ImageBarrier::Record(cmd, toGeneral);
 
     _graph.transDepthBuffer.DiscardTo<Vk::ImageLayout::DepthStencilAttachmentOptimal>(cmd);
     _graph.transDepthBuffer.Transition<Vk::ImageLayout::DepthStencilAttachmentOptimal, Vk::ImageLayout::ShaderReadOnlyOptimal>(cmd);

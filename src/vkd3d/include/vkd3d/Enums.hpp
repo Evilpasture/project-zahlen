@@ -7,7 +7,7 @@
 // plus their flag operators. No Vulkan or D3D12 constants and no
 // translation tables live here. neutral<->Vk:: conversion lives in
 // src/vkd3d/VulkanConversions.hpp; neutral->D3D12 translation lives in
-// src/d3d12/D3D12Conversions.hpp, written against the real Microsoft
+// src/vkd3d/D3D12Conversions.hpp, written against the real Microsoft
 // DirectX headers so the compiler -- not a hand-typed table -- checks
 // every mapping. A neutral value with no equivalent on one side maps to
 // that side's Undefined/Unknown/None and is documented at the case,

@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+
+#include <vkd3d/Barriers.hpp>
+#include <vkd3d/VulkanBarriers.hpp>
 #include "Zahlen/Math/Math3D.hpp"
 #include "Zahlen/Core/Profiler.hpp"
 #include "diagnostics/GpuProfiler.hpp"
@@ -153,11 +156,11 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> BatchRe
         }
     }
 
-    Vk::MemoryBarrier {
-        Vk::BarrierStage::Compute,
-        Vk::BarrierAccess::ShaderWrite,
-        Vk::BarrierStage::AccelerationStructureBuild | Vk::BarrierStage::Vertex,
-        Vk::BarrierAccess::AccelerationStructureRead | Vk::BarrierAccess::ShaderRead,
+    VkD3D::MemoryBarrier {
+        VkD3D::PipelineStage::Compute,
+        VkD3D::Access::ShaderWrite,
+        VkD3D::PipelineStage::AccelerationStructureBuild | VkD3D::PipelineStage::Vertex,
+        VkD3D::Access::AccelerationStructureRead | VkD3D::Access::ShaderRead,
     }
         .Record(cmd);
 
@@ -186,7 +189,7 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> BatchRe
             outcome.Add(rebuilt.transform([&](auto addr) -> SkinnedBlasEntry { return {.scratch = drawCmd.skinnedVertexBuffer, .address = addr}; }));
         }
 
-        Vk::MemoryBarrier::AccelerationStructureBuildToBuild().Record(cmd);
+        VkD3D::MemoryBarrier::AccelerationStructureBuildToBuild().Record(cmd);
     }
     return outcome;
 }
@@ -263,7 +266,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
         cmd, geom, frames.tlas[presenter.frameIndex].Get(), Vk::BufferSlice {scratch, ctx.BufferAddress(scratch.Handle())}, tlasInstancesScratch.size()
     );
 
-    Vk::MemoryBarrier::AccelerationStructureBuildToTrace().Record(cmd);
+    VkD3D::MemoryBarrier::AccelerationStructureBuildToTrace().Record(cmd);
 }
 
 void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {

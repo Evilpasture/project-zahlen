@@ -16,16 +16,18 @@
 # from here, which is the leak check_subsystem_boundaries.py rejects.
 #
 # The neutral vocabulary lives at include/vkd3d/Enums.hpp (pure enums, no
-# backend values) so the d3d12 backend can read it through this same
-# seam-shaped root for its private D3D12Conversions.hpp; the
-# neutral<->Vulkan conversion stays private in VulkanConversions.hpp.
-# zahlen_vkd3d itself never sees a DirectX header: the D3D12 conversion
-# direction belongs to zahlen_d3d12 alone.
+# backend values), readable by any consumer through this same seam-shaped
+# root. ALL neutral<->backend translation is owned here, never by the
+# backends: <vkd3d/VulkanConversions.hpp> + <vkd3d/VulkanBarriers.hpp>
+# (the Vulkan direction, via the zahlen_vulkan_address seam and volk)
+# and D3D12Conversions.hpp + D3D12Barriers.hpp (the D3D12 direction,
+# via zahlen_directx_headers). Neither src/vulkan nor src/d3d12 names a
+# VkD3D type; the backends keep only native barrier/conversion code.
 if(NOT TARGET zahlen_vulkan_address)
     message(FATAL_ERROR "zahlen_vkd3d requires ZHLN_BUILD_RENDER=ON so the zahlen_vulkan_address seam (src/vulkan) is available")
 endif()
 
-add_library(zahlen_vkd3d STATIC GpuAddress.cpp Enums.cpp)
+add_library(zahlen_vkd3d STATIC GpuAddress.cpp Enums.cpp Barriers.cpp)
 add_library(Zahlen::VkD3D ALIAS zahlen_vkd3d)
 set_target_properties(zahlen_vkd3d PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -46,5 +48,6 @@ target_compile_definitions(zahlen_vkd3d PUBLIC ZHLN_GPU_ADDRESS_D3D12=1)
 target_link_libraries(zahlen_vkd3d PRIVATE
     zahlen_d3d12_address
     zahlen_vulkan_address
+    zahlen_directx_headers
     zahlen_warnings
 )

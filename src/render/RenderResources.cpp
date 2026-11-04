@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GpuPack.hpp"
+
+#include <vkd3d/Barriers.hpp>
+#include <vkd3d/VulkanBarriers.hpp>
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "Zahlen/Core/AssetID.hpp"
@@ -997,7 +1000,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     }
     auto* const cmd = recording->Handle();
     impl.geometry.RecordPendingUpdates(cmd);
-    Vk::MemoryBarrier::TransferToAccelerationStructureBuild().Record(cmd);
+    VkD3D::MemoryBarrier::TransferToAccelerationStructureBuild().Record(cmd);
     Vk::BuildBLAS(cmd, geometry, blas.Get(), Vk::BufferSlice {*scratchRes, impl.ctx.BufferAddress(scratchRes->Handle())});
     auto executable = std::move(*recording).End();
     if (!executable) {

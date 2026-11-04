@@ -30,18 +30,18 @@ target_include_directories(zahlen_d3d12_address INTERFACE
 target_compile_features(zahlen_d3d12_address INTERFACE cxx_std_26)
 
 # Microsoft DirectX-Headers (git submodule extern/DirectX-Headers, pinned in
-# .gitmodules). Scoped to this subsystem ONLY: zahlen_directx_headers is
-# linked PRIVATE to zahlen_d3d12 below, so the SDK include paths are never
-# propagated to zahlen_d3d12_address consumers (src/vkd3d), src/vulkan,
-# src/render, or anything else -- a target that wants <directx/d3d12.h>
-# outside src/d3d12 does not get it from this build. Deliberately NOT
+# .gitmodules). zahlen_directx_headers is linked PRIVATE to zahlen_d3d12
+# below and to zahlen_vkd3d (the joint layer owns the neutral->D3D12
+# translation, src/vkd3d/D3D12Conversions.hpp); the SDK include paths are
+# never propagated further -- not to zahlen_d3d12_address consumers,
+# src/vulkan, src/render, or anything else. Deliberately NOT
 # add_subdirectory(extern/DirectX-Headers): that project's own
 # DirectX-Headers target carries PUBLIC include directories, and using our
 # own INTERFACE here keeps the scope in this file where it can be audited.
-# There is no SDK-free mirror of the D3D12 enums anywhere: the backend
-# translates the neutral vocabulary (VkD3D::) straight to real SDK types
-# in D3D12Conversions.hpp (this target only), so the compiler checks
-# every mapping and no hand-typed SDK integer exists to proofread.
+# There is no SDK-free mirror of the D3D12 enums anywhere: the joint layer
+# translates the neutral vocabulary straight to real SDK types, so the
+# compiler checks every mapping and no hand-typed SDK integer exists to
+# proofread.
 if(NOT EXISTS "${PROJECT_SOURCE_DIR}/extern/DirectX-Headers/include/directx/d3d12.h")
     message(FATAL_ERROR "extern/DirectX-Headers submodule is not initialized; run: git submodule update --init extern/DirectX-Headers")
 endif()
@@ -57,12 +57,12 @@ if(NOT WIN32)
     )
 endif()
 
-# The portable core (address anchor, conversions, barrier synthesis,
+# The portable core (address anchor, barrier synthesis,
 # timeline fences, descriptor heaps, buffers) compiles on every host --
 # non-Windows builds exercise it against the WSL header stubs. The DXGI
 # translation units (Context.cpp: factory/adapter/device; Swapchain.cpp:
 # presentation) are Windows-only and link the real SDK import libraries.
-add_library(zahlen_d3d12 STATIC Backend.cpp D3D12Conversions.cpp Barriers.cpp Fence.cpp DescriptorHeap.cpp Buffers.cpp)
+add_library(zahlen_d3d12 STATIC Backend.cpp Barriers.cpp Fence.cpp DescriptorHeap.cpp Buffers.cpp)
 add_library(Zahlen::D3D12 ALIAS zahlen_d3d12)
 add_library(zahlen_direct3d ALIAS zahlen_d3d12)
 add_library(Zahlen::Direct3D ALIAS zahlen_d3d12)
@@ -77,16 +77,11 @@ target_compile_options(zahlen_d3d12 PRIVATE -fno-exceptions -fno-rtti)
 # PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}: Backend.cpp's own tree only. Not
 # ${PROJECT_SOURCE_DIR} (repo root) and not ${PROJECT_SOURCE_DIR}/src:
 # either would let a bare <src/...> -- or any sibling subsystem's private
-# headers -- resolve from this target. The one foreign root is
-# src/vkd3d/include: D3D12Conversions.hpp reads the neutral vocabulary
-# (<vkd3d/Enums.hpp>) through the same seam-shaped include/ tree the
-# backends themselves export -- an include path to a dependency-free
-# header, not a subsystem linkage (zahlen_d3d12 does not link
-# zahlen_vkd3d, and nothing here can reach src/vkd3d's private headers).
+# headers -- resolve from this target. No foreign roots: this backend
+# names no VkD3D type, so it needs nothing from the joint layer.
 target_include_directories(zahlen_d3d12 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/src/vkd3d/include
 )
 target_link_libraries(zahlen_d3d12 PRIVATE zahlen_d3d12_address zahlen_directx_headers zahlen_warnings)
 if(WIN32)

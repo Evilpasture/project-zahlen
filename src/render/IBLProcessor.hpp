@@ -3,6 +3,9 @@
 
 #pragma once
 #include "RenderInternal.hpp"
+
+#include <vkd3d/Barriers.hpp>
+#include <vkd3d/VulkanBarriers.hpp>
 #include "pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Defer.hpp>
@@ -174,10 +177,10 @@ class IBLProcessor {
 
                     stagedInput->RecordUpload(cmd, useVisualSky ? payload.visualSkyView : Vk::ImageView {});
 
-                    Vk::ImageBarrier::Record(
+                    VkD3D::ImageBarrier::Record(
                         cmd, std::array {
-                                 Vk::ImageBarrier::DiscardTo<Vk::ImageLayout::General>(payload.brdfLutView),
-                                 Vk::ImageBarrier::DiscardTo<Vk::ImageLayout::General>(payload.prefilteredView),
+                                 VkD3D::ImageBarrier::DiscardTo<VkD3D::ImageLayout::General>(payload.brdfLutView),
+                                 VkD3D::ImageBarrier::DiscardTo<VkD3D::ImageLayout::General>(payload.prefilteredView),
                              }
                     );
 
@@ -205,10 +208,14 @@ class IBLProcessor {
                         }
                     }
 
-                    Vk::ImageBarrier::Record(
+                    VkD3D::ImageBarrier::Record(
                         cmd, std::array {
-                                 Vk::ImageBarrier::Transition<Vk::ImageLayout::General, Vk::ImageLayout::ShaderReadOnlyOptimal>(payload.brdfLutView),
-                                 Vk::ImageBarrier::Transition<Vk::ImageLayout::General, Vk::ImageLayout::ShaderReadOnlyOptimal>(payload.prefilteredView),
+                                 VkD3D::ImageBarrier::Transition<VkD3D::ImageLayout::General, VkD3D::ImageLayout::ShaderReadOnlyOptimal>(
+                                     payload.brdfLutView
+                                 ),
+                                 VkD3D::ImageBarrier::Transition<VkD3D::ImageLayout::General, VkD3D::ImageLayout::ShaderReadOnlyOptimal>(
+                                     payload.prefilteredView
+                                 ),
                              }
                     );
                 }

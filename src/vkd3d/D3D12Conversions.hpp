@@ -1,16 +1,16 @@
 #pragma once
 
-// Neutral -> D3D12 translation. This is the ONLY place the neutral
-// vocabulary (VkD3D::, <vkd3d/Enums.hpp>) meets the Microsoft DirectX
-// headers, and it is private to the d3d12 backend: it lives under
-// src/d3d12 (not any include/ seam), so only zahlen_d3d12 translation
-// units -- the one target with the DirectX-Headers include path -- can
-// ever see it. Every mapping names real SDK constants
+// Neutral -> D3D12 translation, owned by the joint layer (src/vkd3d):
+// this is the ONLY place the neutral vocabulary (<vkd3d/Enums.hpp>)
+// meets the Microsoft DirectX headers, and it is private to
+// zahlen_vkd3d -- the d3d12 backend never names a VkD3D type, so it
+// never sees this header. Every mapping names real SDK constants
 // (DXGI_FORMAT_*, D3D12_BARRIER_*), so the compiler checks the tables;
 // there is no hand-typed integer anywhere in this header.
 //
-// The reverse direction (neutral <- Vk::) lives in
-// src/vkd3d/VulkanConversions.hpp; the neutral header itself contains
+// The Vulkan direction (neutral <-> Vk::) lives in
+// src/vkd3d/include/vkd3d/VulkanConversions.hpp; the neutral header
+// itself contains
 // no backend values at all.
 
 #if __has_include(<wsl/winadapter.h>)
@@ -22,7 +22,7 @@
 
 #include <cstdint>
 
-namespace ZHLN::D3D12 {
+namespace ZHLN::VkD3D {
 
 [[nodiscard]] constexpr auto ToD3D12Layout(VkD3D::ImageLayout layout) noexcept -> D3D12_BARRIER_LAYOUT {
     switch (layout) {
@@ -210,4 +210,4 @@ namespace ZHLN::D3D12 {
     return D3D12_COMPARISON_FUNC_NEVER;
 }
 
-} // namespace ZHLN::D3D12
+} // namespace ZHLN::VkD3D

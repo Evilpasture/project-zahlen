@@ -3,23 +3,22 @@
 
 #include "Barriers.hpp"
 
-// Anchor TU for the header-only barrier synthesis, and the compile-time
-// half of the barrier test plan: these asserts verify that a neutral
-// (VkD3D::) transition lands in the D3D12_TEXTURE_BARRIER fields the
-// runtime will hand to ID3D12GraphicsCommandList7::Barrier -- layout,
-// sync, and access all translated, subresources defaulting to "all".
-// The recording half is exercised once command lists exist (Phase 3+);
-// nothing here runs at runtime.
+// Anchor TU for the header-only native barrier synthesis, with the
+// compile-time half of a barrier sanity check: a present -> render-target
+// transition and a compute -> indirect buffer barrier land in the
+// D3D12_*_BARRIER fields the runtime will hand to
+// ID3D12GraphicsCommandList7::Barrier. The recording half is exercised
+// once command lists exist (Phase 3+); nothing here runs at runtime.
 namespace {
 
 [[maybe_unused]] constexpr D3D12_TEXTURE_BARRIER kPresentToRenderTarget = ZHLN::D3D12::MakeTextureBarrier(
     nullptr,
-    ZHLN::VkD3D::ImageLayout::PresentSrc,
-    ZHLN::VkD3D::ImageLayout::ColorAttachmentOptimal,
-    ZHLN::VkD3D::PipelineStage::BottomOfPipe,
-    ZHLN::VkD3D::PipelineStage::ColorAttachment,
-    ZHLN::VkD3D::Access::None,
-    ZHLN::VkD3D::Access::ColorWrite
+    D3D12_BARRIER_LAYOUT_PRESENT,
+    D3D12_BARRIER_LAYOUT_RENDER_TARGET,
+    D3D12_BARRIER_SYNC_ALL,
+    D3D12_BARRIER_SYNC_RENDER_TARGET,
+    D3D12_BARRIER_ACCESS_COMMON,
+    D3D12_BARRIER_ACCESS_RENDER_TARGET
 );
 static_assert(kPresentToRenderTarget.LayoutBefore == D3D12_BARRIER_LAYOUT_PRESENT);
 static_assert(kPresentToRenderTarget.LayoutAfter == D3D12_BARRIER_LAYOUT_RENDER_TARGET);
@@ -31,10 +30,10 @@ static_assert(kPresentToRenderTarget.Subresources.IndexOrFirstMipLevel == 0xFFFF
 
 [[maybe_unused]] constexpr D3D12_BUFFER_BARRIER kComputeToIndirect = ZHLN::D3D12::MakeBufferBarrier(
     nullptr,
-    ZHLN::VkD3D::PipelineStage::Compute,
-    ZHLN::VkD3D::PipelineStage::Indirect,
-    ZHLN::VkD3D::Access::ShaderWrite,
-    ZHLN::VkD3D::Access::IndirectRead
+    D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+    D3D12_BARRIER_SYNC_EXECUTE_INDIRECT,
+    D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+    D3D12_BARRIER_ACCESS_INDIRECT_ARGUMENT
 );
 static_assert(kComputeToIndirect.SyncBefore == D3D12_BARRIER_SYNC_COMPUTE_SHADING);
 static_assert(kComputeToIndirect.SyncAfter == D3D12_BARRIER_SYNC_EXECUTE_INDIRECT);

@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GeometryManager.hpp"
+
+#include <vkd3d/Barriers.hpp>
+#include <vkd3d/VulkanBarriers.hpp>
+#include <vkd3d/VulkanConversions.hpp>
 #include <Zahlen/Render/Vertex.hpp>
 #include <algorithm>
 #include <cstring>
@@ -236,7 +240,7 @@ void GeometryManager::RecordPendingUpdates(VkCommandBuffer cmd) noexcept {
         dstAccess |= Vk::Access::AccelerationStructureRead;
     }
 
-    Vk::MemoryBarrier {Vk::PipelineStage::Copy, Vk::Access::TransferWrite, dstStage, dstAccess}.Record(cmd);
+    VkD3D::MemoryBarrier {VkD3D::PipelineStage::Copy, VkD3D::Access::TransferWrite, VkD3D::FromVk(dstStage), VkD3D::FromVk(dstAccess)}.Record(cmd);
 }
 
 void GeometryManager::AdvanceUploadFrame() noexcept {
