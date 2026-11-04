@@ -58,11 +58,13 @@ module aa_common;
 // sharpening." FSR_RCAS_LIMIT = 0.25 - 1/16 = 0.1875.
 public static const float kAaRcasLimit = 0.25f - (1.0f / 16.0f);
 
-// FsrRcasCon(sharpnessStops) = exp2(-stops); 0.0 = maximum sharpness, each
-// extra stop halves it. AMD's integration guide recommends 0.2 stops below
-// full for a 1:1 (non-upscaling) RCAS pass.
-public static const float kAaRcasSharpnessStops = 0.2f;
-public static const float kAaRcasSharpness      = 0.8705505632961241f; // exp2(-0.2)
+// RCAS sharpness is NOT a constant here: blit.slang passes
+// BlitPushConstants.rcasSharpness (sourced from GISettings::rcasSharpness) to
+// AaRcasSharpenHdr() every frame. AMD's FsrRcasCon(stops) = exp2(-stops), so
+// the shipped default 0.8705505632961241f is 0.2 stops below maximum, and 0.0
+// disables the filter. Keeping the dial in settings (rather than baking one
+// "correct" value into the shader) leaves the sharpening / crunchiness trade-off
+// to the person looking at the frame.
 
 // SMAA's official gamma-space luma weights. Kept here (rather than Rec.709)
 // so SMAA_THRESHOLD 0.1 stays at its calibrated value.

@@ -117,6 +117,7 @@ public struct BlitPushConstants {
     public int tonemapper;
     public float3 colorFilter;
     public int applySrgbOetf;
+    public float rcasSharpness; // 0.0 = Off / Soft, > 0.0 = Sharpened (default ~0.87f)
 };
 
 // --- The remaining push-payload exports (migrated 2026-10-18 from the host

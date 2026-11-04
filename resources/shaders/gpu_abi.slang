@@ -99,6 +99,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += uint(abi.kawasePush.mode);
     acc += asuint(abi.thresholdPush.exposure);
     acc += asuint(abi.blitPush.colorFilter.x);
+    acc += asuint(abi.blitPush.rcasSharpness);
     acc += asuint(abi.fxaaPush.rcpFrameX);
     acc += abi.rcgiProbeSetupPush.cascadeIndex;
     acc += asuint(abi.rcgiCascadePush.tMax);

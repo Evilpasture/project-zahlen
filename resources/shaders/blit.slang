@@ -103,22 +103,29 @@ float3 LinearToSRGB(float3 color) {
 // after SmaaBlendPass and before exposure / tonemap / bloom / OETF, which is
 // the point in the frame where AMD recommends RCAS (post-AA, pre-grain/UI).
 //
-// `sharpness` comes from a fixed compile-time constant (0.2 stops), so the
-// BlitPushConstants ABI, GraphicsSettings and QualitySignature are untouched.
-// Define AA_RCAS_DISABLE at shader build time to A/B the filter.
+// `sharpness` is a runtime push constant (BlitPushConstants.rcasSharpness,
+// sourced from GISettings::rcasSharpness), so the same cooked pipeline can A/B
+// the filter without a shader rebuild. 0.0 bypasses RCAS entirely; positive
+// values are AMD's exp2(-stops) sharpness, ~0.87 being the shipped default.
+// QualitySignature deliberately does not include it: this is a subjective look
+// control, not a quality tier, so changing it never invalidates a preset.
 // -----------------------------------------------------------------------------
 
 // tonemapper push-constant IDs: 0 linear, 1 Narkowicz ACES, 2 Reinhard,
 // 3 Khronos PBR Neutral, 4 ACES Hill with the generator's 1/0.6 boost.
 float4 PSMain(VSOutput input) : SV_Target0 {
-#ifndef AA_RCAS_DISABLE
-    // Taps the AA result (AccumCurrent with SMAA/FXAA, HdrSceneColor without
-    // AA) with a true 3x3 neighborhood, then restores unclamped HDR. The
-    // center Load also supplies alpha, so there is no redundant sample.
-    float4 hdrSample = AaRcasSharpenHdr(input.uv, texInput, kAaRcasSharpness);
-#else
-    float4 hdrSample = texInput.SampleLevel(smp, input.uv, 0);
-#endif
+    float4 hdrSample;
+
+    [branch]
+    if (pc.rcasSharpness > 0.0f) {
+        // Taps the AA result (AccumCurrent with SMAA/FXAA, HdrSceneColor without
+        // AA) with a true 3x3 neighborhood, then restores unclamped HDR. The
+        // center Load also supplies alpha, so there is no redundant sample.
+        hdrSample = AaRcasSharpenHdr(input.uv, texInput, pc.rcasSharpness);
+    } else {
+        hdrSample = texInput.SampleLevel(smp, input.uv, 0);
+    }
+
     float3 hdrColor = hdrSample.rgb;
     float alpha      = hdrSample.a;
 

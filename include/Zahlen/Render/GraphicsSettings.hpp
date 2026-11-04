@@ -42,6 +42,13 @@ struct GISettings {
     int                  tonemapper    = 3;
     ZHLN::Float3         colorFilter   = {1.0f, 1.0f, 1.0f};
 
+    // Runtime RCAS dial forwarded to BlitPushConstants.rcasSharpness. 0.0 turns
+    // sharpening off; positive values are AMD's exp2(-stops) sharpness, 0.2
+    // stops being the default. Deliberately absent from QualitySignature: this
+    // is a subjective look control, not a quality tier, so retuning it never
+    // changes preset detection.
+    float                rcasSharpness = 0.8705505632961241f; // exp2(-0.2)
+
     auto operator==(const GISettings&) const noexcept -> bool = default;
 };
 
@@ -208,6 +215,7 @@ static_assert([] -> bool {
     const GraphicsSettings settings {};
     return settings.antiAliasing.mode == AAMode::SMAA && settings.post.mode == 0 && settings.post.giIntensity == 1.0f
            && settings.post.enableSSR == 0 && settings.post.enableRTR == 0 && settings.post.exposure == 1.0f
+           && settings.post.rcasSharpness > 0.0f
            && settings.post.bloomStrength == 0.0f && settings.post.glowIntensity == 0.0f && settings.post.vignetteIntensity == 0.0f
            && settings.post.tonemapper == 3 && settings.shadows.resolution == 2048
            && !settings.rayTracing.enableShadows && !settings.rayTracing.enableReflections && !settings.rayTracing.enableDiffuseGI

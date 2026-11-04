@@ -110,6 +110,7 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
         gfx.post.saturation    = pp->saturation;
         gfx.post.tonemapper    = pp->tonemapper;
         gfx.post.colorFilter   = pp->colorFilter;
+        gfx.post.rcasSharpness = pp->rcasSharpness;
 
         gfx.environment.ambientExposure = pp->ambientExposure;
         gfx.environment.fullBright      = pp->fullBright;
@@ -257,6 +258,7 @@ void ApplyGraphicsSettings(Engine& engine, const GraphicsSettings& settings) {
         pp.saturation        = gfx.post.saturation;
         pp.tonemapper        = gfx.post.tonemapper;
         pp.colorFilter       = gfx.post.colorFilter;
+        pp.rcasSharpness     = gfx.post.rcasSharpness;
 
         pp.ambientExposure = gfx.environment.ambientExposure;
         pp.fullBright      = gfx.environment.fullBright;
