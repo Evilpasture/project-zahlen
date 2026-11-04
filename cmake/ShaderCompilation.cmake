@@ -418,11 +418,12 @@ else()
 endif()
 
 # ----------------------------------------------------------------------------
-# D3D12 / DXIL binding convention (formulated here; consumed by the DXIL
-# cook and by ID3D12RootSignature creation when the native backend lands --
+# D3D12 / DXIL binding convention (formulated here; the profile is consumed
+# by compile_dxil below, the root-signature string by ID3D12RootSignature
+# creation when the native backend lands --
 # todo/vkd3d_backend_infrastructure.md, native-backend phase). State it once
-# so the shader ABI, the future compile_dxil, and the C++ root-signature
-# object cannot drift apart:
+# so the shader ABI, the DXIL cook, and the C++ root-signature object cannot
+# drift apart:
 #
 #   space0, b0  Root constants: the pass payload (ScenePassPushConstants and
 #               every per-pass *Constants struct that today rides
@@ -517,6 +518,84 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
     endforeach()
     set(ZHLN_SLANG_DEFINE_RECORDS "${ZHLN_SLANG_DEFINE_RECORDS}" PARENT_SCOPE)
 endfunction()
+
+# ----------------------------------------------------------------------------
+# compile_dxil: compiles a single Slang entry point to DXIL (Shader Model
+# 6.6, per ZHLN_DXIL_PROFILE above). The DXIL counterpart of compile_slang,
+# with three deliberate differences:
+#   * -target dxil and an explicit -profile (<stage>_6_6): DXIL has no
+#     profile-less cook, and SM 6.6 is the bindless-heap floor.
+#   * -D__TARGET_DXIL__=1 mirrors -D__TARGET_SPIRV__=1: target selection
+#     stays in the compile setup (gpu_memory.slang keys off these macros),
+#     shader sources never choose a backend themselves.
+#   * No catalog records: zshader's reflection replay is SPIR-V-only by
+#     design, so a DXIL cook registers nothing into
+#     ALL_SHADER_SLANG_SOURCES / ALL_SHADER_SLANG_DEFINES. DXIL reflection
+#     arrives with the D3D12 pipeline path, not before.
+# The entry's [vk::push_constant] block compiles to the (b0, space0)
+# cbuffer: whether the runtime feeds it as 32-bit root constants or as a
+# root CBV is an API-level choice the shader cannot see (see the convention
+# above); root parameter 1 takes the DescriptorHeapPushData bytes the
+# Vulkan side pushes. Requires a slangc with DXIL enabled -- a host/SDK
+# slangc, or the vendored build configured with -DSLANG_ENABLE_DXIL=ON.
+# ----------------------------------------------------------------------------
+function(compile_dxil SHADER_PATH ENTRY STAGE OUTPUT_VAR)
+    get_filename_component(FILE_NAME ${SHADER_PATH} NAME_WE)
+    set(OUTPUT_DXIL "${GEN_INCLUDE_DIR}/${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.dxil")
+    set(EXTRA_ARGS ${ARGN})
+    list(APPEND EXTRA_ARGS -D__TARGET_DXIL__=1)
+
+    # Map HLSL-style profiles to Slang's stage names (same table as
+    # compile_slang; the two cooks must agree on what a stage is called).
+    set(SLANG_STAGE ${STAGE})
+    if(STAGE MATCHES "^vs_")
+        set(SLANG_STAGE "vertex")
+    elseif(STAGE MATCHES "^ps_")
+        set(SLANG_STAGE "fragment")
+    elseif(STAGE MATCHES "^cs_")
+        set(SLANG_STAGE "compute")
+    elseif(STAGE MATCHES "^as_")
+        set(SLANG_STAGE "amplification")
+    elseif(STAGE MATCHES "^ms_")
+        set(SLANG_STAGE "mesh")
+    endif()
+
+    # ZHLN_DXIL_PROFILE is "sm_6_6": the per-stage profile keeps the stage
+    # prefix of the SPIR-V cook's profile (cs_6_0) and takes the model from
+    # the convention (cs_6_6), so the two cooks can never target different
+    # shader models by a call-site typo.
+    string(REGEX REPLACE "^([a-z]+)_[0-9]+_[0-9]+$" "\\1" DXIL_PROFILE_PREFIX "${STAGE}")
+    string(REPLACE "sm_" "" DXIL_MODEL "${ZHLN_DXIL_PROFILE}")
+    set(DXIL_PROFILE "${DXIL_PROFILE_PREFIX}_${DXIL_MODEL}")
+
+    add_custom_command(
+        OUTPUT ${OUTPUT_DXIL}
+        COMMAND ${SLANG_EXECUTABLE} ${SHADER_PATH}
+                -entry ${ENTRY}
+                -stage ${SLANG_STAGE}
+                -target dxil
+                -profile ${DXIL_PROFILE}
+                -matrix-layout-column-major
+                -I "${SHADER_SRC_DIR}"
+                -I "${SHADER_INCLUDE_DIR}"
+                ${EXTRA_ARGS}
+                -o ${OUTPUT_DXIL}
+        DEPENDS ${SHADER_PATH}
+                ${SLANG_COMPILER_DEPENDS}
+                ${ZHLN_SHADER_COMMON_SOURCES}
+        COMMENT "Slang: Generating ${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.dxil"
+        VERBATIM
+    )
+    set(${OUTPUT_VAR} ${OUTPUT_DXIL} PARENT_SCOPE)
+endfunction()
+
+# The DXIL bring-up smoke cook: one entry that exercises the whole Phase-1
+# surface at once -- a [vk::push_constant] payload, DeviceAddress<T> typed
+# loads/stores, and uint atomics through gpu_memory.slang. Opt-in target
+# (never part of the default build, like zahlen_shaders_spv): build it with
+# a DXIL-capable slangc to prove the DXIL path before pipelines consume it.
+compile_dxil("${SHADER_SRC_DIR}/skinning.slang" CSMain cs_6_0 SHADER_SKINNING_SLANG_DXIL_PATH)
+add_custom_target(zahlen_shaders_dxil DEPENDS ${SHADER_SKINNING_SLANG_DXIL_PATH})
 
 # ----------------------------------------------------------------------------
 # add_shader_target: Boilerplate killer with stage-specific flag support.

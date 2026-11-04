@@ -37,6 +37,13 @@ public struct ScenePassPushConstants {
 //               gpu_memory.slang indexes ResourceDescriptorHeap directly.
 // [vk::push_constant] declarations in the passes stay as they are: Slang
 // lowers them to the push blob on SPIR-V and to this root layout on DXIL.
+// Shader-side, the declared payload struct is simply the (b0, space0)
+// cbuffer; root-constants-vs-root-CBV is an API-level choice the shader
+// cannot observe (VK_EXT_descriptor_heap maps 32BIT_CONSTANTS to push data
+// and a root CBV to a push address -- the same bytes, read two ways). The
+// 64-DWORD cap is enforced host-side as GpuAbi::kRootConstantMaxBytes /
+// RootConstantPayload, and the DXIL cook (compile_dxil in
+// cmake/ShaderCompilation.cmake) targets sm_6_6 per the convention.
 public struct DescriptorHeapPushData {
     public ScenePassPushConstants passData;
 

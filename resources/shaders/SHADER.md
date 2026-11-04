@@ -53,7 +53,11 @@ pass payload (64-DWORD budget, the same ceiling as the Vulkan push blob),
 space 0 `b1` is a CBV over `DescriptorHeapPushData`, and the SM 6.6 bindless
 heaps (`ResourceDescriptorHeap` / `SamplerDescriptorHeap`) are implicit — no
 descriptor tables. Passes keep declaring `[vk::push_constant]`; Slang lowers
-it to the push blob on SPIR-V and to this root layout on DXIL.
+it to the push blob on SPIR-V and to this root layout on DXIL. The 64-DWORD
+budget is enforced host-side (`GpuAbi::kRootConstantMaxBytes`,
+`RootConstantPayload`), and `ninja zahlen_shaders_dxil` smoke-cooks the
+skinning compute entry to DXIL (SM 6.6) as the bring-up check for the DXIL
+path — it is an opt-in target, not part of the default build.
 
 Descriptor binding authority lives in the shaders: the C++ side reflects
 the compiled SPIR-V (`ReflectedLayout`) instead of declaring static

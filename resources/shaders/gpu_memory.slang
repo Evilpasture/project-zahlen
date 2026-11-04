@@ -40,10 +40,19 @@ public struct DeviceAddress<T>
     {
 #if defined(__TARGET_SPIRV__)
         return ((T*)this.raw)[index];
-#else
+#elif defined(__TARGET_DXIL__) || defined(__TARGET_HLSL__)
         uint encodedSlot = (uint)(this.raw >> 32);
         uint offset = (uint)(this.raw & 0xFFFFFFFFu) + index * (uint)sizeof(T);
         return GetD3D12Buffer(encodedSlot).Load<T>(offset);
+#else
+        // No backend target selected: this module is being loaded for
+        // reflection (zshader's gpu-types pass), where bodies are
+        // semantically checked but never code-generated. Stay inert so
+        // the module loads under any target -- an #else that assumed
+        // "not SPIR-V" means DXIL referenced GetD3D12Buffer here, which
+        // only exists under the DXIL/HLSL guard above.
+        T value = {};
+        return value;
 #endif
     }
 
@@ -52,10 +61,12 @@ public struct DeviceAddress<T>
     {
 #if defined(__TARGET_SPIRV__)
         ((T*)this.raw)[index] = value;
-#else
+#elif defined(__TARGET_DXIL__) || defined(__TARGET_HLSL__)
         uint encodedSlot = (uint)(this.raw >> 32);
         uint offset = (uint)(this.raw & 0xFFFFFFFFu) + index * (uint)sizeof(T);
         GetD3D12RWBuffer(encodedSlot).Store<T>(offset, value);
+#else
+        // Reflection-only load; see load().
 #endif
     }
 }
@@ -101,10 +112,12 @@ public extension DeviceAddress<uint>
         uint original = 0;
 #if defined(__TARGET_SPIRV__)
         InterlockedAdd(((uint*)this.raw)[index], value, original);
-#else
+#elif defined(__TARGET_DXIL__) || defined(__TARGET_HLSL__)
         uint encodedSlot = (uint)(this.raw >> 32);
         uint offset = (uint)(this.raw & 0xFFFFFFFFu) + index * (uint)sizeof(uint);
         GetD3D12RWBuffer(encodedSlot).InterlockedAdd(offset, value, original);
+#else
+        // Reflection-only load; see DeviceAddress::load().
 #endif
         return original;
     }
