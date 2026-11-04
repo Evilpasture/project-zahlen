@@ -6,7 +6,7 @@ Introduce the address-model and build-target seams for the future `zahlen_direct
 
 ## Landed in this infrastructure patch
 
-- [x] Add `ZHLN::D3D::BufferAddress<T>` in `src/d3d12/memory/BufferAddress.hpp` as a header-only SM 6.6 descriptor-slot plus byte-offset address. It has no Windows SDK dependency, so its type and target can be configured on non-Windows hosts.
+- [x] Add `ZHLN::D3D::BufferAddress<T>` in `src/d3d12/include/d3d12/memory/BufferAddress.hpp` as a header-only SM 6.6 descriptor-slot plus byte-offset address. It has no Windows SDK dependency, so its type and target can be configured on non-Windows hosts.
 - [x] Make `ZHLN::Vk::DeviceAddress<T>` independently includable through Vulkan/volk headers, while preserving the existing Vulkan address API and pointer-arithmetic behavior.
 - [x] Add `ZHLN::VkD3D::DeviceAddress<T>` in the private `src/vkd3d/GpuAddress.hpp` as the 64-bit shared wire contract. Backend conversions are concentrated in this type; no GPU address wrapper is installed or exposed through `include/Zahlen`, and the current renderer has not been switched to it.
 - [x] Add concrete build targets `zahlen_d3d12`, `zahlen_direct3d`, and `zahlen_vkd3d` (`Zahlen::D3D12` / `Zahlen::Direct3D` / `Zahlen::VkD3D` aliases). Their internal include paths and backend link dependencies are not propagated as a public engine API.

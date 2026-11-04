@@ -7,7 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "DeviceAddress.hpp"
+#include <vulkan/memory/DeviceAddress.hpp>
 #include <cstdint>
 #include <optional>
 #include <type_traits>

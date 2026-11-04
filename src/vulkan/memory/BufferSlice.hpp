@@ -8,7 +8,7 @@
 
 #include <type_traits>
 
-#include "DeviceAddress.hpp"
+#include <vulkan/memory/DeviceAddress.hpp>
 
 namespace ZHLN::Vk {
 

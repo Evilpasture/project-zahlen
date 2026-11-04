@@ -5,12 +5,18 @@
 
 // Private backend headers: this contract belongs to the renderer/backend
 // implementation and is intentionally not part of include/Zahlen's API.
+// The two backend headers below resolve ONLY through the header-only seam
+// targets zahlen_d3d12_address / zahlen_vulkan_address (each exports just
+// its own src/<backend>/include root -- see src/vkd3d/CMakeLists.txt).
+// There is deliberately no -I src/ here: that would make every subsystem's
+// private headers reachable from this file.
 #include <cstddef>
 #include <cstdint>
 #include <d3d12/memory/BufferAddress.hpp>
 #include <type_traits>
-#include <vkd3d/Config.hpp>
 #include <vulkan/memory/DeviceAddress.hpp>
+
+#include "Config.hpp"
 
 namespace ZHLN::VkD3D {
 

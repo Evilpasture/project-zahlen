@@ -1,6 +1,23 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# Header-only seam for the one vulkan header the joint VkD3D contract
+# (src/vkd3d) is allowed to see: <vulkan/memory/DeviceAddress.hpp>, exported
+# from include/ -- the rest of src/vulkan stays private to zahlen_vulkan.
+# DeviceAddress.hpp includes <volk.h>, so the seam also carries the volk /
+# Vulkan-Headers usage requirements it needs to stand alone (mirroring how
+# zahlen_vulkan itself exposes them below).
+add_library(zahlen_vulkan_address INTERFACE)
+add_library(Zahlen::VulkanAddress ALIAS zahlen_vulkan_address)
+target_include_directories(zahlen_vulkan_address INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_include_directories(zahlen_vulkan_address SYSTEM INTERFACE
+    ${PROJECT_SOURCE_DIR}/extern/volk
+)
+target_link_libraries(zahlen_vulkan_address INTERFACE Vulkan-Headers)
+target_compile_features(zahlen_vulkan_address INTERFACE cxx_std_26)
+
 add_library(
   zahlen_vulkan STATIC
   ${PROJECT_SOURCE_DIR}/extern/volk/volk.c
@@ -65,9 +82,13 @@ set_target_properties(
 target_compile_options(
   zahlen_vulkan PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 
+# PUBLIC zahlen_vulkan_address: zahlen_vulkan's own headers spell the seam
+# header <vulkan/memory/DeviceAddress.hpp>, and so do consumers that parse
+# Rendering.hpp (src/render) -- they get the exported include/ root through
+# this link, never src/vulkan itself from this target.
 target_link_libraries(
   zahlen_vulkan PUBLIC Vulkan-Headers GPUOpen::VulkanMemoryAllocator
-                       spirv-reflect-static)
+                       spirv-reflect-static zahlen_vulkan_address)
 
 target_include_directories(
   zahlen_vulkan

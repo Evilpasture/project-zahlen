@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "memory/BufferAddress.hpp"
+#include <d3d12/memory/BufferAddress.hpp>
 
 #include <cstdint>
 #include <type_traits>

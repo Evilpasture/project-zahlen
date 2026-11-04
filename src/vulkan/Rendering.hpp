@@ -54,7 +54,7 @@
 #include "presentation/Surface.hpp"
 #include "memory/ImageView.hpp"
 #include "memory/ImageSlice.hpp"
-#include "memory/DeviceAddress.hpp"
+#include <vulkan/memory/DeviceAddress.hpp>
 #include "memory/GeometryView.hpp"
 #include "memory/BufferSlice.hpp"
 #include "execution/Barriers.hpp"
