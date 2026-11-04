@@ -188,7 +188,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
         .storeOp            = ToVk(storeOp),
         .clearValue         = {.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b, clearColor.a}}}
     };
-    _colorFormats[ColorCount] = img.GetFormat();
+    _colorFormats[ColorCount] = ToVk(img.GetFormat());
 
     return DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type>(std::move(*this));
 }
@@ -209,7 +209,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
             size_t     offset = ColorCount;
             const auto add    = [&](const auto& image) {
                 const size_t index   = offset++;
-                _colorFormats[index] = image.GetFormat();
+                _colorFormats[index] = ToVk(image.GetFormat());
                 _colors[index]       = {
                     .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                     .pNext              = nullptr,
@@ -245,7 +245,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
         Layout == Vk::ImageLayout::DepthAttachmentOptimal || Layout == Vk::ImageLayout::DepthStencilAttachmentOptimal || Layout == Vk::ImageLayout::General
     );
 
-    _depthFormat = img.GetFormat();
+    _depthFormat = ToVk(img.GetFormat());
     _hasStencil  = StencilFormatForDepth(img.GetFormat()) != Vk::Format::Undefined;
 
     _depth = {
@@ -293,24 +293,27 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::Flags(VkRenderingFlag
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
 constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetInheritance() const noexcept -> RenderingInheritance {
-    std::span<const Vk::Format> colors;
-    Vk::Format                  depth = Vk::Format::Undefined;
+    VkFormat depth   = VK_FORMAT_UNDEFINED;
+    VkFormat stencil = VK_FORMAT_UNDEFINED;
     if constexpr (std::same_as<Formats, RuntimeAttachmentFormats>) {
-        colors = std::span<const Vk::Format> {_colorFormats.data(), ColorCount};
         if constexpr (HasDepth) {
-            depth = _depthFormat;
+            depth   = _depthFormat;
+            stencil = _hasStencil ? ToVk(StencilFormatForDepth(FromVk(depth))) : VK_FORMAT_UNDEFINED;
         }
+        return RenderingInheritance {std::span<const VkFormat> {_colorFormats.data(), ColorCount}, depth, stencil, _viewMask, EffectiveViewport()};
     } else {
         static_assert(Formats::color_formats.size() == ColorCount);
         static_assert((Formats::depth_format != Vk::Format::Undefined) == HasDepth);
-        colors = std::span<const Vk::Format> {Formats::color_formats};
-        if constexpr (HasDepth) {
-            depth = Formats::depth_format;
+        std::array<VkFormat, ColorCount> typed_colors {};
+        for (size_t i = 0; i < ColorCount; ++i) {
+            typed_colors[i] = ToVk(Formats::color_formats[i]);
         }
+        if constexpr (HasDepth) {
+            depth   = ToVk(Formats::depth_format);
+            stencil = _hasStencil ? ToVk(StencilFormatForDepth(Formats::depth_format)) : VK_FORMAT_UNDEFINED;
+        }
+        return RenderingInheritance {std::span<const VkFormat> {typed_colors}, depth, stencil, _viewMask, EffectiveViewport()};
     }
-
-    const Vk::Format stencil = (HasDepth && _hasStencil) ? StencilFormatForDepth(depth) : Vk::Format::Undefined;
-    return RenderingInheritance {colors, depth, stencil, _viewMask, EffectiveViewport()};
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>

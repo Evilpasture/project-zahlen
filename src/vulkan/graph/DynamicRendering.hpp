@@ -350,11 +350,11 @@ class RenderingInheritance {
   public:
     constexpr RenderingInheritance() noexcept = default;
 
-    constexpr RenderingInheritance(std::span<const Vk::Format> colorFormats, Vk::Format depth, Vk::Format stencil, uint32_t viewMask, VkViewport viewport) noexcept:
+    constexpr RenderingInheritance(std::span<const VkFormat> colorFormats, VkFormat depth, VkFormat stencil, uint32_t viewMask, VkViewport viewport) noexcept:
         _colorFormatCount(static_cast<uint32_t>(std::min(colorFormats.size(), _colorFormats.size()))), _depthFormat(depth), _stencilFormat(stencil),
         _viewMask(viewMask), _viewport(viewport), _active(true) {
         for (size_t i = 0; i < _colorFormatCount; ++i) {
-            _colorFormats[i] = ToVk(colorFormats[i]);
+            _colorFormats[i] = colorFormats[i];
         }
     }
 
@@ -379,8 +379,8 @@ class RenderingInheritance {
             .viewMask                = _viewMask,
             .colorAttachmentCount    = _colorFormatCount,
             .pColorAttachmentFormats = _colorFormatCount > 0 ? _colorFormats.data() : nullptr,
-            .depthAttachmentFormat   = ToVk(_depthFormat),
-            .stencilAttachmentFormat = ToVk(_stencilFormat),
+            .depthAttachmentFormat   = _depthFormat,
+            .stencilAttachmentFormat = _stencilFormat,
             .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT,
         };
         return &storage;
@@ -396,11 +396,11 @@ class RenderingInheritance {
 
   private:
     // Stored raw: Link() points the driver struct at this array, and the
-    // array must outlive Link() in this object (converted in the ctor).
+    // array must outlive Link() in this object (copied in as native formats).
     std::array<VkFormat, kMaxColorAttachments> _colorFormats {};
     uint32_t                                   _colorFormatCount = 0;
-    Vk::Format                                   _depthFormat      = Vk::Format::Undefined;
-    Vk::Format                                   _stencilFormat    = Vk::Format::Undefined;
+    VkFormat                                   _depthFormat      = VK_FORMAT_UNDEFINED;
+    VkFormat                                   _stencilFormat    = VK_FORMAT_UNDEFINED;
     uint32_t                                   _viewMask         = 0;
     VkViewport                                 _viewport {};
     bool                                       _active = false;
@@ -642,9 +642,9 @@ class DynamicPass {
     VkExtent2D                                                  _extent {};
     VkRenderingFlags                                            _flags = 0;
     std::array<VkRenderingAttachmentInfo, kMaxColorAttachments> _colors {};
-    std::array<Vk::Format, kMaxColorAttachments>                  _colorFormats {};
+    std::array<VkFormat, kMaxColorAttachments>                  _colorFormats {};
     VkRenderingAttachmentInfo                                   _depth {};
-    Vk::Format                                                    _depthFormat = Vk::Format::Undefined;
+    VkFormat                                                      _depthFormat = VK_FORMAT_UNDEFINED;
     uint32_t                                                    _viewMask    = 0;
     bool                                                        _hasStencil  = false;
     float                                                       _vpX         = 0.0f;

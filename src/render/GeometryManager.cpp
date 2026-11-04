@@ -208,7 +208,7 @@ void GeometryManager::RecordPendingUpdates(VkCommandBuffer cmd) noexcept {
         }
         const VkBuffer dstBuffer = dstMesh->buffer.Handle();
         if (std::ranges::find(writtenBuffers, dstBuffer) != writtenBuffers.end()) {
-            Vk::BufferBarrier::CopyWriteToWrite(dstBuffer, 0, copy.size).Record(cmd);
+            dstMesh->buffer.SyncCopyWriteToWrite(cmd, 0, copy.size);
         } else {
             writtenBuffers.push_back(dstBuffer);
         }

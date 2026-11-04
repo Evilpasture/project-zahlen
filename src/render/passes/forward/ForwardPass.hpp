@@ -19,7 +19,7 @@ struct ForwardPass: Vk::RenderPass<"Forward", Vk::ColorWrite<Res_HdrSceneColor>,
     const ForwardResources& forward;
     RenderFrame&            frame;
 
-    void operator()(VkCommandBuffer cmd) const noexcept;
+    void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };
 
 } // namespace ZHLN::Passes

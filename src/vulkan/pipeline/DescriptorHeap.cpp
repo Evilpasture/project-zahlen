@@ -488,7 +488,7 @@ void DescriptorHeap::WriteResources(std::span<const ResourceWriteEntry> entries)
                     .sType  = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT,
                     .pNext  = nullptr,
                     .pView  = &viewInfos[i],
-                    .layout = ToVk(entry.layout),
+                    .layout = entry.layout,
                 };
                 descriptors[i].data.pImage = &imageInfos[i];
             } else {

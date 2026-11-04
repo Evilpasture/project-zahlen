@@ -737,6 +737,8 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     } else {
 
         using Img              = DImgs...[0];
+        using Pass             = typename TypeList<Passes...>::template type<PassIndex>;
+        using ImgUsage         = typename TemplatedDetail::FindResourceUsage<typename Pass::Usages, Img>::type;
         constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
         const auto&      res   = bindings[r_idx];
 
@@ -747,7 +749,7 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
             .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext              = nullptr,
             .imageView          = res.attachmentView,
-            .imageLayout        = ToVk(Vk::ImageLayout::DepthAttachmentOptimal),
+            .imageLayout        = ToVk(ImgUsage::layout),
             .resolveMode        = VK_RESOLVE_MODE_NONE,
             .resolveImageView   = VK_NULL_HANDLE,
             .resolveImageLayout = ToVk(Vk::ImageLayout::Undefined),

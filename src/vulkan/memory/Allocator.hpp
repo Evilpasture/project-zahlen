@@ -274,6 +274,17 @@ class Buffer {
 
     void Flush(Allocator& allocator, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
 
+    // Synchronization verbs: the buffer states what consumes it next and
+    // records its own barrier -- a pass never assembles stage/access flags
+    // for a buffer it merely wrote or read. Each verb names the hazard it
+    // resolves (the BufferBarrier factory of the same transition, below).
+    void SyncForComputeRead(VkCommandBuffer cmd) const noexcept;          // compute write -> compute read
+    void SyncForComputeReadWrite(VkCommandBuffer cmd) const noexcept;     // transfer write -> compute read/write
+    void SyncForIndirectRead(VkCommandBuffer cmd) const noexcept;         // compute write -> indirect draw/dispatch read
+    void SyncComputeForTransferWrite(VkCommandBuffer cmd) const noexcept; // compute read/write -> transfer write
+    void SyncIndirectForTransferWrite(VkCommandBuffer cmd) const noexcept; // indirect consumption -> transfer write
+    void SyncCopyWriteToWrite(VkCommandBuffer cmd, VkDeviceSize offset, VkDeviceSize size) const noexcept; // serialize overlapping staged copy writes
+
     struct MappedRegion {
         MappedRegion() = default;
         ~MappedRegion() noexcept;
@@ -499,6 +510,30 @@ inline auto BufferBarrier::ComputeToIndirect(const Buffer& buffer, VkDeviceSize 
 
 inline auto BufferBarrier::ComputeWriteToRead(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {
     return ComputeWriteToRead(buffer.Handle(), offset, size);
+}
+
+inline void Buffer::SyncForComputeRead(VkCommandBuffer cmd) const noexcept {
+    BufferBarrier::ComputeWriteToRead(*this).Record(cmd);
+}
+
+inline void Buffer::SyncForComputeReadWrite(VkCommandBuffer cmd) const noexcept {
+    BufferBarrier::TransferToCompute(*this).Record(cmd);
+}
+
+inline void Buffer::SyncForIndirectRead(VkCommandBuffer cmd) const noexcept {
+    BufferBarrier::ComputeToIndirect(*this).Record(cmd);
+}
+
+inline void Buffer::SyncComputeForTransferWrite(VkCommandBuffer cmd) const noexcept {
+    BufferBarrier::ComputeToTransfer(*this).Record(cmd);
+}
+
+inline void Buffer::SyncIndirectForTransferWrite(VkCommandBuffer cmd) const noexcept {
+    BufferBarrier::IndirectToTransfer(*this).Record(cmd);
+}
+
+inline void Buffer::SyncCopyWriteToWrite(VkCommandBuffer cmd, VkDeviceSize offset, VkDeviceSize size) const noexcept {
+    BufferBarrier::CopyWriteToWrite(*this, offset, size).Record(cmd);
 }
 
 inline auto BufferBarrier::CopyWriteToWrite(const Buffer& buffer, VkDeviceSize offset, VkDeviceSize size) noexcept -> BufferBarrier {

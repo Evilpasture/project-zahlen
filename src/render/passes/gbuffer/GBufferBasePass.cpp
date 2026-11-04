@@ -74,9 +74,9 @@ void RecordGpuCulled(
     auto* const cmd      = encoder.cmd;
     const auto& countBuf = ctx.secondPassCountBuffers;
 
-    Vk::BufferBarrier::ComputeToTransfer(countBuf).Record(cmd);
+    countBuf.SyncComputeForTransferWrite(cmd);
     Vk::FillBuffer(cmd, countBuf);
-    Vk::BufferBarrier::TransferToCompute(countBuf).Record(cmd);
+    countBuf.SyncForComputeReadWrite(cmd);
 
     const auto     sceneVp = ctx.viewport;
     const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
@@ -96,13 +96,9 @@ void RecordGpuCulled(
     );
     cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
-    Vk::BufferBarrier::Record(
-        cmd, std::to_array({
-                 Vk::BufferBarrier::ComputeToIndirect(ctx.indirectCommandsBuffers),
-                 Vk::BufferBarrier::ComputeWriteToRead(ctx.secondPassCandidatesBuffers),
-                 Vk::BufferBarrier::ComputeWriteToRead(countBuf),
-             })
-    );
+    ctx.indirectCommandsBuffers.SyncForIndirectRead(cmd);
+    ctx.secondPassCandidatesBuffers.SyncForComputeRead(cmd);
+    countBuf.SyncForComputeRead(cmd);
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)
@@ -116,7 +112,7 @@ void RecordGpuCulled(
                 if (group.material->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
-                encoder.SetCullMode(group.cullMode);
+                encoder.SetDoubleSided(group.doubleSided);
                 encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                     {
                         .pipeline       = group.material->pipeline,

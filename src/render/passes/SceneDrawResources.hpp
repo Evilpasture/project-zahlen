@@ -22,7 +22,7 @@ struct GroupRange {
     const NativeMaterial* material;
     uint32_t              start;
     uint32_t              count;
-    Vk::CullMode       cullMode;
+    bool               doubleSided;
 };
 
 struct CsgResources {

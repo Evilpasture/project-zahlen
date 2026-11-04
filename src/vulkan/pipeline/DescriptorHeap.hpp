@@ -160,7 +160,7 @@ struct ResourceWriteEntry {
     uint32_t         slot   = 0;
     VkDescriptorType type   = VK_DESCRIPTOR_TYPE_MAX_ENUM;
     Kind             kind   = Kind::AddressRange;
-    Vk::ImageLayout    layout = Vk::ImageLayout::Undefined;
+    VkImageLayout    layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     union Payload {
         ImageView               view;
@@ -175,7 +175,7 @@ struct ResourceWriteEntry {
             .slot   = slot,
             .type   = type,
             .kind   = Kind::Image,
-            .layout = layout,
+            .layout = ToVk(layout),
         };
         entry.payload.view = view;
         return entry;

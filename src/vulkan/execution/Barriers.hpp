@@ -312,17 +312,17 @@ class ImageBarrier {
         return {
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .pNext               = nullptr,
-            .srcStageMask        = ToVk(_srcStage),
-            .srcAccessMask       = ToVk(_srcAccess),
-            .dstStageMask        = ToVk(_dstStage),
-            .dstAccessMask       = ToVk(_dstAccess),
-            .oldLayout           = ToVk(_oldLayout),
-            .newLayout           = ToVk(_newLayout),
+            .srcStageMask        = _srcStage,
+            .srcAccessMask       = _srcAccess,
+            .dstStageMask        = _dstStage,
+            .dstAccessMask       = _dstAccess,
+            .oldLayout           = _oldLayout,
+            .newLayout           = _newLayout,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image               = _image,
             .subresourceRange    = {
-                .aspectMask     = ToVk(_aspect),
+                .aspectMask     = _aspect,
                 .baseMipLevel   = _baseMipLevel,
                 .levelCount     = _levelCount == kRemainingMips ? VK_REMAINING_MIP_LEVELS : static_cast<uint32_t>(_levelCount),
                 .baseArrayLayer = _baseArrayLayer,
@@ -344,13 +344,13 @@ class ImageBarrier {
     ) noexcept -> ImageBarrier {
         ImageBarrier b {};
         b._image          = image;
-        b._srcStage       = srcStage;
-        b._srcAccess      = srcAccess;
-        b._dstStage       = dstStage;
-        b._dstAccess      = dstAccess;
-        b._oldLayout      = oldLayout;
-        b._newLayout      = newLayout;
-        b._aspect         = static_cast<Vk::ImageAspect>(range.aspectMask);
+        b._srcStage       = ToVk(srcStage);
+        b._srcAccess      = ToVk(srcAccess);
+        b._dstStage       = ToVk(dstStage);
+        b._dstAccess      = ToVk(dstAccess);
+        b._oldLayout      = ToVk(oldLayout);
+        b._newLayout      = ToVk(newLayout);
+        b._aspect         = range.aspectMask;
         b._baseArrayLayer = range.baseArrayLayer;
         b._layerCount     = range.layerCount;
         b._baseMipLevel   = static_cast<uint16_t>(range.baseMipLevel);
@@ -358,14 +358,18 @@ class ImageBarrier {
         return b;
     }
 
-    VkImage               _image          = VK_NULL_HANDLE;            // 8 bytes
-    Vk::PipelineStage _srcStage       = Vk::PipelineStage::StageNone;  // 8 bytes
-    Vk::Access        _srcAccess      = Vk::Access::AccessNone;                         // 8 bytes
-    Vk::PipelineStage _dstStage       = Vk::PipelineStage::StageNone;  // 8 bytes
-    Vk::Access        _dstAccess      = Vk::Access::AccessNone;                         // 8 bytes
-    Vk::ImageLayout         _oldLayout      = Vk::ImageLayout::Undefined; // 4 bytes
-    Vk::ImageLayout         _newLayout      = Vk::ImageLayout::Undefined; // 4 bytes
-    Vk::ImageAspect    _aspect         = Vk::ImageAspect::Color; // 4 bytes
+    // Native storage: the factories above convert the Vk:: vocabulary once, at
+    // construction, so AsVkBarrier() only adds sType/pNext where the driver
+    // consumes the struct. Same widths as the enums' underlying types, so the
+    // 64-byte contract below is unchanged.
+    VkImage               _image          = VK_NULL_HANDLE;       // 8 bytes
+    VkPipelineStageFlags2 _srcStage       = VK_PIPELINE_STAGE_2_NONE; // 8 bytes
+    VkAccessFlags2        _srcAccess      = VK_ACCESS_2_NONE;         // 8 bytes
+    VkPipelineStageFlags2 _dstStage       = VK_PIPELINE_STAGE_2_NONE; // 8 bytes
+    VkAccessFlags2        _dstAccess      = VK_ACCESS_2_NONE;         // 8 bytes
+    VkImageLayout         _oldLayout      = VK_IMAGE_LAYOUT_UNDEFINED; // 4 bytes
+    VkImageLayout         _newLayout      = VK_IMAGE_LAYOUT_UNDEFINED; // 4 bytes
+    VkImageAspectFlags    _aspect         = VK_IMAGE_ASPECT_COLOR_BIT; // 4 bytes
     uint32_t              _baseArrayLayer = 0;                         // 4 bytes
     uint32_t              _layerCount     = VK_REMAINING_ARRAY_LAYERS; // 4 bytes
     uint16_t              _baseMipLevel   = 0;                         // 2 bytes
@@ -384,7 +388,7 @@ class MemoryBarrier {
 
     // BarrierStage/BarrierAccess parameters resolve here too: they are aliases of these types (RenderQueue.hpp).
     constexpr MemoryBarrier(Vk::PipelineStage srcStage, Vk::Access srcAccess, Vk::PipelineStage dstStage, Vk::Access dstAccess) noexcept:
-        _srcStage(srcStage), _srcAccess(srcAccess), _dstStage(dstStage), _dstAccess(dstAccess) {
+        _srcStage(ToVk(srcStage)), _srcAccess(ToVk(srcAccess)), _dstStage(ToVk(dstStage)), _dstAccess(ToVk(dstAccess)) {
     }
 
     // -------------------------------------------------------------------------
@@ -554,18 +558,19 @@ class MemoryBarrier {
         return {
             .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
             .pNext         = nullptr,
-            .srcStageMask  = ToVk(_srcStage),
-            .srcAccessMask = ToVk(_srcAccess),
-            .dstStageMask  = ToVk(_dstStage),
-            .dstAccessMask = ToVk(_dstAccess),
+            .srcStageMask  = _srcStage,
+            .srcAccessMask = _srcAccess,
+            .dstStageMask  = _dstStage,
+            .dstAccessMask = _dstAccess,
         };
     }
 
   private:
-    Vk::PipelineStage _srcStage  = Vk::PipelineStage::StageNone;
-    Vk::Access        _srcAccess = Vk::Access::AccessNone;
-    Vk::PipelineStage _dstStage  = Vk::PipelineStage::StageNone;
-    Vk::Access        _dstAccess = Vk::Access::AccessNone;
+    // Native storage, converted once by the constructor (see ImageBarrier).
+    VkPipelineStageFlags2 _srcStage  = VK_PIPELINE_STAGE_2_NONE;
+    VkAccessFlags2        _srcAccess = VK_ACCESS_2_NONE;
+    VkPipelineStageFlags2 _dstStage  = VK_PIPELINE_STAGE_2_NONE;
+    VkAccessFlags2        _dstAccess = VK_ACCESS_2_NONE;
 };
 
 static_assert(sizeof(MemoryBarrier) == 32, "MemoryBarrier must be exactly 32 bytes.");
@@ -597,8 +602,8 @@ class BufferBarrier {
         uint32_t              srcQueueFamily = VK_QUEUE_FAMILY_IGNORED,
         uint32_t              dstQueueFamily = VK_QUEUE_FAMILY_IGNORED
     ) noexcept:
-        _buffer(buffer), _offset(offset), _size(size), _srcStage(srcStage), _srcAccess(srcAccess), _dstStage(dstStage), _dstAccess(dstAccess),
-        _srcQueueFamily(srcQueueFamily), _dstQueueFamily(dstQueueFamily) {
+        _buffer(buffer), _offset(offset), _size(size), _srcStage(ToVk(srcStage)), _srcAccess(ToVk(srcAccess)), _dstStage(ToVk(dstStage)),
+        _dstAccess(ToVk(dstAccess)), _srcQueueFamily(srcQueueFamily), _dstQueueFamily(dstQueueFamily) {
     }
 
     constexpr BufferBarrier(
@@ -941,10 +946,10 @@ class BufferBarrier {
         return {
             .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
             .pNext               = nullptr,
-            .srcStageMask        = ToVk(_srcStage),
-            .srcAccessMask       = ToVk(_srcAccess),
-            .dstStageMask        = ToVk(_dstStage),
-            .dstAccessMask       = ToVk(_dstAccess),
+            .srcStageMask        = _srcStage,
+            .srcAccessMask       = _srcAccess,
+            .dstStageMask        = _dstStage,
+            .dstAccessMask       = _dstAccess,
             .srcQueueFamilyIndex = _srcQueueFamily,
             .dstQueueFamilyIndex = _dstQueueFamily,
             .buffer              = _buffer,
@@ -963,10 +968,10 @@ class BufferBarrier {
     VkBuffer              _buffer         = VK_NULL_HANDLE;
     VkDeviceSize          _offset         = 0;
     VkDeviceSize          _size           = VK_WHOLE_SIZE;
-    Vk::PipelineStage _srcStage       = Vk::PipelineStage::StageNone;
-    Vk::Access        _srcAccess      = Vk::Access::AccessNone;
-    Vk::PipelineStage _dstStage       = Vk::PipelineStage::StageNone;
-    Vk::Access        _dstAccess      = Vk::Access::AccessNone;
+    VkPipelineStageFlags2 _srcStage       = VK_PIPELINE_STAGE_2_NONE;
+    VkAccessFlags2        _srcAccess      = VK_ACCESS_2_NONE;
+    VkPipelineStageFlags2 _dstStage       = VK_PIPELINE_STAGE_2_NONE;
+    VkAccessFlags2        _dstAccess      = VK_ACCESS_2_NONE;
     uint32_t              _srcQueueFamily = VK_QUEUE_FAMILY_IGNORED;
     uint32_t              _dstQueueFamily = VK_QUEUE_FAMILY_IGNORED;
 };

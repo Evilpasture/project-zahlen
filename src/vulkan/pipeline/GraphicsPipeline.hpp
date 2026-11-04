@@ -7,7 +7,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "PipelineBuilder.hpp"
+#include "PipelineBuilder.hpp" // PipelineBuilderError, CreateGraphicsPipeline, ComputePipelineBuilder
+#include "PipelineBinaries.hpp"  // PipelineBinarySession: Create() below runs the binary cache itself
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -446,33 +447,169 @@ struct GraphicsPipeline {
         if (!stages.Valid() || stages.IsMeshPipeline() != ShaderModule::is_mesh_pipeline) {
             return std::unexpected(PipelineBuilderError::MissingShaders);
         }
-        const PipelineConfig config {
-            .stages          = stages,
-            .vsMapping       = bindings.vertexMapping,
-            .psMapping       = bindings.fragmentMapping,
-            .colorFormats    = {Attachments::color_formats.begin(), Attachments::color_formats.end()},
-            .depthFormat     = Attachments::depth_format,
-            .topology        = PipelineDetail::PassTopology<PassContract>(),
-            .polygonMode     = PipelineDetail::PassPolygonMode<PassContract>(),
-            .cullMode        = HasFlag(Flags, MaterialFlags::DoubleSided) ? Vk::CullMode::None : PipelineDetail::PassCullMode<PassContract>(),
-            .dynamicCullMode = true,
-            .depthTest       = Attachments::has_depth && PipelineDetail::PassDepthTest<PassContract>(),
-            .depthWrite = HasFlag(Flags, MaterialFlags::DepthWrite) ? true :
-                                                                      (!is_blended && Attachments::has_depth && PipelineDetail::PassDepthWrite<PassContract>()),
-            .blendEnable        = is_blended,
-            .additiveBlend      = is_additive,
-            .viewMask           = PipelineDetail::PassViewMask<PassContract>(),
-            .specializationInfo = bindings.specialization,
-            .colorWriteEnable   = PipelineDetail::PassColorWriteEnable<PassContract>(),
-            .colorWriteMask     = [] {
-                if constexpr (Attachments::color_count == 1)
-                    return Attachments::color_masks[0];
-                else
-                    return VkColorComponentFlags(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
-            }(),
+        // The pipeline is a ShaderModule + this PassContract + these
+        // MaterialFlags, so the create-info is synthesized here, in one
+        // scope, from those three concepts -- there is no config object to
+        // unpack. Everything below is native Vulkan; the contract's static
+        // formats and state readers convert once, at the field they fill.
+        const ShaderStages& shaders       = *stages.Get();
+        const bool          mesh_pipeline = ShaderModule::is_mesh_pipeline;
+
+        std::array<VkPipelineShaderStageCreateInfo, 3> stage_infos {};
+        std::array<VkShaderModuleCreateInfo, 3>        module_infos {};
+        uint32_t                                       stage_count = 0;
+        const auto append_stage = [&](const ShaderStageData& shader, const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) {
+            if (shader.code == nullptr || shader.size == 0 || shader.size % sizeof(uint32_t) != 0 || stage_count >= stage_infos.size()) {
+                return;
+            }
+            module_infos[stage_count] = VkShaderModuleCreateInfo {
+                .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                .pNext    = mapping,
+                .codeSize = shader.size,
+                .pCode    = shader.code,
+            };
+            stage_infos[stage_count] = VkPipelineShaderStageCreateInfo {
+                .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .pNext               = &module_infos[stage_count],
+                .stage               = ToVk(shader.stage),
+                .module              = VK_NULL_HANDLE,
+                .pName               = shader.entryPoint,
+                .pSpecializationInfo = bindings.specialization,
+            };
+            ++stage_count;
+        };
+        if (mesh_pipeline) {
+            append_stage(shaders.task, bindings.vertexMapping);
+            append_stage(shaders.mesh, bindings.vertexMapping);
+        } else {
+            append_stage(shaders.vert, bindings.vertexMapping);
+        }
+        append_stage(shaders.frag, bindings.fragmentMapping);
+        if (stage_count == 0) {
+            return std::unexpected(PipelineBuilderError::NoUsableShaderStages);
+        }
+
+        std::array<VkFormat, Attachments::color_count> raw_color_formats {};
+        for (size_t i = 0; i < Attachments::color_count; ++i) {
+            raw_color_formats[i] = ToVk(Attachments::color_formats[i]);
+        }
+        const VkFormat raw_depth_format = ToVk(Attachments::depth_format);
+
+        const VkPipelineVertexInputStateCreateInfo vertex_input {
+            .sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            .vertexBindingDescriptionCount   = 0,
+            .pVertexBindingDescriptions      = nullptr,
+            .vertexAttributeDescriptionCount = 0,
+            .pVertexAttributeDescriptions    = nullptr,
+        };
+        const VkPipelineInputAssemblyStateCreateInfo input_assembly {
+            .sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            .topology               = ToVk(PipelineDetail::PassTopology<PassContract>()),
+            .primitiveRestartEnable = VK_FALSE,
+        };
+        const VkPipelineViewportStateCreateInfo viewport_state {
+            .sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            .viewportCount = 1,
+            .scissorCount  = 1,
+        };
+        const VkPipelineRasterizationStateCreateInfo rasterizer {
+            .sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            .polygonMode = ToVk(PipelineDetail::PassPolygonMode<PassContract>()),
+            .cullMode    = HasFlag(Flags, MaterialFlags::DoubleSided) ? VK_CULL_MODE_NONE : ToVk(PipelineDetail::PassCullMode<PassContract>()),
+            .frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+            .lineWidth   = 1.0F,
+        };
+        const VkPipelineMultisampleStateCreateInfo multisampling {
+            .sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        };
+        const bool depth_write = HasFlag(Flags, MaterialFlags::DepthWrite) ||
+                                 (!is_blended && Attachments::has_depth && PipelineDetail::PassDepthWrite<PassContract>());
+        const VkPipelineDepthStencilStateCreateInfo depth_stencil {
+            .sType             = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            .depthTestEnable   = (Attachments::has_depth && PipelineDetail::PassDepthTest<PassContract>()) ? VK_TRUE : VK_FALSE,
+            .depthWriteEnable  = depth_write ? VK_TRUE : VK_FALSE,
+            .depthCompareOp    = VK_COMPARE_OP_LESS,
+            .stencilTestEnable = VK_FALSE,
+            .front             = {},
+            .back              = {},
+        };
+        const VkColorComponentFlags write_mask = PipelineDetail::PassColorWriteEnable<PassContract>()
+                                                     ? (Attachments::color_count == 1
+                                                            ? Attachments::color_masks[0]
+                                                            : VkColorComponentFlags {VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                                                                     VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT})
+                                                     : VkColorComponentFlags {0};
+        const VkPipelineColorBlendAttachmentState blend_state {
+            .blendEnable         = is_blended ? VK_TRUE : VK_FALSE,
+            .srcColorBlendFactor = is_additive ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA,
+            .dstColorBlendFactor = is_additive ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+            .colorBlendOp        = VK_BLEND_OP_ADD,
+            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+            .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+            .alphaBlendOp        = VK_BLEND_OP_ADD,
+            .colorWriteMask      = write_mask,
+        };
+        const std::vector<VkPipelineColorBlendAttachmentState> blend_attachments(Attachments::color_count, blend_state);
+        const VkPipelineColorBlendStateCreateInfo              color_blend {
+            .sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            .attachmentCount = static_cast<uint32_t>(blend_attachments.size()),
+            .pAttachments    = blend_attachments.empty() ? nullptr : blend_attachments.data(),
+        };
+        constexpr std::array<VkDynamicState, 3> dynamic_states {
+            VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR,
+            VK_DYNAMIC_STATE_CULL_MODE,
+        };
+        const VkPipelineDynamicStateCreateInfo dynamic_state {
+            .sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            .dynamicStateCount = static_cast<uint32_t>(dynamic_states.size()),
+            .pDynamicStates    = dynamic_states.data(),
+        };
+        const VkPipelineRenderingCreateInfo rendering_info {
+            .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+            .viewMask                = PipelineDetail::PassViewMask<PassContract>(),
+            .colorAttachmentCount    = static_cast<uint32_t>(raw_color_formats.size()),
+            .pColorAttachmentFormats = raw_color_formats.empty() ? nullptr : raw_color_formats.data(),
+            .depthAttachmentFormat   = raw_depth_format,
+            .stencilAttachmentFormat = FormatHasStencil(Attachments::depth_format) ? raw_depth_format : VK_FORMAT_UNDEFINED,
+        };
+        const VkPipelineCreateFlags2CreateInfoKHR heap_flags {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR,
+            .pNext = &rendering_info,
+            .flags = VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT,
+        };
+        const VkGraphicsPipelineCreateInfo pipeline_info {
+            .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+            .pNext               = &heap_flags,
+            .stageCount          = stage_count,
+            .pStages             = stage_infos.data(),
+            .pVertexInputState   = mesh_pipeline ? nullptr : &vertex_input,
+            .pInputAssemblyState = mesh_pipeline ? nullptr : &input_assembly,
+            .pViewportState      = &viewport_state,
+            .pRasterizationState = &rasterizer,
+            .pMultisampleState   = &multisampling,
+            .pDepthStencilState  = &depth_stencil,
+            .pColorBlendState    = &color_blend,
+            .pDynamicState       = &dynamic_state,
+            .layout              = VK_NULL_HANDLE,
+            .renderPass          = VK_NULL_HANDLE,
+            .subpass             = 0,
+            .basePipelineHandle  = VK_NULL_HANDLE,
+            .basePipelineIndex   = -1,
         };
 
-        return PipelineBuilder<>::WithConfig(config).Binaries(binaries).Build(device);
+        auto session = PipelineBinarySession::Begin(device, binaries, pipeline_info);
+        auto created = CreateGraphicsPipeline(device, pipeline_info, session.Binaries());
+        if (!created && session.Replayed()) {
+            session.Invalidate();
+            created = CreateGraphicsPipeline(device, pipeline_info, {});
+        }
+        if (!created) {
+            return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
+        }
+        session.Commit();
+        return Pipeline(device, *created);
     }
 };
 

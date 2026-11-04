@@ -51,7 +51,7 @@ void SubmitDrawInstanced(
 ) noexcept {
     const auto* nativeMat   = drawCmd.material;
     const auto  doubleSided = (drawCmd.instanceData.flags & (1U << 9U)) != 0;
-    encoder.SetCullMode(doubleSided ? Vk::CullMode::None : Vk::CullMode::Back);
+    encoder.SetDoubleSided(doubleSided);
 
     if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
         encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(

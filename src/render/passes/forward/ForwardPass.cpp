@@ -20,16 +20,17 @@ using LinePushConstants = Slang::LinePushConstants;
 
 } // namespace
 
-void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
-    auto& ctx = frame;
+void ForwardPass::operator()(Vk::RasterPassContextBase& pass) const noexcept {
+    // The graph opened rendering on this pass's declared attachments
+    // (ColorWrite<Res_HdrSceneColor>, DepthStencilWrite<Res_Depth>) before
+    // calling here, with load/store chosen from the state table; it ends
+    // rendering when the context goes away. Only the scene viewport is this
+    // pass's own to state.
+    pass.SetViewport(frame.viewport);
 
-    Vk::CommandEncoder encoder(cmd);
-    const auto         sceneVp = frame.viewport;
-
-    const auto litColor = Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(frame.graphResources.hdrSceneColor);
-    const auto depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.ActiveDepthTarget());
-
-    Vk::DynamicPass(litColor.Extent()).Viewport(sceneVp).LoadColor(litColor).LoadDepth(depth).Execute(cmd, [&]() {
+    auto&              ctx = frame;
+    Vk::CommandEncoder encoder(pass.Cmd());
+    {
         for (size_t i = 0; i < ctx.renderer.queues.Draws().size(); ++i) {
             const auto& drawCmd = ctx.renderer.queues.Draws()[i];
 
@@ -68,7 +69,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
                 {.pipeline = forward.line.Get(), .vertexCount = ctx.activeLineVertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = 0}, pc
             );
         }
-    });
+    }
 }
 
 } // namespace ZHLN::Passes

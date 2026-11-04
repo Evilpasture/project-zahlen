@@ -294,7 +294,7 @@ class CommandEncoder {
   public:
     VkCommandBuffer cmd          = VK_NULL_HANDLE;
     VkPipeline      lastPipeline = VK_NULL_HANDLE;
-    Vk::CullMode lastCullMode = Vk::CullMode::Back;
+    VkCullModeFlags lastCullMode = VK_CULL_MODE_BACK_BIT;
     bool            hasCullMode  = false;
 
     CommandEncoder() = default;
@@ -308,10 +308,13 @@ class CommandEncoder {
         }
     }
 
-    void SetCullMode(Vk::CullMode mode) noexcept {
-        if (!hasCullMode || lastCullMode != mode) {
-            vkCmdSetCullMode(cmd, ToVk(mode));
-            lastCullMode = mode;
+    // The encoder speaks native Vulkan: callers state the material behavior
+    // (double-sided vs back-face culled), never a cull-mode enum.
+    void SetDoubleSided(bool doubleSided) noexcept {
+        const VkCullModeFlags cull = doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+        if (!hasCullMode || lastCullMode != cull) {
+            vkCmdSetCullMode(cmd, cull);
+            lastCullMode = cull;
             hasCullMode  = true;
         }
     }

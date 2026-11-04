@@ -13,7 +13,7 @@ void ClusterCullingPass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto& counterBuffer = frame.globalCounterBuffers;
 
     Vk::FillBuffer(cmd, counterBuffer);
-    Vk::BufferBarrier::TransferToCompute(counterBuffer).Record(cmd);
+    counterBuffer.SyncForComputeReadWrite(cmd);
 
     const auto block = frame.renderer.heapManager.WriteHeapParameters<Shaders::ClusterCulling>(
         cull.clusterCullingHeapBindings, Vk::Slot<"in_Bounds">(frame.renderer.clusterBoundsBuffer), Vk::Slot<"out_Grid">(frame.clusterGridBuffers),
