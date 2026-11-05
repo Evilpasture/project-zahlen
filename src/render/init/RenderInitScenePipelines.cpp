@@ -473,8 +473,8 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                                     Vk::BufferBarrier::Record(
                                         cmd,
                                         std::to_array({
-                                            Vk::BufferBarrier::TransferToCompute(frames.clusterGridBuffers[i]),
-                                            Vk::BufferBarrier::TransferToCompute(frames.globalCounterBuffers[i]),
+                                            frames.clusterGridBuffers[i].BarrierForComputeReadWrite(),
+                                            frames.globalCounterBuffers[i].BarrierForComputeReadWrite(),
                                         })
                                     );
                                 }

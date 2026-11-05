@@ -8,35 +8,30 @@
 
 namespace ZHLN::Passes {
 
-void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
+void ViewmodelPass::operator()(Vk::RasterPassContextBase& pass) const noexcept {
     using enum DrawFlags;
     const auto& draws = frame.renderer.queues.Draws();
     if (!std::ranges::any_of(draws, [](const auto& drawCmd) { return (drawCmd.flags & Viewmodel) != None && !IsForwardOnly(drawCmd.instanceData.flags); })) {
         return;
     }
 
-    Vk::CommandEncoder encoder(cmd);
-    const auto  in = GBufferSceneTargets(frame);
+    // The graph opened rendering on the declared G-buffer targets with loads
+    // from the state table; this pass only states its viewport and draws the
+    // viewmodel subset.
+    pass.StateViewport(frame.viewport);
 
-    Vk::DynamicPass(in.sceneColor.Extent())
-        .Viewport(frame.viewport)
-        .LoadColor(in.sceneColor)
-        .LoadColor(in.velocity)
-        .LoadColor(in.normRough)
-        .LoadColor(in.bakedMask)
-        .LoadDepth(in.depth)
-        .Execute(cmd, [&]() {
-            for (size_t i = 0; i < frame.renderer.queues.Draws().size(); ++i) {
-                const auto& drawCmd = frame.renderer.queues.Draws()[i];
+    Vk::CommandEncoder encoder(pass.Cmd());
 
-                if ((drawCmd.flags & Viewmodel) == None || IsForwardOnly(drawCmd.instanceData.flags) || drawCmd.material->pipeline == VK_NULL_HANDLE) {
-                    continue;
-                }
+    for (size_t i = 0; i < frame.renderer.queues.Draws().size(); ++i) {
+        const auto& drawCmd = frame.renderer.queues.Draws()[i];
 
-                const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
-                SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, frame.meshShading);
-            }
-        });
+        if ((drawCmd.flags & Viewmodel) == None || IsForwardOnly(drawCmd.instanceData.flags) || drawCmd.material->pipeline == VK_NULL_HANDLE) {
+            continue;
+        }
+
+        const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
+        SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, frame.meshShading);
+    }
 }
 
 } // namespace ZHLN::Passes

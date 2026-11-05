@@ -11,22 +11,19 @@
 
 namespace ZHLN::Passes {
 
-void EmissivePass::operator()(VkCommandBuffer cmd) const noexcept {
+void EmissivePass::operator()(Vk::RasterPassContextBase& pass) const noexcept {
     if (!forward.emissive.Valid()) {
         return;
     }
 
-    auto& ctx = frame;
+    // The graph opened rendering on ColorWriteRGB<Res_LightingGI> +
+    // DepthStencilWrite<Res_Depth> with loads from the state table; this pass
+    // only states its viewport and draws what has deferred emission.
+    pass.StateViewport(frame.viewport);
 
-    Vk::CommandEncoder encoder(cmd);
-    const auto         sceneVp        = frame.viewport;
-    const auto& lightingTarget = frame.graphResources.lightingGI;
-    const auto  lighting       = Vk::ImageSlice {
-        lightingTarget.image.Handle(), lightingTarget.mipAttachmentViews[0], lightingTarget.extent, Res_LightingGI::format
-    }.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
-    const auto  depth = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.ActiveDepthTarget());
-
-    Vk::DynamicPass(lighting.Extent()).Viewport(sceneVp).LoadColor(lighting).LoadDepth(depth).Execute(cmd, [&]() {
+    auto&              ctx = frame;
+    Vk::CommandEncoder encoder(pass.Cmd());
+    {
         for (size_t i = 0; i < ctx.renderer.queues.Draws().size(); ++i) {
             const auto& drawCmd = ctx.renderer.queues.Draws()[i];
             if (!HasDeferredEmission(drawCmd.instanceData.flags) || drawCmd.material == nullptr) {
@@ -38,7 +35,7 @@ void EmissivePass::operator()(VkCommandBuffer cmd) const noexcept {
                 forward.emissive.Get()
             );
         }
-    });
+    }
 }
 
 } // namespace ZHLN::Passes

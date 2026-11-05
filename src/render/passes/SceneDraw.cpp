@@ -198,9 +198,9 @@ auto BuildGroupRanges(const RenderFrame& frame) -> ZHLN::Array<GroupRange> {
             continue;
         }
 
-        const VkCullModeFlags cullMode = (drawCmd.instanceData.flags & (1U << 9U)) != 0 ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
-        if (groups.empty() || drawMat->pipeline != currentPipeline || groups.back().cullMode != cullMode) {
-            groups.push_back({.material = drawMat, .start = i, .count = 1, .cullMode = cullMode});
+        const bool doubleSided = (drawCmd.instanceData.flags & (1U << 9U)) != 0;
+        if (groups.empty() || drawMat->pipeline != currentPipeline || groups.back().doubleSided != doubleSided) {
+            groups.push_back({.material = drawMat, .start = i, .count = 1, .doubleSided = doubleSided});
             currentPipeline = drawMat->pipeline;
         } else {
             groups.back().count++;

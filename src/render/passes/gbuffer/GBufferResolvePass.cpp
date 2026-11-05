@@ -25,9 +25,9 @@ void RecordGpuCulled(
     auto* const    cmd         = encoder.cmd;
     const auto&    indirectBuf = ctx.indirectCommandsBuffersPass2;
 
-    Vk::BufferBarrier::IndirectToTransfer(indirectBuf).Record(cmd);
+    indirectBuf.SyncIndirectForTransferWrite(cmd);
     Vk::FillBuffer(cmd, indirectBuf);
-    Vk::BufferBarrier::TransferToCompute(indirectBuf).Record(cmd);
+    indirectBuf.SyncForComputeReadWrite(cmd);
 
     const auto             hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
     const auto             sceneVp = ctx.viewport;
@@ -45,7 +45,7 @@ void RecordGpuCulled(
     );
     cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
-    Vk::BufferBarrier::ComputeToIndirect(indirectBuf).Record(cmd);
+    indirectBuf.SyncForIndirectRead(cmd);
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)

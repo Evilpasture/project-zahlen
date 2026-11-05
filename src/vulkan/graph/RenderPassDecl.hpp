@@ -188,6 +188,12 @@ template <
     VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess, VkColorComponentFlags Mask>
 struct IsDepthAttachment<Usage<Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess, Mask>>: std::true_type {};
 
+template <
+    typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
+    VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess, VkColorComponentFlags Mask>
+struct IsDepthAttachment<Usage<Image, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess, Mask>>
+    : std::true_type {};
+
 } // namespace TemplatedDetail
 
 // Public graph contract for pipeline setup. Keep internal traversal details in
@@ -217,6 +223,20 @@ class RasterPassContextBase {
     }
     [[nodiscard]] auto Extent() const noexcept -> VkExtent2D {
         return m_extent;
+    }
+
+    // The context opened rendering at the full attachment extent. A pass whose
+    // domain viewport differs (the scene viewport against a full-resolution
+    // attachment) states it here; the context applies viewport and the matching
+    // scissor together, so the two can never disagree.
+    void StateViewport(const VkViewport& viewport) noexcept {
+        const VkRect2D scissor = {
+            .offset = {.x = static_cast<int32_t>(viewport.x), .y = static_cast<int32_t>(viewport.y)},
+            .extent = {.width = static_cast<uint32_t>(viewport.width), .height = static_cast<uint32_t>(viewport.height)}
+        };
+
+        vkCmdSetViewport(m_cmd, 0, 1, &viewport);
+        vkCmdSetScissor(m_cmd, 0, 1, &scissor);
     }
 
   protected:

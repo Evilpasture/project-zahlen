@@ -316,6 +316,12 @@ class CommandEncoder {
         }
     }
 
+    // The encoder speaks native Vulkan: callers state the material behaviour
+    // (double-sided vs back-face culled), never a cull-mode bitmask.
+    void SetDoubleSided(bool doubleSided) noexcept {
+        SetCullMode(doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
+    }
+
     void SetViewport(const VkViewport& viewport) noexcept {
         vkCmdSetViewport(cmd, 0, 1, &viewport);
     }
