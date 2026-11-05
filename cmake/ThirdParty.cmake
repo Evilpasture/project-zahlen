@@ -594,14 +594,28 @@ set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
 # cooking them here, and it does so with dxc. It never searches for dxc: Jolt/Jolt.cmake
 # takes the glslc path that find_package(Vulkan) produced and substitutes the file name,
 #     string(REPLACE "glslc" "dxc" Vulkan_dxc_EXECUTABLE ${Vulkan_GLSLC_EXECUTABLE})
-# so dxc is only ever found next to a glslc. A machine or image with distro packages but
-# no LunarG SDK has dxc (directx-shader-compiler) and no glslc, which leaves the variable
-# at Vulkan_GLSLC_EXECUTABLE-NOTFOUND; "glslc" does not occur in that string, the
-# substitution changes nothing, and every shader rule tries to run a program named
-# Vulkan_GLSLC_EXECUTABLE-NOTFOUND and exits 127. Give Jolt the compiler it expects: if
-# Vulkan was found but glslc was not, put dxc in the variable Jolt reads; the substitution
-# then returns the path unchanged and Jolt invokes dxc itself. A real SDK is never
-# overridden -- this only acts when the variable is empty or *-NOTFOUND.
+# so dxc is only ever found next to a glslc. That leaves two machines broken. One has
+# distro packages but no LunarG SDK: dxc (directx-shader-compiler) is present, glslc is
+# not, and Vulkan_GLSLC_EXECUTABLE stays at Vulkan_GLSLC_EXECUTABLE-NOTFOUND. The other
+# is an architecture no dxc is released for -- Fedora ships no directx-shader-compiler
+# for aarch64, conda-forge has no linux-aarch64 build, and upstream publishes x86_64
+# only, while the Vulkan SDK's arm64 packages omit dxc altogether. Both fail the same
+# way: "glslc" does not occur in the *-NOTFOUND string, the substitution changes
+# nothing, and every shader rule execs a program with that name and exits 127.
+#
+# Give Jolt the compiler it expects. When Vulkan was found and glslc was not:
+#   * dxc if the machine has one -- put it in the variable Jolt reads; the
+#     substitution then returns the path unchanged and Jolt invokes dxc itself;
+#   * otherwise the vendored Slang through cmake/JoltDxcShim.sh, which accepts dxc's
+#     command line and emits the same SPIR-V (see the shim for the verified mapping).
+# The second case is why this block cannot wait for ShaderCompilation.cmake: the root
+# CMakeLists includes this file before it, so the vendored Slang target does not exist
+# yet and the shim locates the built compiler itself at build time.
+# A real SDK's glslc is never overridden -- this only acts when the variable is empty
+# or *-NOTFOUND, and only for the very same 17 shaders, feeding the same
+# NAME.spv files to the same descriptor-binding parser.
+option(ZHLN_JOLT_SLANG_FALLBACK
+    "Compile Jolt's Vulkan compute shaders with the vendored Slang when no dxc/glslc exists" ON)
 if(ZHLN_BUILD_RENDER)
     find_package(Vulkan QUIET)
     if(Vulkan_FOUND AND NOT Vulkan_GLSLC_EXECUTABLE)
@@ -610,11 +624,21 @@ if(ZHLN_BUILD_RENDER)
             set(Vulkan_GLSLC_EXECUTABLE "${ZHLN_JOLT_DXC_EXECUTABLE}" CACHE FILEPATH
                 "Shader compiler path Jolt reads; Jolt replaces 'glslc' with 'dxc' in it to locate dxc" FORCE)
             message(STATUS "Jolt Vulkan compute: no glslc found, compiling its HLSL shaders with ${ZHLN_JOLT_DXC_EXECUTABLE}.")
+        elseif(ZHLN_JOLT_SLANG_FALLBACK)
+            # Point Jolt at the shim, not at a compiler: Jolt prepends nothing and
+            # runs the path it is given, and the shim resolves slangc at build time.
+            set(ZHLN_JOLT_SLANGC_DXC "${CMAKE_CURRENT_SOURCE_DIR}/cmake/JoltDxcShim.sh")
+            set(Vulkan_GLSLC_EXECUTABLE "${ZHLN_JOLT_SLANGC_DXC}" CACHE FILEPATH
+                "Shader compiler path Jolt reads; Jolt replaces 'glslc' with 'dxc' in it to locate dxc" FORCE)
+            message(STATUS
+                "Jolt Vulkan compute: no dxc and no glslc found, compiling its HLSL shaders with the vendored Slang via ${ZHLN_JOLT_SLANGC_DXC}. "
+                "Set ZHLN_JOLT_SLANGC to pin a compiler, or ZHLN_JOLT_SLANG_FALLBACK=OFF to require dxc.")
         else()
             message(WARNING
                 "Jolt's Vulkan compute shaders are compiled with dxc, and neither glslc nor dxc was found (Vulkan_GLSLC_EXECUTABLE is "
-                "\"${Vulkan_GLSLC_EXECUTABLE}\"). Install directx-shader-compiler (dxc) or shaderc (glslc), or configure with "
-                "-DJPH_USE_VK=OFF to build without Jolt's Vulkan compute backend."
+                "\"${Vulkan_GLSLC_EXECUTABLE}\"). Install directx-shader-compiler (dxc) or shaderc (glslc), leave "
+                "ZHLN_JOLT_SLANG_FALLBACK=ON to compile them with the vendored Slang, or configure with -DJPH_USE_VK=OFF to build "
+                "without Jolt's Vulkan compute backend."
             )
         endif()
     endif()
