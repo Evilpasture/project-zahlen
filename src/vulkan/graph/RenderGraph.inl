@@ -598,7 +598,16 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
             using AutoCtx = RasterPassContext<Resources, ColorWrites, DepthWrites, PassIndex, Passes...>;
 
             if constexpr (std::is_invocable_v<PassType, AutoCtx&>) {
-                AutoCtx ctx(cmd, bindings);
+                // A pass that records its draws across secondaries has to say so
+                // before the scope opens: vkCmdExecuteCommands inside a
+                // vkCmdBeginRendering scope is only legal when the VkRenderingInfo
+                // carried this flag, and the flag is fixed at begin time. The
+                // flag permits secondaries, it does not require them, so a pass
+                // whose other path draws directly is unaffected.
+                constexpr VkRenderingFlags scope_flags =
+                    requires { PassType::uses_secondaries; } ? VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT : VkRenderingFlags {0};
+
+                AutoCtx ctx(cmd, bindings, scope_flags);
                 pass(ctx);
             }
 
@@ -623,10 +632,46 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     }
 }
 
+// Derived, not assembled. The inheritance formats a managed scope hands to the
+// secondaries recorded inside it are a projection of the pass's own usage
+// declarations:
+//
+//   - the colour array is exactly as long as ColorWrites and every element is
+//     filled by a pack expansion over that same list, so the length and the
+//     contents have one source and cannot disagree. The hand-rolled version this
+//     replaces kept a separate counter and indexed the binding slice by
+//     attachment position; that slice is indexed by *resource*, so the two
+//     walked different orders and every format came out shifted by one.
+//   - depth is read only from DepthWrites. The two lists are disjoint by
+//     construction (IsColorAttachment keys off the colour attachment layout), so
+//     no image can appear in both -- that colour/depth separation is the one the
+//     type system already enforced one level up; this makes the format list
+//     follow it instead of being able to drift from it.
+namespace InheritanceDetail {
+
+template <typename ResourceList, typename... CImgs>
+[[nodiscard]] auto ResolveColorFormats(std::span<const ImageSlice, ResourceList::size> bindings, TypeList<CImgs...>) noexcept
+    -> std::array<VkFormat, sizeof...(CImgs)> {
+    return {bindings[TemplatedDetail::GetResourceIndex<ResourceList, CImgs>()].format...};
+}
+
+// At most one depth attachment per scope: a second would make "the" depth format
+// ambiguous, and VkRenderingInfo has room for exactly one.
+template <typename ResourceList, typename... DImgs>
+[[nodiscard]] auto ResolveDepthFormat(std::span<const ImageSlice, ResourceList::size> bindings, TypeList<DImgs...>) noexcept -> VkFormat {
+    static_assert(sizeof...(DImgs) <= 1, "a render scope binds at most one depth attachment");
+    VkFormat resolved = VK_FORMAT_UNDEFINED;
+    ((resolved = bindings[TemplatedDetail::GetResourceIndex<ResourceList, DImgs>()].format), ...);
+    return resolved;
+}
+
+} // namespace InheritanceDetail
+
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::RasterPassContext(
     VkCommandBuffer                                      cmd,
-    std::span<const ImageSlice, ResourceList::size> bindings
+    std::span<const ImageSlice, ResourceList::size> bindings,
+    VkRenderingFlags                                     flags
 ) noexcept: RasterPassContextBase(cmd) {
     SetExtent({});
     ResolveExtent(bindings, ColorWrites {}, DepthWrites {});
@@ -640,7 +685,7 @@ RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>:
     VkRenderingInfo rendering_info = {
         .sType                = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .pNext                = nullptr,
-        .flags                = 0,
+        .flags                = flags,
         .renderArea           = {.offset = {.x = 0, .y = 0}, .extent = Extent()},
         .layerCount           = 1,
         .viewMask             = 0,
@@ -658,6 +703,34 @@ RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>:
     const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = Extent()};
     vkCmdSetViewport(Cmd(), 0, 1, &viewport);
     vkCmdSetScissor(Cmd(), 0, 1, &scissor);
+
+    // The same facts the scope was opened with, in the form a secondary command
+    // buffer has to inherit: colour formats in attachment order, the depth
+    // format, no view mask (this context renders single-view) and the viewport
+    // just set.
+    //
+    // Resolved through the same Usages the attachments were built from, in the
+    // same order BuildColorAttachments visits them. Indexing the binding slice
+    // by attachment position instead walks the *resource list*, which has no
+    // relationship to attachment order -- it hands the secondary whatever image
+    // happens to sit there, which is neither the right format nor even a colour
+    // format.
+    const auto color_formats = InheritanceDetail::ResolveColorFormats<ResourceList>(bindings, ColorWrites {});
+
+    // Gated on has_depth rather than on DepthWrites alone: inheritance has to
+    // mirror what vkCmdBeginRendering actually bound, not what the pass
+    // declared. With no depth attachment bound, naming a depth format here is
+    // itself the error, so this stays VK_FORMAT_UNDEFINED in that case.
+    const VkFormat depth_format =
+        has_depth ? InheritanceDetail::ResolveDepthFormat<ResourceList>(bindings, DepthWrites {}) : VK_FORMAT_UNDEFINED;
+
+    SetInheritance(RenderingInheritance {
+        std::span<const VkFormat> {color_formats},
+        depth_format,
+        VK_FORMAT_UNDEFINED,
+        0,
+        viewport,
+    });
 }
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>

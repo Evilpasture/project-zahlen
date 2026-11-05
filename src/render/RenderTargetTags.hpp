@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "RenderConstants.hpp"
 #include "Rendering.hpp"
 #include "graph/GraphImage.hpp"
 #include <cstdint>
@@ -69,7 +70,60 @@ template <>
 struct ClearColorOf<Res_TransLighting> {
     static constexpr Color4 value = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 };
+
+// The graph clears an attachment from ClearColorOf<Tag>, whose default is
+// opaque black {0,0,0,1}. These are the targets that are not cleared to that
+// default -- the values below are the ones the passes were clearing to by hand,
+// moved here so the pass that first writes the target no longer has to restate
+// them (and cannot disagree with the graph about them).
+//
+// SceneColor is the visible background while the G-buffer is still empty, so it
+// is the one clear that is not black. Velocity, NormRough and BakedMask clear to
+// zero in every channel: those are data lanes, and alpha 1 would be read as a
+// real value (see kClearColorBakedMask on why a zero Color4 is exact for the
+// UINT lane). Anisotropy's alpha is likewise a lane, cleared to 1; TransNorm and
+// TransSheen are not.
+template <>
+struct ClearColorOf<Res_SceneColor> {
+    static constexpr Color4 value = {.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f};
+};
+template <>
+struct ClearColorOf<Res_Velocity> {
+    static constexpr Color4 value = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+};
+template <>
+struct ClearColorOf<Res_NormRough> {
+    static constexpr Color4 value = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+};
+template <>
+struct ClearColorOf<Res_BakedMask> {
+    static constexpr Color4 value = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+};
+template <>
+struct ClearColorOf<Res_TransNorm> {
+    static constexpr Color4 value = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+};
+template <>
+struct ClearColorOf<Res_TransSheen> {
+    static constexpr Color4 value = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+};
+template <>
+struct ClearColorOf<Res_TransAnisotropy> {
+    static constexpr Color4 value = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f};
+};
 } // namespace Vk
+
+// The clear values above were moved out of the passes, so assert they still say
+// what the passes say. kClearColor* stays the single definition; these read it,
+// which also means a change lands in one place instead of two that can differ.
+static_assert(Vk::ClearColorOf<Res_SceneColor>::value.r == kClearColorScene.r && Vk::ClearColorOf<Res_SceneColor>::value.g == kClearColorScene.g &&
+              Vk::ClearColorOf<Res_SceneColor>::value.b == kClearColorScene.b && Vk::ClearColorOf<Res_SceneColor>::value.a == kClearColorScene.a);
+static_assert(Vk::ClearColorOf<Res_Velocity>::value.a == kClearColorVelocity.a && Vk::ClearColorOf<Res_Velocity>::value.r == kClearColorVelocity.r);
+static_assert(Vk::ClearColorOf<Res_NormRough>::value.a == kClearColorNormalRoughness.a && Vk::ClearColorOf<Res_NormRough>::value.r == kClearColorNormalRoughness.r);
+static_assert(Vk::ClearColorOf<Res_BakedMask>::value.a == kClearColorBakedMask.a && Vk::ClearColorOf<Res_BakedMask>::value.r == kClearColorBakedMask.r);
+static_assert(Vk::ClearColorOf<Res_TransNorm>::value.a == kClearColorNormalRoughness.a);
+static_assert(Vk::ClearColorOf<Res_TransSheen>::value.a == kClearColorSheen.a && Vk::ClearColorOf<Res_TransSheen>::value.r == kClearColorSheen.r);
+static_assert(Vk::ClearColorOf<Res_TransAnisotropy>::value.a == kClearColorAnisotropy.a && Vk::ClearColorOf<Res_TransAnisotropy>::value.r == kClearColorAnisotropy.r);
 
 using Res_AccumPrevious = Vk::GraphImage<"AccumPrevious", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
 using Res_AccumCurrent  = Vk::GraphImage<"AccumCurrent", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;

@@ -47,31 +47,25 @@ void RecordGpuCulled(
 
     indirectBuf.SyncForIndirectRead(cmd);
 
-    Vk::DynamicPass(in.sceneColor.Extent())
-        .Viewport(sceneVp)
-        .LoadColor(in.sceneColor)
-        .LoadColor(in.velocity)
-        .LoadColor(in.normRough)
-        .LoadColor(in.bakedMask)
-        .LoadDepth(in.depth)
-        .Execute(cmd, [&]() {
-            for (const auto& group: groups) {
-                if (group.material->pipeline == VK_NULL_HANDLE) {
-                    continue;
-                }
-                encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
-                    {
-                        .pipeline       = group.material->pipeline,
-                        .argumentBuffer = indirectBuf.Handle(),
-                        .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
-                        .drawCount      = group.count,
-                    },
-                    ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
-                );
-            }
-            DrawCSGMeshes(ctx, encoder, csg, in.sceneColor.Extent());
-            Draw3DParticles(ctx, encoder, particles);
-        });
+    encoder.SetViewport(sceneVp);
+
+    for (const auto& group: groups) {
+        if (group.material->pipeline == VK_NULL_HANDLE) {
+            continue;
+        }
+        encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
+            {
+                .pipeline       = group.material->pipeline,
+                .argumentBuffer = indirectBuf.Handle(),
+                .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
+                .drawCount      = group.count,
+            },
+            ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
+        );
+    }
+
+    DrawCSGMeshes(ctx, encoder, csg, in.sceneColor.Extent());
+    Draw3DParticles(ctx, encoder, particles);
 }
 
 void RecordCpuCulled(
@@ -83,23 +77,24 @@ void RecordCpuCulled(
 ) noexcept {
     auto* const cmd = encoder.cmd;
 
-    Vk::DynamicPass(in.sceneColor.Extent())
-        .Viewport(ctx.viewport)
-        .LoadColor(in.sceneColor)
-        .LoadColor(in.velocity)
-        .LoadColor(in.normRough)
-        .LoadColor(in.bakedMask)
-        .LoadDepth(in.depth)
-        .Execute(cmd, [&]() {
-            DrawCSGMeshes(ctx, encoder, csg, in.sceneColor.Extent());
-            Draw3DParticles(ctx, encoder, particles);
-        });
+    encoder.SetViewport(ctx.viewport);
+
+    // The graph holds the scope open on the same five targets; these two draw
+    // calls are all this path adds inside it.
+    DrawCSGMeshes(ctx, encoder, csg, in.sceneColor.Extent());
+    Draw3DParticles(ctx, encoder, particles);
 }
 
 } // namespace
 
-void GBufferResolvePass::operator()(VkCommandBuffer cmd) const noexcept {
-    Vk::CommandEncoder encoder(cmd);
+void GBufferResolvePass::operator()(Vk::RasterPassContextBase& pass) const noexcept {
+    // Unlike the first G-buffer pass this one is not the frame's first writer:
+    // GBufferBasePass already cleared and filled these targets, so the state
+    // table hands this pass LOAD instead of CLEAR -- which is exactly what the
+    // manual LoadColor/LoadDepth list stated.
+    pass.StateViewport(frame.viewport);
+
+    Vk::CommandEncoder encoder(pass.Cmd());
 
     const auto drawCount = static_cast<uint32_t>(frame.renderer.queues.Draws().size());
     if (drawCount == 0 && frame.renderer.queues.MeshParticleEmitters().empty() && frame.renderer.queues.CsgDraws().empty()) {

@@ -11,6 +11,7 @@
 #include <Zahlen/Core/FunctionRef.hpp>
 #include <concepts>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -225,6 +226,15 @@ class RasterPassContextBase {
         return m_extent;
     }
 
+    // What a secondary command buffer has to inherit to record into this
+    // scope: the attachment formats the context opened, the view mask and the
+    // effective viewport. Non-null only for a managed context -- a pass that
+    // records secondaries out of its own DynamicPass keeps using that pass's
+    // GetInheritance(). Defined in RenderGraph.inl, where the type is complete.
+    [[nodiscard]] auto Inheritance() const noexcept -> const std::optional<RenderingInheritance>& {
+        return m_inheritance;
+    }
+
     // The context opened rendering at the full attachment extent. A pass whose
     // domain viewport differs (the scene viewport against a full-resolution
     // attachment) states it here; the context applies viewport and the matching
@@ -244,9 +254,14 @@ class RasterPassContextBase {
         m_extent = extent;
     }
 
+    void SetInheritance(RenderingInheritance inheritance) noexcept {
+        m_inheritance.emplace(inheritance);
+    }
+
   private:
-    VkCommandBuffer m_cmd;
-    VkExtent2D      m_extent {};
+    VkCommandBuffer                     m_cmd;
+    VkExtent2D                          m_extent {};
+    std::optional<RenderingInheritance> m_inheritance {};
 };
 
 } // namespace ZHLN::Vk

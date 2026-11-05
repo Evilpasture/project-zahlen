@@ -435,7 +435,11 @@ class CompileTimeFrameGraph {
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 class RasterPassContext: public RasterPassContextBase {
   public:
-    RasterPassContext(VkCommandBuffer cmd, std::span<const ImageSlice, ResourceList::size> bindings) noexcept;
+    RasterPassContext(
+        VkCommandBuffer                                 cmd,
+        std::span<const ImageSlice, ResourceList::size> bindings,
+        VkRenderingFlags                                flags = 0
+    ) noexcept;
 
     ~RasterPassContext() noexcept;
 

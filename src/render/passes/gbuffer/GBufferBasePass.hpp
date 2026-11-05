@@ -23,10 +23,15 @@ struct GBufferBasePass:
         Vk::DepthStencilWrite<Res_Depth>> {
     using PushConstants = ObjectConstants;
 
+    // The CPU-culled path records its draw range across worker secondaries, so
+    // the graph must open the scope with
+    // VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT.
+    static constexpr bool uses_secondaries = true;
+
     CullingResources&   cull;
     RenderFrame&        frame;
 
-    void operator()(VkCommandBuffer cmd) const noexcept;
+    void operator()(Vk::RasterPassContextBase& pass) const noexcept;
 };
 
 } // namespace ZHLN::Passes

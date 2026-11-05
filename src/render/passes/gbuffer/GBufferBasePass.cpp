@@ -14,6 +14,14 @@
 
 namespace ZHLN::Passes {
 
+// The graph clears these attachments because this pass is the first thing in the
+// frame to write them -- the same clear the manual DynamicPass used to perform.
+// If a future edit puts an earlier writer in front of this pass, the graph would
+// switch to LOAD and the clear would quietly stop happening, so the ordering
+// assumption is checked here rather than remembered.
+static_assert(Vk::TemplatedDetail::IsColorAttachment<Vk::ColorWrite<Res_SceneColor>>::value);
+static_assert(Vk::TemplatedDetail::IsDepthAttachment<Vk::DepthStencilWrite<Res_Depth>>::value);
+
 namespace {
 
 static_assert(
@@ -99,47 +107,37 @@ void RecordGpuCulled(
     ctx.secondPassCandidatesBuffers.SyncForComputeRead(cmd);
     countBuf.SyncForComputeRead(cmd);
 
-    Vk::DynamicPass(in.sceneColor.Extent())
-        .Viewport(sceneVp)
-        .ClearColor(in.sceneColor, kClearColorScene)
-        .ClearColor(in.velocity, kClearColorVelocity)
-        .ClearColor(in.normRough, kClearColorNormalRoughness)
-        .ClearColor(in.bakedMask, kClearColorBakedMask)
-        .ClearDepth(in.depth, kClearDepthValue)
-        .Execute(cmd, [&]() {
-            for (const auto& group: groups) {
-                if (group.material->pipeline == VK_NULL_HANDLE) {
-                    continue;
-                }
-                encoder.SetDoubleSided(group.doubleSided);
-                encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
-                    {
-                        .pipeline       = group.material->pipeline,
-                        .argumentBuffer = ctx.indirectCommandsBuffers.Handle(),
-                        .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
-                        .drawCount      = group.count,
-                    },
-                    ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
-                );
-            }
-        });
+    encoder.SetViewport(sceneVp);
+
+    for (const auto& group: groups) {
+        if (group.material->pipeline == VK_NULL_HANDLE) {
+            continue;
+        }
+        encoder.SetDoubleSided(group.doubleSided);
+        encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
+            {
+                .pipeline       = group.material->pipeline,
+                .argumentBuffer = ctx.indirectCommandsBuffers.Handle(),
+                .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
+                .drawCount      = group.count,
+            },
+            ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
+        );
+    }
 }
 
-void RecordCpuCulled(RenderFrame& ctx, VkCommandBuffer cmd, uint32_t drawCount, const GBufferTargets& in) noexcept {
+void RecordCpuCulled(
+    RenderFrame& ctx, VkCommandBuffer cmd, const Vk::RenderingInheritance& inheritance, uint32_t drawCount, const GBufferTargets& in
+) noexcept {
     using enum DrawFlags;
     const uint32_t frameIndex = ctx.inFlight;
     const auto     sceneVp    = ctx.viewport;
 
-    const auto pass = Vk::DynamicPass(in.sceneColor.Extent())
-                          .Viewport(sceneVp)
-                          .ClearColor(in.sceneColor, kClearColorScene)
-                          .ClearColor(in.velocity, kClearColorVelocity)
-                          .ClearColor(in.normRough, kClearColorNormalRoughness)
-                          .ClearColor(in.bakedMask, kClearColorBakedMask)
-                          .ClearDepth(in.depth, kClearDepthValue)
-                          .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT);
-    pass.Execute(cmd, [&]() {
-        const auto secContext = ctx.renderer.CreateSecondaryContext(pass.GetInheritance());
+    {
+        // The scope is the graph's, opened with the declared G-buffer targets and
+        // VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT; what it inherits is
+        // read back off that same scope rather than assembled a second time here.
+        const auto secContext = ctx.renderer.CreateSecondaryContext(inheritance);
 
         const auto chunks = Vk::ParallelDrawDispatch(
             cmd, secContext, drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
@@ -174,34 +172,38 @@ void RecordCpuCulled(RenderFrame& ctx, VkCommandBuffer cmd, uint32_t drawCount, 
         chunks.ForEachError([](const Vk::RecordingFailure& failure) {
             ZHLN::Log("[Render] Parallel G-buffer chunk {} could not be recorded ({}); the batch was not submitted.", failure.index, failure.error);
         });
-    });
+    }
 }
 
 } // namespace
 
-void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
-    Vk::CommandEncoder encoder(cmd);
+void GBufferBasePass::operator()(Vk::RasterPassContextBase& pass) const noexcept {
+    // The graph opened rendering on the declared G-buffer targets and cleared
+    // them from ClearColorOf<Tag> -- they are the first thing written this
+    // frame, so the state table chose CLEAR. That also retires the third copy
+    // of this scope: the empty-frame branch (drawCount == 0) used to need its
+    // own DynamicPass just to perform the clear, and now it is simply a frame
+    // whose loops do not run.
+    pass.StateViewport(frame.viewport);
+
+    Vk::CommandEncoder encoder(pass.Cmd());
+    const auto         cmd = pass.Cmd();
 
     const auto drawCount = static_cast<uint32_t>(frame.renderer.queues.Draws().size());
+    const auto in        = GBufferSceneTargets(frame);
+
     if (drawCount == 0) {
-        const auto in = GBufferSceneTargets(frame);
-        Vk::DynamicPass(in.sceneColor.Extent())
-            .ClearColor(in.sceneColor, kClearColorScene)
-            .ClearColor(in.velocity, kClearColorVelocity)
-            .ClearColor(in.normRough, kClearColorNormalRoughness)
-            .ClearColor(in.bakedMask, kClearColorBakedMask)
-            .ClearDepth(in.depth, kClearDepthValue)
-            .Execute(cmd, []() {});
         return;
     }
 
     const auto groups = BuildGroupRanges(frame);
-    const auto in     = GBufferSceneTargets(frame);
     if (cull.cullingPass.pipeline.Valid() && frame.indirectCommandsBuffers.Valid() && (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() &&
         !frame.meshShading) {
         RecordGpuCulled(frame, encoder, cull, groups, drawCount, in);
     } else {
-        RecordCpuCulled(frame, cmd, drawCount, in);
+        // A pass that records secondaries needs the rendering inheritance even
+        // though the scope is the graph's; it carries what the graph opened.
+        RecordCpuCulled(frame, cmd, pass.Inheritance().value_or(Vk::RenderingInheritance {}), drawCount, in);
     }
 }
 

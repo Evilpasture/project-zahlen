@@ -8,32 +8,24 @@
 
 namespace ZHLN::Passes {
 
-void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
-    Vk::CommandEncoder encoder(cmd);
-    const auto         sceneVp = frame.viewport;
+void TranslucentPrePass::operator()(Vk::RasterPassContextBase& pass) const noexcept {
+    // The graph opened rendering on the declared translucent targets with the
+    // load op the state table chose -- CLEAR, because nothing has written them
+    // yet this frame -- and with the clear values from ClearColorOf<Tag> for
+    // each one. This pass states its viewport and draws.
+    pass.StateViewport(frame.viewport);
 
-    const auto norm_att  = Vk::Assume<Vk::ColorWrite<Res_TransNorm>>(frame.graphResources.transNormalBuffer);
-    const auto aniso_att = Vk::Assume<Vk::ColorWrite<Res_TransAnisotropy>>(frame.graphResources.transAnisotropyBuffer);
-    const auto sheen_att = Vk::Assume<Vk::ColorWrite<Res_TransSheen>>(frame.graphResources.transSheenBuffer);
-    const auto depth_att = Vk::Assume<Vk::DepthStencilWrite<Res_TransDepth>>(frame.graphResources.transDepthBuffer);
+    Vk::CommandEncoder encoder(pass.Cmd());
 
-    Vk::DynamicPass(norm_att.Extent())
-        .Viewport(sceneVp)
-        .ClearColor(norm_att, kClearColorNormalRoughness)
-        .ClearColor(aniso_att, kClearColorAnisotropy)
-        .ClearColor(sheen_att, kClearColorSheen)
-        .ClearDepth(depth_att, kClearDepthValue)
-        .Execute(cmd, [&]() {
-            for (size_t i = 0; i < frame.renderer.queues.Draws().size(); ++i) {
-                const auto& drawCmd = frame.renderer.queues.Draws()[i];
-                if (!IsForwardOnly(drawCmd.instanceData.flags) || drawCmd.prePassMaterial == nullptr || drawCmd.prePassMaterial->pipeline == VK_NULL_HANDLE) {
-                    continue;
-                }
-                const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
+    for (size_t i = 0; i < frame.renderer.queues.Draws().size(); ++i) {
+        const auto& drawCmd = frame.renderer.queues.Draws()[i];
+        if (!IsForwardOnly(drawCmd.instanceData.flags) || drawCmd.prePassMaterial == nullptr || drawCmd.prePassMaterial->pipeline == VK_NULL_HANDLE) {
+            continue;
+        }
+        const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, frame.meshShading, drawCmd.prePassMaterial->pipeline);
-            }
-        });
+        SubmitDrawInstanced(encoder, drawCmd, static_cast<uint32_t>(i), push, frame.meshShading, drawCmd.prePassMaterial->pipeline);
+    }
 }
 
 } // namespace ZHLN::Passes

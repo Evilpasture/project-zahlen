@@ -28,7 +28,7 @@ struct GBufferResolvePass:
     const MeshParticlePipelines& particles;
     RenderFrame&                 frame;
 
-    void operator()(VkCommandBuffer cmd) const noexcept;
+    void operator()(Vk::RasterPassContextBase& pass) const noexcept;
 };
 
 } // namespace ZHLN::Passes
