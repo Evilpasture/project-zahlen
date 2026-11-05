@@ -549,7 +549,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
                     const auto&                              resource   = bindings[r_idx];
 
                     barriers[Bs] = ImageBarrier::Transition(
-                        resource.View().WithAspect(Img::aspect).AllSubresources(),
+                        resource.View().WithAspect(VkD3D::ToVk(Img::aspect)).AllSubresources(),
                         prev_state.layout,
                         UsageType::layout,
                         prev_state.stage,
@@ -776,17 +776,17 @@ constexpr auto MakeRef(const T& resource) noexcept -> ImageSlice {
 
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept {
-    return ImageSlice {handle, view, VkExtent3D {0, 0, 1}, Tag::format, Tag::aspect};
+    return ImageSlice {handle, view, VkExtent3D {0, 0, 1}, VkD3D::ToVk(Tag::format), VkD3D::ToVk(Tag::aspect)};
 }
 
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, Vk::Format format) noexcept {
-    return ImageSlice {handle, view, extent, format, Tag::aspect};
+    return ImageSlice {handle, view, extent, format, VkD3D::ToVk(Tag::aspect)};
 }
 
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, Vk::Format format) noexcept {
-    return ImageSlice {handle, view, extent, format, Tag::aspect};
+    return ImageSlice {handle, view, extent, format, VkD3D::ToVk(Tag::aspect)};
 }
 
 template <typename Resources, typename... Passes>
@@ -841,9 +841,9 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
 
         if constexpr (needs_barrier) {
             msg.append("          Layout: ");
-            msg.append(LayoutTraits<prev_state.layout>::kName);
+            msg.append(VkD3D::LayoutTraits<VkD3D::FromVk(prev_state.layout)>::kName);
             msg.append(" ➔ ");
-            msg.append(LayoutTraits<UsageType::layout>::kName);
+            msg.append(VkD3D::LayoutTraits<VkD3D::FromVk(UsageType::layout)>::kName);
             msg.append("\n");
 
             msg.append("          Stage : ");
@@ -859,7 +859,7 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
             msg.append("\n");
         } else {
             msg.append("          State : ");
-            msg.append(LayoutTraits<prev_state.layout>::kName);
+            msg.append(VkD3D::LayoutTraits<VkD3D::FromVk(prev_state.layout)>::kName);
             msg.append(" (");
             msg.append_enum(static_cast<BarrierStage>(prev_state.stage));
             msg.append(" / ");

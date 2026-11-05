@@ -16,6 +16,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <vkd3d/VulkanConversions.hpp>
+
 namespace ZHLN::Vk {
 
 enum class MaterialFlags : uint8_t {
@@ -120,7 +122,9 @@ consteval void AppendColorFormat(std::array<Vk::Format, N>& formats, size_t& out
     using Usage = typename UsageList::template type<Index>;
     if constexpr (IsColorAttachmentUsage<Usage>()) {
         using Resource      = typename Usage::Resource;
-        formats[outIndex++] = Resource::format;
+        // Resource is a graph tag, so its format is neutral; this is the
+        // Vulkan pipeline builder, so convert once here.
+        formats[outIndex++] = VkD3D::ToVk(Resource::format);
     }
 }
 
@@ -158,7 +162,7 @@ template <typename UsageList, size_t... Index>
             using Usage = typename UsageList::template type<Index>;
             if constexpr (IsDepthAttachmentUsage<Usage>()) {
                 using Resource = typename Usage::Resource;
-                format         = Resource::format;
+                format         = VkD3D::ToVk(Resource::format);
             }
         }(),
         ...);

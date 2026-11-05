@@ -13,6 +13,7 @@
 // graph tag in its own header so physical targets can depend on it without
 // making compile-time graph analysis depend on GPU allocation code.
 #include "../graph/GraphImage.hpp"
+#include <vkd3d/VulkanConversions.hpp>
 
 namespace ZHLN::Vk {
 
@@ -20,12 +21,28 @@ namespace ZHLN::Vk {
 // allocation policy is opt-in through the tag, never required for raw targets.
 template <typename T>
 struct TargetTraits {
-    static constexpr Vk::Format           format = T::format;
-    static constexpr Vk::ImageAspect aspect = [] {
-        if constexpr (requires { T::aspect; })
-            return T::aspect;
-        else
+    // The boundary adapter. Graph tags arrive neutral (VkD3D::Format /
+    // VkD3D::ImageAspect) and raw targets arrive already Vulkan
+    // (ImageFormat<Vk::Format, ...>), so this converts exactly when the tag is
+    // the neutral kind and passes the Vulkan kind through. Everything
+    // downstream of here keeps the native value it always had.
+    static constexpr Vk::Format format = [] {
+        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(T::format)>, Vk::Format>) {
+            return T::format;
+        } else {
+            return VkD3D::ToVk(T::format);
+        }
+    }();
+    static constexpr Vk::ImageAspect aspect = []() -> Vk::ImageAspect {
+        if constexpr (requires { T::aspect; }) {
+            if constexpr (std::is_same_v<std::remove_cvref_t<decltype(T::aspect)>, Vk::ImageAspect>) {
+                return T::aspect;
+            } else {
+                return VkD3D::ToVk(T::aspect);
+            }
+        } else {
             return GetFormatAspect(format);
+        }
     }();
     static constexpr std::string_view name = [] {
         if constexpr (requires { T::name.string_view(); })
@@ -234,7 +251,15 @@ struct UsageLayout {
     static_assert(requires { typename Usage::Resource; }, "UsageLayout requires a valid Vk::Usage type.");
 
     static constexpr Vk::ImageLayout      layout = Usage::layout;
-    static constexpr Vk::ImageAspect aspect = Usage::Resource::aspect;
+    // Resource is a graph tag, so its aspect is neutral; convert here rather
+    // than at every Assume() call site.
+    static constexpr Vk::ImageAspect aspect = []() -> Vk::ImageAspect {
+        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(Usage::Resource::aspect)>, Vk::ImageAspect>) {
+            return Usage::Resource::aspect;
+        } else {
+            return VkD3D::ToVk(Usage::Resource::aspect);
+        }
+    }();
 };
 
 template <typename Usage, typename T>

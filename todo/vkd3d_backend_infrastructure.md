@@ -17,6 +17,82 @@ Introduce the address-model and build-target seams for the future `zahlen_direct
 - [x] Root-constants refactor: the 64-DWORD budget is now law host-side -- `GpuAbi::kRootConstantMaxDwords` / `kRootConstantMaxBytes`, a `static_assert` that `ScenePassPushConstants` fits it, and the `RootConstantPayload` concept that `ScenePassPayload` builds on. The DXIL cook exists: `compile_dxil` in `cmake/ShaderCompilation.cmake` (mirrors `compile_slang`, `-target dxil`, per-stage `sm_6_6` profile derived from `ZHLN_DXIL_PROFILE`, `-D__TARGET_DXIL__=1`, no catalog reflection records -- the zshader replay stays SPIR-V-only), with the opt-in `zahlen_shaders_dxil` target smoke-cooking the skinning compute entry (push payload + `DeviceAddress<T>` loads/stores/atomics). Needs a DXIL-capable slangc (host/SDK, or vendored with `-DSLANG_ENABLE_DXIL=ON`); not part of the default build.
 - [x] Keep all current `src/render` sources, target links, and draw-command address usage unchanged.
 
+## Vendor-agnostic theory migration (in progress)
+
+Goal: `src/render` speaks only `ZHLN::VkD3D` and links only the neutral layer;
+`src/vulkan` keeps a compatibility alias namespace so nothing has to move at
+once; `src/d3d12` may stay stubs.
+
+### Landed
+
+- [x] **The layout->sync table has one home.** `LayoutSyncInfo` /
+  `GetLayoutSyncInfo` / `LayoutTraits` were duplicated character for character
+  between `src/vulkan/execution/Barriers.hpp` and
+  `src/vkd3d/include/vkd3d/Barriers.hpp`. The Vulkan copy is deleted; the native
+  barrier classes derive from `VkD3D::LayoutTraits<VkD3D::FromVk(Layout)>` and
+  convert back through `ToVk()` where the 64-byte `VkImageMemoryBarrier2` is
+  synthesized. Verified equivalent: `FromVk(ImageLayout)` is a bijection over
+  exactly the nine layouts both tables switch on. `zahlen_vulkan` gains
+  `<vkd3d/...>` on its PUBLIC include path (no link) because
+  `<src/vulkan/Rendering.hpp>` is the force-included prelude every consumer
+  compiles.
+- [x] **The frame-graph vocabulary moved.** `TypeList`, `IsInList`, `Usage`,
+  `RenderPass`, `FrameGraphPass`, `ResourceName`, `EmptyResourceTag`/
+  `EmptyUsageTag` and the fork protocol now live in
+  `src/vkd3d/include/vkd3d/RenderPassDecl.hpp`; `src/vulkan/graph` re-exports
+  them, so `ZHLN::Vk` keeps every spelling. No call site changed: `Usage`'s
+  layout/stage/access are non-type template parameters of deduced type, so a
+  Vulkan pass still declares `Vk::ImageLayout::...` and the graph reads the same
+  fields. The default channel mask became `std::uint32_t{0xF}` (same all-bits
+  value as the `VK_COLOR_COMPONENT_*` default it replaced).
+- [x] `zahlen_render`, `zahlen_vulkan` and every dependent target build; the four
+  configure governance checks (namespace, include, layer DAG, macro) pass.
+
+### Deliberately left in ZHLN::Vk (and why)
+
+- The twelve composition aliases (`ShaderRead`, `ColorWrite`, `DepthWrite`,
+  `ComputeRead`, `ComputeWrite`, `FragmentAndComputeRead`, the transfer pair,
+  ...) -- each names a `Vk::ImageLayout` and a `Vk::PipelineStage`. They are
+  Vulkan spellings of neutral shapes, not vocabulary.
+- `Vk::ForkCall` / `Vk::ForkRecorder` / `Vk::SequentialFork` -- instantiations of
+  the neutral protocol on `VkCommandBuffer`.
+- `RasterPassContextBase` (issues `vkCmdSetViewport`) and `DynamicPass`
+  (`vkCmdBeginRendering`) -- these record backend commands, which the neutral
+  header must never do.
+- `Vk::Format` / `Vk::ImageLayout` / `Vk::PipelineStage` / `Vk::Access` keep the
+  native `VK_*` values. **They must not become `using` aliases of the neutral
+  enums**: the neutral ones are independently numbered and `Enums.hpp` states
+  values serialize to disk. The bridge stays `ToVk()` / `FromVk()`.
+
+### Next, in order (Vulkan path green at every step)
+
+1. [x] **RenderTarget tags** -- landed. `GraphImageTag` carries
+  `VkD3D::Format`/`VkD3D::ImageAspect`; `Vk::GraphImage<...>` survives as an
+  alias that converts once, and all 36 tags are authored neutrally.
+  `VkD3D::GetFormatAspect` (`src/vkd3d/FormatAspect.hpp`) is the neutral mirror
+  of `Vk::GetFormatAspect`. Conversion points, all at the Vulkan boundary:
+  `TargetTraits`, `UsageLayout`, `GraphicsPipeline`'s format synthesis,
+  `RenderGraph::MakeRef` defaults, `ImageBarrier::Transition`, ImageSlice
+  construction, the decal format array. **Note:** both namespaces now have a
+  `ToVk`, so write conversions qualified -- `VkD3D::ToVk` is neutral to Vk,
+  `Vk::ToVk` is a Vk enum to native flags; unqualified calls are ambiguous.
+2. **State table emits both arrays.** `CompileTimeFrameGraph`'s `StateTable`
+  already does the constexpr hazard analysis over `Usage::layout`/`stage`; once
+  1 lands, the same simulation generates the Vulkan barrier array and the D3D12
+  barrier array with no second hazard model.
+3. **Retire the native barrier classes** once `DynamicRendering.inl` and
+  `RenderGraph.inl` record through `VkD3D::*Barrier::Record()`. `DynamicRendering`
+  (680 lines) is the biggest block of Vulkan theory left; `TypedImage` there is
+  already layout/format-parameterized and is a graph type, not a Vulkan type.
+4. **Call-site sweep.** ~232 distinct `Vk::` names across `src/vulkan` +
+  `src/render`; migrate by subsystem, alias first, delete the alias when the
+  subsystem is clean.
+5. **CMake inversion.** `zahlen_vkd3d` becomes what `zahlen_render` links;
+  `zahlen_vulkan` becomes a private dependency of it. Watch out:
+  `zahlen_vkd3d` PUBLIC-defines `ZHLN_GPU_ADDRESS_D3D12=1`, so anything that
+  starts linking it inherits the D3D address model -- that macro has to move
+  into `src/render` deliberately, not arrive transitively.
+
 ## Follow-up implementation phases
 
 ### 1. Validate the shared address contract

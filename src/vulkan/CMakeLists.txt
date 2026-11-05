@@ -99,6 +99,17 @@ target_include_directories(
 target_include_directories(zahlen_vulkan SYSTEM
                            PUBLIC ${PROJECT_SOURCE_DIR}/extern/volk)
 
+# The joint layer's public headers (<vkd3d/Barriers.hpp>,
+# <vkd3d/VulkanConversions.hpp>): the native barrier classes derive their
+# layout->sync stage/access from VkD3D instead of keeping a second copy of
+# that table. PUBLIC because <src/vulkan/Rendering.hpp> is the force-included
+# prelude every zahlen_vulkan consumer compiles, so whatever it names must
+# resolve for them too. Path-only, no link -- the same seam src/render uses,
+# so neither target drags the other's implementation.
+target_include_directories(zahlen_vulkan PUBLIC
+    ${PROJECT_SOURCE_DIR}/src/vkd3d/include
+)
+
 target_compile_definitions(zahlen_vulkan PRIVATE VMA_STATIC_VULKAN_FUNCTIONS=0
                                                  VMA_DYNAMIC_VULKAN_FUNCTIONS=1)
 

@@ -469,9 +469,9 @@ constexpr auto MakeRef(const T& resource) noexcept -> ImageSlice;
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept;
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, Vk::Format format = Tag::format) noexcept;
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, Vk::Format format = VkD3D::ToVk(Tag::format)) noexcept;
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, Vk::Format format = Tag::format) noexcept;
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, Vk::Format format = VkD3D::ToVk(Tag::format)) noexcept;
 
 }
 

@@ -9,6 +9,10 @@
 
 #include "GraphImage.hpp"
 #include <Zahlen/Core/FunctionRef.hpp>
+// The graph vocabulary (TypeList, Usage, RenderPass, FrameGraphPass, forks)
+// lives in the joint layer; this header keeps the Vulkan-facing aliases that
+// name Vk:: enums and the Vulkan pass context that records commands.
+#include <vkd3d/RenderPassDecl.hpp>
 #include <concepts>
 #include <cstddef>
 #include <span>
@@ -17,67 +21,34 @@
 
 namespace ZHLN::Vk {
 
-template <typename... Ts>
-struct TypeList {
-    static constexpr size_t size = sizeof...(Ts);
+// TypeList / IsInList / Usage / RenderPass / FrameGraphPass / the fork protocol
+// are the joint layer's vocabulary; re-exported so ZHLN::Vk keeps its spellings
+// while the definitions have exactly one home.
+using ZHLN::VkD3D::FrameGraphPass;
+using ZHLN::VkD3D::IsInList;
+using ZHLN::VkD3D::RenderPass;
+using ZHLN::VkD3D::ResourceName;
+using ZHLN::VkD3D::TypeList;
+using ZHLN::VkD3D::Usage;
 
-    template <size_t I>
-    using type = Ts...[I];
-};
+// The fork protocol is neutral over the command type; these two spellings bind
+// it to the Vulkan command buffer so pass code keeps naming Vk::ForkCall /
+// Vk::ForkRecorder. Commented as a binding, not a definition: the concept and
+// the alias live in the joint layer.
+using ForkCall = ZHLN::VkD3D::ForkCall<VkCommandBuffer>;
 
-template <typename List, typename Target>
-struct IsInList;
+template <typename Executor>
+concept ForkRecorder = ZHLN::VkD3D::ForkRecorder<Executor, VkCommandBuffer>;
 
-template <typename... Ts, typename Target>
-struct IsInList<Vk::TypeList<Ts...>, Target> {
-    static constexpr bool value = (std::is_same_v<Ts, Target> || ...);
-};
+using SequentialFork = ZHLN::VkD3D::SequentialFork<VkCommandBuffer>;
 
-namespace TemplatedDetail {
+static_assert(ForkRecorder<SequentialFork>);
 
-template <typename = void>
-struct EmptyResourceTag {
-    static constexpr auto name          = ResourceName("DummyResource");
-    static constexpr bool is_swapchain  = false;
-    static constexpr bool is_persistent = false;
-};
-
-template <typename T = void>
-struct EmptyUsageTag {
-    using Resource                                = EmptyResourceTag<T>;
-    static constexpr auto                  name   = ResourceName("DummyResource");
-    static constexpr bool                  is_swapchain  = false;
-    static constexpr bool                  is_persistent = false;
-    static constexpr Vk::ImageLayout         layout = Vk::ImageLayout::Undefined;
-    static constexpr Vk::PipelineStage stage  = Vk::PipelineStage::StageNone;
-    static constexpr Vk::Access        access = Vk::Access::AccessNone;
-};
-
-} // namespace TemplatedDetail
-
-template <>
-struct TypeList<> {
-    static constexpr size_t size = 0;
-
-    template <size_t I>
-    using type = TemplatedDetail::EmptyUsageTag<>;
-};
-
-template <
-    typename Image, Vk::ImageLayout Layout, Vk::PipelineStage Stage, Vk::Access Access,
-    Vk::ImageLayout FinalLayout = Layout, Vk::PipelineStage FinalStage = Stage, Vk::Access FinalAccess = Access,
-    VkColorComponentFlags ChannelMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT>
-struct Usage {
-    using Resource                                      = Image;
-    static constexpr Vk::ImageLayout         layout       = Layout;
-    static constexpr Vk::PipelineStage stage        = Stage;
-    static constexpr Vk::Access        access       = Access;
-    static constexpr Vk::ImageLayout         final_layout = FinalLayout;
-    static constexpr Vk::PipelineStage final_stage  = FinalStage;
-    static constexpr Vk::Access        final_access = FinalAccess;
-    static constexpr VkColorComponentFlags channel_mask = ChannelMask;
-};
-
+// The declared uses a pass actually names. These are compositions of the
+// neutral Usage, which is why they survive the move unchanged: the layout is a
+// Vk::ImageLayout and the stage/access are Vk::PipelineStage/Vk::Access, and
+// Usage carries them as deduced non-type parameters rather than fixed types.
+// A D3D12 pass will compose the same field names with its own enums.
 template <typename Image>
 using ColorWrite = Usage<
     Image,
@@ -100,6 +71,9 @@ template <typename Image>
 using ShaderRead = Usage<Image, Vk::ImageLayout::ShaderReadOnlyOptimal, Vk::PipelineStage::Fragment, Vk::Access::ShaderRead>;
 
 template <typename Image>
+using ShaderReadGeneral = Usage<Image, Vk::ImageLayout::General, Vk::PipelineStage::Fragment, Vk::Access::ShaderRead>;
+
+template <typename Image>
 using DepthWrite = Usage<
     Image,
     Vk::ImageLayout::DepthAttachmentOptimal,
@@ -120,12 +94,12 @@ template <typename Image>
 using ComputeRead = Usage<Image, Vk::ImageLayout::ShaderReadOnlyOptimal, Vk::PipelineStage::Compute, Vk::Access::ShaderRead>;
 
 template <typename Image>
+using ComputeReadGeneral = Usage<Image, Vk::ImageLayout::General, Vk::PipelineStage::Compute, Vk::Access::ShaderRead>;
+
+template <typename Image>
 using FragmentAndComputeRead = Usage<
     Image, Vk::ImageLayout::ShaderReadOnlyOptimal,
     Vk::PipelineStage::Fragment | Vk::PipelineStage::Compute, Vk::Access::ShaderRead>;
-
-template <typename Image>
-using ComputeReadGeneral = Usage<Image, Vk::ImageLayout::General, Vk::PipelineStage::Compute, Vk::Access::ShaderRead>;
 
 template <typename Image>
 using TransferSrcRead = Usage<Image, Vk::ImageLayout::TransferSrcOptimal, Vk::PipelineStage::Transfer, Vk::Access::TransferRead>;
@@ -138,59 +112,36 @@ using TransferDstWriteThenShaderRead = Usage<
     Image, Vk::ImageLayout::TransferDstOptimal, Vk::PipelineStage::Transfer, Vk::Access::TransferWrite,
     Vk::ImageLayout::ShaderReadOnlyOptimal, Vk::PipelineStage::Fragment, Vk::Access::ShaderRead>;
 
-template <typename Image>
-using ShaderReadGeneral = Usage<Image, Vk::ImageLayout::General, Vk::PipelineStage::Fragment, Vk::Access::ShaderRead>;
-
-template <typename T>
-concept FrameGraphPass = requires {
-    { T::name.string_view() } -> std::convertible_to<std::string_view>;
-    typename T::Usages;
-};
-
-template <ResourceName Name, typename... UsagesList>
-struct RenderPass {
-    static constexpr auto name = Name;
-    using Usages               = TypeList<UsagesList...>;
-};
-
-using ForkCall = ZHLN::FunctionRef<void(VkCommandBuffer) const>;
-
-template <typename Executor>
-concept ForkRecorder = requires(Executor& executor, VkCommandBuffer cmd, std::span<const ForkCall> bodies) {
-    { executor.ExecuteFork(cmd, bodies) } noexcept;
-};
-
-struct SequentialFork {
-    static constexpr void ExecuteFork(VkCommandBuffer cmd, std::span<const ForkCall> bodies) noexcept {
-        for (const ForkCall& body : bodies) {
-            body(cmd);
-        }
-    }
-};
-
-static_assert(ForkRecorder<SequentialFork>);
+// Everything above is neutral; a Usage's ChannelMask has no Vulkan meaning, but
+// the color-write mask a pass hands the pipeline does, so that default stays
+// spelled with the VK_COLOR_COMPONENT_* constants below.
 
 namespace TemplatedDetail {
+
+// The graph empty-slot stand-ins moved with the vocabulary; re-exported so the
+// Vk:: spellings internal traversal already uses keep resolving.
+using ZHLN::VkD3D::TemplatedDetail::EmptyResourceTag;
+using ZHLN::VkD3D::TemplatedDetail::EmptyUsageTag;
 
 template <typename U>
 struct IsColorAttachment: std::false_type {};
 
 template <
-    typename Image, Vk::PipelineStage Stage, Vk::Access Access,
-    Vk::ImageLayout FinalLayout, Vk::PipelineStage FinalStage, Vk::Access FinalAccess, VkColorComponentFlags Mask>
+    typename Image, auto Stage, auto Access,
+    auto FinalLayout, auto FinalStage, auto FinalAccess, auto Mask>
 struct IsColorAttachment<Usage<Image, Vk::ImageLayout::ColorAttachmentOptimal, Stage, Access, FinalLayout, FinalStage, FinalAccess, Mask>>: std::true_type {};
 
 template <typename U>
 struct IsDepthAttachment: std::false_type {};
 
 template <
-    typename Image, Vk::PipelineStage Stage, Vk::Access Access,
-    Vk::ImageLayout FinalLayout, Vk::PipelineStage FinalStage, Vk::Access FinalAccess, VkColorComponentFlags Mask>
+    typename Image, auto Stage, auto Access,
+    auto FinalLayout, auto FinalStage, auto FinalAccess, auto Mask>
 struct IsDepthAttachment<Usage<Image, Vk::ImageLayout::DepthAttachmentOptimal, Stage, Access, FinalLayout, FinalStage, FinalAccess, Mask>>: std::true_type {};
 
 template <
-    typename Image, Vk::PipelineStage Stage, Vk::Access Access,
-    Vk::ImageLayout FinalLayout, Vk::PipelineStage FinalStage, Vk::Access FinalAccess, VkColorComponentFlags Mask>
+    typename Image, auto Stage, auto Access,
+    auto FinalLayout, auto FinalStage, auto FinalAccess, auto Mask>
 struct IsDepthAttachment<Usage<Image, Vk::ImageLayout::DepthStencilAttachmentOptimal, Stage, Access, FinalLayout, FinalStage, FinalAccess, Mask>>: std::true_type {};
 
 } // namespace TemplatedDetail

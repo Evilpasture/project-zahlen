@@ -11,6 +11,12 @@
 #include "../memory/ImageSlice.hpp"
 #include "../memory/ImageView.hpp"
 #include "RenderQueue.hpp"
+// The layout->sync derivation is graph theory, not backend knowledge: it lives
+// in the joint layer and both backends consume it (src/vkd3d/include/vkd3d/
+// Barriers.hpp). Included by path, like src/render does -- Vulkan headers are
+// already visible here, so this header names no new dependency.
+#include <vkd3d/Barriers.hpp>
+#include <vkd3d/VulkanConversions.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -20,92 +26,6 @@
 #include <vector>
 
 namespace ZHLN::Vk {
-
-struct LayoutSyncInfo {
-    Vk::PipelineStage stage;
-    Vk::Access        access;
-    std::string_view      name;
-};
-
-[[nodiscard]] constexpr auto GetLayoutSyncInfo(Vk::ImageLayout layout, bool isSource) noexcept -> LayoutSyncInfo {
-    switch (layout) {
-        case Vk::ImageLayout::Undefined:
-            return {.stage = Vk::PipelineStage::StageNone, .access = Vk::Access::AccessNone, .name = "UNDEFINED"};
-
-        case Vk::ImageLayout::ColorAttachmentOptimal:
-            return {
-                .stage  = Vk::PipelineStage::ColorAttachment,
-                .access = isSource ? Vk::Access::ColorWrite : (Vk::Access::ColorRead | Vk::Access::ColorWrite),
-                .name   = "COLOR_ATTACHMENT_OPTIMAL",
-            };
-
-        case Vk::ImageLayout::DepthAttachmentOptimal:
-            return {
-                .stage  = Vk::PipelineStage::EarlyFragment | Vk::PipelineStage::LateFragment,
-                .access = isSource ? Vk::Access::DepthWrite :
-                                     (Vk::Access::DepthRead | Vk::Access::DepthWrite),
-                .name   = "DEPTH_ATTACHMENT_OPTIMAL",
-            };
-
-        case Vk::ImageLayout::DepthStencilAttachmentOptimal:
-            return {
-                .stage  = Vk::PipelineStage::EarlyFragment | Vk::PipelineStage::LateFragment,
-                .access = isSource ? Vk::Access::DepthWrite :
-                                     (Vk::Access::DepthRead | Vk::Access::DepthWrite),
-                .name   = "DEPTH_STENCIL_ATTACHMENT_OPTIMAL",
-            };
-
-        case Vk::ImageLayout::ShaderReadOnlyOptimal:
-            return {
-                .stage  = Vk::PipelineStage::Fragment | Vk::PipelineStage::Compute,
-                .access = Vk::Access::ShaderRead,
-                .name   = "SHADER_READ_ONLY_OPTIMAL",
-            };
-
-        case Vk::ImageLayout::PresentSrc:
-            return {.stage = Vk::PipelineStage::ColorAttachment, .access = Vk::Access::AccessNone, .name = "PRESENT_SRC_KHR"};
-
-        case Vk::ImageLayout::TransferDstOptimal:
-            return {.stage = Vk::PipelineStage::Transfer, .access = Vk::Access::TransferWrite, .name = "TRANSFER_DST_OPTIMAL"};
-
-        case Vk::ImageLayout::TransferSrcOptimal:
-            return {.stage = Vk::PipelineStage::Transfer, .access = Vk::Access::TransferRead, .name = "TRANSFER_SRC_OPTIMAL"};
-
-        case Vk::ImageLayout::General:
-            return {
-                .stage  = Vk::PipelineStage::AllCommands,
-                .access = Vk::Access::ShaderRead | Vk::Access::ShaderWrite,
-                .name   = "GENERAL",
-            };
-
-        default:
-            return {
-                .stage  = Vk::PipelineStage::AllCommands,
-                .access = isSource ? Vk::Access::MemoryWrite : Vk::Access::MemoryRead,
-                .name   = "UNKNOWN_OR_CUSTOM_LAYOUT",
-            };
-    }
-}
-
-template <Vk::ImageLayout Layout>
-struct LayoutTraits {
-    static constexpr auto             kInfo = GetLayoutSyncInfo(Layout, false);
-    static constexpr std::string_view kName = kInfo.name;
-
-    static constexpr Vk::PipelineStage kStage = []() constexpr {
-        if constexpr (Layout == Vk::ImageLayout::Undefined) {
-            return Vk::PipelineStage::StageNone;
-        } else if constexpr (Layout == Vk::ImageLayout::ShaderReadOnlyOptimal) {
-            return Vk::PipelineStage::Fragment;
-        } else if constexpr (Layout == Vk::ImageLayout::General) {
-            return Vk::PipelineStage::Compute;
-        } else {
-            return kInfo.stage;
-        }
-    }();
-
-    static constexpr Vk::Access kAccess = kInfo.access;
-};
 
 // A compact 64-byte (one cache line) value-type description of an image memory
 // barrier, following the same JIT synthesis discipline as Vk::Sampler,
@@ -129,9 +49,9 @@ class ImageBarrier {
     /// Automatic layout transition for any ImageView (deduces aspect, subresource range, stages, and accesses).
     template <Vk::ImageLayout OldLayout, Vk::ImageLayout NewLayout>
     [[nodiscard]] static constexpr auto Transition(ImageView view) noexcept -> ImageBarrier {
-        using Src = LayoutTraits<OldLayout>;
-        using Dst = LayoutTraits<NewLayout>;
-        return FromRange(view.Handle(), view.SubresourceRange(), OldLayout, NewLayout, Src::kStage, Src::kAccess, Dst::kStage, Dst::kAccess);
+        using Src = VkD3D::LayoutTraits<VkD3D::FromVk(OldLayout)>;
+        using Dst = VkD3D::LayoutTraits<VkD3D::FromVk(NewLayout)>;
+        return FromRange(view.Handle(), view.SubresourceRange(), OldLayout, NewLayout, VkD3D::ToVk(Src::kStage), VkD3D::ToVk(Src::kAccess), VkD3D::ToVk(Dst::kStage), VkD3D::ToVk(Dst::kAccess));
     }
 
     /// Automatic layout transition for an ImageSlice.
@@ -143,16 +63,16 @@ class ImageBarrier {
     /// Automatic layout transition for an explicit subresource range when only a raw VkImage handle is available.
     template <Vk::ImageLayout OldLayout, Vk::ImageLayout NewLayout>
     [[nodiscard]] static constexpr auto Transition(VkImage image, const VkImageSubresourceRange& range) noexcept -> ImageBarrier {
-        using Src = LayoutTraits<OldLayout>;
-        using Dst = LayoutTraits<NewLayout>;
-        return FromRange(image, range, OldLayout, NewLayout, Src::kStage, Src::kAccess, Dst::kStage, Dst::kAccess);
+        using Src = VkD3D::LayoutTraits<VkD3D::FromVk(OldLayout)>;
+        using Dst = VkD3D::LayoutTraits<VkD3D::FromVk(NewLayout)>;
+        return FromRange(image, range, OldLayout, NewLayout, VkD3D::ToVk(Src::kStage), VkD3D::ToVk(Src::kAccess), VkD3D::ToVk(Dst::kStage), VkD3D::ToVk(Dst::kAccess));
     }
 
     /// Runtime layout transition deriving conservative sync masks from oldLayout / newLayout.
     [[nodiscard]] static constexpr auto Transition(ImageView view, Vk::ImageLayout oldLayout, Vk::ImageLayout newLayout) noexcept -> ImageBarrier {
-        const LayoutSyncInfo src = GetLayoutSyncInfo(oldLayout, true);
-        const LayoutSyncInfo dst = GetLayoutSyncInfo(newLayout, false);
-        return FromRange(view.Handle(), view.SubresourceRange(), oldLayout, newLayout, src.stage, src.access, dst.stage, dst.access);
+        const VkD3D::LayoutSyncInfo src = VkD3D::GetLayoutSyncInfo(VkD3D::FromVk(oldLayout), true);
+        const VkD3D::LayoutSyncInfo dst = VkD3D::GetLayoutSyncInfo(VkD3D::FromVk(newLayout), false);
+        return FromRange(view.Handle(), view.SubresourceRange(), oldLayout, newLayout, VkD3D::ToVk(src.stage), VkD3D::ToVk(src.access), VkD3D::ToVk(dst.stage), VkD3D::ToVk(dst.access));
     }
 
     [[nodiscard]] static constexpr auto Transition(const ImageSlice& slice, Vk::ImageLayout oldLayout, Vk::ImageLayout newLayout) noexcept -> ImageBarrier {
