@@ -3,7 +3,8 @@
 
 #pragma once
 #include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 
 namespace ZHLN {
 struct RenderFrame;
@@ -12,16 +13,16 @@ struct RenderFrame;
 namespace ZHLN::Passes {
 
 struct BloomPass:
-    Vk::RenderPass<
+    VkD3D::RenderPass<
         "BloomKawase",
-        Vk::ComputeRead<Res_HdrSceneColor>,
-        Vk::ComputeWrite<Res_BloomThresh>,
-        Vk::ComputeWrite<Res_BloomDown1>,
-        Vk::ComputeWrite<Res_BloomDown2>,
-        Vk::ComputeWrite<Res_BloomDown3>,
-        Vk::ComputeWrite<Res_BloomUp2>,
-        Vk::ComputeWrite<Res_BloomUp1>,
-        Vk::ComputeWrite<Res_BloomFinal>> {
+        VkD3D::ComputeRead<Res_HdrSceneColor>,
+        VkD3D::ComputeWrite<Res_BloomThresh>,
+        VkD3D::ComputeWrite<Res_BloomDown1>,
+        VkD3D::ComputeWrite<Res_BloomDown2>,
+        VkD3D::ComputeWrite<Res_BloomDown3>,
+        VkD3D::ComputeWrite<Res_BloomUp2>,
+        VkD3D::ComputeWrite<Res_BloomUp1>,
+        VkD3D::ComputeWrite<Res_BloomFinal>> {
     RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;

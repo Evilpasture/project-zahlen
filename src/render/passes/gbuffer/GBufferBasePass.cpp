@@ -91,7 +91,7 @@ void RecordGpuCulled(
 
     const auto block = ctx.renderer.heapManager.WriteHeapParameters<Shaders::Culling>(
         cull.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.instanceDataBuffers), Vk::Slot<"g_indirectCommands">(ctx.indirectCommandsBuffers),
-        Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
+        Vk::Slot<"g_hizTexture">(Vk::Assume<VkD3D::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
         Vk::Slot<"g_secondPassCandidates">(ctx.secondPassCandidatesBuffers), Vk::Slot<"g_secondPassCount">(countBuf)
     );
     cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);

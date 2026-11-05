@@ -77,7 +77,7 @@ inline constexpr auto kFxaaPrepare = +[](RenderFrame& frame) noexcept {
             .edgeThresholdMin = frame.settings.antiAliasing.fxaaEdgeThresholdMin,
             ._pad             = 0.0f
         },
-        Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
+        Vk::Slot<"texInput">(Vk::Assume<VkD3D::ShaderRead<Res_HdrSceneColor>>(inputColor))
     );
 };
 

@@ -9,6 +9,7 @@
 
 #include "PipelineBuilder.hpp" // PipelineBuilderError, CreateGraphicsPipeline, ComputePipelineBuilder
 #include "PipelineBinaries.hpp"  // PipelineBinarySession: Create() below runs the binary cache itself
+#include <vkd3d/VulkanConversions.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -87,7 +88,7 @@ template <typename Usage>
                       typename Usage::Resource;
                       Usage::layout;
                   }) {
-        return Usage::layout == Vk::ImageLayout::ColorAttachmentOptimal;
+        return Usage::layout == VkD3D::ImageLayout::ColorAttachmentOptimal;
     } else {
         return false;
     }
@@ -99,7 +100,7 @@ template <typename Usage>
                       typename Usage::Resource;
                       Usage::layout;
                   }) {
-        return Usage::layout == Vk::ImageLayout::DepthAttachmentOptimal || Usage::layout == Vk::ImageLayout::DepthStencilAttachmentOptimal;
+        return Usage::layout == VkD3D::ImageLayout::DepthAttachmentOptimal || Usage::layout == VkD3D::ImageLayout::DepthStencilAttachmentOptimal;
     } else {
         return false;
     }
@@ -120,7 +121,7 @@ consteval void AppendColorFormat(std::array<Vk::Format, N>& formats, size_t& out
     using Usage = typename UsageList::template type<Index>;
     if constexpr (IsColorAttachmentUsage<Usage>()) {
         using Resource      = typename Usage::Resource;
-        formats[outIndex++] = Resource::format;
+        formats[outIndex++] = VkD3D::ToVk(Resource::format);
     }
 }
 
@@ -128,7 +129,7 @@ template <typename UsageList, size_t Index, size_t N>
 consteval void AppendColorMask(std::array<VkColorComponentFlags, N>& masks, size_t& outIndex) noexcept {
     using Usage = typename UsageList::template type<Index>;
     if constexpr (IsColorAttachmentUsage<Usage>()) {
-        masks[outIndex++] = Usage::channel_mask;
+        masks[outIndex++] = VkD3D::ToVk(Usage::channel_mask);
     }
 }
 
@@ -158,7 +159,7 @@ template <typename UsageList, size_t... Index>
             using Usage = typename UsageList::template type<Index>;
             if constexpr (IsDepthAttachmentUsage<Usage>()) {
                 using Resource = typename Usage::Resource;
-                format         = Resource::format;
+                format         = VkD3D::ToVk(Resource::format);
             }
         }(),
         ...);

@@ -246,6 +246,18 @@ namespace ZHLN::VkD3D {
     return result;
 }
 
+// The neutral write mask has no Vk:: spelling (color components were never
+// swept into the joint vocabulary); it lowers straight to the raw flag type.
+// Bit correspondence is pinned in src/vkd3d/Enums.cpp.
+[[nodiscard]] constexpr auto ToVk(ColorMask mask) noexcept -> VkColorComponentFlags {
+    VkColorComponentFlags result = 0;
+    if (Has(mask, ColorMask::Red)) { result |= VK_COLOR_COMPONENT_R_BIT; }
+    if (Has(mask, ColorMask::Green)) { result |= VK_COLOR_COMPONENT_G_BIT; }
+    if (Has(mask, ColorMask::Blue)) { result |= VK_COLOR_COMPONENT_B_BIT; }
+    if (Has(mask, ColorMask::Alpha)) { result |= VK_COLOR_COMPONENT_A_BIT; }
+    return result;
+}
+
 [[nodiscard]] constexpr auto ToVk(CompareOp op) noexcept -> Vk::CompareOp {
     switch (op) {
         case CompareOp::Never: return Vk::CompareOp::Never;

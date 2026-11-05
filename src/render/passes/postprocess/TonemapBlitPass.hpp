@@ -5,7 +5,8 @@
 #include "PassPayloads.hpp"
 #include "Renderer.hpp"
 #include "TargetManager.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 #include "passes/FullscreenPassRecorder.hpp"
 #include "passes/postprocess/PostProcessResources.hpp"
 #include <ShaderBindings.hpp>
@@ -38,7 +39,7 @@ using BlitInputRes = std::conditional_t<Mode != AAMode::None, Res_AccumCurrent, 
 
 template <AAMode Mode>
 struct TonemapBlitPass:
-    Vk::RenderPass<"Blit", Vk::ShaderRead<BlitInputRes<Mode>>, Vk::ShaderRead<Res_BloomFinal>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_Swapchain>> {
+    VkD3D::RenderPass<"Blit", VkD3D::ShaderRead<BlitInputRes<Mode>>, VkD3D::ShaderRead<Res_BloomFinal>, VkD3D::ShaderRead<Res_Depth>, VkD3D::ColorWrite<Res_Swapchain>> {
     using SwapchainImageFn = FunctionRef<Vk::TypedImage<Vk::ImageLayout::ColorAttachmentOptimal>() const>;
 
     PostProcessResources& post;
@@ -78,9 +79,9 @@ struct TonemapBlitPass:
                 };
 
                 return MakeFullscreenPassArgs(
-                    pc, Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<BlitInputRes<Mode>>>(blitInputImage)),
-                    Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(frame.graphResources.bloomFinalTarget)),
-                    Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(frame.ActiveDepthTarget())), Vk::Unread<"frame">(frame.frameUniformBuffers)
+                    pc, Vk::Slot<"texInput">(Vk::Assume<VkD3D::ShaderRead<BlitInputRes<Mode>>>(blitInputImage)),
+                    Vk::Slot<"texBloom">(Vk::Assume<VkD3D::ShaderRead<Res_BloomFinal>>(frame.graphResources.bloomFinalTarget)),
+                    Vk::Unread<"texDepth">(Vk::Assume<VkD3D::ShaderRead<Res_Depth>>(frame.ActiveDepthTarget())), Vk::Unread<"frame">(frame.frameUniformBuffers)
                 );
             },
             [&swapchainTarget](RenderFrame&, VkCommandBuffer drawCmd, auto&& execute) {

@@ -3,7 +3,8 @@
 
 #pragma once
 #include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 
 namespace ZHLN {
 struct RenderFrame;
@@ -12,13 +13,13 @@ struct RenderFrame;
 namespace ZHLN::Passes {
 
 struct ViewmodelPass:
-    Vk::RenderPass<
+    VkD3D::RenderPass<
         "Viewmodel",
-        Vk::ColorWrite<Res_SceneColor>,
-        Vk::ColorWrite<Res_Velocity>,
-        Vk::ColorWrite<Res_NormRough>,
-        Vk::ColorWrite<Res_BakedMask>,
-        Vk::DepthStencilWrite<Res_Depth>> {
+        VkD3D::ColorWrite<Res_SceneColor>,
+        VkD3D::ColorWrite<Res_Velocity>,
+        VkD3D::ColorWrite<Res_NormRough>,
+        VkD3D::ColorWrite<Res_BakedMask>,
+        VkD3D::DepthStencilWrite<Res_Depth>> {
     RenderFrame& frame;
 
     void operator()(Vk::RasterPassContextBase& pass) const noexcept;

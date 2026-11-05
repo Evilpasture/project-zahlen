@@ -12,10 +12,10 @@ void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
     Vk::CommandEncoder encoder(cmd);
     const auto         sceneVp = frame.viewport;
 
-    const auto norm_att  = Vk::Assume<Vk::ColorWrite<Res_TransNorm>>(frame.graphResources.transNormalBuffer);
-    const auto aniso_att = Vk::Assume<Vk::ColorWrite<Res_TransAnisotropy>>(frame.graphResources.transAnisotropyBuffer);
-    const auto sheen_att = Vk::Assume<Vk::ColorWrite<Res_TransSheen>>(frame.graphResources.transSheenBuffer);
-    const auto depth_att = Vk::Assume<Vk::DepthStencilWrite<Res_TransDepth>>(frame.graphResources.transDepthBuffer);
+    const auto norm_att  = Vk::Assume<VkD3D::ColorWrite<Res_TransNorm>>(frame.graphResources.transNormalBuffer);
+    const auto aniso_att = Vk::Assume<VkD3D::ColorWrite<Res_TransAnisotropy>>(frame.graphResources.transAnisotropyBuffer);
+    const auto sheen_att = Vk::Assume<VkD3D::ColorWrite<Res_TransSheen>>(frame.graphResources.transSheenBuffer);
+    const auto depth_att = Vk::Assume<VkD3D::DepthStencilWrite<Res_TransDepth>>(frame.graphResources.transDepthBuffer);
 
     Vk::DynamicPass(norm_att.Extent())
         .Viewport(sceneVp)

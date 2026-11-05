@@ -16,7 +16,7 @@ namespace ZHLN {
 
 auto RenderContext::Impl::BuildEmissivePipeline() -> std::expected<void, ErrorCode> {
     static_assert(
-        Vk::ColorAttachmentWriteMask<Passes::EmissivePass, Res_LightingGI>() ==
+        VkD3D::ToVk(VkD3D::ColorAttachmentWriteMask<Passes::EmissivePass, Res_LightingGI>()) ==
             (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT),
         "Deferred emission must not write LightingGI alpha"
     );
@@ -34,7 +34,7 @@ auto RenderContext::Impl::BuildEmissivePipeline() -> std::expected<void, ErrorCo
                 .DepthCompare(Vk::CompareOp::LessOrEqual)
                 .DynamicCullMode()
                 .AdditiveRGBPreserveAlpha()
-                .ColorWriteMask(Vk::ColorAttachmentWriteMask<Passes::EmissivePass, Res_LightingGI>())
+                .ColorWriteMask(VkD3D::ToVk(VkD3D::ColorAttachmentWriteMask<Passes::EmissivePass, Res_LightingGI>()))
                 .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { forward.emissive = std::forward<decltype(pipeline)>(pipeline); });
@@ -207,7 +207,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
 }
 
 auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode> {
-    static constexpr std::array<Vk::Format, 2> decalFormats = {Res_SceneColor::format, Res_NormRough::format};
+    static constexpr std::array<Vk::Format, 2> decalFormats = {VkD3D::ToVk(Res_SceneColor::format), VkD3D::ToVk(Res_NormRough::format)};
 
     const std::array reflectInputs = {
         Vk::ReflectedStageInput {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalVS>(), .stage = Vk::ShaderStage::Vertex},

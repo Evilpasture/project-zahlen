@@ -27,11 +27,6 @@
       "reason": "The archetype the ParallelScheduler concept's requires-expression is checked against: a concept cannot name a lambda in an unevaluated context, so the callback type it demands has to be a real type declared beside it. The struct is not a template; the concept that consumes it is."
     },
     {
-      "path": "src/vulkan/graph/RenderGraph.hpp",
-      "namespace": "ZHLN::Vk::detail",
-      "reason": "Stubs that a zero-usage pass (a BDA compute pass, say) names instead of void, so the pass machinery in the TemplatedDetail block further down this file has a Resource plus layout/stage/access triple to work with. Plain structs: what is templated is the machinery that consumes them, not these."
-    },
-    {
       "path": "tests/extras/profile/PerfBaseline.hpp",
       "namespace": "ZHLN::Test::Perf::detail",
       "reason": "One baseline store per process, reached through Store()'s function-local static and flushed by its destructor at exit. This header is included by several test executables and has no translation unit of its own, so inline plus a function-local static is the only way to get exactly one definition shared by all of them -- which is the point, since accepted metrics are merged over a fresh copy of the file at save time."

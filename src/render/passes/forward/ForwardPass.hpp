@@ -4,7 +4,8 @@
 #pragma once
 #include "PassPayloads.hpp"
 #include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 
 namespace ZHLN {
 struct ForwardResources;
@@ -13,7 +14,7 @@ struct RenderFrame;
 
 namespace ZHLN::Passes {
 
-struct ForwardPass: Vk::RenderPass<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>, Vk::ShaderRead<Res_TransLighting>> {
+struct ForwardPass: VkD3D::RenderPass<"Forward", VkD3D::ColorWrite<Res_HdrSceneColor>, VkD3D::DepthStencilWrite<Res_Depth>, VkD3D::ShaderRead<Res_TransLighting>> {
     using PushConstants = ObjectConstants;
 
     const ForwardResources& forward;

@@ -3,7 +3,8 @@
 
 #pragma once
 #include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 
 namespace ZHLN {
 struct DecalResources;
@@ -17,7 +18,7 @@ namespace ZHLN::Passes {
 // ambient ownership the G-buffer pass gave them, which is what a decal on a
 // lightmapped wall should inherit. Its pipeline is also a two-attachment pass of
 // its own (BuildDecalPipeline), not a variant of the compact G-buffer.
-struct DecalPass: Vk::RenderPass<"DecalPass", Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_NormRough>> {
+struct DecalPass: VkD3D::RenderPass<"DecalPass", VkD3D::ShaderRead<Res_Depth>, VkD3D::ColorWrite<Res_SceneColor>, VkD3D::ColorWrite<Res_NormRough>> {
     const DecalResources& decals;
     RenderFrame&          frame;
 

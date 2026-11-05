@@ -4,7 +4,8 @@
 #pragma once
 #include "PassPayloads.hpp"
 #include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 
 namespace ZHLN {
 struct ForwardResources;
@@ -17,7 +18,7 @@ namespace ZHLN::Passes {
 // material emission is sampled a second time and additively rasterized into
 // HDR LightingGI after GI composition, before reflection reads that target.
 struct EmissivePass:
-    Vk::RenderPass<"Emissive", Vk::ColorWriteRGB<Res_LightingGI>, Vk::DepthStencilWrite<Res_Depth>> {
+    VkD3D::RenderPass<"Emissive", VkD3D::ColorWriteRGB<Res_LightingGI>, VkD3D::DepthStencilWrite<Res_Depth>> {
     using PushConstants = ObjectConstants;
 
     const ForwardResources& forward;

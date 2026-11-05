@@ -3,7 +3,8 @@
 
 #pragma once
 #include "Rendering.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 
 namespace ZHLN {
 struct CullingResources;
@@ -12,7 +13,7 @@ struct RenderFrame;
 
 namespace ZHLN::Passes {
 
-struct ClusterCullingPass: Vk::RenderPass<"ClusterCulling"> {
+struct ClusterCullingPass: VkD3D::RenderPass<"ClusterCulling"> {
     CullingResources&   cull;
     RenderFrame&        frame;
 

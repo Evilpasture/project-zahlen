@@ -4,7 +4,8 @@
 #pragma once
 #include "PassPayloads.hpp"
 #include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 
 namespace ZHLN {
 struct CullingResources;
@@ -14,13 +15,13 @@ struct RenderFrame;
 namespace ZHLN::Passes {
 
 struct GBufferBasePass:
-    Vk::RenderPass<
+    VkD3D::RenderPass<
         "MainPass1",
-        Vk::ColorWrite<Res_SceneColor>,
-        Vk::ColorWrite<Res_Velocity>,
-        Vk::ColorWrite<Res_NormRough>,
-        Vk::ColorWrite<Res_BakedMask>,
-        Vk::DepthStencilWrite<Res_Depth>> {
+        VkD3D::ColorWrite<Res_SceneColor>,
+        VkD3D::ColorWrite<Res_Velocity>,
+        VkD3D::ColorWrite<Res_NormRough>,
+        VkD3D::ColorWrite<Res_BakedMask>,
+        VkD3D::DepthStencilWrite<Res_Depth>> {
     using PushConstants = ObjectConstants;
 
     CullingResources&   cull;

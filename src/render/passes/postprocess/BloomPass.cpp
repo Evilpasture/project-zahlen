@@ -16,7 +16,7 @@ namespace ZHLN::Passes {
 void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
     using namespace Shaders;
 
-    const auto srcHdr     = Vk::Assume<Vk::ComputeRead<Res_HdrSceneColor>>(frame.graphResources.hdrSceneColor);
+    const auto srcHdr     = Vk::Assume<VkD3D::ComputeRead<Res_HdrSceneColor>>(frame.graphResources.hdrSceneColor);
     const auto thresh     = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.bloomThresholdTarget);
     const auto down1      = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.bloomDown1);
     const auto down2      = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.bloomDown2);

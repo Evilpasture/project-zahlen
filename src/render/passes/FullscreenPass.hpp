@@ -3,7 +3,8 @@
 
 #pragma once
 #include "RenderFrame.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 #include "passes/FullscreenPassRecorder.hpp"
 #include "passes/GraphPassUtils.hpp"
 
@@ -17,14 +18,14 @@ namespace ZHLN::Passes {
 // at the call site), which is why the call sites pass a named function
 // pointer and decltype(...).
 template <
-    Vk::ResourceName PassName,
+    VkD3D::ResourceName PassName,
     typename ShaderDecl,
     typename ShaderModule,
     typename OutRes,
     typename PushT,
     typename PrepareFn,
     typename... InRes>
-struct FullscreenPass: Vk::RenderPass<PassName, Vk::ShaderRead<InRes>..., Vk::ColorWrite<OutRes>> {
+struct FullscreenPass: VkD3D::RenderPass<PassName, VkD3D::ShaderRead<InRes>..., VkD3D::ColorWrite<OutRes>> {
     static_assert(TemplatedDetail::kNameProfilesAsStage<PassName>, "the pass name has no Stage enumerator, so the GPU profiler would never time it");
 
     RenderFrame&                             frame;

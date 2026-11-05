@@ -14,28 +14,28 @@ struct FindResourceUsage {
 };
 
 template <typename Head, typename... Tail, typename TargetResource>
-struct FindResourceUsage<TypeList<Head, Tail...>, TargetResource> {
+struct FindResourceUsage<VkD3D::TypeList<Head, Tail...>, TargetResource> {
     static consteval auto Select() {
         if constexpr (std::is_same_v<typename Head::Resource, TargetResource>) {
             return std::type_identity<Head> {};
         } else {
-            return std::type_identity<typename FindResourceUsage<TypeList<Tail...>, TargetResource>::type> {};
+            return std::type_identity<typename FindResourceUsage<VkD3D::TypeList<Tail...>, TargetResource>::type> {};
         }
     }
     using type = typename decltype(Select())::type;
 };
 
 template <typename OutList, template <typename> class Predicate>
-struct FilterImpl<TypeList<>, OutList, Predicate> {
+struct FilterImpl<VkD3D::TypeList<>, OutList, Predicate> {
     using type = OutList;
 };
 
 template <typename Head, typename... Tail, typename... Out, template <typename> class Predicate>
-struct FilterImpl<TypeList<Head, Tail...>, TypeList<Out...>, Predicate> {
+struct FilterImpl<VkD3D::TypeList<Head, Tail...>, VkD3D::TypeList<Out...>, Predicate> {
     using type = typename std::conditional_t<
         Predicate<Head>::value,
-        FilterImpl<TypeList<Tail...>, TypeList<Out..., typename Head::Resource>, Predicate>,
-        FilterImpl<TypeList<Tail...>, TypeList<Out...>, Predicate>>::type;
+        FilterImpl<VkD3D::TypeList<Tail...>, VkD3D::TypeList<Out..., typename Head::Resource>, Predicate>,
+        FilterImpl<VkD3D::TypeList<Tail...>, VkD3D::TypeList<Out...>, Predicate>>::type;
 };
 
 template <typename Accumulated>
@@ -49,9 +49,9 @@ struct MergeFold<Accumulated, Head, Tail...> {
 };
 
 template <typename... Ts, typename T>
-struct AppendUnique<TypeList<Ts...>, T> {
+struct AppendUnique<VkD3D::TypeList<Ts...>, T> {
     static constexpr bool contains = (std::is_same_v<Ts, T> || ...);
-    using type                     = std::conditional_t<contains, TypeList<Ts...>, TypeList<Ts..., T>>;
+    using type                     = std::conditional_t<contains, VkD3D::TypeList<Ts...>, VkD3D::TypeList<Ts..., T>>;
 };
 
 template <typename Existing, typename Incoming>
@@ -66,7 +66,7 @@ struct CombineSameResourceUsage<Existing, Incoming> {
         Existing::layout == Incoming::layout && Existing::final_layout == Incoming::final_layout,
         "Concurrent passes in a ParallelPass cannot require different layouts for the same resource."
     );
-    using type = Usage<
+    using type = VkD3D::Usage<
         typename Existing::Resource,
         Existing::layout,
         Existing::stage | Incoming::stage,
@@ -81,31 +81,31 @@ template <typename List, typename T>
 struct MergeUsageIntoList;
 
 template <typename... Ts, typename T>
-struct MergeUsageIntoList<TypeList<Ts...>, T> {
+struct MergeUsageIntoList<VkD3D::TypeList<Ts...>, T> {
     static consteval auto Select() {
         if constexpr ((std::is_same_v<typename Ts::Resource, typename T::Resource> || ...)) {
-            return std::type_identity<TypeList<typename CombineSameResourceUsage<Ts, T>::type...>> {};
+            return std::type_identity<VkD3D::TypeList<typename CombineSameResourceUsage<Ts, T>::type...>> {};
         } else {
-            return std::type_identity<TypeList<Ts..., T>> {};
+            return std::type_identity<VkD3D::TypeList<Ts..., T>> {};
         }
     }
     using type = typename decltype(Select())::type;
 };
 
 template <typename List1>
-struct MergeLists<List1, TypeList<>> {
+struct MergeLists<List1, VkD3D::TypeList<>> {
     using type = List1;
 };
 
 template <typename List1, typename Head, typename... Tail>
-struct MergeLists<List1, TypeList<Head, Tail...>> {
+struct MergeLists<List1, VkD3D::TypeList<Head, Tail...>> {
     using HeadResources = typename MergeUsageIntoList<List1, Head>::type;
-    using type          = typename MergeLists<HeadResources, TypeList<Tail...>>::type;
+    using type          = typename MergeLists<HeadResources, VkD3D::TypeList<Tail...>>::type;
 };
 
 template <typename... Usages>
-struct ExtractResources<TypeList<Usages...>> {
-    using type = TypeList<typename Usages::Resource...>;
+struct ExtractResources<VkD3D::TypeList<Usages...>> {
+    using type = VkD3D::TypeList<typename Usages::Resource...>;
 };
 
 template <typename Accumulated, typename... Usages>
@@ -123,7 +123,7 @@ template <typename Accumulated, typename Usages>
 struct CollectResources;
 
 template <typename Accumulated, typename... Usages>
-struct CollectResources<Accumulated, TypeList<Usages...>> {
+struct CollectResources<Accumulated, VkD3D::TypeList<Usages...>> {
     using type = typename UniqueResourcesFold<Accumulated, Usages...>::type;
 };
 
@@ -140,234 +140,8 @@ struct CollectAllResourcesFold<Accumulated, Head, Tail...> {
 
 template <typename... Passes>
 struct CollectAllResources {
-    using type = typename CollectAllResourcesFold<TypeList<>, Passes...>::type;
+    using type = typename CollectAllResourcesFold<VkD3D::TypeList<>, Passes...>::type;
 };
-
-template <typename Target, typename... Ts>
-consteval auto GetResourceIndexImpl(TypeList<Ts...> ) -> size_t {
-    size_t                idx   = 0;
-    [[maybe_unused]] bool found = ((std::is_same_v<Target, Ts> ? true : (++idx, false)) || ...);
-    return idx;
-}
-
-template <typename ResourceList, typename Target>
-consteval auto GetResourceIndex() -> size_t {
-    if constexpr (std::is_same_v<Target, detail::DummyResource> || std::is_same_v<Target, EmptyResourceTag<>>) {
-        return 0;
-    } else {
-        constexpr size_t idx = GetResourceIndexImpl<Target>(ResourceList {});
-
-        if constexpr (idx >= ResourceList::size) {
-            constexpr auto error_message = []() consteval {
-                ConstexprString<2048> msg {};
-                msg.append("\n\n");
-                msg.append("================================================================================\n");
-                msg.append("  [GRAPH COMPILATION ERROR]\n");
-                msg.append("================================================================================\n\n");
-                msg.append("  The requested resource is not registered in this Frame Graph!\n\n");
-                msg.append("  Missing Resource:\n");
-                msg.append("    - \"");
-                msg.append(std::string_view(Target::name.value.data(), Target::name.value.size()));
-                msg.append("\"\n\n");
-                msg.append("  Registered Resources in this Graph:\n");
-
-                auto append_name = [&]<typename R>() {
-                    msg.append("    - \"");
-                    msg.append(std::string_view(R::name.value.data(), R::name.value.size()));
-                    msg.append("\"\n");
-                };
-
-                [&]<typename... Us>(TypeList<Us...>) { (append_name.template operator()<Us>(), ...); }(ResourceList {});
-
-                msg.append("================================================================================\n\n");
-                return msg;
-            }();
-
-            static_assert(idx < ResourceList::size, error_message.string_view());
-        }
-
-        return idx;
-    }
-}
-
-template <typename ResourceList, typename... Passes>
-consteval auto ComputeStateTable() {
-    constexpr size_t num_passes    = sizeof...(Passes);
-    constexpr size_t num_resources = ResourceList::size;
-
-    std::array<std::array<ResourceState, num_resources>, num_passes> table {};
-    if constexpr (num_passes == 0 || num_resources == 0) {
-        return table;
-    } else {
-    std::array<ResourceState, num_resources>                         current_states {};
-
-    [&]<size_t... Is>(std::index_sequence<Is...>) {
-        (
-            [&]<size_t I>() {
-                using R = typename ResourceList::template type<I>;
-
-                constexpr bool is_written = []() consteval {
-                    bool written    = false;
-                    auto check_pass = [&]<typename Pass>() {
-                        using Usages = typename Pass::Usages;
-                        written |= []<size_t... Js>(std::index_sequence<Js...>) {
-                            if constexpr (sizeof...(Js) == 0) {
-                                return false;
-                            } else {
-                                return (
-                                    (std::is_same_v<typename Usages::template type<Js>::Resource, R> &&
-                                     (Has(Usages::template type<Js>::access, WriteMask))) ||
-                                    ...
-                                );
-                            }
-                        }(std::make_index_sequence<Usages::size> {});
-                    };
-                    (check_pass.template operator()<Passes>(), ...);
-                    return written;
-                }();
-
-                if constexpr (!is_written) {
-
-                    constexpr auto first_usage_info = []() consteval {
-                        Vk::ImageLayout         layout = Vk::ImageLayout::ShaderReadOnlyOptimal;
-                        Vk::PipelineStage stage  = Vk::PipelineStage::Fragment;
-                        Vk::Access        access = Vk::Access::ShaderRead;
-                        bool                  found  = false;
-
-                        auto check_pass = [&]<typename Pass>() {
-                            if (found) {
-                                return;
-                            }
-                            using Usages = typename Pass::Usages;
-                            [&]<size_t... Js>(std::index_sequence<Js...>) {
-                                if constexpr (sizeof...(Js) > 0) {
-                                    (([&]() {
-                                         if (found) {
-                                             return;
-                                         }
-                                         using U = typename Usages::template type<Js>;
-                                         if constexpr (std::is_same_v<typename U::Resource, R>) {
-                                             layout = U::layout;
-                                             stage  = U::stage;
-                                             access = U::access;
-                                             found  = true;
-                                         }
-                                     }()),
-                                     ...);
-                                }
-                            }(std::make_index_sequence<Usages::size> {});
-                        };
-                        (check_pass.template operator()<Passes>(), ...);
-                        return ResourceState {.layout = layout, .stage = stage, .access = access, .lastWritePass = 999999, .fromPreviousFrame = false};
-                    }();
-
-                    current_states[I] = first_usage_info;
-                } else {
-
-                    current_states[I] = ResourceState {
-                        .layout            = Vk::ImageLayout::Undefined,
-                        .stage             = Vk::PipelineStage::TopOfPipe,
-                        .access            = Vk::Access::AccessNone,
-                        .lastWritePass     = 999999,
-                        .fromPreviousFrame = false
-                    };
-                }
-            }.template operator()<Is>(),
-            ...);
-    }(std::make_index_sequence<num_resources> {});
-
-    auto simulate_passes = [&](bool record) noexcept(false) {
-        size_t pass_idx     = 0;
-        auto   process_pass = [&]<typename Pass>() noexcept(false) {
-            if (record) {
-                table[pass_idx] = current_states;
-            }
-
-            using Usages = typename Pass::Usages;
-
-            if constexpr (Usages::size > 0) {
-                [&]<size_t... Is>(std::index_sequence<Is...>) {
-                    (
-                        [&]<size_t I>() {
-                            using U                = typename Usages::template type<I>;
-                            using Img              = typename U::Resource;
-                            constexpr size_t r_idx = GetResourceIndex<ResourceList, Img>();
-
-                            constexpr bool is_write = Has(U::access, WriteMask);
-
-                            current_states[r_idx] = ResourceState {
-                                .layout            = U::final_layout,
-                                .stage             = U::final_stage,
-                                .access            = U::final_access,
-                                .lastWritePass     = is_write ? pass_idx : current_states[r_idx].lastWritePass,
-                                .fromPreviousFrame = is_write ? false : current_states[r_idx].fromPreviousFrame
-                            };
-                        }.template operator()<Is>(),
-                        ...);
-                }(std::make_index_sequence<Usages::size> {});
-            }
-
-            pass_idx++;
-        };
-
-        (process_pass.template operator()<Passes>(), ...);
-    };
-
-    simulate_passes(false);
-
-    [&]<size_t... Is>(std::index_sequence<Is...>) {
-        (
-            [&]<size_t I>() {
-                using R = typename ResourceList::template type<I>;
-
-                constexpr bool is_written = []() consteval {
-                    bool written    = false;
-                    auto check_pass = [&]<typename Pass>() {
-                        using Usages = typename Pass::Usages;
-                        written |= []<size_t... Js>(std::index_sequence<Js...>) {
-                            if constexpr (sizeof...(Js) == 0) {
-                                return false;
-                            } else {
-                                return (
-                                    (std::is_same_v<typename Usages::template type<Js>::Resource, R> &&
-                                     (Has(Usages::template type<Js>::access, WriteMask))) ||
-                                    ...
-                                );
-                            }
-                        }(std::make_index_sequence<Usages::size> {});
-                    };
-                    (check_pass.template operator()<Passes>(), ...);
-                    return written;
-                }();
-
-                if constexpr (R::is_swapchain) {
-                    current_states[I] = ResourceState {
-                        .layout            = Vk::ImageLayout::Undefined,
-                        .stage             = Vk::PipelineStage::ColorAttachment,
-                        .access            = Vk::Access::AccessNone,
-                        .lastWritePass     = 999999,
-                        .fromPreviousFrame = false
-                    };
-                } else if constexpr (is_written && !R::is_persistent) {
-                    current_states[I] = ResourceState {
-                        .layout = Vk::ImageLayout::Undefined, .stage = Vk::PipelineStage::StageNone, .access = Vk::Access::AccessNone, .lastWritePass = 999999, .fromPreviousFrame = false
-                    };
-                } else if constexpr (!is_written) {
-
-                } else {
-                    if (current_states[I].lastWritePass < 999999) {
-                        current_states[I].fromPreviousFrame = true;
-                    }
-                }
-            }.template operator()<Is>(),
-            ...);
-    }(std::make_index_sequence<num_resources> {});
-
-    simulate_passes(true);
-
-    return table;
-    }
-}
 
 template <typename T>
 [[nodiscard]] constexpr VkExtent3D ToExtent3D(const T& extent) noexcept {
@@ -394,7 +168,7 @@ constexpr auto ExtractForkRun(std::tuple<Passes...>& passes) noexcept {
 template <typename ResourceList>
 template <typename Image>
 constexpr void ResourceBinder<ResourceList>::Bind(ImageSlice slice) noexcept {
-    constexpr size_t idx = TemplatedDetail::GetResourceIndex<ResourceList, Image>();
+    constexpr size_t idx = VkD3D::TemplatedDetail::GetResourceIndex<ResourceList, Image>();
     _resources[idx]      = slice;
 }
 
@@ -403,7 +177,7 @@ template <typename ContextImpl>
 constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcept {
     // Explicit resolvers cover presentation depth, swapchain, history and
     // shadow views (which need more than the graph target's default view).
-    [&]<typename... Resources>(TypeList<Resources...>) noexcept {
+    [&]<typename... Resources>(VkD3D::TypeList<Resources...>) noexcept {
         ([&] noexcept {
             if constexpr (requires { ResourceResolver<Resources>::Resolve(impl); })
                 this->template Bind<Resources>(ResourceResolver<Resources>::Resolve(impl));
@@ -414,7 +188,7 @@ constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcep
     // selects only requested targets; there is no per-frame string lookup.
     Reflect::ForEachField(impl.graphResources, [&]<typename Target>(const Target& rt) noexcept {
         using Resource = typename Target::TagType;
-        if constexpr (IsInList<ResourceList, Resource>::value &&
+        if constexpr (VkD3D::IsInList<ResourceList, Resource>::value &&
                       !requires { ResourceResolver<Resource>::Resolve(impl); }) {
             this->template Bind<Resource>(rt.AsSlice());
         }
@@ -544,18 +318,18 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
                     using UsageType     = typename Usages::template type<us>;
                     using Img           = typename UsageType::Resource;
 
-                    constexpr size_t                         r_idx      = TemplatedDetail::GetResourceIndex<Resources, Img>();
-                    constexpr TemplatedDetail::ResourceState prev_state = StateTable[PassIndex][r_idx];
+                    constexpr size_t                                    r_idx      = VkD3D::TemplatedDetail::GetResourceIndex<Resources, Img>();
+                    constexpr VkD3D::TemplatedDetail::ResourceState prev_state = StateTable[PassIndex][r_idx];
                     const auto&                              resource   = bindings[r_idx];
 
                     barriers[Bs] = ImageBarrier::Transition(
-                        resource.View().WithAspect(Img::aspect).AllSubresources(),
-                        prev_state.layout,
-                        UsageType::layout,
-                        prev_state.stage,
-                        prev_state.access,
-                        UsageType::stage,
-                        UsageType::access
+                        resource.View().WithAspect(VkD3D::ToVk(Img::aspect)).AllSubresources(),
+                        VkD3D::ToVk(prev_state.layout),
+                        VkD3D::ToVk(UsageType::layout),
+                        VkD3D::ToVk(prev_state.stage),
+                        VkD3D::ToVk(prev_state.access),
+                        VkD3D::ToVk(UsageType::stage),
+                        VkD3D::ToVk(UsageType::access)
                     );
                 }(),
                 ...);
@@ -585,12 +359,12 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     } else {
 
         static_assert(
-            FrameGraphPass<PassType>,
-            "a graph pass must either be a Vk::Fork group (static constexpr is_fork) or satisfy Vk::FrameGraphPass by inheriting Vk::RenderPass<\"Name\", Usages...>"
+            VkD3D::FrameGraphPass<PassType>,
+            "a graph pass must either be a Vk::Fork group (static constexpr is_fork) or satisfy VkD3D::FrameGraphPass by inheriting VkD3D::RenderPass<\"Name\", Usages...>"
         );
 
-        using ColorWrites = TemplatedDetail::Filter<Usages, TemplatedDetail::IsColorAttachment>;
-        using DepthWrites = TemplatedDetail::Filter<Usages, TemplatedDetail::IsDepthAttachment>;
+        using ColorWrites = TemplatedDetail::Filter<Usages, VkD3D::TemplatedDetail::IsColorAttachment>;
+        using DepthWrites = TemplatedDetail::Filter<Usages, VkD3D::TemplatedDetail::IsDepthAttachment>;
 
         constexpr bool is_raster = (ColorWrites::size > 0) || (DepthWrites::size > 0);
 
@@ -669,13 +443,13 @@ template <typename ResourceList, typename ColorWrites, typename DepthWrites, siz
 template <typename... Imgs, typename... DImgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::ResolveExtent(
     std::span<const ImageSlice, ResourceList::size> bindings,
-    TypeList<Imgs...> ,
-    TypeList<DImgs...>
+    VkD3D::TypeList<Imgs...> ,
+    VkD3D::TypeList<DImgs...>
 ) noexcept {
     (([&]() {
          if (Extent().width == 0) {
              using Img       = Imgs;
-             const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
+             const auto& ext = bindings[VkD3D::TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
 
              SetExtent({ext.width, ext.height});
          }
@@ -686,7 +460,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
         (([&]() {
              if (Extent().width == 0) {
                  using Img       = DImgs;
-                 const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
+                 const auto& ext = bindings[VkD3D::TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
 
                  SetExtent({ext.width, ext.height});
              }
@@ -698,16 +472,16 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 template <typename... Imgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::
-    BuildColorAttachments(std::span<const ImageSlice, ResourceList::size> bindings, uint32_t& colorCount, TypeList<Imgs...> ) noexcept {
+    BuildColorAttachments(std::span<const ImageSlice, ResourceList::size> bindings, uint32_t& colorCount, VkD3D::TypeList<Imgs...> ) noexcept {
     (([&]() {
          using Img              = Imgs;
-         constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
+         constexpr size_t r_idx = VkD3D::TemplatedDetail::GetResourceIndex<ResourceList, Img>();
          const auto&      res   = bindings[r_idx];
 
          constexpr auto     prev_state = CompileTimeFrameGraph<Passes...>::StateTable[PassIndex][r_idx];
-         Vk::AttachmentLoadOp load_op    = (prev_state.layout == Vk::ImageLayout::Undefined) ? Vk::AttachmentLoadOp::Clear : Vk::AttachmentLoadOp::Load;
+         Vk::AttachmentLoadOp load_op    = (prev_state.layout == VkD3D::ImageLayout::Undefined) ? Vk::AttachmentLoadOp::Clear : Vk::AttachmentLoadOp::Load;
 
-         constexpr Color4 clear_color = ClearColorOf<Img>::value;
+         constexpr Color4 clear_color = VkD3D::ClearColorOf<Img>::value;
 
          m_colors[colorCount++] = {
              .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -730,26 +504,26 @@ template <typename... DImgs>
 bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::BuildDepthAttachment(
     std::span<const ImageSlice, ResourceList::size> bindings,
     VkRenderingAttachmentInfo&                           outDepth,
-    TypeList<DImgs...>
+    VkD3D::TypeList<DImgs...>
 ) noexcept {
     if constexpr (DepthWrites::size == 0) {
         return false;
     } else {
 
         using Img              = DImgs...[0];
-        using Pass             = typename TypeList<Passes...>::template type<PassIndex>;
+        using Pass             = typename VkD3D::TypeList<Passes...>::template type<PassIndex>;
         using ImgUsage         = typename TemplatedDetail::FindResourceUsage<typename Pass::Usages, Img>::type;
-        constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
+        constexpr size_t r_idx = VkD3D::TemplatedDetail::GetResourceIndex<ResourceList, Img>();
         const auto&      res   = bindings[r_idx];
 
         constexpr auto     prev_state = CompileTimeFrameGraph<Passes...>::StateTable[PassIndex][r_idx];
-        Vk::AttachmentLoadOp load_op    = (prev_state.layout == Vk::ImageLayout::Undefined) ? Vk::AttachmentLoadOp::Clear : Vk::AttachmentLoadOp::Load;
+        Vk::AttachmentLoadOp load_op    = (prev_state.layout == VkD3D::ImageLayout::Undefined) ? Vk::AttachmentLoadOp::Clear : Vk::AttachmentLoadOp::Load;
 
         outDepth = {
             .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext              = nullptr,
             .imageView          = res.attachmentView,
-            .imageLayout        = ToVk(ImgUsage::layout),
+            .imageLayout        = Vk::ToVk(VkD3D::ToVk(ImgUsage::layout)),
             .resolveMode        = VK_RESOLVE_MODE_NONE,
             .resolveImageView   = VK_NULL_HANDLE,
             .resolveImageLayout = ToVk(Vk::ImageLayout::Undefined),
@@ -776,17 +550,17 @@ constexpr auto MakeRef(const T& resource) noexcept -> ImageSlice {
 
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept {
-    return ImageSlice {handle, view, VkExtent3D {0, 0, 1}, Tag::format, Tag::aspect};
+    return ImageSlice {handle, view, VkExtent3D {0, 0, 1}, VkD3D::ToVk(Tag::format), VkD3D::ToVk(Tag::aspect)};
 }
 
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, Vk::Format format) noexcept {
-    return ImageSlice {handle, view, extent, format, Tag::aspect};
+    return ImageSlice {handle, view, extent, format, VkD3D::ToVk(Tag::aspect)};
 }
 
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, Vk::Format format) noexcept {
-    return ImageSlice {handle, view, extent, format, Tag::aspect};
+    return ImageSlice {handle, view, extent, format, VkD3D::ToVk(Tag::aspect)};
 }
 
 template <typename Resources, typename... Passes>
@@ -811,7 +585,7 @@ struct IsResourceInUsages {
 };
 
 template <typename... Us, typename Target>
-struct IsResourceInUsages<TypeList<Us...>, Target> {
+struct IsResourceInUsages<VkD3D::TypeList<Us...>, Target> {
     static constexpr bool value = (std::is_same_v<typename Us::Resource, Target> || ...);
 };
 
@@ -831,39 +605,39 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
 
         constexpr bool layout_changed = (prev_state.layout != UsageType::layout);
 
-        constexpr bool is_prev_write = Has(prev_state.access, ZHLN::Vk::TemplatedDetail::WriteMask);
-        constexpr bool is_curr_write = Has(UsageType::access, ZHLN::Vk::TemplatedDetail::WriteMask);
+        constexpr bool is_prev_write = VkD3D::Has(prev_state.access, ZHLN::VkD3D::TemplatedDetail::WriteMask);
+        constexpr bool is_curr_write = VkD3D::Has(UsageType::access, ZHLN::VkD3D::TemplatedDetail::WriteMask);
 
         constexpr bool write_hazard = (is_curr_write && (prev_state.fromPreviousFrame || (prev_state.lastWritePass < PassIdx))) ||
                                       (is_prev_write && !is_curr_write && (prev_state.lastWritePass < PassIdx));
 
-        constexpr bool needs_barrier = layout_changed || write_hazard || (prev_state.layout == Vk::ImageLayout::Undefined);
+        constexpr bool needs_barrier = layout_changed || write_hazard || (prev_state.layout == VkD3D::ImageLayout::Undefined);
 
         if constexpr (needs_barrier) {
             msg.append("          Layout: ");
-            msg.append(LayoutTraits<prev_state.layout>::kName);
+            msg.append(VkD3D::LayoutTraits<prev_state.layout>::kName);
             msg.append(" ➔ ");
-            msg.append(LayoutTraits<UsageType::layout>::kName);
+            msg.append(VkD3D::LayoutTraits<UsageType::layout>::kName);
             msg.append("\n");
 
             msg.append("          Stage : ");
-            msg.append_enum(static_cast<BarrierStage>(prev_state.stage));
+            msg.append_enum(prev_state.stage);
             msg.append(" ➔ ");
-            msg.append_enum(static_cast<BarrierStage>(UsageType::stage));
+            msg.append_enum(UsageType::stage);
             msg.append("\n");
 
             msg.append("          Access: ");
-            msg.append_enum(static_cast<BarrierAccess>(prev_state.access));
+            msg.append_enum(prev_state.access);
             msg.append(" ➔ ");
-            msg.append_enum(static_cast<BarrierAccess>(UsageType::access));
+            msg.append_enum(UsageType::access);
             msg.append("\n");
         } else {
             msg.append("          State : ");
-            msg.append(LayoutTraits<prev_state.layout>::kName);
+            msg.append(VkD3D::LayoutTraits<prev_state.layout>::kName);
             msg.append(" (");
-            msg.append_enum(static_cast<BarrierStage>(prev_state.stage));
+            msg.append_enum(prev_state.stage);
             msg.append(" / ");
-            msg.append_enum(static_cast<BarrierAccess>(prev_state.access));
+            msg.append_enum(prev_state.access);
             msg.append(") [Unchanged]\n");
         }
     }
@@ -871,7 +645,7 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
 
 template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... ResIdxs>
 constexpr void PrintResources(VisualizerStringT& msg, std::index_sequence<ResIdxs...> ) noexcept {
-    [&]<typename... R>(TypeList<R...>) {
+    [&]<typename... R>(VkD3D::TypeList<R...>) {
         (
             [&]<size_t ResIdx, typename Res>() {
                 if constexpr (IsResourceInUsages<typename Pass::Usages, Res>::value) {
@@ -903,7 +677,7 @@ constexpr void PrintPasses(VisualizerStringT& msg, std::index_sequence<PassIdxs.
 
 template <typename Resources, size_t NumResources, typename VisualizerStringT, size_t... Is>
 constexpr void PrintResourceNames(VisualizerStringT& msg, std::index_sequence<Is...> ) noexcept {
-    [&]<typename... R>(TypeList<R...>) {
+    [&]<typename... R>(VkD3D::TypeList<R...>) {
         ((msg.append("    [Resource "), msg.append_int(Is), msg.append("]: \""), msg.append(std::string_view(R...[Is] ::name.value.data())), msg.append("\""),
           msg.append(R...[Is] ::is_swapchain ? " (SWAPCHAIN)" : ""), msg.append("\n")),
          ...);

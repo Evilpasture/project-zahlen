@@ -14,15 +14,15 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
     const Vk::AsAddressWrite tlas {.address = hasTlas ? frame.tlasAddresses.Get() : 0};
 
     const auto block = post.lighting.WriteHeapParameters<Shaders::Lighting>(
-        frame.renderer.heapManager, Vk::Slot<"texInput">(Vk::Assume<Vk::FragmentAndComputeRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
-        Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
-        Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
-        Vk::Slot<"texBakedMask">(Vk::Assume<Vk::FragmentAndComputeRead<Res_BakedMask>>(frame.graphResources.bakedMask)),
+        frame.renderer.heapManager, Vk::Slot<"texInput">(Vk::Assume<VkD3D::FragmentAndComputeRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
+        Vk::Slot<"texDepth">(Vk::Assume<VkD3D::FragmentAndComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
+        Vk::Slot<"texNormalRoughness">(Vk::Assume<VkD3D::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
+        Vk::Slot<"texBakedMask">(Vk::Assume<VkD3D::FragmentAndComputeRead<Res_BakedMask>>(frame.graphResources.bakedMask)),
         Vk::Slot<"lights">(frame.lightStorageBuffers), Vk::Slot<"frame">(frame.frameUniformBuffers),
-        Vk::Slot<"shadowMap">(Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(frame.graphResources.shadowMap)), Vk::Slot<"ltc_mat">(post.ltcMat),
+        Vk::Slot<"shadowMap">(Vk::Assume<VkD3D::ShaderRead<Res_ShadowMap>>(frame.graphResources.shadowMap)), Vk::Slot<"ltc_mat">(post.ltcMat),
         Vk::Slot<"ltc_amp">(post.ltcAmp), Vk::Slot<"clusterGrid">(frame.clusterGridBuffers), Vk::Slot<"clusterIndexList">(frame.lightIndexListBuffers),
         Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.View(Vk::ImageAspect::Depth)), Vk::Slot<"shadowTiles">(frame.shadowTileBuffers),
-        Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(frame.graphResources.ao)), Vk::Slot<"tlas">(tlas)
+        Vk::Slot<"texAo">(Vk::Assume<VkD3D::ShaderRead<Res_Ao>>(frame.graphResources.ao)), Vk::Slot<"tlas">(tlas)
     );
     // Typestate: From proves the variant's bounds and validity, Create the
     // non-zero heap push -- ExecuteHeap cannot be reached with anything else.

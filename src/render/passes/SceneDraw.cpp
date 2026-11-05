@@ -172,11 +172,11 @@ void Draw3DParticleShadows(RenderFrame& ctx, Vk::CommandEncoder& encoder, const 
 
 auto GBufferSceneTargets(RenderFrame& frame) noexcept -> GBufferTargets {
     return GBufferTargets {
-        .sceneColor = Vk::Assume<Vk::ColorWrite<Res_SceneColor>>(frame.graphResources.sceneColor),
-        .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(frame.graphResources.velocityBuffer),
-        .normRough  = Vk::Assume<Vk::ColorWrite<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer),
-        .bakedMask  = Vk::Assume<Vk::ColorWrite<Res_BakedMask>>(frame.graphResources.bakedMask),
-        .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.ActiveDepthTarget())
+        .sceneColor = Vk::Assume<VkD3D::ColorWrite<Res_SceneColor>>(frame.graphResources.sceneColor),
+        .velocity   = Vk::Assume<VkD3D::ColorWrite<Res_Velocity>>(frame.graphResources.velocityBuffer),
+        .normRough  = Vk::Assume<VkD3D::ColorWrite<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer),
+        .bakedMask  = Vk::Assume<VkD3D::ColorWrite<Res_BakedMask>>(frame.graphResources.bakedMask),
+        .depth      = Vk::Assume<VkD3D::DepthStencilWrite<Res_Depth>>(frame.ActiveDepthTarget())
     };
 }
 

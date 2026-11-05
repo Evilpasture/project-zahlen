@@ -3,7 +3,8 @@
 
 #pragma once
 #include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 
 namespace ZHLN {
 struct CullingResources;
@@ -12,7 +13,7 @@ struct RenderFrame;
 
 namespace ZHLN::Passes {
 
-struct HiZGeneratePass: Vk::RenderPass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>> {
+struct HiZGeneratePass: VkD3D::RenderPass<"HiZGenerate", VkD3D::ShaderRead<Res_Depth>, VkD3D::ComputeWrite<Res_HiZ>> {
     CullingResources&   cull;
     RenderFrame&        frame;
 

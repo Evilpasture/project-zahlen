@@ -210,4 +210,13 @@ namespace ZHLN::VkD3D {
     return D3D12_COMPARISON_FUNC_NEVER;
 }
 
+[[nodiscard]] constexpr auto ToD3D12ColorMask(VkD3D::ColorMask mask) noexcept -> D3D12_COLOR_WRITE_ENABLE {
+    unsigned int result = 0;
+    if (VkD3D::Has(mask, VkD3D::ColorMask::Red)) { result |= D3D12_COLOR_WRITE_ENABLE_RED; }
+    if (VkD3D::Has(mask, VkD3D::ColorMask::Green)) { result |= D3D12_COLOR_WRITE_ENABLE_GREEN; }
+    if (VkD3D::Has(mask, VkD3D::ColorMask::Blue)) { result |= D3D12_COLOR_WRITE_ENABLE_BLUE; }
+    if (VkD3D::Has(mask, VkD3D::ColorMask::Alpha)) { result |= D3D12_COLOR_WRITE_ENABLE_ALPHA; }
+    return static_cast<D3D12_COLOR_WRITE_ENABLE>(result);
+}
+
 } // namespace ZHLN::VkD3D

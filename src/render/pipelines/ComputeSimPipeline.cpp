@@ -30,7 +30,7 @@ void RebuildClusterBounds(RenderContext::Impl& impl, VkCommandBuffer cmd, uint32
 
 template <typename Resources, typename Tag, typename Binder, typename RefFn>
 void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
-    if constexpr (Vk::IsInList<Resources, Tag>::value) {
+    if constexpr (VkD3D::IsInList<Resources, Tag>::value) {
         auto ref = std::forward<RefFn>(makeRef)();
         binder.template Bind<Tag>(ref);
     }

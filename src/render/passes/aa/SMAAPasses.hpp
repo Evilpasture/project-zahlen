@@ -3,7 +3,8 @@
 
 #pragma once
 #include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 
 namespace ZHLN {
 struct AntiAliasingResources;
@@ -15,22 +16,22 @@ namespace ZHLN::Passes {
 // Depth and normal/roughness are read by the hybrid edge detector so that
 // silhouettes and hard creases survive even where HDR luma is locally flat.
 struct SmaaEdgePass:
-    Vk::RenderPass<"SmaaEdge", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>,
-                   Vk::ColorWrite<Res_SmaaEdge>> {
+    VkD3D::RenderPass<"SmaaEdge", VkD3D::ShaderRead<Res_HdrSceneColor>, VkD3D::ShaderRead<Res_Depth>, VkD3D::ShaderRead<Res_NormRough>,
+                   VkD3D::ColorWrite<Res_SmaaEdge>> {
     AntiAliasingResources& aa;
     RenderFrame&           frame;
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };
 
-struct SmaaWeightPass: Vk::RenderPass<"SmaaWeight", Vk::ShaderRead<Res_SmaaEdge>, Vk::ColorWrite<Res_SmaaWeight>> {
+struct SmaaWeightPass: VkD3D::RenderPass<"SmaaWeight", VkD3D::ShaderRead<Res_SmaaEdge>, VkD3D::ColorWrite<Res_SmaaWeight>> {
     AntiAliasingResources& aa;
     RenderFrame&           frame;
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };
 
-struct SmaaBlendPass: Vk::RenderPass<"SmaaBlend", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ShaderRead<Res_SmaaWeight>, Vk::ColorWrite<Res_AccumCurrent>> {
+struct SmaaBlendPass: VkD3D::RenderPass<"SmaaBlend", VkD3D::ShaderRead<Res_HdrSceneColor>, VkD3D::ShaderRead<Res_SmaaWeight>, VkD3D::ColorWrite<Res_AccumCurrent>> {
     AntiAliasingResources& aa;
     RenderFrame&           frame;
 

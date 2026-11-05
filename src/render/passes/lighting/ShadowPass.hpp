@@ -3,7 +3,8 @@
 
 #pragma once
 #include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 
 namespace ZHLN {
 struct MeshParticlePipelines;
@@ -12,7 +13,7 @@ struct RenderFrame;
 
 namespace ZHLN::Passes {
 
-struct ShadowPass: Vk::RenderPass<"MainShadow", Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>> {
+struct ShadowPass: VkD3D::RenderPass<"MainShadow", VkD3D::DepthWrite<Res_ShadowMap>, VkD3D::DepthWrite<Res_ShadowAtlas>> {
     const MeshParticlePipelines& particles;
     RenderFrame&                 frame;
 

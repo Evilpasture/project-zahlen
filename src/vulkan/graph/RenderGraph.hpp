@@ -7,7 +7,11 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "RenderPassDecl.hpp"
+#include "PassExecution.hpp"
+#include <vkd3d/Barriers.hpp>
+#include <vkd3d/VulkanConversions.hpp>
+#include <vkd3d/graph/PassDecl.hpp>
+#include <vkd3d/graph/StateTable.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <array>
@@ -16,18 +20,6 @@
 #include <utility>
 
 namespace ZHLN::Vk {
-
-namespace detail {
-struct DummyResource {
-    static constexpr auto name = ResourceName("DummyResource");
-};
-struct DummyUsage {
-    using Resource                                = DummyResource;
-    static constexpr Vk::ImageLayout         layout = Vk::ImageLayout::Undefined;
-    static constexpr Vk::PipelineStage stage  = Vk::PipelineStage::StageNone;
-    static constexpr Vk::Access        access = Vk::Access::AccessNone;
-};
-}
 
 namespace TemplatedDetail {
 
@@ -48,8 +40,8 @@ inline constexpr bool DependentFalse = false;
 
 template <typename... SubPasses>
 struct ParallelPass {
-    static constexpr auto name = ResourceName("ParallelPassGroup");
-    using Usages = typename TemplatedDetail::MergeFold<TypeList<>, typename SubPasses::Usages...>::type;
+    static constexpr auto name = VkD3D::ResourceName("ParallelPassGroup");
+    using Usages = typename TemplatedDetail::MergeFold<VkD3D::TypeList<>, typename SubPasses::Usages...>::type;
 
     static constexpr bool   is_fork    = true;
     static constexpr size_t kBodyCount = sizeof...(SubPasses);
@@ -77,98 +69,10 @@ template <typename InList, typename OutList, template <typename> class Predicate
 struct FilterImpl;
 
 template <typename List, template <typename> class Predicate>
-using Filter = typename FilterImpl<List, TypeList<>, Predicate>::type;
+using Filter = typename FilterImpl<List, VkD3D::TypeList<>, Predicate>::type;
 
 template <typename... Passes>
 struct CollectAllResources;
-
-template <typename Target, typename... Ts>
-consteval auto GetResourceIndexImpl(TypeList<Ts...> ) -> size_t;
-
-template <size_t Capacity>
-struct ConstexprString {
-    std::array<char, Capacity> dataBuffer {};
-    size_t                     length = 0;
-
-    constexpr void append(std::string_view sv) noexcept {
-        const size_t to_copy = sv.size() < (Capacity - 1 - length) ? sv.size() : (Capacity - 1 - length);
-        if (to_copy > 0) {
-            std::char_traits<char>::copy(dataBuffer.data() + length, sv.data(), to_copy);
-            length += to_copy;
-            dataBuffer[length] = '\0';
-        }
-    }
-
-    constexpr void append_int(size_t val) noexcept {
-        if (val == 0) {
-            append("0");
-            return;
-        }
-        std::array<char, 24> temp {};
-        size_t               i = 0;
-        while (val > 0 && i < 23) {
-            temp[i++] = static_cast<char>('0' + (val % 10));
-            val /= 10;
-        }
-        for (size_t j = 0; j < i / 2; ++j) {
-            const char c    = temp[j];
-            temp[j]         = temp[i - 1 - j];
-            temp[i - 1 - j] = c;
-        }
-        append(std::string_view(temp.data(), i));
-    }
-
-    template <typename E>
-        requires std::is_enum_v<E>
-    constexpr void append_enum(E value) noexcept {
-        using Under     = std::underlying_type_t<E>;
-        const auto bits = static_cast<Under>(value);
-        bool       any  = false;
-        for (const auto& entry : Reflect::kEnumEntries<E>) {
-            const auto v = static_cast<Under>(entry.value);
-            if (v != 0 && (bits & v) == v) {
-                if (any) {
-                    append(" | ");
-                }
-                any = true;
-                append(entry.name);
-            }
-        }
-        if (!any) {
-            append(Reflect::EnumToString(value));
-        }
-    }
-
-    [[nodiscard]] constexpr auto string_view() const noexcept -> std::string_view {
-        return std::string_view(dataBuffer.data(), length);
-    }
-};
-
-template <typename ResourceList, typename Target>
-consteval auto GetResourceIndex() -> size_t;
-
-struct ResourceState {
-    Vk::ImageLayout         layout            = Vk::ImageLayout::Undefined;
-    Vk::PipelineStage stage             = Vk::PipelineStage::StageNone;
-    Vk::Access        access            = Vk::Access::AccessNone;
-    size_t                lastWritePass     = 999999;
-    bool                  fromPreviousFrame = false;
-};
-
-constexpr Vk::Access WriteMask = Vk::Access::ShaderWrite | Vk::Access::ColorWrite | Vk::Access::DepthWrite |
-                                     Vk::Access::TransferWrite | Vk::Access::HostWrite | Vk::Access::MemoryWrite;
-
-template <typename U>
-struct IsAnyWrite: std::bool_constant<Has(U::access, WriteMask)> {};
-
-template <typename U>
-struct IsAnyRead: std::bool_constant<!Has(U::access, WriteMask)> {};
-
-template <typename ListA, typename ListB>
-struct HasIntersection: std::false_type {};
-
-template <typename... As, typename... Bs>
-struct HasIntersection<TypeList<As...>, TypeList<Bs...>>: std::bool_constant<(IsInList<TypeList<Bs...>, As>::value || ...)> {};
 
 template <typename Resources, typename Pass>
 struct PassFootprint {
@@ -177,10 +81,10 @@ struct PassFootprint {
     template <typename Usages, size_t I>
     static constexpr auto Fold(std::array<uint64_t, 2> accumulated) noexcept {
         using Usage            = typename Usages::template type<I>;
-        constexpr size_t index = GetResourceIndex<Resources, typename Usage::Resource>();
+        constexpr size_t index = VkD3D::TemplatedDetail::GetResourceIndex<Resources, typename Usage::Resource>();
         static_assert(index < kMaxResources, "The frame graph's hazard masks hold 64 resources; widen them before the graph reaches 65.");
         const uint64_t bit = uint64_t {1} << index;
-        accumulated[Has(Usage::access, WriteMask) ? 0 : 1] |= bit;
+        accumulated[VkD3D::Has(Usage::access, VkD3D::TemplatedDetail::WriteMask) ? 0 : 1] |= bit;
         return accumulated;
     }
 
@@ -194,24 +98,11 @@ struct PassFootprint {
     static constexpr std::array<uint64_t, 2> masks = Build<typename Pass::Usages>(std::make_index_sequence<Pass::Usages::size> {});
 };
 
-template <ResourceState Prev, typename Usage, size_t PassIndex>
-struct NeedsBarrier {
-    static constexpr bool is_prev_write = Has(Prev.access, WriteMask);
-    static constexpr bool is_curr_write = Has(Usage::access, WriteMask);
-
-    static constexpr bool value = (is_curr_write && (Prev.fromPreviousFrame || (Prev.lastWritePass < PassIndex))) ||
-                                  (is_prev_write && !is_curr_write && (Prev.lastWritePass < PassIndex)) || (Prev.layout != Usage::layout) ||
-                                  (Prev.layout == Vk::ImageLayout::Undefined);
-};
-
-template <typename ResourceList, typename... Passes>
-consteval auto ComputeStateTable();
-
 template <typename P>
 struct IsForkablePass {
     using Usages      = typename P::Usages;
-    using ColorWrites = Filter<Usages, IsColorAttachment>;
-    using DepthWrites = Filter<Usages, IsDepthAttachment>;
+    using ColorWrites = Filter<Usages, VkD3D::TemplatedDetail::IsColorAttachment>;
+    using DepthWrites = Filter<Usages, VkD3D::TemplatedDetail::IsDepthAttachment>;
 
     static constexpr bool is_graphics = (ColorWrites::size > 0) || (DepthWrites::size > 0);
     static constexpr bool value       = !is_graphics || std::is_invocable_v<P, VkCommandBuffer>;
@@ -275,11 +166,11 @@ consteval auto ForkRunTypeHelper() {
 template <typename Resources, typename... Passes>
 consteval auto AutoForkTypeHelper() {
     if constexpr (sizeof...(Passes) == 0) {
-        return std::type_identity<TypeList<>> {};
+        return std::type_identity<VkD3D::TypeList<>> {};
     } else {
         constexpr auto plan = ComputeForkPlan<Resources, Passes...>();
         return [&]<size_t... Rs>(std::index_sequence<Rs...>) {
-            return std::type_identity<TypeList<typename decltype(ForkRunTypeHelper<plan.offsets[Rs], plan.lengths[Rs], Passes...>())::type...>> {};
+            return std::type_identity<VkD3D::TypeList<typename decltype(ForkRunTypeHelper<plan.offsets[Rs], plan.lengths[Rs], Passes...>())::type...>> {};
         }(std::make_index_sequence<plan.numRuns> {});
     }
 }
@@ -363,14 +254,14 @@ class CompileTimeFrameGraph {
     using Binder    = ResourceBinder<Resources>;
 
     static_assert(
-        (FrameGraphPass<Passes> && ...),
-        "every graph pass must satisfy Vk::FrameGraphPass: inherit Vk::RenderPass<\"Name\", Usages...> so the graph can name it and analyse its hazards"
+        (VkD3D::FrameGraphPass<Passes> && ...),
+        "every graph pass must satisfy VkD3D::FrameGraphPass: inherit VkD3D::RenderPass<\"Name\", Usages...> so the graph can name it and analyse its hazards"
     );
 
     static constexpr size_t NumPasses    = sizeof...(Passes);
     static constexpr size_t NumResources = Resources::size;
 
-    static constexpr auto StateTable = TemplatedDetail::ComputeStateTable<Resources, Passes...>();
+    static constexpr auto StateTable = VkD3D::TemplatedDetail::ComputeStateTable<Resources, Passes...>();
 
     constexpr explicit CompileTimeFrameGraph(Passes&&... passes);
 
@@ -400,9 +291,9 @@ class CompileTimeFrameGraph {
                 (([&] {
                      using UsageType                                     = typename PassType::Usages::template type<Is>;
                      using Img                                           = typename UsageType::Resource;
-                     constexpr size_t                         r_idx      = TemplatedDetail::GetResourceIndex<Resources, Img>();
-                     constexpr TemplatedDetail::ResourceState prev_state = StateTable[PassIndex][r_idx];
-                     if constexpr (TemplatedDetail::NeedsBarrier<prev_state, UsageType, PassIndex>::value) {
+                     constexpr size_t                         r_idx      = VkD3D::TemplatedDetail::GetResourceIndex<Resources, Img>();
+                     constexpr VkD3D::TemplatedDetail::ResourceState prev_state = StateTable[PassIndex][r_idx];
+                     if constexpr (VkD3D::TemplatedDetail::NeedsBarrier<prev_state, UsageType, PassIndex>::value) {
                          plan.indices[plan.count++] = Is;
                      }
                  }()),
@@ -445,22 +336,22 @@ class RasterPassContext: public RasterPassContextBase {
     template <typename... Imgs, typename... DImgs>
     void ResolveExtent(
         std::span<const ImageSlice, ResourceList::size> bindings,
-        TypeList<Imgs...> ,
-        TypeList<DImgs...>
+        VkD3D::TypeList<Imgs...> ,
+        VkD3D::TypeList<DImgs...>
     ) noexcept;
 
     template <typename... Imgs>
     void BuildColorAttachments(
         std::span<const ImageSlice, ResourceList::size> bindings,
         uint32_t&                                            colorCount,
-        TypeList<Imgs...>
+        VkD3D::TypeList<Imgs...>
     ) noexcept;
 
     template <typename... DImgs>
     bool BuildDepthAttachment(
         std::span<const ImageSlice, ResourceList::size> bindings,
         VkRenderingAttachmentInfo&                           outDepth,
-        TypeList<DImgs...>
+        VkD3D::TypeList<DImgs...>
     ) noexcept;
 };
 
@@ -469,16 +360,16 @@ constexpr auto MakeRef(const T& resource) noexcept -> ImageSlice;
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept;
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, Vk::Format format = Tag::format) noexcept;
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, Vk::Format format = VkD3D::ToVk(Tag::format)) noexcept;
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, Vk::Format format = Tag::format) noexcept;
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, Vk::Format format = VkD3D::ToVk(Tag::format)) noexcept;
 
 }
 
 namespace ZHLN::Vk::Debug {
 
 template <size_t Capacity>
-using VisualizerString = TemplatedDetail::ConstexprString<Capacity>;
+using VisualizerString = VkD3D::TemplatedDetail::ConstexprString<Capacity>;
 
 template <typename T>
 struct GraphVisualizer;

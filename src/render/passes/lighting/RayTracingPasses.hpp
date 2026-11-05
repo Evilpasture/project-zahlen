@@ -6,7 +6,8 @@
 #include "RenderFrame.hpp"
 #include "Renderer.hpp"
 #include "TargetManager.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 #include "passes/ComputePass.hpp"
 #include "pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
@@ -27,8 +28,8 @@ namespace ZHLN::Passes {
 // again for the bindings that belong to it.
 
 struct GtaoDesc {
-    static constexpr auto name = Vk::ResourceName("GTAO");
-    using Usages               = Vk::TypeList<Vk::FragmentAndComputeRead<Res_Depth>, Vk::FragmentAndComputeRead<Res_NormRough>, Vk::ComputeWrite<Res_Ao>>;
+    static constexpr auto name = VkD3D::ResourceName("GTAO");
+    using Usages               = VkD3D::TypeList<VkD3D::FragmentAndComputeRead<Res_Depth>, VkD3D::FragmentAndComputeRead<Res_NormRough>, VkD3D::ComputeWrite<Res_Ao>>;
     using ShaderDecl           = Shaders::Gtao;
     using ShaderModule         = Shaders::Modules::GtaoCS;
     using PushConstants        = GtaoPushConstants;
@@ -58,8 +59,8 @@ struct GtaoDesc {
 
         return MakeComputePassArgs(
             push, VkExtent3D {frame.graphResources.ao.extent.width, frame.graphResources.ao.extent.height, 1},
-            Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
-            Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
+            Vk::Slot<"texDepth">(Vk::Assume<VkD3D::FragmentAndComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
+            Vk::Slot<"texNormalRoughness">(Vk::Assume<VkD3D::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
             Vk::Slot<"frame">(frame.frameUniformBuffers), Vk::Slot<"outAo">(Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.ao))
         );
     }
@@ -71,14 +72,14 @@ struct GtaoDesc {
 //    bilateral merge (C3 -> B, C2 -> A, C1 -> B, C0 -> A), converging in a
 //    single frame with zero temporal history buffers or A-Trous denoising.
 struct RcgiCascadePass:
-    Vk::RenderPass<
+    VkD3D::RenderPass<
         "RcgiCascade",
-        Vk::ComputeRead<Res_Depth>,
-        Vk::ComputeRead<Res_NormRough>,
-        Vk::ComputeRead<Res_ShadowAtlas>,
-        Vk::ComputeWrite<Res_RcgiProbes>,
-        Vk::ComputeWrite<Res_RcgiCascadeA>,
-        Vk::ComputeWrite<Res_RcgiCascadeB>> {
+        VkD3D::ComputeRead<Res_Depth>,
+        VkD3D::ComputeRead<Res_NormRough>,
+        VkD3D::ComputeRead<Res_ShadowAtlas>,
+        VkD3D::ComputeWrite<Res_RcgiProbes>,
+        VkD3D::ComputeWrite<Res_RcgiCascadeA>,
+        VkD3D::ComputeWrite<Res_RcgiCascadeB>> {
     RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept {
@@ -94,8 +95,8 @@ struct RcgiCascadePass:
             return;
         }
 
-        const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget());
-        const auto normal   = Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer);
+        const auto depth    = Vk::Assume<VkD3D::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget());
+        const auto normal   = Vk::Assume<VkD3D::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer);
         const auto probes   = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.rcgiProbes);
         const auto cascadeA = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.rcgiCascadeA);
         const auto cascadeB = Vk::AssumeLayout<Vk::ImageLayout::General>(frame.graphResources.rcgiCascadeB);

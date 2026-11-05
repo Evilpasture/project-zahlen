@@ -9,10 +9,13 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-// Rendering.hpp includes this header before RenderGraph.hpp. Keep the pure
-// graph tag in its own header so physical targets can depend on it without
-// making compile-time graph analysis depend on GPU allocation code.
-#include "../graph/GraphImage.hpp"
+// Rendering.hpp includes this header before RenderGraph.hpp. The pure graph
+// tag lives in the joint layer (<vkd3d/graph/GraphImage.hpp>) so physical
+// targets can depend on it without making compile-time graph analysis depend
+// on GPU allocation code. The tag vocabulary is neutral; this layer keeps the
+// Vk:: spellings and converts at this boundary.
+#include <vkd3d/VulkanConversions.hpp>
+#include <vkd3d/graph/GraphImage.hpp>
 
 namespace ZHLN::Vk {
 
@@ -20,10 +23,10 @@ namespace ZHLN::Vk {
 // allocation policy is opt-in through the tag, never required for raw targets.
 template <typename T>
 struct TargetTraits {
-    static constexpr Vk::Format           format = T::format;
+    static constexpr Vk::Format           format = VkD3D::ToVk(T::format);
     static constexpr Vk::ImageAspect aspect = [] {
         if constexpr (requires { T::aspect; })
-            return T::aspect;
+            return VkD3D::ToVk(T::aspect);
         else
             return GetFormatAspect(format);
     }();
@@ -231,10 +234,10 @@ Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<Tag>& rt, Vk::ImageAspect 
 template <typename Usage>
     requires requires { typename Usage::Resource; }
 struct UsageLayout {
-    static_assert(requires { typename Usage::Resource; }, "UsageLayout requires a valid Vk::Usage type.");
+    static_assert(requires { typename Usage::Resource; }, "UsageLayout requires a valid VkD3D::Usage type.");
 
-    static constexpr Vk::ImageLayout      layout = Usage::layout;
-    static constexpr Vk::ImageAspect aspect = Usage::Resource::aspect;
+    static constexpr Vk::ImageLayout      layout = VkD3D::ToVk(Usage::layout);
+    static constexpr Vk::ImageAspect aspect = VkD3D::ToVk(Usage::Resource::aspect);
 };
 
 template <typename Usage, typename T>

@@ -8,7 +8,8 @@
 // so shader edits never invalidate the precompiled header.
 #include "Rendering.hpp"
 #include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>

@@ -4,7 +4,8 @@
 #pragma once
 #include "PassPayloads.hpp"
 #include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 
 namespace ZHLN {
 struct RenderFrame;
@@ -24,13 +25,13 @@ namespace ZHLN::Passes {
 // test confines them to the pixels the world left empty. Pixels no layer drew
 // keep the cleared depth and are shaded from the environment.
 struct BackgroundGBufferPass:
-    Vk::RenderPass<
+    VkD3D::RenderPass<
         "SkyboxGBuffer",
-        Vk::ColorWrite<Res_SceneColor>,
-        Vk::ColorWrite<Res_Velocity>,
-        Vk::ColorWrite<Res_NormRough>,
-        Vk::ColorWrite<Res_BakedMask>,
-        Vk::DepthStencilWrite<Res_Depth>> {
+        VkD3D::ColorWrite<Res_SceneColor>,
+        VkD3D::ColorWrite<Res_Velocity>,
+        VkD3D::ColorWrite<Res_NormRough>,
+        VkD3D::ColorWrite<Res_BakedMask>,
+        VkD3D::DepthStencilWrite<Res_Depth>> {
     using PushConstants = ObjectConstants;
 
     RenderFrame& frame;

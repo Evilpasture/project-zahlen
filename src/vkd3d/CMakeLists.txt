@@ -27,7 +27,7 @@ if(NOT TARGET zahlen_vulkan_address)
     message(FATAL_ERROR "zahlen_vkd3d requires ZHLN_BUILD_RENDER=ON so the zahlen_vulkan_address seam (src/vulkan) is available")
 endif()
 
-add_library(zahlen_vkd3d STATIC GpuAddress.cpp Enums.cpp Barriers.cpp)
+add_library(zahlen_vkd3d STATIC GpuAddress.cpp Enums.cpp Barriers.cpp Graph.cpp)
 add_library(Zahlen::VkD3D ALIAS zahlen_vkd3d)
 set_target_properties(zahlen_vkd3d PROPERTIES
     POSITION_INDEPENDENT_CODE ON

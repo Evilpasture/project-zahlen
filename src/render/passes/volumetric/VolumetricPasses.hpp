@@ -7,7 +7,8 @@
 #include "Renderer.hpp"
 #include "TargetManager.hpp"
 #include "features/VolumetricFogSystem.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "graph/PassExecution.hpp"
+#include <vkd3d/graph/PassDecl.hpp>
 #include "passes/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 
@@ -24,8 +25,8 @@ namespace ZHLN::Passes {
 // no resolve target and no per-frame swap.
 
 struct VolumetricFogInjectDesc {
-    static constexpr auto name = Vk::ResourceName("VolumetricFogInject");
-    using Usages               = Vk::TypeList<Vk::ComputeWrite<Res_VoxelMedia>>;
+    static constexpr auto name = VkD3D::ResourceName("VolumetricFogInject");
+    using Usages               = VkD3D::TypeList<VkD3D::ComputeWrite<Res_VoxelMedia>>;
     using ShaderDecl           = Shaders::VolumetricFogInject;
     using ShaderModule         = Shaders::Modules::VolumetricFogInjectCS;
     using PushConstants        = VolumetricFogPushConstants;
@@ -38,15 +39,15 @@ struct VolumetricFogInjectDesc {
         const VolumetricFogPushConstants fogPC = {};
         return MakeComputePassArgs(
             fogPC, frame.renderer.fog.VoxelDispatchExtent(),
-            Vk::Slot<"outVoxelMedia">(Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(frame.graphResources.voxelMedia)),
+            Vk::Slot<"outVoxelMedia">(Vk::Assume<VkD3D::ComputeWrite<Res_VoxelMedia>>(frame.graphResources.voxelMedia)),
             Vk::Slot<"noiseTexture">(frame.renderer.fog.NoiseWrite()), Vk::Slot<"frame">(frame.frameUniformBuffers)
         );
     }
 };
 
 struct VolumetricLightInjectDesc {
-    static constexpr auto name = Vk::ResourceName("VolumetricLightInject");
-    using Usages = Vk::TypeList<Vk::ComputeReadGeneral<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>>;
+    static constexpr auto name = VkD3D::ResourceName("VolumetricLightInject");
+    using Usages = VkD3D::TypeList<VkD3D::ComputeReadGeneral<Res_VoxelMedia>, VkD3D::ComputeWrite<Res_VoxelLight>, VkD3D::ComputeRead<Res_ShadowMap>>;
     using ShaderDecl           = Shaders::VolumetricLightInject;
     using ShaderModule         = Shaders::Modules::VolumetricLightInjectCS;
     using PushConstants        = VolumetricLightInjectPushConstants;
@@ -59,18 +60,18 @@ struct VolumetricLightInjectDesc {
         const VolumetricLightInjectPushConstants lightInjectPC = {};
         return MakeComputePassArgs(
             lightInjectPC, frame.renderer.fog.VoxelDispatchExtent(),
-            Vk::Slot<"inVoxelMedia">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(frame.graphResources.voxelMedia)),
-            Vk::Slot<"outVoxelLight">(Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(frame.graphResources.voxelLight)),
+            Vk::Slot<"inVoxelMedia">(Vk::Assume<VkD3D::ComputeReadGeneral<Res_VoxelMedia>>(frame.graphResources.voxelMedia)),
+            Vk::Slot<"outVoxelLight">(Vk::Assume<VkD3D::ComputeWrite<Res_VoxelLight>>(frame.graphResources.voxelLight)),
             Vk::Slot<"frame">(frame.frameUniformBuffers), Vk::Slot<"lights">(frame.lightStorageBuffers), Vk::Slot<"clusterGrid">(frame.clusterGridBuffers),
             Vk::Slot<"clusterIndexList">(frame.lightIndexListBuffers),
-            Vk::Slot<"shadowMap">(Vk::Assume<Vk::ComputeRead<Res_ShadowMap>>(frame.graphResources.shadowMap))
+            Vk::Slot<"shadowMap">(Vk::Assume<VkD3D::ComputeRead<Res_ShadowMap>>(frame.graphResources.shadowMap))
         );
     }
 };
 
 struct VolumetricIntegrationDesc {
-    static constexpr auto name = Vk::ResourceName("VolumetricIntegrate");
-    using Usages               = Vk::TypeList<Vk::ComputeReadGeneral<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>>;
+    static constexpr auto name = VkD3D::ResourceName("VolumetricIntegrate");
+    using Usages               = VkD3D::TypeList<VkD3D::ComputeReadGeneral<Res_VoxelLight>, VkD3D::ComputeWrite<Res_VoxelInt>>;
     using ShaderDecl           = Shaders::VolumetricIntegration;
     using ShaderModule         = Shaders::Modules::VolumetricIntegrationCS;
     using PushConstants        = void;
@@ -82,8 +83,8 @@ struct VolumetricIntegrationDesc {
     [[nodiscard]] static auto Prepare(RenderFrame& frame, const Slang::ScenePassPushConstants&) noexcept {
         return MakeComputePassArgs(
             frame.renderer.fog.VoxelDispatchExtent(),
-            Vk::Slot<"inVoxelLight">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(frame.graphResources.voxelLight)),
-            Vk::Slot<"outVoxelIntegrated">(Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(frame.graphResources.voxelIntegrated)),
+            Vk::Slot<"inVoxelLight">(Vk::Assume<VkD3D::ComputeReadGeneral<Res_VoxelLight>>(frame.graphResources.voxelLight)),
+            Vk::Slot<"outVoxelIntegrated">(Vk::Assume<VkD3D::ComputeWrite<Res_VoxelInt>>(frame.graphResources.voxelIntegrated)),
             Vk::Slot<"frame">(frame.frameUniformBuffers)
         );
     }
