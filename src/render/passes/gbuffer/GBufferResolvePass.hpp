@@ -3,8 +3,7 @@
 
 #pragma once
 #include "RenderTargetTags.hpp"
-#include "graph/PassExecution.hpp"
-#include <vkd3d/graph/PassDecl.hpp>
+#include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN {
 struct CsgResources;
@@ -16,14 +15,14 @@ struct RenderFrame;
 namespace ZHLN::Passes {
 
 struct GBufferResolvePass:
-    VkD3D::RenderPass<
+    Vk::RenderPass<
         "MainPass2",
-        VkD3D::ColorWrite<Res_SceneColor>,
-        VkD3D::ColorWrite<Res_Velocity>,
-        VkD3D::ColorWrite<Res_NormRough>,
-        VkD3D::ColorWrite<Res_BakedMask>,
-        VkD3D::DepthStencilWrite<Res_Depth>,
-        VkD3D::ComputeRead<Res_HiZ>> {
+        Vk::ColorWrite<Res_SceneColor>,
+        Vk::ColorWrite<Res_Velocity>,
+        Vk::ColorWrite<Res_NormRough>,
+        Vk::ColorWrite<Res_BakedMask>,
+        Vk::DepthStencilWrite<Res_Depth>,
+        Vk::ComputeRead<Res_HiZ>> {
     CullingResources&            cull;
     const CsgResources&          csg;
     const MeshParticlePipelines& particles;

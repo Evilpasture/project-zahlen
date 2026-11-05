@@ -4,26 +4,25 @@
 #pragma once
 #include "RenderFrame.hpp"
 #include "Renderer.hpp"
-#include "graph/PassExecution.hpp"
-#include <vkd3d/graph/PassDecl.hpp>
+#include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN::Passes {
 
-template <typename SurfaceTag, typename OutputTag, VkD3D::ResourceName PassName>
+template <typename SurfaceTag, typename OutputTag, Vk::ResourceName PassName>
 struct ReflectionPass:
-    VkD3D::RenderPass<
+    Vk::RenderPass<
         PassName,
-        VkD3D::ShaderRead<Res_SceneColor>,
-        VkD3D::ShaderRead<typename SurfaceTag::Normals>,
-        VkD3D::ShaderRead<typename SurfaceTag::Depth>,
-        VkD3D::ShaderRead<Res_LightingGI>,
-        VkD3D::ShaderRead<Res_LightingAo>,
-        VkD3D::ShaderRead<Res_ShadowMap>,
-        VkD3D::ShaderRead<Res_ShadowAtlas>,
-        VkD3D::ShaderReadGeneral<Res_VoxelInt>,
-        VkD3D::ShaderRead<Res_RcgiProbes>,
-        VkD3D::ShaderRead<Res_RcgiCascadeA>,
-        VkD3D::ColorWrite<OutputTag>> {
+        Vk::ShaderRead<Res_SceneColor>,
+        Vk::ShaderRead<typename SurfaceTag::Normals>,
+        Vk::ShaderRead<typename SurfaceTag::Depth>,
+        Vk::ShaderRead<Res_LightingGI>,
+        Vk::ShaderRead<Res_LightingAo>,
+        Vk::ShaderRead<Res_ShadowMap>,
+        Vk::ShaderRead<Res_ShadowAtlas>,
+        Vk::ShaderReadGeneral<Res_VoxelInt>,
+        Vk::ShaderRead<Res_RcgiProbes>,
+        Vk::ShaderRead<Res_RcgiCascadeA>,
+        Vk::ColorWrite<OutputTag>> {
     RenderFrame&                  frame;
     Slang::ScenePassPushConstants pc {};
 

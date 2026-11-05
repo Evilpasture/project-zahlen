@@ -4,8 +4,7 @@
 #pragma once
 #include "RenderFrame.hpp"
 #include "Renderer.hpp"
-#include "graph/PassExecution.hpp"
-#include <vkd3d/graph/PassDecl.hpp>
+#include "graph/RenderPassDecl.hpp"
 #include "passes/GraphPassUtils.hpp"
 #include <ShaderBindings.hpp>
 #include <concepts>
@@ -71,7 +70,7 @@ struct IsDoubleBufferedPass<Vk::DoubleBufferedComputePass<LayoutT, Domain>>: std
 //
 // The descriptor contract:
 //   static constexpr auto              name;          // matches a Stage enumerator
-//   using Usages                       = VkD3D::TypeList<...>;
+//   using Usages                       = Vk::TypeList<...>;
 //   using ShaderDecl                   = Shaders::X;  // descriptor set
 //   using ShaderModule                 = Shaders::Modules::X;
 //   using PushConstants                = T | void;

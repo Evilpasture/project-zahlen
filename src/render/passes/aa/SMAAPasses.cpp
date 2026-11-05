@@ -31,9 +31,9 @@ void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
         const auto& inputColor = frame.graphResources.hdrSceneColor;
 
         return MakeFullscreenPassArgs(
-            MetricsOf(inputColor.extent), Vk::Slot<"colorTex">(Vk::Assume<VkD3D::ShaderRead<Res_HdrSceneColor>>(inputColor)),
-            Vk::Slot<"depthTex">(Vk::Assume<VkD3D::ShaderRead<Res_Depth>>(frame.ActiveDepthTarget())),
-            Vk::Slot<"normRoughTex">(Vk::Assume<VkD3D::ShaderRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer))
+            MetricsOf(inputColor.extent), Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
+            Vk::Slot<"depthTex">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(frame.ActiveDepthTarget())),
+            Vk::Slot<"normRoughTex">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer))
         );
     });
 }
@@ -45,7 +45,7 @@ void SmaaWeightPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     const auto  variantIndex = SmaaWeightVariantForExtent(extent);
 
     const auto block = aa.smaaWeight.WriteHeapParameters<Shaders::SmaaWeight>(
-        frame.renderer.heapManager, Vk::Slot<"edgesTex">(Vk::Assume<VkD3D::ShaderRead<Res_SmaaEdge>>(frame.graphResources.smaaEdgeTarget)),
+        frame.renderer.heapManager, Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(frame.graphResources.smaaEdgeTarget)),
         Vk::Slot<"areaTex">(areaView), Vk::Slot<"searchTex">(searchView)
     );
 
@@ -65,8 +65,8 @@ void SmaaBlendPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
         const auto& inputColor = frame.graphResources.hdrSceneColor;
 
         return MakeFullscreenPassArgs(
-            MetricsOf(inputColor.extent), Vk::Slot<"colorTex">(Vk::Assume<VkD3D::ShaderRead<Res_HdrSceneColor>>(inputColor)),
-            Vk::Slot<"blendTex">(Vk::Assume<VkD3D::ShaderRead<Res_SmaaWeight>>(frame.graphResources.smaaWeightTarget))
+            MetricsOf(inputColor.extent), Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
+            Vk::Slot<"blendTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(frame.graphResources.smaaWeightTarget))
         );
     });
 }

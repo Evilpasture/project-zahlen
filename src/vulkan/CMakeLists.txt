@@ -96,13 +96,6 @@ target_include_directories(
   PUBLIC ${PROJECT_SOURCE_DIR}/include
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-# The joint layer's public headers (<vkd3d/graph/*>, <vkd3d/VulkanConversions.hpp>,
-# <vkd3d/Color.hpp>): the graph declarations and state analysis are neutral and
-# live in src/vkd3d; the Vulkan execution layer here consumes them and converts
-# at its boundary. Path-only, mirroring zahlen_render's treatment.
-target_include_directories(zahlen_vulkan PRIVATE
-                           ${PROJECT_SOURCE_DIR}/src/vkd3d/include)
-
 target_include_directories(zahlen_vulkan SYSTEM
                            PUBLIC ${PROJECT_SOURCE_DIR}/extern/volk)
 

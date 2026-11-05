@@ -11,13 +11,12 @@
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
-#include <vkd3d/Color.hpp>
 
 namespace ZHLN {
 
-/// The four-float color aggregate lives in the joint layer now
-/// (<vkd3d/Color.hpp>); this alias keeps the historical spelling.
-using VkD3D::Color4;
+struct Color4 {
+    float r, g, b, a;
+};
 
 } // namespace ZHLN
 

@@ -29,13 +29,13 @@ void RtgiCompositePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     frame.renderer.lighting.rcgiResolve.DispatchIndexed<RcgiResolve>(
         cmd, frame.renderer.heapManager, fullExt.width, fullExt.height, 1, push,
-        Vk::Slot<"texLighting">(Vk::Assume<VkD3D::ComputeRead<Res_Lighting>>(frame.graphResources.lightingTarget)),
-        Vk::Slot<"texLightingAo">(Vk::Assume<VkD3D::ComputeRead<Res_LightingAo>>(frame.graphResources.lightingAo)),
-        Vk::Slot<"texAlbedo">(Vk::Assume<VkD3D::ComputeRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
-        Vk::Slot<"texDepth">(Vk::Assume<VkD3D::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
-        Vk::Slot<"texNormalRoughness">(Vk::Assume<VkD3D::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
-        Vk::Slot<"inProbes">(Vk::Assume<VkD3D::ComputeRead<Res_RcgiProbes>>(frame.graphResources.rcgiProbes)),
-        Vk::Slot<"inCascade0">(Vk::Assume<VkD3D::ComputeRead<Res_RcgiCascadeA>>(frame.graphResources.rcgiCascadeA)), Vk::Slot<"frame">(frame.frameUniformBuffers),
+        Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(frame.graphResources.lightingTarget)),
+        Vk::Slot<"texLightingAo">(Vk::Assume<Vk::ComputeRead<Res_LightingAo>>(frame.graphResources.lightingAo)),
+        Vk::Slot<"texAlbedo">(Vk::Assume<Vk::ComputeRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
+        Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
+        Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
+        Vk::Slot<"inProbes">(Vk::Assume<Vk::ComputeRead<Res_RcgiProbes>>(frame.graphResources.rcgiProbes)),
+        Vk::Slot<"inCascade0">(Vk::Assume<Vk::ComputeRead<Res_RcgiCascadeA>>(frame.graphResources.rcgiCascadeA)), Vk::Slot<"frame">(frame.frameUniformBuffers),
         Vk::Slot<"outLighting">(Vk::ImageWrite {frame.graphResources.lightingGI.image.View(Vk::ImageAspect::Color, 0, 1), Vk::ImageLayout::General})
     );
 }

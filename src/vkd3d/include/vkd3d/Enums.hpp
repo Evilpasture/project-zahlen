@@ -115,30 +115,6 @@ enum class ImageAspect : uint32_t { None = 0, Color = 1u << 0, Depth = 1u << 1, 
 // PlaneSlice, not an aspect enum; the neutral flags carry the information
 // and the backend lowers them when the barrier code lands.
 
-// Neutral color write mask. Bit values coincide with both backends
-// (VK_COLOR_COMPONENT_*_BIT and D3D12_COLOR_WRITE_ENABLE_*), and the
-// conversion anchors pin that correspondence; the graph's Usage channel
-// masks speak only this vocabulary.
-// NOLINTNEXTLINE(performance-enum-size)
-enum class ColorMask : uint32_t {
-    None  = 0,
-    Red   = 1u << 0,
-    Green = 1u << 1,
-    Blue  = 1u << 2,
-    Alpha = 1u << 3,
-};
-
-[[nodiscard]] constexpr auto operator|(ColorMask a, ColorMask b) noexcept -> ColorMask {
-    return static_cast<ColorMask>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
-}
-constexpr auto operator|=(ColorMask& a, ColorMask b) noexcept -> ColorMask& { a = a | b; return a; }
-[[nodiscard]] constexpr auto operator&(ColorMask a, ColorMask b) noexcept -> ColorMask {
-    return static_cast<ColorMask>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
-}
-[[nodiscard]] constexpr auto Has(ColorMask flags, ColorMask bits) noexcept -> bool {
-    return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(bits)) != 0;
-}
-
 // NOLINTNEXTLINE(performance-enum-size)
 enum class CompareOp : uint32_t { Never, Less, Equal, LessOrEqual, Greater, NotEqual, GreaterOrEqual, Always };
 

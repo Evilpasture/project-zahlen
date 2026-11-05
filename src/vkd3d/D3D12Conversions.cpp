@@ -22,11 +22,6 @@ static_assert(ZHLN::VkD3D::ToD3D12Sync(ZHLN::VkD3D::PipelineStage::VertexInput) 
 static_assert(ZHLN::VkD3D::ToD3D12Access(ZHLN::VkD3D::Access::UniformRead) == D3D12_BARRIER_ACCESS_CONSTANT_BUFFER);
 static_assert(ZHLN::VkD3D::ToD3D12Access(ZHLN::VkD3D::Access::HostRead) == D3D12_BARRIER_ACCESS_COMMON); // collapse
 static_assert(ZHLN::VkD3D::ToD3D12Compare(ZHLN::VkD3D::CompareOp::LessOrEqual) == D3D12_COMPARISON_FUNC_LESS_EQUAL);
-static_assert(ZHLN::VkD3D::ToD3D12ColorMask(ZHLN::VkD3D::ColorMask::Red) == D3D12_COLOR_WRITE_ENABLE_RED);
-static_assert(ZHLN::VkD3D::ToD3D12ColorMask(ZHLN::VkD3D::ColorMask::Green) == D3D12_COLOR_WRITE_ENABLE_GREEN);
-static_assert(ZHLN::VkD3D::ToD3D12ColorMask(ZHLN::VkD3D::ColorMask::Blue) == D3D12_COLOR_WRITE_ENABLE_BLUE);
-static_assert(ZHLN::VkD3D::ToD3D12ColorMask(ZHLN::VkD3D::ColorMask::Alpha) == D3D12_COLOR_WRITE_ENABLE_ALPHA);
-static_assert(ZHLN::VkD3D::ToD3D12ColorMask(ZHLN::VkD3D::ColorMask::None) == static_cast<D3D12_COLOR_WRITE_ENABLE>(0));
 
 // Barrier synthesis: neutral values lower to the enhanced-barrier fields
 // the runtime hands to ID3D12GraphicsCommandList7::Barrier.

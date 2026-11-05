@@ -32,7 +32,7 @@ struct ResourceResolver<Res_TransLighting> {
     [[nodiscard]] static auto Resolve(RenderContext::Impl& impl) noexcept -> ImageSlice {
         const auto& target = impl.graphResources.transLightingTarget;
 
-        return ImageSlice {target.image.Handle(), target.mipAttachmentViews[0], target.extent, VkD3D::ToVk(Res_TransLighting::format)};
+        return ImageSlice {target.image.Handle(), target.mipAttachmentViews[0], target.extent, Res_TransLighting::format};
     }
 };
 
@@ -41,7 +41,7 @@ struct ResourceResolver<Res_LightingGI> {
     [[nodiscard]] static auto Resolve(RenderContext::Impl& impl) noexcept -> ImageSlice {
         const auto& target = impl.graphResources.lightingGI;
 
-        return ImageSlice {target.image.Handle(), target.mipAttachmentViews[0], target.extent, VkD3D::ToVk(Res_LightingGI::format)};
+        return ImageSlice {target.image.Handle(), target.mipAttachmentViews[0], target.extent, Res_LightingGI::format};
     }
 };
 

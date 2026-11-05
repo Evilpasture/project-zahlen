@@ -3,8 +3,7 @@
 
 #pragma once
 #include "Rendering.hpp"
-#include "graph/PassExecution.hpp"
-#include <vkd3d/graph/PassDecl.hpp>
+#include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN {
 struct ParticleUpdateResources;
@@ -13,7 +12,7 @@ struct RenderFrame;
 
 namespace ZHLN::Passes {
 
-struct ParticleUpdatePass: VkD3D::RenderPass<"ParticleUpdate"> {
+struct ParticleUpdatePass: Vk::RenderPass<"ParticleUpdate"> {
     const ParticleUpdateResources& particles;
     RenderFrame&                   frame;
     float                          dt;

@@ -5,8 +5,7 @@
 #include "RenderFrame.hpp"
 #include "Rendering.hpp"
 #include "TargetManager.hpp"
-#include "graph/PassExecution.hpp"
-#include <vkd3d/graph/PassDecl.hpp>
+#include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN::Passes {
 
@@ -28,8 +27,8 @@ struct OpaqueSurface {
 
     [[nodiscard]] static auto Resolve(RenderFrame& frame) noexcept -> GBufferSurface {
         return {
-            .depth   = Vk::Assume<VkD3D::ShaderRead<Depth>>(frame.ActiveDepthTarget()).Raw(),
-            .normals = Vk::Assume<VkD3D::ShaderRead<Normals>>(frame.graphResources.normalRoughnessBuffer).Raw(),
+            .depth   = Vk::Assume<Vk::ShaderRead<Depth>>(frame.ActiveDepthTarget()).Raw(),
+            .normals = Vk::Assume<Vk::ShaderRead<Normals>>(frame.graphResources.normalRoughnessBuffer).Raw(),
         };
     }
 };
@@ -43,8 +42,8 @@ struct TranslucentSurface {
 
     [[nodiscard]] static auto Resolve(RenderFrame& frame) noexcept -> GBufferSurface {
         return {
-            .depth   = Vk::Assume<VkD3D::ShaderRead<Depth>>(frame.graphResources.transDepthBuffer).Raw(),
-            .normals = Vk::Assume<VkD3D::ShaderRead<Normals>>(frame.graphResources.transNormalBuffer).Raw(),
+            .depth   = Vk::Assume<Vk::ShaderRead<Depth>>(frame.graphResources.transDepthBuffer).Raw(),
+            .normals = Vk::Assume<Vk::ShaderRead<Normals>>(frame.graphResources.transNormalBuffer).Raw(),
         };
     }
 };

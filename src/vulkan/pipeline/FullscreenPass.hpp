@@ -7,8 +7,7 @@
 #endif
 
 #include "ActivePipeline.hpp"
-#include "graph/PassExecution.hpp"
-#include <vkd3d/graph/PassDecl.hpp>
+#include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN::Vk {
 

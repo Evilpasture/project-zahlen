@@ -3,8 +3,7 @@
 
 #pragma once
 #include "RenderTargetTags.hpp"
-#include "graph/PassExecution.hpp"
-#include <vkd3d/graph/PassDecl.hpp>
+#include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN {
 struct RenderFrame;
@@ -13,12 +12,12 @@ struct RenderFrame;
 namespace ZHLN::Passes {
 
 struct TranslucentPrePass:
-    VkD3D::RenderPass<
+    Vk::RenderPass<
         "TransPrePass",
-        VkD3D::ColorWrite<Res_TransNorm>,
-        VkD3D::ColorWrite<Res_TransAnisotropy>,
-        VkD3D::ColorWrite<Res_TransSheen>,
-        VkD3D::DepthStencilWrite<Res_TransDepth>> {
+        Vk::ColorWrite<Res_TransNorm>,
+        Vk::ColorWrite<Res_TransAnisotropy>,
+        Vk::ColorWrite<Res_TransSheen>,
+        Vk::DepthStencilWrite<Res_TransDepth>> {
     RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;

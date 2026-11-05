@@ -3,15 +3,14 @@
 
 #pragma once
 #include "RenderFrame.hpp"
-#include "graph/PassExecution.hpp"
-#include <vkd3d/graph/PassDecl.hpp>
+#include "graph/RenderPassDecl.hpp"
 
 namespace ZHLN::Passes {
 
 // Generates the linear mip pyramid on `Res_LightingGI` right after `RtgiCompositePass`
 // and `EmissivePass` finish writing mip 0, enabling deterministic Tier 2 cone-traced
 // mip selection (`0.20 <= roughness <= 0.40`) in `ReflectionPass` with zero temporal noise.
-struct LightingMipPass: VkD3D::RenderPass<"LightingMip", VkD3D::TransferDstWriteThenShaderRead<Res_LightingGI>> {
+struct LightingMipPass: Vk::RenderPass<"LightingMip", Vk::TransferDstWriteThenShaderRead<Res_LightingGI>> {
     RenderFrame& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept {

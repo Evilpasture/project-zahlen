@@ -3,8 +3,7 @@
 
 #pragma once
 #include "Rendering.hpp"
-#include "graph/PassExecution.hpp"
-#include <vkd3d/graph/PassDecl.hpp>
+#include "graph/RenderPassDecl.hpp"
 #include "pipeline/FullscreenPass.hpp"
 #include <GeneratedGpuTypes.hpp>
 

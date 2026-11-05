@@ -20,8 +20,7 @@
 #include "diagnostics/GpuProfiler.hpp"
 #include "features/ShadowRenderer.hpp"
 #include "features/VolumetricFogSystem.hpp"
-#include "graph/PassExecution.hpp"
-#include <vkd3d/graph/PassDecl.hpp>
+#include "graph/RenderPassDecl.hpp"
 #include "passes/SceneDrawResources.hpp"
 #include "passes/aa/AntiAliasingResources.hpp"
 #include "passes/culling/CullingResources.hpp"

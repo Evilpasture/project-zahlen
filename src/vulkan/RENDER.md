@@ -116,7 +116,7 @@ This encapsulates `vkCmdBeginRendering`, sets up the dynamic viewports, scissors
 bodies should not contain profiler scopes or breadcrumb calls:
 
 A pass is a self-describing struct, not a closure: it inherits
-`VkD3D::RenderPass<"Name", Usages...>` and implements `operator()`. The name in that
+`Vk::RenderPass<"Name", Usages...>` and implements `operator()`. The name in that
 inheritance is the single source of truth for both systems.
 
 ```cpp
@@ -124,7 +124,7 @@ enum class Stage : uint8_t { GBuffer, Lighting, PostProcess };
 Profiler::GpuProfiler<Stage> profiler;
 Vk::GPUDiagnostics diagnostics;
 
-struct LightingPass: VkD3D::RenderPass<"Lighting", VkD3D::ShaderRead<GBuffer>, VkD3D::ColorWrite<Hdr>> {
+struct LightingPass: Vk::RenderPass<"Lighting", Vk::ShaderRead<GBuffer>, Vk::ColorWrite<Hdr>> {
     RenderContext::Impl& impl;
 
     // A raster pass that wants the automatic render-pass wrapper takes the

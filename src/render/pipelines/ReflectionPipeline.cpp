@@ -24,16 +24,16 @@ void ReflectionPipeline::Dispatch(
     // that stream began (RenderContext::Impl::AcquireTarget), never per draw.
 
     const auto block = pass.WriteHeapParameters<Shaders::Reflection>(
-        frame.renderer.heapManager, Vk::Slot<"texInput">(Vk::Assume<VkD3D::ShaderRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
+        frame.renderer.heapManager, Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
         Vk::Slot<"texDepth">(surface.depth), Vk::Slot<"texNormalRoughness">(surface.normals),
         Vk::Slot<"texEnvMap">(inputs.prefiltered),
         Vk::Slot<"texSkyEquirect">(inputs.visualSky), Vk::Slot<"frame">(frame.frameUniformBuffers), Vk::Slot<"brdfLUT">(inputs.brdfLut),
-        Vk::Slot<"texLighting">(Vk::Assume<VkD3D::ShaderRead<Res_LightingGI>>(frame.graphResources.lightingGI)),
-        Vk::Slot<"texLightingAo">(Vk::Assume<VkD3D::ShaderRead<Res_LightingAo>>(frame.graphResources.lightingAo)),
-        Vk::Slot<"texVoxelIntegrated">(Vk::Assume<VkD3D::ShaderReadGeneral<Res_VoxelInt>>(frame.graphResources.voxelIntegrated)),
+        Vk::Slot<"texLighting">(Vk::Assume<Vk::ShaderRead<Res_LightingGI>>(frame.graphResources.lightingGI)),
+        Vk::Slot<"texLightingAo">(Vk::Assume<Vk::ShaderRead<Res_LightingAo>>(frame.graphResources.lightingAo)),
+        Vk::Slot<"texVoxelIntegrated">(Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelInt>>(frame.graphResources.voxelIntegrated)),
         Vk::Slot<"g_instances">(frame.instanceDataBuffers), Vk::Slot<"tlas">(inputs.tlas),
-        Vk::Slot<"texRcgiProbes">(Vk::Assume<VkD3D::ShaderRead<Res_RcgiProbes>>(frame.graphResources.rcgiProbes)),
-        Vk::Slot<"texRcgiCascade0">(Vk::Assume<VkD3D::ShaderRead<Res_RcgiCascadeA>>(frame.graphResources.rcgiCascadeA))
+        Vk::Slot<"texRcgiProbes">(Vk::Assume<Vk::ShaderRead<Res_RcgiProbes>>(frame.graphResources.rcgiProbes)),
+        Vk::Slot<"texRcgiCascade0">(Vk::Assume<Vk::ShaderRead<Res_RcgiCascadeA>>(frame.graphResources.rcgiCascadeA))
     );
 
     // Typestate: From proves the variant's bounds and validity, Create the
