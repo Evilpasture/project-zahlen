@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# zdev: manage the zahlen dev container and its Cloudflare quick tunnel
+# zdev: manage the zahlen dev container and its Cloudflare quick tunnel (Cross-Platform: Arch & macOS)
 set -euo pipefail
 
 NAME=zahlen-dev-container
@@ -10,9 +10,11 @@ CCACHE_VOL=zahlen-ccache
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Detect Host OS
+OS="$(uname -s)"
+
 find_dockerfile() {
   local c
-  # explicit override wins, then repo root, then cwd, then script dir and its parent
   local candidates=(
     "${ZDEV_DOCKERFILE:-}"
     "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)/Dockerfile.dev"
@@ -51,9 +53,12 @@ get_password() {
 }
 
 ensure_machine() {
-  if ! podman machine list --format '{{.Running}}' 2>/dev/null | grep -q true; then
-    log "starting podman machine"
-    podman machine start
+  # podman machine is only required and valid on macOS/Windows
+  if [[ "$OS" == "Darwin" ]]; then
+    if ! podman machine list --format '{{.Running}}' 2>/dev/null | grep -q true; then
+      log "starting podman machine"
+      podman machine start
+    fi
   fi
 }
 
@@ -61,12 +66,12 @@ build() {
   local DOCKERFILE
   DOCKERFILE="$(find_dockerfile)" || die "Dockerfile.dev not found (set ZDEV_DOCKERFILE=/path/to/Dockerfile.dev)"
   ensure_machine
-  local ctx; ctx="$(mktemp -d)"
-  trap 'rm -rf "$ctx"' RETURN
-  log "building $IMAGE"
+  local repo_root
+  repo_root="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$SCRIPT_DIR")"
+  log "building $IMAGE from $repo_root"
   local args=(--build-arg "FRIEND_PASSWORD=$(get_password)")
   [[ -n "${ZDEV_SSH_PUBKEY:-}" ]] && args+=(--build-arg "SSH_PUBKEY=$ZDEV_SSH_PUBKEY")
-  podman build -f "$DOCKERFILE" -t "$IMAGE" "${args[@]}" "$ctx"
+  podman build -f "$DOCKERFILE" -t "$IMAGE" "${args[@]}" "$repo_root"
 }
 
 confirm_if_busy() {
@@ -74,7 +79,6 @@ confirm_if_busy() {
   local n
   n="$(podman exec "$NAME" sh -c 'pgrep -c dropbear || true' 2>/dev/null || true)"
   n="${n:-0}"
-  # 1 = the listener only; more means live sessions
   if (( n > 1 )) && [[ "${ZDEV_FORCE:-}" != 1 ]]; then
     read -r -p "$((n-1)) active session(s) will be killed. Continue? [y/N] " a
     [[ "$a" == [yY]* ]] || die "aborted (ZDEV_FORCE=1 skips this check)"
@@ -88,12 +92,24 @@ run() {
   podman volume exists "$SRC_VOL"    || podman volume create "$SRC_VOL" >/dev/null
   podman volume exists "$CCACHE_VOL" || podman volume create "$CCACHE_VOL" >/dev/null
   podman rm -f "$NAME" >/dev/null 2>&1 || true
+  
+  # Conditionally add GPU flags if running on Linux with NVIDIA CDI configured
+  local run_args=()
+  if [[ "$OS" == "Linux" ]] && nvidia-ctk cdi list 2>/dev/null | grep -q "nvidia.com/gpu"; then
+    log "enabling NVIDIA GPU passthrough via CDI"
+    run_args+=(--device nvidia.com/gpu=all --security-opt=label=disable)
+  else
+    log "running in CPU / software-rendering mode (macOS or non-NVIDIA host)"
+  fi
+
   log "starting container $NAME"
   podman run -d --name "$NAME" \
+    "${run_args[@]}" \
     -p "127.0.0.1:${HOST_PORT}:22" \
     -v "$SRC_VOL:/home/frienduser/Projects" \
     -v "$CCACHE_VOL:/home/frienduser/.ccache" \
     "$IMAGE" >/dev/null
+
   for _ in $(seq 1 15); do
     podman logs "$NAME" 2>&1 | grep -q 'Not backgrounding' && return 0
     sleep 1
@@ -110,7 +126,7 @@ tunnel_stop() {
 }
 
 tunnel_start() {
-  command -v cloudflared >/dev/null || die "cloudflared not installed (brew install cloudflared)"
+  command -v cloudflared >/dev/null || die "cloudflared not installed"
   tunnel_stop
   : > "$TUN_LOG"
   log "starting tunnel"
@@ -144,9 +160,9 @@ status() {
   podman ps -a --filter "name=^${NAME}\$" --format 'container: {{.Names}} {{.Status}}' || true
   if [[ -f "$TUN_PID" ]] && kill -0 "$(cat "$TUN_PID")" 2>/dev/null; then
     local url; url="$(grep -Eo '[a-z0-9-]+\.trycloudflare\.com' "$TUN_LOG" | head -n1 || true)"
-    echo "tunnel:    running ($url)"
+    echo "tunnel:   running ($url)"
   else
-    echo "tunnel:    stopped"
+    echo "tunnel:   stopped"
   fi
 }
 
