@@ -626,13 +626,51 @@ if(ZHLN_BUILD_RENDER)
             message(STATUS "Jolt Vulkan compute: no glslc found, compiling its HLSL shaders with ${ZHLN_JOLT_DXC_EXECUTABLE}.")
         elseif(ZHLN_JOLT_SLANG_FALLBACK)
             # Point Jolt at the shim, not at a compiler: Jolt prepends nothing and
-            # runs the path it is given, and the shim resolves slangc at build time.
+            # runs the path it is given, and the shim accepts dxc's command line.
+            #
+            # If a compiler already exists, tell the shim where it is, here. The
+            # shim otherwise locates slangc at build time, and on a tree that builds
+            # Slang from source that is too late: the seventeen .spv rules are
+            # scheduled at step 1, in parallel with the Slang build that would have
+            # produced slangc, and every one of them exits with "slangc not found".
+            # Jolt's CMakeLists cannot depend on that target -- it is a submodule and
+            # it is configured before the Slang target exists -- and the .spv build
+            # statements carry no order-only edge that a dependency from this file
+            # could reach (add_dependencies only orders Jolt's objects, which already
+            # wait on the .spv). Naming a compiler that exists now removes the
+            # question instead of ordering around it.
             set(ZHLN_JOLT_SLANGC_DXC "${CMAKE_CURRENT_SOURCE_DIR}/cmake/JoltDxcShim.sh")
+            set(ZHLN_JOLT_SLANGC_PINNED "")
+            if(SLANG_EXECUTABLE AND EXISTS "${SLANG_EXECUTABLE}")
+                set(ZHLN_JOLT_SLANGC_PINNED "${SLANG_EXECUTABLE}")
+            else()
+                # HINTS covers the layout scripts/install-slang-prebuilt.sh installs.
+                find_program(ZHLN_JOLT_SLANGC_HOST NAMES slangc
+                    HINTS "$ENV{SLANG_BIN}" "$ENV{VULKAN_SDK}/bin" /opt/slang/bin)
+                if(ZHLN_JOLT_SLANGC_HOST)
+                    set(ZHLN_JOLT_SLANGC_PINNED "${ZHLN_JOLT_SLANGC_HOST}")
+                endif()
+            endif()
+            if(ZHLN_JOLT_SLANGC_PINNED)
+                # A generated wrapper, not an environment variable: the build must
+                # not depend on how the shell that launched it was configured.
+                set(ZHLN_JOLT_SLANGC_WRAPPER "${CMAKE_BINARY_DIR}/jolt-dxc-shim")
+                file(WRITE "${ZHLN_JOLT_SLANGC_WRAPPER}"
+"#!/bin/sh
+# Written by cmake/ThirdParty.cmake -- do not edit.
+ZHLN_JOLT_SLANGC='${ZHLN_JOLT_SLANGC_PINNED}' exec '${ZHLN_JOLT_SLANGC_DXC}' \"$@\"
+")
+                file(CHMOD "${ZHLN_JOLT_SLANGC_WRAPPER}" PERMISSIONS
+                    OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                    GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+                set(ZHLN_JOLT_SLANGC_DXC "${ZHLN_JOLT_SLANGC_WRAPPER}")
+            endif()
             set(Vulkan_GLSLC_EXECUTABLE "${ZHLN_JOLT_SLANGC_DXC}" CACHE FILEPATH
                 "Shader compiler path Jolt reads; Jolt replaces 'glslc' with 'dxc' in it to locate dxc" FORCE)
             message(STATUS
-                "Jolt Vulkan compute: no dxc and no glslc found, compiling its HLSL shaders with the vendored Slang via ${ZHLN_JOLT_SLANGC_DXC}. "
-                "Set ZHLN_JOLT_SLANGC to pin a compiler, or ZHLN_JOLT_SLANG_FALLBACK=OFF to require dxc.")
+                "Jolt Vulkan compute: no dxc and no glslc found, compiling its HLSL shaders with Slang via ${ZHLN_JOLT_SLANGC_DXC}. "
+                "Pinned compiler: \"${ZHLN_JOLT_SLANGC_PINNED}\". "
+                "Set ZHLN_JOLT_SLANGC to pin a different one, or ZHLN_JOLT_SLANG_FALLBACK=OFF to require dxc.")
         else()
             message(WARNING
                 "Jolt's Vulkan compute shaders are compiled with dxc, and neither glslc nor dxc was found (Vulkan_GLSLC_EXECUTABLE is "

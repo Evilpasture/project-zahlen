@@ -126,7 +126,10 @@ endif()
 if(ZHLN_SLANG_VENDORED)
     set(SLANG_EXECUTABLE "")
 else()
-    find_program(SLANG_EXECUTABLE NAMES slangc PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}")
+    # /opt/slang/bin is the prefix scripts/install-slang-prebuilt.sh installs into;
+    # a machine that ran the tree's own installer should not also need PATH edits.
+    find_program(SLANG_EXECUTABLE NAMES slangc
+        PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}" /opt/slang/bin)
 endif()
 set(SLANG_COMPILER_DEPENDS "")
 if(SLANG_EXECUTABLE)
