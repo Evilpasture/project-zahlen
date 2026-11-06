@@ -8,14 +8,34 @@ HOST_PORT=2222
 SRC_VOL=zahlen-src
 CCACHE_VOL=zahlen-ccache
 
-HERE="$(cd "$(dirname "$0")" && pwd)"
-DOCKERFILE="${ZDEV_DOCKERFILE:-$HERE/Dockerfile.dev}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+find_dockerfile() {
+  local c
+  # explicit override wins, then repo root, then cwd, then script dir and its parent
+  local candidates=(
+    "${ZDEV_DOCKERFILE:-}"
+    "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)/Dockerfile.dev"
+    "$PWD/Dockerfile.dev"
+    "$SCRIPT_DIR/Dockerfile.dev"
+    "$SCRIPT_DIR/../Dockerfile.dev"
+  )
+  for c in "${candidates[@]}"; do
+    [[ -n "$c" && -f "$c" ]] && { (cd "$(dirname "$c")" && printf '%s/%s' "$PWD" "$(basename "$c")"); return; }
+  done
+  return 1
+}
+
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/zdev"
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/zdev"
 PW_FILE="$CONF/password"
 TUN_LOG="$STATE/tunnel.log"
 TUN_PID="$STATE/tunnel.pid"
 mkdir -p "$STATE" "$CONF"
+
+for bin in podman openssl; do
+  command -v "$bin" >/dev/null || die "$bin not found in PATH"
+done
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -38,7 +58,8 @@ ensure_machine() {
 }
 
 build() {
-  [[ -f "$DOCKERFILE" ]] || die "Dockerfile not found: $DOCKERFILE"
+  local DOCKERFILE
+  DOCKERFILE="$(find_dockerfile)" || die "Dockerfile.dev not found (set ZDEV_DOCKERFILE=/path/to/Dockerfile.dev)"
   ensure_machine
   local ctx; ctx="$(mktemp -d)"
   trap 'rm -rf "$ctx"' RETURN
@@ -48,7 +69,20 @@ build() {
   podman build -f "$DOCKERFILE" -t "$IMAGE" "${args[@]}" "$ctx"
 }
 
+confirm_if_busy() {
+  podman container exists "$NAME" 2>/dev/null || return 0
+  local n
+  n="$(podman exec "$NAME" sh -c 'pgrep -c dropbear || true' 2>/dev/null || true)"
+  n="${n:-0}"
+  # 1 = the listener only; more means live sessions
+  if (( n > 1 )) && [[ "${ZDEV_FORCE:-}" != 1 ]]; then
+    read -r -p "$((n-1)) active session(s) will be killed. Continue? [y/N] " a
+    [[ "$a" == [yY]* ]] || die "aborted (ZDEV_FORCE=1 skips this check)"
+  fi
+}
+
 run() {
+  confirm_if_busy
   ensure_machine
   podman image exists "$IMAGE" || die "image $IMAGE missing, run: $0 rebuild"
   podman volume exists "$SRC_VOL"    || podman volume create "$SRC_VOL" >/dev/null
@@ -60,6 +94,11 @@ run() {
     -v "$SRC_VOL:/home/frienduser/Projects" \
     -v "$CCACHE_VOL:/home/frienduser/.ccache" \
     "$IMAGE" >/dev/null
+  for _ in $(seq 1 15); do
+    podman logs "$NAME" 2>&1 | grep -q 'Not backgrounding' && return 0
+    sleep 1
+  done
+  die "dropbear did not start, see: podman logs $NAME"
 }
 
 tunnel_stop() {
@@ -67,6 +106,7 @@ tunnel_stop() {
     kill "$(cat "$TUN_PID")" 2>/dev/null || true
   fi
   rm -f "$TUN_PID"
+  pkill -f "cloudflared tunnel --url tcp://localhost:${HOST_PORT}" 2>/dev/null || true
 }
 
 tunnel_start() {
@@ -137,7 +177,7 @@ case "${1:-}" in
   rebuild) build; run; log "container recreated; run '$0 tunnel' if the tunnel is down" ;;
   restart) run ;;
   tunnel)  ensure_machine; tunnel_start ;;
-  down)    tunnel_stop; podman rm -f "$NAME" >/dev/null 2>&1 || true; log "stopped" ;;
+  down)    confirm_if_busy; tunnel_stop; podman rm -f "$NAME" >/dev/null 2>&1 || true; log "stopped" ;;
   status)  status ;;
   shell)   podman exec -it -u frienduser "$NAME" bash ;;
   logs)    podman logs -f "$NAME" ;;
