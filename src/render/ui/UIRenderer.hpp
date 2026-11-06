@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Rendering.hpp"
+#include "FormatTags.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/GUI/UIData.hpp>
@@ -18,9 +19,12 @@ class CommandEncoder;
 
 namespace ZHLN {
 
-using SupportedUITargetFormats = std::integer_sequence<
-    VkFormat, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_R8G8B8A8_UNORM,
-    VK_FORMAT_R16G16B16A16_SFLOAT>;
+// The UI's supported target formats are types, so the list is a TypeList and
+// joins the graph's own vocabulary. UIVariants derives the value-space pipelines
+// from it; this declaration is the single source of truth for both.
+using SupportedUITargetFormats = Vk::TypeList<
+    Vk::Format::B8G8R8A8_SRGB, Vk::Format::B8G8R8A8_UNorm, Vk::Format::R8G8B8A8_SRGB, Vk::Format::R8G8B8A8_UNorm,
+    Vk::Format::R16G16B16A16_SFloat>;
 
 template <VkFormat Format>
 using UIColorPass = Vk::DynamicPass<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, Format>>;

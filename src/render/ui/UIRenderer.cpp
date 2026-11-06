@@ -35,9 +35,18 @@ constexpr uint32_t kMaxUiVertices = 100'000;
 template <typename Formats>
 struct UIVariants;
 
-template <VkFormat... Formats>
-struct UIVariants<std::integer_sequence<VkFormat, Formats...>> {
-    std::tuple<Vk::TypedPipeline<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, Formats>>...> pipelines;
+template <typename... Fs>
+struct UIVariants<Vk::TypeList<Fs...>> {
+    static_assert(sizeof...(Fs) > 0, "a UI target format list with no formats has no pipelines to build");
+
+    // Both, cross-checked: the list is a colour-target list by construction, and
+    // the tag says so itself. The graph's attachment classification stays keyed
+    // on image layout -- that is what says how an image takes part in a pass --
+    // and this assertion catches a declaration that disagrees with it, rather
+    // than introducing a second place where "is this a colour target" is decided.
+    static_assert((Vk::Format::ColorFormat<Fs> && ...), "a UI render target is a colour attachment; a depth-stencil tag here would never bind");
+
+    std::tuple<Vk::TypedPipeline<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, Fs::vk>>...> pipelines;
 
     template <VkFormat Format>
     [[nodiscard]] auto Get() noexcept -> auto& {
