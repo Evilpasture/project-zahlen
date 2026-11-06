@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TUNNEL="" PASSWORD="${SSHPASS:-}" LOCAL_PORT=2223
+ENV_FILE=".env"
+
+# Load existing .env if present so variables act as defaults
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  source "$ENV_FILE"
+  set +a
+fi
+
+TUNNEL="${TUNNEL:-}"
+PASSWORD="${PASSWORD:-${SSHPASS:-}}"
+LOCAL_PORT="${LOCAL_PORT:-2223}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -14,7 +25,29 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$TUNNEL" && -n "$PASSWORD" ]] || {
-  echo "Usage: $0 --tunnel <name or full hostname> --password <password>" >&2; exit 1; }
+  echo "Usage: $0 [--tunnel <name or full hostname>] [--password <password>] [--port <port>]" >&2; exit 1; }
+
+# Helper function to update or append specific variables in .env without wiping others
+update_env() {
+  local key="$1"
+  local val="$2"
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "${key}=${val}" > "$ENV_FILE"
+    return
+  fi
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    grep -v "^${key}=" "$ENV_FILE" > "${ENV_FILE}.tmp" || true
+    echo "${key}=${val}" >> "${ENV_FILE}.tmp"
+    mv "${ENV_FILE}.tmp" "$ENV_FILE"
+  else
+    echo "${key}=${val}" >> "$ENV_FILE"
+  fi
+}
+
+# Automatically save/update the current values to .env
+update_env "TUNNEL" "$TUNNEL"
+update_env "PASSWORD" "$PASSWORD"
+update_env "LOCAL_PORT" "$LOCAL_PORT"
 
 # Accept "name", "name.trycloudflare.com" or "https://name.trycloudflare.com"
 TUNNEL="${TUNNEL#https://}"
