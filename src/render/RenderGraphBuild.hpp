@@ -20,6 +20,7 @@
 #include "render/passes/gbuffer/BackgroundGBufferPass.hpp"
 #include "render/passes/gbuffer/DecalPass.hpp"
 #include "render/passes/gbuffer/GBufferBasePass.hpp"
+#include "render/passes/gbuffer/GBufferCullingPass.hpp"
 #include "render/passes/gbuffer/GBufferResolvePass.hpp"
 #include "render/passes/gbuffer/ViewmodelPass.hpp"
 #include "render/passes/lighting/ClusteredLightingPass.hpp"
@@ -89,8 +90,10 @@ template <AAMode Mode>
     using TranslucentReflectionPass = Passes::ReflectionPass<Passes::TranslucentSurface, Res_TransLighting, "TransReflection">;
 
     auto core = Vk::MakePassPack(
-        Passes::ShadowPass {.particles = self.meshParticles, .frame = frame}, Passes::GBufferBasePass {.cull = self.culling, .frame = frame},
+        Passes::ShadowPass {.particles = self.meshParticles, .frame = frame}, Passes::GBufferCullingPass {.cull = self.culling, .frame = frame},
+        Passes::GBufferBasePass {.cull = self.culling, .frame = frame},
         Passes::BackgroundGBufferPass {.frame = frame}, Passes::HiZGeneratePass {.cull = self.culling, .frame = frame},
+        Passes::GBufferResolveCullingPass {.cull = self.culling, .frame = frame},
         Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = frame},
         Passes::DecalPass {.decals = self.decals, .frame = frame}, Passes::ViewmodelPass {.frame = frame},
         Passes::TranslucentPrePass {.frame = frame},

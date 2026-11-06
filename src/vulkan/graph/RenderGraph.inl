@@ -601,11 +601,20 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
                 // A pass that records its draws across secondaries has to say so
                 // before the scope opens: vkCmdExecuteCommands inside a
                 // vkCmdBeginRendering scope is only legal when the VkRenderingInfo
-                // carried this flag, and the flag is fixed at begin time. The
-                // flag permits secondaries, it does not require them, so a pass
-                // whose other path draws directly is unaffected.
-                constexpr VkRenderingFlags scope_flags =
-                    requires { PassType::uses_secondaries; } ? VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT : VkRenderingFlags {0};
+                // carried this flag, and the flag is fixed at begin time. The flag
+                // permits secondaries, it does not require them -- but the path
+                // that draws directly must not carry it either: with the flag set
+                // and VK_RENDERING_CONTENTS_INLINE_BIT_KHR absent,
+                // VUID-vkCmdDrawIndirect-flags-10582 fires, and that bit exists
+                // only with dynamicRenderingLocalRead. Which path a frame takes is
+                // a runtime property, so the pass answers per frame through
+                // UsesSecondaries() instead of declaring a compile-time constant.
+                VkRenderingFlags scope_flags = VkRenderingFlags {0};
+                if constexpr (requires { pass.UsesSecondaries(); }) {
+                    if (pass.UsesSecondaries()) {
+                        scope_flags = static_cast<VkRenderingFlags>(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT);
+                    }
+                }
 
                 AutoCtx ctx(cmd, bindings, scope_flags);
                 pass(ctx);
@@ -658,7 +667,12 @@ template <typename ResourceList, typename... CImgs>
 // At most one depth attachment per scope: a second would make "the" depth format
 // ambiguous, and VkRenderingInfo has room for exactly one.
 template <typename ResourceList, typename... DImgs>
-[[nodiscard]] auto ResolveDepthFormat(std::span<const ImageSlice, ResourceList::size> bindings, TypeList<DImgs...>) noexcept -> VkFormat {
+// bindings is unused for a scope that declares no depth write -- the pack
+// expansion below is empty there -- so it is marked rather than passed and
+// discarded: the parameter list has to line up with ResolveColorFormats.
+[[nodiscard]] auto ResolveDepthFormat(
+    [[maybe_unused]] std::span<const ImageSlice, ResourceList::size> bindings, TypeList<DImgs...>
+) noexcept -> VkFormat {
     static_assert(sizeof...(DImgs) <= 1, "a render scope binds at most one depth attachment");
     VkFormat resolved = VK_FORMAT_UNDEFINED;
     ((resolved = bindings[TemplatedDetail::GetResourceIndex<ResourceList, DImgs>()].format), ...);

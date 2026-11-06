@@ -4,6 +4,7 @@
 #include "render/passes/gbuffer/GBufferResolvePass.hpp"
 #include "render/Renderer.hpp"
 #include "render/passes/SceneDraw.hpp"
+#include "render/passes/gbuffer/GBufferCullingPass.hpp"
 #include "render/passes/culling/CullingResources.hpp"
 #include <ShaderBindings.hpp>
 #include <algorithm>
@@ -12,42 +13,21 @@ namespace ZHLN::Passes {
 
 namespace {
 
-void RecordGpuCulled(
+// Draws only; GBufferResolveCullingPass records the clear, barriers and dispatch
+// outside the rendering scope.
+void RecordGpuCulledDraws(
     RenderFrame&                 ctx,
     Vk::CommandEncoder&          encoder,
-    CullingResources&            cull,
     const CsgResources&          csg,
     const MeshParticlePipelines& particles,
     std::span<const GroupRange>  groups,
-    uint32_t                     drawCount,
     const GBufferTargets&        in
 ) noexcept {
-    auto* const    cmd         = encoder.cmd;
-    const auto&    indirectBuf = ctx.indirectCommandsBuffersPass2;
+    encoder.SetViewport(ctx.viewport);
 
-    indirectBuf.SyncIndirectForTransferWrite(cmd);
-    Vk::FillBuffer(cmd, indirectBuf);
-    indirectBuf.SyncForComputeReadWrite(cmd);
-
-    const auto             hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
-    const auto             sceneVp = ctx.viewport;
-    const CullingConstants pc {
-        .viewProj       = ctx.unjitteredViewProj,
-        .hizScreenSize  = {sceneVp.width, sceneVp.height},
-        .maxHiZMipLevel = hizMips > 0 ? hizMips - 1 : 0,
-        .drawCount      = drawCount,
-        .passIndex      = 1,
-    };
-    const auto block = ctx.renderer.heapManager.WriteHeapParameters<Shaders::Culling>(
-        cull.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.instanceDataBuffers), Vk::Slot<"g_indirectCommands">(indirectBuf),
-        Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
-        Vk::Slot<"g_secondPassCandidates">(ctx.secondPassCandidatesBuffers), Vk::Slot<"g_secondPassCount">(ctx.secondPassCountBuffers)
-    );
-    cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
-
-    indirectBuf.SyncForIndirectRead(cmd);
-
-    encoder.SetViewport(sceneVp);
+    // The buffer the prologue filled; declared here because the sequence that
+    // produced it now lives in GBufferResolveCullingPass.
+    const auto& indirectBuf = ctx.indirectCommandsBuffersPass2;
 
     for (const auto& group: groups) {
         if (group.material->pipeline == VK_NULL_HANDLE) {
@@ -75,8 +55,6 @@ void RecordCpuCulled(
     const MeshParticlePipelines& particles,
     const GBufferTargets&        in
 ) noexcept {
-    auto* const cmd = encoder.cmd;
-
     encoder.SetViewport(ctx.viewport);
 
     // The graph holds the scope open on the same five targets; these two draw
@@ -103,9 +81,8 @@ void GBufferResolvePass::operator()(Vk::RasterPassContextBase& pass) const noexc
 
     const auto groups = BuildGroupRanges(frame);
     const auto in     = GBufferSceneTargets(frame);
-    if (cull.cullingPass.pipeline.Valid() && frame.indirectCommandsBuffers.Valid() && (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() &&
-        !frame.meshShading) {
-        RecordGpuCulled(frame, encoder, cull, csg, particles, groups, drawCount, in);
+    if (UsesGpuCulling(cull, frame, true, drawCount)) {
+        RecordGpuCulledDraws(frame, encoder, csg, particles, groups, in);
     } else {
         RecordCpuCulled(frame, encoder, csg, particles, in);
     }

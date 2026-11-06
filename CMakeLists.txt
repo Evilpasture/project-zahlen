@@ -344,9 +344,7 @@ target_link_libraries(
           mimalloc-static
           ${ZSTD_LIBRARY}
           zahlen_warnings)
-if(ZHLN_BUILD_RENDER)
-    target_link_libraries(zahlen_engine PRIVATE zahlen_vulkan spirv-reflect-static)
-endif()
+
 
 # Every target whose objects are linked into libzahlen_engine compiles the
 # engine's own public headers, so all of them must see ZHLN_API as dllexport.

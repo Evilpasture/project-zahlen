@@ -167,6 +167,8 @@ struct CommandBuffer {
     [[nodiscard]] bool Valid() const noexcept;
 };
 
+// Defined in RenderQueue.inl, in terms of Context's members, so Context has to be
+// complete where the .inl is reached; the .inl includes core/Context.hpp for that.
 template <QueueType QType>
 [[nodiscard]] constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue;
 

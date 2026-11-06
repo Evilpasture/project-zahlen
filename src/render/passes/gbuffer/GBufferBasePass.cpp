@@ -4,6 +4,7 @@
 #include "render/passes/gbuffer/GBufferBasePass.hpp"
 #include "render/Renderer.hpp"
 #include "render/passes/SceneDraw.hpp"
+#include "render/passes/gbuffer/GBufferCullingPass.hpp"
 #include "render/passes/culling/CullingResources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Log.hpp>
@@ -70,44 +71,11 @@ struct TaskSystemSchedulerAdapter {
     }
 };
 
-void RecordGpuCulled(
-    RenderFrame&                ctx,
-    Vk::CommandEncoder&         encoder,
-    CullingResources&           cull,
-    std::span<const GroupRange> groups,
-    uint32_t                    drawCount,
-    const GBufferTargets&       in
-) noexcept {
-    auto* const cmd      = encoder.cmd;
-    const auto& countBuf = ctx.secondPassCountBuffers;
-
-    countBuf.SyncComputeForTransferWrite(cmd);
-    Vk::FillBuffer(cmd, countBuf);
-    countBuf.SyncForComputeReadWrite(cmd);
-
-    const auto     sceneVp = ctx.viewport;
-    const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
-
-    const CullingConstants pc {
-        .viewProj       = ctx.unjitteredViewProj,
-        .hizScreenSize  = {sceneVp.width, sceneVp.height},
-        .maxHiZMipLevel = hizMips > 0 ? hizMips - 1 : 0,
-        .drawCount      = drawCount,
-        .passIndex      = 0,
-    };
-
-    const auto block = ctx.renderer.heapManager.WriteHeapParameters<Shaders::Culling>(
-        cull.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.instanceDataBuffers), Vk::Slot<"g_indirectCommands">(ctx.indirectCommandsBuffers),
-        Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
-        Vk::Slot<"g_secondPassCandidates">(ctx.secondPassCandidatesBuffers), Vk::Slot<"g_secondPassCount">(countBuf)
-    );
-    cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
-
-    ctx.indirectCommandsBuffers.SyncForIndirectRead(cmd);
-    ctx.secondPassCandidatesBuffers.SyncForComputeRead(cmd);
-    countBuf.SyncForComputeRead(cmd);
-
-    encoder.SetViewport(sceneVp);
+// Only the draws. The counter clear, its barriers and the culling dispatch are
+// GBufferCullingPass's, because none of them may be recorded inside the rendering
+// scope this pass runs in.
+void RecordGpuCulledDraws(RenderFrame& ctx, Vk::CommandEncoder& encoder, std::span<const GroupRange> groups) noexcept {
+    encoder.SetViewport(ctx.viewport);
 
     for (const auto& group: groups) {
         if (group.material->pipeline == VK_NULL_HANDLE) {
@@ -131,7 +99,6 @@ void RecordCpuCulled(
 ) noexcept {
     using enum DrawFlags;
     const uint32_t frameIndex = ctx.inFlight;
-    const auto     sceneVp    = ctx.viewport;
 
     {
         // The scope is the graph's, opened with the declared G-buffer targets and
@@ -197,14 +164,21 @@ void GBufferBasePass::operator()(Vk::RasterPassContextBase& pass) const noexcept
     }
 
     const auto groups = BuildGroupRanges(frame);
-    if (cull.cullingPass.pipeline.Valid() && frame.indirectCommandsBuffers.Valid() && (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() &&
-        !frame.meshShading) {
-        RecordGpuCulled(frame, encoder, cull, groups, drawCount, in);
+    if (UsesGpuCulling(cull, frame, false, drawCount)) {
+        RecordGpuCulledDraws(frame, encoder, groups);
     } else {
         // A pass that records secondaries needs the rendering inheritance even
         // though the scope is the graph's; it carries what the graph opened.
         RecordCpuCulled(frame, cmd, pass.Inheritance().value_or(Vk::RenderingInheritance {}), drawCount, in);
     }
+}
+
+// Asked by the graph before the scope opens. The GPU-culled path draws inline,
+// so it must not get the secondary-command-buffer flag; the CPU-culled path
+// records across secondaries and must.
+bool GBufferBasePass::UsesSecondaries() const noexcept {
+    const auto drawCount = static_cast<uint32_t>(frame.renderer.queues.Draws().size());
+    return drawCount != 0 && !UsesGpuCulling(cull, frame, false, drawCount);
 }
 
 } // namespace ZHLN::Passes

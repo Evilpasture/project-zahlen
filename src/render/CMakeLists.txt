@@ -80,6 +80,7 @@ set(RAW_RENDER_SOURCES
     passes/gbuffer/DecalPass.cpp
     passes/gbuffer/BackgroundGBufferPass.cpp
     passes/gbuffer/GBufferBasePass.cpp
+    passes/gbuffer/GBufferCullingPass.cpp
     passes/gbuffer/GBufferResolvePass.cpp
     passes/gbuffer/ViewmodelPass.cpp
     passes/lighting/ClusteredLightingPass.cpp
@@ -144,7 +145,7 @@ set_target_properties(zahlen_render PROPERTIES
 target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 
 target_link_libraries(zahlen_render
-    PUBLIC  zahlen_vulkan
+    PRIVATE  zahlen_vulkan
     PUBLIC  Jolt
     PRIVATE zahlen_presentation
     PRIVATE zahlen_threading

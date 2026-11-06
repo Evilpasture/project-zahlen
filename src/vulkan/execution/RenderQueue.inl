@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "vulkan/core/Context.hpp"
 #include "vulkan/execution/RenderQueue.hpp"
 
 namespace ZHLN::Vk {
