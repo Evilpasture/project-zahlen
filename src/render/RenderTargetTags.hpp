@@ -5,6 +5,7 @@
 
 #include "RenderConstants.hpp"
 #include "Rendering.hpp"
+#include "FormatTags.hpp"
 #include "graph/GraphImage.hpp"
 #include <cstdint>
 
@@ -12,9 +13,9 @@ namespace ZHLN {
 
 inline constexpr uint32_t kMaxGeneratedHiZMips = 7;
 
-using Res_SceneColor = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32>;
-using Res_Velocity   = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT>;
-using Res_NormRough  = Vk::GraphImage<"NormRough", VK_FORMAT_R16G16B16A16_SFLOAT>;
+using Res_SceneColor = Vk::GraphImage<"SceneColor", Vk::Format::B10G11R11_UFloatPack32>;
+using Res_Velocity   = Vk::GraphImage<"Velocity", Vk::Format::R16G16_SFloat>;
+using Res_NormRough  = Vk::GraphImage<"NormRough", Vk::Format::R16G16B16A16_SFloat>;
 // Which shading model owns the static lighting of a pixel, as a bitfield:
 //   bit 0 - a compile-time bake supplied this surface's diffuse ambient (a VRAD
 //           lightmap lump, or the leaf ambient cube that stands in for one on
@@ -31,39 +32,39 @@ using Res_NormRough  = Vk::GraphImage<"NormRough", VK_FORMAT_R16G16B16A16_SFLOAT
 // 8-bit UNORM lane can only hold 1.0 or 0.0 without inventing an encoding, and
 // two independent flags have no exact UNORM spelling. Consumed by
 // lighting.slang only.
-using Res_BakedMask = Vk::GraphImage<"BakedMask", VK_FORMAT_R8_UINT>;
+using Res_BakedMask = Vk::GraphImage<"BakedMask", Vk::Format::R8_UInt>;
 // The active presentation supplies backing storage; the resource identity is renderer-owned.
-using Res_Depth = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT>;
+using Res_Depth = Vk::GraphImage<"Depth", Vk::Format::D32_SFloat_S8_UInt>;
 
-using Res_ShadowMap       = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT>;
-using Res_ShadowAtlas     = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT>;
-using Res_Lighting        = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT>;
-using Res_HdrSceneColor   = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16_SFLOAT>;
-using Res_RcgiProbes      = Vk::GraphImage<"RcgiProbes", VK_FORMAT_R32G32B32A32_SFLOAT>;
-using Res_RcgiCascadeA    = Vk::GraphImage<"RcgiCascadeA", VK_FORMAT_R16G16B16A16_SFLOAT>;
-using Res_RcgiCascadeB    = Vk::GraphImage<"RcgiCascadeB", VK_FORMAT_R16G16B16A16_SFLOAT>;
-using Res_LightingGI      = Vk::GraphImage<"LightingGI", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, false, true>;
-using Res_LightingAo      = Vk::GraphImage<"LightingAo", VK_FORMAT_R8_UNORM>;
-using Res_Ao              = Vk::GraphImage<"Ao", VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-using Res_BloomThresh     = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-using Res_BloomDown1      = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
-using Res_BloomDown2      = Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 8>;
-using Res_BloomDown3      = Vk::GraphImage<"BloomDown3", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 16>;
-using Res_BloomUp2        = Vk::GraphImage<"BloomUp2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 8>;
-using Res_BloomUp1        = Vk::GraphImage<"BloomUp1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
-using Res_BloomFinal      = Vk::GraphImage<"BloomFinal", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-using Res_SmaaEdge        = Vk::GraphImage<"SmaaEdge", VK_FORMAT_R8G8_UNORM>;
-using Res_SmaaWeight      = Vk::GraphImage<"SmaaWeight", VK_FORMAT_R8G8B8A8_UNORM>;
-using Res_Swapchain       = Vk::GraphImage<"Swapchain", VK_FORMAT_B8G8R8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, true>;
-using Res_VoxelMedia      = Vk::GraphImage<"VoxelMedia", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
-using Res_VoxelLight      = Vk::GraphImage<"VoxelLight", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
-using Res_VoxelInt        = Vk::GraphImage<"VoxelInt", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
-using Res_TransNorm       = Vk::GraphImage<"TransNorm", VK_FORMAT_R8G8B8A8_UNORM>;
-using Res_TransSheen      = Vk::GraphImage<"TransSheen", VK_FORMAT_R8G8B8A8_UNORM>;
-using Res_TransAnisotropy = Vk::GraphImage<"TransAnisotropy", VK_FORMAT_R8G8B8A8_UNORM>;
-using Res_TransDepth      = Vk::GraphImage<"TransDepth", VK_FORMAT_D32_SFLOAT_S8_UINT>;
-using Res_TransLighting   = Vk::GraphImage<"TransLighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, false, true>;
-using Res_HiZ             = Vk::GraphImage<"HiZMap", VK_FORMAT_R32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, false, true>;
+using Res_ShadowMap       = Vk::GraphImage<"ShadowMap", Vk::Format::D32_SFloat>;
+using Res_ShadowAtlas     = Vk::GraphImage<"ShadowAtlas", Vk::Format::D32_SFloat>;
+using Res_Lighting        = Vk::GraphImage<"Lighting", Vk::Format::R16G16B16A16_SFloat>;
+using Res_HdrSceneColor   = Vk::GraphImage<"HdrSceneColor", Vk::Format::R16G16B16A16_SFloat>;
+using Res_RcgiProbes      = Vk::GraphImage<"RcgiProbes", Vk::Format::R32G32B32A32_SFloat>;
+using Res_RcgiCascadeA    = Vk::GraphImage<"RcgiCascadeA", Vk::Format::R16G16B16A16_SFloat>;
+using Res_RcgiCascadeB    = Vk::GraphImage<"RcgiCascadeB", Vk::Format::R16G16B16A16_SFloat>;
+using Res_LightingGI      = Vk::GraphImage<"LightingGI", Vk::Format::R16G16B16A16_SFloat, false, false, 1, false, true>;
+using Res_LightingAo      = Vk::GraphImage<"LightingAo", Vk::Format::R8_UNorm>;
+using Res_Ao              = Vk::GraphImage<"Ao", Vk::Format::R8_UNorm, false, false, 2>;
+using Res_BloomThresh     = Vk::GraphImage<"BloomThresh", Vk::Format::R16G16B16A16_SFloat, false, false, 2>;
+using Res_BloomDown1      = Vk::GraphImage<"BloomDown1", Vk::Format::R16G16B16A16_SFloat, false, false, 4>;
+using Res_BloomDown2      = Vk::GraphImage<"BloomDown2", Vk::Format::R16G16B16A16_SFloat, false, false, 8>;
+using Res_BloomDown3      = Vk::GraphImage<"BloomDown3", Vk::Format::R16G16B16A16_SFloat, false, false, 16>;
+using Res_BloomUp2        = Vk::GraphImage<"BloomUp2", Vk::Format::R16G16B16A16_SFloat, false, false, 8>;
+using Res_BloomUp1        = Vk::GraphImage<"BloomUp1", Vk::Format::R16G16B16A16_SFloat, false, false, 4>;
+using Res_BloomFinal      = Vk::GraphImage<"BloomFinal", Vk::Format::R16G16B16A16_SFloat, false, false, 2>;
+using Res_SmaaEdge        = Vk::GraphImage<"SmaaEdge", Vk::Format::R8G8_UNorm>;
+using Res_SmaaWeight      = Vk::GraphImage<"SmaaWeight", Vk::Format::R8G8B8A8_UNorm>;
+using Res_Swapchain       = Vk::GraphImage<"Swapchain", Vk::Format::B8G8R8A8_SRGB, true>;
+using Res_VoxelMedia      = Vk::GraphImage<"VoxelMedia", Vk::Format::R16G16B16A16_SFloat, false, false, 1, true>;
+using Res_VoxelLight      = Vk::GraphImage<"VoxelLight", Vk::Format::R16G16B16A16_SFloat, false, false, 1, true>;
+using Res_VoxelInt        = Vk::GraphImage<"VoxelInt", Vk::Format::R16G16B16A16_SFloat, false, false, 1, true>;
+using Res_TransNorm       = Vk::GraphImage<"TransNorm", Vk::Format::R8G8B8A8_UNorm>;
+using Res_TransSheen      = Vk::GraphImage<"TransSheen", Vk::Format::R8G8B8A8_UNorm>;
+using Res_TransAnisotropy = Vk::GraphImage<"TransAnisotropy", Vk::Format::R8G8B8A8_UNorm>;
+using Res_TransDepth      = Vk::GraphImage<"TransDepth", Vk::Format::D32_SFloat_S8_UInt>;
+using Res_TransLighting   = Vk::GraphImage<"TransLighting", Vk::Format::R16G16B16A16_SFloat, false, false, 1, false, true>;
+using Res_HiZ             = Vk::GraphImage<"HiZMap", Vk::Format::R32_SFloat, false, false, 1, false, true>;
 
 namespace Vk {
 template <>
@@ -125,7 +126,7 @@ static_assert(Vk::ClearColorOf<Res_TransNorm>::value.a == kClearColorNormalRough
 static_assert(Vk::ClearColorOf<Res_TransSheen>::value.a == kClearColorSheen.a && Vk::ClearColorOf<Res_TransSheen>::value.r == kClearColorSheen.r);
 static_assert(Vk::ClearColorOf<Res_TransAnisotropy>::value.a == kClearColorAnisotropy.a && Vk::ClearColorOf<Res_TransAnisotropy>::value.r == kClearColorAnisotropy.r);
 
-using Res_AccumPrevious = Vk::GraphImage<"AccumPrevious", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-using Res_AccumCurrent  = Vk::GraphImage<"AccumCurrent", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
+using Res_AccumPrevious = Vk::GraphImage<"AccumPrevious", Vk::Format::R16G16B16A16_SFloat, false, true>;
+using Res_AccumCurrent  = Vk::GraphImage<"AccumCurrent", Vk::Format::R16G16B16A16_SFloat, false, true>;
 
 } // namespace ZHLN

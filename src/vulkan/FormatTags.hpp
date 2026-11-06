@@ -152,6 +152,34 @@ struct R8_UInt {
     static constexpr bool               is_depth_stencil = false;
 };
 
+struct R8_UNorm {
+    static constexpr VkFormat           vk              = VK_FORMAT_R8_UNORM;
+    static constexpr VkImageAspectFlags aspect          = VK_IMAGE_ASPECT_COLOR_BIT;
+    static constexpr uint32_t           bytes_per_pixel = 1;
+    static constexpr bool               is_depth_stencil = false;
+};
+
+struct R8G8_UNorm {
+    static constexpr VkFormat           vk              = VK_FORMAT_R8G8_UNORM;
+    static constexpr VkImageAspectFlags aspect          = VK_IMAGE_ASPECT_COLOR_BIT;
+    static constexpr uint32_t           bytes_per_pixel = 2;
+    static constexpr bool               is_depth_stencil = false;
+};
+
+struct R32_SFloat {
+    static constexpr VkFormat           vk              = VK_FORMAT_R32_SFLOAT;
+    static constexpr VkImageAspectFlags aspect          = VK_IMAGE_ASPECT_COLOR_BIT;
+    static constexpr uint32_t           bytes_per_pixel = 4;
+    static constexpr bool               is_depth_stencil = false;
+};
+
+struct R32G32B32A32_SFloat {
+    static constexpr VkFormat           vk              = VK_FORMAT_R32G32B32A32_SFLOAT;
+    static constexpr VkImageAspectFlags aspect          = VK_IMAGE_ASPECT_COLOR_BIT;
+    static constexpr uint32_t           bytes_per_pixel = 16;
+    static constexpr bool               is_depth_stencil = false;
+};
+
 // ---------------------------------------------------------------------------
 // Depth / depth-stencil
 // ---------------------------------------------------------------------------
@@ -191,7 +219,7 @@ struct Undefined {
 
 using AllFormats = TypeList<
     Undefined, B8G8R8A8_UNorm, B8G8R8A8_SRGB, R8G8B8A8_UNorm, R8G8B8A8_SRGB, R16G16B16A16_SFloat, R16G16_SFloat,
-    B10G11R11_UFloatPack32, R8_UInt, D32_SFloat, D32_SFloat_S8_UInt>;
+    B10G11R11_UFloatPack32, R8_UInt, R8_UNorm, R8G8_UNorm, R32_SFloat, R32G32B32A32_SFloat, D32_SFloat, D32_SFloat_S8_UInt>;
 
 // Swapchain and on-disk formats are only known at runtime, so a tag has to be
 // recovered from a VkFormat value somewhere. This is that bridge, and it is
