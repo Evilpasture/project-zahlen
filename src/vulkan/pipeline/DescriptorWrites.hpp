@@ -41,7 +41,7 @@ struct NamedSlot {
 
 template <typename T>
 struct IsTypedImage: std::false_type {};
-template <VkImageLayout L, VkFormat F>
+template <VkImageLayout L, Format::IsFormat F>
 struct IsTypedImage<TypedImage<L, F>>: std::true_type {};
 
 namespace TemplatedDetail {

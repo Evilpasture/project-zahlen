@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../FormatTag.hpp"
 #include "../pipeline/PipelineTypes.hpp"
 #include <algorithm>
 #include <array>
@@ -29,10 +30,14 @@ static constexpr VkCommandBufferInheritanceInfo NullInheritanceInfo = {
     .pipelineStatistics   = 0
 };
 
-template <VkImageLayout Layout, VkFormat Format = VK_FORMAT_UNDEFINED>
+template <VkImageLayout Layout, Format::IsFormat FormatTag = Format::Undefined>
 struct TypedImage {
-    static constexpr VkImageLayout layout       = Layout;
-    static constexpr VkFormat      known_format = Format;
+    static constexpr VkImageLayout layout = Layout;
+
+    // The compile-time half: the tag this image was typed with. The slice still
+    // carries the runtime VkFormat (which may have come from a swapchain), so
+    // this is what type-space code reads, not a replacement for slice.format.
+    using format_tag = FormatTag;
     ImageSlice                     slice {};
 
     constexpr TypedImage() noexcept = default;
@@ -65,24 +70,28 @@ struct TypedImage {
         return &slice;
     }
     template <VkImageLayout NewLayout>
-    [[nodiscard]] constexpr auto WithLayout(VkImageAspectFlags newAspect) const noexcept -> TypedImage<NewLayout, Format> {
+    [[nodiscard]] constexpr auto WithLayout(VkImageAspectFlags newAspect) const noexcept -> TypedImage<NewLayout, FormatTag> {
         ImageSlice result = slice;
         result.aspect     = newAspect;
-        return TypedImage<NewLayout, Format> {result};
+        return TypedImage<NewLayout, FormatTag> {result};
     }
 };
 
-template <VkImageLayout Layout, VkFormat Format>
-    requires(Format != VK_FORMAT_UNDEFINED)
-struct TypedImage<Layout, Format> {
-    static constexpr VkImageLayout layout       = Layout;
-    static constexpr VkFormat      known_format = Format;
-    static constexpr VkFormat      format       = Format;
+template <VkImageLayout Layout, Format::IsFormat FormatTag>
+    requires(FormatTag::vk != VK_FORMAT_UNDEFINED)
+struct TypedImage<Layout, FormatTag> {
+    static constexpr VkImageLayout layout = Layout;
+    static constexpr VkFormat      format = FormatTag::vk;
+
+    using format_tag = FormatTag;
     const ImageSlice               slice;
 
   private:
     friend struct ImageSlice;
-    template <VkImageLayout, VkFormat>
+    // Every tag, so every specialization of the primary above is a friend. The
+    // constraint is repeated because a friend declaration has to match the
+    // primary template's own template-head.
+    template <VkImageLayout FriendLayout, Format::IsFormat FriendTag>
     friend struct TypedImage;
     constexpr explicit TypedImage(ImageSlice s) noexcept: slice(s) {
     }
@@ -114,39 +123,39 @@ struct TypedImage<Layout, Format> {
         return &slice;
     }
     template <VkImageLayout NewLayout>
-    [[nodiscard]] constexpr auto WithLayout(VkImageAspectFlags newAspect) const noexcept -> TypedImage<NewLayout, Format> {
+    [[nodiscard]] constexpr auto WithLayout(VkImageAspectFlags newAspect) const noexcept -> TypedImage<NewLayout, FormatTag> {
         ImageSlice result = slice;
         result.aspect     = newAspect;
-        return TypedImage<NewLayout, Format> {result};
+        return TypedImage<NewLayout, FormatTag> {result};
     }
 };
 
 template <VkImageLayout Layout>
-constexpr auto ImageSlice::Assume(VkImageAspectFlags imageAspect) const noexcept -> TypedImage<Layout, VK_FORMAT_UNDEFINED> {
+constexpr auto ImageSlice::Assume(VkImageAspectFlags imageAspect) const noexcept -> TypedImage<Layout, Format::Undefined> {
     ImageSlice result = *this;
     result.aspect     = imageAspect;
-    return TypedImage<Layout, VK_FORMAT_UNDEFINED> {result};
+    return TypedImage<Layout, Format::Undefined> {result};
 }
 
 template <VkImageLayout Layout>
-constexpr auto ImageSlice::Assume() const noexcept -> TypedImage<Layout, VK_FORMAT_UNDEFINED> {
+constexpr auto ImageSlice::Assume() const noexcept -> TypedImage<Layout, Format::Undefined> {
     return Assume<Layout>(aspect);
 }
 
-template <VkFormat Format, VkImageLayout Layout>
-constexpr auto ImageSlice::MatchFormat(VkImageAspectFlags imageAspect) const noexcept -> std::optional<TypedImage<Layout, Format>> {
-    static_assert(Format != VK_FORMAT_UNDEFINED, "MatchFormat requires a concrete VkFormat.");
-    if (!Valid() || format != Format) {
+template <Format::IsFormat FormatTag, VkImageLayout Layout>
+constexpr auto ImageSlice::MatchFormat(VkImageAspectFlags imageAspect) const noexcept -> std::optional<TypedImage<Layout, FormatTag>> {
+    static_assert(FormatTag::vk != VK_FORMAT_UNDEFINED, "MatchFormat requires a concrete format tag.");
+    if (!Valid() || format != FormatTag::vk) {
         return std::nullopt;
     }
     ImageSlice result = *this;
     result.aspect     = imageAspect;
-    return TypedImage<Layout, Format> {result};
+    return TypedImage<Layout, FormatTag> {result};
 }
 
-template <VkFormat Format, VkImageLayout Layout>
-constexpr auto ImageSlice::MatchFormat() const noexcept -> std::optional<TypedImage<Layout, Format>> {
-    return MatchFormat<Format, Layout>(aspect);
+template <Format::IsFormat FormatTag, VkImageLayout Layout>
+constexpr auto ImageSlice::MatchFormat() const noexcept -> std::optional<TypedImage<Layout, FormatTag>> {
+    return MatchFormat<FormatTag, Layout>(aspect);
 }
 
 enum class AttachmentLayout : uint8_t {
@@ -276,9 +285,9 @@ void ClearColorImage(VkCommandBuffer cmd, VkImage image, VkClearColorValue color
 template <typename InState, typename OutState, typename T>
 auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE);
 
-template <VkImageLayout NewLayout, VkImageLayout OldLayout, VkFormat Format>
-[[nodiscard]] auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, VkImageAspectFlags overrideAspect = VK_IMAGE_ASPECT_NONE) noexcept
-    -> TypedImage<NewLayout, Format>;
+template <VkImageLayout NewLayout, VkImageLayout OldLayout, Format::IsFormat FormatTag>
+[[nodiscard]] auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, FormatTag>& img, VkImageAspectFlags overrideAspect = VK_IMAGE_ASPECT_NONE) noexcept
+    -> TypedImage<NewLayout, FormatTag>;
 
 template <typename SrcState, typename DstState>
 class ScopedBarrierGuard {
@@ -414,8 +423,8 @@ inline constexpr Tag<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> AsReadOnly;
 inline constexpr Tag<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> AsDepthAttachment;
 inline constexpr Tag<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>          AsPresent;
 
-template <VkImageLayout TargetLayout, VkImageLayout OldLayout, VkFormat Format>
-[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, Tag<TargetLayout>) noexcept;
+template <VkImageLayout TargetLayout, VkImageLayout OldLayout, Format::IsFormat FormatTag>
+[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, FormatTag>& img, Tag<TargetLayout>) noexcept;
 
 template <typename ImageT, VkImageLayout Final>
 class ScopedTransition {
@@ -502,16 +511,16 @@ struct DepthOp {
     }
 };
 
-template <size_t ColorCount = 0, bool HasDepth = false, typename Formats = AttachmentFormats<VK_FORMAT_UNDEFINED>>
+template <size_t ColorCount = 0, bool HasDepth = false, typename Formats = AttachmentFormats<Format::Undefined>>
 class DynamicPass {
   public:
     constexpr explicit DynamicPass(VkExtent2D extent) noexcept
-        requires(ColorCount == 0 && !HasDepth && std::same_as<Formats, AttachmentFormats<VK_FORMAT_UNDEFINED>>)
+        requires(ColorCount == 0 && !HasDepth && std::same_as<Formats, AttachmentFormats<Format::Undefined>>)
         : _extent(extent) {
     }
 
     constexpr explicit DynamicPass(VkExtent3D extent) noexcept
-        requires(ColorCount == 0 && !HasDepth && std::same_as<Formats, AttachmentFormats<VK_FORMAT_UNDEFINED>>)
+        requires(ColorCount == 0 && !HasDepth && std::same_as<Formats, AttachmentFormats<Format::Undefined>>)
         : _extent({.width = extent.width, .height = extent.height}) {
     }
 
@@ -527,13 +536,13 @@ class DynamicPass {
         return std::move(*this).Viewport(viewport.x, viewport.y, viewport.width, viewport.height);
     }
 
-    template <VkImageLayout Layout, VkFormat Format>
+    template <VkImageLayout Layout, Format::IsFormat FormatTag>
     constexpr auto AddColor(
-        const TypedImage<Layout, Format>& img,
+        const TypedImage<Layout, FormatTag>& img,
         VkAttachmentLoadOp                loadOp     = VK_ATTACHMENT_LOAD_OP_LOAD,
         VkAttachmentStoreOp               storeOp    = VK_ATTACHMENT_STORE_OP_STORE,
         ZHLN::Vk::Color4                  clearColor = {}
-    ) && noexcept -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type>;
+    ) && noexcept -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, FormatTag>::type>;
 
     template <typename... TypedImages>
     constexpr auto AddColorGroup(
@@ -541,61 +550,61 @@ class DynamicPass {
         VkAttachmentLoadOp                loadOp     = VK_ATTACHMENT_LOAD_OP_LOAD,
         VkAttachmentStoreOp               storeOp    = VK_ATTACHMENT_STORE_OP_STORE,
         ZHLN::Vk::Color4                  clearColor = {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 1.0F}
-    ) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type>;
+    ) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, typename TypedImages::format_tag...>::type>;
 
-    template <VkImageLayout Layout, VkFormat Format>
+    template <VkImageLayout Layout, Format::IsFormat FormatTag>
     constexpr auto AddDepth(
-        const TypedImage<Layout, Format>& img,
+        const TypedImage<Layout, FormatTag>& img,
         VkAttachmentLoadOp                loadOp   = VK_ATTACHMENT_LOAD_OP_LOAD,
         VkAttachmentStoreOp               storeOp  = VK_ATTACHMENT_STORE_OP_STORE,
         float                             clearVal = 1.0F
-    ) && noexcept -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type>;
+    ) && noexcept -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, FormatTag>::type>;
 
     // -------------------------------------------------------------------------
     // Policy-Driven Attachments (Tier 2)
     // -------------------------------------------------------------------------
-    template <VkImageLayout Layout, VkFormat Format>
-    constexpr auto AddColor(const TypedImage<Layout, Format>& img, ColorOp op) && noexcept
-        -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type>;
+    template <VkImageLayout Layout, Format::IsFormat FormatTag>
+    constexpr auto AddColor(const TypedImage<Layout, FormatTag>& img, ColorOp op) && noexcept
+        -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, FormatTag>::type>;
 
     template <typename... TypedImages>
     constexpr auto AddColorGroup(const std::tuple<TypedImages...>& imageTuple, ColorOp op) && noexcept
-        -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type>;
+        -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, typename TypedImages::format_tag...>::type>;
 
-    template <VkImageLayout Layout, VkFormat Format>
-    constexpr auto AddDepth(const TypedImage<Layout, Format>& img, DepthOp op) && noexcept
-        -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type>;
+    template <VkImageLayout Layout, Format::IsFormat FormatTag>
+    constexpr auto AddDepth(const TypedImage<Layout, FormatTag>& img, DepthOp op) && noexcept
+        -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, FormatTag>::type>;
 
     // -------------------------------------------------------------------------
     // Semantic Intent Shorthands (Tier 1)
     // -------------------------------------------------------------------------
-    template <VkImageLayout Layout, VkFormat Format>
-    constexpr auto ClearColor(const TypedImage<Layout, Format>& img, ZHLN::Color4 clearColor) && noexcept {
+    template <VkImageLayout Layout, Format::IsFormat FormatTag>
+    constexpr auto ClearColor(const TypedImage<Layout, FormatTag>& img, ZHLN::Color4 clearColor) && noexcept {
         return std::move(*this).AddColor(img, ColorOp::Clear(clearColor));
     }
 
-    template <VkImageLayout Layout, VkFormat Format>
-    constexpr auto LoadColor(const TypedImage<Layout, Format>& img) && noexcept {
+    template <VkImageLayout Layout, Format::IsFormat FormatTag>
+    constexpr auto LoadColor(const TypedImage<Layout, FormatTag>& img) && noexcept {
         return std::move(*this).AddColor(img, ColorOp::Load());
     }
 
-    template <VkImageLayout Layout, VkFormat Format>
-    constexpr auto OverwriteColor(const TypedImage<Layout, Format>& img) && noexcept {
+    template <VkImageLayout Layout, Format::IsFormat FormatTag>
+    constexpr auto OverwriteColor(const TypedImage<Layout, FormatTag>& img) && noexcept {
         return std::move(*this).AddColor(img, ColorOp::Overwrite());
     }
 
-    template <VkImageLayout Layout, VkFormat Format>
-    constexpr auto ClearDepth(const TypedImage<Layout, Format>& img, float clearVal = 1.0F) && noexcept {
+    template <VkImageLayout Layout, Format::IsFormat FormatTag>
+    constexpr auto ClearDepth(const TypedImage<Layout, FormatTag>& img, float clearVal = 1.0F) && noexcept {
         return std::move(*this).AddDepth(img, DepthOp::Clear(clearVal));
     }
 
-    template <VkImageLayout Layout, VkFormat Format>
-    constexpr auto LoadDepth(const TypedImage<Layout, Format>& img) && noexcept {
+    template <VkImageLayout Layout, Format::IsFormat FormatTag>
+    constexpr auto LoadDepth(const TypedImage<Layout, FormatTag>& img) && noexcept {
         return std::move(*this).AddDepth(img, DepthOp::Load());
     }
 
-    template <VkImageLayout Layout, VkFormat Format>
-    constexpr auto ReadOnlyDepth(const TypedImage<Layout, Format>& img) && noexcept {
+    template <VkImageLayout Layout, Format::IsFormat FormatTag>
+    constexpr auto ReadOnlyDepth(const TypedImage<Layout, FormatTag>& img) && noexcept {
         return std::move(*this).AddDepth(img, DepthOp::ReadOnly());
     }
 

@@ -9,11 +9,12 @@
 #include <optional>
 #include <type_traits>
 
+#include "../FormatTag.hpp"
 #include "ImageView.hpp"
 
 namespace ZHLN::Vk {
 
-template <VkImageLayout Layout, VkFormat Format>
+template <VkImageLayout Layout, Format::IsFormat FormatTag>
 struct TypedImage;
 
 struct ImageSlice {
@@ -115,14 +116,14 @@ struct ImageSlice {
     }
 
     template <VkImageLayout Layout>
-    [[nodiscard]] constexpr auto Assume(VkImageAspectFlags imageAspect) const noexcept -> TypedImage<Layout, VK_FORMAT_UNDEFINED>;
+    [[nodiscard]] constexpr auto Assume(VkImageAspectFlags imageAspect) const noexcept -> TypedImage<Layout, Format::Undefined>;
     template <VkImageLayout Layout>
-    [[nodiscard]] constexpr auto Assume() const noexcept -> TypedImage<Layout, VK_FORMAT_UNDEFINED>;
+    [[nodiscard]] constexpr auto Assume() const noexcept -> TypedImage<Layout, Format::Undefined>;
 
-    template <VkFormat Format, VkImageLayout Layout>
-    [[nodiscard]] constexpr auto MatchFormat(VkImageAspectFlags imageAspect) const noexcept -> std::optional<TypedImage<Layout, Format>>;
-    template <VkFormat Format, VkImageLayout Layout>
-    [[nodiscard]] constexpr auto MatchFormat() const noexcept -> std::optional<TypedImage<Layout, Format>>;
+    template <Format::IsFormat FormatTag, VkImageLayout Layout>
+    [[nodiscard]] constexpr auto MatchFormat(VkImageAspectFlags imageAspect) const noexcept -> std::optional<TypedImage<Layout, FormatTag>>;
+    template <Format::IsFormat FormatTag, VkImageLayout Layout>
+    [[nodiscard]] constexpr auto MatchFormat() const noexcept -> std::optional<TypedImage<Layout, FormatTag>>;
 };
 
 static_assert(std::is_trivially_copyable_v<ImageSlice>);

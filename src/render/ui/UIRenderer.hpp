@@ -26,8 +26,8 @@ using SupportedUITargetFormats = Vk::TypeList<
     Vk::Format::B8G8R8A8_SRGB, Vk::Format::B8G8R8A8_UNorm, Vk::Format::R8G8B8A8_SRGB, Vk::Format::R8G8B8A8_UNorm,
     Vk::Format::R16G16B16A16_SFloat>;
 
-template <VkFormat Format>
-using UIColorPass = Vk::DynamicPass<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, Format>>;
+template <Vk::Format::IsFormat Format>
+using UIColorPass = Vk::DynamicPass<1, false, Vk::AttachmentFormats<Vk::Format::Undefined, Format>>;
 
 class UIRenderer {
   public:
@@ -46,7 +46,7 @@ class UIRenderer {
 
     [[nodiscard]] auto SupportsFormat(VkFormat colorFormat) const noexcept -> bool;
 
-    template <VkFormat Format>
+    template <Vk::Format::IsFormat Format>
     void Record(const UIColorPass<Format>& pass, Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex,
                 UIDrawData uiData) noexcept;
 

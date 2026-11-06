@@ -453,11 +453,11 @@ class PipelineBuilder {
         return PipelineBuilder<ColorCount, false, typename WithoutAttachmentDepth<Formats>::type> {std::move(_cfg)};
     }
 
-    template <VkFormat Depth>
-    [[nodiscard]] auto DepthFormat() && noexcept -> PipelineBuilder<ColorCount, true, typename SetAttachmentDepth<Formats, Depth>::type> {
-        static_assert(Depth != VK_FORMAT_UNDEFINED, "A depth attachment needs a concrete format.");
-        _cfg.depthFormat = Depth;
-        return PipelineBuilder<ColorCount, true, typename SetAttachmentDepth<Formats, Depth>::type> {std::move(_cfg)};
+    template <Format::IsFormat DepthTag>
+    [[nodiscard]] auto DepthFormat() && noexcept -> PipelineBuilder<ColorCount, true, typename SetAttachmentDepth<Formats, DepthTag>::type> {
+        static_assert(DepthTag::vk != VK_FORMAT_UNDEFINED, "A depth attachment needs a concrete format tag.");
+        _cfg.depthFormat = DepthTag::vk;
+        return PipelineBuilder<ColorCount, true, typename SetAttachmentDepth<Formats, DepthTag>::type> {std::move(_cfg)};
     }
 
     auto StencilOp(VkStencilOpState front, VkStencilOpState back) noexcept -> PipelineBuilder& {
@@ -514,11 +514,11 @@ class PipelineBuilder {
         return std::move(*this).ColorFormats(std::span<const VkFormat, N> {formats});
     }
 
-    template <VkFormat... Colors>
-    [[nodiscard]] auto ColorFormats() && noexcept -> PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>> {
-        static_assert(((Colors != VK_FORMAT_UNDEFINED) && ...), "Color attachments need concrete formats.");
-        _cfg.colorFormats = {Colors...};
-        return PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>> {std::move(_cfg)};
+    template <Format::IsFormat... ColorTags>
+    [[nodiscard]] auto ColorFormats() && noexcept -> PipelineBuilder<sizeof...(ColorTags), HasDepth, AttachmentFormats<Format::Undefined, ColorTags...>> {
+        static_assert(((ColorTags::vk != VK_FORMAT_UNDEFINED) && ...), "Color attachments need concrete format tags.");
+        _cfg.colorFormats = {ColorTags::vk...};
+        return PipelineBuilder<sizeof...(ColorTags), HasDepth, AttachmentFormats<Format::Undefined, ColorTags...>> {std::move(_cfg)};
     }
 
     [[nodiscard]] auto Build(VkDevice device) const&& noexcept -> std::expected<TypedPipeline<ColorCount, HasDepth, Formats>, ErrorCode> {

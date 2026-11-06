@@ -9,10 +9,10 @@ namespace TemplatedDetail {
 template <typename T>
 struct ResourceTraits;
 
-template <VkImageLayout Layout, VkFormat Format>
-struct ResourceTraits<TypedImage<Layout, Format>> {
+template <VkImageLayout Layout, Format::IsFormat FormatTag>
+struct ResourceTraits<TypedImage<Layout, FormatTag>> {
     static constexpr VkImageLayout old_layout = Layout;
-    static constexpr auto GetSlice(const TypedImage<Layout, Format>& res) noexcept -> const ImageSlice& {
+    static constexpr auto GetSlice(const TypedImage<Layout, FormatTag>& res) noexcept -> const ImageSlice& {
         return res.Raw();
     }
 };

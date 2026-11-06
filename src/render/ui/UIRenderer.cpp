@@ -46,11 +46,11 @@ struct UIVariants<Vk::TypeList<Fs...>> {
     // than introducing a second place where "is this a colour target" is decided.
     static_assert((Vk::Format::ColorFormat<Fs> && ...), "a UI render target is a colour attachment; a depth-stencil tag here would never bind");
 
-    std::tuple<Vk::TypedPipeline<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, Fs::vk>>...> pipelines;
+    std::tuple<Vk::TypedPipeline<1, false, Vk::AttachmentFormats<Vk::Format::Undefined, Fs>>...> pipelines;
 
-    template <VkFormat Format>
+    template <Vk::Format::IsFormat Format>
     [[nodiscard]] auto Get() noexcept -> auto& {
-        return std::get<Vk::TypedPipeline<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, Format>>>(pipelines);
+        return std::get<Vk::TypedPipeline<1, false, Vk::AttachmentFormats<Vk::Format::Undefined, Format>>>(pipelines);
     }
 
     [[nodiscard]] auto Supports(VkFormat format) const noexcept -> bool {
@@ -144,8 +144,8 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
             .CullNone();
         return builder;
     };
-    auto BuildVariant = [&]<VkFormat Format>(auto& pipeline) -> std::expected<void, ErrorCode> {
-        auto result = std::move(MakeBuilder()).ColorFormats<Format>().NoDepth().Build(ctx.ctx.Device());
+    auto BuildVariant = [&]<Vk::Format::IsFormat FormatTag>(auto& pipeline) -> std::expected<void, ErrorCode> {
+        auto result = std::move(MakeBuilder()).ColorFormats<FormatTag>().NoDepth().Build(ctx.ctx.Device());
         if (!result) {
             return std::unexpected(result.error());
         }
@@ -174,14 +174,15 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
                 (
                     [&] {
                         using Pipeline            = std::remove_cvref_t<decltype(pipelines)>;
-                        constexpr VkFormat Format = Pipeline::FormatSet::color_formats[0];
-                        if (Format != presentFormat && Format != VK_FORMAT_R8G8B8A8_UNORM && Format != VK_FORMAT_R16G16B16A16_SFLOAT) {
+                        using FormatTag           = typename Pipeline::FormatSet::template color_tag<0>;
+                        constexpr VkFormat format = Pipeline::FormatSet::color_formats[0];
+                        if (format != presentFormat && format != VK_FORMAT_R8G8B8A8_UNORM && format != VK_FORMAT_R16G16B16A16_SFLOAT) {
                             return;
                         }
-                        if (auto variant = BuildVariant.template operator()<Format>(pipelines); variant) {
-                            built.AddSuccess(Format);
+                        if (auto variant = BuildVariant.template operator()<FormatTag>(pipelines); variant) {
+                            built.AddSuccess(format);
                         } else {
-                            built.EmplaceError(VariantFailure {.format = Format, .error = variant.error()});
+                            built.EmplaceError(VariantFailure {.format = format, .error = variant.error()});
                         }
                     }(),
                     ...);
@@ -322,7 +323,7 @@ void UIRenderer::RecordBatches(
     }
 }
 
-template <VkFormat Format>
+template <Vk::Format::IsFormat Format>
 void UIRenderer::Record(
     const UIColorPass<Format>& pass,
     Vk::CommandEncoder&        encoder,
@@ -360,16 +361,20 @@ void UIRenderer::RecordFallback(
     });
 }
 
-template void UIRenderer::Record<
-    VK_FORMAT_B8G8R8A8_SRGB>(const UIColorPass<VK_FORMAT_B8G8R8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
-template void UIRenderer::Record<
-    VK_FORMAT_B8G8R8A8_UNORM>(const UIColorPass<VK_FORMAT_B8G8R8A8_UNORM>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
-template void UIRenderer::Record<
-    VK_FORMAT_R8G8B8A8_SRGB>(const UIColorPass<VK_FORMAT_R8G8B8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
-template void UIRenderer::Record<
-    VK_FORMAT_R8G8B8A8_UNORM>(const UIColorPass<VK_FORMAT_R8G8B8A8_UNORM>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
-template void UIRenderer::Record<VK_FORMAT_R16G16B16A16_SFLOAT>(
-    const UIColorPass<VK_FORMAT_R16G16B16A16_SFLOAT>&,
+template void UIRenderer::Record<Vk::Format::B8G8R8A8_SRGB>(
+    const UIColorPass<Vk::Format::B8G8R8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData
+) noexcept;
+template void UIRenderer::Record<Vk::Format::B8G8R8A8_UNorm>(
+    const UIColorPass<Vk::Format::B8G8R8A8_UNorm>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData
+) noexcept;
+template void UIRenderer::Record<Vk::Format::R8G8B8A8_SRGB>(
+    const UIColorPass<Vk::Format::R8G8B8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData
+) noexcept;
+template void UIRenderer::Record<Vk::Format::R8G8B8A8_UNorm>(
+    const UIColorPass<Vk::Format::R8G8B8A8_UNorm>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData
+) noexcept;
+template void UIRenderer::Record<Vk::Format::R16G16B16A16_SFloat>(
+    const UIColorPass<Vk::Format::R16G16B16A16_SFloat>&,
     Vk::CommandEncoder&,
     uint32_t,
     uint32_t,

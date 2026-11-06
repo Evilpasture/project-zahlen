@@ -7,10 +7,12 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../FormatTag.hpp"
 #include "../core/Handles.hpp"
 #include <array>
 #include <concepts>
 #include <cstddef>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -18,32 +20,51 @@ namespace ZHLN::Vk {
 
 struct RuntimeAttachmentFormats {};
 
-template <VkFormat DepthFormat, VkFormat... ColorFormats>
+// The attachment set of a typed pass: the depth tag and the colour tags, in bind
+// order. The VkFormat values the driver wants are derived from the tags below,
+// so a tag is the identity of a slot and the array is a projection of it -- one
+// source of truth, two forms, which is what the whole format-tag change is for.
+//
+// Format::Undefined is the "slot exists, format not statically known" marker. It
+// is a real VkFormat value (VK_FORMAT_UNDEFINED), so it projects like any other
+// tag; the difference from RuntimeAttachmentFormats is that the set still knows
+// how many slots there are and which of them are depth.
+template <Format::IsFormat DepthTag, Format::IsFormat... ColorTags>
 struct AttachmentFormats {
-    static constexpr VkFormat depth_format = DepthFormat;
-    static constexpr std::array<VkFormat, sizeof...(ColorFormats)> color_formats {ColorFormats...};
+    static constexpr VkFormat depth_format = DepthTag::vk;
+    static constexpr std::array<VkFormat, sizeof...(ColorTags)> color_formats {ColorTags::vk...};
+
+    // The same set in the other form. A caller that already has a pipeline and
+    // needs its format as a *type* -- the variant loop that asks which of its
+    // pipelines matches the swapchain's format -- reads the tag here instead of
+    // projecting a value back into a template argument.
+    using depth_tag = DepthTag;
+    template <size_t I>
+    using color_tag = std::tuple_element_t<I, std::tuple<ColorTags...>>;
 };
 
-template <typename Formats, VkFormat... Added>
+template <typename Formats, Format::IsFormat... Added>
 struct AppendAttachmentColors {
     using type = RuntimeAttachmentFormats;
 };
 
-template <VkFormat Depth, VkFormat... Colors, VkFormat... Added>
-struct AppendAttachmentColors<AttachmentFormats<Depth, Colors...>, Added...> {
+template <Format::IsFormat DepthTag, Format::IsFormat... ColorTags, Format::IsFormat... Added>
+struct AppendAttachmentColors<AttachmentFormats<DepthTag, ColorTags...>, Added...> {
     using type = std::conditional_t<
-        ((Added != VK_FORMAT_UNDEFINED) && ...), AttachmentFormats<Depth, Colors..., Added...>, RuntimeAttachmentFormats
+        ((Added::vk != VK_FORMAT_UNDEFINED) && ...), AttachmentFormats<DepthTag, ColorTags..., Added...>, RuntimeAttachmentFormats
     >;
 };
 
-template <typename Formats, VkFormat Depth>
+template <typename Formats, Format::IsFormat DepthTag>
 struct SetAttachmentDepth {
     using type = RuntimeAttachmentFormats;
 };
 
-template <VkFormat OldDepth, VkFormat... Colors, VkFormat Depth>
-struct SetAttachmentDepth<AttachmentFormats<OldDepth, Colors...>, Depth> {
-    using type = std::conditional_t<Depth == VK_FORMAT_UNDEFINED, RuntimeAttachmentFormats, AttachmentFormats<Depth, Colors...>>;
+template <Format::IsFormat OldDepth, Format::IsFormat... ColorTags, Format::IsFormat DepthTag>
+struct SetAttachmentDepth<AttachmentFormats<OldDepth, ColorTags...>, DepthTag> {
+    using type = std::conditional_t<
+        DepthTag::vk == VK_FORMAT_UNDEFINED, RuntimeAttachmentFormats, AttachmentFormats<DepthTag, ColorTags...>
+    >;
 };
 
 template <typename Formats>
@@ -51,9 +72,9 @@ struct WithoutAttachmentDepth {
     using type = RuntimeAttachmentFormats;
 };
 
-template <VkFormat Depth, VkFormat... Colors>
-struct WithoutAttachmentDepth<AttachmentFormats<Depth, Colors...>> {
-    using type = AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>;
+template <Format::IsFormat DepthTag, Format::IsFormat... ColorTags>
+struct WithoutAttachmentDepth<AttachmentFormats<DepthTag, ColorTags...>> {
+    using type = AttachmentFormats<Format::Undefined, ColorTags...>;
 };
 
 template <typename Formats>
@@ -61,9 +82,9 @@ struct ClearAttachmentColors {
     using type = RuntimeAttachmentFormats;
 };
 
-template <VkFormat Depth, VkFormat... Colors>
-struct ClearAttachmentColors<AttachmentFormats<Depth, Colors...>> {
-    using type = AttachmentFormats<Depth>;
+template <Format::IsFormat DepthTag, Format::IsFormat... ColorTags>
+struct ClearAttachmentColors<AttachmentFormats<DepthTag, ColorTags...>> {
+    using type = AttachmentFormats<DepthTag>;
 };
 
 template <size_t ColorCount, bool HasDepth, typename Formats>

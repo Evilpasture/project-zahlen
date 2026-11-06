@@ -149,9 +149,10 @@ inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFl
     return TypedImage<out_layout> {slice};
 }
 
-template <VkImageLayout NewLayout, VkImageLayout OldLayout, VkFormat Format>
-inline auto
-    Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, VkImageAspectFlags overrideAspect) noexcept -> TypedImage<NewLayout, Format> {
+template <VkImageLayout NewLayout, VkImageLayout OldLayout, Format::IsFormat FormatTag>
+inline auto Transition(
+    VkCommandBuffer cmd, const TypedImage<OldLayout, FormatTag>& img, VkImageAspectFlags overrideAspect
+) noexcept -> TypedImage<NewLayout, FormatTag> {
     const VkImageAspectFlags aspect = overrideAspect != VK_IMAGE_ASPECT_NONE ? overrideAspect : img.Aspect();
     auto                     next   = img.template WithLayout<NewLayout>(aspect);
     if constexpr (OldLayout != NewLayout) {
@@ -160,19 +161,19 @@ inline auto
     return next;
 }
 
-template <VkImageLayout TargetLayout, VkImageLayout OldLayout, VkFormat Format>
-constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, Tag<TargetLayout> /*unused*/) noexcept {
+template <VkImageLayout TargetLayout, VkImageLayout OldLayout, Format::IsFormat FormatTag>
+constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, FormatTag>& img, Tag<TargetLayout> /*unused*/) noexcept {
     return Transition<TargetLayout>(cmd, img);
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
-template <VkImageLayout Layout, VkFormat Format>
+template <VkImageLayout Layout, Format::IsFormat FormatTag>
 constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
-    const TypedImage<Layout, Format>& img,
+    const TypedImage<Layout, FormatTag>& img,
     VkAttachmentLoadOp                loadOp,
     VkAttachmentStoreOp               storeOp,
     ZHLN::Vk::Color4                  clearColor
-) && noexcept -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type> {
+) && noexcept -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, FormatTag>::type> {
     static_assert(ColorCount < kMaxColorAttachments, "ZHLN Error: DynamicPass exceeded maximum color attachments (8).");
     static_assert(Layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_GENERAL);
 
@@ -190,7 +191,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
     };
     _colorFormats[ColorCount] = img.GetFormat();
 
-    return DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type>(std::move(*this));
+    return DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, FormatTag>::type>(std::move(*this));
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
@@ -200,7 +201,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
     VkAttachmentLoadOp                loadOp,
     VkAttachmentStoreOp               storeOp,
     ZHLN::Vk::Color4                  clearColor
-) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type> {
+) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, typename TypedImages::format_tag...>::type> {
     constexpr size_t added_count = sizeof...(TypedImages);
     static_assert(ColorCount + added_count <= kMaxColorAttachments, "ZHLN Error: DynamicPass exceeded maximum color attachments (8).");
 
@@ -228,17 +229,17 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
         imageTuple
     );
 
-    return DynamicPass<ColorCount + added_count, HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type>(std::move(*this));
+    return DynamicPass<ColorCount + added_count, HasDepth, typename AppendAttachmentColors<Formats, typename TypedImages::format_tag...>::type>(std::move(*this));
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
-template <VkImageLayout Layout, VkFormat Format>
+template <VkImageLayout Layout, Format::IsFormat FormatTag>
 constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
-    const TypedImage<Layout, Format>& img,
+    const TypedImage<Layout, FormatTag>& img,
     VkAttachmentLoadOp                loadOp,
     VkAttachmentStoreOp               storeOp,
     float                             clearVal
-) && noexcept -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type> {
+) && noexcept -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, FormatTag>::type> {
     static_assert(!HasDepth, "ZHLN Execution Error: Depth target already bound.");
 
     static_assert(
@@ -261,27 +262,27 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
         .clearValue         = {.depthStencil = {.depth = clearVal, .stencil = 0}}
     };
 
-    return DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type>(std::move(*this));
+    return DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, FormatTag>::type>(std::move(*this));
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
-template <VkImageLayout Layout, VkFormat Format>
-constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(const TypedImage<Layout, Format>& img, ColorOp op) && noexcept
-    -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type> {
+template <VkImageLayout Layout, Format::IsFormat FormatTag>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(const TypedImage<Layout, FormatTag>& img, ColorOp op) && noexcept
+    -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, FormatTag>::type> {
     return std::move(*this).AddColor(img, op.loadOp, op.storeOp, op.clearColor);
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
 template <typename... TypedImages>
 constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(const std::tuple<TypedImages...>& imageTuple, ColorOp op) && noexcept
-    -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type> {
+    -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth, typename AppendAttachmentColors<Formats, typename TypedImages::format_tag...>::type> {
     return std::move(*this).AddColorGroup(imageTuple, op.loadOp, op.storeOp, op.clearColor);
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
-template <VkImageLayout Layout, VkFormat Format>
-constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(const TypedImage<Layout, Format>& img, DepthOp op) && noexcept
-    -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type> {
+template <VkImageLayout Layout, Format::IsFormat FormatTag>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(const TypedImage<Layout, FormatTag>& img, DepthOp op) && noexcept
+    -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, FormatTag>::type> {
     return std::move(*this).AddDepth(img, op.loadOp, op.storeOp, op.clearVal);
 }
 

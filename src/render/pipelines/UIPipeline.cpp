@@ -8,41 +8,46 @@ namespace ZHLN::Pipelines {
 
 namespace {
 
-using LdrImage = Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_FORMAT_R8G8B8A8_UNORM>;
-static_assert(std::same_as<decltype(std::declval<Vk::ImageSlice>().MatchFormat<VK_FORMAT_R8G8B8A8_UNORM,
+using LdrImage = Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Vk::Format::R8G8B8A8_UNorm>;
+static_assert(std::same_as<decltype(std::declval<Vk::ImageSlice>().MatchFormat<Vk::Format::R8G8B8A8_UNorm,
                                                                                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>()),
                            std::optional<LdrImage>>);
 using LdrPass = decltype(Vk::DynamicPass(VkExtent2D {}).AddColor(std::declval<LdrImage>()));
-static_assert(std::same_as<LdrPass, UIColorPass<VK_FORMAT_R8G8B8A8_UNORM>>);
+static_assert(std::same_as<LdrPass, UIColorPass<Vk::Format::R8G8B8A8_UNorm>>);
 static_assert(!std::is_constructible_v<LdrImage, VkImage, VkImageView, VkExtent3D, VkImageAspectFlags, const Vk::ImageView&>);
 static_assert(!std::is_constructible_v<LdrImage, VkImage, VkImageView, VkExtent3D, VkImageAspectFlags, const Vk::ImageView*>);
 static_assert(!std::is_constructible_v<LdrImage, Vk::ImageSlice>);
 static_assert(!std::is_constructible_v<LdrPass, VkExtent2D>);
-static_assert(!std::is_constructible_v<LdrPass, UIColorPass<VK_FORMAT_R8G8B8A8_SRGB>&&>);
+static_assert(!std::is_constructible_v<LdrPass, UIColorPass<Vk::Format::R8G8B8A8_SRGB>&&>);
 
-template <VkFormat Target, VkFormat Pipeline>
-concept CanBindUI = requires(const UIColorPass<Target>& pass, VkCommandBuffer cmd,
-                             const Vk::TypedPipeline<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, Pipeline>>& pipeline) {
-    pass.Bind(cmd, pipeline);
-};
-static_assert(CanBindUI<VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM>);
-static_assert(!CanBindUI<VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB>);
+template <typename Target, typename Pipeline>
+concept CanBindUI = Vk::Format::IsFormat<Target> && Vk::Format::IsFormat<Pipeline> &&
+    requires(const UIColorPass<Target>& pass, VkCommandBuffer cmd,
+             const Vk::TypedPipeline<1, false, Vk::AttachmentFormats<Vk::Format::Undefined, Pipeline>>& pipeline) {
+        pass.Bind(cmd, pipeline);
+    };
+static_assert(CanBindUI<Vk::Format::R8G8B8A8_UNorm, Vk::Format::R8G8B8A8_UNorm>);
+static_assert(!CanBindUI<Vk::Format::R8G8B8A8_UNorm, Vk::Format::R8G8B8A8_SRGB>);
 
 template <typename Pass, typename Pipeline>
 concept CanBindPass = requires(const Pass& pass, VkCommandBuffer cmd, const Pipeline& pipeline) { pass.Bind(cmd, pipeline); };
-using DepthImage = Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_FORMAT_D32_SFLOAT_S8_UINT>;
+using DepthImage = Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, Vk::Format::D32_SFloat_S8_UInt>;
 using LdrDepthPass = decltype(std::declval<LdrPass>().AddDepth(std::declval<DepthImage>()));
-using LdrDepthPipeline = Vk::TypedPipeline<1, true, Vk::AttachmentFormats<VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_R8G8B8A8_UNORM>>;
+using LdrDepthPipeline =
+    Vk::TypedPipeline<1, true, Vk::AttachmentFormats<Vk::Format::D32_SFloat_S8_UInt, Vk::Format::R8G8B8A8_UNorm>>;
 static_assert(CanBindPass<LdrDepthPass, LdrDepthPipeline>);
-static_assert(!CanBindPass<LdrDepthPass, Vk::TypedPipeline<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, VK_FORMAT_R8G8B8A8_UNORM>>>);
-using MixedPass = decltype(std::declval<LdrPass>().AddColor(std::declval<Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_FORMAT_R8G8B8A8_SRGB>>()));
+static_assert(!CanBindPass<LdrDepthPass,
+                          Vk::TypedPipeline<1, false, Vk::AttachmentFormats<Vk::Format::Undefined, Vk::Format::R8G8B8A8_UNorm>>>);
+using MixedPass = decltype(std::declval<LdrPass>().AddColor(
+    std::declval<Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Vk::Format::R8G8B8A8_SRGB>>()
+));
 static_assert(!CanBindPass<MixedPass, Vk::TypedPipeline<2, false,
-                         Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_R8G8B8A8_UNORM>>>);
+                         Vk::AttachmentFormats<Vk::Format::Undefined, Vk::Format::R8G8B8A8_SRGB, Vk::Format::R8G8B8A8_UNorm>>>);
 
 using BuiltLdrPipeline = decltype(std::declval<Vk::PipelineBuilder<>>()
-    .ColorFormats<VK_FORMAT_R8G8B8A8_UNORM>().NoDepth().Build(std::declval<VkDevice>()));
+    .ColorFormats<Vk::Format::R8G8B8A8_UNorm>().NoDepth().Build(std::declval<VkDevice>()));
 static_assert(std::same_as<typename BuiltLdrPipeline::value_type,
-                           Vk::TypedPipeline<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, VK_FORMAT_R8G8B8A8_UNORM>>>);
+                           Vk::TypedPipeline<1, false, Vk::AttachmentFormats<Vk::Format::Undefined, Vk::Format::R8G8B8A8_UNorm>>>);
 static_assert(!std::is_constructible_v<typename BuiltLdrPipeline::value_type, Vk::Pipeline&&>);
 using RuntimePipeline = decltype(std::declval<Vk::PipelineBuilder<>>()
     .ColorFormats(std::declval<std::span<const VkFormat, 1>>()).NoDepth().Build(std::declval<VkDevice>()));
@@ -107,22 +112,25 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, UIDrawDa
         return std::nullopt;
     };
 
-    auto DrawTyped = [&]<VkFormat Format>() -> FrameOutcome<FrameSkipped> {
-        auto image = target.image.MatchFormat<Format, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+    auto DrawTyped = [&]<Vk::Format::IsFormat FormatTag>() -> FrameOutcome<FrameSkipped> {
+        auto image = target.image.MatchFormat<FormatTag, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
         if (!image) {
             return std::unexpected(DestinationError::UnsupportedColorFormat);
         }
         return Draw(*image, [&](const auto& pass, Vk::CommandEncoder& encoder) {
-            impl.uiRenderer.Record<Format>(pass, encoder, extent.width, extent.height, view.frameIndex, uiData);
+            impl.uiRenderer.Record<FormatTag>(pass, encoder, extent.width, extent.height, view.frameIndex, uiData);
         });
     };
 
     switch (target.image.format) {
-        case VK_FORMAT_B8G8R8A8_SRGB:       return DrawTyped.template operator()<VK_FORMAT_B8G8R8A8_SRGB>();
-        case VK_FORMAT_B8G8R8A8_UNORM:      return DrawTyped.template operator()<VK_FORMAT_B8G8R8A8_UNORM>();
-        case VK_FORMAT_R8G8B8A8_SRGB:       return DrawTyped.template operator()<VK_FORMAT_R8G8B8A8_SRGB>();
-        case VK_FORMAT_R8G8B8A8_UNORM:      return DrawTyped.template operator()<VK_FORMAT_R8G8B8A8_UNORM>();
-        case VK_FORMAT_R16G16B16A16_SFLOAT: return DrawTyped.template operator()<VK_FORMAT_R16G16B16A16_SFLOAT>();
+        // The switch is on the runtime VkFormat (the target's actual format);
+        // only what it instantiates is a tag.
+        case VK_FORMAT_B8G8R8A8_SRGB:  return DrawTyped.template operator()<Vk::Format::B8G8R8A8_SRGB>();
+        case VK_FORMAT_B8G8R8A8_UNORM: return DrawTyped.template operator()<Vk::Format::B8G8R8A8_UNorm>();
+        case VK_FORMAT_R8G8B8A8_SRGB:  return DrawTyped.template operator()<Vk::Format::R8G8B8A8_SRGB>();
+        case VK_FORMAT_R8G8B8A8_UNORM: return DrawTyped.template operator()<Vk::Format::R8G8B8A8_UNorm>();
+        case VK_FORMAT_R16G16B16A16_SFLOAT:
+            return DrawTyped.template operator()<Vk::Format::R16G16B16A16_SFloat>();
         default:
 
             return Draw(target.image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(),
