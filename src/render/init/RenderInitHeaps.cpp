@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "../IBLProcessor.hpp"
-#include "../RenderInternal.hpp"
-#include "../Resources.hpp"
+#include "render/IBLProcessor.hpp"
+#include "render/RenderInternal.hpp"
+#include "render/Resources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Error.hpp>

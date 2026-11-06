@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "passes/lighting/ClusteredLightingPass.hpp"
-#include "RenderFrame.hpp"
-#include "Renderer.hpp"
+#include "render/passes/lighting/ClusteredLightingPass.hpp"
+#include "render/RenderFrame.hpp"
+#include "render/Renderer.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {

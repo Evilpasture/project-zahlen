@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderGraph.hpp"
+#include "vulkan/graph/RenderGraph.hpp"
 
 namespace ZHLN::Vk {
 

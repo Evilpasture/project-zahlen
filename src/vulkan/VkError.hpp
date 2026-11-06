@@ -3,13 +3,11 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include "PresentationOutcome.hpp"
+#include "vulkan/PresentationOutcome.hpp"
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <cstdint>
 #include <string_view>

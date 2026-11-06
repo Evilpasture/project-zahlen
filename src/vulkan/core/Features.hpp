@@ -3,9 +3,7 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -100,4 +98,4 @@ struct FeatureFactory {
 
 }
 
-#include "Features.inl"
+#include "vulkan/core/Features.inl"

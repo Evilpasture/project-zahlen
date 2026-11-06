@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "PassPayloads.hpp"
-#include "Renderer.hpp"
-#include "TargetManager.hpp"
-#include "graph/RenderPassDecl.hpp"
-#include "passes/FullscreenPassRecorder.hpp"
-#include "passes/postprocess/PostProcessResources.hpp"
+
+#include "vulkan/VulkanHeader.hpp"
+
+#include "render/PassPayloads.hpp"
+#include "render/Renderer.hpp"
+#include "render/TargetManager.hpp"
+#include "vulkan/graph/RenderPassDecl.hpp"
+#include "render/passes/FullscreenPassRecorder.hpp"
+#include "render/passes/postprocess/PostProcessResources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/FunctionRef.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>

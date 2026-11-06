@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderTargetTags.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "render/RenderTargetTags.hpp"
+#include "vulkan/graph/RenderPassDecl.hpp"
 
 namespace ZHLN {
 struct CsgResources;

@@ -1,10 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "passes/gbuffer/GBufferBasePass.hpp"
-#include "Renderer.hpp"
-#include "passes/SceneDraw.hpp"
-#include "passes/culling/CullingResources.hpp"
+#include "render/passes/gbuffer/GBufferBasePass.hpp"
+#include "render/Renderer.hpp"
+#include "render/passes/SceneDraw.hpp"
+#include "render/passes/culling/CullingResources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>

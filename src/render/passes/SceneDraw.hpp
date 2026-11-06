@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderConstants.hpp"
-#include "RenderFrame.hpp"
-#include "passes/SceneDrawResources.hpp"
+
+#include "vulkan/VulkanHeader.hpp"
+
+#include "render/RenderConstants.hpp"
+#include "render/RenderFrame.hpp"
+#include "render/passes/SceneDrawResources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Render/Meshlet.hpp>

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "ParallelRecorder.hpp"
+#include "vulkan/execution/ParallelRecorder.hpp"
 
 namespace ZHLN::Vk {
 

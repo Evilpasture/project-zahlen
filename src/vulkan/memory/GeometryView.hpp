@@ -3,11 +3,9 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "DeviceAddress.hpp"
+#include "vulkan/memory/DeviceAddress.hpp"
 #include <cstdint>
 #include <optional>
 #include <type_traits>

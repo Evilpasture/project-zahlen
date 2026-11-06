@@ -3,8 +3,10 @@
 
 #pragma once
 
-#include "Rendering.hpp"
-#include "diagnostics/GpuProfiler.hpp"
+#include "vulkan/VulkanHeader.hpp"
+
+#include "vulkan/Rendering.hpp"
+#include "vulkan/diagnostics/GpuProfiler.hpp"
 #include <Zahlen/Render/Types.hpp>
 #include <cstdint>
 

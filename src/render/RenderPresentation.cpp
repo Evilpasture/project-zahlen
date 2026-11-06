@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "RenderInternal.hpp"
-#include "OpenGLHacks/HostBlit.hpp"
+#include "render/RenderInternal.hpp"
+#include "render/OpenGLHacks/HostBlit.hpp"
 #include <Zahlen/Log.hpp>
 #include <array>
 #include <cstdint>

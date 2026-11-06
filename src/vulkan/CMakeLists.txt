@@ -69,10 +69,16 @@ target_link_libraries(
   zahlen_vulkan PUBLIC Vulkan-Headers GPUOpen::VulkanMemoryAllocator
                        spirv-reflect-static)
 
+# Every first-party header is spelled from src/ -- "vulkan/core/Handles.hpp",
+# "render/passes/SceneDraw.hpp" -- so src/ is the single include root. The
+# target's own directory is deliberately NOT a root: with both present,
+# "core/Handles.hpp" would resolve to src/core/ for a render TU and to
+# src/vulkan/core/ for a vulkan TU, and the meaning of a header name would
+# depend on which target compiled it.
 target_include_directories(
   zahlen_vulkan
-  PUBLIC ${PROJECT_SOURCE_DIR}/include
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>)
 
 target_include_directories(zahlen_vulkan SYSTEM
                            PUBLIC ${PROJECT_SOURCE_DIR}/extern/volk)
@@ -80,17 +86,13 @@ target_include_directories(zahlen_vulkan SYSTEM
 target_compile_definitions(zahlen_vulkan PRIVATE VMA_STATIC_VULKAN_FUNCTIONS=0
                                                  VMA_DYNAMIC_VULKAN_FUNCTIONS=1)
 
-# Every src/vulkan/*.cpp TU relies on Rendering.hpp being force-included first
-# (defining ZHLN_RENDERING_HPP_INCLUDED and VK_NO_PROTOTYPES); keep PCH on both
-# GCC and Clang when enabled, and fall back to -include when ZHLN_ENABLE_PCH=OFF.
+# Rendering.hpp as a precompiled header, for speed only: every header in this tree
+# includes what it uses, so a build without PCH (ZHLN_ENABLE_PCH=OFF) compiles the
+# same sources with nothing force-included.
 if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_precompile_headers(
       zahlen_vulkan PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>")
-else()
-    target_compile_options(
-      zahlen_vulkan PRIVATE
-      "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include \"${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp\">")
 endif()
 
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)

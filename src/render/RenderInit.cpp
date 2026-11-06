@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "RenderInternal.hpp"
-#include "pipeline/ComputePass.hpp"
+#include "render/RenderInternal.hpp"
+#include "vulkan/pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>

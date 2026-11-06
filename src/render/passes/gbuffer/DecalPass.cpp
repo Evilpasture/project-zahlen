@@ -1,10 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "passes/gbuffer/DecalPass.hpp"
-#include "RenderFrame.hpp"
-#include "Renderer.hpp"
-#include "passes/gbuffer/DecalResources.hpp"
+#include "render/passes/gbuffer/DecalPass.hpp"
+#include "render/RenderFrame.hpp"
+#include "render/Renderer.hpp"
+#include "render/passes/gbuffer/DecalResources.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {

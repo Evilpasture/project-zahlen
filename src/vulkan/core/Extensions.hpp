@@ -3,11 +3,10 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
 #include <Zahlen/Error.hpp>
+#include <expected>
 namespace ZHLN::Vk {
 
 [[nodiscard]] auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionProperties>;

@@ -3,16 +3,15 @@
 
 #pragma once
 
-#include <Zahlen/Core/Defer.hpp>
+#include "vulkan/VulkanHeader.hpp"
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include <Zahlen/Core/Defer.hpp>
 
 // Rendering.hpp includes this header before RenderGraph.hpp. Keep the pure
 // graph tag in its own header so physical targets can depend on it without
 // making compile-time graph analysis depend on GPU allocation code.
-#include "../graph/GraphImage.hpp"
+#include "vulkan/graph/GraphImage.hpp"
+#include "vulkan/memory/Allocator.hpp"
 
 namespace ZHLN::Vk {
 
@@ -311,4 +310,4 @@ template <typename... Images>
 
 } // namespace ZHLN::Vk
 
-#include "RenderTarget.inl"
+#include "vulkan/memory/RenderTarget.inl"

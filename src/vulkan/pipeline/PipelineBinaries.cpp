@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // clang-format off
-#include "Rendering.hpp"
+#include "vulkan/Rendering.hpp"
 // clang-format on
-#include "PipelineBinaries.hpp"
+#include "vulkan/pipeline/PipelineBinaries.hpp"
 #include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <array>

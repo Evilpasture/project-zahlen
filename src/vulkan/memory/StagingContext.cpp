@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // clang-format off
-#include "Rendering.hpp"
+#include "vulkan/Rendering.hpp"
 // clang-format on
-#include "StagingContext.hpp"
-#include "Allocator.hpp"
+#include "vulkan/memory/StagingContext.hpp"
+#include "vulkan/memory/Allocator.hpp"
 #include <Zahlen/Core/Defer.hpp>
 #include <cstring>
 #include <utility>

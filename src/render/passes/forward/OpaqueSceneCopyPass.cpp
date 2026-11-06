@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "passes/forward/OpaqueSceneCopyPass.hpp"
-#include "RenderFrame.hpp"
+#include "render/passes/forward/OpaqueSceneCopyPass.hpp"
+#include "render/RenderFrame.hpp"
 
 namespace ZHLN::Passes {
 

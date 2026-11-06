@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "../RenderInternal.hpp"
-#include "../Resources.hpp"
-#include "PassDescriptors.hpp"
-#include "pipeline/ComputePass.hpp"
-#include "../passes/aa/SMAAVariants.hpp"
+#include "render/RenderInternal.hpp"
+#include "render/Resources.hpp"
+#include "render/init/PassDescriptors.hpp"
+#include "vulkan/pipeline/ComputePass.hpp"
+#include "render/passes/aa/SMAAVariants.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>

@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "passes/aa/SMAAPasses.hpp"
-#include "Renderer.hpp"
-#include "passes/FullscreenPassRecorder.hpp"
-#include "passes/aa/AntiAliasingResources.hpp"
-#include "passes/aa/SMAAVariants.hpp"
+#include "render/passes/aa/SMAAPasses.hpp"
+#include "render/Renderer.hpp"
+#include "render/passes/FullscreenPassRecorder.hpp"
+#include "render/passes/aa/AntiAliasingResources.hpp"
+#include "render/passes/aa/SMAAVariants.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {

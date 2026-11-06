@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderInternal.hpp"
-#include "pipeline/ComputePass.hpp"
+
+#include "vulkan/VulkanHeader.hpp"
+
+#include "render/RenderInternal.hpp"
+#include "vulkan/pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Error.hpp>

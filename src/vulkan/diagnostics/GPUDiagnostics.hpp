@@ -3,12 +3,10 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "../core/Context.hpp"
-#include "GPUAddressTracker.hpp"
+#include "vulkan/core/Context.hpp"
+#include "vulkan/diagnostics/GPUAddressTracker.hpp"
 #include <cstdint>
 #include <cstring>
 #include <span>

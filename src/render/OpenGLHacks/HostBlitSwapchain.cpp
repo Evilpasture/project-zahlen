@@ -6,7 +6,7 @@
 
 #include <GLFW/glfw3.h>
 #include <OpenGL/gl.h>
-#include <Rendering.hpp>
+#include "vulkan/Rendering.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -312,7 +312,7 @@ void Shutdown() noexcept {
 
 #else
 
-#include "HostBlit.hpp"
+#include "render/OpenGLHacks/HostBlit.hpp"
 
 namespace ZHLN::HostBlit {
 

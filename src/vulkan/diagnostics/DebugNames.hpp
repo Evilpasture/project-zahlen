@@ -3,11 +3,9 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "GPUAddressTracker.hpp"
+#include "vulkan/diagnostics/GPUAddressTracker.hpp"
 #include <array>
 #include <cstdint>
 #include <cstring>

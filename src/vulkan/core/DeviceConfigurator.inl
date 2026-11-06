@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "DeviceConfigurator.hpp"
+#include "vulkan/core/DeviceConfigurator.hpp"
 #include <Zahlen/Log.hpp>
 
 namespace ZHLN::Vk {

@@ -126,9 +126,9 @@ constexpr std::string_view kHeaderPreamble = R"ZHLN(// Copyright (C) 2026 Evilpa
 
 #pragma once
 
-#include "Rendering.hpp" // the RHI implementation headers
-#include "pipeline/ShaderProgram.hpp" // Vk::ShaderProgram, Vk::ShaderSet
-#include "pipeline/SpirvLayout.hpp" // Vk::WorkgroupSize (the compute LocalSize below)
+#include "vulkan/Rendering.hpp" // the RHI implementation headers
+#include "vulkan/pipeline/ShaderProgram.hpp" // Vk::ShaderProgram, Vk::ShaderSet
+#include "vulkan/pipeline/SpirvLayout.hpp" // Vk::WorkgroupSize (the compute LocalSize below)
 
 #include <cstdint>
 #include <span>

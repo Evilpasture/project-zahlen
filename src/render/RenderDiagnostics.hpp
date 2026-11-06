@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include "RenderConstants.hpp"
-#include "Rendering.hpp"
-#include "ShaderReloadRegistry.hpp"
-#include "diagnostics/GPUDiagnostics.hpp"
+#include "render/RenderConstants.hpp"
+#include "vulkan/Rendering.hpp"
+#include "render/ShaderReloadRegistry.hpp"
+#include "vulkan/diagnostics/GPUDiagnostics.hpp"
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Render/PipelineStats.hpp>
 #include <atomic>

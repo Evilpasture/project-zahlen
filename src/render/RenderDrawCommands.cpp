@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "RenderInternal.hpp"
+#include "render/RenderInternal.hpp"
 #include "Zahlen/Math/Math3D.hpp"
 #include <Zahlen/Render/Render.hpp>
 #include <algorithm>

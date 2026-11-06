@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "passes/SceneDraw.hpp"
-#include "Renderer.hpp"
+#include "render/passes/SceneDraw.hpp"
+#include "render/Renderer.hpp"
 #include <Zahlen/Core/Profiler.hpp>
 
 namespace ZHLN::Passes {

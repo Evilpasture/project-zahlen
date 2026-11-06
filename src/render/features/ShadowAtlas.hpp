@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "GpuLayout.hpp"
-#include "Rendering.hpp"
+#include "render/GpuLayout.hpp"
+#include "vulkan/Rendering.hpp"
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>

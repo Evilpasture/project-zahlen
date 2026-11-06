@@ -1,13 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "ComputeSimPipeline.hpp"
-#include "../passes/ComputePass.hpp"
-#include "../passes/culling/ClusterCullingPass.hpp"
-#include "../passes/simulation/MeshParticleUpdatePass.hpp"
-#include "../passes/simulation/ParticleUpdatePass.hpp"
-#include "../passes/volumetric/VolumetricPasses.hpp"
-#include "graph/RenderGraph.hpp"
+#include "render/pipelines/ComputeSimPipeline.hpp"
+#include "render/passes/ComputePass.hpp"
+#include "render/passes/culling/ClusterCullingPass.hpp"
+#include "render/passes/simulation/MeshParticleUpdatePass.hpp"
+#include "render/passes/simulation/ParticleUpdatePass.hpp"
+#include "render/passes/volumetric/VolumetricPasses.hpp"
+#include "vulkan/graph/RenderGraph.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Log.hpp>
 

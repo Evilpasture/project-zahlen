@@ -3,23 +3,25 @@
 
 #pragma once
 
-#include "DrawQueueManager.hpp"
-#include "FrameDestinations.hpp"
-#include "FrameResources.hpp"
-#include "GeometryManager.hpp"
-#include "GpuAbi.hpp"
-#include "GpuLayout.hpp"
-#include "RenderFrame.hpp"
-#include "Rendering.hpp"
-#include "TargetManager.hpp"
-#include "TextureManager.hpp"
-#include "core/FrameStorage.hpp"
-#include "features/ShadowAtlas.hpp"
-#include "features/ShadowRenderer.hpp"
-#include "features/VolumetricFogSystem.hpp"
-#include "passes/lighting/LightingResources.hpp"
-#include "passes/postprocess/PostProcessResources.hpp"
-#include "pipelines/ReflectionPipeline.hpp"
+#include "vulkan/VulkanHeader.hpp"
+
+#include "render/DrawQueueManager.hpp"
+#include "render/FrameDestinations.hpp"
+#include "render/FrameResources.hpp"
+#include "render/GeometryManager.hpp"
+#include "render/GpuAbi.hpp"
+#include "render/GpuLayout.hpp"
+#include "render/RenderFrame.hpp"
+#include "vulkan/Rendering.hpp"
+#include "render/TargetManager.hpp"
+#include "render/TextureManager.hpp"
+#include "vulkan/core/FrameStorage.hpp"
+#include "render/features/ShadowAtlas.hpp"
+#include "render/features/ShadowRenderer.hpp"
+#include "render/features/VolumetricFogSystem.hpp"
+#include "render/passes/lighting/LightingResources.hpp"
+#include "render/passes/postprocess/PostProcessResources.hpp"
+#include "render/pipelines/ReflectionPipeline.hpp"
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>

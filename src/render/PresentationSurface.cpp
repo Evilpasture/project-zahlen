@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "PresentationSurface.hpp"
-#include "PresentationTarget.hpp"
-#include "Rendering.hpp"
+#include "render/PresentationSurface.hpp"
+#include "presentation/PresentationTarget.hpp"
+#include "vulkan/Rendering.hpp"
 #include <Zahlen/Log.hpp>
 
 namespace {

@@ -3,12 +3,10 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "../VkError.hpp"
-#include "RenderQueue.hpp"
+#include "vulkan/VkError.hpp"
+#include "vulkan/execution/RenderQueue.hpp"
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
@@ -105,4 +103,4 @@ class CommandPools {
 
 } // namespace ZHLN::Vk
 
-#include "CommandPool.inl"
+#include "vulkan/execution/CommandPool.inl"

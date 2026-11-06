@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include "vulkan/VulkanHeader.hpp"
+#include <array>
+
 namespace ZHLN::Vk {
 
 class alignas(64) SemaphorePool {

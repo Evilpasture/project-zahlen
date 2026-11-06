@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "RenderFrame.hpp"
-#include "Rendering.hpp"
+#include "render/RenderFrame.hpp"
+#include "vulkan/Rendering.hpp"
 namespace ZHLN::Passes {
 
 struct ReflectionInputs {

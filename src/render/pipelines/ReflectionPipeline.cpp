@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "pipelines/ReflectionPipeline.hpp"
-#include "GBufferSurface.hpp"
-#include "RenderFrame.hpp"
-#include "Renderer.hpp"
-#include "passes/lighting/ReflectionInputs.hpp"
+#include "render/pipelines/ReflectionPipeline.hpp"
+#include "render/GBufferSurface.hpp"
+#include "render/RenderFrame.hpp"
+#include "render/Renderer.hpp"
+#include "render/passes/lighting/ReflectionInputs.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN {

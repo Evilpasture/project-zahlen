@@ -2,18 +2,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
 
-#include "FormatTags.hpp" // Format::R8G8B8A8_SRGB, the headless target format
-#include "PresentPacer.hpp"
-#include "PresentationOutcome.hpp"
+#include "vulkan/VulkanHeader.hpp"
+
+#include "vulkan/FormatTags.hpp" // Format::R8G8B8A8_SRGB, the headless target format
+#include "vulkan/presentation/PresentPacer.hpp"
+#include "vulkan/PresentationOutcome.hpp"
 #include <Zahlen/Core/PresentTiming.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <optional>
 #include <span>
+#include "vulkan/presentation/Surface.hpp"
+#include "vulkan/presentation/Swapchain.hpp"
+#include "vulkan/execution/CommandPool.hpp"
+#include "vulkan/execution/CommandRecorder.hpp"
+#include "vulkan/execution/FrameSync.hpp"
+#include "vulkan/execution/RenderQueue.hpp"
+#include "vulkan/memory/Allocator.hpp"
+#include "vulkan/memory/ImageSlice.hpp"
+#include "vulkan/memory/RenderTarget.hpp"
+#include "vulkan/core/FrameConfig.hpp"
+#include "vulkan/execution/SemaphorePool.hpp"
 
 namespace ZHLN::Vk {
 

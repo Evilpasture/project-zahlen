@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "GPUDiagnostics.hpp"
-#include "GPUAddressTracker.hpp"
-#include "Rendering.hpp"
+#include "vulkan/diagnostics/GPUDiagnostics.hpp"
+#include "vulkan/diagnostics/GPUAddressTracker.hpp"
+#include "vulkan/Rendering.hpp"
 #include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <array>

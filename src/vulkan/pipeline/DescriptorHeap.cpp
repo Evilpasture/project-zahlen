@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "DescriptorHeap.hpp"
-#include "Rendering.hpp"
+#include "vulkan/pipeline/DescriptorHeap.hpp"
+#include "vulkan/Rendering.hpp"
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Log.hpp>

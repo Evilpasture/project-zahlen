@@ -3,8 +3,10 @@
 
 #pragma once
 
-#include "../RenderInternal.hpp"
-#include "pipeline/FullscreenPass.hpp"
+#include "vulkan/VulkanHeader.hpp"
+
+#include "render/RenderInternal.hpp"
+#include "vulkan/pipeline/FullscreenPass.hpp"
 #include <initializer_list>
 #include <span>
 

@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "Rendering.hpp"
-#include "features/ShadowAtlas.hpp"
+
+#include "vulkan/VulkanHeader.hpp"
+
+#include "vulkan/Rendering.hpp"
+#include "render/features/ShadowAtlas.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Math/Math3D.hpp>

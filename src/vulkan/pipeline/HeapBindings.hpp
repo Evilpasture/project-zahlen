@@ -3,17 +3,23 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "DescriptorMapping.hpp"
-#include "ShaderProgram.hpp"
+#include "vulkan/pipeline/DescriptorMapping.hpp"
+#include "vulkan/pipeline/ShaderProgram.hpp"
 
 #include <Zahlen/Log.hpp>
 
 #include <optional>
 #include <string>
+#include "vulkan/pipeline/DescriptorHeap.hpp"
+#include "vulkan/pipeline/DescriptorWrites.hpp"
+#include "vulkan/pipeline/PushDataLayout.hpp"
+#include "vulkan/memory/BufferSlice.hpp"
+#include "vulkan/memory/DeviceAddress.hpp"
+#include "vulkan/memory/ImageSlice.hpp"
+#include "vulkan/memory/ImageView.hpp"
+#include "vulkan/pipeline/ReflectedLayout.hpp"
 
 namespace ZHLN::Vk {
 

@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "passes/lighting/ReflectionInputs.hpp"
-#include "Renderer.hpp"
+#include "render/passes/lighting/ReflectionInputs.hpp"
+#include "render/Renderer.hpp"
 
 namespace ZHLN::Passes {
 

@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "PresentationSurface.hpp"
-#include "RenderInternal.hpp"
+#include "render/PresentationSurface.hpp"
+#include "render/RenderInternal.hpp"
 #include <Zahlen/Log.hpp>
 #include <memory>
 #include <utility>

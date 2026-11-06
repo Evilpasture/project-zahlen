@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "passes/gbuffer/GBufferBasePass.hpp"
+#include "render/passes/gbuffer/GBufferBasePass.hpp"
 
 namespace ZHLN {
 

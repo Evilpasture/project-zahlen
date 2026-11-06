@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderTargetTags.hpp"
+
+#include "vulkan/VulkanHeader.hpp"
+
+#include "render/RenderTargetTags.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>

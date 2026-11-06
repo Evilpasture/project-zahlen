@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "FrameSync.hpp"
+#include "vulkan/execution/FrameSync.hpp"
 #include <utility>
 
 namespace ZHLN::Vk {

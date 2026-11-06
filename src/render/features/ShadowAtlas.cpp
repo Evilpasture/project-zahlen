@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "features/ShadowAtlas.hpp"
+#include "render/features/ShadowAtlas.hpp"
 #include <Jolt/Math/Float2.h>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>

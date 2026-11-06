@@ -3,14 +3,12 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "../memory/BufferSlice.hpp"
-#include "../memory/ImageSlice.hpp"
-#include "../memory/ImageView.hpp"
-#include "RenderQueue.hpp"
+#include "vulkan/memory/BufferSlice.hpp"
+#include "vulkan/memory/ImageSlice.hpp"
+#include "vulkan/memory/ImageView.hpp"
+#include "vulkan/execution/RenderQueue.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>

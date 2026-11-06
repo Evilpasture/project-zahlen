@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "ReflectedLayout.hpp"
-#include "ShaderStages.hpp"
+#include "vulkan/pipeline/ReflectedLayout.hpp"
+#include "vulkan/pipeline/ShaderStages.hpp"
 #include <cstring>
 #include <map>
 #include <spirv_reflect.h>

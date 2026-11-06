@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "GpuLayout.hpp"
+#include "render/GpuLayout.hpp"
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Render/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/FrameData.hpp>

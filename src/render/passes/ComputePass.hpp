@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderFrame.hpp"
-#include "Renderer.hpp"
-#include "graph/RenderPassDecl.hpp"
-#include "passes/GraphPassUtils.hpp"
+
+#include "vulkan/VulkanHeader.hpp"
+
+#include "render/RenderFrame.hpp"
+#include "render/Renderer.hpp"
+#include "vulkan/graph/RenderPassDecl.hpp"
+#include "render/passes/GraphPassUtils.hpp"
 #include <ShaderBindings.hpp>
 #include <concepts>
 #include <tuple>

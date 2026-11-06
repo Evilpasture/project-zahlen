@@ -3,12 +3,10 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "../FormatTag.hpp"
-#include "../pipeline/PipelineTypes.hpp"
+#include "vulkan/FormatTag.hpp"
+#include "vulkan/pipeline/PipelineTypes.hpp"
 #include <algorithm>
 #include <array>
 #include <concepts>
@@ -16,6 +14,9 @@
 #include <optional>
 #include <span>
 #include <type_traits>
+#include "vulkan/core/RenderCore.hpp"
+#include "vulkan/execution/Barriers.hpp"
+#include "vulkan/memory/ImageSlice.hpp"
 
 namespace ZHLN::Vk {
 
@@ -680,4 +681,4 @@ void ClearAttachment(
 
 } // namespace ZHLN::Vk
 
-#include "DynamicRendering.inl"
+#include "vulkan/graph/DynamicRendering.inl"

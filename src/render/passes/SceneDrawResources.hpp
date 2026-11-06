@@ -3,8 +3,10 @@
 
 #pragma once
 
-#include "DrawCommands.hpp"
-#include "Rendering.hpp"
+#include "vulkan/VulkanHeader.hpp"
+
+#include "render/DrawCommands.hpp"
+#include "vulkan/Rendering.hpp"
 #include <cstdint>
 
 namespace ZHLN {

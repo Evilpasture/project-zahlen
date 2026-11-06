@@ -11,12 +11,8 @@
 // first. In particular: no <vulkan/vulkan.h> here. volk is this tree's single
 // Vulkan entry point, and a second one is a conflict waiting for a TUs worth of
 // distance.
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
-
-#include "FormatTag.hpp"          // Format::IsFormat, Format::Undefined
-#include "graph/RenderPassDecl.hpp" // ZHLN::Vk::TypeList
+#include "vulkan/FormatTag.hpp"          // Format::IsFormat, Format::Undefined
+#include "vulkan/graph/RenderPassDecl.hpp" // ZHLN::Vk::TypeList
 
 #include <array>
 #include <cstdint>

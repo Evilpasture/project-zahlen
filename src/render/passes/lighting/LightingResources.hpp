@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "PassPayloads.hpp"
-#include "Rendering.hpp"
-#include "pipeline/ComputePass.hpp"
+#include "render/PassPayloads.hpp"
+#include "vulkan/Rendering.hpp"
+#include "vulkan/pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN {

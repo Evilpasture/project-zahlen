@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "Rendering.hpp"
-#include "graph/RenderPassDecl.hpp"
+
+#include "vulkan/VulkanHeader.hpp"
+
+#include "vulkan/Rendering.hpp"
+#include "vulkan/graph/RenderPassDecl.hpp"
 
 namespace ZHLN {
 struct ParticleUpdateResources;

@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include "RenderConstants.hpp"
-#include "Rendering.hpp"
-#include "FormatTags.hpp"
-#include "graph/GraphImage.hpp"
+#include "render/RenderConstants.hpp"
+#include "vulkan/Rendering.hpp"
+#include "vulkan/FormatTags.hpp"
+#include "vulkan/graph/GraphImage.hpp"
 #include <cstdint>
 
 namespace ZHLN {

@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "Rendering.hpp"
+
+#include "vulkan/VulkanHeader.hpp"
+
+#include "vulkan/Rendering.hpp"
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Error.hpp>

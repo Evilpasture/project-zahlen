@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
 
-#include "CommandRecorder.hpp"
+#include "vulkan/VulkanHeader.hpp"
+
+#include "vulkan/execution/CommandRecorder.hpp"
 #include <Zahlen/Error.hpp>
 #include <expected>
 #include <type_traits>

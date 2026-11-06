@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "UIPipeline.hpp"
+#include "render/pipelines/UIPipeline.hpp"
 #include <span>
 
 namespace ZHLN::Pipelines {

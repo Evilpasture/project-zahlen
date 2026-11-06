@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderConstants.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "render/RenderConstants.hpp"
+#include "vulkan/graph/RenderPassDecl.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
 
 namespace ZHLN::Passes::TemplatedDetail {

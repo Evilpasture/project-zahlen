@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "PresentPacer.hpp"
-#include "../core/Context.hpp"
+#include "vulkan/presentation/PresentPacer.hpp"
+#include "vulkan/core/Context.hpp"
 
 namespace ZHLN::Vk {
 

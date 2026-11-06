@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "FrameConfig.hpp"
+#include "vulkan/core/FrameConfig.hpp"
 #include <array>
 #include <cstdint>
 

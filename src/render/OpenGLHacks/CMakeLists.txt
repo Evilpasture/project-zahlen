@@ -17,15 +17,21 @@ target_include_directories(HostBlitSwapchain SYSTEM PRIVATE
     ${PROJECT_SOURCE_DIR}/extern/volk
 )
 
+# HostBlitSwapchain.cpp includes "vulkan/Rendering.hpp": rooted, like everything
+# else, which needs src/ on the non-Apple path as well -- the block below is
+# Apple-only and used to be the sole place this target could find the RHI.
+target_include_directories(HostBlitSwapchain PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/src
+)
+
 target_compile_options(HostBlitSwapchain PRIVATE -fno-exceptions -fno-rtti)
 
 if(APPLE)
     find_package(OpenGL REQUIRED)
 
     target_include_directories(HostBlitSwapchain PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${PROJECT_SOURCE_DIR}/src/vulkan
     )
 
     target_link_libraries(HostBlitSwapchain PRIVATE

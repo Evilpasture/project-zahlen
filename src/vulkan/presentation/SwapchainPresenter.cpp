@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "SwapchainPresenter.hpp"
-#include "Rendering.hpp"
+#include "vulkan/presentation/SwapchainPresenter.hpp"
+#include "vulkan/Rendering.hpp"
 #include <array>
 #include <cstdint>
 

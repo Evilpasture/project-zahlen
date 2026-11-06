@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "../Rendering.hpp"
-#include "Handles.hpp"
+#include "vulkan/Rendering.hpp"
+#include "vulkan/core/Handles.hpp"
 
 namespace ZHLN::Vk {
 

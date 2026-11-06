@@ -12,8 +12,9 @@ if(NOT ZHLN_BUILD_RENDER)
     )
     target_compile_features(zahlen_render PUBLIC cxx_std_26)
     target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
-    target_include_directories(zahlen_render PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
+    target_include_directories(zahlen_render
+        PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     )
     target_include_directories(zahlen_render SYSTEM PRIVATE
         ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
@@ -122,7 +123,7 @@ if(NOT ZHLN_SYNTAX_ONLY)
     target_link_libraries(zahlen_shader_bytecode PRIVATE zahlen_vulkan Jolt zahlen_warnings)
     target_include_directories(zahlen_shader_bytecode PRIVATE
         "${CMAKE_BINARY_DIR}/generated_shaders"
-        "${PROJECT_SOURCE_DIR}/src/vulkan"
+        "${PROJECT_SOURCE_DIR}/src"
     )
     target_include_directories(zahlen_shader_bytecode SYSTEM PRIVATE
         "${PROJECT_SOURCE_DIR}/extern/JoltPhysics"
@@ -149,10 +150,10 @@ target_link_libraries(zahlen_render
     PRIVATE zahlen_threading
 )
 
-target_include_directories(zahlen_render PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/init
-    ${PROJECT_SOURCE_DIR}/src/vulkan
+target_include_directories(zahlen_render
+    PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
 
 target_include_directories(zahlen_render SYSTEM PRIVATE

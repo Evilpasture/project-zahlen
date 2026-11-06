@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "GeometryManager.hpp"
+#include "render/GeometryManager.hpp"
 #include <Zahlen/Render/Vertex.hpp>
 #include <algorithm>
 #include <cstring>

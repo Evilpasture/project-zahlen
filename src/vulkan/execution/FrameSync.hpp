@@ -3,16 +3,16 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "../VkError.hpp"
+#include "vulkan/VkError.hpp"
 #include <array>
 #include <cstdint>
 #include <expected>
 #include <optional>
 #include <span>
+#include "vulkan/execution/RenderQueue.hpp"
+#include <Zahlen/Log.hpp>
 
 namespace ZHLN::Vk {
 
@@ -217,4 +217,4 @@ class FrameSync {
 
 } // namespace ZHLN::Vk
 
-#include "FrameSync.inl"
+#include "vulkan/execution/FrameSync.inl"

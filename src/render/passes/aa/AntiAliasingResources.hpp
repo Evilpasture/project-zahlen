@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "Rendering.hpp"
-#include "pipeline/FullscreenPass.hpp"
+#include "vulkan/Rendering.hpp"
+#include "vulkan/pipeline/FullscreenPass.hpp"
 
 namespace ZHLN {
 

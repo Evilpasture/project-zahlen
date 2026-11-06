@@ -2,17 +2,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+
+#include "vulkan/VulkanHeader.hpp"
 
 #include <array>
 #include <span>
 #include <Zahlen/Log.hpp>
-#include "HeapBindings.hpp"
-#include "HeapMappingBuilder.hpp"
-#include "PushDataLayout.hpp" // SpirvLayoutError
-#include "SpirvLayout.hpp"    // WorkgroupSize, LocalSizeOf
+#include "vulkan/pipeline/HeapBindings.hpp"
+#include "vulkan/pipeline/HeapMappingBuilder.hpp"
+#include "vulkan/pipeline/PushDataLayout.hpp" // SpirvLayoutError
+#include "vulkan/pipeline/SpirvLayout.hpp"    // WorkgroupSize, LocalSizeOf
+#include "vulkan/pipeline/DescriptorWrites.hpp"
+#include "vulkan/pipeline/PipelineBinaries.hpp"
+#include "vulkan/pipeline/PipelineBuilder.hpp"
+#include "vulkan/pipeline/ShaderStages.hpp"
+#include "vulkan/execution/Barriers.hpp"
+#include "vulkan/execution/GpuPayload.hpp"
 
 namespace ZHLN::Vk {
 

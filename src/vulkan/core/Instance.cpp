@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Instance.hpp"
-#include "Extensions.hpp"
-#include <VkError.hpp>
+#include "vulkan/core/Instance.hpp"
+#include "vulkan/core/Extensions.hpp"
+#include "vulkan/VkError.hpp"
 #include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <array>

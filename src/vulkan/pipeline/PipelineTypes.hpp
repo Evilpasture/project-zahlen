@@ -3,12 +3,10 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "../FormatTag.hpp"
-#include "../core/Handles.hpp"
+#include "vulkan/FormatTag.hpp"
+#include "vulkan/core/Handles.hpp"
 #include <array>
 #include <concepts>
 #include <cstddef>

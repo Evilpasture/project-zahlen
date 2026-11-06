@@ -1,18 +1,18 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "GpuPack.hpp"
-#include "RenderInternal.hpp"
-#include "Resources.hpp"
+#include "render/GpuPack.hpp"
+#include "render/RenderInternal.hpp"
+#include "render/Resources.hpp"
 #include "Zahlen/Core/AssetID.hpp"
 #include "Zahlen/Math/Geometry2D.hpp"
 #include "Zahlen/Render/GraphicsSettings.hpp"
 #include "Zahlen/Render/Handles.hpp"
 #include "Zahlen/Render/Types.hpp"
 #include "Zahlen/Render/Vertex.hpp"
-#include "passes/forward/ForwardPass.hpp"
-#include "passes/gbuffer/GBufferBasePass.hpp"
-#include <PipelineFormats.hpp>
+#include "render/passes/forward/ForwardPass.hpp"
+#include "render/passes/gbuffer/GBufferBasePass.hpp"
+#include "render/PipelineFormats.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/Ranges.hpp>

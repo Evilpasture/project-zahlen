@@ -1,10 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "UIRenderer.hpp"
-#include "../RenderInternal.hpp"
-#include "../Resources.hpp"
-#include "../TextureManager.hpp"
+#include "render/ui/UIRenderer.hpp"
+#include "render/RenderInternal.hpp"
+#include "render/Resources.hpp"
+#include "render/TextureManager.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/BatchResult.hpp>

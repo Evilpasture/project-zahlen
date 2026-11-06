@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
 
-#include "RecordingBatch.hpp"
+#include "vulkan/VulkanHeader.hpp"
+
+#include "vulkan/execution/RecordingBatch.hpp"
+#include "vulkan/execution/SecondaryPassContext.hpp"
+#include "vulkan/execution/CommandPool.hpp"
 
 namespace ZHLN::Vk {
 
@@ -66,4 +67,4 @@ class ParallelCommandRecorder {
 
 }
 
-#include "ParallelRecorder.inl"
+#include "vulkan/execution/ParallelRecorder.inl"

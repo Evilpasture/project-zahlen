@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "passes/forward/TranslucentPrePass.hpp"
-#include "Renderer.hpp"
-#include "passes/SceneDraw.hpp"
+#include "render/passes/forward/TranslucentPrePass.hpp"
+#include "render/Renderer.hpp"
+#include "render/passes/SceneDraw.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {

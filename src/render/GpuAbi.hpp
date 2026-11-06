@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "Rendering.hpp"
+#include "vulkan/Rendering.hpp"
 #include <GeneratedGpuTypes.hpp>
 #include <cstdint>
 #include <span>

@@ -3,8 +3,10 @@
 
 #pragma once
 
-#include "Rendering.hpp"
-#include "core/FrameStorage.hpp"
+#include "vulkan/VulkanHeader.hpp"
+
+#include "vulkan/Rendering.hpp"
+#include "vulkan/core/FrameStorage.hpp"
 #include <Zahlen/Render/Handles.hpp>
 #include <cstdint>
 

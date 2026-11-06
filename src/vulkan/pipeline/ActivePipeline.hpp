@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+
+#include "vulkan/VulkanHeader.hpp"
 
 #include <optional>
 #include <span>
+#include "vulkan/core/Handles.hpp"
+#include "vulkan/pipeline/HeapBindings.hpp"
 
 namespace ZHLN::Vk {
 

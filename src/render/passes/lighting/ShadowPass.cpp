@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "passes/lighting/ShadowPass.hpp"
-#include "Renderer.hpp"
-#include "features/ShadowAtlas.hpp"
-#include "features/ShadowRenderer.hpp"
-#include "passes/SceneDraw.hpp"
+#include "render/passes/lighting/ShadowPass.hpp"
+#include "render/Renderer.hpp"
+#include "render/features/ShadowAtlas.hpp"
+#include "render/features/ShadowRenderer.hpp"
+#include "render/passes/SceneDraw.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Math3D.hpp>

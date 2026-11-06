@@ -10,14 +10,12 @@
 // both need to name IsFormat and Format::Undefined, and neither can reach
 // FormatTags.hpp without closing a cycle.
 //
-// A render header, so the usual rule applies: Rendering.hpp first, and Vulkan
-// comes from VulkanHeader.hpp -> <volk.h>. No <vulkan/vulkan.h> here.
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
-
+// Vulkan comes from VulkanHeader.hpp -> <volk.h>, included below: no header in
+// this tree needs another one included before it, and none includes
+// <vulkan/vulkan.h>.
 #include <concepts>
 #include <cstdint>
+#include "vulkan/VulkanHeader.hpp"
 
 namespace ZHLN::Vk::Format {
 

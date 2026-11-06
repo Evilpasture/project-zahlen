@@ -1,13 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Surface.hpp"
+#include "vulkan/presentation/Surface.hpp"
 #include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <optional>
 #include <span>
 #include <utility>
 #include <vector>
+#include "vulkan/VkError.hpp"
 
 namespace ZHLN::Vk {
 

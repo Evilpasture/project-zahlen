@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "../OpenGLHacks/HostBlit.hpp"
-#include "../PresentationSurface.hpp"
-#include "../RenderInternal.hpp"
-#include "diagnostics/GPUDiagnostics.hpp"
-#include "diagnostics/GpuProfiler.hpp"
+#include "render/OpenGLHacks/HostBlit.hpp"
+#include "render/PresentationSurface.hpp"
+#include "render/RenderInternal.hpp"
+#include "vulkan/diagnostics/GPUDiagnostics.hpp"
+#include "vulkan/diagnostics/GpuProfiler.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstdlib>

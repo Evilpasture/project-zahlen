@@ -3,14 +3,13 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "../VkError.hpp"
+#include "vulkan/VkError.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
+#include "vulkan/execution/Barriers.hpp"
 
 namespace ZHLN {
 
@@ -135,4 +134,4 @@ void GenerateMipmaps(VkCommandBuffer cmd, VkImage image, uint32_t width, uint32_
 
 } // namespace ZHLN::Vk
 
-#include "RenderCore.inl"
+#include "vulkan/core/RenderCore.inl"

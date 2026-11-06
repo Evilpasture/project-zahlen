@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "vulkan/VulkanHeader.hpp"
+
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <algorithm>
@@ -12,7 +14,7 @@
 #include <type_traits>
 #include <utility>
 
-#include "../core/Handles.hpp"
+#include "vulkan/core/Handles.hpp"
 
 namespace ZHLN::Vk {
 
@@ -268,4 +270,4 @@ class AttachmentView {
 
 }
 
-#include "ImageView.inl"
+#include "vulkan/memory/ImageView.inl"

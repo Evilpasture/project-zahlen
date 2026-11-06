@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "DeviceConfigurator.hpp"
-#include "PhysicalDevice.hpp"
+#include "vulkan/core/DeviceConfigurator.hpp"
+#include "vulkan/core/PhysicalDevice.hpp"
 #include <Zahlen/Log.hpp>
 
 namespace ZHLN::Vk {

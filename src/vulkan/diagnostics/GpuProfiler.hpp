@@ -3,11 +3,12 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
+#include <expected>
 
 #include <Zahlen/Core/Reflection/Enums.hpp>
+#include <Zahlen/Error.hpp>
+#include "vulkan/core/FrameConfig.hpp"
 
 namespace ZHLN::Profiler {
 
@@ -120,4 +121,4 @@ ScopedGpuProfile(VkCommandBuffer, uint32_t, const GpuProfiler<EnumT>&, EnumT) ->
 
 }
 
-#include "GpuProfiler.inl"
+#include "vulkan/diagnostics/GpuProfiler.inl"

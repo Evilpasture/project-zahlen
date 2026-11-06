@@ -3,14 +3,16 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
 #include <Zahlen/Threading/Mutex.hpp>
 #include <span>
 
-#include "ImageView.hpp"
+#include "vulkan/memory/ImageView.hpp"
+#include "vulkan/execution/Barriers.hpp"
+#include "vulkan/execution/CommandRecorder.hpp"
+#include "vulkan/memory/BufferSlice.hpp"
+#include "vulkan/core/FrameConfig.hpp"
 
 struct VmaAllocator_T;
 struct VmaAllocation_T;

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "GpuAbi.hpp"
+#include "render/GpuAbi.hpp"
 
 namespace ZHLN {
 

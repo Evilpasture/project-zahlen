@@ -12,8 +12,8 @@
 // it comes from is the ABI, and re-parsing the module's SPIR-V to confirm it
 // would be confirming Slang against Slang.
 
-#include "GpuAbi.hpp"
-#include "GpuLayout.hpp"
+#include "render/GpuAbi.hpp"
+#include "render/GpuLayout.hpp"
 
 namespace ZHLN::GpuAbi {
 

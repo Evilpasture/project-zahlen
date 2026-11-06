@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "FullscreenPass.hpp"
+#include "vulkan/pipeline/FullscreenPass.hpp"
 
 namespace ZHLN::Vk {
 

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "TextureManager.hpp"
+#include "render/TextureManager.hpp"
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>

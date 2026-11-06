@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Context.hpp"
-#include "../diagnostics/GPUAddressTracker.hpp"
-#include "Extensions.hpp"
+#include "vulkan/core/Context.hpp"
+#include "vulkan/diagnostics/GPUAddressTracker.hpp"
+#include "vulkan/core/Extensions.hpp"
 #include <Zahlen/Log.hpp>
 #include <array>
 #include <cstddef>
@@ -11,6 +11,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "vulkan/core/DeviceConfigurator.hpp"
+#include "vulkan/VkError.hpp"
 
 namespace ZHLN::Vk {
 

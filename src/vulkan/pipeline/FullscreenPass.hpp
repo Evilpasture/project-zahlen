@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
 
-#include "ActivePipeline.hpp"
-#include "graph/RenderPassDecl.hpp"
+#include "vulkan/VulkanHeader.hpp"
+
+#include "vulkan/pipeline/ActivePipeline.hpp"
+#include "vulkan/graph/RenderPassDecl.hpp"
+#include "vulkan/pipeline/PipelineBinaries.hpp"
+#include "vulkan/pipeline/ShaderStages.hpp"
+#include "vulkan/pipeline/PipelineBuilder.hpp"
+#include "vulkan/pipeline/HeapMappingBuilder.hpp"
 
 namespace ZHLN::Vk {
 
@@ -76,4 +79,4 @@ struct FullscreenPass {
 
 }
 
-#include "FullscreenPass.inl"
+#include "vulkan/pipeline/FullscreenPass.inl"

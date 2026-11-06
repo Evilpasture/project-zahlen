@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "vulkan/VulkanHeader.hpp"
+
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <expected>

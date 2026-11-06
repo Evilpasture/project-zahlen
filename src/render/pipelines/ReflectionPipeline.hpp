@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "Rendering.hpp"
-#include "graph/RenderPassDecl.hpp"
-#include "pipeline/FullscreenPass.hpp"
+#include "vulkan/Rendering.hpp"
+#include "vulkan/graph/RenderPassDecl.hpp"
+#include "vulkan/pipeline/FullscreenPass.hpp"
 #include <GeneratedGpuTypes.hpp>
 
 namespace ZHLN::Passes {

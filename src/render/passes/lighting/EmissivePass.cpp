@@ -1,10 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "passes/lighting/EmissivePass.hpp"
-#include "Renderer.hpp"
-#include "passes/SceneDraw.hpp"
-#include "passes/forward/ForwardResources.hpp"
+#include "render/passes/lighting/EmissivePass.hpp"
+#include "render/Renderer.hpp"
+#include "render/passes/SceneDraw.hpp"
+#include "render/passes/forward/ForwardResources.hpp"
 #include <ShaderBindings.hpp>
 #include <cstddef>
 #include <cstdint>

@@ -1,13 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "RenderInternal.hpp"
+#include "render/RenderInternal.hpp"
 #include "Zahlen/Math/Math3D.hpp"
 #include "Zahlen/Core/Profiler.hpp"
-#include "diagnostics/GpuProfiler.hpp"
-#include "pipelines/ComputeSimPipeline.hpp"
-#include "pipelines/DeferredPbrPipeline.hpp"
-#include "pipelines/UIPipeline.hpp"
+#include "vulkan/diagnostics/GpuProfiler.hpp"
+#include "render/pipelines/ComputeSimPipeline.hpp"
+#include "render/pipelines/DeferredPbrPipeline.hpp"
+#include "render/pipelines/UIPipeline.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/AssetID.hpp>

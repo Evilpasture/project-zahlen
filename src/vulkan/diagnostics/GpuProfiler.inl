@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "GpuProfiler.hpp"
+#include "vulkan/diagnostics/GpuProfiler.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
 
 namespace ZHLN::Profiler {

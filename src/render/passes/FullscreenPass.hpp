@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderFrame.hpp"
-#include "graph/RenderPassDecl.hpp"
-#include "passes/FullscreenPassRecorder.hpp"
-#include "passes/GraphPassUtils.hpp"
+#include "render/RenderFrame.hpp"
+#include "vulkan/graph/RenderPassDecl.hpp"
+#include "render/passes/FullscreenPassRecorder.hpp"
+#include "render/passes/GraphPassUtils.hpp"
 
 namespace ZHLN::Passes {
 

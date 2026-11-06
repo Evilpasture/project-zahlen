@@ -566,7 +566,7 @@ constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilp
 
 #include <Zahlen/Math/ValueTypes.hpp> // the containers the members are spelled in
 
-#include "pipeline/PushDataLayout.hpp" // Vk::HeapPushDataLayout: kScenePushLayout's type
+#include "vulkan/pipeline/PushDataLayout.hpp" // Vk::HeapPushDataLayout: kScenePushLayout's type
 
 #include <array>
 #include <cstdint>

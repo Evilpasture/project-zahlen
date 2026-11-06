@@ -3,13 +3,13 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "../VkError.hpp"
-#include "../memory/GeometryView.hpp"
+#include "vulkan/VkError.hpp"
+#include "vulkan/memory/GeometryView.hpp"
 #include <cstdint>
+#include "vulkan/core/Handles.hpp"
+#include "vulkan/memory/BufferSlice.hpp"
 
 namespace ZHLN::Vk {
 

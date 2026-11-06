@@ -3,20 +3,23 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
 #include <span>
 #include <array>
 #include <type_traits>
 #include <utility>
 
-#include "../FormatTags.hpp" // Format::HasStencilFormat
-#include "../VkError.hpp"
-#include "PipelineTypes.hpp"
+#include "vulkan/FormatTags.hpp" // Format::HasStencilFormat
+#include "vulkan/VkError.hpp"
+#include "vulkan/pipeline/PipelineTypes.hpp"
 #include <Zahlen/Error.hpp>
 #include <optional>
+#include "vulkan/pipeline/PipelineBinaries.hpp"
+#include "vulkan/pipeline/ReflectedLayout.hpp"
+#include "vulkan/pipeline/ShaderProgram.hpp"
+#include "vulkan/pipeline/ShaderStages.hpp"
+#include "vulkan/pipeline/Vertex.hpp"
 
 namespace ZHLN::Vk {
 

@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "DrawCommands.hpp"
-#include "GenerationalPool.hpp"
-#include "Rendering.hpp"
-#include "diagnostics/GPUDiagnostics.hpp"
+
+#include "vulkan/VulkanHeader.hpp"
+
+#include "render/DrawCommands.hpp"
+#include "render/GenerationalPool.hpp"
+#include "vulkan/Rendering.hpp"
+#include "vulkan/diagnostics/GPUDiagnostics.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/Handles.hpp>

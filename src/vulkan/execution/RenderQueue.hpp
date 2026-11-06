@@ -3,12 +3,10 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "../core/Handles.hpp"
-#include "CommandRecorder.hpp"
+#include "vulkan/core/Handles.hpp"
+#include "vulkan/execution/CommandRecorder.hpp"
 #include <Zahlen/Error.hpp>
 #include <array>
 #include <cstdint>
@@ -193,4 +191,4 @@ template <QueueType QType>
 
 }
 
-#include "RenderQueue.inl"
+#include "vulkan/execution/RenderQueue.inl"

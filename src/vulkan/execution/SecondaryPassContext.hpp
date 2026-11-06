@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
 
-#include "graph/DynamicRendering.hpp"
-#include "pipeline/DescriptorHeap.hpp"
-#include "pipeline/HeapBindings.hpp"
+#include "vulkan/VulkanHeader.hpp"
+
+#include "vulkan/graph/DynamicRendering.hpp"
+#include "vulkan/pipeline/DescriptorHeap.hpp"
+#include "vulkan/pipeline/HeapBindings.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>

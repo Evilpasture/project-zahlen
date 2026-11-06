@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "RenderQueue.hpp"
-#include "Rendering.hpp"
+#include "vulkan/execution/RenderQueue.hpp"
+#include "vulkan/Rendering.hpp"
 #include <memory>
 
 namespace ZHLN::Vk {

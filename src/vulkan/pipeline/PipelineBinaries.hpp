@@ -3,9 +3,7 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
 #include <concepts>
 #include <cstdint>
@@ -14,6 +12,7 @@
 #include <span>
 #include <type_traits>
 #include <vector>
+#include "vulkan/core/Handles.hpp"
 
 namespace ZHLN::Vk {
 

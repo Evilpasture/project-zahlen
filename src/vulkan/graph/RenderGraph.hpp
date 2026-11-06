@@ -3,11 +3,9 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "RenderPassDecl.hpp"
+#include "vulkan/graph/RenderPassDecl.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <array>
@@ -504,4 +502,4 @@ struct ForceGraphVisualization {
 
 }
 
-#include "RenderGraph.inl"
+#include "vulkan/graph/RenderGraph.inl"

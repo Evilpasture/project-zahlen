@@ -3,9 +3,11 @@
 
 #pragma once
 
-#include "FrameResources.hpp"
-#include "GpuLayout.hpp"
-#include "TargetManager.hpp"
+#include "vulkan/VulkanHeader.hpp"
+
+#include "render/FrameResources.hpp"
+#include "render/GpuLayout.hpp"
+#include "render/TargetManager.hpp"
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <cstdint>

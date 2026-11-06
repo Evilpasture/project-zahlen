@@ -3,12 +3,10 @@
 
 #pragma once
 
-#ifndef ZHLN_RENDERING_HPP_INCLUDED
-#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
-#endif
+#include "vulkan/VulkanHeader.hpp"
 
-#include "Extensions.hpp"
-#include "Features.hpp"
+#include "vulkan/core/Extensions.hpp"
+#include "vulkan/core/Features.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <initializer_list>
@@ -16,6 +14,7 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <expected>
 
 namespace ZHLN::Vk {
 
@@ -119,4 +118,4 @@ class DeviceConfigurator {
 
 }
 
-#include "DeviceConfigurator.inl"
+#include "vulkan/core/DeviceConfigurator.inl"

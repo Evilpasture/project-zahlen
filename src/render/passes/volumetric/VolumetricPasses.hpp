@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "PassPayloads.hpp"
-#include "RenderFrame.hpp"
-#include "Renderer.hpp"
-#include "TargetManager.hpp"
-#include "features/VolumetricFogSystem.hpp"
-#include "graph/RenderPassDecl.hpp"
-#include "passes/ComputePass.hpp"
+#include "render/PassPayloads.hpp"
+#include "render/RenderFrame.hpp"
+#include "render/Renderer.hpp"
+#include "render/TargetManager.hpp"
+#include "render/features/VolumetricFogSystem.hpp"
+#include "vulkan/graph/RenderPassDecl.hpp"
+#include "render/passes/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {

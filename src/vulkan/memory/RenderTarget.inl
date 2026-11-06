@@ -1,6 +1,6 @@
 #pragma once
 
-#include "RenderTarget.hpp"
+#include "vulkan/memory/RenderTarget.hpp"
 
 namespace ZHLN::Vk {
 
