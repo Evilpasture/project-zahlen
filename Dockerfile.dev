@@ -8,7 +8,7 @@ RUN dnf -y upgrade --refresh && dnf -y install \
     libevdev-devel libseat-devel gtest-devel \
     glfw-devel simdjson-devel luajit-devel \
     dropbear openssh-clients sudo tmux vim neovim htop libcurl-devel clang-tools-extra \
-    perl-core luarocks \
+    perl-core luarocks fastfetch \
     && dnf clean all
 
 # Optional packages: don't fail the build if Fedora lacks them
