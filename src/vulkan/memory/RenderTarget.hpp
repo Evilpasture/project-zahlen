@@ -18,9 +18,21 @@ namespace ZHLN::Vk {
 
 // A physical image can be described by a format alone. Graph-specific
 // allocation policy is opt-in through the tag, never required for raw targets.
+//
+// A tag names its format one of two ways, and both name the same fact: a graph
+// resource tag carries the VkFormat it is allocated with (T::format, itself
+// derived from the resource's own format tag), while a format tag carries T::vk.
+// Reading either here is what lets a physical target be described by a resource
+// tag or by a format tag without a third spelling existing for the second case --
+// which is what the adapter removed below used to be for.
 template <typename T>
 struct TargetTraits {
-    static constexpr VkFormat           format = T::format;
+    static constexpr VkFormat format = [] {
+        if constexpr (requires { T::vk; })
+            return T::vk;
+        else
+            return T::format;
+    }();
     static constexpr VkImageAspectFlags aspect = [] {
         if constexpr (requires { T::aspect; })
             return T::aspect;
@@ -209,16 +221,6 @@ struct RenderTarget {
         return std::move(rt);
     }
 };
-
-// An untagged physical allocation still has a format and inferred aspect.
-template <VkFormat F, VkImageAspectFlags Aspect = GetFormatAspect(F)>
-struct ImageFormat {
-    static constexpr VkFormat           format = F;
-    static constexpr VkImageAspectFlags aspect = Aspect;
-};
-
-template <VkFormat F>
-using FormatRenderTarget = RenderTarget<ImageFormat<F>>;
 
 template <VkImageLayout TargetLayout, typename GraphTag>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<GraphTag>& rt, Tag<TargetLayout>) noexcept;

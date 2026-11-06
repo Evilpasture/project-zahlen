@@ -72,7 +72,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
 
     if (surface.Get() == VK_NULL_HANDLE) {
         const VkExtent2D render_extent = {.width = width, .height = height};
-        auto hct_res = FormatRenderTarget<kHeadlessColorFormat>::Create(
+        auto hct_res = RenderTarget<HeadlessColorTag>::Create(
             *_alloc, _ctx->Device(), render_extent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
         );
         if (!hct_res) {

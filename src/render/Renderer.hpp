@@ -88,7 +88,7 @@ struct Renderer {
 
     Vk::SwapchainPresenter presenter;
     // Primary scene depth is a renderer resource, not part of presentation state.
-    Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> primaryDepthTarget;
+    Vk::RenderTarget<Vk::Format::D32_SFloat_S8_UInt> primaryDepthTarget;
     FrameDestinations                                    destinations;
 
     DrawQueueManager queues;
@@ -232,7 +232,7 @@ struct Renderer {
         return presenter;
     }
 
-    [[nodiscard]] auto ActiveDepthTarget() noexcept -> Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>& {
+    [[nodiscard]] auto ActiveDepthTarget() noexcept -> Vk::RenderTarget<Vk::Format::D32_SFloat_S8_UInt>& {
         if (auto active = destinations.Active(); active && !active->IsPrimary()) {
             return active->depthTarget;
         }

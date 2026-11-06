@@ -67,7 +67,7 @@ auto RenderContext::Impl::EnsureDepthTarget(FrameDestinations::Window& destinati
         return {};
     }
 
-    auto created = Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+    auto created = Vk::RenderTarget<Vk::Format::D32_SFloat_S8_UInt>::Create(
         allocator, ctx.Device(), extent, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
     );
     if (!created) {

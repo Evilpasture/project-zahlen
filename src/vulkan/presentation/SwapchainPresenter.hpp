@@ -6,6 +6,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "FormatTags.hpp" // Format::R8G8B8A8_SRGB, the headless target format
 #include "PresentPacer.hpp"
 #include "PresentationOutcome.hpp"
 #include <Zahlen/Core/PresentTiming.hpp>
@@ -35,7 +36,11 @@ struct SwapchainTarget {
     bool       presentable = false;
 };
 
-inline constexpr VkFormat kHeadlessColorFormat = VK_FORMAT_R8G8B8A8_SRGB;
+// The offscreen presentation target format, stated once as a tag: the VkFormat
+// below and the aspect that target views address both come from it, so the target
+// that gets created and the blit that fills it cannot disagree.
+using HeadlessColorTag                         = Format::R8G8B8A8_SRGB;
+inline constexpr VkFormat kHeadlessColorFormat = HeadlessColorTag::vk;
 
 class SwapchainPresenter {
   public:
@@ -52,7 +57,7 @@ class SwapchainPresenter {
     SemaphorePool presentSemaphores;
 
     // Offscreen color is the presentation output when no swapchain exists.
-    FormatRenderTarget<kHeadlessColorFormat> headlessColorTarget;
+    RenderTarget<HeadlessColorTag> headlessColorTarget;
 
     FrameSync<kFramesInFlight>                         sync;
     CommandPools<kFramesInFlight, QueueType::Graphics> pools;

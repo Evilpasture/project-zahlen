@@ -85,7 +85,7 @@ class FrameDestinations {
         std::optional<Acquired> acquired;
         uint64_t cachedGeneration = 0;
         // Renderer-owned scene attachment for this secondary presentation.
-        Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> depthTarget;
+        Vk::RenderTarget<Vk::Format::D32_SFloat_S8_UInt> depthTarget;
 
         [[nodiscard]] auto IsPrimary() const noexcept -> bool { return ownedPresenter == nullptr; }
         [[nodiscard]] auto Presenter() const noexcept -> Vk::SwapchainPresenter& {

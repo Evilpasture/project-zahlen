@@ -39,7 +39,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         presentationTarget.SetFramebufferExtent(targetExt.width, targetExt.height);
     }
 
-    auto depthTarget = Vk::FormatRenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+    auto depthTarget = Vk::RenderTarget<Vk::Format::D32_SFloat_S8_UInt>::Create(
         allocator, ctx.Device(), targetExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
     );
     if (!depthTarget) {
