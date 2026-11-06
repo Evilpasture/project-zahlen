@@ -247,7 +247,16 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
     );
 
     _depthFormat = img.GetFormat();
-    _hasStencil  = StencilFormatForDepth(img.GetFormat()) != VK_FORMAT_UNDEFINED;
+    // The stencil plane: the tag answers it whenever the image carries one. An
+    // image typed Undefined (an ImageSlice::Assume) has a format value instead, and
+    // its aspect field is whatever the caller assumed rather than what the format
+    // implies, so the format is what gets asked -- through the aspect table
+    // GetFormatAspect has always been, not through a list of stencil formats.
+    if constexpr (FormatTag::vk != VK_FORMAT_UNDEFINED) {
+        _hasStencil = Format::HasStencil<FormatTag>;
+    } else {
+        _hasStencil = (GetFormatAspect(img.GetFormat()) & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+    }
 
     _depth = {
         .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -310,7 +319,10 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetInheritance() cons
         }
     }
 
-    const VkFormat stencil = (HasDepth && _hasStencil) ? StencilFormatForDepth(depth) : VK_FORMAT_UNDEFINED;
+    // A depth format that carries stencil is itself the stencil attachment format,
+    // which is the whole of what the helper this replaces computed; _hasStencil
+    // already holds that answer.
+    const VkFormat stencil = (HasDepth && _hasStencil) ? depth : VK_FORMAT_UNDEFINED;
     return RenderingInheritance {colors, depth, stencil, _viewMask, EffectiveViewport()};
 }
 

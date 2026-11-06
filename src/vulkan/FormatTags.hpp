@@ -188,6 +188,21 @@ template <typename Fn>
     return handled;
 }
 
+// The same question for a VkFormat. This is the only place a value can be asked,
+// and the answer is looked up in the list above rather than kept in a second one:
+// a caller that has a tag should use HasStencil<Tag> and skip this entirely.
+//
+// A format the table does not name cannot be classified and reports false. Every
+// depth attachment this tree allocates is in the table, so that is a closed set
+// rather than a gap -- and it is why the two hand-written lists this replaces
+// could disagree (one named D16_UNORM_S8_UINT, the other D24_UNORM_S8_UINT,
+// and the tree creates neither) without anyone noticing.
+[[nodiscard]] constexpr auto HasStencilFormat(VkFormat format) noexcept -> bool {
+    bool has_stencil = false;
+    static_cast<void>(Visit(format, [&]<typename F>() -> void { has_stencil = HasStencil<F>; }));
+    return has_stencil;
+}
+
 // The value-space form of the same list, for the places that still take a pack of
 // VkFormat (AttachmentFormats and the pipeline types are value-templated today).
 // Deriving it keeps one source of truth: the TypeList stays authoritative and the
@@ -236,6 +251,9 @@ static_assert(TemplatedDetail::AllDistinct(AllFormats {}), "two tags must not na
 static_assert(ColorFormat<B8G8R8A8_SRGB> && ColorFormat<R8_UInt>);
 static_assert(!ColorFormat<D32_SFloat> && DepthStencilFormat<D32_SFloat_S8_UInt>);
 static_assert(!ColorFormat<Undefined> && !DepthStencilFormat<Undefined>);
+static_assert(!HasStencil<D32_SFloat> && HasStencil<D32_SFloat_S8_UInt>, "D32_SFLOAT is depth-stencil and has no stencil aspect");
+static_assert(!HasStencil<Undefined> && !HasStencil<B8G8R8A8_UNorm>);
+static_assert(HasStencilFormat(VK_FORMAT_D32_SFLOAT_S8_UINT) && !HasStencilFormat(VK_FORMAT_D32_SFLOAT));
 static_assert(D32_SFloat_S8_UInt::bytes_per_pixel == 8, "D32_SFLOAT_S8_UINT is a 64-bit texel");
 static_assert(D32_SFloat::bytes_per_pixel == 4);
 static_assert(R16G16B16A16_SFloat::bytes_per_pixel == 8);

@@ -326,10 +326,6 @@ inline constexpr ColorToReadTrans ColorToRead {};
 
 static constexpr size_t kMaxColorAttachments = 8;
 
-[[nodiscard]] constexpr auto StencilFormatForDepth(VkFormat depthFormat) noexcept -> VkFormat {
-    return (depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT || depthFormat == VK_FORMAT_D24_UNORM_S8_UINT) ? depthFormat : VK_FORMAT_UNDEFINED;
-}
-
 template <size_t ColorCount, bool HasDepth, typename Formats>
 class DynamicPass;
 

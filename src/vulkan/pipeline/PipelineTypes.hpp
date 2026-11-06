@@ -39,7 +39,12 @@ struct AttachmentFormats {
     // pipelines matches the swapchain's format -- reads the tag here instead of
     // projecting a value back into a template argument.
     using depth_tag = DepthTag;
+
+    // Lazily evaluated, so a depth-only set (ColorTags... empty) is fine as long as
+    // nothing asks for a colour tag. The constraint turns an accidental ask into a
+    // rejected template argument rather than an error inside tuple_element_t.
     template <size_t I>
+        requires(I < sizeof...(ColorTags))
     using color_tag = std::tuple_element_t<I, std::tuple<ColorTags...>>;
 };
 

@@ -11,10 +11,6 @@
 
 namespace ZHLN::Vk {
 
-auto FormatHasStencil(const VkFormat format) noexcept -> bool {
-    return format == VK_FORMAT_D16_UNORM_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT;
-}
-
 auto ResolveComputeEntryPoint(const ShaderDesc& shader, const std::span<char, 64> name) noexcept -> const char* {
     std::ranges::fill(name, '\0');
     if (shader.entry_point != nullptr && shader.entry_point[0] != '\0') {

@@ -12,6 +12,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "../FormatTags.hpp" // Format::HasStencilFormat
 #include "../VkError.hpp"
 #include "PipelineTypes.hpp"
 #include <Zahlen/Error.hpp>
@@ -79,7 +80,6 @@ struct PipelineConfig {
                                                    VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 };
 
-[[nodiscard]] auto FormatHasStencil(VkFormat format) noexcept -> bool;
 [[nodiscard]] auto ValidShader(const ShaderDesc& shader) noexcept -> bool;
 [[nodiscard]] auto ResolveComputeEntryPoint(const ShaderDesc& shader, std::span<char, 64> name) noexcept -> const char*;
 
@@ -278,7 +278,7 @@ class PipelineBuilder {
         if (!mesh_pipeline && shaders.vert.code == nullptr) {
             return std::unexpected(PipelineBuilderError::MissingVertexOrMeshShader);
         }
-        if (config.stencil.has_value() && !FormatHasStencil(config.depthFormat)) {
+        if (config.stencil.has_value() && !Format::HasStencilFormat(config.depthFormat)) {
             return std::unexpected(PipelineBuilderError::StencilFormatRequired);
         }
         if (!mesh_pipeline && ((config.bindingCount != 0 && config.bindings == nullptr) || (config.attributeCount != 0 && config.attributes == nullptr))) {
@@ -398,7 +398,11 @@ class PipelineBuilder {
             .colorAttachmentCount    = static_cast<uint32_t>(config.colorFormats.size()),
             .pColorAttachmentFormats = config.colorFormats.empty() ? nullptr : config.colorFormats.data(),
             .depthAttachmentFormat   = config.depthFormat,
-            .stencilAttachmentFormat = FormatHasStencil(config.depthFormat) ? config.depthFormat : VK_FORMAT_UNDEFINED,
+            // Same format as the depth attachment when it carries stencil, absent otherwise.
+            // This is the one stencil question that is asked of a value: the builder holds the
+            // depth format as a VkFormat (DepthFormat<Tag>() writes the value into it), so the
+            // answer comes from the tag table rather than from a list kept beside it.
+            .stencilAttachmentFormat = Format::HasStencilFormat(config.depthFormat) ? config.depthFormat : VK_FORMAT_UNDEFINED,
         };
         const VkPipelineCreateFlags2CreateInfoKHR heap_flags {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR,

@@ -69,6 +69,14 @@ concept ColorFormat = IsFormat<T> && !TemplatedDetail::IsUndefined<T>() && !T::i
 template <typename T>
 concept DepthStencilFormat = IsFormat<T> && !TemplatedDetail::IsUndefined<T>() && T::is_depth_stencil;
 
+// A format that carries a stencil aspect. This asks the aspect and not
+// is_depth_stencil, deliberately: that flag classifies a format as depth-stencil,
+// and D32_SFloat sets it while addressing depth alone. The two questions are
+// different -- "is this an attachment a depth pass can use" versus "is there a
+// stencil plane to bind" -- and only the aspect value answers the second.
+template <typename T>
+concept HasStencil = IsFormat<T> && (T::aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+
 template <typename T>
 concept SelfConsistentFormat = IsFormat<T> && TemplatedDetail::IsSelfConsistent<T>();
 
