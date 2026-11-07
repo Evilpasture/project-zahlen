@@ -189,6 +189,8 @@ zahlen_add_extras_group(Extras_Socket
     TestLocalStream.cpp
     TestDiscordRPC.cpp
 )
+# zahlen_discord_engine is PUBLIC zahlen_discord_rpc; TestDiscordRPC.cpp calls
+# Discord::Encode/DecodeRpcFrame, which the rpc target owns.
 target_link_libraries(Extras_Socket PRIVATE
     zahlen_engine
     zahlen_socket
@@ -276,9 +278,10 @@ if(TARGET zahlen_http)
         zahlen_engine
         zahlen_http
     )
+    # Only the CDN entry is listed: zahlen_cdn is PUBLIC zahlen_remote_asset,
+    # which is PUBLIC zahlen_http, so the chain arrives in order.
     if(TARGET zahlen_remote_asset)
         list(APPEND ZHLN_EXTRAS_HTTP_SOURCES TestRemoteAsset.cpp)
-        list(APPEND ZHLN_EXTRAS_HTTP_LIBS zahlen_remote_asset)
     endif()
     if(TARGET zahlen_cdn)
         list(APPEND ZHLN_EXTRAS_HTTP_SOURCES TestCDN.cpp)
@@ -313,11 +316,11 @@ zahlen_add_extras_group(Extras_BSP
     TestBSPStudioModel.cpp
     TestBSPLighting.cpp
 )
+# zahlen_interaction is PUBLIC zahlen_engine and PUBLIC zahlen_bsp, and the
+# character components these suites touch are PODs reached through
+# ZHLN_OPTIONAL_INCLUDE_ROOTS. No BSP or Character:: symbol is called directly.
 target_link_libraries(Extras_BSP PRIVATE
-    zahlen_engine
-    zahlen_bsp
     zahlen_interaction
-    zahlen_character_controller
 )
 zahlen_register_extras_test(Extras_BSP)
 zahlen_add_extras_build_alias(Extras_BSP TestBSPInteraction)
@@ -343,7 +346,11 @@ if(TARGET zahlen_project_light_lua)
         ZHLN_ZTEST_SOURCE_FILES "${_lua_dm_files}"
     )
 
+    # zahlen_lua directly: TestLuaDataModel.cpp includes <lua/ReflectLua.hpp> and
+    # calls ReflectLua::LuaVm::Create / ExecuteString. It used to arrive only
+    # through zahlen_project_light_lua's PUBLIC zahlen_lua, which is gone.
     target_link_libraries(${TARGET_NAME} PRIVATE
+        zahlen_lua
         zahlen_project_light_lua
     )
 
@@ -385,10 +392,17 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     ZHLN_ZTEST_SOURCE_FILES "${_perf_files}"
 )
 
+# No zahlen_character_controller: the profiling suites include
+# <CharacterController/CharacterComponents.hpp> for PODs only and call no
+# Character:: function. zahlen_serialization stays -- PerfBaseline.hpp parses
+# and serializes baselines through ReflectJSON (the header, not the .cpp).
+# Jolt is direct for the same reason zahlen_serialization is: the profiling
+# suite references JPH symbols from its own object file rather than reaching
+# them through the engine's DT_NEEDED entry.
 target_link_libraries(${TARGET_NAME} PRIVATE
+    Jolt
     zahlen_engine
     zahlen_serialization
-    zahlen_character_controller
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE

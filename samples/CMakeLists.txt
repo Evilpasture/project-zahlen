@@ -73,13 +73,13 @@ set(SAMPLE_SOURCES
 # Linking named domains instead of the compatibility aggregate is the point of
 # the decomposition: a sample waits only on the optional targets it uses, and a
 # sample with no optional targets gets no simdjson, sockets, or VFX toolkit.
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain zahlen_camera zahlen_character_controller)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_GlTFInspectorSample zahlen_gltf zahlen_skeletal_animation)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github zahlen_skeletal_animation)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf zahlen_cdn zahlen_freecam zahlen_skeletal_animation)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_DeviceLostRecoverySample zahlen_freecam)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking zahlen_netpbm zahlen_skeletal_animation)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_bsp zahlen_character_controller zahlen_interaction zahlen_freecam zahlen_camera zahlen_animation zahlen_gltf zahlen_benchmark_viewer)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_interaction zahlen_animation zahlen_gltf zahlen_benchmark_viewer)
 
 set(ZHLN_MODULE_SAMPLES
     BSPMurderDronesSample
@@ -120,13 +120,22 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         CXX_SCAN_FOR_MODULES ${ZHLN_SAMPLE_USES_MODULES}
     )
 
+    # zahlen_engine comes with zahlen_host_runner (PUBLIC), and Jolt comes with
+    # zahlen_engine (PUBLIC); naming them here only repeated the same three
+    # paths on the link line. zahlen_signal stays: every sample's TestsMain-style
+    # crash reporting needs it directly.
+    # Jolt is direct: BSPMurderDronesSample.cpp resolves JPH symbols from its own
+    # object. Every other sample only includes Jolt's headers and reaches the
+    # definitions through zahlen_engine's DT_NEEDED entry, which is why they do
+    # not name it -- see the note above about repeated link paths.
     target_link_libraries(${SAMPLE_NAME} PRIVATE
-        zahlen_engine
         zahlen_host_runner
         zahlen_signal
-        Jolt
         zahlen_warnings
     )
+    if(SAMPLE_NAME STREQUAL "BSPMurderDronesSample")
+        target_link_libraries(${SAMPLE_NAME} PRIVATE Jolt)
+    endif()
 
     # Link only the optional targets this sample uses (e.g. ZHLN.Locomotion and
     # Character::Install). Each carries its public include root and any module

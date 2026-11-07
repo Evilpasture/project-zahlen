@@ -38,6 +38,27 @@ endif()
 project(zahlen VERSION 0.1.0 LANGUAGES C CXX ASM)
 
 option(ZHLN_INSTALL_TOOLCHAIN_PACKAGES "Install independently consumable toolchain packages" OFF)
+
+# CMake's built-in "Link What You Use": link with --no-as-needed and have the
+# linker report every direct dependency that contributes no symbol. It is the
+# same evidence as the symbol audit that produced the link cleanup, but it runs
+# on every link and costs one extra ldd pass per executable, so it stays opt-in.
+#
+# Run it before trusting a link line:
+#   cmake -S . -B build/gcc -DZHLN_LINK_WHAT_YOU_USE=ON
+#   ninja -C build/gcc
+# then relink only what you need to inspect -- removing a target's binary is
+# enough, because removing more schedules the whole prerequisite graph:
+#   rm build/gcc/bin/zahlen_cube && ninja -C build/gcc bin/zahlen_cube
+#
+# Anything reported for a *shared* library (libatomic, libsimdjson) is the
+# static-library flattening artifact described in cmake/ThirdParty.cmake, not a
+# defect: CMake propagates a static library's link dependencies verbatim to every
+# final link, so the consumer names a library that one of its archives needs.
+option(ZHLN_LINK_WHAT_YOU_USE "Report direct dependencies that contribute no symbols" OFF)
+if(ZHLN_LINK_WHAT_YOU_USE)
+    set(CMAKE_LINK_WHAT_YOU_USE ON)
+endif()
 if(ZHLN_INSTALL_TOOLCHAIN_PACKAGES)
     # Jolt is shipped with Engine, with the exact ABI used by this build.
     set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
@@ -404,7 +425,16 @@ if(APPLE AND ZHLN_BUILD_RENDER)
     target_link_libraries(zahlen_engine PRIVATE HostBlitSwapchain)
 endif()
 
-target_link_libraries(zahlen_engine PUBLIC Jolt)
+# Jolt's headers travel with every public engine header, but its archive must not:
+# Jolt is SHARED, so libzahlen_engine.so records a DT_NEEDED entry and every
+# consumer resolves JPH::* through the engine. Naming Jolt PUBLIC here would
+# append libJolt.so to the link line of all 18 executables -- *after* the library
+# that already defines those symbols -- which is both dead weight and what mold
+# reports as "Unused direct dependencies: libJolt.so". Keep the archive for the
+# engine's own link, publish the interface to everyone else.
+target_link_libraries(zahlen_engine
+    PRIVATE Jolt
+    PUBLIC  $<BUILD_INTERFACE:zahlen_jolt_headers>)
 
 target_include_directories(
   zahlen_engine SYSTEM
@@ -460,8 +490,13 @@ if(ZHLN_BUILD_EXTRAS)
     # its own copy of that arithmetic. zahlen_widgets arrives with
     # add_subdirectory(extensions) further down: a link item resolves to its
     # target by generate time, whatever the order here.
-    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine
-                          zahlen_widgets Jolt)
+    # zahlen_widgets is PUBLIC zahlen_engine (which publishes Jolt's usage
+    # requirements through zahlen_jolt_headers) but does not
+    # publish its own include root, so extensions/ is named here. The document
+    # format and the schema are linked further down, next to the code that uses
+    # them (ZHLN_HAS_UI_TOML).
+    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_widgets)
+    target_include_directories(zahlen_ui_editor PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
     target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
 
     zahlen_add_runtime_dlls(zahlen_ui_editor)
@@ -539,13 +574,18 @@ if(ZHLN_BUILD_EXTRAS)
     add_subdirectory(extensions)
     add_subdirectory(gameplay)
 
-    # UITOML's public surface names GUI::UINode, so serialization publishes the
-    # schema after both sibling targets exist. Keep the longstanding aggregate
-    # target as a downstream compatibility surface; in-tree targets link the
-    # specific capability they use.
-    if(TARGET zahlen_serialization AND TARGET zahlen_ui_schema)
-        target_link_libraries(zahlen_serialization PUBLIC zahlen_ui_schema)
-    endif()
+    # UITOML.hpp names GUI::UINode in its signatures, and it used to be repaid
+    # with a PUBLIC zahlen_ui_schema link -- which put libzahlen_ui_schema.a on
+    # the link line of all 16 serialization consumers, including fidelity, the
+    # glTF inspector and the CDN map sample, none of which call into it. UINode
+    # is a plain aggregate and ReflectTOML::Parse<> only walks its fields, so the
+    # edge was a *header* requirement, and plugins/toml already publishes the
+    # repository's extensions root (plugins/CMakeLists.txt), which is where
+    # <UI/UITree.hpp> lives. The targets that do call GUI:: symbols -- the UI
+    # editor and Extras_UI -- link zahlen_ui_schema themselves.
+    #
+    # Nothing is linked here on purpose. Do not reintroduce it: the archive is
+    # not needed to compile or link anything that consumes this target.
     add_library(zahlen_extras INTERFACE)
     target_link_libraries(zahlen_extras INTERFACE
     zahlen_module
@@ -605,9 +645,10 @@ if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_project_light_client)
     )
     zahlen_set_bin_output(zahlen_project_light_app)
     target_compile_definitions(zahlen_project_light_app PRIVATE JPH_DOUBLE_PRECISION)
+    # zahlen_application is PUBLIC zahlen_engine, which publishes Jolt's usage
+    # requirements through zahlen_jolt_headers.
     target_link_libraries(zahlen_project_light_app PRIVATE
         zahlen_application
-        Jolt
         zahlen_project_light_client
         zahlen_character_controller
         zahlen_camera

@@ -49,9 +49,16 @@ target_include_directories(zahlen_audio SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
 )
 
+# Jolt is public: include/Zahlen/Audio/Audio.hpp includes Jolt headers.
+# The ECS is NOT linked here. zahlen_ecs is an OBJECT library, so naming it
+# added ECS.cpp.o / SystemGraph.cpp.o / EntityCommandBuffer.cpp.o to
+# libzahlen_audio.a -- three of that archive's four objects -- and every static
+# consumer of zahlen_audio then carried a second copy of the ECS strong symbols
+# that libzahlen_engine.so already exports. The ECS reaches this directory
+# through zahlen_engine, which links it PRIVATE, as it does for every other
+# engine subsystem.
 target_link_libraries(zahlen_audio PUBLIC
-    zahlen_ecs
-    Jolt
+    zahlen_jolt_headers
 )
 
 target_link_libraries(zahlen_audio PRIVATE

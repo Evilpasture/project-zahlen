@@ -98,4 +98,8 @@ if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()
 
-target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
+# Jolt is direct: this library's own objects reference JPH symbols (shapes,
+# settings, factories), so it must be on the link line of whatever consumes
+# them. It used to arrive only through zahlen_engine's PUBLIC Jolt, which put
+# libJolt.so on all 18 executables -- including the ones that never touch it.
+target_link_libraries(${TARGET_NAME} PRIVATE Jolt zahlen_warnings)

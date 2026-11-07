@@ -17,8 +17,14 @@ set_target_properties(zahlen_asset_cooking PROPERTIES
 target_include_directories(zahlen_asset_cooking PUBLIC ${PROJECT_SOURCE_DIR}/plugins)
 target_include_directories(zahlen_asset_cooking PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(zahlen_asset_cooking SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/stb)
+# zahlen_filesystem is not linked: it is PRIVATE to zahlen_engine, so its
+# objects are already in libzahlen_engine.so, and RadianceDecoder.cpp only takes
+# a const FS::VirtualFileSystem& -- an ZHLN_API type whose symbols the .so
+# exports. Linking the archive here put a second copy of VirtualFileSystem and
+# of the TaskSystem scheduler state in front of the .so on every consumer's link
+# line (ztest_cpu, FidelityHarness, zcook, GPU_Lighting).
 target_link_libraries(zahlen_asset_cooking
-    PUBLIC zahlen_engine zahlen_filesystem
+    PUBLIC zahlen_engine
     PRIVATE zahlen_warnings
 )
 

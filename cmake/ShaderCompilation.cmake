@@ -122,8 +122,49 @@ if(NOT ZHLN_SLANG_VENDORED AND WIN32)
     endif()
 endif()
 
+# The official release archive. This is the default route: it carries slangc,
+# libslang-compiler, the headers and a CMake config, so the discovery below
+# resolves it exactly as it would an installed SDK -- no Slang compile, and no
+# second set of rules for "prebuilt".
+#
+# The options are read *here* as well as inside the include, because the include
+# returns before the archive is touched when ZHLN_SLANG_FROM_PREBUILT is OFF.
+# Reading them here lets the find_program calls below tell "no host Slang" apart
+# from "a host Slang this build was told not to use". Without it, the archive's
+# own CMAKE_PROGRAM_PATH entry satisfied find_program and then failed the library
+# search, on the theory that the archive could not provide both halves.
+include(SlangPrebuilt)
+if(NOT DEFINED ZHLN_SLANG_FROM_PREBUILT)
+    set(ZHLN_SLANG_FROM_PREBUILT ON)
+endif()
+if(ZHLN_SLANG_PREBUILT_DIR)
+    list(APPEND CMAKE_PREFIX_PATH "${ZHLN_SLANG_PREBUILT_DIR}")
+    list(APPEND CMAKE_PROGRAM_PATH "${ZHLN_SLANG_PREBUILT_DIR}/bin")
+endif()
+
 # Prefer a host slangc (PATH, Vulkan SDK, SLANG_BIN, or -DSLANG_EXECUTABLE).
-if(ZHLN_SLANG_VENDORED)
+#
+# ZHLN_SLANG_VENDORED is checked *after* the archive: it is a cache entry, it is
+# remembered across configures, and older builds of this profile forced it ON. A
+# stale ON must not be able to skip discovery and send the build back to a
+# ~950-TU Slang compile. Opting out is explicit (ZHLN_SLANG_FROM_PREBUILT=OFF,
+# which scripts/build.sh --vendored-slang sets), and that is what reaches here.
+if(NOT ZHLN_SLANG_FROM_PREBUILT AND NOT ZHLN_SLANG_VENDORED)
+    # Slang was explicitly not wanted from the archive or from source: any slangc
+    # that turns up must come from the host, so CMAKE_PROGRAM_PATH (which may still
+    # carry the archive's bin from an earlier configure) is not consulted.
+    unset(SLANG_EXECUTABLE CACHE)
+    find_program(SLANG_EXECUTABLE NAMES slangc NO_CMAKE_PROGRAM_PATH
+        PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}" /opt/slang/bin)
+elseif(ZHLN_SLANG_PREBUILT_DIR AND EXISTS "${ZHLN_SLANG_PREBUILT_DIR}/bin/slangc")
+    # Named outright rather than left to find_program: SLANG_EXECUTABLE is a cache
+    # entry, so a value an earlier configure found on PATH or in the Vulkan SDK
+    # would be returned again and the archive would never actually be used. This
+    # is the Slang the project pins, and it is the one whose version the known-bad
+    # gate reads.
+    set(SLANG_EXECUTABLE "${ZHLN_SLANG_PREBUILT_DIR}/bin/slangc" CACHE FILEPATH
+        "slangc from the Slang release archive (cmake/SlangPrebuilt.cmake)" FORCE)
+elseif(ZHLN_SLANG_VENDORED)
     set(SLANG_EXECUTABLE "")
 else()
     # /opt/slang/bin is the prefix scripts/install-slang-prebuilt.sh installs into;
@@ -144,7 +185,13 @@ elseif(TARGET slangc)
     set(SLANG_COMPILER_DEPENDS slangc)
 else()
     set(SLANG_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
-    if(EXISTS "${SLANG_SOURCE_DIR}/CMakeLists.txt")
+    # Same rule as the library search below: a compile of Slang has to be asked
+    # for. Without this, a host slangc that cooks fine but ships no CMake package
+    # still dragged the whole submodule in behind it, which is the last-resort
+    # outcome the project is trying to avoid.
+    if(EXISTS "${SLANG_SOURCE_DIR}/CMakeLists.txt"
+       AND ZHLN_SLANG_VENDORED
+       AND NOT ZHLN_SLANG_FROM_PREBUILT)
         if(NOT ZHLN_HAS_PYTHON)
             message(FATAL_ERROR
                 "Building vendored Slang from source (${SLANG_SOURCE_DIR}) requires Python 3 (upstream SPIRV-Tools codegen), "
@@ -170,6 +217,16 @@ else()
         endif()
         set(SLANG_EXECUTABLE "$<TARGET_FILE:slangc>")
         set(SLANG_COMPILER_DEPENDS slangc)
+    elseif(EXISTS "${SLANG_SOURCE_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "No slangc was found and this build did not ask to compile ${SLANG_SOURCE_DIR} from "
+            "source.\n"
+            "  ZHLN_SLANG_VENDORED=${ZHLN_SLANG_VENDORED}  ZHLN_SLANG_FROM_PREBUILT=${ZHLN_SLANG_FROM_PREBUILT}\n"
+            "If VENDORED=ON is left over from an earlier configure, delete the cache (rm -rf build/p2996) "
+            "and configure again to fetch the pinned Slang release.\n"
+            "To compile Slang deliberately: -DZHLN_SLANG_VENDORED=ON -DZHLN_SLANG_FROM_PREBUILT=OFF, "
+            "or scripts/build.sh --vendored-slang.\n"
+            "Otherwise put slangc on PATH / in the Vulkan SDK, or fix the download reported above.")
     else()
         message(FATAL_ERROR
             "slangc not found on PATH and ${SLANG_SOURCE_DIR} is missing. "
@@ -196,13 +253,20 @@ elseif(TARGET slangc)
         "libslang to link. Point CMAKE_PREFIX_PATH at a Slang package, or drop that existing Slang "
         "and let the pinned submodule provide both.")
 else()
-    if(NOT ZHLN_SLANG_VENDORED)
+    if(NOT ZHLN_SLANG_VENDORED OR ZHLN_SLANG_PREBUILT_DIR)
         find_package(slang CONFIG QUIET)
     endif()
     if(slang_FOUND AND TARGET slang::slang)
         set(ZHLN_SLANG_TARGET slang::slang)
         message(STATUS "Found libslang (config): ${slang_DIR}")
-    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang/CMakeLists.txt")
+    elseif(ZHLN_SLANG_VENDORED
+           AND NOT ZHLN_SLANG_FROM_PREBUILT
+           AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang/CMakeLists.txt")
+        # Building Slang is the last resort and it has to be asked for. Both
+        # switches are required: ZHLN_SLANG_VENDORED alone is a cache entry that
+        # an older configure of this profile left behind, and honouring it here is
+        # how a failed download turned into a ~950-TU compile that died in the
+        # linker. scripts/build.sh --vendored-slang sets both.
         if(NOT ZHLN_HAS_PYTHON)
             message(FATAL_ERROR
                 "Building vendored libslang from source (${CMAKE_CURRENT_SOURCE_DIR}/extern/slang) requires Python 3 "
@@ -222,6 +286,30 @@ else()
         else()
             message(FATAL_ERROR "The vendored Slang exports neither a slang nor a slang::slang target")
         endif()
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang/CMakeLists.txt")
+        # The submodule is there, nothing was found, and nobody asked for a build.
+        # Saying so beats discovering it after the compile, and naming the stale
+        # cache entry beats a message the user has to guess the meaning of.
+        if(ZHLN_SLANG_FROM_PREBUILT AND NOT ZHLN_SLANG_VENDORED)
+            # The default route was wanted but the package is not there, so this is
+            # a broken archive, not a missing one: the slangc gate above only passes
+            # with the archive in place, and the archive carries lib/cmake/slang.
+            message(FATAL_ERROR
+                "The Slang release archive at ${ZHLN_SLANG_PREBUILT_DIR} provided slangc but no "
+                "libslang CMake package (expected lib/cmake/slang/slangConfig.cmake). It is "
+                "incomplete or was unpacked partially; delete "
+                "${CMAKE_BINARY_DIR}/_deps/slang-release and configure again to re-fetch it.")
+        endif()
+        message(FATAL_ERROR
+            "Slang is not available as a package, and this build did not ask to compile "
+            "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang from source.\n"
+            "  ZHLN_SLANG_VENDORED=${ZHLN_SLANG_VENDORED}  ZHLN_SLANG_FROM_PREBUILT=${ZHLN_SLANG_FROM_PREBUILT}\n"
+            "If that VENDORED=ON came from an earlier configure rather than from you, the cache is stale: "
+            "delete it (rm -rf build/p2996) and configure again, which downloads the pinned Slang release "
+            "instead.\n"
+            "To compile Slang deliberately, configure with -DZHLN_SLANG_VENDORED=ON "
+            "-DZHLN_SLANG_FROM_PREBUILT=OFF (or run scripts/build.sh --vendored-slang).\n"
+            "Otherwise point CMAKE_PREFIX_PATH at a Slang package, or fix the download reported above.")
     else()
         message(FATAL_ERROR
             "libslang not found: no slang CMake config is visible and ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang is missing. "
@@ -395,7 +483,12 @@ if(ZHLN_SLANGC_PROBEABLE OR ZHLN_SLANG_IMPORTED)
 "(shader-slang/slang#9500, silenced upstream: the C API SPIR-V path null-derefs on builtin "
 "arithmetic that slangc itself cooks fine -- the cooks pass, the replay dies mid-build). "
 "Proven bad on this engine: 2025.24.2 (the issue) and 2026.1 (the 1.4.341.1 SDK's "
-"libslang-compiler.0.2026.1). Resolutions:
+"libslang-compiler.0.2026.1). Resolutions, in the order worth trying:
+  0. Let the release archive provide Slang. This is the default and needs nothing
+     installed: cmake/SlangPrebuilt.cmake downloads the official release for this
+     platform into the build tree and the discovery above uses it. If an earlier
+     configure cached a host slangc instead, delete the build directory (the cache
+     remembers SLANG_EXECUTABLE) and reconfigure.
   1. Update the Vulkan SDK to a release bundling a Slang past this family, verify with
      \"$VULKAN_SDK/bin/slangc -version\", then reconfigure.
   2. Install a recent Slang release binary (https://github.com/shader-slang/slang/releases --

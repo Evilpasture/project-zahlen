@@ -83,10 +83,17 @@ set_target_properties(ztest_cpu PROPERTIES
     ZHLN_ZTEST_SOURCE_FILES "${ZHLN_CPU_REL_FILES}"
 )
 
+# zahlen_command_line and zahlen_signal are added by
+# zahlen_register_ztest_target() (cmake/ZTest.cmake) for every worker; naming
+# them again here put each archive on the link line twice.
+# Jolt is named here because the suites reference JPH symbols from their own
+# objects -- tests/physics/TestPhysics.cpp drives JPH::Factory::sInstance and
+# JPH::RegisterTypesInternal directly. It used to arrive on the command line
+# only because zahlen_engine published it PUBLIC, which is the same duplication
+# LWYU flags on the 18 executables that do NOT use it.
 target_link_libraries(ztest_cpu PRIVATE
+    Jolt
     zahlen_engine
-    zahlen_command_line
-    zahlen_signal
     zahlen_asset_cooking
 )
 

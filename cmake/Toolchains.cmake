@@ -242,11 +242,14 @@ install(FILES app/include/Zahlen/App.hpp app/include/Zahlen/ConfigCli.hpp
 zhln_toolchain_package(Netpbm TARGETS zahlen_netpbm DEPENDS Engine HEADERS plugins/netpbm)
 zhln_toolchain_package(Screenshot TARGETS zahlen_screenshot DEPENDS Engine HEADERS extensions/Screenshot)
 zhln_toolchain_package(UISchema TARGETS zahlen_ui_schema DEPENDS Engine HEADERS extensions/UI)
+# UISchema is a HEADER dependency of toml/UITOML.hpp, not a link in the
+# exported interface: the installed extensions/UI/*.hpp must exist for a
+# consumer to compile that header, so the package still declares it.
 zhln_toolchain_package(Serialization TARGETS zahlen_serialization DEPENDS Engine UISchema HEADERS plugins/json plugins/toml)
 zhln_toolchain_package(GLTF TARGETS zahlen_gltf DEPENDS Engine Serialization HEADERS plugins/glTF)
 zhln_toolchain_package(FreeCam TARGETS zahlen_freecam DEPENDS Engine HEADERS extensions/FreeCam)
-zhln_toolchain_package(Camera TARGETS zahlen_camera DEPENDS Engine FreeCam HEADERS extensions/Camera)
-zhln_toolchain_package(CharacterController TARGETS zahlen_character_controller DEPENDS Engine FreeCam HEADERS extensions/CharacterController)
+zhln_toolchain_package(Camera TARGETS zahlen_camera DEPENDS Engine HEADERS extensions/Camera)
+zhln_toolchain_package(CharacterController TARGETS zahlen_character_controller DEPENDS Engine HEADERS extensions/CharacterController)
 zhln_toolchain_package(SkeletalAnimation TARGETS zahlen_skeletal_animation DEPENDS Engine HEADERS extensions/Animation)
 zhln_toolchain_package(Animation TARGETS zahlen_animation DEPENDS Engine SkeletalAnimation CharacterController Camera FreeCam)
 # Serialization is a PRIVATE link of the plugin, which the export rewrites to

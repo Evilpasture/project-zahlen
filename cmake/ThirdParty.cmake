@@ -693,6 +693,39 @@ set_target_properties(Jolt PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
+# --- Jolt's usage requirements, without its archive ------------------------
+#
+# include/Zahlen/Engine/Engine.hpp, include/Zahlen/ECS/Components.hpp,
+# include/Zahlen/Audio/Audio.hpp and src/gui/GUI.hpp include <Jolt/Jolt.h>, so
+# consumers of those headers need Jolt's include directories and its ABI
+# defines (JPH_DOUBLE_PRECISION, JPH_OBJECT_LAYER_BITS, JPH_SHARED_LIBRARY, the
+# JPH_USE_* feature set). They do not need libJolt.so on their own link line:
+# Jolt is SHARED, so libzahlen_engine.so records it as a DT_NEEDED entry and
+# every consumer resolves JPH::* through the engine.
+#
+# Naming Jolt PUBLIC on the engine and the static subsystems is what produced
+# the noise. CMake propagates a static library's PUBLIC/PRIVATE dependencies
+# verbatim to the final link of every dependent, so Jolt ended up on the command
+# line of all 18 executables -- after libzahlen_engine.so, which already defines
+# the same symbols. mold reports that as "Unused direct dependencies:
+# libJolt.so", and it is also why -Wl,--no-as-needed was needed to stop the
+# as-needed culling from dropping it.
+#
+# The properties are copied explicitly rather than taken by INTERFACE-linking
+# Jolt, because an INTERFACE library's INTERFACE_LINK_LIBRARIES propagate as
+# link items too -- that reintroduces exactly the entry this removes. Property
+# copies evaluate at generate time, so Jolt's $<BUILD_INTERFACE:> include dirs
+# and configuration-conditioned defines arrive intact.
+add_library(zahlen_jolt_headers INTERFACE)
+target_include_directories(zahlen_jolt_headers SYSTEM INTERFACE
+    $<TARGET_PROPERTY:Jolt,INTERFACE_INCLUDE_DIRECTORIES>)
+target_compile_definitions(zahlen_jolt_headers INTERFACE
+    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_DEFINITIONS>)
+target_compile_options(zahlen_jolt_headers INTERFACE
+    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_OPTIONS>)
+target_compile_features(zahlen_jolt_headers INTERFACE
+    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_FEATURES>)
+
 if(ZHLN_BUILD_RENDER)
     # --- VulkanMemoryAllocator ---
     add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)

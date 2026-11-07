@@ -21,8 +21,12 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
+# No zahlen_lua edge. DataModelBindings.hpp forward-declares lua_State and
+# includes nothing from plugins/lua; the only consumer of the Lua C API here is
+# DataModelBindings.cpp, which includes <lua.h> and gets it from the LuaJIT
+# import below. A consumer that imports ReflectLua links zahlen_lua itself
+# (tests/extras TestLuaDataModel does).
 target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_lua
     zahlen_datamodel
 )
 target_link_libraries(${TARGET_NAME} PRIVATE LuaJIT)

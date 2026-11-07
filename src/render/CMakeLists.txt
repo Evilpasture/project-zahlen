@@ -20,7 +20,7 @@ if(NOT ZHLN_BUILD_RENDER)
         ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
     )
     target_link_libraries(zahlen_render
-        PUBLIC  Jolt
+        PUBLIC  zahlen_jolt_headers
         PRIVATE zahlen_presentation
         PRIVATE zahlen_warnings
     )
@@ -146,7 +146,7 @@ target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exce
 
 target_link_libraries(zahlen_render
     PRIVATE  zahlen_vulkan
-    PUBLIC  Jolt
+    PUBLIC  zahlen_jolt_headers
     PRIVATE zahlen_presentation
     PRIVATE zahlen_threading
 )

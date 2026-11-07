@@ -31,9 +31,12 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 # Core is a public dependency: the rig runs on the ECS, Camera and the frame
 # scheduler extension seam.
+# No zahlen_freecam edge. TargetCamera.cpp reads FreeCam::FreeCamTagComponent,
+# which is an empty struct: it crosses this boundary as a type identity and
+# brings no symbol, and TargetCamera.hpp does not include FreeCam.hpp, so no
+# consumer of this target needs its include root either.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
-    zahlen_freecam
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

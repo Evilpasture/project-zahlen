@@ -52,11 +52,10 @@ target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_remote_asset
 )
 
-# CDN.cpp calls ZHLN::HTTP::Fetch, but no public header names an HTTP type, so
-# the transfer stays private, the way it does in RemoteAsset.
-target_link_libraries(${TARGET_NAME} PRIVATE
-    zahlen_http
-)
+# No zahlen_http edge. CDN.cpp does not include an HTTP header and calls no
+# HTTP:: symbol -- every transfer goes through zahlen_remote_asset, which keeps
+# HTTP PRIVATE for itself (RemoteAsset/CMakeLists.txt). Nothing to re-export,
+# nothing to link.
 
 target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions/net

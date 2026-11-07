@@ -129,11 +129,125 @@ function(zahlen_use_custom_libcxx TARGET_NAME)
         $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>
     )
 
+    # Which libc++ this target links.
+    #
+    # The rpath above is a load-time search path: it tells the loader where to
+    # find the library when the binary runs, and it has no effect whatsoever on
+    # what the linker resolves -lc++ to. Link-time resolution is the driver's
+    # search order, and for a toolchain built from source that order does not
+    # necessarily start in the toolchain. A build can therefore compile against
+    # one libc++ and link another, which is not a missing-symbol problem: the
+    # headers declare "this new function lives in the dylib" (extern template in
+    # __charconv, _LIBCPP_EXPORTED_FROM_ABI on __hash_memory) and an older image
+    # simply has nothing to resolve it to, while everything else in the same
+    # library links fine.
+    #
+    # Naming the file in target_link_libraries does not fix that: CMake
+    # normalizes an absolute lib<name>.dylib path back into -L<dir> -l<name>.
+    # The -L is the part that decides, so the -L is what goes on the line, scoped
+    # to these targets rather than to CMAKE_CXX_FLAGS (a global -L changes the
+    # lookup for every library in the build, which is how a scoped problem became
+    # a whole-build one before).
+    #
+    # libunwind stays a bare name on Linux only: there an LLVM tree keeps
+    # libunwind.so beside libc++.so and the loader must be told which to take. On
+    # Darwin the _Unwind_* entry points are in libSystem, which every Mach-O links
+    # regardless, so there is no separate image to name -- and ld64.lld will not
+    # find an SDK stub by bare name, so an explicit -lunwind there fails outright.
+    set(_ZHLN_RUNTIME_DIR "")
+    foreach(_ZHLN_LIB_DIR IN LISTS _ALL_LLVM_LIB_DIRS)
+        if(EXISTS "${_ZHLN_LIB_DIR}/libc++.dylib" OR EXISTS "${_ZHLN_LIB_DIR}/libc++.so")
+            set(_ZHLN_RUNTIME_DIR "${_ZHLN_LIB_DIR}")
+            break()
+        endif()
+    endforeach()
+
+    if(_ZHLN_RUNTIME_DIR)
+        # PUBLIC, not PRIVATE. A consumer of this target resolves -lc++ on its own
+        # link line, so an -L that stopped at the provider would let the engine and
+        # the executable that links it end up on different libc++ images -- the
+        # same two-version build, one level up. The rpath travels with it because
+        # the daemon and the host tools are run out of the build tree.
+        target_link_options(${TARGET_NAME} PUBLIC
+            "-L${_ZHLN_RUNTIME_DIR}"
+            "-Wl,-rpath,${_ZHLN_RUNTIME_DIR}"
+        )
+    endif()
+
     target_link_libraries(${TARGET_NAME} PRIVATE
         c++
         c++abi
-        unwind
     )
+    if(NOT APPLE)
+        target_link_libraries(${TARGET_NAME} PRIVATE unwind)
+    endif()
+
+    # The headers and the image have to come from the same build of libc++, and
+    # nothing in the link line says so -- so check it, once per configure, on the
+    # file the -L above will resolve to. Without this the first sign of a mismatch
+    # is "undefined symbol" naming a function that plainly exists in the headers,
+    # which reads like a bug in the standard library rather than a stale image.
+    if(NOT DEFINED ZHLN_LIBCXX_PROBE_RESULT)
+        set(ZHLN_LIBCXX_PROBE_RESULT "")
+        set(ZHLN_LIBCXX_PROBE_IMAGE "")
+        if(_ZHLN_RUNTIME_DIR)
+            foreach(_ZHLN_SUFFIX IN ITEMS dylib so)
+                if(EXISTS "${_ZHLN_RUNTIME_DIR}/libc++.${_ZHLN_SUFFIX}")
+                    set(ZHLN_LIBCXX_PROBE_IMAGE "${_ZHLN_RUNTIME_DIR}/libc++.${_ZHLN_SUFFIX}")
+                    break()
+                endif()
+            endforeach()
+            find_program(ZHLN_NM_EXECUTABLE NAMES llvm-nm nm)
+            if(ZHLN_LIBCXX_PROBE_IMAGE AND ZHLN_NM_EXECUTABLE)
+                # -gU: external, defined symbols only. Matching the mangled name is
+                # exact here, unlike grepping a demangled spelling -- the mangled
+                # form contains __hash_memory literally (__ZNSt3__113__hash_memoryEPKvm).
+                execute_process(
+                    COMMAND "${ZHLN_NM_EXECUTABLE}" -gU "${ZHLN_LIBCXX_PROBE_IMAGE}"
+                    OUTPUT_VARIABLE _ZHLN_LIBCXX_SYMS
+                    ERROR_QUIET
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+                if(_ZHLN_LIBCXX_SYMS MATCHES "__hash_memory")
+                    set(ZHLN_LIBCXX_PROBE_RESULT "ok")
+                else()
+                    set(ZHLN_LIBCXX_PROBE_RESULT "stale")
+                endif()
+            endif()
+            if(ZHLN_LIBCXX_PROBE_RESULT STREQUAL "ok"
+               AND NOT EXISTS "${_ZHLN_RUNTIME_DIR}/libc++abi.dylib"
+               AND NOT EXISTS "${_ZHLN_RUNTIME_DIR}/libc++abi.so")
+                # A libc++ built from source does not re-export libc++abi the way
+                # the platform's umbrella stub does, so -lc++abi has to find a real
+                # image in the same directory. When it cannot, only libc++abi's
+                # symbols are undefined -- the shape this whole detour started in.
+                set(ZHLN_LIBCXX_PROBE_RESULT "no-abi")
+            endif()
+        endif()
+    endif()
+
+    if(ZHLN_LIBCXX_PROBE_RESULT STREQUAL "stale")
+        message(FATAL_ERROR
+            "libc++ mismatch: ${ZHLN_LIBCXX_PROBE_IMAGE} does not export __hash_memory, which the "
+            "libc++ headers in this toolchain declare as living in the dylib "
+            "(_LIBCPP_AVAILABILITY_HAS_HASH_MEMORY, LLVM 21). Linking it gives "
+            "'undefined symbol: std::__1::__hash_memory' and, for the same reason, "
+            "'__from_chars_floating_point' -- both introduced after that image was built.\n"
+            "The headers and the dylib have to be the same build: rebuild the runtime "
+            "(ninja libcxx libcxxabi in ${LLVM_BLOOMBERG_BUILD}), or point LLVM_BLOOMBERG_ROOT / "
+            "LLVM_BLOOMBERG_BUILD at a toolchain whose libc++ is as new as its headers.")
+    elseif(ZHLN_LIBCXX_PROBE_RESULT STREQUAL "no-abi")
+        message(FATAL_ERROR
+            "libc++ is ${ZHLN_LIBCXX_PROBE_IMAGE}, but there is no libc++abi beside it in "
+            "${_ZHLN_RUNTIME_DIR}. A libc++ built from source does not re-export libc++abi the way "
+            "the platform's umbrella stub does, so -lc++abi needs a real image in that directory; "
+            "without one every libc++abi symbol comes out undefined. Build and install libcxxabi "
+            "into the same directory, or remove libc++.dylib from it so the whole C++ runtime comes "
+            "from the compiler's own search path.")
+    elseif(ZHLN_LIBCXX_PROBE_RESULT STREQUAL "ok")
+        message(STATUS
+            "libc++: linking ${ZHLN_LIBCXX_PROBE_IMAGE} (-L${_ZHLN_RUNTIME_DIR}); "
+            "headers and image agree on __hash_memory")
+    endif()
 endfunction()
 
 function(zahlen_enable_reflection TARGET_NAME)

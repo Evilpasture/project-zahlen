@@ -37,7 +37,7 @@ target_include_directories(zahlen_gui SYSTEM PUBLIC
 
 # Jolt is PUBLIC for the JPH::Vec4 types in GUI.hpp; zero ECS/Engine/Window/Render link coupling.
 target_link_libraries(zahlen_gui PUBLIC
-    Jolt
+    zahlen_jolt_headers
 )
 
 target_compile_definitions(zahlen_gui PRIVATE
