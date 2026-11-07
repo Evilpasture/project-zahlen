@@ -34,6 +34,11 @@
 
 include_guard(GLOBAL)
 
+# Archive fallback is Linux-only; source selection belongs to SlangResolve.
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR ZHLN_SLANG_VENDORED)
+    return()
+endif()
+
 option(ZHLN_SLANG_FROM_PREBUILT
     "Download the official Slang release archive when no host Slang is usable" ON)
 set(ZHLN_SLANG_RELEASE "" CACHE STRING
@@ -99,17 +104,6 @@ endif()
 # cause, instead of a fallthrough nobody notices until the linker runs.
 option(ZHLN_SLANG_REQUIRE_PREBUILT
     "Fail the configure when the Slang release cannot be resolved, instead of falling back" OFF)
-
-if(ZHLN_SLANG_VENDORED)
-    # The wheel/archive path outranks a cached ZHLN_SLANG_VENDORED: that variable
-    # is remembered across configures, and a stale ON would pin every later build
-    # to a ~950-TU compile. scripts/build.sh --vendored-slang sets VENDORED *and*
-    # turns this option off, so the opt-out is always explicit.
-    message(STATUS
-        "Slang: ZHLN_SLANG_VENDORED is ON in the cache, but ZHLN_SLANG_FROM_PREBUILT takes "
-        "precedence, so this build uses a released Slang. Compile extern/slang by clearing the "
-        "cache (rm -rf build/<profile>) and building with scripts/build.sh --vendored-slang.")
-endif()
 
 # --- an already-unpacked tree wins over downloading -------------------------
 if(ZHLN_SLANG_PREBUILT_ROOT AND EXISTS "${ZHLN_SLANG_PREBUILT_ROOT}/include/slang.h")

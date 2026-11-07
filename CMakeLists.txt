@@ -151,6 +151,16 @@ include(PythonProbe)
 include(BlenderProbe)
 include(GovernanceChecks)
 include(ReflectionConfig)
+
+# The C++ runtime for the whole build, decided once, before the first target exists.
+#
+# Directory-scoped on purpose: add_compile_options/link_directories/add_link_options
+# below are inherited by every target created in every subdirectory, including
+# extern/JoltPhysics, whose CMakeLists.txt knows nothing about the branch toolchain.
+# A per-target helper cannot reach that dylib, and a dylib left on the platform
+# libc++ is enough to abort a process inside malloc when a std::locale crosses the
+# boundary. Inert unless ZHLN_USE_CUSTOM_LIBCXX is ON.
+zahlen_configure_custom_libcxx()
 include(ToolchainCapabilities)
 
 option(ZHLN_DEV_MODE "Enable raw loose-file asset loading for development" ON)

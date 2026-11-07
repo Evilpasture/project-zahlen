@@ -36,12 +36,6 @@ while [[ "$#" -gt 0 ]]; do
         --syntax-only|--fsyntax-only)
             ENABLE_SYNTAX_ONLY=true
             ;;
-        --vendored-slang|--build-slang)
-            # Last resort: compile the pinned extern/slang. Slang otherwise comes
-            # from the official release archive (cmake/SlangPrebuilt.cmake), which
-            # is also what a bare `cmake -S . -B build/x` does on its own.
-            USER_CMAKE_ARGS+=("-DZHLN_SLANG_FROM_PREBUILT=OFF" "-DZHLN_SLANG_VENDORED=ON")
-            ;;
         -D*)
             USER_CMAKE_ARGS+=("$1")
             ;;
@@ -237,28 +231,24 @@ case "$BASE_COMPILER" in
         COMPILER_CC="$P2996_INSTALL/bin/clang"
         COMPILER_CXX="$P2996_INSTALL/bin/clang++"
 
-        LIB_DIR="$P2996_INSTALL/lib"
-        [[ -d "$P2996_INSTALL/lib64" ]] && LIB_DIR="$P2996_INSTALL/lib64"
-
-        # The p2996 runtime, for this project's own targets.
+        # The p2996 toolchain. The C++ *runtime* is not configured here: which
+        # libc++, libc++abi and libunwind to link is decided once, in CMake, by
+        # zahlen_configure_custom_libcxx() (cmake/ReflectionConfig.cmake), which
+        # applies it directory-scoped so every target -- including the third-party
+        # dylibs -- inherits it. This profile only names the compiler and the prefix
+        # its source tree is in.
         #
-        # -stdlib=libc++ is what selects it, and it is enough: the compiler is
-        # p2996's own clang++ and reads its runtimes from its own resource
-        # directory. -L$LIB_DIR never bought a library -- it only put that
-        # directory first on the link search path, ahead of the SDK, so -lc++
-        # resolved to the branch's libc++.dylib. That library does not re-export
-        # libc++abi the way the SDK's libc++.tbd umbrella does, so every libc++abi
-        # symbol came out undefined while libc++'s own resolved. Half a runtime
-        # missing is the signature of a search path, not of an ABI disagreement.
+        # Why nothing about -stdlib=libc++, -L or rpath belongs here: -stdlib=libc++
+        # selects the headers, not the images, and a flag string in a shell profile
+        # cannot be checked at configure time, cannot cover a target whose
+        # CMakeLists.txt this project does not own, and is invisible to anyone reading
+        # the CMake. ZHLN_USE_CUSTOM_LIBCXX is the switch; LLVM_BLOOMBERG_* are its
+        # inputs.
         #
-        # No ZHLN_SLANG_* switch: Slang comes from the release archive, and that
-        # decision belongs to cmake/SlangPrebuilt.cmake, not to a shell profile.
+        # No ZHLN_SLANG_* switch either: Slang comes from the release archive, and
+        # that decision belongs to cmake/SlangPrebuilt.cmake.
         INTERNAL_CMAKE_ARGS+=(
             "-DCMAKE_PREFIX_PATH=$P2996_INSTALL"
-            "-DCMAKE_CXX_FLAGS=-stdlib=libc++ -Wno-unused-command-line-argument"
-            "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,$LIB_DIR"
-            "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath,$LIB_DIR"
-            "-DCMAKE_MODULE_LINKER_FLAGS=-Wl,-rpath,$LIB_DIR"
             "-DZHLN_USE_CUSTOM_LIBCXX=ON"
             "-DLLVM_BLOOMBERG_ROOT=$P2996_ROOT"
             "-DLLVM_BLOOMBERG_BUILD=$P2996_BUILD"
