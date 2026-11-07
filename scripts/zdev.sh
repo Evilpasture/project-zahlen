@@ -17,10 +17,10 @@ find_dockerfile() {
   local c
   local candidates=(
     "${ZDEV_DOCKERFILE:-}"
-    "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)/Dockerfile.dev"
-    "$PWD/Dockerfile.dev"
-    "$SCRIPT_DIR/Dockerfile.dev"
-    "$SCRIPT_DIR/../Dockerfile.dev"
+    "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)/docker/dev.Dockerfile"
+    "$PWD/docker/dev.Dockerfile"
+    "$SCRIPT_DIR/docker/dev.Dockerfile"
+    "$SCRIPT_DIR/../docker/dev.Dockerfile"
   )
   for c in "${candidates[@]}"; do
     [[ -n "$c" && -f "$c" ]] && { (cd "$(dirname "$c")" && printf '%s/%s' "$PWD" "$(basename "$c")"); return; }
@@ -64,14 +64,14 @@ ensure_machine() {
 
 build() {
   local DOCKERFILE
-  DOCKERFILE="$(find_dockerfile)" || die "Dockerfile.dev not found (set ZDEV_DOCKERFILE=/path/to/Dockerfile.dev)"
+  DOCKERFILE="$(find_dockerfile)" || die "docker/dev.Dockerfile not found (set ZDEV_DOCKERFILE=/path/to/dev.Dockerfile)"
   ensure_machine
-  local repo_root
-  repo_root="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$SCRIPT_DIR")"
-  log "building $IMAGE from $repo_root"
+  # The dev image has no COPY, so its build context only has to contain the
+  # Dockerfile. Using docker/ itself keeps the whole working tree out of it.
+  log "building $IMAGE from $(dirname "$DOCKERFILE")"
   local args=(--build-arg "FRIEND_PASSWORD=$(get_password)")
   [[ -n "${ZDEV_SSH_PUBKEY:-}" ]] && args+=(--build-arg "SSH_PUBKEY=$ZDEV_SSH_PUBKEY")
-  podman build -f "$DOCKERFILE" -t "$IMAGE" "${args[@]}" "$repo_root"
+  podman build -f "$DOCKERFILE" -t "$IMAGE" "${args[@]}" "$(dirname "$DOCKERFILE")"
 }
 
 confirm_if_busy() {

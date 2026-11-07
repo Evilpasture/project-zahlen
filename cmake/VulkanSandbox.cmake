@@ -16,7 +16,7 @@
 # which ranks a discrete GPU at 1'000'000 and a CPU device at 0).
 #
 # Default OFF: tests use the host Vulkan installation. Turn it ON for a hermetic
-# CPU-only run. Docker never needs it — the Dockerfile points the distro's
+# CPU-only run. Docker never needs it — docker/ci.Dockerfile points the distro's
 # Lavapipe at the whole image — and ZHLN_IN_DOCKER keeps this block off so the
 # two mechanisms never stack.
 #

@@ -139,10 +139,10 @@ jobs:
           echo "vendored slang version: ${version}"
 
       # The release builder is only tooling: ubuntu:22.04 plus the jammy packages a
-      # build needs, with no part of this repository inside it. The GHA layer cache
-      # builds it once and restores it after that, and because the sources are mounted
-      # at run time a source change cannot invalidate it -- only a change to the
-      # provisioning script can.
+      # build needs. It clones the repository inside the image to get its
+      # provisioning scripts (no COPY, no .dockerignore), pinned to this commit;
+      # the sources are still mounted at /workspace at run time. The GHA layer
+      # cache restores everything else.
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -151,6 +151,9 @@ jobs:
         with:
           context: .
           file: docker/release-jammy.Dockerfile
+          build-args: |
+            ZHLN_GIT_URL=${{ github.server_url }}/${{ github.repository }}.git
+            ZHLN_GIT_REF=${{ github.sha }}
           tags: zahlen-release-builder:jammy
           load: true
           cache-from: type=gha,scope=zahlen-release-builder

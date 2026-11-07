@@ -16,36 +16,63 @@
 # is no --sysroot, no loader wrapper, no toolchain file and no target prefix: the
 # artifact's floor is the floor of the machine that built it, which is the point.
 #
-# Only the provisioning script is copied in, so this image is invalidated by a
-# change to the package list and by nothing else -- in particular not by the source
-# tree, which is mounted at run time.
+# Nothing is COPY'd from the build context and there is no .dockerignore. The
+# provisioning scripts come from a git clone inside the container, so every file
+# in scripts/ is present -- including check-glibc-floor.sh, which both
+# ci-ubuntu-2204-env.sh and the Slang installer call through their own
+# ${script_dir}. CI pins that clone to the commit under test; the sources that
+# are actually compiled are still bind-mounted at /workspace at run time.
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# check-glibc-floor.sh is not provisioning, but the env script uses it to refuse a
-# dxc that the baseline cannot run, so it has to be present; the Slang installer
-# uses it on libslang the same way.
-COPY scripts/ci-ubuntu-2204-env.sh scripts/check-glibc-floor.sh \
-     scripts/install-slang-prebuilt.sh scripts/install-gcc-prebuilt.sh /provision/
-RUN /provision/ci-ubuntu-2204-env.sh --build
+ARG ZHLN_GIT_URL=https://github.com/Evilpasture/project-zahlen.git
+ARG ZHLN_GIT_REF=main
 
+# ubuntu:22.04 has no git. --build does its own guarded apt_install, so this
+# minimal bootstrap cannot conflict with it.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Declared before the provisioning RUN so the scripts below see the same PATH
+# they would on a bare runner. The directory itself is created by
+# ci-ubuntu-2204-env.sh inside that RUN; PATH is just a string, resolved when a
+# command is looked up.
 # The compiler is a download into /opt/gcc16, not an apt package in /usr/bin, so
 # the image has to carry the PATH itself. (The same line is published to
 # GITHUB_PATH when this script runs on a bare runner instead of in a build.)
 ENV PATH=/opt/gcc16/bin:${PATH}
 
+# Clone, provision, then delete the checkout -- all in ONE layer, so the source
+# tree does not stay in the image history. `git fetch --depth 1 origin <ref>`
+# takes a SHA or a branch name, which lets the release workflow pin the same
+# commit it later mounts into /workspace.
+RUN set -eu; \
+    git init -q /opt/zahlen-provision; \
+    cd /opt/zahlen-provision; \
+    git remote add origin "${ZHLN_GIT_URL}"; \
+    git fetch --depth 1 origin "${ZHLN_GIT_REF}"; \
+    git checkout -q --detach FETCH_HEAD; \
+    echo "== provisioning from $(git rev-parse HEAD)"; \
+    scripts/ci-ubuntu-2204-env.sh --build; \
+    scripts/install-slang-prebuilt.sh 2026.20 /opt/slang; \
+    cd /; \
+    rm -rf /opt/zahlen-provision
+
 # Slang, for cooking shaders during the build. It is a build-host dependency and
 # nothing it provides reaches a package (utils/zshader has no install rule), so it is
 # upstream's prebuilt -- built against glibc 2.17, measured against the 2.35 baseline
 # before it is installed -- rather than ~25 minutes of the pinned tree on every run.
-# The script also writes the CMake config upstream does not ship, because
-# cmake/SlangHost/ resolves libslang with find_package(slang CONFIG). zshader
-# links that library, so no compiler binary needs to be on PATH.
-RUN /provision/install-slang-prebuilt.sh 2026.20 /opt/slang && rm -rf /provision
+# install-slang-prebuilt.sh also writes the CMake config upstream does not ship,
+# because cmake/SlangHost/ resolves libslang with find_package(slang CONFIG).
+# zshader links that library, so no compiler binary needs to be on PATH.
 
 # Not baked: the sources, the build tree, the ccache. `docker run -v $PWD:/workspace`
-# supplies the tree, so a source change never rebuilds this image.
+# supplies the tree at run time. A Dockerfile cannot see a change to a remote
+# script, so Docker's layer cache only keys on ZHLN_GIT_REF: CI sets it to the
+# commit SHA, which guarantees the tooling here comes from the same commit as the
+# sources it mounts. Leave it at the default to reuse one cached image locally.
 WORKDIR /workspace
 
 CMD ["bash"]

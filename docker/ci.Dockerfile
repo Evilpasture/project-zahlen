@@ -1,5 +1,11 @@
 # CI may package an already-published builder image instead of rebuilding it.
-# The default is the local stage, preserving `docker build --target runner .`.
+# The default is the local stage, preserving
+# `docker build -f docker/ci.Dockerfile --target runner .`.
+#
+# This image takes NOTHING from the build context. There is no COPY from `.` and
+# no .dockerignore: the source is cloned from git inside the container, so the
+# checkout is complete by construction. The context only has to contain this
+# Dockerfile; locally an empty directory works (see docker/README.md).
 ARG ZHLN_BUILDER_IMAGE=builder
 
 # ==============================================================================
@@ -8,6 +14,14 @@ ARG ZHLN_BUILDER_IMAGE=builder
 # Everything expensive and source-independent lives here so that the build and
 # test stages reuse one cached layer set.
 FROM archlinux:latest AS base
+
+# Which tree to compile. `git fetch --depth 1 origin <ref>` below accepts a
+# branch, a tag OR an exact SHA, so CI pins github.sha and a developer can name
+# a branch. Passing the SHA as a build-arg also means a new commit invalidates
+# the clone layer and the compile, while the pacman layer above stays cached.
+ARG ZHLN_GIT_URL=https://github.com/Evilpasture/project-zahlen.git
+ARG ZHLN_GIT_REF=main
+ARG ZHLN_SLANG_VENDORED=OFF
 
 # One toolchain entry the old image carried is gone, and it had no consumer
 # left:
@@ -77,8 +91,8 @@ RUN pacman -Sy --noconfirm && \
 # library directly: no standalone compiler binary is looked up, version-checked
 # or put on PATH.
 #
-# Pass --build-arg ZHLN_SLANG_VENDORED=ON with extern/slang checked out to build
-# the pinned tree instead.
+# Pass --build-arg ZHLN_SLANG_VENDORED=ON to build the pinned tree instead; the
+# clone step below then fetches extern/slang and its nested submodules too.
 
 # CI deliberately uses the system Lavapipe and validation layer packages.
 # CMake disables the checked-in Arch-built sandbox in ZHLN_IN_DOCKER mode,
@@ -90,7 +104,34 @@ ENV VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d
 
 WORKDIR /workspace
 
-COPY . .
+# The one and only source step: a real git checkout, not a snapshot of somebody's
+# working directory. A context COPY plus .dockerignore used to decide which
+# files existed in here; a missing one surfaced as a configure failure ten
+# minutes into the build. Fetching the tree itself also keeps submodule `.git`
+# files intact, which Slang's GitVersion and the CMake probes expect.
+#
+# Only the submodules with no Arch package are fetched. glfw, simdjson,
+# vulkan-headers, shader-slang and LuaJIT come from pacman above and their CMake
+# probes prefer the system copy; extern/slang is added only when the vendored
+# fallback is requested. This list is the single source of truth; the workflows
+# no longer fetch submodules on the host at all.
+ARG ZHLN_SUBMODULES="extern/JoltPhysics extern/VulkanMemoryAllocator extern/SPIRV-Reflect extern/volk extern/meshoptimizer extern/mimalloc extern/miniaudio extern/cgltf extern/clay extern/stb"
+RUN set -eu; \
+    git init -q /workspace; \
+    cd /workspace; \
+    git remote add origin "${ZHLN_GIT_URL}"; \
+    git fetch --depth 1 origin "${ZHLN_GIT_REF}"; \
+    git checkout -q --detach FETCH_HEAD; \
+    echo "zahlen: $(git rev-parse HEAD) <- ${ZHLN_GIT_URL} @ ${ZHLN_GIT_REF}"; \
+    if [ "${ZHLN_SLANG_VENDORED}" = "ON" ]; then \
+        set -- ${ZHLN_SUBMODULES} extern/slang; \
+    else \
+        set -- ${ZHLN_SUBMODULES}; \
+    fi; \
+    git submodule update --init --depth 1 "$@"; \
+    if [ "${ZHLN_SLANG_VENDORED}" = "ON" ]; then \
+        git -C extern/slang submodule update --init --recursive --depth 1; \
+    fi
 
 
 # ==============================================================================
@@ -166,7 +207,7 @@ RUN mkdir -p /workspace/dist/data && \
 # STAGE 3: Test (runs the ztest suite)
 # ==============================================================================
 # Kept out of the build stage so compiling and testing are independent steps.
-# `docker build --target test .` reproduces CI locally; the GitHub Actions "Test"
+# `docker build -f docker/ci.Dockerfile --target test .` reproduces CI locally; the GitHub Actions "Test"
 # job instead runs the same command inside the image published by "Build", so a
 # failing test is reported without ever blocking the build job.
 FROM builder AS test
@@ -213,7 +254,11 @@ RUN pacman -S --needed --noconfirm \
 
 WORKDIR /app
 
-# The payload the builder collected: ./zahlen, its libraries, and ./data/base.pak.
+# Stage-to-stage, not build-context copies: these two move the payload the
+# builder already produced and never read the host tree, so no .dockerignore is
+# involved. Keeping COPY here (rather than a BuildKit-only RUN --mount) also
+# lets this file build with a plain `docker build`, not just buildx.
+# The payload: ./zahlen, its libraries, and ./data/base.pak.
 COPY --from=payload /workspace/dist/ /app/
 # Shader sources and loose assets are read, and watched for hot reload, from this
 # layout rather than from the pak.
