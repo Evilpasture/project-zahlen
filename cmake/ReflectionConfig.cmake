@@ -179,31 +179,35 @@ function(zahlen_configure_custom_libcxx)
             "symbol would come out undefined. Rebuild libcxxabi into the same directory.")
     endif()
 
-    # Does the image match the headers? Two symbols date it: std::__hash_memory (LLVM 21)
-    # and std::__from_chars_floating_point (LLVM 20) are declared in the headers as living
-    # in the dylib. Checking here means a stale runtime is a configure error naming the
-    # file, instead of a linker error that reads like a bug in the standard library.
-    set(_image "")
-    foreach(_suffix IN ITEMS dylib so)
-        if(EXISTS "${_runtime_dir}/libc++.${_suffix}")
-            set(_image "${_runtime_dir}/libc++.${_suffix}")
-            break()
-        endif()
-    endforeach()
+    # Inspect actual shared-library exports, not a Linux linker script.
     find_program(ZHLN_NM_EXECUTABLE NAMES llvm-nm nm)
-    if(_image AND ZHLN_NM_EXECUTABLE)
-        # -gU: external, defined symbols only. Matching the mangled name is exact here,
-        # unlike a demangled spelling -- it contains __hash_memory literally
-        # (__ZNSt3__113__hash_memoryEPKvm).
-        execute_process(COMMAND "${ZHLN_NM_EXECUTABLE}" -gU "${_image}"
-            OUTPUT_VARIABLE _syms ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(APPLE)
+        set(_image "${_runtime_dir}/libc++.dylib")
+        set(_nm_args -gU)
+    else()
+        set(_image "${_runtime_dir}/libc++.so.1")
+        set(_nm_args -D --defined-only)
+    endif()
+    if(EXISTS "${_image}" AND ZHLN_NM_EXECUTABLE)
+        execute_process(
+            COMMAND "${ZHLN_NM_EXECUTABLE}" ${_nm_args} "${_image}"
+            RESULT_VARIABLE _nm_result
+            OUTPUT_VARIABLE _syms ERROR_VARIABLE _nm_error
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(NOT "${_nm_result}" STREQUAL "0")
+            message(FATAL_ERROR
+                "Could not inspect runtime exports in ${_image}: ${_nm_error}. "
+                "This is an inspection failure, not proof of a header/runtime mismatch.")
+        endif()
         if(NOT _syms MATCHES "__hash_memory")
             message(FATAL_ERROR
-                "${_image} does not export std::__hash_memory, which the libc++ headers in this "
-                "toolchain declare as living in the dylib (_LIBCPP_AVAILABILITY_HAS_HASH_MEMORY, "
-                "LLVM 21). The headers and the image are different builds; rebuild the runtime "
-                "(ninja libcxx libcxxabi in ${LLVM_BLOOMBERG_BUILD}).")
+                "${_image} was inspected successfully but exports no __hash_memory. "
+                "Check that the selected shared runtime matches the branch headers.")
         endif()
+    else()
+        message(WARNING
+            "Skipping libc++ export check: actual shared image ${_image} or nm is unavailable. "
+            "The link step will validate runtime symbols.")
     endif()
 
     # One shared branch runtime for all targets created below this directory.

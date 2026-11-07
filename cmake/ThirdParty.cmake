@@ -618,7 +618,9 @@ option(ZHLN_JOLT_SLANG_FALLBACK
     "Compile Jolt's Vulkan compute shaders with the vendored Slang when no dxc/glslc exists" ON)
 if(ZHLN_BUILD_RENDER)
     find_package(Vulkan QUIET)
-    if(Vulkan_FOUND AND NOT Vulkan_GLSLC_EXECUTABLE)
+    if(Vulkan_FOUND AND (NOT Vulkan_GLSLC_EXECUTABLE
+       OR Vulkan_GLSLC_EXECUTABLE STREQUAL "${CMAKE_SOURCE_DIR}/cmake/JoltDxcShim.sh"
+       OR Vulkan_GLSLC_EXECUTABLE STREQUAL "${CMAKE_BINARY_DIR}/jolt-dxc-shim"))
         find_program(ZHLN_JOLT_DXC_EXECUTABLE NAMES dxc dxc.exe HINTS "$ENV{DXC_ROOT}" /usr/bin /usr/local/bin)
         if(ZHLN_JOLT_DXC_EXECUTABLE)
             set(Vulkan_GLSLC_EXECUTABLE "${ZHLN_JOLT_DXC_EXECUTABLE}" CACHE FILEPATH
@@ -651,20 +653,10 @@ if(ZHLN_BUILD_RENDER)
                     set(ZHLN_JOLT_SLANGC_PINNED "${ZHLN_JOLT_SLANGC_HOST}")
                 endif()
             endif()
-            if(ZHLN_JOLT_SLANGC_PINNED)
-                # A generated wrapper, not an environment variable: the build must
-                # not depend on how the shell that launched it was configured.
-                set(ZHLN_JOLT_SLANGC_WRAPPER "${CMAKE_BINARY_DIR}/jolt-dxc-shim")
-                file(WRITE "${ZHLN_JOLT_SLANGC_WRAPPER}"
-"#!/bin/sh
-# Written by cmake/ThirdParty.cmake -- do not edit.
-ZHLN_JOLT_SLANGC='${ZHLN_JOLT_SLANGC_PINNED}' exec '${ZHLN_JOLT_SLANGC_DXC}' \"$@\"
-")
-                file(CHMOD "${ZHLN_JOLT_SLANGC_WRAPPER}" PERMISSIONS
-                    OWNER_READ OWNER_WRITE OWNER_EXECUTE
-                    GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
-                set(ZHLN_JOLT_SLANGC_DXC "${ZHLN_JOLT_SLANGC_WRAPPER}")
-            endif()
+            # Stable path for Jolt's rules. The resolver generates its contents
+            # after selecting the compiler later in this configure.
+            set(ZHLN_JOLT_SLANGC_WRAPPER "${CMAKE_BINARY_DIR}/jolt-dxc-shim")
+            set(ZHLN_JOLT_SLANGC_DXC "${ZHLN_JOLT_SLANGC_WRAPPER}")
             set(Vulkan_GLSLC_EXECUTABLE "${ZHLN_JOLT_SLANGC_DXC}" CACHE FILEPATH
                 "Shader compiler path Jolt reads; Jolt replaces 'glslc' with 'dxc' in it to locate dxc" FORCE)
             message(STATUS
