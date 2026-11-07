@@ -1,0 +1,185 @@
+{
+  "schema": 1,
+  "floor": "16.1.1",
+  "comment": "One row per (GCC 16.x version, platform). `available: false` cells are planned but skipped -- this is the same mechanism used for GCC 16.3.0 before it is released. Enabling a cell is a one-line edit: flip `available` and fill `artifacts` with a URL + sha256 for each pinned file. Never point a cell at a moving tag.",
+  "full_build": {
+    "events": [
+      "schedule",
+      "workflow_dispatch"
+    ],
+    "comment": "Gate mode (the fast compiler capability probe) runs on every push and PR. Full engine configure + build runs on these events, or when workflow_dispatch asks for mode=full. A cell may set `full_build: false` when a known capability gap would make CMake stop at configure time; `full_build_reason` must then say why. `expected_probe_failures` lists probes that are known to fail for that compiler -- the gate reports them as annotations instead of failing the job, and warns if one unexpectedly starts passing. Neither field hides a NEW failure."
+  },
+  "cells": [
+    {
+      "id": "16.1.1-linux",
+      "gcc": "16.1.1",
+      "platform": "linux",
+      "runner": "ubuntu-24.04",
+      "label": "GCC 16.1.1 / Linux",
+      "available": true,
+      "experimental": false,
+      "full_build": false,
+      "reported_version": "16.1.1",
+      "kind": "arch-pkg",
+      "cc": "bin/gcc-16",
+      "cxx": "bin/g++-16",
+      "libdir": "usr/lib",
+      "note": "There is no upstream gcc-16.1.1.tar.xz: 16.1.1 is the version the GCC 16.1 branch carried between the 16.1.0 (2026-04-30) and 16.2.0 (2026-08-07) releases. Fedora 44 GA and Arch shipped it as a dated snapshot; Arch keeps exactly that snapshot in its immutable archive. Three packages from the SAME build (r12+g301eb08fa2c5-1) are pinned: the compiler, libgcc and libstdc++. They need glibc >= 2.38, so ubuntu-24.04 (2.39) is the oldest usable runner; ubuntu-22.04 (2.35) is not.",
+      "artifacts": [
+        {
+          "name": "gcc-16.1.1+r12+g301eb08fa2c5-1-x86_64.pkg.tar.zst",
+          "url": "https://archive.archlinux.org/packages/g/gcc/gcc-16.1.1%2Br12%2Bg301eb08fa2c5-1-x86_64.pkg.tar.zst",
+          "sha256": "80ecc89c7ca567a2c1d460803e1efa434040861f824c34d8fe7000bf27ad82c0",
+          "bytes": 60114403
+        },
+        {
+          "name": "libgcc-16.1.1+r12+g301eb08fa2c5-1-x86_64.pkg.tar.zst",
+          "url": "https://archive.archlinux.org/packages/l/libgcc/libgcc-16.1.1%2Br12%2Bg301eb08fa2c5-1-x86_64.pkg.tar.zst",
+          "sha256": "01fbf0e50872c2f4538ea067f97b143124963e9037ca8eb69cdc8b693779c11b",
+          "bytes": 82224
+        },
+        {
+          "name": "libstdc++-16.1.1+r12+g301eb08fa2c5-1-x86_64.pkg.tar.zst",
+          "url": "https://archive.archlinux.org/packages/l/libstdc%2B%2B/libstdc%2B%2B-16.1.1%2Br12%2Bg301eb08fa2c5-1-x86_64.pkg.tar.zst",
+          "sha256": "5eb8ab787086682875805e7eaad8728e73bad687aba00c9460ecb261c3762aeb",
+          "bytes": 884568
+        }
+      ],
+      "expected_probe_failures": [
+        "jolt"
+      ],
+      "full_build_reason": "Verified against the pinned snapshot: with -freflection, GCC 16.1.1 rejects Jolt's incomplete static data member (`union { T mElements[N]; ... }` instantiated while Vec3 is incomplete). cmake/ToolchainCapabilities.cmake makes that probe FATAL at configure time, so a full engine build cannot start. Released GCC 16.2.0 passes it. The gate still runs every other probe on 16.1.1 and reports the gap as a warning."
+    },
+    {
+      "id": "16.1.1-ucrt64",
+      "gcc": "16.1.1",
+      "platform": "ucrt64",
+      "runner": "windows-latest",
+      "label": "GCC 16.1.1 / MSYS2 UCRT64",
+      "available": false,
+      "experimental": true,
+      "full_build": true,
+      "reported_version": "16.1.1",
+      "kind": "winlibs",
+      "cc": "auto",
+      "cxx": "auto",
+      "unavailable_reason": "No UCRT64 toolchain reports 16.1.1. WinLibs publishes 16.1.0 and 16.2.0 UCRT builds, and MSYS2's UCRT64 archive has mingw-w64-ucrt-x86_64-gcc 16.1.0-1..7 and 16.2.0-3..6 -- no 16.1.1. Substituting 16.1.0 would silently test a different compiler, so this cell stays skipped until a literal 16.1.1 UCRT64 artifact is published. See .github/gcc16/README.md for the 16.1.0 UCRT pin if a 16.1.x lane is wanted instead.",
+      "artifacts": [],
+      "expected_probe_failures": []
+    },
+    {
+      "id": "16.2.0-linux",
+      "gcc": "16.2.0",
+      "platform": "linux",
+      "runner": "ubuntu-24.04",
+      "label": "GCC 16.2.0 / Linux",
+      "available": true,
+      "experimental": false,
+      "full_build": true,
+      "reported_version": "16.2.0",
+      "kind": "conda",
+      "installer": "scripts/install-gcc-prebuilt.sh",
+      "cc": "bin/gcc-16",
+      "cxx": "bin/g++-16",
+      "note": "The exact six conda-forge artifacts scripts/install-gcc-prebuilt.sh already pins for the jammy release lane. That script owns the download, checksum verification and the --sysroot=/ wrappers; the pins below are cross-checked against its ARTIFACTS block by `gcc16_matrix.py verify` so the two cannot drift.",
+      "artifacts": [
+        {
+          "name": "gcc_impl_linux-64-16.2.0-hfe51025_5.conda",
+          "url": "https://conda.anaconda.org/conda-forge/linux-64/gcc_impl_linux-64-16.2.0-hfe51025_5.conda",
+          "sha256": "7780003a2cfd8872289904a71237744c698fec19020ae60886b97de86c583c01",
+          "bytes": 86290246
+        },
+        {
+          "name": "gxx_impl_linux-64-16.2.0-h0d273dc_5.conda",
+          "url": "https://conda.anaconda.org/conda-forge/linux-64/gxx_impl_linux-64-16.2.0-h0d273dc_5.conda",
+          "sha256": "0f6b73e3a0854d5f3d8e3635cae7d57750767615f912f50a80581f1b7a0fac79",
+          "bytes": 17653049
+        },
+        {
+          "name": "libstdcxx-16.2.0-h934c35e_5.conda",
+          "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_5.conda",
+          "sha256": "38cadde30fad8f7c101f9eec79f60bf03fc99310c7195d23f8b30832516d666f",
+          "bytes": 6618916
+        },
+        {
+          "name": "libstdcxx-devel_linux-64-16.2.0-h86e191b_105.conda",
+          "url": "https://conda.anaconda.org/conda-forge/noarch/libstdcxx-devel_linux-64-16.2.0-h86e191b_105.conda",
+          "sha256": "db4009a129f73e5f4e301a06b443bb5d160dbd7a89685ca54db1f50cd47f6963",
+          "bytes": 22154557
+        },
+        {
+          "name": "libgcc-devel_linux-64-16.2.0-he3ce08f_105.conda",
+          "url": "https://conda.anaconda.org/conda-forge/noarch/libgcc-devel_linux-64-16.2.0-he3ce08f_105.conda",
+          "sha256": "8c50468146b12ae9f2c7b457aa54fef603f69f7c46d607d6c892c16d1c8d2f70",
+          "bytes": 3093468
+        },
+        {
+          "name": "binutils_impl_linux-64-2.46.1-default_hfdba357_103.conda",
+          "url": "https://conda.anaconda.org/conda-forge/linux-64/binutils_impl_linux-64-2.46.1-default_hfdba357_103.conda",
+          "sha256": "98f9ddc6dc5d56a824b7eaea5bab6ad4bb47642288fc70d6b1b4024ac39d5595",
+          "bytes": 3706604
+        }
+      ],
+      "expected_probe_failures": []
+    },
+    {
+      "id": "16.2.0-ucrt64",
+      "gcc": "16.2.0",
+      "platform": "ucrt64",
+      "runner": "windows-latest",
+      "label": "GCC 16.2.0 / MSYS2 UCRT64",
+      "available": true,
+      "experimental": false,
+      "full_build": true,
+      "reported_version": "16.2.0",
+      "kind": "winlibs",
+      "cc": "auto",
+      "cxx": "auto",
+      "note": "WinLibs' UCRT64 MinGW-w64 build of released GCC 16.2.0 (posix threads, SEH, mingw-w64 14.0.0 r3). The checksum is the one published in the release's .sha256 sidecar. It is a single self-contained archive, so no pacman compiler package is installed: MSYS2 supplies the shell, cmake, ninja and unzip, while this archive supplies the compiler. The DLLs in its bin/ must be on PATH (see cmake/HostToolRuntime.cmake).",
+      "artifacts": [
+        {
+          "name": "winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r3.zip",
+          "url": "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-23.1.3-14.0.0-ucrt-r3/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r3.zip",
+          "sha256": "3c69305081e4a647144339a936244fcf7d3d9e558319e1ad7be2cd2886d4b6a1",
+          "bytes": 276414382
+        }
+      ],
+      "expected_probe_failures": []
+    },
+    {
+      "id": "16.3.0-linux",
+      "gcc": "16.3.0",
+      "platform": "linux",
+      "runner": "ubuntu-24.04",
+      "label": "GCC 16.3.0 / Linux",
+      "available": false,
+      "experimental": true,
+      "full_build": true,
+      "reported_version": "16.3.0",
+      "kind": "conda",
+      "installer": "scripts/install-gcc-prebuilt.sh",
+      "cc": "bin/gcc-16",
+      "cxx": "bin/g++-16",
+      "unavailable_reason": "GCC 16.3 is not released yet (no gcc-16.3.0 tarball, no conda-forge gcc_impl_linux-64 16.3.0). When it is: add the six pinned .conda artifacts with their sha256, add that version to scripts/install-gcc-prebuilt.sh, and flip `available` to true. Until then this cell is skipped rather than failing the workflow.",
+      "artifacts": [],
+      "expected_probe_failures": []
+    },
+    {
+      "id": "16.3.0-ucrt64",
+      "gcc": "16.3.0",
+      "platform": "ucrt64",
+      "runner": "windows-latest",
+      "label": "GCC 16.3.0 / MSYS2 UCRT64",
+      "available": false,
+      "experimental": true,
+      "full_build": true,
+      "reported_version": "16.3.0",
+      "kind": "winlibs",
+      "cc": "auto",
+      "cxx": "auto",
+      "unavailable_reason": "GCC 16.3 is not released yet, so neither WinLibs nor MSYS2 UCRT64 publishes a 16.3.0 toolchain. When one does: pin its archive URL + sha256 and flip `available` to true. Until then this cell is skipped.",
+      "artifacts": [],
+      "expected_probe_failures": []
+    }
+  ]
+}
