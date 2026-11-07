@@ -69,10 +69,11 @@ RUN set -eu; \
 # zshader links that library, so no compiler binary needs to be on PATH.
 
 # Not baked: the sources, the build tree, the ccache. `docker run -v $PWD:/workspace`
-# supplies the tree at run time. A Dockerfile cannot see a change to a remote
-# script, so Docker's layer cache only keys on ZHLN_GIT_REF: CI sets it to the
-# commit SHA, which guarantees the tooling here comes from the same commit as the
-# sources it mounts. Leave it at the default to reuse one cached image locally.
+# supplies the tree at run time (podman run works identically). A Containerfile
+# cannot see a change to a remote script, so the layer cache only keys on
+# ZHLN_GIT_REF: CI sets it to the commit SHA, which guarantees the tooling here
+# comes from the same commit as the sources it mounts. Leave it at the default
+# to reuse one cached image locally.
 WORKDIR /workspace
 
 CMD ["bash"]

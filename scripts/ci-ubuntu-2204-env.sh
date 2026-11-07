@@ -157,7 +157,7 @@ export PATH="${GCC_PREFIX}/bin:${PATH}"
 hash -r
 # The compiler is no longer in /usr/bin, so PATH has to be published rather than
 # just exported: the build runs in later workflow steps, and the image built by
-# docker/release-jammy.Dockerfile has its own ENV for the same reason.
+# docker/release-jammy/Containerfile has its own ENV for the same reason.
 if [ -n "${GITHUB_PATH:-}" ]; then
     printf '%s\n' "${GCC_PREFIX}/bin" >>"${GITHUB_PATH}"
 fi

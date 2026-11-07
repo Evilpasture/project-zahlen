@@ -134,7 +134,7 @@ things behave differently, all of them because Windows has no POSIX file model:
   `std::ofstream` (which would also convert the path to the ANSI code page).
 
 `build-zpkg/` is ignored by git. The CI image no longer copies the host tree at
-all: `docker/ci.Dockerfile` clones the repository inside the container, so a
+all: `docker/ci/Containerfile` clones the repository inside the container, so a
 `CMakeCache.txt` from a host build at a different path cannot reach the image in
 the first place.
 

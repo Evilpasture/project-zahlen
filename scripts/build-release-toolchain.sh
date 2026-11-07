@@ -8,7 +8,7 @@
 #       -v "$PWD/.ccache:/ccache" -e CCACHE_DIR=/ccache \
 #       zahlen-release-builder:jammy bash scripts/build-release-toolchain.sh /dist
 #
-# The host *is* the target. This runs inside docker/release-jammy.Dockerfile, which
+# The host *is* the target. This runs inside docker/release-jammy/Containerfile, which
 # is ubuntu:22.04 plus the jammy packages a build needs, so the glibc floor of every
 # published byte is the floor of the machine that produced it. There is no --sysroot,
 # no -B, no loader wrapper and no foreign binutils: the failures that design caused
@@ -69,7 +69,7 @@ if [ -r /etc/os-release ]; then
 fi
 if [ "${ID:-}" != "ubuntu" ] || [ "${VERSION_ID:-}" != "22.04" ]; then
     echo "error: this script builds inside Ubuntu 22.04; this is ${PRETTY_NAME:-an unknown system}." >&2
-    echo "       Use docker/release-jammy.Dockerfile. Cross-building against a sysroot" >&2
+    echo "       Use docker/release-jammy/Containerfile. Cross-building against a sysroot" >&2
     echo "       is precisely what this replaced: every failure in that design came" >&2
     echo "       from running another distro's binaries on this one." >&2
     exit 1
@@ -193,7 +193,7 @@ fi
 # therefore costs ~25 minutes of every run that is not a ccache hit to produce
 # something nobody ships.
 #
-# The prebuilt comes from docker/release-jammy.Dockerfile, which installs upstream's
+# The prebuilt comes from docker/release-jammy/Containerfile, which installs upstream's
 # release tarball -- built against glibc 2.17, measured -- plus the CMake config
 # upstream does not ship (scripts/install-slang-prebuilt.sh). -DZHLN_SLANG_VENDORED=ON
 # builds the pinned tree instead, for anyone who wants the exact submodule revision.

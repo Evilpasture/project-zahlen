@@ -40,12 +40,12 @@ on:
 permissions:
   contents: read
 
-# The image clones the tree itself (docker/ci.Dockerfile) and fetches only the
+# The image clones the tree itself (docker/ci/Containerfile) and fetches only the
 # ten submodules with no Arch package; glfw, simdjson, vulkan-headers,
 # shader-slang and LuaJIT come from pacman and their CMake probes prefer the
 # system copy. No host-side submodule checkout feeds a Docker context any more;
 # `actions/checkout` below stays only so build-push-action can resolve
-# `file: docker/ci.Dockerfile` from the (otherwise unused) context.
+# `file: docker/ci/Containerfile` from the (otherwise unused) context.
 
 # PR updates supersede earlier runs of that PR. Pushes use unique groups so
 # independent commits can build and test concurrently instead of queueing.
@@ -75,7 +75,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/ci.Dockerfile
+          file: docker/ci/Containerfile
           target: builder
           load: true
           tags: zahlen-builder:asan

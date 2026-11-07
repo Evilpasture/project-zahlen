@@ -1,11 +1,11 @@
 # CI may package an already-published builder image instead of rebuilding it.
-# The default is the local stage, preserving
-# `docker build -f docker/ci.Dockerfile --target runner .`.
+# The default is the local stage, so a plain `--target runner` build uses the
+# stages in this file (see docker/README.md).
 #
 # This image takes NOTHING from the build context. There is no COPY from `.` and
 # no .dockerignore: the source is cloned from git inside the container, so the
 # checkout is complete by construction. The context only has to contain this
-# Dockerfile; locally an empty directory works (see docker/README.md).
+# Containerfile; locally an empty directory works (see docker/README.md).
 ARG ZHLN_BUILDER_IMAGE=builder
 
 # ==============================================================================
@@ -207,7 +207,7 @@ RUN mkdir -p /workspace/dist/data && \
 # STAGE 3: Test (runs the ztest suite)
 # ==============================================================================
 # Kept out of the build stage so compiling and testing are independent steps.
-# `docker build -f docker/ci.Dockerfile --target test .` reproduces CI locally; the GitHub Actions "Test"
+# `docker build -f docker/ci/Containerfile --target test .` reproduces CI locally; the GitHub Actions "Test"
 # job instead runs the same command inside the image published by "Build", so a
 # failing test is reported without ever blocking the build job.
 FROM builder AS test

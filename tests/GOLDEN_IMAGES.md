@@ -116,10 +116,10 @@ count deltas. No pixels involved.
    to grow on.
 2. **GPU suites are off in CI.** `tests/CMakeLists.txt:203` —
    `option(ZHLN_BUILD_GPU_TESTS … OFF)`. `.github/workflows/ci.yml` builds the
-   `builder` stage of `docker/ci.Dockerfile` and runs CTest; the render suites are not
+   `builder` stage of `docker/ci/Containerfile` and runs CTest; the render suites are not
    in that run. Everything in bucket B is therefore a **local-only** gate today:
    it fails on a developer's machine, never in a PR.
-3. **The Docker image already pins a software device.** `docker/ci.Dockerfile`
+3. **The Docker image already pins a software device.** `docker/ci/Containerfile`
    installs `vulkan-icd-loader`, `vulkan-swrast` and `vulkan-validation-layers`
    from Arch and sets `VK_DRIVER_FILES` / `VK_ICD_FILENAMES` to the distro's
    `lvp_icd.json` — Lavapipe.

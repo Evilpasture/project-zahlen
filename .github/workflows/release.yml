@@ -12,7 +12,7 @@ name: Release (Ubuntu 22.04 baseline)
 # normal dev environment and the release itself.
 #
 # Three jobs, deliberately different in kind:
-#   toolchain  build *inside* Ubuntu 22.04 (docker/release-jammy.Dockerfile: apt
+#   toolchain  build *inside* Ubuntu 22.04 (docker/release-jammy/Containerfile: apt
 #              packages, and GCC 16 from the Ubuntu toolchain PPA since the tree
 #              needs -freflection), package, sign, publish to a GitHub Release.
 #              Nothing is cross-compiled: the compiler, binutils, wayland-scanner
@@ -140,7 +140,7 @@ jobs:
 
       # The release builder is only tooling: ubuntu:22.04 plus the jammy packages a
       # build needs. It clones the repository inside the image to get its
-      # provisioning scripts (no COPY, no .dockerignore), pinned to this commit;
+      # provisioning scripts (no build-context COPY), pinned to this commit;
       # the sources are still mounted at /workspace at run time. The GHA layer
       # cache restores everything else.
       - name: Set up Buildx
@@ -150,7 +150,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/release-jammy.Dockerfile
+          file: docker/release-jammy/Containerfile
           build-args: |
             ZHLN_GIT_URL=${{ github.server_url }}/${{ github.repository }}.git
             ZHLN_GIT_REF=${{ github.sha }}
