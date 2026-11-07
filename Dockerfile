@@ -15,8 +15,8 @@ FROM archlinux:latest AS base
 #                              cooker no longer needs one to configure -- see
 #                              ZHLN_HAS_BLENDER below (385 MiB installed).
 #
-# directx-shader-compiler stays, but not for DXIL: every shader in this tree
-# still cooks to SPIR-V through slangc (-target spirv) with SLANG_ENABLE_DXIL=OFF.
+# directx-shader-compiler stays, but not for DXIL: every engine shader cooks to
+# SPIR-V in-process through zshader/libslang with SLANG_ENABLE_DXIL=OFF.
 # The package is here because Jolt compiles its own Vulkan compute shaders:
 # Jolt/Shaders/*.hlsl -> *.spv is driven by dxc, and Jolt locates dxc by taking
 # FindVulkan's glslc path and replacing "glslc" with "dxc" -- there is no
@@ -32,7 +32,7 @@ FROM archlinux:latest AS base
 #   vulkan-headers  extern/Vulkan-Headers (revision macro-checked by the probe)
 #   glfw            extern/glfw           (3.5.1 >= the required 3.4)
 #   simdjson        extern/simdjson       (5.0.5, CMake config + pkg-config)
-#   shader-slang    extern/slang          (2026.18.2, slang::slang + slangc)
+#   shader-slang    extern/slang          (2026.18.2, libslang + headers)
 #   luajit          extern/LuaJIT         (2.1, pkg-config luajit>=2.1)
 #
 # Combine keyring update, full system upgrade, and package installation into ONE RUN
@@ -70,19 +70,15 @@ RUN pacman -Sy --noconfirm && \
 # No LunarG Vulkan SDK: every piece of it this build used is now a distro
 # package -- vulkan-headers, vulkan-icd-loader, vulkan-validation-layers and
 # shader-slang -- which drops a ~1.4 GB download from the image and leaves one
-# Slang on the box instead of two. extra/shader-slang installs slangc, the
-# slang::slang config at /usr/lib/cmake/slang, the headers cmake derives
-# ZHLN_SLANG_INCLUDE_DIR from (/usr/include/shader-slang) and the versioned
-# libslang-glslang-<version>.so libslang dlopens, so ShaderCompilation.cmake
-# resolves it with no prefix hint at all. Its 2026.18.2 is also outside the
-# known-bad families ShaderCompilation.cmake's gate refuses (2025.24.x and
-# 2026.1.x), and it is the very version this tree already downloads prebuilt on
-# Windows (v2026.18.2).
+# Slang on the box instead of two. extra/shader-slang installs libslang, its
+# public headers (/usr/include/shader-slang) and the slang::slang config at
+# /usr/lib/cmake/slang, so cmake/SlangHost/ resolves both halves with
+# find_package(slang CONFIG) and no prefix hint at all. zshader links that
+# library directly: no standalone compiler binary is looked up, version-checked
+# or put on PATH.
 #
 # Pass --build-arg ZHLN_SLANG_VENDORED=ON with extern/slang checked out to build
 # the pinned tree instead.
-RUN slangc -version 2>/dev/null || \
-    echo "WARNING: no slangc on PATH; the build will fall back to extern/slang"
 
 # CI deliberately uses the system Lavapipe and validation layer packages.
 # CMake disables the checked-in Arch-built sandbox in ZHLN_IN_DOCKER mode,

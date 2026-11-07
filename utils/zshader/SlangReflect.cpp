@@ -85,9 +85,11 @@ auto CheckDiagnostics(slang::IBlob* blob, std::string_view source, std::string_v
     -> bool {
     const std::string text = DiagText(blob);
     if (!text.empty()) {
+        // One provenance for diagnostics: the build system and the IDE read
+        // file:line:col: error/warning, not Slang's file(line): error 30019.
         return ReportOrFail(
             errorOut, "'{}' entry '{}': Slang reported diagnostics; the catalog compiles warning-free:\n{}", source,
-            entry, text
+            entry, FormatSlangDiagnostics(text, source)
         );
     }
     return true;
@@ -500,10 +502,60 @@ auto ReflectSlangEntry(slang::IComponentType* linked, std::string_view file, std
     return info;
 }
 
+namespace {
+
+// The codegen half of a compile. `errorOut` is set (not Fail()-ed) so the
+// batch's worker threads can report the earliest failure on the main thread
+// instead of exiting the process from a worker.
+auto EmitSpirvImpl(slang::IComponentType* linked, std::string_view file, std::string_view entry, std::string* errorOut)
+    -> std::vector<uint8_t> {
+    if (linked == nullptr) {
+        ReportOrFail(errorOut, "'{}' entry '{}': Slang linked nothing to emit", file, entry);
+        return {};
+    }
+    Slang::ComPtr<slang::IBlob> code;
+    Slang::ComPtr<slang::IBlob> diagnostics;
+    const SlangResult result = linked->getEntryPointCode(0, 0, code.writeRef(), diagnostics.writeRef());
+    const std::string diagText = DiagText(diagnostics.get());
+    if (!diagText.empty()) {
+        // Warnings are visible but do not fail the codegen; -WX (dxc-compat)
+        // turns them into errors inside libslang on its own.
+        std::print(stderr, "{}", FormatSlangDiagnostics(diagText, file));
+    }
+    if (SLANG_FAILED(result) || code == nullptr) {
+        ReportOrFail(
+            errorOut, "'{}' entry '{}': Slang cannot emit SPIR-V:\n{}", file, entry,
+            diagText.empty() ? std::string {"no diagnostic"} : FormatSlangDiagnostics(diagText, file)
+        );
+        return {};
+    }
+    const size_t      size = code->getBufferSize();
+    const auto* const data = static_cast<const uint8_t*>(code->getBufferPointer());
+    if (size < 4 || size % sizeof(uint32_t) != 0 || data == nullptr ||
+        !(data[0] == 0x03 && data[1] == 0x02 && data[2] == 0x23 && data[3] == 0x07)) {
+        ReportOrFail(errorOut, "'{}' entry '{}': Slang emitted {} bytes that are not SPIR-V", file, entry, size);
+        return {};
+    }
+    return std::vector<uint8_t> {data, data + size};
+}
+
+} // namespace
+
+auto EntryPointSpirv(slang::IComponentType* linked, std::string_view file, std::string_view entry)
+    -> std::vector<uint8_t> {
+    std::vector<uint8_t> bytes = EmitSpirvImpl(linked, file, entry, nullptr);
+    if (bytes.empty()) {
+        Fail("no SPIR-V for '{}' entry '{}'", file, entry);
+    }
+    return bytes;
+}
+
 auto ReflectCatalogModule(const SlangCompileArgs& args) -> SlangEntryInfo {
     const SlangProgram     program = CompileSlangEntry(args);
     const std::string_view source  = SourceOf(args);
-    return ReflectSlangEntry(program.linked.get(), source, args.entry);
+    SlangEntryInfo         info    = ReflectSlangEntry(program.linked.get(), source, args.entry);
+    info.spirv                    = EntryPointSpirv(program.linked.get(), source, args.entry);
+    return info;
 }
 
 auto ReflectCatalogBatch(std::span<const SlangBatchRequest> requests, std::span<const std::string> searchPaths)
@@ -686,6 +738,15 @@ auto ReflectCatalogBatch(std::span<const SlangBatchRequest> requests, std::span<
 
                 if (!ReflectSlangEntryImpl(linked.get(), req.file, req.entry, results[reqIdx], &err)) {
                     recordFailure(reqIdx, std::move(err));
+                    return;
+                }
+
+                // Codegen on the SAME linked program, in the same worker: the
+                // bytes and the reflection are one compile, not a replay.
+                std::string spvError;
+                results[reqIdx].spirv = EmitSpirvImpl(linked.get(), req.file, req.entry, &spvError);
+                if (results[reqIdx].spirv.empty()) {
+                    recordFailure(reqIdx, std::move(spvError));
                     return;
                 }
             }

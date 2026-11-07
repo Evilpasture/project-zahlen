@@ -3,14 +3,15 @@
 
 # cmake/SlangPrebuilt.cmake
 #
-# Slang without a Slang build.
+# libslang without a Slang build.
 #
-# The official release archive is a complete Slang install: bin/slangc,
-# lib/libslang-compiler, the public headers (slang.h, slang-com-helper.h,
-# slang-com-ptr.h) and a CMake config package at lib/cmake/slang. Taking it means
-# nothing is compiled for Slang and nothing downstream changes -- the existing
-# discovery in ShaderCompilation.cmake already knows how to consume exactly that
-# layout, because it is the layout scripts/install-slang-prebuilt.sh produces.
+# The official release archive is a complete Slang install: lib/libslang-compiler,
+# the slang-glslang companion, the public headers (slang.h, slang-com-helper.h,
+# slang-com-ptr.h) and a CMake config package at lib/cmake/slang. The archive
+# also ships a standalone compiler binary, which this build ignores: zshader
+# links libslang once and is the only shader compiler driver. SlangResolve.cmake
+# consumes the library/header layout -- the same one
+# scripts/install-slang-prebuilt.sh produces -- and nothing else.
 #
 # Why the release archive and not the PyPI slangpy wheel: the wheel carries
 # libslang-compiler and slang.h, but neither slang-com-helper.h nor
@@ -21,7 +22,7 @@
 # Ordering, highest first:
 #
 #   1. an existing Slang in the configure (a parent project, an earlier add)
-#   2. host slangc on PATH / $VULKAN_SDK/bin / $SLANG_BIN / /opt/slang/bin
+#   2. a host slang CONFIG package / slangpy wheel (libslang + headers)
 #   3. this file: the release archive, unpacked into the build tree and cached
 #   4. extern/slang compiled from source -- ZHLN_SLANG_VENDORED=ON only
 #
@@ -47,7 +48,7 @@ set(ZHLN_SLANG_PREBUILT_ROOT "" CACHE PATH
     "Use an already-unpacked Slang release as-is; skips the download")
 set(ZHLN_SLANG_PREBUILT_DIR "" CACHE PATH "Resolved Slang release root (set by this file)")
 set(ZHLN_SLANG_KNOWN_GOOD "v2026.21" CACHE STRING
-    "Release used when the GitHub API cannot be reached (past the #9500 window)")
+    "Release used when the GitHub API cannot be reached")
 
 # The release names its assets <tag>-<os>-<arch>. Those three tokens are enough to
 # name the archive without asking the API -- which is what makes a pinned,
@@ -60,9 +61,9 @@ function(_zhln_slang_give_up _reason)
             "Slang: ${_reason}. ZHLN_SLANG_REQUIRE_PREBUILT=ON, so this is fatal rather than a "
             "fallback. Fix the cause, pin a release with -DZHLN_SLANG_RELEASE=vYYYY.MM, point "
             "-DZHLN_SLANG_PREBUILT_ROOT at an unpacked release, or turn the requirement off and "
-            "accept a host slangc / extern/slang build.")
+            "accept a host libslang package / extern/slang build.")
     endif()
-    message(STATUS "Slang: ${_reason}; falling back to a host slangc, then extern/slang")
+    message(STATUS "libslang: ${_reason}; falling back to a host package, then extern/slang")
 endfunction()
 
 function(_zhln_slang_prebuilt_asset _tag _out)

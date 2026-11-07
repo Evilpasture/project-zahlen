@@ -98,6 +98,9 @@ struct SlangEntryInfo {
     std::array<uint32_t, 3>       localSize {1, 1, 1}; // compute: [numthreads], straight from Slang's reflection
     std::vector<SlangBinding>     bindings {};
     std::vector<SlangPushBlock>   pushes {};
+    // SPIR-V from the same linked program the reflection above walked. One
+    // compile per module: the tool is the compiler driver, not a replayer.
+    std::vector<uint8_t>          spirv {};
 };
 
 // How to compile one entry point: exactly one of the file or the module
@@ -149,9 +152,15 @@ auto CompileSlangEntry(const SlangCompileArgs& args) -> SlangProgram;
 // tree declares no uniform entry params); anything else fails naming it.
 auto ReflectSlangEntry(slang::IComponentType* linked, std::string_view file, std::string_view entry) -> SlangEntryInfo;
 
-// Compile + reflect for one catalog module: the linked program's records,
-// exactly as Slang's layout and usage table describe them. No bytes -- the
-// cooked file is never the tool's input.
+// Emits the linked entry point's SPIR-V and validates it (magic, word
+// alignment). Called on the very program the reflection walked, so the bytes
+// and the bindings can never disagree. Diagnostics are GCC/Clang formatted.
+auto EntryPointSpirv(slang::IComponentType* linked, std::string_view file, std::string_view entry)
+    -> std::vector<uint8_t>;
+
+// Compile + reflect + codegen for one catalog module: the linked program's
+// records and its bytes, exactly as Slang produced them. No second compile,
+// no cooked file as an input.
 auto ReflectCatalogModule(const SlangCompileArgs& args) -> SlangEntryInfo;
 
 struct SlangBatchRequest {

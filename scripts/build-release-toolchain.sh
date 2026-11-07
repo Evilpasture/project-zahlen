@@ -187,10 +187,11 @@ if [ -d extern/slang/.git ] || [ -f extern/slang/.git ]; then
 fi
 
 # -------------------------------------------------------------------- 3. slang
-# Slang is a build-host dependency, not a released one: utils/zshader is a build tool
-# with no install rule, so it cooks shaders with slangc and nothing it links reaches a
-# package. Building the pinned extern/slang tree therefore costs ~25 minutes of every
-# run that is not a ccache hit to produce two things nobody ships.
+# Slang is a build-host dependency, not a released one: utils/zshader is a build
+# tool with no install rule, so it links libslang, cooks the shaders in-process
+# and nothing it links reaches a package. Building the pinned extern/slang tree
+# therefore costs ~25 minutes of every run that is not a ccache hit to produce
+# something nobody ships.
 #
 # The prebuilt comes from docker/release-jammy.Dockerfile, which installs upstream's
 # release tarball -- built against glibc 2.17, measured -- plus the CMake config
@@ -206,21 +207,26 @@ if [ "${slang_mode}" = "ON" ]; then
         slang_args+=(-DSLANG_VERSION_FULL="${slang_version}")
     fi
 else
-    [ -x "${slang_prefix}/bin/slangc" ] || {
-        echo "error: no prebuilt slangc at ${slang_prefix}/bin/slangc." >&2
-        echo "       scripts/install-slang-prebuilt.sh installs it; the release image" >&2
+    [ -f "${slang_prefix}/include/slang.h" ] || {
+        echo "error: no libslang headers at ${slang_prefix}/include/slang.h." >&2
+        echo "       scripts/install-slang-prebuilt.sh installs them; the release image" >&2
         echo "       does that at build time. Or set ZHLN_SLANG_VENDORED=ON to build" >&2
         echo "       the pinned tree instead." >&2
         exit 1
     }
-    [ -f "${slang_prefix}/lib/cmake/slang/slang-config.cmake" ] || {
-        echo "error: ${slang_prefix} has slangc but no CMake config package." >&2
-        echo "       cmake/ShaderCompilation.cmake resolves Slang with" >&2
-        echo "       find_package(slang CONFIG); re-run scripts/install-slang-prebuilt.sh." >&2
+    compgen -G "${slang_prefix}/lib/libslang-compiler.so*" >/dev/null || {
+        echo "error: ${slang_prefix}/lib has no libslang-compiler shared library." >&2
+        echo "       Re-run scripts/install-slang-prebuilt.sh." >&2
         exit 1
     }
-    echo "== slang: prebuilt $("${slang_prefix}/bin/slangc" -version 2>&1 | head -1) at ${slang_prefix}"
-    slang_args+=(-DCMAKE_PREFIX_PATH="${slang_prefix}" -DSLANG_EXECUTABLE="${slang_prefix}/bin/slangc")
+    [ -f "${slang_prefix}/lib/cmake/slang/slang-config.cmake" ] || {
+        echo "error: ${slang_prefix} has libslang but no CMake config package." >&2
+        echo "       cmake/SlangHost/ resolves it with find_package(slang CONFIG);" >&2
+        echo "       re-run scripts/install-slang-prebuilt.sh." >&2
+        exit 1
+    }
+    echo "== slang: prebuilt libslang + headers at ${slang_prefix}"
+    slang_args+=(-DCMAKE_PREFIX_PATH="${slang_prefix}")
 fi
 
 # ---------------------------------------------------------------- 2. ccache

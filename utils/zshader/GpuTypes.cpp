@@ -113,7 +113,10 @@ auto CheckDiagnostics(std::string_view module, std::string_view stage, slang::IB
     if (text.empty()) {
         return;
     }
-    Fail("gpu types: Slang reported diagnostics {} '{}'; the ABI modules compile warning-free:\n{}", stage, module, text);
+    Fail(
+        "gpu types: Slang reported diagnostics {} '{}'; the ABI modules compile warning-free:\n{}", stage, module,
+        FormatSlangDiagnostics(text, module)
+    );
 }
 
 // A Slang reflection kind as a word: the Fail messages below name what the

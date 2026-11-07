@@ -103,16 +103,24 @@ set_source_files_properties(
 
 set(ZHLN_RENDER_SHADER_BYTECODE_OBJECTS "")
 if(NOT ZHLN_SYNTAX_ONLY)
+    # ShaderBytecode.cpp inlines every shader's SPIR-V as a C++ array; only the
+    # two static DDS tables and the decoded blue-noise tile are still #embed-ed.
+    # Those are the only files this TU needs a file-level dependency on -- the
+    # .spv modules are outputs of the same zshader command, not its inputs.
+    set(ZHLN_SHADER_BYTECODE_DEPENDS
+        "${ZHLN_BLUE_NOISE_COOKED}"
+        "${CMAKE_SOURCE_DIR}/src/render/ltc_mat.dds"
+        "${CMAKE_SOURCE_DIR}/src/render/ltc_amp.dds"
+    )
     set_source_files_properties(
         "${ZHLN_SHADER_CATALOG_SOURCE}"
-        PROPERTIES OBJECT_DEPENDS "${ALL_GENERATED_SPVS};${ZHLN_BLUE_NOISE_COOKED}"
+        PROPERTIES OBJECT_DEPENDS "${ZHLN_SHADER_BYTECODE_DEPENDS}"
     )
 
-    # ShaderBytecode.cpp #embeds every cooked .spv module, whereas the 59 renderer
-    # translation units only consume the reflected ShaderBindings.hpp text catalog.
-    # Isolating ShaderBytecode.cpp in its own OBJECT library lets all renderer C++
-    # TUs compile in parallel with slangc .spv cooking and limits .slang body edits
-    # to recompiling this single object file.
+    # The 59 renderer translation units only consume the reflected
+    # ShaderBindings.hpp text catalog. Isolating ShaderBytecode.cpp in its own
+    # OBJECT library keeps the inlined bytes in one translation unit, so a
+    # .slang edit rebuilds exactly that object and relinks.
     add_library(zahlen_shader_bytecode OBJECT "${ZHLN_SHADER_CATALOG_SOURCE}")
     set_target_properties(zahlen_shader_bytecode PROPERTIES
         POSITION_INDEPENDENT_CODE ON
