@@ -1,0 +1,217 @@
+# Game-development box: Fedora 44, a superset of dev/Containerfile.
+#
+# Two consumer workflows in one image:
+#   zpkg      the newest published toolchain is fetched from GitHub Releases,
+#             checksum- and signature-verified, and installed into frienduser's
+#             per-user store. zpkg itself stays in ~/.local/bin -- nothing is
+#             installed system-wide. This happens in the entrypoint, so a new
+#             release needs no rebuild of the image.
+#   app-only  the release's cube-consumer bundle becomes a starter game project.
+#             There is no engine checkout, no submodules and no build-context
+#             COPY: everything in here comes from dnf or from the release.
+#
+# Ubuntu 24.04 (noble) is the release's proven *render* host: the release
+# workflow runs its frame there because kisak-mesa publishes Mesa 26.2 for
+# noble, the first lavapipe with VK_EXT_descriptor_heap. The release itself is
+# built on Ubuntu 22.04 / glibc 2.35, so its binaries run here too. Noble is
+# deliberately not a stage in this image -- Fedora's own Mesa is what renders.
+# If a frame needs a driver newer than Fedora ships, run the same release on
+# noble instead of cross-installing Ubuntu packages into Fedora.
+#
+# Toolchain: exactly what dnf offers. No pinned prebuilt compiler, no downgrade,
+# no sysroot tricks, no clone of the engine just to get a provisioning script.
+# See docker/README.md for the one consequence of that choice.
+
+FROM fedora:44
+
+# Build args set the defaults; `podman run -e NAME=...` overrides them at start.
+ARG ZHLN_RELEASE_REPO=Evilpasture/project-zahlen
+ARG ZHLN_RELEASE_TAG=latest
+ARG ZHLN_RELEASE_CACHE=/home/frienduser/.cache/zahlen-release
+ARG ZHLN_GAME_DIR=/home/frienduser/Projects/game
+ENV ZHLN_RELEASE_REPO=${ZHLN_RELEASE_REPO} \
+    ZHLN_RELEASE_TAG=${ZHLN_RELEASE_TAG} \
+    ZHLN_RELEASE_CACHE=${ZHLN_RELEASE_CACHE} \
+    ZHLN_GAME_DIR=${ZHLN_GAME_DIR}
+
+# dev/Containerfile's package set, plus what a released toolchain links or
+# dlopens at run time and what the release fetch needs. `gcc gcc-c++` come from
+# dnf -- they are the compiler here, and Fedora upgrades them with everything
+# else in the `dnf upgrade` below.
+RUN dnf -y upgrade --refresh && dnf -y install \
+    gcc gcc-c++ make patch diffutils findutils which file procps-ng binutils gdb \
+    clang mold cmake ninja-build ccache git python3 \
+    pkgconf-pkg-config wget tar curl libzstd-devel \
+    vulkan-loader-devel vulkan-headers vulkan-validation-layers mesa-vulkan-drivers \
+    vulkan-tools netpbm-progs \
+    libevdev-devel libseat-devel gtest-devel \
+    glfw-devel simdjson-devel luajit-devel \
+    dropbear openssh-clients sudo tmux vim neovim htop libcurl-devel clang-tools-extra \
+    perl-core luarocks fastfetch \
+    jq zstd unzip openssl libcurl libzstd glibc-devel libstdc++-devel \
+    libwayland-client libwayland-cursor libwayland-egl libxkbcommon libdecor \
+    && dnf clean all
+
+# Optional packages: don't fail the build if Fedora lacks them.
+RUN for p in shader-slang directx-shader-compiler; do \
+        dnf -y install "$p" || echo "WARNING: $p not available"; \
+    done
+
+# Fedora names the Lavapipe ICD with an arch suffix; give it a stable path.
+RUN f="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n1)" && \
+    mkdir -p /usr/local/share/vulkan && \
+    ln -sf "$f" /usr/local/share/vulkan/lvp_icd.json
+ENV VK_DRIVER_FILES=/usr/local/share/vulkan/lvp_icd.json \
+    VK_ICD_FILENAMES=/usr/local/share/vulkan/lvp_icd.json \
+    VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d
+
+ARG SSH_PUBKEY=""
+ARG FRIEND_PASSWORD
+RUN test -n "$FRIEND_PASSWORD" || { echo "pass --build-arg FRIEND_PASSWORD=..." >&2; exit 1; }
+
+RUN useradd -m -s /bin/bash frienduser && \
+    echo "frienduser:${FRIEND_PASSWORD}" | chpasswd && \
+    echo 'frienduser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/frienduser && \
+    chmod 440 /etc/sudoers.d/frienduser && \
+    mkdir -p /home/frienduser/.ssh /home/frienduser/Projects /home/frienduser/.ccache \
+             /home/frienduser/.local/bin /home/frienduser/.local/share/zahlen && \
+    echo "$SSH_PUBKEY" > /home/frienduser/.ssh/authorized_keys && \
+    chmod 700 /home/frienduser/.ssh && chmod 600 /home/frienduser/.ssh/authorized_keys && \
+    chown -R frienduser:frienduser /home/frienduser && \
+    install -d -o frienduser -g frienduser "${ZHLN_RELEASE_CACHE}"
+
+RUN mkdir -p /etc/dropbear && \
+    dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key && \
+    dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key && \
+    dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
+
+# The release installer. It is written into the image rather than COPYed from a
+# build context, and it owns no engine sources. Podman/buildah accept this
+# heredoc form without a `# syntax=` directive (BuildKit does too, with one).
+RUN <<'SETUP'
+cat > /usr/local/bin/zahlen-gamedev-init <<'INIT'
+#!/usr/bin/env bash
+# Fetch, verify and install the newest Zahlen release, then exec the CMD.
+set -Eeuo pipefail
+
+log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+repo=${ZHLN_RELEASE_REPO:-Evilpasture/project-zahlen}
+requested=${ZHLN_RELEASE_TAG:-latest}
+cache=${ZHLN_RELEASE_CACHE:-/var/cache/zahlen-release}
+game=${ZHLN_GAME_DIR:-/home/frienduser/Projects/game}
+user=frienduser
+home=/home/frienduser
+
+# Optional: lifts the anonymous 60 req/hr limit and opens private repositories.
+token=${GH_TOKEN:-${GITHUB_TOKEN:-}}
+auth=()
+[[ -n $token ]] && auth=(-H "Authorization: Bearer ${token}")
+
+# A pinned tag that is already cached needs no network at all.
+tag=""
+if [[ $requested != latest && -f "${cache}/${requested}/toolchain.json" ]]; then
+    tag=$requested
+    log "using cached release ${tag} (no GitHub API call)"
+fi
+if [[ -z $tag ]]; then
+    if [[ $requested == latest ]]; then
+        url="https://api.github.com/repos/${repo}/releases/latest"
+    else
+        url="https://api.github.com/repos/${repo}/releases/tags/${requested}"
+    fi
+    log "resolving ${repo} @ ${requested}"
+    meta=$(curl -fsSL "${auth[@]}" -H 'Accept: application/vnd.github+json' "$url") \
+        || die "no release at ${url}; set ZHLN_RELEASE_TAG to a published tag"
+    tag=$(printf '%s' "$meta" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])') \
+        || die "could not read tag_name from the GitHub API response"
+    [[ -n $tag ]] || die "empty tag_name"
+fi
+
+dest="${cache}/${tag}"
+if [[ ! -f "${dest}/toolchain.json" ]]; then
+    tmp="${dest}.tmp.$$"
+    rm -rf "$tmp"; mkdir -p "$tmp"
+    # GitHub Releases are flat: packages/, tools/ and the signing key all land
+    # in one directory, which is exactly what `zpkg install <dir>` expects.
+    # The rendered preview PNG is the only asset that is not part of that set.
+    printf '%s' "$meta" | python3 -c '
+import json, sys
+for a in json.load(sys.stdin).get("assets", []):
+    n = a["name"]
+    if not n.endswith(".png"):
+        print(n + "\t" + a["browser_download_url"])
+' | while IFS=$'\t' read -r name link; do
+        [[ -n $name ]] || continue
+        log "downloading ${name}"
+        curl -fsSL "${auth[@]}" -o "${tmp}/${name}" "$link"
+    done || die "download failed"
+    # zpkg ships outside the packages' SHA256SUMS; check it before executing it.
+    ( cd "$tmp" && sha256sum -c SHA256SUMS.tools ) || die "SHA256SUMS.tools did not verify"
+    test -f "${tmp}/zahlen-release-key.pub" || die "release has no public key"
+    test -f "${tmp}/SHA256SUMS.ed25519"     || die "release is unsigned"
+    rm -rf "$dest"; mkdir -p "$(dirname "$dest")"; mv "$tmp" "$dest"
+    chmod -R a+rX "$dest"
+else
+    log "using cached release ${tag}"
+fi
+
+# zpkg is a per-user tool, not a system package manager. It lives in
+# frienduser's own ~/.local/bin, next to the shims it creates; its store is
+# ~/.local/share/zahlen. Nothing from the release is installed system-wide and
+# zpkg is never run as root (it refuses elevated use by design).
+as_user() { runuser -u "$user" -- env HOME="$home" XDG_DATA_HOME="${home}/.local/share" "$@"; }
+as_user install -m 755 "${dest}/zpkg-linux-x86_64" "${home}/.local/bin/zpkg"
+log "zpkg $(as_user zpkg --version 2>&1 | head -1)"
+as_user zpkg key add "${dest}/zahlen-release-key.pub" --name "zahlen release" \
+    || die "could not trust the release key"
+as_user zpkg install "$dest" --require-checksums --require-signatures \
+    || die "zpkg refused the release"
+id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "${dest}/toolchain.json") \
+    || die "toolchain.json has no id"
+as_user zpkg use "$id" || die "could not activate ${id}"
+as_user zpkg shims enable >/dev/null 2>&1 || true
+
+# Starter game project, extracted once so a new release never overwrites it.
+if [[ ! -f "${game}/CMakeLists.txt" ]]; then
+    bundle=$(find "$dest" -maxdepth 1 -name 'cube-consumer-*.tar.gz' -print -quit)
+    [[ -n $bundle ]] || die "release has no cube-consumer-*.tar.gz"
+    mkdir -p "$game"
+    tar -xzf "$bundle" -C "$game"
+    chown -R "${user}:${user}" "$game"
+    log "starter project: ${game}"
+fi
+
+# Both versions are printed, never reconciled: this image uses dnf's compiler,
+# while a published toolchain records the compiler that built it.
+required=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("compiler","?")+" "+d.get("compiler_version","?"))' "${dest}/toolchain.json")
+have=$(g++ -dumpfullversion -dumpversion 2>/dev/null || echo unknown)
+log "release compiler: ${required} | image compiler: GNU ${have} (dnf)"
+log "active toolchain: ${id}"
+log "prefix: $(as_user zpkg prefix)"
+log "game: ${game}"
+exec "$@"
+INIT
+chmod 755 /usr/local/bin/zahlen-gamedev-init
+
+# Login shell defaults. CMAKE_PREFIX_PATH is resolved from the store at login,
+# so it follows `zpkg use` without a rebuild.
+cat > /etc/profile.d/zahlen-gamedev.sh <<'PROF'
+export PATH="$HOME/.local/bin:$PATH"
+if command -v zpkg >/dev/null 2>&1; then
+    export CMAKE_PREFIX_PATH="$(zpkg prefix)"
+fi
+PROF
+
+SETUP
+
+ENV CCACHE_DIR=/home/frienduser/.ccache
+WORKDIR /home/frienduser/Projects
+EXPOSE 22
+
+# -R = remote forwarding, -F = foreground, -E = log to stderr, -w = no root
+# login (no -s, so password logins work; keys work too). The entrypoint installs
+# the release first, then hands over to whatever CMD was given.
+ENTRYPOINT ["/usr/local/bin/zahlen-gamedev-init"]
+CMD ["dropbear", "-R", "-F", "-E", "-w"]

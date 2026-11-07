@@ -39,6 +39,13 @@ project(zahlen VERSION 0.1.0 LANGUAGES C CXX ASM)
 
 option(ZHLN_INSTALL_TOOLCHAIN_PACKAGES "Install independently consumable toolchain packages" OFF)
 
+# Floor for the C++26 reflection support in the engine and its public headers.
+# It is a minimum, not a pinned patch release: GCC point releases keep the
+# libstdc++ ABI. Installed package configs check >= this, and the provisioning
+# scripts (build-release-toolchain.sh, ci-ubuntu-2204-env.sh,
+# install-gcc-prebuilt.sh) default GCC_MIN to the same value.
+set(ZHLN_GCC_MIN "16.1.1" CACHE STRING "Minimum GCC version for C++26 reflection")
+
 # CMake's built-in "Link What You Use": link with --no-as-needed and have the
 # linker report every direct dependency that contributes no symbol. It is the
 # same evidence as the symbol audit that produced the link cleanup, but it runs

@@ -6,11 +6,18 @@ endif()
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build configuration" FORCE)
 endif()
-# Do not silently accept a different compiler, CPU ABI, or instrumentation.
+# A package is not a compiler distribution. GCC point releases keep the
+# libstdc++ ABI, so demanding the exact patch version that happened to build a
+# release was arbitrary. The real gates are the compiler family, the tree's
+# minimum, the CPU, the dual-ABI/debug switches below, and the ELF symbol
+# versions the linker and loader enforce.
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "@CMAKE_CXX_COMPILER_ID@" OR
-   NOT CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "@CMAKE_CXX_COMPILER_VERSION@" OR
    NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "@CMAKE_SYSTEM_PROCESSOR@")
-    message(FATAL_ERROR "Zahlen toolchain requires @CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@ on @CMAKE_SYSTEM_PROCESSOR@")
+    message(FATAL_ERROR "Zahlen toolchain requires @CMAKE_CXX_COMPILER_ID@ on @CMAKE_SYSTEM_PROCESSOR@")
+endif()
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+   CMAKE_CXX_COMPILER_VERSION VERSION_LESS "@ZHLN_GCC_MIN@")
+    message(FATAL_ERROR "Zahlen toolchain requires GNU >= @ZHLN_GCC_MIN@ (built with @CMAKE_CXX_COMPILER_VERSION@)")
 endif()
 set(Zahlen_SANITIZER_PROFILE "release" CACHE STRING "Zahlen toolchain profile: release or asan-ubsan")
 if(NOT Zahlen_SANITIZER_PROFILE STREQUAL "@ZHLN_TOOLCHAIN_PROFILE@")
@@ -24,13 +31,17 @@ set_property(GLOBAL PROPERTY Zahlen_TOOLCHAIN_ABI "@ZHLN_TOOLCHAIN_ABI@")
 if(NOT _zahlen_abi)
     include(CheckCXXSourceCompiles)
     unset(_zahlen_stl_ok CACHE)
+    # __GLIBCXX__ is a header release date, not an ABI contract. libstdc++ is
+    # backward compatible, and an older runtime fails at link/load with the
+    # precise missing GLIBCXX_x.y.z symbol, which is a better error than a date
+    # comparison. The two settings that really change the ABI stay exact.
     check_cxx_source_compiles("#include <string>
-#if !defined(__GLIBCXX__) || __GLIBCXX__ != @ZHLN_TOOLCHAIN___GLIBCXX__@ || _GLIBCXX_USE_CXX11_ABI != @ZHLN_TOOLCHAIN__GLIBCXX_USE_CXX11_ABI@ || defined(_GLIBCXX_DEBUG)
+#if !defined(__GLIBCXX__) || _GLIBCXX_USE_CXX11_ABI != @ZHLN_TOOLCHAIN__GLIBCXX_USE_CXX11_ABI@ || defined(_GLIBCXX_DEBUG)
 #error incompatible Zahlen standard library ABI
 #endif
 int main() { return 0; }" _zahlen_stl_ok)
     if(NOT _zahlen_stl_ok)
-        message(FATAL_ERROR "Zahlen toolchain requires its build's libstdc++ ABI and version")
+        message(FATAL_ERROR "Zahlen toolchain requires libstdc++ with _GLIBCXX_USE_CXX11_ABI=@ZHLN_TOOLCHAIN__GLIBCXX_USE_CXX11_ABI@ and no debug containers")
     endif()
 endif()
 @ZHLN_TOOLCHAIN_DEPENDENCIES@

@@ -200,8 +200,8 @@ jobs:
             backends=$(cat dist/window-backends.txt || echo 'wayland=ON x11=OFF')
             echo "* window backends: ${backends} (GLFW is vendored and static; Wayland is the primary backend)"
             echo "* built natively on Ubuntu 22.04 (no sysroot, no cross-compilation)"
-            echo '* with that distro'"'"'s own GCC 16 package, so a consumer can install the'
-            echo '  exact compiler this was built with.'
+            echo '* with that distro'"'"'s own released GCC 16. Consumers need GNU >= 16.1.1,'
+            echo '  not the exact patch version that built this release.'
             echo
             echo '## Install'
             echo
@@ -221,7 +221,7 @@ jobs:
             echo 'cmake --build consumer-build'
             echo '```'
             echo
-            echo 'The toolchain pins its compiler: a released GCC 16, not the trunk'
+            echo 'The release was built with a released GCC 16, not the trunk'
             echo 'snapshot Ubuntu 22.04 offers. Get it with the script in this repository,'
             echo 'which downloads it, checks the version and compiles a probe with it:'
             echo
