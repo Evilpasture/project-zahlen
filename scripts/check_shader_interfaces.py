@@ -10,11 +10,12 @@ declared") and it wastes interpolation bandwidth. basic.slang / basic_mesh.slang
 therefore compile a per-pass variant of SceneGeometryOutput, and the geometry
 and fragment stages of a pipeline must rasterise the same varying struct.
 
-This script compiles all three variants with slangc and reflects the resulting
-SPIR-V, so the invariant is checkable without a GPU (unlike the validation
-layer, which only notices at pipeline creation).
+This script compiles all three variants with `zshader compile` (the same
+libslang driver the build uses) and reflects the resulting SPIR-V, so the
+invariant is checkable without a GPU (unlike the validation layer, which only
+notices at pipeline creation).
 
-    python3 scripts/check_shader_interfaces.py [--slangc /path/to/slangc]
+    python3 scripts/check_shader_interfaces.py [--compiler /path/to/zshader]
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ from __future__ import annotations
 import argparse
 import os
 import pathlib
-import shutil
 import struct
 import subprocess
 import sys
@@ -52,25 +52,25 @@ DECORATION_LOCATION = 30
 STORAGE_INPUT, STORAGE_OUTPUT = 1, 3
 
 
-def find_slangc(explicit: str | None) -> str:
+def find_compiler(explicit: str | None) -> list[str]:
+    """Returns the argv prefix for one compile: zshader's `compile` mode, or an
+    explicitly named compiler binary for comparison against an older tree."""
     if explicit:
-        return explicit
-    for candidate in (shutil.which("slangc"),
-                      os.path.join(os.environ.get("VULKAN_SDK", ""), "bin", "slangc"),
-                      os.path.join(os.environ.get("SLANG_BIN", ""), "slangc")):
-        if candidate and os.path.exists(candidate):
-            return candidate
-    sys.exit("slangc not found; pass --slangc or set VULKAN_SDK / SLANG_BIN")
+        return [explicit, "compile"] if os.path.basename(explicit).startswith("zshader") else [explicit]
+    built = sorted(REPO.glob("build/*/bin/zshader"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if built:
+        return [str(built[0]), "compile"]
+    sys.exit("zshader not built yet; pass --compiler /path/to/build/bin/zshader")
 
 
-def compile_stage(slangc: str, path: str, entry: str, stage: str, out: str) -> None:
-    cmd = [slangc, str(SHADERS / path), "-entry", entry, "-stage", stage, "-target", "spirv",
+def compile_stage(compiler: list[str], path: str, entry: str, stage: str, out: str) -> None:
+    cmd = [*compiler, str(SHADERS / path), "-entry", entry, "-stage", stage, "-target", "spirv",
            "-fvk-use-entrypoint-name", "-matrix-layout-column-major", "-I", str(SHADERS),
            "-I", str(REPO / "include")]
     cmd += ["-o", out]
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
-        sys.exit(f"slangc failed for {path}:{entry}\n{res.stderr}")
+        sys.exit(f"shader compile failed for {path}:{entry}\n{res.stderr}")
 
 
 def reflect(spv_path: str) -> tuple[dict[int, str], dict[int, str]]:
@@ -105,8 +105,8 @@ def reflect(spv_path: str) -> tuple[dict[int, str], dict[int, str]]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--slangc")
-    slangc = find_slangc(ap.parse_args().slangc)
+    ap.add_argument("--compiler", dest="compiler")
+    compiler = find_compiler(ap.parse_args().compiler)
 
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:
@@ -114,7 +114,7 @@ def main() -> int:
             spv = {}
             for path, entry, stage in stages:
                 out = os.path.join(tmp, f"{label}.{entry}.spv")
-                compile_stage(slangc, path, entry, stage, out)
+                compile_stage(compiler, path, entry, stage, out)
                 spv[stage] = out
 
             vs_out, _ = reflect(spv["vertex"])

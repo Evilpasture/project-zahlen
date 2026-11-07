@@ -37,10 +37,10 @@ set_target_properties(fidelity PROPERTIES
 zahlen_set_bin_output(fidelity)
 zahlen_add_runtime_dlls(fidelity)
 
+# zahlen_serialization carries zahlen_engine PUBLIC, so naming the engine again
+# is noise; Jolt was linked for a JPH_DOUBLE_PRECISION that nothing here uses.
 target_link_libraries(fidelity PRIVATE
-    zahlen_engine
     zahlen_serialization
-    Jolt
 )
 
 target_include_directories(fidelity SYSTEM PRIVATE
@@ -48,10 +48,8 @@ target_include_directories(fidelity SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/plugins
     ${CMAKE_SOURCE_DIR}/utils/fidelity
 )
-target_include_directories(fidelity PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-)
-
+# No ${CMAKE_SOURCE_DIR}/src root: main.cpp includes FidelityCore.hpp,
+# ImageIO.hpp and <json/JSONSchema.hpp> only.
 target_compile_definitions(fidelity PRIVATE JPH_DOUBLE_PRECISION)
 
 # Reflection gate, identical to every target that reaches a reflected header

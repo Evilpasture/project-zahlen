@@ -65,9 +65,12 @@ set_target_properties(
 target_compile_options(
   zahlen_vulkan PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 
+# SPIRV-Reflect is an implementation detail: pipeline/PipelineBuilder.cpp,
+# ShaderStages.cpp and ReflectedLayout.cpp use it, no header of this target
+# names a SpvReflect* type, so it stays out of the interface.
 target_link_libraries(
   zahlen_vulkan PUBLIC Vulkan-Headers GPUOpen::VulkanMemoryAllocator
-                       spirv-reflect-static)
+  PRIVATE spirv-reflect-static)
 
 # Every first-party header is spelled from src/ -- "vulkan/core/Handles.hpp",
 # "render/passes/SceneDraw.hpp" -- so src/ is the single include root. The

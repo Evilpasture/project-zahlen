@@ -13,8 +13,11 @@ jobs:
       - name: Build the preconfigured builder image
         run: |
           docker build \
+            -f docker/ci/Containerfile \
             --target builder \
             -t zahlen-builder:local \
+            --build-arg "ZHLN_GIT_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" \
+            --build-arg "ZHLN_GIT_REF=$GITHUB_SHA" \
             .
 
       - name: Run tests with Lavapipe

@@ -144,6 +144,7 @@ def get_git_tracked_files(
     extra_ignore_paths=None,
     ignore_headers=False,
     ignore_shaders=False,
+    cmake_only=False,
 ):
     extensions = {
         ".cpp",
@@ -170,6 +171,9 @@ def get_git_tracked_files(
     # other presets' existing extension selection unchanged.
     if active_presets and "test" in active_presets:
         extensions.update({".cmake", ".md"})
+
+    if cmake_only:
+        extensions = {".cmake"}
 
     include_filenames = {"CMakeLists.txt"}
     exclude_paths: set[str] = set()
@@ -205,6 +209,8 @@ def get_git_tracked_files(
         )
 
     if os.path.isfile(target):
+        if cmake_only and not (Path(target).suffix == ".cmake" or Path(target).name == "CMakeLists.txt"):
+            return []
         # A file target bypasses extension/ignore filtering as before, but
         # must still match an explicitly selected preset.
         if active_presets and not matches_any_preset(target, active_presets):
@@ -363,6 +369,7 @@ def run_project_manager(
     ignore_headers=False,
     ignore_shaders=False,
     stats=False,
+    cmake_only=False,
 ):
     tracked_files = get_git_tracked_files(
         target,
@@ -379,6 +386,7 @@ def run_project_manager(
         extra_ignore_paths=extra_ignore_paths,
         ignore_headers=ignore_headers,
         ignore_shaders=ignore_shaders,
+        cmake_only=cmake_only,
     )
     if stats:
         print_stats(tracked_files)
@@ -407,6 +415,10 @@ def run_project_manager(
         prefix = clean_path.replace(os.sep, "_") + "_"
         snapshot_file = f"{prefix}project_snapshot.md"
         diff_file = f"{prefix}project_diff.md"
+
+    if cmake_only:
+        snapshot_file = "cmake_" + snapshot_file
+        diff_file = "cmake_" + diff_file
 
     # 1. Generate new content
     new_content = generate_snapshot_string(tracked_files, target, active_presets)
@@ -503,6 +515,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--test-only", action="store_true",
         help="Dump test suites, ztest infrastructure, and render-fidelity harness files.",
+    )
+
+    parser.add_argument(
+        "--cmake-only", action="store_true",
+        help="Include only .cmake files and CMakeLists.txt; retain target, preset and ignore filters.",
     )
 
     # Ignore flags
@@ -631,4 +648,5 @@ if __name__ == "__main__":
         ignore_headers=args.ignore_headers,
         ignore_shaders=args.ignore_shaders,
         stats=args.stats,
+        cmake_only=args.cmake_only,
     )

@@ -40,26 +40,12 @@ on:
 permissions:
   contents: read
 
-# Only the libraries with no Arch package stay vendored. Slang, GLFW, simdjson,
-# Vulkan-Headers and LuaJIT are provisioned by the distro inside the image, so
-# cloning them (slang alone is the largest tree in the repo) is pure overhead:
-# their CMake probes prefer the system copy and every shipped compiler and
-# library they resolve to is a package. Jolt, VulkanMemoryAllocator,
-# meshoptimizer, SPIRV-Reflect, volk, mimalloc and the header-only
-# cgltf/stb/clay/miniaudio are added with add_subdirectory or included straight
-# out of extern/, so they must be present.
-env:
-  VENDORED_SUBMODULES: >-
-    extern/JoltPhysics
-    extern/VulkanMemoryAllocator
-    extern/SPIRV-Reflect
-    extern/volk
-    extern/meshoptimizer
-    extern/mimalloc
-    extern/miniaudio
-    extern/cgltf
-    extern/clay
-    extern/stb
+# The image clones the tree itself (docker/ci/Containerfile) and fetches only the
+# ten submodules with no Arch package; glfw, simdjson, vulkan-headers,
+# shader-slang and LuaJIT come from pacman and their CMake probes prefer the
+# system copy. No host-side submodule checkout feeds a Docker context any more;
+# `actions/checkout` below stays only so build-push-action can resolve
+# `file: docker/ci/Containerfile` from the (otherwise unused) context.
 
 # PR updates supersede earlier runs of that PR. Pushes use unique groups so
 # independent commits can build and test concurrently instead of queueing.
@@ -80,9 +66,6 @@ jobs:
         with:
           submodules: false
 
-      - name: Fetch vendored libraries
-        run: git submodule update --init --depth 1 ${VENDORED_SUBMODULES}
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -92,11 +75,14 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: docker/ci/Containerfile
           target: builder
           load: true
           tags: zahlen-builder:asan
           build-args: |
             ZHLN_USE_SANITIZERS=ON
+            ZHLN_GIT_URL=${{ github.server_url }}/${{ github.repository }}.git
+            ZHLN_GIT_REF=${{ github.sha }}
           cache-from: type=gha,scope=zahlen-asan
           cache-to: type=gha,scope=zahlen-asan,mode=max
 

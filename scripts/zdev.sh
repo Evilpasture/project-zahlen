@@ -13,14 +13,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Detect Host OS
 OS="$(uname -s)"
 
-find_dockerfile() {
+log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+find_containerfile() {
   local c
   local candidates=(
-    "${ZDEV_DOCKERFILE:-}"
-    "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)/Dockerfile.dev"
-    "$PWD/Dockerfile.dev"
-    "$SCRIPT_DIR/Dockerfile.dev"
-    "$SCRIPT_DIR/../Dockerfile.dev"
+    "${ZDEV_CONTAINERFILE:-${ZDEV_DOCKERFILE:-}}"
+    "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)/docker/dev/Containerfile"
+    "$PWD/docker/dev/Containerfile"
+    "$SCRIPT_DIR/docker/dev/Containerfile"
+    "$SCRIPT_DIR/../docker/dev/Containerfile"
   )
   for c in "${candidates[@]}"; do
     [[ -n "$c" && -f "$c" ]] && { (cd "$(dirname "$c")" && printf '%s/%s' "$PWD" "$(basename "$c")"); return; }
@@ -38,9 +41,6 @@ mkdir -p "$STATE" "$CONF"
 for bin in podman openssl; do
   command -v "$bin" >/dev/null || die "$bin not found in PATH"
 done
-
-log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
-die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 get_password() {
   if [[ -n "${ZDEV_PASSWORD:-}" ]]; then printf '%s' "$ZDEV_PASSWORD"; return; fi
@@ -63,15 +63,15 @@ ensure_machine() {
 }
 
 build() {
-  local DOCKERFILE
-  DOCKERFILE="$(find_dockerfile)" || die "Dockerfile.dev not found (set ZDEV_DOCKERFILE=/path/to/Dockerfile.dev)"
+  local CONTAINERFILE
+  CONTAINERFILE="$(find_containerfile)" || die "docker/dev/Containerfile not found (set ZDEV_CONTAINERFILE=/path/to/Containerfile)"
   ensure_machine
-  local repo_root
-  repo_root="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$SCRIPT_DIR")"
-  log "building $IMAGE from $repo_root"
+  # The dev image has no build-context COPY, so the context only has to hold the
+  # Containerfile. Using its own directory keeps the whole working tree out of it.
+  log "building $IMAGE from $(dirname "$CONTAINERFILE")"
   local args=(--build-arg "FRIEND_PASSWORD=$(get_password)")
   [[ -n "${ZDEV_SSH_PUBKEY:-}" ]] && args+=(--build-arg "SSH_PUBKEY=$ZDEV_SSH_PUBKEY")
-  podman build -f "$DOCKERFILE" -t "$IMAGE" "${args[@]}" "$repo_root"
+  podman build -f "$CONTAINERFILE" -t "$IMAGE" "${args[@]}" "$(dirname "$CONTAINERFILE")"
 }
 
 confirm_if_busy() {

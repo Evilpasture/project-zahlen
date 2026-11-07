@@ -158,8 +158,9 @@ the fragment stage would discard.
 Mixing variants across a pipeline mismatches varying locations, so the pairing
 is centralised in `Resource::GetSceneShaders(SceneShaderVariant)` -- geometry
 and fragment stages always come out of one lookup.
-`scripts/check_shader_interfaces.py` compiles all three variants and reflects the
-SPIR-V to prove every interface is exact; it needs slangc but no GPU.
+`scripts/check_shader_interfaces.py` compiles all three variants through
+`zshader compile` and reflects the SPIR-V to prove every interface is exact;
+it needs a built zshader but no GPU.
 
 * `common.slang` — `GPUMeshlet`, the `InstanceData` meshlet tail, BDA accessors
   (`fetchMeshlet`, `fetchMeshletVertex`, `fetchMeshletTriangle`),

@@ -7,18 +7,21 @@
 # headers through. Scoping that to this directory is why the target is not
 # declared inline in cmake/ShaderCompilation.cmake, where it used to live.
 
-# Six translation units: the model they share (ZShader.hpp), the command line
-# that fills it (main.cpp), the argument and file helpers (ZShader.cpp), the
-# Slang reflection pass (SlangReflect.cpp, driven per-module by Reflect.cpp)
-# and the two emitters (Emit.cpp) -- plus the gpu-types mode (GpuTypes.cpp),
-# which compiles the gpu_abi module in-process and walks its reflected layout
-# into the generated host structs in a separate invocation.
+# Eight translation units: the model they share (ZShader.hpp), the command line
+# (main.cpp), the argument and file helpers (ZShader.cpp), the batch manifest
+# driver (Manifest.cpp), the Slang compile+reflect pass (SlangReflect.cpp,
+# driven per-module by Reflect.cpp), the emitters (Emit.cpp), the standalone
+# slangc/dx compiler front doors (Compile.cpp) and the gpu-types mode
+# (GpuTypes.cpp). The tool is the build's only shader compiler driver: no
+# slangc binary is located, invoked or version-checked anywhere.
 set(ZHLN_ZSHADER_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/ZShader.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Manifest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Reflect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/SlangReflect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Emit.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Compile.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/GpuTypes.cpp"
 )
 
@@ -61,11 +64,10 @@ target_link_libraries(zshader PRIVATE
 )
 
 # Slang's own headers do not survive this project's warning set (old-style
-# casts throughout slang.h), so they arrive as system includes however the
-# provision found them. The directory is ZHLN_SLANG_INCLUDE_DIR, which
-# cmake/ShaderCompilation.cmake verified actually resolves them -- the
-# includedir a config package advertises is not always that (the Vulkan SDK
-# names its parent while shipping the headers in its slang/ subdirectory).
+# casts throughout slang.h), so they arrive as system includes. The directory is
+# ZHLN_SLANG_INCLUDE_DIR, resolved once by cmake/SlangResolve.cmake: a config
+# package does not always advertise the directory that actually holds them (the
+# Vulkan SDK names its parent while shipping them in its slang/ subdirectory).
 # The tool RUNS during the build as well, so libslang must load without an
 # install step: the build tree's own RPATH carries the library's directory.
 # APPEND, not set -- CMAKE_BUILD_RPATH may already hold the libc++ runtime
@@ -78,9 +80,6 @@ set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHL
 if(TARGET slang-glslang)
     set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:slang-glslang>")
     add_dependencies(zshader slang-glslang)
-endif()
-if(DEFINED ZHLN_SLANG_GLSLANG_DIR AND NOT "${ZHLN_SLANG_GLSLANG_DIR}" STREQUAL "")
-    set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "${ZHLN_SLANG_GLSLANG_DIR}")
 endif()
 
 # The engine's headers, read-only: Zahlen/Core/Reflection for EnumToString and
@@ -95,7 +94,7 @@ target_compile_options(zshader PRIVATE
 )
 
 # The tool is the build's critical path: the catalog and gpu-types commands
-# cannot run until its six translation units are built, and every downstream
+# cannot run until its eight translation units are built, and every downstream
 # consumer of the generated headers queues behind them. What the six actually
 # share is ZShader.hpp everywhere, slang.h in three of them, and vulkan_core.h
 # (Reflect.cpp reads the enumerators); those parse once into the PCH.

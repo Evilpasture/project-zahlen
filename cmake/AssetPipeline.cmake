@@ -29,7 +29,12 @@ add_executable(zcook
     utils/zcook/Ninja.cpp
     utils/zcook/FontBake.cpp
 )
-target_link_libraries(zcook PRIVATE zahlen_engine zahlen_filesystem zahlen_threading zahlen_asset_cooking)
+# Only the engine and the cooking helper. zcook reads FS::PakHeader/PakEntry
+# (POD structs in the public VFS.hpp) and calls TaskSystem::ParallelFor, whose
+# only out-of-line callee is Dispatch -- both exported by libzahlen_engine.so.
+# The archives were linked ahead of the .so, so the executable ran a second copy
+# of the scheduler next to the one the engine uses.
+target_link_libraries(zcook PRIVATE zahlen_engine zahlen_asset_cooking)
 zahlen_set_bin_output(zcook)
 zahlen_add_runtime_dlls(zcook)
 target_include_directories(zcook SYSTEM PRIVATE

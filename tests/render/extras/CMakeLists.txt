@@ -40,9 +40,9 @@ foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
         ZHLN_ZTEST_SOURCE_FILES "${_vfx_files}"
     )
 
+    # No zahlen_vulkan -- same reasoning as tests/render/CMakeLists.txt.
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
-        zahlen_vulkan
         zahlen_vfx
     )
 

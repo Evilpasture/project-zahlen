@@ -6,7 +6,7 @@
 # Configures Ninja/Makefile targets to run the C/C++ frontend in -fsyntax-only
 # mode without emitting object code or invoking the linker/archiver.
 #
-# Build-time host tools (zshader, LuaJIT's minilua/buildvm, vendored slangc)
+# Build-time host tools (zshader, LuaJIT's minilua/buildvm, vendored libslang)
 # continue to compile and link normally so generated headers (ShaderBindings.hpp,
 # GeneratedGpuTypes.hpp, luajit.h) exist before dependent translation units are
 # checked. Precompiled headers and C++20 module BMIs (.pcm/.gcm) also pass

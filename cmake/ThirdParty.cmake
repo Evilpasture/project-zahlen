@@ -590,92 +590,49 @@ add_compile_definitions(JPH_DEBUG_RENDERER)
 set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
 
 # --- Jolt Vulkan compute shader compiler ---
-# Jolt compiles its own compute shaders (Jolt/Shaders/*.hlsl -> *.spv) rather than
-# cooking them here, and it does so with dxc. It never searches for dxc: Jolt/Jolt.cmake
-# takes the glslc path that find_package(Vulkan) produced and substitutes the file name,
+# Jolt compiles its own compute shaders (Jolt/Shaders/*.hlsl -> *.spv) with dxc.
+# It never searches for dxc: Jolt/Jolt.cmake takes the glslc path that
+# find_package(Vulkan) produced and substitutes the file name,
 #     string(REPLACE "glslc" "dxc" Vulkan_dxc_EXECUTABLE ${Vulkan_GLSLC_EXECUTABLE})
-# so dxc is only ever found next to a glslc. That leaves two machines broken. One has
-# distro packages but no LunarG SDK: dxc (directx-shader-compiler) is present, glslc is
-# not, and Vulkan_GLSLC_EXECUTABLE stays at Vulkan_GLSLC_EXECUTABLE-NOTFOUND. The other
-# is an architecture no dxc is released for -- Fedora ships no directx-shader-compiler
-# for aarch64, conda-forge has no linux-aarch64 build, and upstream publishes x86_64
-# only, while the Vulkan SDK's arm64 packages omit dxc altogether. Both fail the same
-# way: "glslc" does not occur in the *-NOTFOUND string, the substitution changes
-# nothing, and every shader rule execs a program with that name and exits 127.
+# so dxc is only ever found next to a glslc. On a machine without the SDK (or
+# on aarch64, where no dxc is released) every shader rule execs a
+# *-NOTFOUND string and exits 127.
 #
 # Give Jolt the compiler it expects. When Vulkan was found and glslc was not:
-#   * dxc if the machine has one -- put it in the variable Jolt reads; the
-#     substitution then returns the path unchanged and Jolt invokes dxc itself;
-#   * otherwise the vendored Slang through cmake/JoltDxcShim.sh, which accepts dxc's
-#     command line and emits the same SPIR-V (see the shim for the verified mapping).
-# The second case is why this block cannot wait for ShaderCompilation.cmake: the root
-# CMakeLists includes this file before it, so the vendored Slang target does not exist
-# yet and the shim locates the built compiler itself at build time.
-# A real SDK's glslc is never overridden -- this only acts when the variable is empty
-# or *-NOTFOUND, and only for the very same 17 shaders, feeding the same
-# NAME.spv files to the same descriptor-binding parser.
+#   * dxc if the machine has one -- put it in the variable Jolt reads;
+#   * otherwise zshader itself. No shell shim, no PATH lookup, no slangc:
+#     Jolt runs $<TARGET_FILE:zshader> with dxc's own flags and zshader's
+#     --dxc-compat mode maps them to libslang in-process (utils/zshader/Compile.cpp).
+#
+# The generator expression is deliberately not a cache value (a FILEPATH cache
+# entry would be made absolute and broken). CMake evaluates it in Jolt's
+# add_custom_command COMMAND at generate time AND adds an order-only dependency
+# on the zshader target, so the seventeen .spv rules wait for the tool to link
+# even though this file is included before utils/zshader is added.
 option(ZHLN_JOLT_SLANG_FALLBACK
-    "Compile Jolt's Vulkan compute shaders with the vendored Slang when no dxc/glslc exists" ON)
+    "Compile Jolt's Vulkan compute shaders with zshader/libslang when no dxc/glslc exists" ON)
 if(ZHLN_BUILD_RENDER)
     find_package(Vulkan QUIET)
-    if(Vulkan_FOUND AND NOT Vulkan_GLSLC_EXECUTABLE)
+    if(Vulkan_FOUND AND (NOT Vulkan_GLSLC_EXECUTABLE
+       OR Vulkan_GLSLC_EXECUTABLE STREQUAL "${CMAKE_SOURCE_DIR}/cmake/JoltDxcShim.sh"
+       OR Vulkan_GLSLC_EXECUTABLE STREQUAL "${CMAKE_BINARY_DIR}/jolt-dxc-shim"
+       OR Vulkan_GLSLC_EXECUTABLE STREQUAL "$<TARGET_FILE:zshader>"))
         find_program(ZHLN_JOLT_DXC_EXECUTABLE NAMES dxc dxc.exe HINTS "$ENV{DXC_ROOT}" /usr/bin /usr/local/bin)
         if(ZHLN_JOLT_DXC_EXECUTABLE)
             set(Vulkan_GLSLC_EXECUTABLE "${ZHLN_JOLT_DXC_EXECUTABLE}" CACHE FILEPATH
                 "Shader compiler path Jolt reads; Jolt replaces 'glslc' with 'dxc' in it to locate dxc" FORCE)
             message(STATUS "Jolt Vulkan compute: no glslc found, compiling its HLSL shaders with ${ZHLN_JOLT_DXC_EXECUTABLE}.")
         elseif(ZHLN_JOLT_SLANG_FALLBACK)
-            # Point Jolt at the shim, not at a compiler: Jolt prepends nothing and
-            # runs the path it is given, and the shim accepts dxc's command line.
-            #
-            # If a compiler already exists, tell the shim where it is, here. The
-            # shim otherwise locates slangc at build time, and on a tree that builds
-            # Slang from source that is too late: the seventeen .spv rules are
-            # scheduled at step 1, in parallel with the Slang build that would have
-            # produced slangc, and every one of them exits with "slangc not found".
-            # Jolt's CMakeLists cannot depend on that target -- it is a submodule and
-            # it is configured before the Slang target exists -- and the .spv build
-            # statements carry no order-only edge that a dependency from this file
-            # could reach (add_dependencies only orders Jolt's objects, which already
-            # wait on the .spv). Naming a compiler that exists now removes the
-            # question instead of ordering around it.
-            set(ZHLN_JOLT_SLANGC_DXC "${CMAKE_CURRENT_SOURCE_DIR}/cmake/JoltDxcShim.sh")
-            set(ZHLN_JOLT_SLANGC_PINNED "")
-            if(SLANG_EXECUTABLE AND EXISTS "${SLANG_EXECUTABLE}")
-                set(ZHLN_JOLT_SLANGC_PINNED "${SLANG_EXECUTABLE}")
-            else()
-                # HINTS covers the layout scripts/install-slang-prebuilt.sh installs.
-                find_program(ZHLN_JOLT_SLANGC_HOST NAMES slangc
-                    HINTS "$ENV{SLANG_BIN}" "$ENV{VULKAN_SDK}/bin" /opt/slang/bin)
-                if(ZHLN_JOLT_SLANGC_HOST)
-                    set(ZHLN_JOLT_SLANGC_PINNED "${ZHLN_JOLT_SLANGC_HOST}")
-                endif()
-            endif()
-            if(ZHLN_JOLT_SLANGC_PINNED)
-                # A generated wrapper, not an environment variable: the build must
-                # not depend on how the shell that launched it was configured.
-                set(ZHLN_JOLT_SLANGC_WRAPPER "${CMAKE_BINARY_DIR}/jolt-dxc-shim")
-                file(WRITE "${ZHLN_JOLT_SLANGC_WRAPPER}"
-"#!/bin/sh
-# Written by cmake/ThirdParty.cmake -- do not edit.
-ZHLN_JOLT_SLANGC='${ZHLN_JOLT_SLANGC_PINNED}' exec '${ZHLN_JOLT_SLANGC_DXC}' \"$@\"
-")
-                file(CHMOD "${ZHLN_JOLT_SLANGC_WRAPPER}" PERMISSIONS
-                    OWNER_READ OWNER_WRITE OWNER_EXECUTE
-                    GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
-                set(ZHLN_JOLT_SLANGC_DXC "${ZHLN_JOLT_SLANGC_WRAPPER}")
-            endif()
-            set(Vulkan_GLSLC_EXECUTABLE "${ZHLN_JOLT_SLANGC_DXC}" CACHE FILEPATH
-                "Shader compiler path Jolt reads; Jolt replaces 'glslc' with 'dxc' in it to locate dxc" FORCE)
+            unset(Vulkan_GLSLC_EXECUTABLE CACHE)
+            set(Vulkan_GLSLC_EXECUTABLE "$<TARGET_FILE:zshader>")
             message(STATUS
-                "Jolt Vulkan compute: no dxc and no glslc found, compiling its HLSL shaders with Slang via ${ZHLN_JOLT_SLANGC_DXC}. "
-                "Pinned compiler: \"${ZHLN_JOLT_SLANGC_PINNED}\". "
-                "Set ZHLN_JOLT_SLANGC to pin a different one, or ZHLN_JOLT_SLANG_FALLBACK=OFF to require dxc.")
+                "Jolt Vulkan compute: no dxc and no glslc found, compiling its HLSL shaders with zshader's dxc-compat mode (libslang). "
+                "Set ZHLN_JOLT_SLANG_FALLBACK=OFF to require dxc.")
         else()
             message(WARNING
                 "Jolt's Vulkan compute shaders are compiled with dxc, and neither glslc nor dxc was found (Vulkan_GLSLC_EXECUTABLE is "
                 "\"${Vulkan_GLSLC_EXECUTABLE}\"). Install directx-shader-compiler (dxc) or shaderc (glslc), leave "
-                "ZHLN_JOLT_SLANG_FALLBACK=ON to compile them with the vendored Slang, or configure with -DJPH_USE_VK=OFF to build "
+                "ZHLN_JOLT_SLANG_FALLBACK=ON to compile them with zshader/libslang, or configure with -DJPH_USE_VK=OFF to build "
                 "without Jolt's Vulkan compute backend."
             )
         endif()
@@ -692,6 +649,39 @@ set_target_properties(Jolt PROPERTIES
     VISIBILITY_INLINES_HIDDEN OFF
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
+
+# --- Jolt's usage requirements, without its archive ------------------------
+#
+# include/Zahlen/Engine/Engine.hpp, include/Zahlen/ECS/Components.hpp,
+# include/Zahlen/Audio/Audio.hpp and src/gui/GUI.hpp include <Jolt/Jolt.h>, so
+# consumers of those headers need Jolt's include directories and its ABI
+# defines (JPH_DOUBLE_PRECISION, JPH_OBJECT_LAYER_BITS, JPH_SHARED_LIBRARY, the
+# JPH_USE_* feature set). They do not need libJolt.so on their own link line:
+# Jolt is SHARED, so libzahlen_engine.so records it as a DT_NEEDED entry and
+# every consumer resolves JPH::* through the engine.
+#
+# Naming Jolt PUBLIC on the engine and the static subsystems is what produced
+# the noise. CMake propagates a static library's PUBLIC/PRIVATE dependencies
+# verbatim to the final link of every dependent, so Jolt ended up on the command
+# line of all 18 executables -- after libzahlen_engine.so, which already defines
+# the same symbols. mold reports that as "Unused direct dependencies:
+# libJolt.so", and it is also why -Wl,--no-as-needed was needed to stop the
+# as-needed culling from dropping it.
+#
+# The properties are copied explicitly rather than taken by INTERFACE-linking
+# Jolt, because an INTERFACE library's INTERFACE_LINK_LIBRARIES propagate as
+# link items too -- that reintroduces exactly the entry this removes. Property
+# copies evaluate at generate time, so Jolt's $<BUILD_INTERFACE:> include dirs
+# and configuration-conditioned defines arrive intact.
+add_library(zahlen_jolt_headers INTERFACE)
+target_include_directories(zahlen_jolt_headers SYSTEM INTERFACE
+    $<TARGET_PROPERTY:Jolt,INTERFACE_INCLUDE_DIRECTORIES>)
+target_compile_definitions(zahlen_jolt_headers INTERFACE
+    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_DEFINITIONS>)
+target_compile_options(zahlen_jolt_headers INTERFACE
+    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_OPTIONS>)
+target_compile_features(zahlen_jolt_headers INTERFACE
+    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_FEATURES>)
 
 if(ZHLN_BUILD_RENDER)
     # --- VulkanMemoryAllocator ---

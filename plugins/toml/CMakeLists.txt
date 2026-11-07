@@ -14,10 +14,11 @@
 #   UITOML.hpp     the same for GUI::UINode (app/UIEditor.cpp, ZHLN_HAS_UI_TOML).
 #
 # No third-party dependency: the parser is charconv and a hand-rolled reader.
-# UITOML.hpp reaches <UI/UITree.hpp>: the schema left core for extensions/UI, and
-# the parent links zahlen_ui_schema PUBLIC into zahlen_serialization because
-# this header names GUI::UINode in its signatures. The GUI implementation
-# (zahlen_gui) is not needed to compile or link this.
+# UITOML.hpp reaches <UI/UITree.hpp>: the schema left core for extensions/UI. The
+# header names GUI::UINode in its signatures, but UINode is a plain aggregate, so
+# only the include root is needed -- this directory publishes extensions/ itself.
+# The schema implementation (zahlen_ui_schema) is not linked into
+# zahlen_serialization, and zahlen_gui is not needed to compile or link this.
 
 set(ZHLN_TOML_SOURCES
     TOML.cpp

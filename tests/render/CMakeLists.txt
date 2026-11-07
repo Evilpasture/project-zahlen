@@ -31,9 +31,15 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
         ZHLN_ZTEST_SOURCE_FILES "${GROUP_REL_FILES}"
     )
 
+    # No zahlen_vulkan. Nothing under tests/render includes a Vulkan, Volk, VMA
+    # or SPIRV-Reflect header or calls ZHLN::Vk::; the RHI is inside
+    # libzahlen_engine.so. Linking the archive put 29 RHI objects and 60
+    # SPIRV-Reflect objects in front of the .so, and because zahlen_vulkan
+    # publishes the repository src root as PUBLIC it also handed every GPU test
+    # binary an include root for src/ -- exactly the one that
+    # configure/check_tests_public_api.py and the include list below keep out.
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
-        zahlen_vulkan
     )
 
     # Public headers only. src/ is banned — see configure/check_tests_public_api.py.

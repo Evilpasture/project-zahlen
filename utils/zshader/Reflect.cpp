@@ -205,6 +205,8 @@ auto NamesEnumerators() -> bool {
 namespace {
 
 void PopulateModuleFromInfo(Module& module, SlangEntryInfo info) {
+    // The bytes and the declarations come from one linked program.
+    module.spirv      = std::move(info.spirv);
     module.entryPoint = std::move(info.entryPoint);
     module.stage      = StageName(module.path, StageFor(module.path, module.entryPoint, info.stage));
     module.localSize  = info.localSize;

@@ -327,10 +327,11 @@ esac
 # Jolt's static-member pattern, and whether its assembler accepts the `.base64`
 # directive. Both are questions about a compiler, and cmake/
 # ToolchainCapabilities.cmake now asks them at configure time, with the flags the
-# build actually uses -- so they answer for the engine, for the SDK, and for
-# anyone who points CMake at this prefix, not only for the machine that ran this
-# script. What stays here is what configure cannot see: that this prefix's own
-# binutils is the one that answers, which is the `as` path check above.
+# build actually uses -- so they answer for the engine, for every toolchain
+# package, and for anyone who points CMake at this prefix, not only for the
+# machine that ran this script. What stays here is what configure cannot see:
+# that this prefix's own binutils is the one that answers, which is the `as`
+# path check above.
 
 printf '\n== gcc: %s (%s/bin/g++-16)\n' "${version}" "${PREFIX}"
 printf '   add %s/bin to PATH; the wrappers carry --sysroot=/ themselves.\n' "${PREFIX}"

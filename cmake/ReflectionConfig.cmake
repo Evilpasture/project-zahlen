@@ -86,54 +86,174 @@ function(zahlen_transpile_sources OUT_SOURCES_VAR)
 endfunction()
 
 # --- PER-TARGET REFLECTION FLAGS & CUSTOM LIBC++ ---
-function(zahlen_use_custom_libcxx TARGET_NAME)
-    option(ZHLN_USE_CUSTOM_LIBCXX "Link against Bloomberg custom libc++" OFF)
-
-    # Only apply custom LLVM libc++ when explicitly enabled and the compiler
-    # actually speaks -stdlib=libc++ (feature-probed at the root: GCC refuses
-    # the flag, so the probe keeps this function Clang-shaped without naming
-    # any compiler).
+# --- the custom libc++ ------------------------------------------------------
+#
+# One problem, one place. Everything about the branch toolchain's C++ runtime is
+# decided here, once, and every target in the tree inherits it -- nothing per
+# target, and nothing in a profile script.
+#
+# Why it cannot be left to -stdlib=libc++ alone: that flag selects the *headers*,
+# which clang resolves through its resource directory ($RESOURCE_DIR/include/c++/v1).
+# Where -lc++, -lc++abi and -lunwind resolve is the linker's search path, and the
+# Darwin driver contributes no -L for a runtime installed under <prefix>/lib --
+# Apple's model is that libc++ is a platform library in the SDK. So the headers come
+# from the branch and the images come from the SDK unless something says otherwise.
+# That mismatch is not a missing-symbol problem in the usual sense: <meta> and
+# std::define_static_array exist only in the branch headers, so the SDK's libc++
+# cannot be used at all, and an image older than the headers leaves exactly the
+# functions newly added to it (std::__hash_memory, std::__from_chars_floating_point)
+# undefined while everything else in the same library links fine.
+#
+# Why it cannot be per target: an LLVM tree's libc++ does not re-export libc++abi the
+# way the platform's umbrella stub does, and it carries @rpath load commands for
+# libc++abi and libunwind. A target that names -lc++ without the directory therefore
+# links nothing of libc++abi, and a process in which one C++ image is on the platform
+# runtime and another on the branch one hands a std::locale across a boundary where
+# the two disagree about its layout -- which aborts inside malloc. Both are the same
+# mistake: the runtime has to be chosen once, for the whole build.
+#
+# The three mechanisms below are directory-scoped, so every target created after this
+# point -- including extern/JoltPhysics, whose CMakeLists.txt knows nothing about any
+# of this -- inherits them:
+#
+#   add_compile_options  -stdlib=libc++                     headers, every TU
+#   link_directories     -L<runtime dir>                    link-time, every -l
+#   add_link_options     -stdlib=libc++, -Wl,-rpath,<dir>   the driver's own choice of
+#                                                           runtime, and the load path
+#
+# Inert unless ZHLN_USE_CUSTOM_LIBCXX is ON. Sets these cache variables for reference:
+# LLVM_BLOOMBERG_ROOT, LLVM_BLOOMBERG_BUILD, ZHLN_LIBCXX_RUNTIME_DIR.
+function(zahlen_configure_custom_libcxx)
     if(NOT ZHLN_USE_CUSTOM_LIBCXX OR NOT ZHLN_HAS_STDLIB_LIBCXX)
         return()
     endif()
 
-    get_filename_component(_DEFAULT_LLVM_ROOT "${CMAKE_SOURCE_DIR}/../llvm-p2996" ABSOLUTE)
-    set(LLVM_BLOOMBERG_ROOT "${_DEFAULT_LLVM_ROOT}" CACHE PATH "Path to Bloomberg LLVM monorepo")
+    get_filename_component(_default_root "${CMAKE_SOURCE_DIR}/../llvm-p2996" ABSOLUTE)
+    set(LLVM_BLOOMBERG_ROOT "${_default_root}" CACHE PATH "Path to Bloomberg LLVM monorepo")
     set(LLVM_BLOOMBERG_BUILD "${LLVM_BLOOMBERG_ROOT}/build" CACHE PATH "Path to Bloomberg LLVM build directory")
 
     if(NOT EXISTS "${LLVM_BLOOMBERG_ROOT}")
-        message(FATAL_ERROR "ZHLN_USE_CUSTOM_LIBCXX is ON, but LLVM root was not found at: ${LLVM_BLOOMBERG_ROOT}\n"
-                           "Pass -DLLVM_BLOOMBERG_ROOT=/path/to/llvm-p2996 to configure manually.")
+        message(FATAL_ERROR
+            "ZHLN_USE_CUSTOM_LIBCXX is ON, but LLVM root was not found at: ${LLVM_BLOOMBERG_ROOT}\n"
+            "Pass -DLLVM_BLOOMBERG_ROOT=/path/to/llvm-p2996 to configure manually.")
     endif()
 
-    file(GLOB _LLVM_LIB_SUBDIRS LIST_DIRECTORIES true "${LLVM_BLOOMBERG_BUILD}/lib/*")
-    set(_ALL_LLVM_LIB_DIRS "${LLVM_BLOOMBERG_BUILD}/lib")
-    foreach(_DIR IN LISTS _LLVM_LIB_SUBDIRS)
-        if(IS_DIRECTORY "${_DIR}")
-            list(APPEND _ALL_LLVM_LIB_DIRS "${_DIR}")
+    # lib, lib64, and one level down: lib/<target-triple>/ -- an LLVM build tree puts
+    # its runtimes in whichever of those it was told to use.
+    file(GLOB _subdirs LIST_DIRECTORIES true
+        "${LLVM_BLOOMBERG_BUILD}/lib" "${LLVM_BLOOMBERG_BUILD}/lib64"
+        "${LLVM_BLOOMBERG_BUILD}/lib/*" "${LLVM_BLOOMBERG_BUILD}/lib64/*")
+    set(_dirs "${LLVM_BLOOMBERG_BUILD}/lib" "${LLVM_BLOOMBERG_BUILD}/lib64")
+    foreach(_d IN LISTS _subdirs)
+        if(IS_DIRECTORY "${_d}")
+            list(APPEND _dirs "${_d}")
         endif()
     endforeach()
 
-    target_compile_options(${TARGET_NAME} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>
-    )
-
-    foreach(_LIB_DIR IN LISTS _ALL_LLVM_LIB_DIRS)
-        target_link_options(${TARGET_NAME} PRIVATE
-            $<$<PLATFORM_ID:Linux>:-L${_LIB_DIR}>
-            $<$<PLATFORM_ID:Linux>:-Wl,-rpath,${_LIB_DIR}>
-        )
+    set(_runtime_dir "")
+    foreach(_d IN LISTS _dirs)
+        if(EXISTS "${_d}/libc++.dylib" OR EXISTS "${_d}/libc++.so")
+            set(_runtime_dir "${_d}")
+            break()
+        endif()
     endforeach()
 
-    target_link_options(${TARGET_NAME} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>
-    )
+    if(NOT _runtime_dir)
+        message(FATAL_ERROR
+            "ZHLN_USE_CUSTOM_LIBCXX is ON, but no directory under ${LLVM_BLOOMBERG_BUILD} holds "
+            "libc++.dylib or libc++.so. This build cannot use the platform libc++: the reflection "
+            "headers need <meta> and std::define_static_array, which exist only in the branch's "
+            "libc++.\nRebuild the runtimes (ninja libcxx libcxxabi libunwind in "
+            "${LLVM_BLOOMBERG_BUILD}), or point LLVM_BLOOMBERG_BUILD at a tree that has them.")
+    endif()
+    set(ZHLN_LIBCXX_RUNTIME_DIR "${_runtime_dir}" CACHE INTERNAL
+        "Directory holding the C++ runtime this build links against" FORCE)
 
-    target_link_libraries(${TARGET_NAME} PRIVATE
-        c++
-        c++abi
-        unwind
-    )
+    # A libc++ built from source does not re-export libc++abi, so -lc++abi has to find a
+    # real image in the same directory. Without one, only libc++abi's symbols are
+    # undefined -- half a runtime missing is the signature of a search path.
+    if(NOT EXISTS "${_runtime_dir}/libc++abi.dylib" AND NOT EXISTS "${_runtime_dir}/libc++abi.so")
+        message(FATAL_ERROR
+            "${_runtime_dir} holds libc++ but no libc++abi. A libc++ built from source does not "
+            "re-export libc++abi the way the platform's umbrella stub does, so every libc++abi "
+            "symbol would come out undefined. Rebuild libcxxabi into the same directory.")
+    endif()
+
+    # Inspect actual shared-library exports, not a Linux linker script.
+    find_program(ZHLN_NM_EXECUTABLE NAMES llvm-nm nm)
+    if(APPLE)
+        set(_image "${_runtime_dir}/libc++.dylib")
+        set(_nm_args -gU)
+    else()
+        set(_image "${_runtime_dir}/libc++.so.1")
+        set(_nm_args -D --defined-only)
+    endif()
+    if(EXISTS "${_image}" AND ZHLN_NM_EXECUTABLE)
+        execute_process(
+            COMMAND "${ZHLN_NM_EXECUTABLE}" ${_nm_args} "${_image}"
+            RESULT_VARIABLE _nm_result
+            OUTPUT_VARIABLE _syms ERROR_VARIABLE _nm_error
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(NOT "${_nm_result}" STREQUAL "0")
+            message(FATAL_ERROR
+                "Could not inspect runtime exports in ${_image}: ${_nm_error}. "
+                "This is an inspection failure, not proof of a header/runtime mismatch.")
+        endif()
+        if(NOT _syms MATCHES "__hash_memory")
+            message(FATAL_ERROR
+                "${_image} was inspected successfully but exports no __hash_memory. "
+                "Check that the selected shared runtime matches the branch headers.")
+        endif()
+    else()
+        message(WARNING
+            "Skipping libc++ export check: actual shared image ${_image} or nm is unavailable. "
+            "The link step will validate runtime symbols.")
+    endif()
+
+    # One shared branch runtime for all targets created below this directory.
+    # Do not embed libc++ archives independently in the engine and executables:
+    # exported functions can bind across images while locale state stays local.
+    if(APPLE)
+        foreach(_library IN ITEMS libc++.dylib libc++abi.dylib)
+            if(NOT EXISTS "${_runtime_dir}/${_library}")
+                message(FATAL_ERROR
+                    "Shared branch runtime required: ${_runtime_dir}/${_library} is missing. "
+                    "Rebuild the toolchain shared runtimes; static fallback is not safe here.")
+            endif()
+        endforeach()
+        # The namespace must be generated by the runtime build, not supplied as
+        # a consumer-only define. It separates branch symbols from Apple's __1.
+        set(_config_site "${LLVM_BLOOMBERG_BUILD}/include/c++/v1/__config_site")
+        if(NOT EXISTS "${_config_site}")
+            message(FATAL_ERROR "Missing branch runtime configuration: ${_config_site}")
+        endif()
+        file(READ "${_config_site}" _runtime_config)
+        if(NOT _runtime_config MATCHES "#[ \t]*define[ \t]+_LIBCPP_ABI_NAMESPACE[ \t]+__p2996([^A-Za-z0-9_]|$)")
+            message(FATAL_ERROR
+                "Rebuild branch libc++ with -DLIBCXX_ABI_NAMESPACE=__p2996. "
+                "Its generated headers must match the rebuilt shared library.")
+        endif()
+    endif()
+
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>")
+    # Link-time search and run-time lookup are separate requirements.
+    link_directories(BEFORE "${_runtime_dir}")
+    add_link_options(
+        "$<$<LINK_LANGUAGE:CXX>:-stdlib=libc++>"
+        "-Wl,-rpath,${_runtime_dir}")
+    link_libraries(c++ c++abi)
+    if(NOT APPLE)
+        link_libraries(unwind)
+    endif()
+    message(STATUS "libc++: shared branch runtime at ${_runtime_dir}; no per-image runtime archives")
+endfunction()
+
+# Kept as a no-op so existing call sites (zahlen_enable_reflection, and any target that
+# called it directly) keep working. Everything it used to do is now directory-scoped by
+# zahlen_configure_custom_libcxx() above, which is the point: there is nothing left to
+# decide per target, and a second place deciding it is how targets ended up on different
+# runtimes in the first place.
+function(zahlen_use_custom_libcxx TARGET_NAME)
 endfunction()
 
 function(zahlen_enable_reflection TARGET_NAME)

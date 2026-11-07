@@ -116,13 +116,13 @@ count deltas. No pixels involved.
    to grow on.
 2. **GPU suites are off in CI.** `tests/CMakeLists.txt:203` —
    `option(ZHLN_BUILD_GPU_TESTS … OFF)`. `.github/workflows/ci.yml` builds the
-   `builder` stage of the Dockerfile and runs CTest; the render suites are not
+   `builder` stage of `docker/ci/Containerfile` and runs CTest; the render suites are not
    in that run. Everything in bucket B is therefore a **local-only** gate today:
    it fails on a developer's machine, never in a PR.
-3. **The Docker image already pins a software device.** `Dockerfile:21-22`
-   installs `vulkan-icd-loader` and `vulkan-swrast`, `:35` pins
-   `VULKAN_SDK_VER=1.4.357.0`, and `:52-53` force
-   `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json` — Lavapipe.
+3. **The Docker image already pins a software device.** `docker/ci/Containerfile`
+   installs `vulkan-icd-loader`, `vulkan-swrast` and `vulkan-validation-layers`
+   from Arch and sets `VK_DRIVER_FILES` / `VK_ICD_FILENAMES` to the distro's
+   `lvp_icd.json` — Lavapipe.
    This is the single most important fact for this proposal: **the reference
    device a golden store needs already exists and is already pinned.** It is
    currently used only to keep the validation layers quiet; nothing renders

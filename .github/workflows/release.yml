@@ -12,7 +12,7 @@ name: Release (Ubuntu 22.04 baseline)
 # normal dev environment and the release itself.
 #
 # Three jobs, deliberately different in kind:
-#   toolchain  build *inside* Ubuntu 22.04 (docker/release-jammy.Dockerfile: apt
+#   toolchain  build *inside* Ubuntu 22.04 (docker/release-jammy/Containerfile: apt
 #              packages, and GCC 16 from the Ubuntu toolchain PPA since the tree
 #              needs -freflection), package, sign, publish to a GitHub Release.
 #              Nothing is cross-compiled: the compiler, binutils, wayland-scanner
@@ -139,10 +139,10 @@ jobs:
           echo "vendored slang version: ${version}"
 
       # The release builder is only tooling: ubuntu:22.04 plus the jammy packages a
-      # build needs, with no part of this repository inside it. The GHA layer cache
-      # builds it once and restores it after that, and because the sources are mounted
-      # at run time a source change cannot invalidate it -- only a change to the
-      # provisioning script can.
+      # build needs. It clones the repository inside the image to get its
+      # provisioning scripts (no build-context COPY), pinned to this commit;
+      # the sources are still mounted at /workspace at run time. The GHA layer
+      # cache restores everything else.
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -150,7 +150,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/release-jammy.Dockerfile
+          file: docker/release-jammy/Containerfile
+          build-args: |
+            ZHLN_GIT_URL=${{ github.server_url }}/${{ github.repository }}.git
+            ZHLN_GIT_REF=${{ github.sha }}
           tags: zahlen-release-builder:jammy
           load: true
           cache-from: type=gha,scope=zahlen-release-builder
@@ -197,8 +200,8 @@ jobs:
             backends=$(cat dist/window-backends.txt || echo 'wayland=ON x11=OFF')
             echo "* window backends: ${backends} (GLFW is vendored and static; Wayland is the primary backend)"
             echo "* built natively on Ubuntu 22.04 (no sysroot, no cross-compilation)"
-            echo '* with that distro'"'"'s own GCC 16 package, so a consumer can install the'
-            echo '  exact compiler this was built with.'
+            echo '* with that distro'"'"'s own released GCC 16. Consumers need GNU >= 16.1.1,'
+            echo '  not the exact patch version that built this release.'
             echo
             echo '## Install'
             echo
@@ -218,7 +221,7 @@ jobs:
             echo 'cmake --build consumer-build'
             echo '```'
             echo
-            echo 'The toolchain pins its compiler: a released GCC 16, not the trunk'
+            echo 'The release was built with a released GCC 16, not the trunk'
             echo 'snapshot Ubuntu 22.04 offers. Get it with the script in this repository,'
             echo 'which downloads it, checks the version and compiles a probe with it:'
             echo

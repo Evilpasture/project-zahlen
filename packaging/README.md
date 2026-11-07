@@ -213,17 +213,20 @@ cameras, animation or authoring tools must explicitly install those systems.
 
 ## ABI and profiles
 
-Each config checks compiler ID and exact version, architecture, libstdc++ header
-version, dual ABI, debug-container mode, Release configuration, and an explicit
-sanitizer profile. A shared fingerprint includes the engine revision, compiler
-flags, Jolt public ABI definitions/options and the annotation setting; mixing
-fingerprints is rejected even when package versions match, and so is mixing
-packages from two toolchain ids.
+Each config checks the compiler family, the tree's minimum GCC (`ZHLN_GCC_MIN`,
+16.1.1), architecture, dual ABI, debug-container mode, Release configuration and
+an explicit sanitizer profile. It does **not** pin a compiler patch version or a
+`__GLIBCXX__` header date: GCC point releases keep the libstdc++ ABI, and an
+older runtime is rejected by the linker/loader with the precise missing
+`GLIBCXX_x.y.z` symbol. A shared fingerprint includes the engine revision,
+compiler flags, Jolt public ABI definitions/options and the annotation setting;
+mixing fingerprints is rejected even when package versions match, and so is
+mixing packages from two toolchain ids.
 
 Jolt is bundled in Engine with its own public usage requirements, not resolved
-against an arbitrary system Jolt. The toolchain assumes its exact
-reflection-capable compiler remains installed; it is not a compiler distribution
-or a promise of ABI stability across revisions.
+against an arbitrary system Jolt. A toolchain is tied to the engine revision and
+compiler family that built it; it is not a compiler distribution or a promise of
+ABI stability across revisions.
 
 Sanitized consumers pass `-DZahlen_SANITIZER_PROFILE=asan-ubsan`; ASan/UBSan
 compile and link requirements propagate and there is no automatic switch from a

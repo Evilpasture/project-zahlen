@@ -1,3 +1,10 @@
+# The SSH development box (fedora:44 + dropbear), built by scripts/zdev.sh.
+#
+# No COPY and no .dockerignore: this image is tooling only. The source tree is a
+# named volume (`zahlen-src`, mounted at /home/frienduser/Projects by zdev.sh),
+# so a build-time clone would be shadowed by the mount anyway. Clone into that
+# volume once from inside the container after `zdev up`.
+#
 FROM fedora:44
 
 RUN dnf -y upgrade --refresh && dnf -y install \

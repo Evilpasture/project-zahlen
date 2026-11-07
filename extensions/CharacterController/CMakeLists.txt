@@ -33,9 +33,11 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 # Core is a public dependency: the controller runs on SystemContext, the ECS,
 # PhysicsContext's character API and the frame/graph extension seams.
+# No zahlen_freecam edge: PlayerInput.cpp reads FreeCam::FreeCamTagComponent,
+# an empty struct with no symbol and no public-header requirement (see
+# extensions/Camera/CMakeLists.txt for the same call).
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
-    zahlen_freecam
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC
@@ -50,4 +52,8 @@ if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()
 
-target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
+# Jolt is direct: this library's own objects reference JPH symbols (shapes,
+# settings, factories), so it must be on the link line of whatever consumes
+# them. It used to arrive only through zahlen_engine's PUBLIC Jolt, which put
+# libJolt.so on all 18 executables -- including the ones that never touch it.
+target_link_libraries(${TARGET_NAME} PRIVATE Jolt zahlen_warnings)

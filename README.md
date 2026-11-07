@@ -220,7 +220,7 @@ However, precompiled headers are buggy due to unknown internal compiler errors. 
 
 See [here](https://en.cppreference.com/cpp/compiler_support/26) for detailed compiler support information.
 
-These packages are expected to be installed on the host operating system: Read the Dockerfile.
+These packages are expected to be installed on the host operating system: read the Containerfiles in [`docker/`](docker/README.md), starting with `docker/ci/Containerfile`.
 
 ## Installing engine packages without root
 

@@ -311,7 +311,7 @@ the old bindless set array.
       per-draw material descriptor selection instead of push data fields, now
       that the frame partition can hand out a block per draw.
 - [ ] Optional: direct descriptor access (`layout(descriptor_heap)`) for hot
-      bindless paths once slangc with `-capability spvDescriptorHeapEXT` is
+      bindless paths once libslang with `-capability spvDescriptorHeapEXT` is
       the build requirement.
 - [x] Remove the now-unused `DescriptorLayout` DSL, the legacy pass helpers,
       and the per-pass pool/set members.
@@ -330,4 +330,4 @@ and `uiPipeline` as native UI batches.
 * Vulkan SDK ≥ 1.4.321 (headers/loader with `VK_EXT_descriptor_heap`).
 * Driver with `VK_EXT_descriptor_heap` + `VK_KHR_maintenance5` +
   `VK_EXT_extended_dynamic_state3` (NVIDIA ≥ 610, recent RADV/ANV/AMD/Intel drivers).
-* Slang shaders unchanged; no new slangc capability required.
+* Slang shaders unchanged; no new libslang capability required.

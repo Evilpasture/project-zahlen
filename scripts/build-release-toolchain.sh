@@ -8,7 +8,7 @@
 #       -v "$PWD/.ccache:/ccache" -e CCACHE_DIR=/ccache \
 #       zahlen-release-builder:jammy bash scripts/build-release-toolchain.sh /dist
 #
-# The host *is* the target. This runs inside docker/release-jammy.Dockerfile, which
+# The host *is* the target. This runs inside docker/release-jammy/Containerfile, which
 # is ubuntu:22.04 plus the jammy packages a build needs, so the glibc floor of every
 # published byte is the floor of the machine that produced it. There is no --sysroot,
 # no -B, no loader wrapper and no foreign binutils: the failures that design caused
@@ -69,7 +69,7 @@ if [ -r /etc/os-release ]; then
 fi
 if [ "${ID:-}" != "ubuntu" ] || [ "${VERSION_ID:-}" != "22.04" ]; then
     echo "error: this script builds inside Ubuntu 22.04; this is ${PRETTY_NAME:-an unknown system}." >&2
-    echo "       Use docker/release-jammy.Dockerfile. Cross-building against a sysroot" >&2
+    echo "       Use docker/release-jammy/Containerfile. Cross-building against a sysroot" >&2
     echo "       is precisely what this replaced: every failure in that design came" >&2
     echo "       from running another distro's binaries on this one." >&2
     exit 1
@@ -187,12 +187,13 @@ if [ -d extern/slang/.git ] || [ -f extern/slang/.git ]; then
 fi
 
 # -------------------------------------------------------------------- 3. slang
-# Slang is a build-host dependency, not a released one: utils/zshader is a build tool
-# with no install rule, so it cooks shaders with slangc and nothing it links reaches a
-# package. Building the pinned extern/slang tree therefore costs ~25 minutes of every
-# run that is not a ccache hit to produce two things nobody ships.
+# Slang is a build-host dependency, not a released one: utils/zshader is a build
+# tool with no install rule, so it links libslang, cooks the shaders in-process
+# and nothing it links reaches a package. Building the pinned extern/slang tree
+# therefore costs ~25 minutes of every run that is not a ccache hit to produce
+# something nobody ships.
 #
-# The prebuilt comes from docker/release-jammy.Dockerfile, which installs upstream's
+# The prebuilt comes from docker/release-jammy/Containerfile, which installs upstream's
 # release tarball -- built against glibc 2.17, measured -- plus the CMake config
 # upstream does not ship (scripts/install-slang-prebuilt.sh). -DZHLN_SLANG_VENDORED=ON
 # builds the pinned tree instead, for anyone who wants the exact submodule revision.
@@ -206,21 +207,26 @@ if [ "${slang_mode}" = "ON" ]; then
         slang_args+=(-DSLANG_VERSION_FULL="${slang_version}")
     fi
 else
-    [ -x "${slang_prefix}/bin/slangc" ] || {
-        echo "error: no prebuilt slangc at ${slang_prefix}/bin/slangc." >&2
-        echo "       scripts/install-slang-prebuilt.sh installs it; the release image" >&2
+    [ -f "${slang_prefix}/include/slang.h" ] || {
+        echo "error: no libslang headers at ${slang_prefix}/include/slang.h." >&2
+        echo "       scripts/install-slang-prebuilt.sh installs them; the release image" >&2
         echo "       does that at build time. Or set ZHLN_SLANG_VENDORED=ON to build" >&2
         echo "       the pinned tree instead." >&2
         exit 1
     }
-    [ -f "${slang_prefix}/lib/cmake/slang/slang-config.cmake" ] || {
-        echo "error: ${slang_prefix} has slangc but no CMake config package." >&2
-        echo "       cmake/ShaderCompilation.cmake resolves Slang with" >&2
-        echo "       find_package(slang CONFIG); re-run scripts/install-slang-prebuilt.sh." >&2
+    compgen -G "${slang_prefix}/lib/libslang-compiler.so*" >/dev/null || {
+        echo "error: ${slang_prefix}/lib has no libslang-compiler shared library." >&2
+        echo "       Re-run scripts/install-slang-prebuilt.sh." >&2
         exit 1
     }
-    echo "== slang: prebuilt $("${slang_prefix}/bin/slangc" -version 2>&1 | head -1) at ${slang_prefix}"
-    slang_args+=(-DCMAKE_PREFIX_PATH="${slang_prefix}" -DSLANG_EXECUTABLE="${slang_prefix}/bin/slangc")
+    [ -f "${slang_prefix}/lib/cmake/slang/slang-config.cmake" ] || {
+        echo "error: ${slang_prefix} has libslang but no CMake config package." >&2
+        echo "       cmake/SlangHost/ resolves it with find_package(slang CONFIG);" >&2
+        echo "       re-run scripts/install-slang-prebuilt.sh." >&2
+        exit 1
+    }
+    echo "== slang: prebuilt libslang + headers at ${slang_prefix}"
+    slang_args+=(-DCMAKE_PREFIX_PATH="${slang_prefix}")
 fi
 
 # ---------------------------------------------------------------- 2. ccache
