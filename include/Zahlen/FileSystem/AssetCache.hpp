@@ -7,8 +7,12 @@
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <concepts>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace ZHLN::FS {
@@ -46,11 +50,36 @@ class AssetCache {
         return *this;
     }
 
-    [[nodiscard]] auto Find(uint64_t id) const noexcept -> ZHLN::Optional<T&> {
-        return Lock(_mutex, [&]() -> ZHLN::Optional<T&> {
-            const auto entry = _map.Find(id);
-            return (entry && *entry != nullptr) ? ZHLN::Optional<T&> {**entry} : ZHLN::Optional<T&> {std::nullopt};
-        });
+    // The lock stays held for the whole visit. A lookup that returned a
+    // reference (or a pointer) would drop the mutex before the caller reads
+    // it: Clear() or a move could then retire the asset mid-read.
+    // A void visitor gets bool (was the id found?). A visitor that returns a
+    // value gets std::optional<Ret>, so a value snapshot can leave the lock
+    // without an out-parameter. References are decayed: no borrowed reference
+    // can be carried out of the lock through the return value either.
+    template <typename Fn>
+        requires std::invocable<Fn, T&>
+    [[nodiscard]] auto With(uint64_t id, Fn&& fn) const {
+        using Result = std::invoke_result_t<Fn, T&>;
+        if constexpr (std::is_void_v<Result>) {
+            return Lock(_mutex, [&]() -> bool {
+                const auto entry = _map.Find(id);
+                if (!entry || *entry == nullptr) {
+                    return false;
+                }
+                std::forward<Fn>(fn)(**entry);
+                return true;
+            });
+        } else {
+            using Ret = std::remove_cvref_t<Result>;
+            return Lock(_mutex, [&]() -> std::optional<Ret> {
+                const auto entry = _map.Find(id);
+                if (!entry || *entry == nullptr) {
+                    return std::nullopt;
+                }
+                return std::forward<Fn>(fn)(**entry);
+            });
+        }
     }
 
     void Insert(uint64_t id, std::unique_ptr<T> asset) {

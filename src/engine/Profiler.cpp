@@ -44,14 +44,11 @@ SkipList<std::string, ProfileDataInternal<100>, std::less<>> s_Metrics;
 
 void CPUProfiler::Record(std::string_view name, float timeMS) noexcept {
     std::string key(name);
-    auto        data = s_Metrics.Find(key);
-
-    if (!data) [[unlikely]] {
+    const auto  push = [&](ProfileDataInternal<100>& data) { data.Push(timeMS); };
+    if (!s_Metrics.With(key, push)) [[unlikely]] {
         s_Metrics.Insert(key, ProfileDataInternal<100> {});
-        data = s_Metrics.Find(key);
+        s_Metrics.With(key, push);
     }
-
-    data->Push(timeMS);
 }
 
 void CPUProfiler::IterateMetrics(MetricCallback callback, void* userData) noexcept {

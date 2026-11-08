@@ -8,6 +8,8 @@
 #include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Render/EnvironmentImage.hpp>
 #include <Zahlen/Core/Optional.hpp>
+#include <concepts>
+#include <utility>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
@@ -109,14 +111,38 @@ class AssetManager {
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool { return _vfs.Exists(assetID); }
     [[nodiscard]] auto Exists(std::string_view virtualPath) const noexcept -> bool { return _vfs.Exists(virtualPath); }
 
+    // Non-owning borrow of a cached prefab. Invalidated by ClearCache() or
+    // device-loss recovery; prefer WithCachedPrefab when the whole read must
+    // be atomic with respect to the cache lock.
     [[nodiscard]] auto GetCachedPrefab(uint64_t hash) -> ZHLN::Optional<ModelPrefab&>;
     [[nodiscard]] auto GetCachedPrefab(uint64_t hash) const noexcept -> ZHLN::Optional<const ModelPrefab&>;
+
+    // Scoped visit: the cache's lock is held for the whole callback, so
+    // nothing borrowed outlives a Clear() or a cache move.
+    template <typename Fn>
+        requires std::invocable<Fn, const ModelPrefab&>
+    [[nodiscard]] auto WithCachedPrefab(uint64_t hash, Fn&& fn) const {
+        return _prefabCache.With(hash, std::forward<Fn>(fn));
+    }
+
+    // Explicitly borrowed, non-owning pointer for the importer/PrefabFactory
+    // paths that hand a prefab back to a caller. Invalidated by ClearCache()
+    // or device-loss recovery; never retain it across such a boundary.
+    [[nodiscard]] auto BorrowCachedPrefab(uint64_t hash) const noexcept -> ModelPrefab*;
     // Bind the uploading renderer via UseRenderContext before caching a prefab
     // whose parts contain GPU meshes (Kernel already does this for Engine users).
     void CachePrefab(uint64_t hash, ModelPrefab* prefab);
     void CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab);
 
     [[nodiscard]] auto GetCachedFont(uint64_t hash) -> ZHLN::Optional<GUI::BakedFontAsset&>;
+
+    template <typename Fn>
+        requires std::invocable<Fn, const GUI::BakedFontAsset&>
+    [[nodiscard]] auto WithCachedFont(uint64_t hash, Fn&& fn) const {
+        return _fontCache.With(hash, std::forward<Fn>(fn));
+    }
+
+    [[nodiscard]] auto BorrowCachedFont(uint64_t hash) const noexcept -> GUI::BakedFontAsset*;
     void CacheFont(uint64_t hash, GUI::BakedFontAsset* font);
     void CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
 

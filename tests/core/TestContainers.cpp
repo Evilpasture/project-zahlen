@@ -630,8 +630,8 @@ struct ContainersTestSuite {
 
             ZHLN::Test::ExpectEq(sl.Size(), static_cast<size_t>(4));
 
-            // Verify lock-free Find
-            const auto f20 = sl.Find(20);
+            // Reads happen inside the reader lease, or leave it as a copy.
+            const auto f20 = sl.CopyValue(20);
             if (!ZHLN::Test::ExpectTrue(f20.has_value())) {
                 return std::unexpected(CoreContainersTestError::SkipListInvariantFailed);
             }
@@ -653,7 +653,7 @@ struct ContainersTestSuite {
             bool erased = sl.Erase(20);
             ZHLN::Test::ExpectTrue(erased);
             ZHLN::Test::ExpectEq(sl.Size(), static_cast<size_t>(3));
-            ZHLN::Test::ExpectFalse(sl.Find(20).has_value());
+            ZHLN::Test::ExpectFalse(sl.CopyValue(20).has_value());
 
             return {};
         }

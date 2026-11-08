@@ -78,6 +78,7 @@ enum class MorphPosePassTestError : uint8_t {
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the morph pose pass test."> {}) = 1,
     MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CreateMaterial failed while building the morph material."> {}),
     InstanceSpawnFailed ZHLN_ANNOTATION(ZHLN::Description<"InstantiatePrefab produced no mesh child under the animator root it spawned."> {}),
+    PrefabCacheMissing ZHLN_ANNOTATION(ZHLN::Description<"The cached morph prefab was not in AssetLibrary when the suite needed it."> {}),
     DegenerateClipMissing ZHLN_ANNOTATION(ZHLN::Description<"The fixture that is supposed to carry the keyless weights channel does not have it."> {}),
     MorphComponentMissing ZHLN_ANNOTATION(ZHLN::Description<"The factory did not attach MorphTargetComponent to a part with activeMorphCount > 0."> {}),
     PosePassAttachedMorphComponent ZHLN_ANNOTATION(
@@ -152,11 +153,13 @@ struct MorphPosePassSuite {
     //
     // `degenerateClip` appends the channel claim 2 is about: same path, same
     // target node, keyValues but no keyTimes.
-    [[nodiscard]] static auto BuildMorphPrefab(ZHLN::Engine& engine, bool degenerateClip) -> const ZHLN::ModelPrefab& {
+    // Builds and caches the fixture, returning an inert ID. Nothing borrowed
+    // escapes this function: readers use AssetLibrary::BorrowCachedPrefab.
+    [[nodiscard]] static auto BuildMorphPrefab(ZHLN::Engine& engine, bool degenerateClip) -> ZHLN::AssetID {
         const std::string_view vPath = degenerateClip ? "zahlen_test_morph_pose_prefab_degenerate" : "zahlen_test_morph_pose_prefab";
         const ZHLN::AssetID    id    = ZHLN::HashAssetPath(vPath);
-        if (const auto existing = engine.Assets().CachedPrefab(id)) {
-            return *existing;
+        if (engine.Assets().BorrowCachedPrefab(id) != nullptr) {
+            return id;
         }
 
         auto rc = engine.Graphics();
@@ -231,7 +234,7 @@ struct MorphPosePassSuite {
         }
 
         engine.Assets().CachePrefab(id, std::move(prefab));
-        return *engine.Assets().CachedPrefab(id);
+        return id;
     }
 
     struct Instance {
@@ -302,8 +305,12 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }
 
-            const auto& prefab    = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/false);
-            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, prefab, *material, 1);
+            const auto  prefabID  = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/false);
+            const auto* prefab    = engine->Assets().BorrowCachedPrefab(prefabID);
+            if (prefab == nullptr) {
+                return std::unexpected(MorphPosePassTestError::PrefabCacheMissing);
+            }
+            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, *prefab, *material, 1);
             if (instances.size() != 1) {
                 return std::unexpected(MorphPosePassTestError::InstanceSpawnFailed);
             }
@@ -344,8 +351,12 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }
 
-            const auto& prefab    = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/false);
-            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, prefab, *material, MorphPosePassSuite::kStressInstances);
+            const auto  prefabID  = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/false);
+            const auto* prefab    = engine->Assets().BorrowCachedPrefab(prefabID);
+            if (prefab == nullptr) {
+                return std::unexpected(MorphPosePassTestError::PrefabCacheMissing);
+            }
+            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, *prefab, *material, MorphPosePassSuite::kStressInstances);
             if (instances.size() != MorphPosePassSuite::kStressInstances) {
                 return std::unexpected(MorphPosePassTestError::InstanceSpawnFailed);
             }
@@ -405,12 +416,16 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }
 
-            const auto& prefab    = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/true);
-            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, prefab, *material, MorphPosePassSuite::kDegenerateInstances);
+            const auto  prefabID  = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/true);
+            const auto* prefab    = engine->Assets().BorrowCachedPrefab(prefabID);
+            if (prefab == nullptr) {
+                return std::unexpected(MorphPosePassTestError::PrefabCacheMissing);
+            }
+            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, *prefab, *material, MorphPosePassSuite::kDegenerateInstances);
             if (instances.size() != MorphPosePassSuite::kDegenerateInstances) {
                 return std::unexpected(MorphPosePassTestError::InstanceSpawnFailed);
             }
-            if (prefab.animations.size() != 2) {
+            if (prefab->animations.size() != 2) {
                 return std::unexpected(MorphPosePassTestError::DegenerateClipMissing);
             }
 
@@ -494,8 +509,12 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }
 
-            const auto& prefab    = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/false);
-            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, prefab, *material, 1);
+            const auto  prefabID  = MorphPosePassSuite::BuildMorphPrefab(*engine, /*degenerateClip=*/false);
+            const auto* prefab    = engine->Assets().BorrowCachedPrefab(prefabID);
+            if (prefab == nullptr) {
+                return std::unexpected(MorphPosePassTestError::PrefabCacheMissing);
+            }
+            auto        instances = MorphPosePassSuite::SpawnInstances(*engine, *prefab, *material, 1);
             if (instances.empty()) {
                 return std::unexpected(MorphPosePassTestError::InstanceSpawnFailed);
             }

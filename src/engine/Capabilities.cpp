@@ -252,6 +252,15 @@ auto AssetLibrary::CachedPrefab(uint64_t hash) noexcept -> ZHLN::Optional<ModelP
 auto AssetLibrary::CachedPrefab(uint64_t hash) const noexcept -> ZHLN::Optional<const ModelPrefab&> {
     return _assets->GetCachedPrefab(hash);
 }
+
+auto AssetLibrary::WithCachedPrefabImpl(
+    uint64_t hash, void (*visit)(const void*, const ModelPrefab&), const void* ctx
+) const -> bool {
+    return _assets->WithCachedPrefab(hash, [&](const ModelPrefab& prefab) { visit(ctx, prefab); });
+}
+auto AssetLibrary::BorrowCachedPrefab(uint64_t hash) const noexcept -> const ModelPrefab* {
+    return _assets->BorrowCachedPrefab(hash);
+}
 void AssetLibrary::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
     _assets->CachePrefab(hash, prefab);
 }

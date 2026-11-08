@@ -356,9 +356,9 @@ layers after evaluating `AnimatorComponent::currentTrackIdx`. If that index is
 to select by name:
 
 ```cpp
-if (const auto prefab = engine.GetAssetManager().GetCachedPrefab(animator.prefabAsset); prefab.has_value()) {
-    animator.currentTrackIdx = ZHLN::FindAnimationTrack(*prefab, "idle");
-}
+engine.Assets().WithCachedPrefab(animator.prefabAsset, [&](const ZHLN::ModelPrefab& prefab) {
+    animator.currentTrackIdx = ZHLN::FindAnimationTrack(prefab, "idle");
+});
 ```
 
 The lookup is case-insensitive, prefers an exact name, then accepts a substring

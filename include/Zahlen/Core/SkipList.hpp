@@ -4,7 +4,10 @@
 #pragma once
 
 #include "Atomic.hpp"
-#include "Optional.hpp"
+#include <concepts>
+#include <optional>
+#include <type_traits>
+#include <utility>
 #include "Platform.hpp"
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
@@ -84,38 +87,52 @@ class SkipList {
         return *this;
     }
 
-    [[nodiscard]] ZHLN::Optional<const Value&> Find(const Key& key) const noexcept {
+    // The reader lease covers the whole visit. The old Find() called
+    // ExitReader() before returning, leaving the caller holding a reference to
+    // a node a concurrent Erase could retire.
+    // Like AssetCache::With: void visitors get bool, value visitors get
+    // std::optional<Ret>. The reader lease covers the whole call in both cases.
+    template <typename Fn>
+        requires std::invocable<Fn, const Value&>
+    [[nodiscard]] auto With(const Key& key, Fn&& fn) const noexcept {
+        using Result = std::invoke_result_t<Fn, const Value&>;
         const_cast<SkipList*>(this)->EnterReader();
-
-        const SkipNode* curr = _head;
-        uint32_t        lvl  = _level.load(std::memory_order::acquire);
-
-        for (int i = static_cast<int>(lvl) - 1; i >= 0; --i) {
-            const ZHLN::Atomic<SkipNode*>* forward = curr->GetForward();
-            SkipNode*                      next    = forward[i].load(std::memory_order::acquire);
-            while (next && _compare(next->key, key)) {
-                curr = next;
-                next = curr->GetForward()[i].load(std::memory_order::acquire);
-            }
+        if constexpr (std::is_void_v<Result>) {
+            const bool found = WithUnlocked(key, std::forward<Fn>(fn));
+            const_cast<SkipList*>(this)->ExitReader();
+            return found;
+        } else {
+            using Ret = std::remove_cvref_t<Result>;
+            std::optional<Ret> result;
+            WithUnlocked(key, [&](const Value& value) { result.emplace(std::forward<Fn>(fn)(value)); });
+            const_cast<SkipList*>(this)->ExitReader();
+            return result;
         }
-
-        const ZHLN::Atomic<SkipNode*>* forward = curr->GetForward();
-        SkipNode*                      next    = forward[0].load(std::memory_order::acquire);
-        ZHLN::Optional<const Value&>   result;
-
-        if (next && !next->deleted.load(std::memory_order::acquire) && !_compare(next->key, key) && !_compare(key, next->key)) {
-            result = next->value;
-        }
-
-        const_cast<SkipList*>(this)->ExitReader();
-        return result;
     }
 
-    [[nodiscard]] ZHLN::Optional<Value&> Find(const Key& key) noexcept {
-        if (auto found = std::as_const(*this).Find(key)) {
-            return const_cast<Value&>(*found);
+    template <typename Fn>
+        requires std::invocable<Fn, Value&>
+    [[nodiscard]] auto With(const Key& key, Fn&& fn) noexcept {
+        using Result = std::invoke_result_t<Fn, Value&>;
+        const_cast<SkipList*>(this)->EnterReader();
+        if constexpr (std::is_void_v<Result>) {
+            const bool found = WithUnlocked(key, std::forward<Fn>(fn));
+            const_cast<SkipList*>(this)->ExitReader();
+            return found;
+        } else {
+            using Ret = std::remove_cvref_t<Result>;
+            std::optional<Ret> result;
+            WithUnlocked(key, [&](Value& value) { result.emplace(std::forward<Fn>(fn)(value)); });
+            const_cast<SkipList*>(this)->ExitReader();
+            return result;
         }
-        return std::nullopt;
+    }
+
+    // Small scalar values leave the lease as a copy; nothing is borrowed.
+    [[nodiscard]] auto CopyValue(const Key& key) const noexcept -> std::optional<Value>
+        requires std::copy_constructible<Value>
+    {
+        return With(key, [](const Value& value) -> Value { return value; });
     }
 
     template <typename Func>
@@ -322,6 +339,29 @@ class SkipList {
     }
 
   private:
+    template <typename Fn>
+    auto WithUnlocked(const Key& key, Fn&& fn) const noexcept -> bool {
+        const SkipNode* curr = _head;
+        const uint32_t  lvl  = _level.load(std::memory_order::acquire);
+
+        for (int i = static_cast<int>(lvl) - 1; i >= 0; --i) {
+            const ZHLN::Atomic<SkipNode*>* forward = curr->GetForward();
+            SkipNode*                      next    = forward[i].load(std::memory_order::acquire);
+            while (next && _compare(next->key, key)) {
+                curr = next;
+                next = curr->GetForward()[i].load(std::memory_order::acquire);
+            }
+        }
+
+        SkipNode* next = curr->GetForward()[0].load(std::memory_order::acquire);
+        if (next == nullptr || next->deleted.load(std::memory_order::acquire) ||
+            _compare(next->key, key) || _compare(key, next->key)) {
+            return false;
+        }
+        std::forward<Fn>(fn)(next->value);
+        return true;
+    }
+
     void EnterReader() noexcept {
         _activeReaders.fetch_add(1, std::memory_order::acquire);
     }

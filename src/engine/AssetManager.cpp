@@ -41,14 +41,19 @@ void AssetManager::FreeMemory(AssetLoadRequest& req) {
 }
 
 auto AssetManager::GetCachedPrefab(uint64_t hash) -> ZHLN::Optional<ModelPrefab&> {
-    return _prefabCache.Find(hash);
+    ModelPrefab* found = BorrowCachedPrefab(hash);
+    return found != nullptr ? ZHLN::Optional<ModelPrefab&> {*found} : ZHLN::Optional<ModelPrefab&> {std::nullopt};
 }
 
 auto AssetManager::GetCachedPrefab(uint64_t hash) const noexcept -> ZHLN::Optional<const ModelPrefab&> {
-    if (auto found = _prefabCache.Find(hash)) {
-        return std::cref(*found);
-    }
-    return std::nullopt;
+    const ModelPrefab* found = BorrowCachedPrefab(hash);
+    return found != nullptr ? ZHLN::Optional<const ModelPrefab&> {*found} : ZHLN::Optional<const ModelPrefab&> {std::nullopt};
+}
+
+auto AssetManager::BorrowCachedPrefab(uint64_t hash) const noexcept -> ModelPrefab* {
+    ModelPrefab* found = nullptr;
+    _prefabCache.With(hash, [&](ModelPrefab& prefab) { found = &prefab; });
+    return found;
 }
 
 void AssetManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
@@ -112,7 +117,14 @@ uint32_t AssetManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCo
 }
 
 auto AssetManager::GetCachedFont(uint64_t hash) -> ZHLN::Optional<GUI::BakedFontAsset&> {
-    return _fontCache.Find(hash);
+    GUI::BakedFontAsset* found = BorrowCachedFont(hash);
+    return found != nullptr ? ZHLN::Optional<GUI::BakedFontAsset&> {*found} : ZHLN::Optional<GUI::BakedFontAsset&> {std::nullopt};
+}
+
+auto AssetManager::BorrowCachedFont(uint64_t hash) const noexcept -> GUI::BakedFontAsset* {
+    GUI::BakedFontAsset* found = nullptr;
+    _fontCache.With(hash, [&](GUI::BakedFontAsset& font) { found = &font; });
+    return found;
 }
 
 void AssetManager::CacheFont(uint64_t hash, GUI::BakedFontAsset* font) {
@@ -166,18 +178,19 @@ auto AssetManager::FindEnvironmentImage(std::string_view key) const noexcept -> 
     if (key.empty()) {
         return std::nullopt;
     }
-    const auto image = _environmentImages.Find(HashAssetPath(key));
-    if (!image) {
-        return std::nullopt;
-    }
-    return EnvironmentImageView {
-        .rgba         = image->rgba,
-        .lightingRgba = image->lightingRgba,
-        .sun          = image->sun,
-        .width        = image->width,
-        .height       = image->height,
-        .contentHash  = image->contentHash,
-    };
+    // The lock is held while the view is built, so the spans it carries stay
+    // valid until the caller's next ClearCache (the documented contract).
+    // With() returns the value snapshot directly; no out-parameter needed.
+    return _environmentImages.With(HashAssetPath(key), [](const EnvironmentImage& image) {
+        return EnvironmentImageView {
+            .rgba         = image.rgba,
+            .lightingRgba = image.lightingRgba,
+            .sun          = image.sun,
+            .width        = image.width,
+            .height       = image.height,
+            .contentHash  = image.contentHash,
+        };
+    });
 }
 
 } // namespace ZHLN

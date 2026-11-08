@@ -594,6 +594,40 @@ RenderContext state (SetFrameData packs the engine's FrameData into the shader's
 
 ---
 
+### 3.3 Borrowed state and scoped access
+
+Return shapes follow the semantics of what is looked up, not a blanket rule
+about one type. `ZHLN::Optional<T&>` is `std::optional<T&>` where the standard
+library provides it (C++26) and a pointer-backed reference wrapper with the
+same monadic interface on older toolchains. It states a non-owning, possibly
+absent borrow: no pointer arithmetic, `.transform()` / `.and_then()`, and no
+ownership ambiguity.
+
+| category | rule | examples |
+| :--- | :--- | :--- |
+| synchronized / locked data structure | **never return a borrow**, neither `T*` nor `Optional<T&>`; a scoped `With(key, fn)` holds the lock or reader lease for the whole call | `AssetCache::With(id, fn)`, `SkipList::With(key, fn)`, `AssetLibrary::WithCachedPrefab(hash, fn)` |
+| single-object lookup / non-owning borrow | `ZHLN::Optional<T&>`, `std::nullopt` = absent | `HashMap::Find`, `UITree::FindNodeById`, `Registry::Get<T>`, `Engine::GetWindow`, `PhysicsContext::GetRagdoll` |
+| buffers & contiguous sequences | `std::span<const T>` / `std::span<T>`, not a `T*` to the first element | `FrameDestinations::Windows`, `InputContext::ActionMaps`, `EnvironmentImageView` |
+
+A `With(...)` visitor returning void gets `bool` (was the key found?). One that
+returns a value gets `std::optional<Ret>` with `Ret` decayed, so a snapshot can
+leave the lock without an out-variable and no reference can escape through the
+return type. `AssetLibrary::WithCachedPrefab` takes void visitors only, because
+its type-erased trampoline cannot carry a value back. `SkipList` also offers
+`CopyValue(key)` for small scalars.
+
+The asset caches are the one place where a higher-level API has to hand a
+prefab on. `AssetManager::BorrowCachedPrefab/BorrowCachedFont` and
+`AssetLibrary::BorrowCachedPrefab` are the explicitly named seam: non-owning
+pointers invalidated by `ClearCache()` / device-loss recovery, never retained
+across that boundary. The public lookups built on them
+(`AssetManager::GetCachedPrefab`, `AssetLibrary::CachedPrefab`, the glTF and
+BSP importers) return `ZHLN::Optional<T&>` so callers get the safe borrow type.
+Never use `With(...)` as a pointer-extractor.
+
+ECS `Registry::Get<T>`, `Query::Get<T>` and `ExtensionServices::Get<T>` keep
+their optional references: their use is confined to one system invocation.
+
 ## 4. Deferred Render Graph Topology
 
 The renderer executes a multi-pass pipeline managed by a compile-time type-checked frame graph:
