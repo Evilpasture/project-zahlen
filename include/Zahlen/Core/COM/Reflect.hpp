@@ -51,17 +51,57 @@ constexpr void ForEachInterfaceBase(F&& f) {
 }
 
 // All ABI policy lives here, in the COM domain. Reflection supplies only
-// MethodSignature<Return, Noexcept> and a way to enumerate them.
-template <typename Signature>
-[[nodiscard]] consteval bool ComMethodCompliant() noexcept {
-    if constexpr (!Signature::IsNoexcept) {
-        return false;
-    }
-    using Return = typename Signature::ReturnType;
+// MethodSignature<Return, Noexcept, Parameters...> and a way to enumerate
+// them.
+//
+// A returned object is either nothing, an address, or a value the caller
+// copies out of a register or a hidden-pointer slot. A reference return is
+// rejected: the boundary cannot express how long the referent stays alive,
+// which is exactly what refcounting a pointer is for.
+template <typename Return>
+[[nodiscard]] consteval bool ComReturnCompliant() noexcept {
     if constexpr (std::is_void_v<Return> || std::is_pointer_v<Return>) {
         return true;
     } else {
         return std::is_standard_layout_v<Return> && std::is_trivially_copyable_v<Return>;
+    }
+}
+
+// A parameter lives only for the duration of the call, so a reference is
+// just an address the callee reads and carries no lifetime question. It is
+// therefore audited as the type referred to, which keeps `const Transform&`
+// usable while still rejecting `const std::string&` for the real reason:
+// std::string is not trivially copyable, so its layout and its allocator
+// would have to match on both sides.
+template <typename Parameter>
+[[nodiscard]] consteval bool ComParameterCompliant() noexcept {
+    using Bare = std::remove_cvref_t<Parameter>;
+    if constexpr (std::is_pointer_v<Bare>) {
+        return true;
+    } else {
+        return std::is_standard_layout_v<Bare> && std::is_trivially_copyable_v<Bare>;
+    }
+}
+
+template <typename ParameterPack>
+struct ComParameterAudit;
+
+template <typename... Parameters>
+struct ComParameterAudit<std::tuple<Parameters...>> {
+    static constexpr bool kCompliant = (... && ComParameterCompliant<Parameters>());
+};
+
+// A method that takes std::string by value is noexcept and returns void, so
+// auditing the return type alone would pass it. Parameters are half the
+// signature and half the ABI.
+template <typename Signature>
+[[nodiscard]] consteval bool ComMethodCompliant() noexcept {
+    if constexpr (!Signature::IsNoexcept) {
+        return false;
+    } else if constexpr (!ComReturnCompliant<typename Signature::ReturnType>()) {
+        return false;
+    } else {
+        return ComParameterAudit<typename Signature::ParameterTypes>::kCompliant;
     }
 }
 

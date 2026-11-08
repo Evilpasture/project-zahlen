@@ -683,11 +683,24 @@ container object, allocator or exception crosses the boundary.
 | `Types.hpp` | `StringView`, `Span<T>`, `Result<T>` / `Result<void>` -- fixed-layout scalars that convert to and from `std::string_view`, `std::span` and `std::expected`. `Result<T>` requires a standard-layout, trivially copyable `T`; both variants keep the original `ErrorCode` on failure. |
 | `IObject.hpp` | `InterfaceID` and the three virtuals (`AddRef`, `Release`, `QueryRaw`). `InterfaceIdOf<T>()` is a compile-time 128-bit hash of the *qualified* type name, so there is no GUID registry and no IDL. `Query<T>()` is a caller-side template. |
 | `Reflect.hpp` | `Implements<Derived, Interfaces...>` and `AuditInterfaceABI<I>()`. Reflection walks the whole base graph to build `QueryRaw`'s dispatch; there is no interface map, no switch and no macro. |
-| `Ref.hpp` | `Ref<T>`, an owning reference. `Adopt` takes a reference `QueryRaw` already added; the explicit constructor adds one. |
+| `Ref.hpp` | `Ref<T>`, an owning reference. `Adopt` takes a reference `QueryRaw` already added; the explicit constructor adds one. Assignment acquires before it releases. |
 
 An interface is a pure abstract class deriving **non-virtually** from `IObject`,
-with no virtual destructor, `noexcept` methods and void / pointer / fixed-layout
-return types. `AuditInterfaceABI<I>()` enforces that at compile time. With no
+with no virtual destructor and `noexcept` methods. `AuditInterfaceABI<I>()`
+enforces that at compile time, and it audits the **whole** signature, because
+`void SetTitle(std::string) noexcept` is noexcept and returns void yet still
+drags a `std::string` across the boundary:
+
+| position | rule | why |
+| :--- | :--- | :--- |
+| return | `void`, any pointer, or standard-layout **and** trivially copyable | a reference return is rejected: the boundary cannot say how long the referent lives, which is what refcounting a pointer is for |
+| parameter | any pointer, or standard-layout **and** trivially copyable, applied to the referred-to type for references | a parameter lives only for the call, so `const Transform&` is just an address; `const std::string&` is still rejected, for the real reason -- `std::string` is not trivially copyable, so both sides would have to agree on its layout and allocator |
+
+A pointer parameter is accepted whatever it points at. That is deliberate: an
+opaque handle (`IObject*`, a `void*` cookie) is the one thing the boundary
+cannot audit and must allow. The rule catches the accident -- a container
+passed by value or by reference -- not a caller who deliberately smuggles a
+pointer. With no
 virtual inheritance each interface branch has its own `IObject` subobject, so
 `Implements` aggregates the interface branches itself: one declaration of the
 three virtuals is then the final overrider for every branch. Interfaces are
@@ -703,10 +716,14 @@ layout of `StringView`, `Span<T>` and `Result<T>` is pinned by static asserts in
 `tests/core/TestCOM.cpp` instead.
 
 The reflection library has **no domain**: it gained only generic primitives --
-`QualifiedTypeName<T>()` in `Core.hpp`, and `MethodSignature<Return, Noexcept>`
-plus `ForEachMethodSignature<T>(f)` in `Class.hpp`, next to the existing
-`ForEachBase`. Every ABI policy decision -- which method signatures may cross
-the boundary, which layouts are allowed, `AuditInterfaceABI<I>()` -- lives in
+`QualifiedTypeName<T>()` in `Core.hpp`, and
+`MethodSignature<Return, Noexcept, Parameters...>` plus
+`ForEachMethodSignature<T>(f)` in `Class.hpp`, next to the existing
+`ForEachBase`. `MethodSignature` reports a return type, a `noexcept` bit and
+the declaration-order parameter types as `std::tuple<Parameters...>`, with no
+implicit object parameter; it does not know that any of them means anything.
+Every ABI policy decision -- `ComReturnCompliant`, `ComParameterCompliant`,
+`ComMethodCompliant`, `AuditInterfaceABI<I>()` -- lives in
 `Core/COM/Reflect.hpp`. `check_reflection_boundary.py` keeps the raw
 `std::meta` tokens inside `Reflection/`, so COM consumes plain types and
 bools and never a reflection `info`.

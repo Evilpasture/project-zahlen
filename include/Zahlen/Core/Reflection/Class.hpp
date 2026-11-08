@@ -11,6 +11,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace ZHLN::Reflect {
 
@@ -26,6 +27,21 @@ consteval auto MembersOf() {
 template <typename T>
 consteval auto BasesOf() {
     return std::define_static_array(std::meta::bases_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+}
+
+// Builds MethodSignature<Return, Noexcept, Parameters...> for one reflected
+// member function. Parameters cannot be expanded into a template argument
+// list by a fold, so the argument list is assembled as reflections and
+// substituted in one step. The implicit object parameter is not included.
+template <template <typename, bool, typename...> class Signature>
+consteval auto SignatureOf(std::meta::info member) -> std::meta::info {
+    std::vector<std::meta::info> arguments;
+    arguments.push_back(std::meta::dealias(std::meta::return_type_of(member)));
+    arguments.push_back(std::meta::reflect_constant(std::meta::is_noexcept(member)));
+    for (auto parameter: std::meta::parameters_of(member)) {
+        arguments.push_back(std::meta::dealias(std::meta::type_of(parameter)));
+    }
+    return std::meta::substitute(^^Signature, arguments);
 }
 
 template <typename T>
@@ -110,19 +126,22 @@ constexpr void ForEachMemberFunction(F&& f) {
 
 // A domain-neutral description of one reflected member function. Consumers
 // decide what a return type or a noexcept bit means; this library does not.
-template <typename Return, bool Noexcept>
+template <typename Return, bool Noexcept, typename... Parameters>
 struct MethodSignature {
     using ReturnType = Return;
+    // Declaration order, no implicit object parameter, top-level aliases
+    // resolved. A consumer decides what the types mean.
+    using ParameterTypes = std::tuple<Parameters...>;
 
-    static constexpr bool IsNoexcept = Noexcept;
+    static constexpr bool        IsNoexcept     = Noexcept;
+    static constexpr std::size_t ParameterCount = sizeof...(Parameters);
 };
 
 template <typename T, typename F>
 constexpr void ForEachMethodSignature(F&& f) {
     ForEachMemberFunction<T>([&]<auto member>() -> auto {
         if constexpr (!std::meta::is_special_member_function(member)) {
-            using Return = typename[:std::meta::dealias(std::meta::return_type_of(member)):];
-            f.template operator()<MethodSignature<Return, std::meta::is_noexcept(member)>>();
+            f.template operator()<typename[:TemplatedDetail::SignatureOf<MethodSignature>(member):]>();
         }
     });
 }

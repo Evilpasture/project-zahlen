@@ -36,20 +36,28 @@ public:
     Ref(Ref&& other) noexcept: m_ptr(std::exchange(other.m_ptr, nullptr)) {
     }
 
+    // Acquire before release, always. Two Refs can name the same object, and
+    // `this != &other` does not catch that: releasing first can run the
+    // destructor and leave AddRef to touch freed memory. Releasing last also
+    // means a destructor that reaches back into this Ref sees a finished
+    // object rather than a half-assigned one.
     Ref& operator=(const Ref& other) noexcept {
-        if (this != &other) {
-            if (m_ptr != nullptr) m_ptr->Release();
-            m_ptr = other.m_ptr;
-            if (m_ptr != nullptr) m_ptr->AddRef();
-        }
+        if (other.m_ptr != nullptr) other.m_ptr->AddRef();
+        T* previous = m_ptr;
+        m_ptr       = other.m_ptr;
+        if (previous != nullptr) previous->Release();
         return *this;
     }
 
+    // A move consumes other's reference instead of adding one, so the
+    // pointer is taken first and the old one released once this Ref is
+    // already consistent. Self-move leaves the object empty but valid.
     Ref& operator=(Ref&& other) noexcept {
-        if (this != &other) {
-            if (m_ptr != nullptr) m_ptr->Release();
-            m_ptr = std::exchange(other.m_ptr, nullptr);
-        }
+        if (this == &other) return *this;
+        T* adopted  = std::exchange(other.m_ptr, nullptr);
+        T* previous = m_ptr;
+        m_ptr       = adopted;
+        if (previous != nullptr) previous->Release();
         return *this;
     }
 

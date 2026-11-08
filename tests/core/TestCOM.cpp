@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <expected>
 #include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -39,6 +40,12 @@ struct ITestBuffer : ZHLN::COM::IObject {
 struct ITestMissing : ZHLN::COM::IObject {
     virtual int32_t Missing() const noexcept = 0;
 };
+
+// Watches the assignment that destroys it. Release has to happen last, so the
+// slot being assigned already names its new object by the time this runs.
+ZHLN::COM::Ref<ITestBuffer>* g_assignedSlot          = nullptr;
+const void*                  g_slotTargetWhileDying   = nullptr;
+bool                         g_observedDestructorRan  = false;
 
 // Three interfaces, no virtual inheritance, no macros, and no handwritten
 // QueryInterface switch. Implements aggregates the interface branches so one
@@ -71,8 +78,51 @@ public:
     }
 };
 
+class ObservingObject final : public ZHLN::COM::Implements<ObservingObject, ITestBuffer> {
+public:
+    ~ObservingObject() {
+        g_observedDestructorRan = true;
+        g_slotTargetWhileDying =
+            (g_assignedSlot != nullptr) ? static_cast<const void*>(g_assignedSlot->Get()) : nullptr;
+    }
+
+    uint32_t Sum(ZHLN::COM::Span<const uint8_t> bytes) const noexcept override {
+        return static_cast<uint32_t>(bytes.size);
+    }
+};
+
 struct ThrowingInterface {
     virtual int32_t Bad() const = 0;
+};
+
+// A fixed-layout struct is fine by value or by reference.
+struct TestTransform {
+    float position[3];
+    float scale;
+};
+
+// The accident the parameter audit exists for: noexcept, returns void, and
+// still drags a std::string across the boundary by value.
+struct StringValueParamInterface {
+    virtual void SetTitle(std::string title) noexcept = 0;
+};
+
+// Passing it by const reference is no better: the callee still has to agree
+// with the caller about std::string's layout and allocator.
+struct StringRefParamInterface {
+    virtual void SetTitle(const std::string& title) noexcept = 0;
+};
+
+// Hidden behind a compliant leading parameter, so the audit cannot stop at the
+// first one it likes.
+struct LateViolationParamInterface {
+    virtual void Write(int32_t slot, std::string payload) noexcept = 0;
+};
+
+struct CompliantParamInterface {
+    virtual void Apply(const TestTransform& transform, int32_t count) noexcept = 0;
+    virtual void Store(TestTransform value, const char* label, void* opaque) noexcept = 0;
+    virtual void Nothing() noexcept = 0;
 };
 
 struct VirtualDtorInterface {
@@ -85,6 +135,32 @@ static_assert(ZHLN::COM::AuditInterfaceABI<ITestExtended>());
 static_assert(ZHLN::COM::AuditInterfaceABI<ITestBuffer>());
 static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<ThrowingInterface>());
 static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<VirtualDtorInterface>());
+static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<StringValueParamInterface>());
+static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<StringRefParamInterface>());
+static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<LateViolationParamInterface>());
+static_assert(ZHLN::COM::ComInterfaceLayoutCompliant<CompliantParamInterface>());
+
+// The parameter rule itself: pointers are opaque, references are audited as
+// what they refer to, values must be fixed-layout.
+static_assert(ZHLN::COM::ComParameterCompliant<int32_t>());
+static_assert(ZHLN::COM::ComParameterCompliant<const TestTransform&>());
+static_assert(ZHLN::COM::ComParameterCompliant<TestTransform>());
+static_assert(ZHLN::COM::ComParameterCompliant<void*>());
+static_assert(ZHLN::COM::ComParameterCompliant<const std::string*>());
+static_assert(!ZHLN::COM::ComParameterCompliant<std::string>());
+static_assert(!ZHLN::COM::ComParameterCompliant<const std::string&>());
+
+// A reference return would ask the boundary to express a lifetime it cannot.
+static_assert(ZHLN::COM::ComReturnCompliant<void>());
+static_assert(ZHLN::COM::ComReturnCompliant<TestTransform>());
+static_assert(ZHLN::COM::ComReturnCompliant<ZHLN::COM::IObject*>());
+static_assert(!ZHLN::COM::ComReturnCompliant<TestTransform&>());
+static_assert(!ZHLN::COM::ComReturnCompliant<std::string>());
+
+// Reflection reports parameters without the implicit object parameter.
+static_assert(ZHLN::Reflect::MethodSignature<void, true, int32_t, float>::ParameterCount == 2);
+static_assert(std::is_same_v<ZHLN::Reflect::MethodSignature<void, true, int32_t>::ParameterTypes,
+                             std::tuple<int32_t>>);
 static_assert(ZHLN::COM::InterfaceIdOf<ITestMath>() == ZHLN::COM::InterfaceIdOf<ITestMath>());
 static_assert(ZHLN::COM::InterfaceIdOf<ITestMath>() != ZHLN::COM::InterfaceIdOf<ITestBuffer>());
 static_assert(std::is_standard_layout_v<ZHLN::COM::InterfaceID>);
@@ -172,6 +248,57 @@ struct COMTestSuite {
             const ZHLN::COM::Result<void> failed = COMTestError::UnknownInterface;
             ZHLN::Test::ExpectFalse(failed.HasValue());
             ZHLN::Test::ExpectTrue(failed.error.Is(COMTestError::UnknownInterface));
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> assignment_releases_the_old_object_last() {
+            using ZHLN::COM::Ref;
+
+            // The discriminating case. Assigning over the last reference to an
+            // object runs its destructor inside operator=; with release-first
+            // the slot still names the dead object while that destructor runs.
+            Ref<ITestBuffer> slot        = Ref<ITestBuffer>::Adopt(static_cast<ITestBuffer*>(new ObservingObject()));
+            Ref<ITestBuffer> replacement = Ref<ITestBuffer>::Adopt(static_cast<ITestBuffer*>(new TestObject()));
+
+            g_assignedSlot          = &slot;
+            g_slotTargetWhileDying  = nullptr;
+            g_observedDestructorRan = false;
+
+            slot = replacement;
+
+            ZHLN::Test::ExpectTrue(g_observedDestructorRan);
+            ZHLN::Test::ExpectTrue(g_slotTargetWhileDying == static_cast<const void*>(replacement.Get()));
+            ZHLN::Test::ExpectEq(slot.Get(), replacement.Get());
+            g_assignedSlot = nullptr;
+
+            // Two independent Refs naming one object: `this != &other` is true,
+            // so the guard alone would not have protected this.
+            auto*            raw  = new TestObject();
+            Ref<ITestBuffer> left = Ref<ITestBuffer>::Adopt(static_cast<ITestBuffer*>(raw));
+            Ref<ITestBuffer> right {left.Get()};
+            ZHLN::COM::IObject* base = static_cast<ITestBuffer*>(raw);
+
+            left = right;
+            ZHLN::Test::ExpectEq(left.Get(), right.Get());
+            ZHLN::Test::ExpectEq(base->AddRef(), uint32_t {3});
+            ZHLN::Test::ExpectEq(base->Release(), uint32_t {2});
+
+            // Self-assignment through an alias the compiler cannot fold away.
+            Ref<ITestBuffer>* self = &left;
+            left                   = *self;
+            ZHLN::Test::ExpectTrue(static_cast<bool>(left));
+            ZHLN::Test::ExpectEq(base->AddRef(), uint32_t {3});
+            ZHLN::Test::ExpectEq(base->Release(), uint32_t {2});
+
+            std::array<uint8_t, 3> bytes {1, 2, 3};
+            ZHLN::Test::ExpectEq(left->Sum(bytes), uint32_t {6});
+
+            // A move consumes right's reference rather than adding one.
+            left = std::move(right);
+            ZHLN::Test::ExpectFalse(static_cast<bool>(right));
+            ZHLN::Test::ExpectEq(base->AddRef(), uint32_t {2});
+            ZHLN::Test::ExpectEq(base->Release(), uint32_t {1});
+            ZHLN::Test::ExpectEq(left->Sum(bytes), uint32_t {6});
             return {};
         }
 
