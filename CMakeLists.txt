@@ -288,19 +288,24 @@ endif()
 
 add_subdirectory(src/render)
 
-if(UNIX AND NOT APPLE)
-    target_link_options(
-    zahlen_engine PRIVATE
-    "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/zahlen_engine.map")
-endif()
+# There is no linker version script here any more. What it existed to do --
+# keep the renderer's symbols from being preempted by a copy embedded in a
+# consumer executable -- is now a compile-time visibility preset on the
+# zahlen_vulkan target, which is where the explanation lives. The script was
+# ELF-only, matched symbols by hand-written glob (so it missed every mangled
+# C++ name that did not happen to start with `vma`), and silently overrode
+# source annotations: ZHLN_PostAudioEvent is declared ZHLN_API in a public
+# header and the script localized it anyway, making it unlinkable for the
+# consumers the declaration was written for.
 
 if(MINGW)
-    # PE side of the question the version script above answers for ELF: what does
-    # the engine's shared library export?
+    # PE side of the question visibility answers for ELF: what does the engine's
+    # shared library export?
     #
-    # On ELF the map says `global: *` and localizes the renderer's internals only,
-    # an exception that exists for symbol preemption -- something PE does not have,
-    # since a DLL binds intra-image by default. What PE does have is a much
+    # On ELF the engine exports everything its own consumers reach, and only the
+    # renderer and the fiber trampoline are hidden -- an exception that exists for
+    # symbol preemption, something PE does not have, since a DLL binds intra-image
+    # by default. What PE does have is a much
     # narrower export set: GNU ld stops auto-exporting as soon as one object carries
     # __declspec(dllexport), which every ZHLN_API declaration does. Only the
     # annotated public API would be exported, and the engine's own consumers call
