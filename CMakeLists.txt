@@ -460,7 +460,7 @@ target_include_directories(
 target_include_directories(
   zahlen_engine SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # Build-tree-only seam for in-repo implementation units. Deliberately absent
-# from the installed/exported interface; SDK consumers see capabilities only.
+# from the installed/exported interface; API consumers see capabilities only.
 target_include_directories(
   zahlen_engine SYSTEM PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/engine/internal>)
 target_include_directories(

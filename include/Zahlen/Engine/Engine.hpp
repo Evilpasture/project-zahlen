@@ -274,7 +274,7 @@ class ZHLN_API Engine {
   private:
     friend struct ZHLN::EngineAccess;
 
-    // Cold-start / build-tree-only path to the concrete registry. SDK consumers
+    // Cold-start / build-tree-only path to the concrete registry. API consumers
     // get Entities() and Commands() instead.
     auto               GetInternalRegistry() noexcept -> ECS::Registry&;
     [[nodiscard]] auto GetInternalRegistry() const noexcept -> const ECS::Registry&;

@@ -238,7 +238,7 @@ void test_app_stops_layers_on_typed_frame_failure() {
         // Replace the plan with a single deterministic failing UI step. This
         // tests the frame-error result and cleanup without a GPU frame.
         // Failure injection is in-tree tooling: the mutable plan is reachable
-        // only through the build-tree-only seam, never from the SDK surface.
+        // only through the build-tree-only seam, never from the public API.
         auto& plan = ZHLN::EngineAccess::FramePlanOf(engine);
         plan.Clear();
         const auto placed = plan.Append(FramePhase::UI, "EmitUIAndFail", +[](Engine& active, float, FrameContext& frame) {

@@ -5,7 +5,7 @@
 
 // Zahlen/COM/IGraphicsDevice.hpp
 //
-// The renderer as the SDK sees it. Every method is noexcept and every type in
+// The renderer as the public API sees it. Every method is noexcept and every type in
 // every signature is fixed layout, which AuditInterfaceABI checks at compile
 // time when EngineCOM declares this as one of its interfaces.
 

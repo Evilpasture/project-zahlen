@@ -5,7 +5,7 @@
 
 // Zahlen/COM/IEngine.hpp
 //
-// The root of the SDK. One object implements this and every capability
+// The root of the public API. One object implements this and every capability
 // interface, so Graphics() and Query<IGraphicsDevice>() reach the same
 // subobject of the same allocation and a capability costs nothing to obtain.
 
@@ -16,6 +16,10 @@ namespace ZHLN::COM {
 
 struct IGraphicsDevice;
 struct IEntities;
+struct ISimulation;
+struct IAudioDevice;
+struct IAssetLibrary;
+struct IActionContext;
 
 struct IEngine : IObject {
     [[nodiscard]] virtual bool IsRunning() const noexcept = 0;
@@ -29,6 +33,10 @@ struct IEngine : IObject {
     // independently; that path adds a reference the way COM expects.
     [[nodiscard]] virtual IGraphicsDevice* Graphics() noexcept = 0;
     [[nodiscard]] virtual IEntities*       Entities() noexcept = 0;
+    [[nodiscard]] virtual ISimulation*     Simulation() noexcept = 0;
+    [[nodiscard]] virtual IAudioDevice*    Audio() noexcept = 0;
+    [[nodiscard]] virtual IAssetLibrary*   Assets() noexcept = 0;
+    [[nodiscard]] virtual IActionContext*  Actions() noexcept = 0;
 
 protected:
     ~IEngine() = default;

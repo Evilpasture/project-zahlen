@@ -15,6 +15,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/Math/ValueTypes.hpp>
@@ -63,42 +64,6 @@ auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> ZHLN::Optional<GUI::Bak
 auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> ZHLN::Optional<GUI::BakedFontAsset&>;
 
 auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB = true) -> TextureID;
-
-struct SpawnParams {
-    ZHLN::Double3 position {};
-    ZHLN::Float4  rotation {0.0f, 0.0f, 0.0f, 1.0f};
-    ZHLN::Float3  scale {1.0f, 1.0f, 1.0f};
-
-    bool     createPhysics   = false;
-    bool     useBoxColliders = false;
-    bool     isStaticPhysics = true;
-    // Static bodies that are scripted per-frame by gameplay systems (doors,
-    // buttons): created as Jolt kinematic bodies in the MOVING layer so their
-    // pose can be teleported via SetKinematicPose. isStaticPhysics must stay
-    // true so VisualInterpolationSystem leaves their TransformComponent alone.
-    bool isKinematicPhysics = false;
-    // Dynamic bodies are added to the physics system asleep (Jolt
-    // EActivation::DontActivate). They wake when an active body or an
-    // impulse/velocity change disturbs them. Static/kinematic bodies are
-    // unaffected (they never activate anyway).
-    bool startAsleep        = false;
-    bool isAnimated         = false;
-    uint32_t physicsCategory = 0xFFFFFFFF;
-    uint32_t physicsMask     = 0xFFFFFFFF;
-
-    bool emissiveVirtualLights = false;
-
-    // OR'd into every part's MeshComponent flags on spawn: lets a scene
-    // description route a whole prefab into a draw layer (e.g. the BSP
-    // skybox's props into DrawFlags::Background) without forking the asset.
-    DrawFlags drawFlags = DrawFlags::None;
-
-    float        roughness = 0.5f;
-    float        metallic  = 0.0f;
-    ZHLN::Float4 color {0.8f, 0.4f, 0.2f, -1.0f};
-
-    Material materialOverride = {.pipeline = PipelineID::Invalid};
-};
 
 auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::Float3 halfExtents, const SpawnParams& params = {}) -> Entity;
 auto CreateBox(Engine& engine, ZHLN::Float3 halfExtents, const SpawnParams& params = {}) -> Entity;

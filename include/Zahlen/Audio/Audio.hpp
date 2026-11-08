@@ -9,6 +9,7 @@
 #include <Jolt/Math/Float3.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Audio/AudioTypes.hpp>
+#include <Zahlen/Audio/AudioValues.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/String.hpp>
@@ -28,54 +29,6 @@ struct AudioConfig {
     uint32_t sampleRate = 48000;
     uint32_t channels   = 2;
     bool     headless   = false; // When true, runs miniaudio with no OS audio device (use RenderOfflineFrames).
-};
-
-enum class AudioEventType : uint8_t {
-    OneShot2D      = 0,
-    OneShot3D      = 1,
-    ProceduralBeep = 2,
-    NoiseBurst3D   = 3,
-    ToneSweep3D    = 4,
-};
-inline constexpr size_t kAudioEventTypeCount = 5;
-
-#if ZHLN_REFLECTION_AVAILABLE
-static_assert(Reflect::EnumCount<AudioEventType>() == kAudioEventTypeCount);
-#endif
-
-struct AudioEvent {
-    AudioEventType       type       = AudioEventType::OneShot2D;
-    String64             filepath {};
-    ZHLN::Float3         position {};
-    float                volume     = 1.0f;
-    float                pitch      = 1.0f;
-    float                param1     = 0.0f;
-    float                param2     = 0.0f;
-    float                duration   = 0.2f;
-    AudioWaveformType    waveType   = AudioWaveformType::Sine;
-    AudioFilterType      filterType = AudioFilterType::LowPass;
-    AudioNoiseType       noiseType  = AudioNoiseType::White;
-    AudioBusID           bus        = AudioBus::SFX;
-    float                reverbSend = 0.0f;
-    AudioAttenuationDesc attenuation {};
-};
-static_assert(std::is_trivially_copyable_v<AudioEvent>);
-
-struct VoiceDesc {
-    AudioBusID           bus          = AudioBus::SFX;
-    AudioPlaybackMode    playbackMode = AudioPlaybackMode::Decompressed;
-    bool                 spatialized  = true;
-    bool                 looping      = false;
-    bool                 startPaused  = false;
-    float                volume       = 1.0f;
-    float                pitch        = 1.0f;
-    float                pan          = 0.0f;
-    float                reverbSend   = 0.0f;
-    ZHLN::Float3         position {};
-    ZHLN::Float3         velocity {};
-    ZHLN::Float3         direction {0.0f, 0.0f, -1.0f};
-    AudioAttenuationDesc attenuation  {};
-    AudioOcclusionDesc   occlusion    {};
 };
 
 // Pure curve evaluators exposed for deterministic telemetry, editor visualization, and unit tests.

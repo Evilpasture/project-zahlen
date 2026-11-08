@@ -5,7 +5,7 @@
 
 // Zahlen/COM/COMTypes.hpp
 //
-// The vocabulary the SDK boundary speaks. Everything here is standard layout
+// The vocabulary the public API speaks. Everything here is standard layout
 // and trivially copyable, so it travels as plain bytes in registers or on the
 // stack and never asks the two sides to agree on a container layout, an
 // allocator or an exception table.
@@ -30,6 +30,10 @@ namespace ZHLN::COM {
 // engine reports through its own ErrorCode categories.
 enum class ComError : uint8_t {
     AllocationFailed = 1,
+    // Nothing is cached under that asset path. Importing happens in a plugin
+    // above this library, so the boundary can report the miss but cannot fix
+    // it by loading.
+    AssetNotCached = 2,
 };
 
 // Mirrors the fields of ZHLN::EngineConfig that a consumer can reasonably set
@@ -52,7 +56,7 @@ static_assert(std::is_standard_layout_v<EngineConfigCOM> && std::is_trivially_co
               "EngineConfigCOM crosses the ABI boundary by reference and must be a fixed-layout value.");
 
 // The engine vocabulary this boundary hands across, checked rather than
-// assumed. A type that stops satisfying these rules breaks the SDK, and it
+// assumed. A type that stops satisfying these rules breaks the boundary, and it
 // should say so here and not in a consumer's crash report.
 static_assert(std::is_standard_layout_v<Extent2D> && std::is_trivially_copyable_v<Extent2D>);
 static_assert(std::is_standard_layout_v<ViewportRect> && std::is_trivially_copyable_v<ViewportRect>);

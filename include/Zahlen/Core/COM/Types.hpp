@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <expected>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -73,6 +74,48 @@ struct Span {
 };
 
 static_assert(std::is_standard_layout_v<Span<const std::byte>> && std::is_trivially_copyable_v<Span<const std::byte>>);
+
+// Presence as a value, not as a protocol. A `bool` return plus a `T*`
+// out-parameter is a C habit that survives into C++ only because the ABI
+// forbids std::optional: it makes the caller declare storage before it knows
+// whether anything will be put there, it cannot be returned or chained, and
+// it leaves the out-parameter's state on a miss as a thing you have to
+// document rather than a thing the type says. Option<T> is a fixed layout of
+// T plus a flag, so it crosses as an ordinary return value and the ABI audit
+// accepts it on the wire.
+//
+// The conversion to std::optional is the same bargain Result makes with
+// std::expected: the wire type is what the vtable traffics in, the standard
+// type is one implicit conversion away in the caller's own translation unit.
+template <typename T>
+struct Option {
+    static_assert(std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>,
+                  "COM::Option<T> carries T by value across the boundary; T must be a fixed-layout value.");
+
+    T    value {};
+    bool engaged = false;
+
+    constexpr Option() noexcept = default;
+    constexpr Option(T val) noexcept: value(val), engaged(true) {
+    }
+    constexpr Option(std::nullopt_t) noexcept {
+    }
+
+    [[nodiscard]] constexpr bool HasValue() const noexcept {
+        return engaged;
+    }
+
+    [[nodiscard]] constexpr T ValueOr(T fallback) const noexcept {
+        return engaged ? value : fallback;
+    }
+
+    [[nodiscard]] constexpr operator std::optional<T>() const noexcept {
+        if (engaged) return value;
+        return std::nullopt;
+    }
+};
+
+static_assert(std::is_standard_layout_v<Option<uint32_t>> && std::is_trivially_copyable_v<Option<uint32_t>>);
 
 template <typename T>
 struct Result {

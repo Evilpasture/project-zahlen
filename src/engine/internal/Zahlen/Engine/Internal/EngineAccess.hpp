@@ -5,7 +5,7 @@
 // BUILD-TREE ONLY. This header is deliberately NOT installed. It is the seam
 // engine implementation units and in-repo tooling use to reach the concrete
 // subsystems; the public Engine API exposes capabilities, not these types.
-// If you are writing a consumer of the SDK, this file does not exist for you.
+// If you are writing a consumer of the engine, this file does not exist for you.
 
 #include <Zahlen/Common.h>
 
@@ -38,7 +38,7 @@ struct ZHLN_API EngineAccess {
     static auto SceneOf(Engine&) noexcept -> SceneData&;
 
     // Concrete subsystem seams for build-tree-only callers. None of these is
-    // installed with the SDK: the public Engine API exposes capabilities.
+    // installed with the engine: the public Engine API exposes capabilities.
     static auto RegistryOf(Engine&) noexcept -> ECS::Registry&;
     static auto RegistryOf(const Engine&) noexcept -> const ECS::Registry&;
     static auto PoseUploadsOf(Engine&) noexcept -> PoseUploadQueue&;
@@ -48,7 +48,7 @@ struct ZHLN_API EngineAccess {
 
     // Capability -> implementation. The only free function that still needs the
     // concrete subsystem is PushProps(Simulation, ...). This header is not
-    // installed, so SDK consumers cannot reach this overload.
+    // installed, so API consumers cannot reach this overload.
     static auto PhysicsOf(Simulation&) noexcept -> PhysicsContext&;
 };
 

@@ -151,6 +151,7 @@ my %FIRST_PARTY = (
     InterfaceID      => ['include/Zahlen/Core/COM/IObject.hpp'],
     InterfaceIdOf    => ['include/Zahlen/Core/COM/IObject.hpp'],
     'ZHLN::COM::Implements' => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    'ZHLN::COM::Option'     => ['include/Zahlen/Core/COM/Types.hpp'],
     QualifiedTypeName     => ['include/Zahlen/Core/Reflection/Core.hpp'],
     MethodSignature       => ['include/Zahlen/Core/Reflection/Class.hpp'],
     ForEachMethodSignature => ['include/Zahlen/Core/Reflection/Class.hpp'],
@@ -168,6 +169,15 @@ my %FIRST_PARTY = (
     # call to it -- including the unqualified ones a `using` makes possible.
     'ZHLN::COM::CreateEngine'    => ['include/Zahlen/COM/EngineFactory.hpp'],
     'ZHLN::COM::CreateEngineRef' => ['include/Zahlen/COM/EngineFactory.hpp'],
+    # Qualified for the same reason: Simulation, Audio, Assets and Actions are
+    # ordinary words elsewhere in this tree, and PrefabInfo is the kind of name
+    # a tool or importer invents independently.
+    'ZHLN::COM::ISimulation'         => ['include/Zahlen/COM/ISimulation.hpp'],
+    'ZHLN::COM::IAudioDevice'        => ['include/Zahlen/COM/IAudioDevice.hpp'],
+    'ZHLN::COM::IAssetLibrary'       => ['include/Zahlen/COM/IAssetLibrary.hpp'],
+    'ZHLN::COM::IActionContext'      => ['include/Zahlen/COM/IActionContext.hpp'],
+    'ZHLN::COM::PrefabInfo'          => ['include/Zahlen/COM/IAssetLibrary.hpp'],
+    'ZHLN::COM::EnvironmentImageInfo' => ['include/Zahlen/COM/IAssetLibrary.hpp'],
     ParseCli           => ['extensions/CommandLine/CommandLine.hpp'],
     CliFlag           => ['extensions/CommandLine/CommandLine.hpp'],
     ConfigCli         => ['app/include/Zahlen/ConfigCli.hpp'],

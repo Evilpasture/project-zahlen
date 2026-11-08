@@ -650,7 +650,7 @@ The raw registry is reachable only through the build-tree-only
 engine implementation units, `SystemGraph` compilation,
 `GameModule::ComponentRegistrar`, cold-boot scene deserializers and in-tree
 failure-injection tests. In-repo systems, extensions, samples and tests that
-still need arbitrary registry operations use `RegistryOf`; SDK consumers get
+still need arbitrary registry operations use `RegistryOf`; API consumers get
 `Entities()` and `Commands()` instead.
 
 The remaining work -- rewriting every in-tree system to `Query<...>` /
@@ -674,7 +674,7 @@ ignores the outcome spells it `(void)engine.Tick(dt);`.
 ### 3.6 COM ABI surface
 
 `Zahlen/Core/COM/` is the vocabulary and protocol for objects that live in one
-shared library and are consumed from another. It exists so an SDK consumer does
+shared library and are consumed from another. It exists so an API consumer does
 not have to agree with the engine about a standard-library layout: no STL
 container object, allocator or exception crosses the boundary.
 
@@ -734,7 +734,7 @@ Wiring an engine-owned object to this root (and exposing it across
 `libzahlen_engine.so`) is a separate increment; this section defines the
 boundary, not the first tenant.
 
-### 3.7 The SDK boundary
+### 3.7 The COM boundary
 
 `Zahlen/COM/` is the engine as a consumer outside `libzahlen_engine.so` sees
 it. `Core/COM/` is the mechanism; this is the surface built on it.
@@ -745,9 +745,13 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 | `IEngine.hpp` | lifecycle, `Tick`, and borrowed accessors for the capability interfaces |
 | `IGraphicsDevice.hpp` | resolution, viewport, buffers, textures |
 | `IEntities.hpp` | type-erased ECS operations plus the consumer-side typed templates |
+| `ISimulation.hpp` | raycasts, body queries and impulses; `COM::Option` returns for the queries that may miss, caller-buffer virtuals with inline `std::vector` overloads for the ones that may be plural |
+| `IAudioDevice.hpp` | voices and posted events, described by `VoiceDesc` / `AudioEvent` |
+| `IAssetLibrary.hpp` | prefab cache interrogation and instantiation, plus borrowed environment-image pixels |
+| `IActionContext.hpp` | raw device injection in, virtual actions and physical state out |
 | `EngineFactory.hpp` | `CreateEngine`, the single exported symbol, and the inline `CreateEngineRef` wrapper |
 
-One `EngineCOM` implements all three interfaces, so `engine->Graphics()` and
+One `EngineCOM` implements all seven interfaces, so `engine->Graphics()` and
 `engine.As<IGraphicsDevice>()` reach the same subobject of one allocation. The
 accessors are **borrows** and must not be released; `Query` / `As` take a
 reference the way COM expects.
@@ -781,8 +785,88 @@ boundary formality. `Registry::RemoveDynamic` was added as the erase half of
 cannot serve a type-erased caller.
 
 Interface IDs are a hash of the qualified type name, so adding a capability
-interface needs no GUID and no registry. Wiring further capabilities
-(`ISimulation`, `IAudioEngine`, `IAssetLibrary`) is more of the same file.
+interface needs no GUID and no registry.
+
+**Two tiers: the wire and the header.** An interface here has a virtual tier
+and a non-virtual tier, and they answer to different masters. The virtuals are
+the wire protocol: vtable slots that two separately compiled binaries must
+agree on byte for byte, restricted to pointers and fixed-layout values. The
+non-virtual members above them are ordinary inline code that the *consumer*
+compiles from this header into its own TU. They may allocate, they may name
+`std::optional`, `std::vector` and `std::string`, and none of it reaches the
+library -- the vector is born in the caller's TU, the library is handed a bare
+`BodyID*` and a count, and the caller's allocator frees it.
+
+So the restatement that the ABI forces is a wire detail, not the API. A
+`std::vector` return becomes a caller-owned buffer plus a count on the wire,
+and comes back as a `std::vector` in the header (`BodiesInSphere`,
+`PrefabVirtualPath`, `Instantiate`). Both spellings stay public there: the
+buffer form is for a caller who already owns storage or refuses to allocate,
+the inline form is for everyone else. `GamepadState` is the one thing that
+genuinely does not cross, because `std::bitset` is built out of a base class
+in libstdc++ and is therefore not standard layout -- the scalar queries answer
+the same questions.
+
+**Optionality is a value, not a protocol.** `COM::Option<T>` is `T` plus a
+flag with a fixed layout, so a query that may find nothing simply returns one
+(`BodyPosition`, `BodyState`, `DescribePrefab`, `FindEnvironmentImage`). The
+older shape -- `bool` return plus a `T*` out-parameter -- is a C habit that
+survives into C++ only because the ABI forbids `std::optional`, and it is
+worse in three ways that have nothing to do with taste: the caller must
+declare storage before knowing whether anything will go in it, the result
+cannot be returned or chained, and the state of `*out` on a miss becomes prose
+in a comment instead of something the type enforces. `Option` costs the same
+bytes and none of that. It converts implicitly to `std::optional<T>` exactly
+as `COM::Result<T>` converts to `std::expected<T, ErrorCode>`: the wire type
+is what the vtable traffics in, the standard type is one conversion away in
+the caller's own TU.
+
+That is also why the ergonomic tier is thinner than it first looks. There is
+no inline `std::optional` overload beside these four, because an overload
+differing only in return type is ill-formed -- the conversion on `Option`
+itself does the job, and one spelling is better than two.
+
+`AuditInterfaceABI` therefore inspects the virtual members only. That is not a
+loosening: a non-virtual inline member occupies no vtable slot, emits no
+cross-library symbol, and is as invisible to the ABI as the member templates
+the audit already skipped. The rule the audit now trusts rather than checks is
+that a non-virtual member declared in an interface must be *defined* in that
+header; one defined inside the library would be a cross-boundary symbol that
+no longer passes under the audit's eye. Enumerating virtuals is a language
+property, so `ForEachVirtualMethodSignature` lives in Reflection next to
+`ForEachMethodSignature`, and the policy built on it stays in `Core/COM/`.
+
+No virtual at this boundary takes a default argument: a default is baked into
+the caller's TU, so changing one would silently change already-compiled
+consumer code while the vtable stayed valid. Where a default is worth having,
+the inline tier supplies it and recompiles with the caller. `IActionContext`'s
+`ActionDown` / `Pressed` / `Held` / `Released` / `Axis1D` / `Axis2D` are the
+same idea: six derived reads over one `Action()` dispatch.
+
+**`Instantiate` is the exception to count-then-fill.** The engine's
+`InstantiatePrefab` treats its out-buffer as a *recording* device, not a dry
+run: passing it a null buffer still spawns the whole prefab and merely discards
+the ids. Asking it for a count and then asking again for the entities would
+spawn twice. The inline overload instead sizes its vector from `PrefabInfo`
+-- root, one entity per part, one more per part when the spawn asks for
+emissive virtual lights, one per punctual light -- calls the wire method once,
+and shrinks to what came back. The virtual's comment says so in as many words,
+because the shape invites the wrong habit.
+
+**Importing is not here.** `IAssetLibrary` resolves, describes and instantiates
+cached prefabs, but cannot load one. Every importer (glTF, BSP, StudioModel)
+lives in `plugins/`, a layer *above* `libzahlen_engine.so`, and the engine's own
+`LoadModelPrefab` is a cache lookup. Giving the boundary a real load would mean
+inverting that dependency or adding an importer-registration seam; neither is
+in this increment, and a `LoadPrefab` that silently resolved from cache would
+have been a lie in the header.
+
+Three value headers were split out so a consumer of this boundary does not
+compile the subsystem behind it, the way `PhysicsValues.hpp` was split out of
+`Physics.hpp`: `Audio/AudioValues.hpp` (`AudioEvent`, `VoiceDesc`),
+`Input/ActionValues.hpp` (`ActionID`, `ActionState`, `InputBinding`) and
+`Engine/SpawnParams.hpp`. Each original header includes its new one, so no
+existing spelling moved.
 
 ## 4. Deferred Render Graph Topology
 
