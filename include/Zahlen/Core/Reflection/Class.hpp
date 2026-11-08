@@ -108,6 +108,25 @@ constexpr void ForEachMemberFunction(F&& f) {
     };
 }
 
+// A domain-neutral description of one reflected member function. Consumers
+// decide what a return type or a noexcept bit means; this library does not.
+template <typename Return, bool Noexcept>
+struct MethodSignature {
+    using ReturnType = Return;
+
+    static constexpr bool IsNoexcept = Noexcept;
+};
+
+template <typename T, typename F>
+constexpr void ForEachMethodSignature(F&& f) {
+    ForEachMemberFunction<T>([&]<auto member>() -> auto {
+        if constexpr (!std::meta::is_special_member_function(member)) {
+            using Return = typename[:std::meta::dealias(std::meta::return_type_of(member)):];
+            f.template operator()<MethodSignature<Return, std::meta::is_noexcept(member)>>();
+        }
+    });
+}
+
 template <typename T>
 consteval auto BaseClasses() {
     return std::meta::bases_of(^^std::remove_cvref_t<T>, std::meta::access_context::current());

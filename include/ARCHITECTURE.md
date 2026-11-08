@@ -671,6 +671,52 @@ that same `ErrorCode` rather than substituting a generic one. Success is
 an empty `std::expected<void, ErrorCode>`. A host that deliberately
 ignores the outcome spells it `(void)engine.Tick(dt);`.
 
+### 3.6 COM ABI surface
+
+`Zahlen/Core/COM/` is the vocabulary and protocol for objects that live in one
+shared library and are consumed from another. It exists so an SDK consumer does
+not have to agree with the engine about a standard-library layout: no STL
+container object, allocator or exception crosses the boundary.
+
+| header | contents |
+| :--- | :--- |
+| `Types.hpp` | `StringView`, `Span<T>`, `Result<T>` / `Result<void>` -- fixed-layout scalars that convert to and from `std::string_view`, `std::span` and `std::expected`. `Result<T>` requires a standard-layout, trivially copyable `T`; both variants keep the original `ErrorCode` on failure. |
+| `IObject.hpp` | `InterfaceID` and the three virtuals (`AddRef`, `Release`, `QueryRaw`). `InterfaceIdOf<T>()` is a compile-time 128-bit hash of the *qualified* type name, so there is no GUID registry and no IDL. `Query<T>()` is a caller-side template. |
+| `Reflect.hpp` | `Implements<Derived, Interfaces...>` and `AuditInterfaceABI<I>()`. Reflection walks the whole base graph to build `QueryRaw`'s dispatch; there is no interface map, no switch and no macro. |
+| `Ref.hpp` | `Ref<T>`, an owning reference. `Adopt` takes a reference `QueryRaw` already added; the explicit constructor adds one. |
+
+An interface is a pure abstract class deriving **non-virtually** from `IObject`,
+with no virtual destructor, `noexcept` methods and void / pointer / fixed-layout
+return types. `AuditInterfaceABI<I>()` enforces that at compile time. With no
+virtual inheritance each interface branch has its own `IObject` subobject, so
+`Implements` aggregates the interface branches itself: one declaration of the
+three virtuals is then the final overrider for every branch. Interfaces are
+listed once, as template arguments, and the reflected dispatch covers interfaces
+reached through interface inheritance as well as the direct ones.
+
+`InterfaceIdOf<T>()` hashes `display_string_of(^^T)`, which on this toolchain
+answers `ZHLN::COM::IGraphicsDevice` rather than the unqualified `identifier_of`.
+The ID is therefore stable for a given toolchain and spelling, but it is not yet
+a portable wire constant: a deployment that mixes compiler vendors should pin
+IDs with an explicit override before relying on them across binaries. The
+layout of `StringView`, `Span<T>` and `Result<T>` is pinned by static asserts in
+`tests/core/TestCOM.cpp` instead.
+
+The reflection library has **no domain**: it gained only generic primitives --
+`QualifiedTypeName<T>()` in `Core.hpp`, and `MethodSignature<Return, Noexcept>`
+plus `ForEachMethodSignature<T>(f)` in `Class.hpp`, next to the existing
+`ForEachBase`. Every ABI policy decision -- which method signatures may cross
+the boundary, which layouts are allowed, `AuditInterfaceABI<I>()` -- lives in
+`Core/COM/Reflect.hpp`. `check_reflection_boundary.py` keeps the raw
+`std::meta` tokens inside `Reflection/`, so COM consumes plain types and
+bools and never a reflection `info`.
+Zahlen already hard-requires `-freflection`, so there is no non-reflection
+fallback and no second code path.
+
+Wiring an engine-owned object to this root (and exposing it across
+`libzahlen_engine.so`) is a separate increment; this section defines the
+boundary, not the first tenant.
+
 ## 4. Deferred Render Graph Topology
 
 The renderer executes a multi-pass pipeline managed by a compile-time type-checked frame graph:

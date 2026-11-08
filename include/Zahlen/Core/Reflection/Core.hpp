@@ -99,6 +99,13 @@ consteval auto DefineStaticString(std::string_view sv) -> std::string_view {
     return std::string_view(span.data(), span.size());
 }
 
+// identifier_of() answers the unqualified spelling. display_string_of()
+// keeps the enclosing namespaces, which a fully qualified name needs.
+template <typename T>
+consteval auto QualifiedTypeName() -> std::string_view {
+    return DefineStaticString(std::meta::display_string_of(std::meta::dealias(^^std::remove_cvref_t<T>)));
+}
+
 #else
 
 // The stub era is over: no ZHLN_ALLOW_REFLECTION_STUBS exemption, no

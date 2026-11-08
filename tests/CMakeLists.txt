@@ -30,6 +30,7 @@ set(ZHLN_CPU_TEST_SOURCES
     assets/TestMeshlets.cpp
     assets/TestPackaging.cpp
     audio/TestsAudio.cpp
+    core/TestCOM.cpp
     core/TestClock.cpp
     core/TestCommandLine.cpp
     core/TestContainers.cpp
