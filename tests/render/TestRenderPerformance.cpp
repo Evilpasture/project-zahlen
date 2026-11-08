@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -138,7 +139,7 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
 }
 
 void PrepareEngineForTest(ZHLN::Engine& engine) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
     // 1. Reset UI callbacks
@@ -168,7 +169,7 @@ void PrepareEngineForTest(ZHLN::Engine& engine) {
     //    what kept them from leaking between cases). The camera lives in an entity
     //    the rebuild above created; Patch reports a world without one instead of
     //    panicking, and the (void) is the claim that the rebuild did its part.
-    auto&      camReg    = engine.GetRegistry();
+    auto&      camReg    = ZHLN::EngineAccess::RegistryOf(engine);
     const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
     camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
     engine.State().ResetCullingStats();
@@ -195,7 +196,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
 
     PrepareEngineForTest(engine);
 
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
     auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -235,7 +236,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         }
     }
 
-    const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
@@ -287,7 +288,7 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
 
     PrepareEngineForTest(engine);
 
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
     if (!settings.empty()) {
@@ -321,7 +322,7 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         lightEntities.push_back(l);
     }
 
-    const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
@@ -363,7 +364,7 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
 
     PrepareEngineForTest(engine);
 
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
     constexpr uint32_t  kMaxParticles = 20000;
@@ -394,7 +395,7 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
                                                                                         }
     );
 
-    const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
@@ -420,7 +421,7 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     PrepareEngineForTest(engine);
 
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     reg.Create(
         ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 40.0f, 0.0f)},
@@ -447,7 +448,7 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         engine, 80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false}
     );
 
-    const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
@@ -473,7 +474,7 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
 
     PrepareEngineForTest(engine);
 
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
     ZHLN::PrefabFactory::CreateBox(
@@ -498,7 +499,7 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
         );
     }
 
-    const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
@@ -579,7 +580,7 @@ auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> s
 
     PrepareEngineForTest(engine);
 
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) {
@@ -627,7 +628,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
 
     PrepareEngineForTest(engine);
 
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
     if (!settings.empty()) {
@@ -678,7 +679,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
         engine, {2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 5.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMat}
     );
 
-    const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
@@ -730,7 +731,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     PrepareEngineForTest(engine);
 
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
     const bool useHardwareRT = rc.Info().rayTracingSupported;
@@ -895,7 +896,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         });
     }
 
-    const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }

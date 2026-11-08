@@ -70,7 +70,7 @@ namespace {
 }
 
 [[nodiscard]] auto SyncEnvironmentMap(Engine& engine) -> std::expected<void, ErrorCode> {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
     const Entity ent = reg.SingletonEntity<Components::EnvironmentMapComponent>();
     if (ent == Entity::Null()) {
@@ -106,7 +106,7 @@ constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
 // the API. Persistent particle buffers are private to the RenderContext.
 void SubmitParticleEmitters(Engine& engine) {
     auto scene = engine.Debug();
-    auto& reg   = engine.GetRegistry();
+    auto& reg   = ZHLN::EngineAccess::RegistryOf(engine);
     // The frame's camera, when the world has one: an attachment is a scene decision
     // made against the view, so a world without a camera has none to submit and the
     // render path reports NoMainCamera on its own.
@@ -150,12 +150,12 @@ void SubmitParticleEmitters(Engine& engine) {
 // The palettes the simulation pushed this frame, applied in order.
 void UploadPosePalettes(Engine& engine) {
     auto rc = engine.Graphics();
-    engine.GetPoseUploads().Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
+    ZHLN::EngineAccess::PoseUploadsOf(engine).Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
 }
 
 void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
     auto rc = engine.Graphics();
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     auto IsInList = [](std::span<const Entity> list, Entity e) -> bool { return std::ranges::find(list, e) != list.end(); };
 
@@ -319,12 +319,12 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 [[nodiscard]] auto MakeViewportCamera(Engine& engine, Entity cameraEnt) -> std::optional<Camera> {
     // A viewport camera is built from the main camera's optics: a world without a
     // main camera has no optics to build from, and says so by returning nothing.
-    const auto main = engine.GetRegistry().GetSingleton<Components::CameraComponent>();
+    const auto main = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::CameraComponent>();
     if (!main) {
         return std::nullopt;
     }
     Camera extra = main->camera;
-    auto&  reg   = engine.GetRegistry();
+    auto&  reg   = ZHLN::EngineAccess::RegistryOf(engine);
     if (cameraEnt == Entity::Null() || !reg.IsAlive(cameraEnt)) {
         return extra;
     }
@@ -337,7 +337,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 
 [[nodiscard]] auto MakeViewFor(Engine& engine, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport)
     -> std::optional<SceneView> {
-    auto cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt);
+    auto cComp = ZHLN::EngineAccess::RegistryOf(engine).Get<Components::CameraComponent>(cameraEnt);
 
     // The view's camera is the entity's own component when it has one; a bare
     // transform entity gets a viewport camera built from the main camera's optics
@@ -398,7 +398,7 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 
 FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
     auto rc = engine.Graphics();
-    auto&       reg             = engine.GetRegistry();
+    auto&       reg             = ZHLN::EngineAccess::RegistryOf(engine);
     // The frame's pose, and where "there is nothing to render from" is decided:
     // the component lookup answers emptiness, so the caller checks it before
     // anything is recorded rather than after a dereference.

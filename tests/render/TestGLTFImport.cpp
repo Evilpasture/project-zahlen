@@ -1657,7 +1657,7 @@ struct GLTFImportTestSuite {
             // The renderer derives the raster-winding flag from the *actual*
             // draw world matrix. Check the spawned hierarchy as well as cgltf's
             // source hierarchy, especially the negatively scaled sphere parents.
-            auto&  registry = engine->GetRegistry();
+            auto&  registry = ZHLN::EngineAccess::RegistryOf(*engine);
             size_t matched  = 0;
             for (uint32_t i = 1; i < count; ++i) { // outBuffer[0] is the prefab root, not a mesh part.
                 const auto name  = registry.Get<ZHLN::Components::NameComponent>(spawned[i]);
@@ -1821,7 +1821,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
 
-            auto& registry = engine->GetRegistry();
+            auto& registry = ZHLN::EngineAccess::RegistryOf(*engine);
 
             const auto lightCount = [&registry] { return registry.GetEntitiesWith<ZHLN::Components::LightComponent>().size(); };
 

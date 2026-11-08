@@ -3,6 +3,7 @@
 
 // The default executable is a statically linked C++ game, not a DLL host.
 // App owns platform setup, modules, input polling, frame pacing and teardown.
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -32,7 +33,7 @@ struct SandboxGame {
         if (auto config = engine.Service<ZHLN::EngineConfig>()) {
             ZHLN::Log("[Sandbox] headless={}, vsync={}", config->headless, config->vsync);
         }
-        auto& reg = engine.GetRegistry();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         if (auto camera = reg.GetSingleton<ZHLN::Components::CameraComponent>()) {
             camera->camera.position = JPH::Vec3(0.0f, 3.0f, 11.0f);
             camera->camera.yaw      = -90.0f;
@@ -94,7 +95,7 @@ struct SandboxGame {
     }
 
     void Tick(ZHLN::Engine& engine, float dt) {
-        auto& reg = engine.GetRegistry();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         elapsed += dt;
         if (lamp != ZHLN::Entity::Null() && reg.IsAlive(lamp)) {
             reg.Patch<ZHLN::Components::TransformComponent>(lamp, [&](auto& transform) {

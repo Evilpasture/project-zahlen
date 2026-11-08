@@ -494,7 +494,7 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
 }
 
 auto CreateBox(Engine& engine, ZHLN::Float3 halfExtents, const SpawnParams& params) -> Entity {
-    return CreateBox(engine.Graphics(), engine.GetRegistry(), ZHLN::EngineAccess::PhysicsOf(engine), halfExtents, params);
+    return CreateBox(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), halfExtents, params);
 }
 
 namespace {
@@ -570,7 +570,7 @@ auto CreateSphere(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<Physics
 }
 
 auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
-    return CreateSphere(engine.Graphics(), engine.GetRegistry(), ZHLN::EngineAccess::PhysicsOf(engine), radius, params);
+    return CreateSphere(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, params);
 }
 
 auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params)
@@ -588,7 +588,7 @@ auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<Physi
 }
 
 auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateCylinder(engine.Graphics(), engine.GetRegistry(), ZHLN::EngineAccess::PhysicsOf(engine), radius, height, params);
+    return CreateCylinder(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, height, params);
 }
 
 auto CreateCone(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity {
@@ -604,7 +604,7 @@ auto CreateCone(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCo
 }
 
 auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateCone(engine.Graphics(), engine.GetRegistry(), ZHLN::EngineAccess::PhysicsOf(engine), radius, height, params);
+    return CreateCone(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, height, params);
 }
 
 auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::Float4 color, const SpawnParams& params)
@@ -659,7 +659,7 @@ auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
 }
 
 auto CreatePlane(Engine& engine, float extent, ZHLN::Float4 color, const SpawnParams& params) -> Entity {
-    return CreatePlane(engine.Graphics(), engine.GetRegistry(), ZHLN::EngineAccess::PhysicsOf(engine), extent, color, params);
+    return CreatePlane(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), extent, color, params);
 }
 
 auto InstantiatePrefab(
@@ -873,7 +873,7 @@ auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<Mo
 
 auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
     return InstantiatePrefab(
-        engine.Graphics(), engine.GetRegistry(), ZHLN::EngineAccess::PhysicsOf(engine), engine.GetArticulationSystem(), prefab, params, outBuffer, maxCount
+        engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), ZHLN::EngineAccess::ArticulationOf(engine), prefab, params, outBuffer, maxCount
     );
 }
 

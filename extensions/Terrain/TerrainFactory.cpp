@@ -443,7 +443,7 @@ auto CreateTerrainFromData(
 ) -> Entity {
     TerrainSystem::RegisterCleanup(engine);
     return CreateTerrainFromData(
-        ZHLN::EngineAccess::RenderOf(engine), engine.GetRegistry(), &ZHLN::EngineAccess::PhysicsOf(engine), sampleCount, worldSize, heights, colorsRGBA, params
+        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::RegistryOf(engine), &ZHLN::EngineAccess::PhysicsOf(engine), sampleCount, worldSize, heights, colorsRGBA, params
     );
 }
 
@@ -516,7 +516,7 @@ auto CreateTerrain(
 
 auto CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type, const PrefabFactory::SpawnParams& params) -> Entity {
     TerrainSystem::RegisterCleanup(engine);
-    return CreateTerrain(ZHLN::EngineAccess::RenderOf(engine), engine.GetRegistry(), &ZHLN::EngineAccess::PhysicsOf(engine), sampleCount, worldSize, maxHeight, type, params);
+    return CreateTerrain(ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::RegistryOf(engine), &ZHLN::EngineAccess::PhysicsOf(engine), sampleCount, worldSize, maxHeight, type, params);
 }
 
 } // namespace ZHLN::Terrain

@@ -8,23 +8,21 @@
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Error.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/Engine/PoseUploads.hpp>
-#include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Engine/SystemContext.hpp>
-#include <Zahlen/Window/WindowInput.hpp>
-#include <Zahlen/Render/RenderIDs.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/GUI/Font.hpp>
 #include <Zahlen/GUI/UIData.hpp>
+#include <Zahlen/Render/FrameResult.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
+#include <Zahlen/Window/WindowInput.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <functional>
 #include <memory>
 #include <optional>
-#include <string_view>
 
 namespace ZHLN {
 
@@ -51,7 +49,7 @@ template <typename Services>
 class SystemGraph;
 class EntityCommandBuffer;
 class EventBus;
-}
+} // namespace ECS
 
 namespace GUI {
 struct UIInput;
@@ -66,6 +64,7 @@ class DebugDraw;
 class AssetLibrary;
 class AudioEngine;
 class EngineState;
+class Entities;
 
 class ZHLN_API Engine {
   public:
@@ -112,8 +111,8 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetPlatformHost() noexcept -> PlatformHost&;
     [[nodiscard]] auto GetPlatformHost() const noexcept -> const PlatformHost&;
     [[nodiscard]] auto GetWindow() noexcept -> ZHLN::Optional<Window&>;
-    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver = {})
-        -> ZHLN::Optional<Window&>;
+    auto
+        AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver = {}) -> ZHLN::Optional<Window&>;
     void RemoveWindow(Window& window);
 
     [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<FrameTarget>;
@@ -129,6 +128,14 @@ class ZHLN_API Engine {
     [[nodiscard]] auto Assets() noexcept -> AssetLibrary;
     [[nodiscard]] auto Audio() noexcept -> AudioEngine;
     [[nodiscard]] auto State() noexcept -> ZHLN::EngineState;
+    // Entity lifecycle and typed component access, with resource-owning
+    // components released through SceneResources. Not a Registry pass-through.
+    [[nodiscard]] auto Entities() noexcept -> ZHLN::Entities;
+
+    [[nodiscard]] auto Entities() const noexcept -> ZHLN::Entities;
+    // In-frame mutations are recorded here, played back at MainECBPlayback and
+    // cleaned up by SceneCleanup. Systems declare EntityCommandBuffer& instead.
+    [[nodiscard]] auto Commands() noexcept -> ECS::EntityCommandBuffer&;
 
     // This execution's clock, interpolation state and scratch pool. Engine
     // services are not part of it: they belong to the graphs, bound once (see
@@ -143,13 +150,10 @@ class ZHLN_API Engine {
     auto               GetInput() noexcept -> InputContext&;
     [[nodiscard]] auto GetInput() const noexcept -> const InputContext&;
     auto               GetFileSystemWatcher() -> FileSystemWatcher&;
-    [[nodiscard]] auto GetRegistry() -> ECS::Registry&;
-    [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
 
-    auto GetUpdateGraph() -> SimGraph&;
-    auto GetRenderGraph() -> RenderGraph&;
-    auto GetMainECB() -> ECS::EntityCommandBuffer&;
-    auto GetEventBus() noexcept -> ECS::EventBus&;
+    auto               GetUpdateGraph() -> SimGraph&;
+    auto               GetRenderGraph() -> RenderGraph&;
+    auto               GetEventBus() noexcept -> ECS::EventBus&;
     [[nodiscard]] auto GetEventBus() const noexcept -> const ECS::EventBus&;
     // Run the batched cleanup pass now (normally after ECB playback each frame).
     void ProcessPendingDestroy();
@@ -157,11 +161,8 @@ class ZHLN_API Engine {
     void ClearScene();
     // Register an extra bulk cleanup system once per Engine, not per entity.
     [[nodiscard]] auto AddSceneCleanupPass(SceneCleanupPass pass) -> bool;
-    void RunSceneCleanupPasses(bool all);
+    void               RunSceneCleanupPasses(bool all);
 
-    // Simulation-produced skinning poses, drained once per frame by RenderSystem.
-    auto               GetPoseUploads() -> PoseUploadQueue&;
-    auto               GetArticulationSystem() -> ArticulationSystem&;
     [[nodiscard]] auto GetVisibleEntities() const noexcept -> std::span<const Entity>;
     [[nodiscard]] auto GetVisibleShadowEntities() const noexcept -> std::span<const Entity>;
 
@@ -213,10 +214,10 @@ class ZHLN_API Engine {
     // callbacks to replay.
     [[nodiscard]] auto GetInstalledModules() const noexcept -> std::span<const Module>;
 
-    // The non-const form may build core's steps on first use, so it is the one
-    // accessor here that is not noexcept; the const form reads what exists.
-    [[nodiscard]] auto GetFramePlan() -> FramePlan&;
-    [[nodiscard]] auto GetFramePlan() const noexcept -> const FramePlan&;
+    // The frame schedule as data, for diagnostics and profilers. Read-only:
+    // the plan is mutated only by InstallModule(const Module&), which composes
+    // a module's declared steps all-or-nothing against core's anchors.
+    [[nodiscard]] auto Steps() const noexcept -> std::span<const FrameStep>;
 
     void               SetPhysicsSubstepHooks(PhysicsSubstepHooks hooks);
     [[nodiscard]] auto GetPhysicsSubstepHooks() const noexcept -> const PhysicsSubstepHooks&;
@@ -266,11 +267,17 @@ class ZHLN_API Engine {
     using EventPoller     = void (*)(Engine&);
     // Low-level runner for custom hosts. The optional event poller is an
     // explicit frame seam (not a lifecycle hook smuggled through EngineConfig).
-    static auto Run(const EngineConfig& config = {}, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr,
-                    EventPoller pollEvents = nullptr) -> std::expected<void, ErrorCode>;
+    static auto
+        Run(const EngineConfig& config = {}, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr, EventPoller pollEvents = nullptr)
+            -> std::expected<void, ErrorCode>;
 
   private:
     friend struct ZHLN::EngineAccess;
+
+    // Cold-start / build-tree-only path to the concrete registry. SDK consumers
+    // get Entities() and Commands() instead.
+    auto               GetInternalRegistry() noexcept -> ECS::Registry&;
+    [[nodiscard]] auto GetInternalRegistry() const noexcept -> const ECS::Registry&;
 
     // Consume window-input resize notifications during the event pump. The
     // application and bespoke hosts never need to inspect ECS resize flags.
@@ -293,4 +300,4 @@ class ZHLN_API Engine {
 // Components remain readable until ProcessPendingDestroy/SceneCleanup runs.
 void DespawnEntity(Engine& engine, Entity entity);
 
-}
+} // namespace ZHLN

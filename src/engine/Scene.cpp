@@ -151,13 +151,13 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
     instance.entities.reserve(description.entities.size());
     instance.lights.reserve(description.lights.size());
 
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
 
     // The description's camera applies when the world has a main camera entity to
     // keep it. A world without one still instantiates its entities, lights and
     // environment: the camera block is one field of the description, not the scene,
     // and a caller that wants it applied builds the scene first.
-    auto&      sceneReg     = engine.GetRegistry();
+    auto&      sceneReg     = ZHLN::EngineAccess::RegistryOf(engine);
     const auto cameraEntity = sceneReg.SingletonEntity<Components::MainCameraTagComponent>();
     sceneReg.Patch<Components::CameraComponent>(cameraEntity, [&](Components::CameraComponent& c) {
         c.camera.position = JPH::Vec3 {description.camera.position};
@@ -503,10 +503,10 @@ auto Extract(Engine& engine) -> Scene {
     // The description's camera block is the world's main camera when there is one;
     // a world without one describes the engine's default framing, since there is
     // nothing else to write into that field.
-    const auto camComp = engine.GetRegistry().GetSingleton<Components::CameraComponent>();
+    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::CameraComponent>();
     const auto camera  = camComp ? camComp->camera : Camera {};
     return Extract(
-        camera, engine.GetRegistry(),
+        camera, ZHLN::EngineAccess::RegistryOf(engine),
         MaterialLookup {.userdata = &ZHLN::EngineAccess::RenderOf(engine), .find = [](const void* userdata, MaterialID id) -> std::optional<Material> {
                             return static_cast<const RenderContext*>(userdata)->GetGPUMaterial(id);
                         }}

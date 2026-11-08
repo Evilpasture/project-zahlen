@@ -10,6 +10,7 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
@@ -43,7 +44,7 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = engine->GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -90,7 +91,7 @@ struct ReflectionsTestSuite {
                     }
                 );
 
-                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
@@ -140,7 +141,7 @@ struct ReflectionsTestSuite {
                         return false;
                     }
 
-                    auto&      reg      = eng.GetRegistry();
+                    auto&      reg      = ZHLN::EngineAccess::RegistryOf(eng);
                     const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                     if (!settings.empty()) {
                         reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 0; });
@@ -213,7 +214,7 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = engine->GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -288,7 +289,7 @@ struct ReflectionsTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = {4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveYel}
                 );
 
-                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
@@ -322,7 +323,7 @@ struct ReflectionsTestSuite {
                         return false;
                     }
 
-                    auto&      reg      = eng.GetRegistry();
+                    auto&      reg      = ZHLN::EngineAccess::RegistryOf(eng);
                     const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                     if (!settings.empty()) {
                         reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 0; });
@@ -507,7 +508,7 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = engine->GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -576,7 +577,7 @@ struct ReflectionsTestSuite {
                     );
                 }
 
-                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "LODSystem.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -67,7 +68,7 @@ void LODSystem::GraphUpdate(LODQuery query) {
 }
 
 void LODSystem::Update(Engine& engine) {
-    GraphUpdate(LODQuery {engine.GetRegistry()});
+    GraphUpdate(LODQuery {ZHLN::EngineAccess::RegistryOf(engine)});
 }
 
 }

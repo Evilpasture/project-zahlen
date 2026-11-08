@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -77,7 +78,7 @@ struct CameraLookAtTestSuite {
             // scene rebuilds so the contributed frame step takes its place).
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
             DisableJitterAndVignette(reg);
 

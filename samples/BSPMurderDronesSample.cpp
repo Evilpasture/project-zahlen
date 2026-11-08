@@ -271,7 +271,7 @@ void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
 void UpdateCrosshairPick(ZHLN::Engine& engine) {
     g_pick = CrosshairPick {};
 
-    auto&              reg    = engine.GetRegistry();
+    auto&              reg    = ZHLN::EngineAccess::RegistryOf(engine);
     const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
     if (camEnt == ZHLN::Entity::Null()) {
         return;
@@ -371,7 +371,7 @@ void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui) {
     // advertises an action which pressing E cannot perform.
     std::string_view prompt;
     if (g_pick.entity != ZHLN::Entity::Null() && g_pick.distance <= 2.5f) {
-        auto& reg = engine.GetRegistry();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         if (const auto door = reg.Get<ZHLN::Interaction::DoorComponent>(g_pick.entity)) {
             if ((door->flags & ZHLN::Interaction::DoorFlags::Locked) != ZHLN::Interaction::DoorFlags::None) {
                 prompt = "Locked";
@@ -464,7 +464,7 @@ void UpdatePlayerRigAmbientCube(ZHLN::Engine& engine) {
     if (g_rigCubeMap == nullptr || g_player == ZHLN::Entity::Null() || g_playerRigParts.empty()) {
         return;
     }
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     if (!reg.IsAlive(g_player)) {
         return;
     }
@@ -819,7 +819,7 @@ auto AttachCharacterRig(
     ProceduralViewState&               viewState,
     float                              characterHeight
 ) -> void {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     ZHLN::ProceduralLocomotionComponent locomotion {
         .strideLength = 1.40f,
@@ -992,14 +992,14 @@ auto AttachCharacterRig(
  * this twice with the same value is harmless.
  */
 void SetFirstPersonView(ZHLN::Engine& engine, bool enabled) {
-    if (g_player == ZHLN::Entity::Null() || !engine.GetRegistry().IsAlive(g_player)) {
+    if (g_player == ZHLN::Entity::Null() || !ZHLN::EngineAccess::RegistryOf(engine).IsAlive(g_player)) {
         return;
     }
-    engine.GetRegistry().Patch<ZHLN::FirstPersonVisibilityComponent>(g_player, [enabled](auto& firstPerson) -> auto {
+    ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::FirstPersonVisibilityComponent>(g_player, [enabled](auto& firstPerson) -> auto {
         firstPerson.enabled           = enabled;
         firstPerson.cameraInitialized = false;
     });
-    SetHeadMeshesHidden(engine.GetRegistry(), g_view, enabled);
+    SetHeadMeshesHidden(ZHLN::EngineAccess::RegistryOf(engine), g_view, enabled);
 }
 
 /**
@@ -1013,10 +1013,10 @@ void SetFirstPersonView(ZHLN::Engine& engine, bool enabled) {
  * autonomous look-at layer is restored so the rig's gaze follows the aim.
  */
 void ApplyProceduralView(ZHLN::Engine& engine, bool firstPerson) {
-    if (g_player == ZHLN::Entity::Null() || !engine.GetRegistry().IsAlive(g_player)) {
+    if (g_player == ZHLN::Entity::Null() || !ZHLN::EngineAccess::RegistryOf(engine).IsAlive(g_player)) {
         return;
     }
-    auto&              registry = engine.GetRegistry();
+    auto&              registry = ZHLN::EngineAccess::RegistryOf(engine);
     const ZHLN::Entity camEnt   = registry.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
     if (camEnt == ZHLN::Entity::Null()) {
         return;
@@ -1109,7 +1109,7 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     if (g_player == ZHLN::Entity::Null()) {
         return;
     }
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     if (!reg.IsAlive(g_player)) {
         g_player = ZHLN::Entity::Null();
         return;
@@ -1598,7 +1598,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[BSPSample] Instantiated {} scene entities and {} lights", instance.entities.size(), instance.lights.size());
 
     // 7. Initialize Interactive Entities (doors, buttons, triggers)
-    ZHLN::Interaction::InitializeBSPEntities(engine->GetRegistry(), bspMap, instance, importOpts);
+    ZHLN::Interaction::InitializeBSPEntities(ZHLN::EngineAccess::RegistryOf(*engine), bspMap, instance, importOpts);
     ZHLN::Log("[BSPSample] Interactive entity components attached and wired.");
 
     // 8. Spawn the character at info_player_start
@@ -1632,7 +1632,7 @@ auto main(int argc, char* argv[]) -> int {
     // reach it, and the player is a CharacterVirtual, not a Jolt body.
     {
         auto& physics = ZHLN::EngineAccess::PhysicsOf(*engine);
-        auto& reg     = engine->GetRegistry();
+        auto& reg     = ZHLN::EngineAccess::RegistryOf(*engine);
 
         std::unordered_map<uint32_t, VoidCatcherContactListener::PropInfo> propBodies;
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
@@ -1715,7 +1715,7 @@ auto main(int argc, char* argv[]) -> int {
     );
 
     {
-        auto& reg     = engine->GetRegistry();
+        auto& reg     = ZHLN::EngineAccess::RegistryOf(*engine);
         auto& physics = ZHLN::EngineAccess::PhysicsOf(*engine);
 
         // DescribeScene already converted the first info_player_start into
@@ -1784,7 +1784,7 @@ auto main(int argc, char* argv[]) -> int {
 
     // 9. Lighting & Post-Processing Setup
     {
-        auto&              reg      = engine->GetRegistry();
+        auto&              reg      = ZHLN::EngineAccess::RegistryOf(*engine);
         const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
         if (settings != ZHLN::Entity::Null()) {
             reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& p) {
@@ -1886,7 +1886,7 @@ auto main(int argc, char* argv[]) -> int {
         // Hoisted out of the block that used to own it: the free-camera, mouse
         // capture and crosshair-pick toggles all read the same singleton, and
         // they are three separate blocks now.
-        auto&      reg   = engine->GetRegistry();
+        auto&      reg   = ZHLN::EngineAccess::RegistryOf(*engine);
         const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
         if (input && input->needsResize) {
             engine->Graphics().SetResolution(input->newSize);

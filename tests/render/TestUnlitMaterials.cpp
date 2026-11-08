@@ -73,7 +73,7 @@ struct MeanRgb {
 }
 
 void ConfigureUnlitCapture(ZHLN::Engine& engine) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     ZHLN::Test::Headless::DisableAA(engine);
     for (const ZHLN::Entity settings: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
         reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
@@ -89,7 +89,7 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
             pp.bloomStrength     = 0.0f;
         });
     }
-    const auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
         return;
     }
@@ -180,7 +180,7 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
 // assets and components, but Shape::None because no rebuild recipe exists.
 auto SpawnUnlitChamfer(ZHLN::Engine& engine, float x, const ZHLN::Material& material) -> ZHLN::Entity {
     auto rc = engine.Graphics();
-    auto&            reg  = engine.GetRegistry();
+    auto&            reg  = ZHLN::EngineAccess::RegistryOf(engine);
     const ZHLN::Mesh mesh = UploadChamferedMesh(ZHLN::EngineAccess::RenderOf(*engine));
     if (mesh.posBuffer == ZHLN::BufferID::Invalid || mesh.indexBuffer == ZHLN::BufferID::Invalid) {
         return ZHLN::Entity::Null();
@@ -249,7 +249,7 @@ struct UnlitMaterialsTestSuite {
                 return std::unexpected(UnlitMaterialError::AssetUnavailable);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             const ZHLN::Entity sun = reg.Create();
             reg.Add(sun, ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 8.0f)},
                     ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f),
@@ -305,7 +305,7 @@ struct UnlitMaterialsTestSuite {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless unlit texture coverage");
             if (!engine.Valid()) return std::unexpected(UnlitMaterialError::EngineInitFailed);
             ConfigureUnlitCapture(*engine);
-            const auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }

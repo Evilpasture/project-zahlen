@@ -225,7 +225,7 @@ void CollectFirstPersonHeadMeshes(
 }
 
 void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonViewState& state, bool enabled) {
-    auto& registry       = engine.GetRegistry();
+    auto& registry       = ZHLN::EngineAccess::RegistryOf(engine);
     auto  cameraEntities = registry.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
     if (cameraEntities.empty()) {
         return;
@@ -315,7 +315,7 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
 }
 
 auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     // 1. Configure Post-Processing Atmosphere via ECS Patch
     for (ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
@@ -417,7 +417,7 @@ void SetHandgunVisibility(ZHLN::ECS::Registry& registry, ZHLN::Entity handgunRoo
 }
 
 auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScale) -> ZHLN::Entity {
-    auto&              reg     = engine.GetRegistry();
+    auto&              reg     = ZHLN::EngineAccess::RegistryOf(engine);
     const float        scale   = std::clamp(itemScale, 0.10f, 4.0f);
     const ZHLN::Entity handgun = reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("ProceduralTestHandgun")}, ZHLN::Components::TransformComponent {},
@@ -519,7 +519,7 @@ auto AttachCharacterRig(
     ZHLN::Animation::ItemHandlingComponent itemHandling,
     FirstPersonViewState&                  viewState
 ) -> void {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     ZHLN::ProceduralLocomotionComponent locomotion {
         .strideLength = 1.40f,
@@ -763,7 +763,7 @@ auto main(int argc, char* argv[]) -> int {
     viewState.eyeForwardOffset = std::clamp(characterHeight * 0.040f, 0.04f, 0.10f);
     AttachCharacterRig(*engine, player, rigPath, prefab, BuildTestHandgunHandling(handgun, handgunScale), viewState);
 
-    SetHandgunVisibility(engine->GetRegistry(), handgun, false);
+    SetHandgunVisibility(ZHLN::EngineAccess::RegistryOf(*engine), handgun, false);
 
     ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     bool        handgunEquipped = false;
@@ -780,7 +780,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
-        auto& registry = engine->GetRegistry();
+        auto& registry = ZHLN::EngineAccess::RegistryOf(*engine);
 
         // 1. Mouse Look and edge-triggered handgun equip input.
         bool equipKeyDown = false;

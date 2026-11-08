@@ -15,6 +15,7 @@
 // ambient turned all the way down. Whatever the emissive box shows in that
 // frame can only have come from the emissive term.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -130,7 +131,7 @@ constexpr float kHaloBloomStrength = 0.003f;
 [[nodiscard]] bool BuildUnlitBoxScene(
     ZHLN::Engine& engine, const JPH::Float4& emissiveFactor, std::optional<float> glowIntensity, std::optional<float> bloomStrength
 ) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     auto renderCtx = engine.Graphics();
 
     for (const ZHLN::Entity settings: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
@@ -163,7 +164,7 @@ constexpr float kHaloBloomStrength = 0.003f;
         engine, {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *material}
     );
 
-    const auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
         return false;
     }

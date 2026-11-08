@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "Simulator.hpp"
 #include "ALifeComponents.hpp"
 #include <Zahlen/Engine/Engine.hpp>
@@ -56,7 +57,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
     const float game_dt           = dt * _tuning.time_factor;
     const float dist_sq_threshold = _tuning.switch_distance * _tuning.switch_distance;
 
-    ECS::Registry&               reg      = engine.GetRegistry();
+    ECS::Registry&               reg      = ZHLN::EngineAccess::RegistryOf(engine);
     std::span<const Entity>      entities = reg.GetEntitiesWith<ALifeComponent>();
     RestrictSpan<ALifeComponent> comps    = reg.GetRawArray<ALifeComponent>();
 

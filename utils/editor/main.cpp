@@ -3,6 +3,7 @@
 
 // Dedicated world editor. Its paused/simulating loop is intentionally custom;
 // an ordinary game does not link this UI, document layer, or editor logic.
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <SceneDocument.hpp>
@@ -107,7 +108,7 @@ constexpr float kLeftPanelWidth  = 260.0f;
 constexpr float kRightPanelWidth = 320.0f;
 
 ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam, const ZHLN::RenderContext::ViewportRect& vp) {
-    auto& reg    = engine.GetRegistry();
+    auto& reg    = ZHLN::EngineAccess::RegistryOf(engine);
     float mouseX = 0.0f;
     float mouseY = 0.0f;
     if (auto st = reg.GetSingleton<ZHLN::Components::InputStateComponent>()) {
@@ -145,7 +146,7 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
 // Draws one frame of the self-hosted editor using the Clay layout engine:
 // [Hierarchy | Viewport Toolbar | Inspector]
 void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float dt) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     gui.SetFontAtlas(engine.GetFontAtlas());
     ZHLN::GUI::Frame ui = gui.BeginFrame(engine.ConsumeUIInput(dt));
 
@@ -229,7 +230,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
     ZHLN::Clock clock;
     // The editor poses the world's camera: a world with no main camera entity has
     // none to pose.
-    auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!cameraComp) {
         return std::unexpected(ZHLN::AppError::SceneInitFailed);
     }
@@ -255,7 +256,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         engine.ProcessEvents();
         if (!engine.IsRunning()) break;
 
-        auto& reg   = engine.GetRegistry();
+        auto& reg   = ZHLN::EngineAccess::RegistryOf(engine);
         auto  state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
 
         auto winSize = engine.GetPlatformHost().GetSize();
@@ -427,9 +428,9 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         }
 
         {
-            const ZHLN::Entity camEnt = engine.GetRegistry().SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+            const ZHLN::Entity camEnt = ZHLN::EngineAccess::RegistryOf(engine).SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
             if (camEnt != ZHLN::Entity::Null()) {
-                engine.GetRegistry().Patch<ZHLN::FreeCam::FreeCamComponent>(camEnt, [&](auto& fc) -> auto { fc.enabled = !transformActive; });
+                ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::FreeCam::FreeCamComponent>(camEnt, [&](auto& fc) -> auto { fc.enabled = !transformActive; });
             }
         }
         if (s_EditorState.simulationRunning) {

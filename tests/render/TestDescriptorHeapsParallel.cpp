@@ -10,6 +10,7 @@
 // re-push the per-frame device-address block via vkCmdPushDataEXT, and draw
 // with heap pipelines. 400 cubes in 4 shared materials verify the pipeline.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -87,7 +88,7 @@ struct DescriptorHeapsParallelSuite {
                 return std::unexpected(DescriptorHeapsParallelTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -95,7 +96,7 @@ struct DescriptorHeapsParallelSuite {
                 reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
             }
 
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }

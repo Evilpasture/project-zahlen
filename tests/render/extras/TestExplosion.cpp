@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "TestsFramework.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
@@ -70,7 +71,7 @@ struct ExplosionTestSuite {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             // Spawn omnidirectional fireball
             const JPH::Vec3    origin(0.0f, 5.0f, 0.0f);
@@ -130,7 +131,7 @@ struct ExplosionTestSuite {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             // 2. Detonate Artillery Mortar at (0, 0, 0)
             const ZHLN::Entity expRoot = ZHLN::ExplosionSystem::Spawn(*engine, {0.0f, 0.0f, 0.0f}, 1.0f, ZHLN::OrdnanceType::ArtilleryMortar);
@@ -193,7 +194,7 @@ struct ExplosionTestSuite {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             // Spawn a test crater with initial scale (6.8, 6.8, 5.0)
             const ZHLN::Entity craterEnt = reg.Create();

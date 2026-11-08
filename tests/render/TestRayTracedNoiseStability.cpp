@@ -22,6 +22,7 @@
 //      without isolated ray debris, and moving the caster updates immediately on
 //      the first frame without temporal history ghost trails.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "RayTracedNoiseMetrics.hpp"
 #include "TestsFramework.hpp"
@@ -80,7 +81,7 @@ struct RayTracedNoiseStabilityTestSuite {
     }
 
     static void SetAA(ZHLN::Engine& engine, ZHLN::AAMode mode) {
-        auto& reg = engine.GetRegistry();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
             reg.Patch<ZHLN::Components::AASettingsComponent>(e, [mode](auto& aa) {
                 aa.state.mode        = mode;
@@ -90,7 +91,7 @@ struct RayTracedNoiseStabilityTestSuite {
     }
 
     static void SetRayTracedShadows(ZHLN::Engine& engine, int enableRTR) {
-        auto&      reg      = engine.GetRegistry();
+        auto&      reg      = ZHLN::EngineAccess::RegistryOf(engine);
         const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
         if (settings.empty()) {
             return;
@@ -113,7 +114,7 @@ struct RayTracedNoiseStabilityTestSuite {
     // the camera on the floor. Every material stays rough (>= 0.70 > 0.40) and
     // SSR is off, isolating pc.enableRTR to TraceSunContactShadow in lighting.slang.
     static auto BuildContactBaseScene(ZHLN::Engine& engine, ZHLN::Material& outBoxMat) -> bool {
-        auto& reg = engine.GetRegistry();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
         auto floorMat =
             engine.Graphics().CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.82f, 1.0f}});
@@ -250,7 +251,7 @@ struct RayTracedNoiseStabilityTestSuite {
 
             // Raised caster at y = 12.0m (bottom at y = 9.0m -> ray distance from
             // floor along L_sun is ~20m >> 3.0m), projecting onto z ~ -6..+4 in view.
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             if (const auto camComp = reg.GetSingleton<ZHLN::Components::CameraComponent>(); camComp.has_value()) {
                 camComp->camera.position = JPH::Vec3(0.0f, 10.0f, 30.0f);
                 camComp->camera.pitch    = -18.0f;
@@ -343,7 +344,7 @@ struct RayTracedNoiseStabilityTestSuite {
             // Teleport the contact curb sideways (+4.0m) and capture the VERY NEXT
             // rendered frame vs a settled frame 3 ticks later: without temporal
             // shadow history, frame 1 at the new position must already be settled.
-            engine->GetRegistry().Patch<ZHLN::Components::TransformComponent>(curb, [](auto& tr) { tr.position = JPH::Vec3(2.0f, 0.06f, 15.0f); });
+            ZHLN::EngineAccess::RegistryOf(*engine).Patch<ZHLN::Components::TransformComponent>(curb, [](auto& tr) { tr.position = JPH::Vec3(2.0f, 0.06f, 15.0f); });
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
             RgbImage movedImmediate = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_contact_moved_immediate.ppm");
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 3);

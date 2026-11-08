@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "PhysicsSystem.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -28,7 +29,7 @@ void AccumulateImpulse(ECS::Registry& registry, Entity entity, float x, float y,
 namespace {
 
 void CommitImpulses(Engine& engine) {
-    auto&       reg      = engine.GetRegistry();
+    auto&       reg      = ZHLN::EngineAccess::RegistryOf(engine);
     auto pc = engine.Physics();
     const auto  entities = reg.GetEntitiesWith<Components::ImpulseCommand>();
     for (int i = static_cast<int>(entities.size()) - 1; i >= 0; --i) {

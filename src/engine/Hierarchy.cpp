@@ -3,8 +3,9 @@
 
 #include "Hierarchy.hpp"
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <vector>
@@ -25,10 +26,10 @@ void ExpandPendingDestroy(ECS::Registry& registry) {
 
     struct Link {
         uint64_t parent;
-        Entity child;
+        Entity   child;
     };
     std::vector<Link> children;
-    const auto hierarchyEntities = registry.GetEntitiesWith<Components::HierarchyComponent>();
+    const auto        hierarchyEntities = registry.GetEntitiesWith<Components::HierarchyComponent>();
     if (!hierarchyEntities.empty()) {
         const auto hierarchy = registry.GetRawArray<Components::HierarchyComponent>();
         children.reserve(hierarchyEntities.size());
@@ -43,8 +44,7 @@ void ExpandPendingDestroy(ECS::Registry& registry) {
     while (!frontier.empty()) {
         const Entity parent = frontier.back();
         frontier.pop_back();
-        const auto first = std::lower_bound(children.begin(), children.end(), parent.Pack(),
-                                            [](const Link& link, uint64_t key) { return link.parent < key; });
+        const auto first = std::lower_bound(children.begin(), children.end(), parent.Pack(), [](const Link& link, uint64_t key) { return link.parent < key; });
         for (auto it = first; it != children.end() && it->parent == parent.Pack(); ++it) {
             if (registry.IsAlive(it->child) && !registry.Get<Components::PendingDestroy>(it->child)) {
                 registry.Add(it->child, Components::PendingDestroy {});
@@ -55,7 +55,7 @@ void ExpandPendingDestroy(ECS::Registry& registry) {
 }
 
 void DespawnEntity(Engine& engine, Entity entity) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     if (!registry.IsAlive(entity)) {
         return;
     }

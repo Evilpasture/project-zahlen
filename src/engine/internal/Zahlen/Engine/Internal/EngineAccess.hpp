@@ -19,7 +19,14 @@ class RenderContext;
 class PhysicsContext;
 class AssetManager;
 class AudioContext;
+class ArticulationSystem;
+class FramePlan;
+class PoseUploadQueue;
 struct SceneData;
+
+namespace ECS {
+class Registry;
+}
 
 struct ZHLN_API EngineAccess {
     static auto KernelOf(Engine&) noexcept -> Kernel&;
@@ -29,6 +36,15 @@ struct ZHLN_API EngineAccess {
     static auto AssetsOf(Engine&) noexcept -> AssetManager&;
     static auto AudioOf(Engine&) noexcept -> AudioContext&;
     static auto SceneOf(Engine&) noexcept -> SceneData&;
+
+    // Concrete subsystem seams for build-tree-only callers. None of these is
+    // installed with the SDK: the public Engine API exposes capabilities.
+    static auto RegistryOf(Engine&) noexcept -> ECS::Registry&;
+    static auto RegistryOf(const Engine&) noexcept -> const ECS::Registry&;
+    static auto PoseUploadsOf(Engine&) noexcept -> PoseUploadQueue&;
+    static auto ArticulationOf(Engine&) noexcept -> ArticulationSystem&;
+    // Core wiring and in-tree failure-injection tests only. Not installed.
+    static auto FramePlanOf(Engine&) -> FramePlan&;
 
     // Capability -> implementation. The only free function that still needs the
     // concrete subsystem is PushProps(Simulation, ...). This header is not

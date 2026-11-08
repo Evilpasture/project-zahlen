@@ -292,7 +292,7 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
     // settle ticks advance "Individuals" in MorphStressTest: its first target
     // lifts the yellow block while the untouched blocks stay level.
     if (written > 0 && !prefab->animations.empty() &&
-        !engine.GetRegistry().Patch<ZHLN::Components::AnimatorComponent>(instances.front(), [](auto& animator) {
+        !ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::Components::AnimatorComponent>(instances.front(), [](auto& animator) {
             animator.currentTrackIdx = -1;
         })) {
         ZHLN::Log("[Fidelity] Animated prefab '{}' has no animator root.", virtualPath);
@@ -419,7 +419,7 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 // InitializeDefaultScene already attached these components. Patch replaces the
 // stored value; Add is only the path where the component was never created.
 void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& gfx) {
-    auto&              registry = engine.GetRegistry();
+    auto&              registry = ZHLN::EngineAccess::RegistryOf(engine);
     const ZHLN::Entity settings = registry.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
     if (settings == ZHLN::Entity::Null()) {
         ZHLN::Log("[Fidelity] No global-settings entity; the render settings have nowhere to go.");
@@ -491,7 +491,7 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
 // normally data-only lights, but the Engine path also safely releases any
 // owners attached to a light entity.
 void StripSceneLights(ZHLN::Engine& engine) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     const auto lightSpan = registry.GetEntitiesWith<ZHLN::Components::LightComponent>();
     const auto sunSpan   = registry.GetEntitiesWith<ZHLN::Components::SunTagComponent>();
     const auto lights    = std::vector<ZHLN::Entity>(lightSpan.begin(), lightSpan.end());
@@ -542,7 +542,7 @@ enum class DiagnosticCapture {
         return true;
     }
 
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     auto renderer = engine.Graphics();
     uint32_t transmitting = 0;
     uint32_t opaque       = 0;
@@ -774,7 +774,7 @@ auto main(int argc, char* argv[]) -> int {
     // The harness owns the camera, so core's WASD free-cam must come off the
     // camera entity or the two write the same transform every frame.
     {
-        auto&              registry = engine->GetRegistry();
+        auto&              registry = ZHLN::EngineAccess::RegistryOf(*engine);
         const ZHLN::Entity camera   = registry.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
         if (camera != ZHLN::Entity::Null()) {
         }
@@ -810,7 +810,7 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Log("[Fidelity] Lighting '{}' has invalid pixel dimensions or data.", scenario.lighting);
             return EXIT_FAILURE;
         }
-        auto& registry = engine->GetRegistry();
+        auto& registry = ZHLN::EngineAccess::RegistryOf(*engine);
         const ZHLN::Entity settingsEnt = registry.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
         if (settingsEnt == ZHLN::Entity::Null()) {
             ZHLN::Log("[Fidelity] No global-settings entity; the environment has nowhere to go.");
@@ -822,7 +822,7 @@ auto main(int argc, char* argv[]) -> int {
         registry.Add(settingsEnt, std::move(env));
     }
 
-    auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!cameraComp) {
         ZHLN::Log("[Fidelity] No main camera entity for '{}'; refusing an empty capture.", scenario.name);
         return EXIT_FAILURE;
@@ -870,7 +870,7 @@ auto main(int argc, char* argv[]) -> int {
         engine->ProcessEvents();
         // The camera is authored once; a re-apply keeps it pinned through the
         // settle ticks in case a system resets the view on the first frames.
-        if (auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>()) {
+        if (auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>()) {
             SetFidelityCamera(cameraComp->camera, scenario);
         }
         const auto status = engine->Tick(dt);

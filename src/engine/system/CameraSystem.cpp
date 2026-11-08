@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "CameraSystem.hpp"
 #include "Zahlen/Math/Camera.hpp"
@@ -15,7 +16,7 @@ namespace ZHLN {
 
 void CameraSystem::Update(Engine& engine, float dt, float alpha) {
     const auto vp = engine.Graphics().Viewport();
-    Update(engine.GetRegistry(), Extent2D {vp.width, vp.height}, dt, alpha);
+    Update(ZHLN::EngineAccess::RegistryOf(engine), Extent2D {vp.width, vp.height}, dt, alpha);
 }
 
 void CameraSystem::Update(ECS::Registry& reg, Extent2D res, float , float ) {

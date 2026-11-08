@@ -628,6 +628,36 @@ Never use `With(...)` as a pointer-extractor.
 ECS `Registry::Get<T>`, `Query::Get<T>` and `ExtensionServices::Get<T>` keep
 their optional references: their use is confined to one system invocation.
 
+### 3.4 Engine capability surface
+
+`Engine` exposes operations, not the mutable objects it owns. The getters that
+handed out `FramePlan&`, `PoseUploadQueue&`, `ArticulationSystem&` and
+`ECS::Registry&` are gone; each had a different reason to be wrong, and the
+replacement is chosen by semantics rather than by a blanket naming rule.
+
+| capability | shape | why |
+| :--- | :--- | :--- |
+| frame schedule | `Steps() const noexcept -> std::span<const FrameStep>` | diagnostics and profilers can read the composed order, but only `InstallModule(const Module&)` mutates it, all-or-nothing against core's anchor names. `Clear()` / `Append()` on a public `FramePlan&` silently bypassed anchor validation. |
+| entity lifecycle | `Entities() -> Entities` (`Zahlen/Engine/Capabilities/Entities.hpp`) | not a `Registry` pass-through. `Despawn` marks `PendingDestroy` so `SceneCleanup` releases Jolt bodies, miniaudio voices and GPU buffers; `Attach` / `Detach` route replacements through `SceneResources::Release`. `Get` / `GetSingleton` are read-only `Optional<const T&>`. |
+| in-frame mutations | `Commands() -> ECS::EntityCommandBuffer&` | systems declare `ECS::EntityCommandBuffer&` in their signature and `SystemGraph` resolves it from `carrier.ecb`; external frame steps record into the same ECB. Playback is `MainECBPlayback`, immediately followed by `SceneCleanup`. Synchronous creation/destruction inside `Tick` is prohibited. |
+| skinning / articulation | no public accessor | simulation-to-render pose uploads and the articulation solver are engine-internal; their two consumers reach them through `EngineAccess`. |
+
+`Engine.hpp` forward-declares `ECS::Registry` and `ECS::EntityCommandBuffer` and
+does not include `<Zahlen/ECS/ECS.hpp>` or `<Zahlen/Engine/PoseUploads.hpp>`.
+The raw registry is reachable only through the build-tree-only
+`Zahlen/Engine/Internal/EngineAccess.hpp` seam (`RegistryOf`, `PoseUploadsOf`,
+`ArticulationOf`, `FramePlanOf`), which is **not installed**. That seam is for
+engine implementation units, `SystemGraph` compilation,
+`GameModule::ComponentRegistrar`, cold-boot scene deserializers and in-tree
+failure-injection tests. In-repo systems, extensions, samples and tests that
+still need arbitrary registry operations use `RegistryOf`; SDK consumers get
+`Entities()` and `Commands()` instead.
+
+The remaining work -- rewriting every in-tree system to `Query<...>` /
+`EntityCommandBuffer&` signatures so `RegistryOf` survives only in the three
+cold-start seams -- is tracked in `todo/ecs_capability_boundary.md`. It is a
+multi-patch change and is deliberately not folded into this one.
+
 ## 4. Deferred Render Graph Topology
 
 The renderer executes a multi-pass pipeline managed by a compile-time type-checked frame graph:

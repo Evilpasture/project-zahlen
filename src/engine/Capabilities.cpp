@@ -5,23 +5,42 @@
 // small: they name value types and operations, not renderer, Jolt or audio
 // implementation headers.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
-#include <Zahlen/Engine/Capabilities/EngineState.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/Kernel.hpp>
-#include <Zahlen/Engine/World.hpp>
-#include <Zahlen/Render/RenderContext.hpp>
-#include <Zahlen/Physics/Physics.hpp>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Kernel.hpp>
+#include <Zahlen/Engine/World.hpp>
+#include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/Render/SceneData.hpp>
 
 namespace ZHLN {
+
+// --- Entities -----------------------------------------------------------------
+
+auto Entities::Create() -> Entity {
+    return Registry().Create();
+}
+
+void Entities::Despawn(Entity entity) noexcept {
+    DespawnEntity(*_engine, entity);
+}
+
+auto Entities::IsAlive(Entity entity) const noexcept -> bool {
+    return Registry().IsAlive(entity);
+}
+
+auto Entities::Registry() const noexcept -> ECS::Registry& {
+    return ZHLN::EngineAccess::RegistryOf(*_engine);
+}
 
 // --- GraphicsDevice -----------------------------------------------------------
 
@@ -253,9 +272,7 @@ auto AssetLibrary::CachedPrefab(uint64_t hash) const noexcept -> ZHLN::Optional<
     return _assets->GetCachedPrefab(hash);
 }
 
-auto AssetLibrary::WithCachedPrefabImpl(
-    uint64_t hash, void (*visit)(const void*, const ModelPrefab&), const void* ctx
-) const -> bool {
+auto AssetLibrary::WithCachedPrefabImpl(uint64_t hash, void (*visit)(const void*, const ModelPrefab&), const void* ctx) const -> bool {
     return _assets->WithCachedPrefab(hash, [&](const ModelPrefab& prefab) { visit(ctx, prefab); });
 }
 auto AssetLibrary::BorrowCachedPrefab(uint64_t hash) const noexcept -> const ModelPrefab* {

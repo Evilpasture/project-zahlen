@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -65,7 +66,7 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
@@ -107,7 +108,7 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             // 1. Sun light
             const ZHLN::Entity sunEnt = reg.Create();
@@ -155,7 +156,7 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             // Set Fullbright to test raw G-buffer viewmodel color resolution without lighting variance
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -164,7 +165,7 @@ struct ViewmodelTestSuite {
             }
 
             // 1. Setup Camera looking along standard forward direction (-Z)
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }

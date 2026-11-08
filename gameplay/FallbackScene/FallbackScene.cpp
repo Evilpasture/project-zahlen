@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // gameplay/FallbackScene/FallbackScene.cpp
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "FallbackScene.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -150,7 +151,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine) {
 
     Log("[DefaultPreset] No scene document selected; showing diagnostic scene.");
 
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     // ========================================================================
     // 0. THE SETTINGS ENTITY
@@ -203,7 +204,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     }
 
     s_AccumTime += dt;
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---

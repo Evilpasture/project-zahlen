@@ -3,6 +3,7 @@
 
 // Opt-in local GPU test: whole application launches. Most stop before the
 // first Tick; a failure probe runs a UI-only frame without GPU rendering.
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "TestsFramework.hpp"
 #include <Zahlen/App.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -13,6 +14,7 @@
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <algorithm>
 #include <expected>
 #include <memory>
@@ -26,6 +28,16 @@ namespace ZHLN::Test {
 // through their existing extension-service slots (without an Engine field).
 static_assert(ECS::ResolvableFrom<SystemContext, ECS::Res<EngineConfig>>);
 static_assert(ECS::ResolvableFrom<ECS::Carrier<RenderServices>, ECS::Res<EngineConfig>>);
+
+// Steps() is a read-only span; tests look a named step up by value.
+static auto FindStep(Engine& engine, std::string_view name) -> const FrameStep* {
+    for (const FrameStep& step: engine.Steps()) {
+        if (step.name == name) {
+            return &step;
+        }
+    }
+    return nullptr;
+}
 
 void ExpectUserClosed(const AppRunResult& result) {
     Expect(result.has_value());
@@ -46,7 +58,7 @@ struct RecordingLayer {
     std::vector<std::string_view>* calls = nullptr;
     void Start(Engine& engine) {
         calls->push_back("layer-start");
-        Expect(engine.GetRegistry().GetSingleton<Components::CameraComponent>().has_value());
+        Expect(engine.Entities().GetSingleton<Components::CameraComponent>().has_value());
     }
     void Tick(Engine& engine, float dt) {
         calls->push_back("layer-tick");
@@ -71,20 +83,19 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
     application.Install([&](Engine& engine) {
         calls.push_back("install");
         Expect(engine.Service<EngineConfig>().has_value()); // no-CLI uses the same canonical service
-        Expect(!engine.GetRegistry().GetSingleton<Components::CameraComponent>());
+        Expect(!engine.Entities().GetSingleton<Components::CameraComponent>());
         const auto installed = engine.InstallModule(Module {.name = "AppTestModule"});
         Expect(installed.has_value());
     });
     application.OnStart([&](Engine& engine) {
         calls.push_back("start");
-        Expect(engine.GetRegistry().GetSingleton<Components::CameraComponent>().has_value());
-        const auto& plan = engine.GetFramePlan();
-        Expect(plan.Find("PhysicsSystem") != nullptr);
-        Expect(plan.Find("UpdateGraph") != nullptr);
-        Expect(plan.Find("GameplayModule") == nullptr);
+        Expect(engine.Entities().GetSingleton<Components::CameraComponent>().has_value());
+        Expect(FindStep(engine, "PhysicsSystem") != nullptr);
+        Expect(FindStep(engine, "UpdateGraph") != nullptr);
+        Expect(FindStep(engine, "GameplayModule") == nullptr);
         // ProcessEvents begins an input frame. If update runs before it, the
         // deliberately stale mouse delta below is still visible to gameplay.
-        auto input = engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
+        auto input = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::InputStateComponent>();
         input->mouseDeltaX = 123.0f;
         // A resize is consumed during Engine::ProcessEvents, not by App's loop.
         input->ApplyResize({.width = 800, .height = 600});
@@ -104,7 +115,7 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         ++updates;
         Expect(*state == 42);
         Expect(dt >= 0.0f);
-        const auto input = engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
+        const auto input = engine.Entities().GetSingleton<Components::InputStateComponent>();
         Expect(input.has_value());
         Expect(input->mouseDeltaX == 0.0f);
         Expect(!input->needsResize);
@@ -139,7 +150,7 @@ struct UILifecycleLayer {
     }
     void Stop(Engine& engine) {
         Expect(*state == 3);
-        Expect(engine.GetRegistry().GetSingleton<Components::CameraComponent>().has_value());
+        Expect(engine.Entities().GetSingleton<Components::CameraComponent>().has_value());
         calls->push_back("layer-stop");
     }
 };
@@ -161,7 +172,7 @@ struct HUDPhaseLayer {
 
 void RunHostUIPhaseForTest(Engine& engine) {
     // Exercise the actual Core UI phase without running GPU/render steps.
-    const auto* uiStep = engine.GetFramePlan().Find("HostUICallback");
+    const auto* uiStep = FindStep(engine, "HostUICallback");
     Expect(uiStep != nullptr);
     if (uiStep != nullptr) {
         Expect(uiStep->phase == FramePhase::UI);
@@ -226,7 +237,9 @@ void test_app_stops_layers_on_typed_frame_failure() {
     app.OnStart([&](Engine& engine) {
         // Replace the plan with a single deterministic failing UI step. This
         // tests the frame-error result and cleanup without a GPU frame.
-        auto& plan = engine.GetFramePlan();
+        // Failure injection is in-tree tooling: the mutable plan is reachable
+        // only through the build-tree-only seam, never from the SDK surface.
+        auto& plan = ZHLN::EngineAccess::FramePlanOf(engine);
         plan.Clear();
         const auto placed = plan.Append(FramePhase::UI, "EmitUIAndFail", +[](Engine& active, float, FrameContext& frame) {
             if (const auto cb = active.GetUICallback()) {

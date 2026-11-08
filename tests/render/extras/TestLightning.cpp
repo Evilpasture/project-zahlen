@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -63,7 +64,7 @@ struct LightningTestSuite {
             const auto engine = std::move(engineRes.value());
             engine->InitializeDefaultScene();
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             // Set clean baseline ambient exposure
             constexpr float kInitialBaselineExposure = 6.0f;
@@ -174,7 +175,7 @@ struct LightningTestSuite {
             const auto engine = std::move(engineRes.value());
             engine->InitializeDefaultScene();
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             constexpr float kBaselineExposure = 5.0f;
             const auto      settingsEnts      = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -236,7 +237,7 @@ struct LightningTestSuite {
             }
             auto engine = std::move(engineRes.value());
             engine->InitializeDefaultScene();
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             const ZHLN::Entity rawBolt = ZHLN::Lightning::Spawn(*engine, {0, 80, 0}, {0, 0, 0});

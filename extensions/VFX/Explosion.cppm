@@ -371,12 +371,12 @@ export class ExplosionSystem {
     // the renderer releases what it allocated for described quads on its own
     // schedule. Detaching is an ECS mutation and nothing else.
     static void Detach(Engine& engine, Entity entity) {
-        engine.GetRegistry().Remove<ExplosionComponent>(entity);
+        ZHLN::EngineAccess::RegistryOf(engine).Remove<ExplosionComponent>(entity);
     }
 
     static void Init(Engine& engine) {
         auto rc = engine.Graphics();
-        auto& reg = engine.GetRegistry();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
         // Register ECS components for the current registry instance
         reg.RegisterComponent<ExplosionComponent>("ExplosionComponent");
@@ -446,11 +446,11 @@ export class ExplosionSystem {
     static void Attach(Engine& engine, Entity entity, ExplosionComponent component) {
         Init(engine);
         Detach(engine, entity);
-        engine.GetRegistry().Add(entity, std::move(component));
+        ZHLN::EngineAccess::RegistryOf(engine).Add(entity, std::move(component));
     }
 
     static Entity Spawn(Engine& engine, ZHLN::Float3 origin, float scale = 1.0f, OrdnanceType type = OrdnanceType::ArtilleryMortar) {
-        auto& reg = engine.GetRegistry();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         Init(engine);
 
         ExplosionComponent initialExp {
@@ -555,8 +555,8 @@ export class ExplosionSystem {
     static void Update(Engine& engine, float dt) {
         Init(engine);
 
-        auto& reg = engine.GetRegistry();
-        auto& ecb = engine.GetMainECB();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+        auto& ecb = engine.Commands();
         auto scene = engine.Debug();
 
         // --------------------------------------------------------------------

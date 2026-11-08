@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/Camera/TargetCamera.cpp
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include "TargetCamera.hpp"
 
@@ -141,7 +142,7 @@ namespace {
 // longer creates any camera rig -- that is gameplay policy), then resolve
 // the orbit before the core CameraSystem projects the matrices.
 void TargetCameraStep(Engine& engine, float dt, FrameContext& ctx) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     if (auto mainCams = reg.GetEntitiesWith<Components::MainCameraTagComponent>(); !mainCams.empty()) {
         const Entity camEnt = mainCams[0];

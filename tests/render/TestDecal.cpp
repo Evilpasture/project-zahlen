@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -83,7 +84,7 @@ struct DecalTestSuite {
                 return std::unexpected(DecalTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             // 1. Create a 64x64 bright yellow procedural decal texture
@@ -137,7 +138,7 @@ struct DecalTestSuite {
             // step runs every tick.
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             // Set Fullbright to test raw G-buffer decal color stamping without lighting variance
@@ -147,7 +148,7 @@ struct DecalTestSuite {
             }
 
             // 1. Camera looking along standard forward direction (-Z) from Z = 2.0m
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
@@ -257,10 +258,10 @@ struct DecalTestSuite {
                 return std::unexpected(DecalTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }

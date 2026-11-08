@@ -500,7 +500,7 @@ void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outMin, JPH::Vec3
 }
 
 void ClearSubject(ZHLN::Engine& engine, Subject& subject) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     for (const ZHLN::Entity entity: subject.instances) {
         if (entity != ZHLN::Entity::Null() && reg.IsAlive(entity)) {
             ZHLN::DespawnEntity(engine, entity);
@@ -601,7 +601,7 @@ struct Studio {
     float            range,
     JPH::Vec3Arg     direction
 ) -> ZHLN::Entity {
-    auto&            reg   = engine.GetRegistry();
+    auto&            reg   = ZHLN::EngineAccess::RegistryOf(engine);
     const JPH::Mat44 world = ZHLN::Math::CreateTransform(position, {0.0f, 0.0f, 0.0f, 1.0f});
     return reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64(name)},
@@ -612,7 +612,7 @@ struct Studio {
 }
 
 void ClearStudio(ZHLN::Engine& engine, Studio& studio) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     for (const ZHLN::Entity entity: {studio.sun, studio.fill, studio.rim, studio.floor}) {
         if (entity != ZHLN::Entity::Null() && reg.IsAlive(entity)) {
             ZHLN::DespawnEntity(engine, entity);
@@ -625,7 +625,7 @@ void ClearStudio(ZHLN::Engine& engine, Studio& studio) {
 }
 
 void SetFloorVisible(ZHLN::Engine& engine, const Studio& studio) {
-    engine.GetRegistry().Patch<ZHLN::Components::MeshComponent>(studio.floor, [&studio](auto& mesh) -> auto {
+    ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::Components::MeshComponent>(studio.floor, [&studio](auto& mesh) -> auto {
         if (studio.floorOn) {
             mesh.flags &= ~ZHLN::DrawFlags::Hidden;
         } else {
@@ -639,7 +639,7 @@ void SetFloorVisible(ZHLN::Engine& engine, const Studio& studio) {
 // invisibility, it is the subject's shadow or reflection, not the floor.
 void SetSubjectVisible(ZHLN::Engine& engine, const Subject& subject, const Studio& studio) {
     for (const ZHLN::Entity entity: subject.instances) {
-        engine.GetRegistry().Patch<ZHLN::Components::MeshComponent>(entity, [&studio](auto& mesh) -> auto {
+        ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::Components::MeshComponent>(entity, [&studio](auto& mesh) -> auto {
             if (studio.subjectOn) {
                 mesh.flags &= ~ZHLN::DrawFlags::Hidden;
             } else {
@@ -654,7 +654,7 @@ void SetSubjectVisible(ZHLN::Engine& engine, const Subject& subject, const Studi
 // function is what lets a device-lost recovery rebuild it in one call.
 void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     ClearStudio(engine, studio);
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     const float     radius = subject.radius;
     const JPH::Vec3 center = subject.center;
@@ -812,7 +812,7 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
 // component, so a tier change patches its knobs in place instead of replacing
 // the component.
 void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& gfx) {
-    auto&              reg      = engine.GetRegistry();
+    auto&              reg      = ZHLN::EngineAccess::RegistryOf(engine);
     const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
     if (settings == ZHLN::Entity::Null()) {
         ZHLN::Log("[RemoteGLB] No global-settings entity; the render settings have nowhere to go.");
@@ -901,7 +901,7 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
 // value that changed with every pixel of wheel travel would be noise.
 void UpdateShadowExtent(ZHLN::Engine& engine, float orbitDistance, float maxOrbitDistance, float subjectRadius) {
     const float        wanted = ShadowBoxExtent(orbitDistance, maxOrbitDistance, subjectRadius);
-    auto&              reg    = engine.GetRegistry();
+    auto&              reg    = ZHLN::EngineAccess::RegistryOf(engine);
     const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
     reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [wanted](auto& shadow) -> auto {
         if (std::abs(shadow.shadowWidth - wanted) > (wanted * 0.02f)) {
@@ -1008,7 +1008,7 @@ void UpdateOrbit(OrbitCamera& orbit, const ZHLN::Components::InputStateComponent
 }
 
 void ApplyOrbit(ZHLN::Engine& engine, const OrbitCamera& orbit, const Subject& subject) {
-    auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!cameraComp) {
         return;
     }
@@ -1239,7 +1239,7 @@ void PollFetch(ZHLN::Engine& engine, SampleState& state) {
 }
 
 void HandleInput(ZHLN::Engine& engine, SampleState& state) {
-    auto&              reg      = engine.GetRegistry();
+    auto&              reg      = ZHLN::EngineAccess::RegistryOf(engine);
     const auto         entities = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
     if (entities.empty()) {
         return;
@@ -1519,7 +1519,7 @@ auto main(int argc, char* argv[]) -> int {
     // The turntable owns the camera, so core's WASD free-cam has to come off the
     // camera entity or the two write the same transform every frame.
     {
-        auto&              reg    = engine->GetRegistry();
+        auto&              reg    = ZHLN::EngineAccess::RegistryOf(*engine);
         const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
         if (camera != ZHLN::Entity::Null()) {
         }

@@ -45,7 +45,7 @@ void PlayerIntentStep(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     inputSystem.Update(engine);
     // Translation is relative to the view; a world with no camera has none, and the
     // raw intents stay latched for the frame that does.
-    if (const auto camera = engine.GetRegistry().GetSingleton<Components::CameraComponent>()) {
+    if (const auto camera = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::CameraComponent>()) {
         inputSystem.PlayerInputTranslate(engine, camera->camera);
     }
 }
@@ -90,7 +90,7 @@ void CharacterPreStep(Engine& engine, float dt) {
     CommitCharacterSteering(engine);
     // Prop interaction runs with the steering it depends on: the impulse is
     // computed from the character velocity committed into the body just above.
-    PushProps(engine.Physics(), engine.GetRegistry());
+    PushProps(engine.Physics(), ZHLN::EngineAccess::RegistryOf(engine));
 }
 
 // --- Update-graph contributions ------------------------------------------------

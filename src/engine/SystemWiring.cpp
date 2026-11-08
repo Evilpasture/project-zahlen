@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "SystemWiring.hpp"
 #include "ArticulationSystem.hpp"
 #include "AudioSystem.hpp"
@@ -40,13 +41,13 @@ void HostUICallback(Engine& engine, float, FrameContext&) {
     if (const auto cb = engine.GetUICallback(); cb && static_cast<bool>(*cb)) {
         (*cb)(engine);
         if (engine.GetPendingUIData().Empty()) {
-            if (auto st = engine.GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+            if (auto st = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::InputStateComponent>()) {
                 st->wantCaptureKeyboard = false;
                 st->wantCaptureMouse    = false;
             }
         }
     }
-    if (const auto st = engine.GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+    if (const auto st = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::InputStateComponent>()) {
         engine.GetInput().SyncCaptureFlags(st->wantCaptureKeyboard, st->wantCaptureMouse);
         engine.GetInput().RefreshActionsForCurrentFrame(&engine.GetEventBus());
     }
@@ -69,7 +70,7 @@ void UpdateGraph(Engine& engine, float dt, FrameContext& ctx) {
 }
 
 void CommandPlayback(Engine& engine, float, FrameContext&) {
-    engine.GetMainECB().Playback();
+    engine.Commands().Playback();
 }
 
 void CleanupScene(Engine& engine, float, FrameContext&) {
@@ -110,7 +111,7 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
 
 void TransformHistory(Engine& engine, float, FrameContext&) {
     ZHLN::ScopedTimer profTimer("ECS System: Update Transform History");
-    TransformSystem::UpdateTransformHistory(engine.GetRegistry());
+    TransformSystem::UpdateTransformHistory(ZHLN::EngineAccess::RegistryOf(engine));
 }
 
 }} // namespace ::Steps
@@ -124,9 +125,8 @@ void TransformHistory(Engine& engine, float, FrameContext&) {
 // relative to one of these is depending on this function, so a rename here is a
 // breaking change to every module that anchored to it, reported as
 // FramePlanError::AnchorMissing rather than absorbed.
-void BuildCoreFramePlan(Engine& engine) {
+void BuildCoreFramePlan(FramePlan& plan) {
     using Phase = FramePhase;
-    auto& plan  = engine.GetFramePlan();
 
     // A core step that cannot be placed is a programming error in this function,
     // not a composition problem to return to a caller: the names are literals,
@@ -187,7 +187,7 @@ void BuildSystemGraphs(Engine& engine) {
 }
 
 auto InitializeDefaultScene(Engine& engine) -> bool {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 

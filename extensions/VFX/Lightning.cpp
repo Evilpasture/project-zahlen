@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 module;
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 
 // --- Global Module Fragment: Implementation Dependencies ---
 // clang-format off
@@ -200,7 +201,7 @@ void ReleaseLightning(Engine& engine, LightningComponent& bolt) {
 }
 
 void CleanupLightning(Engine& engine, bool all) {
-    auto&      reg      = engine.GetRegistry();
+    auto&      reg      = ZHLN::EngineAccess::RegistryOf(engine);
     const auto entities = reg.GetEntitiesWith<LightningComponent>();
     if (entities.empty()) {
         return;
@@ -214,11 +215,11 @@ void CleanupLightning(Engine& engine, bool all) {
 }
 
 void RegisterCleanup(Engine& engine) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     reg.RegisterComponent<LightningComponent>("LightningComponent");
     if (engine.AddSceneCleanupPass(&CleanupLightning)) {
         engine.AddDeviceLostCallback([](Engine& owner) {
-            for (auto& bolt: owner.GetRegistry().GetRawArray<LightningComponent>()) {
+            for (auto& bolt: ZHLN::EngineAccess::RegistryOf(owner).GetRawArray<LightningComponent>()) {
                 bolt.vboPos     = BufferID::Invalid;
                 bolt.vboFrame   = BufferID::Invalid;
                 bolt.vboSurface = BufferID::Invalid;
@@ -232,20 +233,20 @@ void RegisterCleanup(Engine& engine) {
 namespace Lightning {
 
 void Detach(Engine& engine, Entity entity) {
-    if (auto bolt = engine.GetRegistry().Get<LightningComponent>(entity)) {
+    if (auto bolt = ZHLN::EngineAccess::RegistryOf(engine).Get<LightningComponent>(entity)) {
         ReleaseLightning(engine, *bolt);
-        engine.GetRegistry().Remove<LightningComponent>(entity);
+        ZHLN::EngineAccess::RegistryOf(engine).Remove<LightningComponent>(entity);
     }
 }
 
 void Attach(Engine& engine, Entity entity, LightningComponent component) {
     RegisterCleanup(engine);
     Detach(engine, entity);
-    engine.GetRegistry().Add(entity, std::move(component));
+    ZHLN::EngineAccess::RegistryOf(engine).Add(entity, std::move(component));
 }
 
 auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, const LightningConfig& cfg) -> Entity {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
     RegisterCleanup(engine);
@@ -354,7 +355,7 @@ auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, cons
 
 auto Update(Engine& engine, float dt) -> void {
     auto rc = engine.Graphics();
-    auto&      reg  = engine.GetRegistry();
+    auto&      reg  = ZHLN::EngineAccess::RegistryOf(engine);
     const auto ents = reg.GetEntitiesWith<LightningComponent>();
 
     if (ents.empty()) {

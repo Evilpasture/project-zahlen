@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -80,7 +81,7 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             // Set Fullbright = 0 to evaluate full PBR lighting and tonemapping.
@@ -115,7 +116,7 @@ struct PBRTestSuite {
             );
 
             // 2. Camera looking forward along -Z toward (0, 1.0, 0)
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
@@ -226,7 +227,7 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
@@ -265,7 +266,7 @@ struct PBRTestSuite {
                 }
             );
 
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
@@ -422,7 +423,7 @@ struct PBRTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
             ZHLN::Test::Headless::DisableAA(*engine);
             const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -445,7 +446,7 @@ struct PBRTestSuite {
                 .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}
             });
             if (!material) return std::unexpected(PBRTestError::MaterialCreationFailed);
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
@@ -568,7 +569,7 @@ struct PBRTestSuite {
         std::expected<void, ZHLN::ErrorCode> pbr_cooked_hdr_sun_is_occluded_by_cascade_shadow() {
             auto engine = CreateTestEngine(640, 480);
             if (!engine) return std::unexpected(PBRTestError::EngineInitFailed);
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
             ZHLN::Test::Headless::DisableAA(*engine);
             const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -590,7 +591,7 @@ struct PBRTestSuite {
                 shadows.shadowResolution = 2048;
                 shadows.sunSize = 0.001f;
             });
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
@@ -670,7 +671,7 @@ struct PBRTestSuite {
             auto engine = CreateTestEngine(640, 480);
             if (!engine) return std::unexpected(PBRTestError::EngineInitFailed);
             ZHLN::Test::Headless::DisableAA(*engine);
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
             const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
             if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
@@ -748,7 +749,7 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             // Set Fullbright ON: Disables direct lighting/shadows and outputs raw G-buffer albedo directly
@@ -764,7 +765,7 @@ struct PBRTestSuite {
             }
 
             // Green flat box placed in front of camera
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }

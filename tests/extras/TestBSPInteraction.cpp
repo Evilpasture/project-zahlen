@@ -33,8 +33,12 @@ void AudioContext::PostEvent(const AudioEvent&) noexcept {
 }
 void PhysicsContext::SetCharacterPosition(Physics::BodyID, ZHLN::Double3) {
 }
-auto Engine::GetRegistry() -> ECS::Registry& {
+auto Engine::GetInternalRegistry() noexcept -> ECS::Registry& {
     static ECS::Registry reg;
+    return reg;
+}
+auto Engine::GetInternalRegistry() const noexcept -> const ECS::Registry& {
+    static const ECS::Registry reg;
     return reg;
 }
 } // namespace ZHLN

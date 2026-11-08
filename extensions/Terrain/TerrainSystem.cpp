@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/Terrain/TerrainSystem.cpp
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "TerrainSystem.hpp"
 #include "TerrainFactory.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -104,12 +105,12 @@ void TerrainSystem::UnregisterTerrainData(TerrainID handle) noexcept {
 }
 
 void TerrainSystem::RegisterCleanup(Engine& engine) {
-    engine.GetRegistry().RegisterComponent<TerrainComponent>();
+    ZHLN::EngineAccess::RegistryOf(engine).RegisterComponent<TerrainComponent>();
     static_cast<void>(engine.AddSceneCleanupPass(&Cleanup));
 }
 
 void TerrainSystem::Detach(Engine& engine, Entity entity) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     if (auto terrain = registry.Get<TerrainComponent>(entity)) {
         UnregisterTerrainData(std::exchange(terrain->terrainID, TerrainID::Invalid));
         registry.Remove<TerrainComponent>(entity);
@@ -119,7 +120,7 @@ void TerrainSystem::Detach(Engine& engine, Entity entity) {
 void TerrainSystem::Attach(Engine& engine, Entity entity, TerrainComponent component) {
     RegisterCleanup(engine);
     Detach(engine, entity);
-    engine.GetRegistry().Add(entity, std::move(component));
+    ZHLN::EngineAccess::RegistryOf(engine).Add(entity, std::move(component));
 }
 
 void TerrainSystem::ReleaseTerrainData(ECS::Registry& registry) {
@@ -132,7 +133,7 @@ void TerrainSystem::ReleaseTerrainData(ECS::Registry& registry) {
 }
 
 void TerrainSystem::Cleanup(Engine& engine, bool all) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     const auto entities = registry.GetEntitiesWith<TerrainComponent>();
     if (!entities.empty()) {
         auto terrains = registry.GetRawArray<TerrainComponent>();
@@ -220,7 +221,7 @@ void TerrainSystem::Update(
 }
 
 float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float worldZ) noexcept {
-    const auto& reg      = engine.GetRegistry();
+    const auto& reg      = ZHLN::EngineAccess::RegistryOf(engine);
     const auto  entities = reg.GetEntitiesWith<TerrainComponent>();
     const auto  terrains = reg.GetRawArray<TerrainComponent>();
 

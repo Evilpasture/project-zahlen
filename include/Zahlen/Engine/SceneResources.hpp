@@ -33,24 +33,11 @@ ZHLN_API void Release(Engine& engine, Components::AudioSourceComponent& componen
 ZHLN_API void Release(Engine& engine, Components::OwnedMeshComponent& component);
 ZHLN_API void Release(Engine& engine, Components::SkeletalMeshComponent& component);
 
-template <typename T>
-    requires requires(Engine& engine, T& component) { Release(engine, component); }
-auto Detach(Engine& engine, Entity entity) -> bool {
-    auto& registry = engine.GetRegistry();
-    if (auto component = registry.Get<T>(entity)) {
-        Release(engine, *component);
-        registry.Remove<T>(entity);
-        return true;
-    }
-    return false;
-}
-
-template <typename T>
-    requires requires(Engine& engine, T& component) { Release(engine, component); }
-auto Attach(Engine& engine, Entity entity, T component) -> T& {
-    Detach<T>(engine, entity);
-    return engine.GetRegistry().Add(entity, std::move(component));
-}
+// Engine-owned scenes go through Engine::Entities(), whose Attach/Detach call
+// the overloads above with the engine as the release owner. There is no
+// Engine& overload here: a public header must not reach the internal registry
+// seam, and routing replacement through this namespace's Release is the only
+// way a Jolt body, audio voice or GPU buffer cannot be orphaned.
 
 // Standalone Registry scenes can use the same explicit operations when they
 // own their PhysicsContext or RenderContext independently of an Engine.

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "FreeCam.hpp"
 
 #include <Zahlen/Math/Camera.hpp>
@@ -93,7 +94,7 @@ void SeedBootCamera(ECS::Registry& reg) {
 } // namespace
 
 void Apply(Engine& engine, float dt) {
-    auto& reg   = engine.GetRegistry();
+    auto& reg   = ZHLN::EngineAccess::RegistryOf(engine);
     auto  input = reg.GetSingleton<Components::InputStateComponent>();
     if (!input) {
         return;
@@ -109,7 +110,7 @@ void Apply(Engine& engine, float dt) {
 namespace {
 
 void FreeCamStep(Engine& engine, float dt, FrameContext&) {
-    SeedBootCamera(engine.GetRegistry());
+    SeedBootCamera(ZHLN::EngineAccess::RegistryOf(engine));
     if (dt <= 0.0f) {
         return;
     }
@@ -153,7 +154,7 @@ void Install(Engine& engine) {
 }
 
 void Attach(Engine& engine, float speed, bool lookRequiresButton) {
-    auto&        reg    = engine.GetRegistry();
+    auto&        reg    = ZHLN::EngineAccess::RegistryOf(engine);
     const Entity camera = MainCamera(reg);
     if (camera == Entity::Null()) {
         return;
@@ -171,7 +172,7 @@ void Attach(Engine& engine, float speed, bool lookRequiresButton) {
 }
 
 void Detach(Engine& engine) {
-    auto&        reg    = engine.GetRegistry();
+    auto&        reg    = ZHLN::EngineAccess::RegistryOf(engine);
     const Entity camera = MainCamera(reg);
     if (camera == Entity::Null()) {
         return;

@@ -1246,7 +1246,7 @@ void ClientSession::PrePhysicsTick(Engine& engine, float dt) {
 
 void ClientSession::SendRealtimeFrame(Engine& engine) {
     if (!m_connected || !m_snapshotComplete) return;
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     auto input = registry.GetSingleton<Components::InputStateComponent>();
     m_lastControls = {};
     // No main camera entity means no view to report; the zeroed controls above stand.

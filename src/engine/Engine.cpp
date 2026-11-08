@@ -1,51 +1,53 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
-#include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include "ArticulationSystem.hpp"
 #include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
 #include "Hierarchy.hpp"
 #include "Platform.hpp"
-#include "SystemWiring.hpp"
 #include "SceneCleanupSystem.hpp"
+#include "SystemWiring.hpp"
 #include <Zahlen/Audio/Audio.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Core/Diagnostics.hpp>
 #include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/VisibilityList.hpp>
-#include <Zahlen/FileSystem/FileWatcher.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Input/InputContext.hpp>
-#include <Zahlen/Engine/Kernel.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Window/Window.hpp>
-#include <Zahlen/Engine/World.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/ECS/EventBus.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Frame.hpp>
+#include <Zahlen/Engine/FramePlan.hpp>
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Kernel.hpp>
+#include <Zahlen/Engine/PoseUploads.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/VisibilityList.hpp>
+#include <Zahlen/Engine/World.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/GUI/GUI.hpp>
+#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -58,21 +60,20 @@
 
 namespace ZHLN {
 
-
 enum class EngineInitError : uint8_t {
     EngineAllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}) = 1,
 };
 
 enum class EngineRunError : uint8_t {
     SceneInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine default scene initialization failed"> {}) = 1,
-    FrameFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine frame failed"> {}) = 2,
+    FrameFailed               ZHLN_ANNOTATION(ZHLN::Description<"Engine frame failed"> {})                        = 2,
 };
 
 struct EngineImpl {
     std::unique_ptr<Kernel> kernel;
     std::unique_ptr<World>  world;
 
-    Engine::UICallback uiCallback = nullptr;
+    Engine::UICallback                      uiCallback = nullptr;
     UIDrawData                              pendingUIData {};
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
 
@@ -84,10 +85,10 @@ struct EngineImpl {
     FramePlan           framePlan;
     bool                framePlanBuilt = false;
 
-    Engine::PhysicsSubstepHooks                  physicsSubstepHooks;
-    ECS::ExtensionServices                       extensions;
-    std::vector<Engine::TeardownHook>            teardownHooks;
-    std::vector<Engine::SceneCleanupPass>        sceneCleanupPasses;
+    Engine::PhysicsSubstepHooks           physicsSubstepHooks;
+    ECS::ExtensionServices                extensions;
+    std::vector<Engine::TeardownHook>     teardownHooks;
+    std::vector<Engine::SceneCleanupPass> sceneCleanupPasses;
 
     // The simulation clock owns the fixed-step accumulator. Engine::Tick feeds
     // it once per frame and drains it with ConsumeFixedSteps; no mutable alpha
@@ -199,7 +200,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     // replacement renderer is created after that. Component authoring data survives.
     auto& reg = _impl->world->GetRegistry();
     for (auto& skeleton: reg.GetRawArray<Components::SkeletalMeshComponent>()) {
-        skeleton.skinnedScratch = BufferID::Invalid;
+        skeleton.skinnedScratch     = BufferID::Invalid;
         skeleton.scratchVertexCount = 0;
     }
     for (auto& owned: reg.GetRawArray<Components::OwnedMeshComponent>()) {
@@ -322,11 +323,13 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     _impl->kernel = std::move(kernel_res.value());
 
     _impl->world->GetInput().SetRumbleSink(
-        [](void* userdata, uint8_t slot, const GamepadRumble& rumble) noexcept {
-            static_cast<PlatformHost*>(userdata)->SetGamepadRumble(slot, rumble);
-        },
+        [](void* userdata, uint8_t slot, const GamepadRumble& rumble) noexcept { static_cast<PlatformHost*>(userdata)->SetGamepadRumble(slot, rumble); },
         &_impl->kernel->GetPlatformHost()
     );
+
+    // Core's steps are composition state, not scene state: build them once here
+    // so the const, noexcept Steps() view is always a complete schedule.
+    EnsureFramePlan();
 
     return {};
 }
@@ -490,6 +493,22 @@ auto ZHLN::EngineAccess::SceneOf(Engine& e) noexcept -> SceneData& {
 auto ZHLN::EngineAccess::PhysicsOf(Simulation& sim) noexcept -> PhysicsContext& {
     return *sim._ctx;
 }
+auto ZHLN::EngineAccess::RegistryOf(Engine& e) noexcept -> ECS::Registry& {
+    return e.GetInternalRegistry();
+}
+auto ZHLN::EngineAccess::RegistryOf(const Engine& e) noexcept -> const ECS::Registry& {
+    return e.GetInternalRegistry();
+}
+auto ZHLN::EngineAccess::PoseUploadsOf(Engine& e) noexcept -> PoseUploadQueue& {
+    return e._impl->poseUploads;
+}
+auto ZHLN::EngineAccess::ArticulationOf(Engine& e) noexcept -> ArticulationSystem& {
+    return e._impl->world->GetArticulationSystem();
+}
+auto ZHLN::EngineAccess::FramePlanOf(Engine& e) -> FramePlan& {
+    e.EnsureFramePlan();
+    return e._impl->framePlan;
+}
 
 namespace {
 // Per-worker scratch. A system's SoAScratch allocation is capped by this, so it
@@ -505,36 +524,28 @@ void Engine::EnsureSystemGraphs() {
 
     auto& render = _impl->kernel->GetRenderContext();
 
-    _impl->simServices = std::make_unique<SimServices>(
-        SimServices {
-            .physics      = _impl->world->GetPhysics(),
-            .audio        = _impl->kernel->GetAudioContext(),
-            .assets       = _impl->kernel->GetAssetManager(),
-            .input        = _impl->world->GetInput(),
-            .articulation = _impl->world->GetArticulationSystem(),
-            .events       = _impl->world->GetEventBus(),
-            .extensions   = _impl->extensions,
-            .poseUploads  = _impl->poseUploads,
-        }
-    );
+    _impl->simServices = std::make_unique<SimServices>(SimServices {
+        .physics      = _impl->world->GetPhysics(),
+        .audio        = _impl->kernel->GetAudioContext(),
+        .assets       = _impl->kernel->GetAssetManager(),
+        .input        = _impl->world->GetInput(),
+        .articulation = _impl->world->GetArticulationSystem(),
+        .events       = _impl->world->GetEventBus(),
+        .extensions   = _impl->extensions,
+        .poseUploads  = _impl->poseUploads,
+    });
 
-    _impl->renderServices = std::make_unique<RenderServices>(
-        RenderServices {
-            .render     = render,
-            .scene      = _impl->sceneData,
-            .assets     = _impl->kernel->GetAssetManager(),
-            .extensions = _impl->extensions,
-            .visible    = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
-            .shadow     = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
-        }
-    );
+    _impl->renderServices = std::make_unique<RenderServices>(RenderServices {
+        .render     = render,
+        .scene      = _impl->sceneData,
+        .assets     = _impl->kernel->GetAssetManager(),
+        .extensions = _impl->extensions,
+        .visible    = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
+        .shadow     = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
+    });
 
     _impl->updateGraph = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices, &MarkPendingDestroy);
     _impl->renderGraph = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices, &MarkPendingDestroy);
-}
-
-auto Engine::GetPoseUploads() -> PoseUploadQueue& {
-    return _impl->poseUploads;
 }
 
 auto Engine::MakeFrame(float dt, FrameAlpha alpha) -> Frame {
@@ -565,12 +576,21 @@ auto Engine::GetInput() const noexcept -> const InputContext& {
 auto Engine::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
     return _impl->kernel->GetFileSystemWatcher();
 }
-auto Engine::GetRegistry() -> ECS::Registry& {
+auto Engine::GetInternalRegistry() noexcept -> ECS::Registry& {
     return _impl->world->GetRegistry();
 }
 
-auto Engine::GetRegistry() const -> const ECS::Registry& {
+auto Engine::GetInternalRegistry() const noexcept -> const ECS::Registry& {
     return _impl->world->GetRegistry();
+}
+
+auto Engine::Entities() noexcept -> ZHLN::Entities {
+    return ZHLN::Entities {*this};
+}
+
+auto Engine::Entities() const noexcept -> ZHLN::Entities {
+    // const overload because Entities is a lightweight value-type facade whose Get and GetSingleton methods are already const
+    return ZHLN::Entities {const_cast<Engine&>(*this)};
 }
 
 auto Engine::GetUpdateGraph() -> SimGraph& {
@@ -582,7 +602,7 @@ auto Engine::GetRenderGraph() -> RenderGraph& {
     EnsureSystemGraphs();
     return *_impl->renderGraph;
 }
-auto Engine::GetMainECB() -> ECS::EntityCommandBuffer& {
+auto Engine::Commands() noexcept -> ECS::EntityCommandBuffer& {
     return _impl->world->GetMainECB();
 }
 auto Engine::GetEventBus() noexcept -> ECS::EventBus& {
@@ -616,9 +636,6 @@ void Engine::RunSceneCleanupPasses(bool all) {
     }
 }
 
-auto Engine::GetArticulationSystem() -> ArticulationSystem& {
-    return _impl->world->GetArticulationSystem();
-}
 void Engine::ClearVisibilityLists() noexcept {
     _impl->world->VisibleEntitiesForServices().Clear();
     _impl->world->VisibleShadowEntitiesForServices().Clear();
@@ -669,20 +686,19 @@ auto Engine::ConsumeUIInput(float dt) noexcept -> GUI::UIInput {
     _impl->uiCharacterStream.clear();
 
     GUI::UIInput out {
-        .viewport = GetPlatformHost().GetSize(),
-        .dt       = dt,
-        .clipboard =
-            {
-                .userdata = &GetPlatformHost(),
-                .set      = [](void* ud, std::string_view text) -> void { static_cast<PlatformHost*>(ud)->SetClipboardText(text); },
-                .get      = [](void* ud) -> std::string { return static_cast<PlatformHost*>(ud)->GetClipboardText(); },
-            },
+        .viewport  = GetPlatformHost().GetSize(),
+        .dt        = dt,
+        .clipboard = {
+            .userdata = &GetPlatformHost(),
+            .set      = [](void* ud, std::string_view text) -> void { static_cast<PlatformHost*>(ud)->SetClipboardText(text); },
+            .get      = [](void* ud) -> std::string { return static_cast<PlatformHost*>(ud)->GetClipboardText(); },
+        },
     };
 
-    if (auto input = GetRegistry().GetSingleton<Components::InputStateComponent>()) {
-        out.mouseX      = input->mouseX;
-        out.mouseY      = input->mouseY;
-        out.mouseScroll = input->mouseWheel;
+    if (auto input = _impl->world->GetRegistry().GetSingleton<Components::InputStateComponent>()) {
+        out.mouseX       = input->mouseX;
+        out.mouseY       = input->mouseY;
+        out.mouseScroll  = input->mouseWheel;
         out.mouseDown[0] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
         out.mouseDown[1] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::RButton));
         out.mouseDown[2] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::MButton));
@@ -738,8 +754,7 @@ auto Engine::DeviceLostCallbackCount() const noexcept -> size_t {
 }
 
 auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePlanError> {
-    if (!module.name.empty() &&
-        std::ranges::any_of(_impl->modules, [&](const Module& existing) { return existing.name == module.name; })) {
+    if (!module.name.empty() && std::ranges::any_of(_impl->modules, [&](const Module& existing) { return existing.name == module.name; })) {
         return {};
     }
 
@@ -753,10 +768,10 @@ auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePla
     }
 
     if (module.registerComponents != nullptr) {
-        module.registerComponents(GetRegistry());
+        module.registerComponents(GetInternalRegistry());
     }
     if (module.sceneCleanup != nullptr) {
-        (void)AddSceneCleanupPass(module.sceneCleanup);
+        (void) AddSceneCleanupPass(module.sceneCleanup);
     }
     if (module.teardown != nullptr) {
         AddTeardownHook(module.teardown);
@@ -773,13 +788,11 @@ auto Engine::GetInstalledModules() const noexcept -> std::span<const Module> {
     return _impl->modules;
 }
 
-auto Engine::GetFramePlan() -> FramePlan& {
-    EnsureFramePlan();
-    return _impl->framePlan;
-}
-
-auto Engine::GetFramePlan() const noexcept -> const FramePlan& {
-    return _impl->framePlan;
+auto Engine::Steps() const noexcept -> std::span<const FrameStep> {
+    if (_impl == nullptr) {
+        return {};
+    }
+    return _impl->framePlan.Steps();
 }
 
 void Engine::EnsureFramePlan() {
@@ -787,7 +800,7 @@ void Engine::EnsureFramePlan() {
         return;
     }
     _impl->framePlanBuilt = true;
-    BuildCoreFramePlan(*this);
+    BuildCoreFramePlan(_impl->framePlan);
 }
 
 void Engine::SetPhysicsSubstepHooks(PhysicsSubstepHooks hooks) {
@@ -831,7 +844,7 @@ auto Engine::Tick(float dt) -> FrameStatus {
     // frame, here, before any step of the plan can run. The physics step runs
     // `fixedSteps` steps; the leftover fraction is the frame's interpolation
     // alpha. Nothing writes an alpha into the engine between phases.
-    _impl->frameClock.Advance(dt);
+    _impl->frameClock.Advance(static_cast<double>(dt));
     const FixedStepBatch batch = _impl->frameClock.ConsumeFixedSteps(kFixedStepDt, kMaxFixedSteps);
     FrameContext         ctx {
         .status     = FrameStatus::OK,
@@ -851,8 +864,7 @@ auto Engine::Tick(float dt) -> FrameStatus {
     return ctx.status;
 }
 
-auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstaller installModules, EventPoller pollEvents)
-    -> std::expected<void, ErrorCode> {
+auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstaller installModules, EventPoller pollEvents) -> std::expected<void, ErrorCode> {
     Platform::Init();
     SetLogLevel(config.logLevel);
     // Construct before the engine so its destructor (and any cleanup tasks)
@@ -899,11 +911,10 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
         runClock.ResetFixedAccumulator();
 
         // Kernel/Engine already synchronized a resize during ProcessEvents.
-        constexpr double           kFpsCapSlack  = 1.05;
-        const std::optional<float> pacedDt       = engine->Graphics().PacedDeltaTime();
-        const bool                 displayPaced  = pacedDt.has_value() &&
-                                  (config.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
-        const float tickDt = displayPaced ? *pacedDt : rawDt;
+        constexpr double           kFpsCapSlack = 1.05;
+        const std::optional<float> pacedDt      = engine->Graphics().PacedDeltaTime();
+        const bool  displayPaced = pacedDt.has_value() && (config.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
+        const float tickDt       = displayPaced ? *pacedDt : rawDt;
         if (engine->Tick(tickDt) == FrameStatus::Error) {
             return std::unexpected(EngineRunError::FrameFailed);
         }
@@ -926,4 +937,4 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
     return {};
 }
 
-}
+} // namespace ZHLN

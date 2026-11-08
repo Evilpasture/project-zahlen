@@ -350,7 +350,7 @@ void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 60.0f) 
 // alone gets overwritten. Both remaining AA modes are spatial filters that
 // would perturb the frame-to-frame comparison at high-contrast edges.
 void DisableAA(ZHLN::Engine& engine) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
         reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
             aa.state.mode        = ZHLN::AAMode::None;
@@ -518,7 +518,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
         // failures during the camera sweep (including after device recovery).
         std::array<ZHLN::Entity, kRingCount> ringEntities {};
         {
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             // Deterministic frame-to-frame comparison needs the per-frame
@@ -636,7 +636,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             addPointLight(JPH::Vec3(rings[3].x, 4.0f, rings[3].distance - 6.0f), JPH::Vec3(1.0f, 0.9f, 0.7f), 1200.0f, 60.0f);
             addPointLight(JPH::Vec3(rings[5].x, 5.0f, rings[5].distance - 6.0f), JPH::Vec3(0.7f, 0.85f, 1.0f), 2000.0f, 80.0f);
 
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
@@ -657,7 +657,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 const float tanH = HorizontalHalfTan();
                 // A device-loss retry can start from the middle of a sweep.
                 // Re-establish the camera pose used to calibrate the coverage.
-                const auto camComp = eng.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(eng).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (camComp) {
                     camComp->camera.position = JPH::Vec3(0.0f, kEyeHeight, 0.0f);
                 }
@@ -901,7 +901,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 constexpr float    kSweepAmplitude = 30.0f;
                 constexpr uint32_t kSweepSample   = 8;
 
-                const auto sweepCamComp = eng.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto sweepCamComp = ZHLN::EngineAccess::RegistryOf(eng).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(sweepCamComp.has_value())) {
                     return false;
                 }
@@ -971,7 +971,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                             // project before attributing this to a culler.
                             const auto& mainVisible    = eng.GetVisibleEntities();
                             const auto& shadowVisible  = eng.GetVisibleShadowEntities();
-                            const auto& reg            = eng.GetRegistry();
+                            const auto& reg            = ZHLN::EngineAccess::RegistryOf(eng);
                             const auto  meshComp       = reg.Get<ZHLN::Components::MeshComponent>(ringEntities[i]);
                             const bool  meshRegistered = meshComp && eng.Graphics().Mesh(meshComp->meshAsset).has_value();
                             const bool  matRegistered  = meshComp && eng.Graphics().Material(meshComp->materialAsset).has_value();

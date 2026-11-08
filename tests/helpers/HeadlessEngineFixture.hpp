@@ -192,7 +192,7 @@ inline void ResetScene(ZHLN::Engine& engine) {
     // (position and yaw but not fov, say), and inheriting the previous test's
     // framing is exactly the kind of order-dependent difference a pooled engine
     // must not introduce.
-    auto&      camReg    = engine.GetRegistry();
+    auto&      camReg    = ZHLN::EngineAccess::RegistryOf(engine);
     const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
     camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
 
@@ -399,7 +399,7 @@ class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
 // are spatial edge filters that perturb high-contrast pixels. Every scene that
 // asserts on stability or on exact pixel values disables AA first.
 inline void DisableAA(ZHLN::Engine& engine) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
         reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
             aa.state.mode        = ZHLN::AAMode::None;

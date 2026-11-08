@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "TestsFramework.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
@@ -71,7 +72,7 @@ struct CombatFXTestSuite {
                 return std::unexpected(CombatFXTestError::SystemInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             ZHLN::CombatFX::System combatFX;
             combatFX.Init(*engine);
@@ -105,7 +106,7 @@ struct CombatFXTestSuite {
             combatFX.SpawnImpact(*engine, hitPos3, hitNorm3, 4);
 
             // Playback ECB to instantiate queued decal entities
-            engine->GetMainECB().Playback();
+            engine->Commands().Playback();
 
             const auto decalEntities = reg.GetEntitiesWith<ZHLN::Components::DecalComponent>();
 

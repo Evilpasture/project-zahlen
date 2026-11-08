@@ -7,6 +7,7 @@
 // paths must agree without making mirrored materials double-sided.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -111,7 +112,7 @@ const std::array<JPH::Vec3, 5> kCenters {
     if (!engine.Valid()) return std::unexpected(NegativeScaleError::EngineInitFailed);
 
     auto rc = engine->Graphics();
-    auto& reg = engine->GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
     const auto info = rc.Info();
     if (meshShading && !info.meshShadingActive) return std::unexpected(NegativeScaleError::MeshPathInactive);
 
@@ -133,7 +134,7 @@ const std::array<JPH::Vec3, 5> kCenters {
             pp.skyGround = JPH::Vec4(0, 0, 0, 1);
         });
     }
-    const auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
@@ -193,7 +194,7 @@ const std::array<JPH::Vec3, 5> kCenters {
             .cullRadius = 0.65f,
         });
         if (i == 0) { // Other instances only borrow the registered mesh.
-            ZHLN::SceneResources::Attach<ZHLN::Components::OwnedMeshComponent>(*engine, e, {.meshAsset = meshID, .mesh = mesh});
+            engine->Entities().Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
         }
     }
 

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Animation/AnimationSystem.hpp>
@@ -78,7 +79,7 @@ struct RenderAnimatedMeshTestSuite {
             }
             ZHLN::Animation::Install(*engine);
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             // 2. Directional Sun Lighting
             const ZHLN::Entity sunEnt = reg.Create();
@@ -114,7 +115,7 @@ struct RenderAnimatedMeshTestSuite {
                 return std::unexpected(AnimatedMeshTestError::NoAnimatorFound);
             }
 
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }

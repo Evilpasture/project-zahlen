@@ -185,7 +185,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[CDNMap] Bounds centre ({:.1f}, {:.1f}, {:.1f}), radius {:.1f} m.", center.GetX(), center.GetY(), center.GetZ(), radius);
 
     {
-        auto&              reg      = engine->GetRegistry();
+        auto&              reg      = ZHLN::EngineAccess::RegistryOf(*engine);
         const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
         // Default exposure is 1.0; a sun of 60 (the studio number at exposure 0.08)
         // clips the whole framebuffer to white. Grade for an outdoor map.
@@ -238,7 +238,7 @@ auto main(int argc, char* argv[]) -> int {
         const float dt = clock.Tick();
 
         {
-            auto& r = engine->GetRegistry();
+            auto& r = ZHLN::EngineAccess::RegistryOf(*engine);
             if (auto st = r.GetSingleton<ZHLN::Components::InputStateComponent>(); st && st->needsResize) {
                 engine->Graphics().SetResolution(st->newSize);
                 st->needsResize = false;

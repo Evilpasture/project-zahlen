@@ -19,6 +19,7 @@
 // The subject is a saturated red material under fullBright, so the mask is a
 // colour test and every background/tone-map concern cancels out.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -160,7 +161,7 @@ struct ViewportSubregionTestSuite {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             // The engine is pooled across suites; whatever band this test
@@ -177,7 +178,7 @@ struct ViewportSubregionTestSuite {
                 return std::unexpected(ViewportSubregionError::NoCameraFound);
             }
 
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }

@@ -34,12 +34,8 @@ class Clock {
     using SteadyClock = std::chrono::steady_clock;
     using TimePoint   = SteadyClock::time_point;
 
-    explicit Clock(ClockConfig config = {}) noexcept
-        : _start(SteadyClock::now()),
-          _last(_start),
-          _maxDeltaTime(config.maxDeltaTime),
-          _timeScale(std::max(0.0f, config.timeScale)),
-          _paused(config.paused) {
+    explicit Clock(ClockConfig config = {}) noexcept:
+        _start(SteadyClock::now()), _last(_start), _maxDeltaTime(config.maxDeltaTime), _timeScale(std::max(0.0f, config.timeScale)), _paused(config.paused) {
     }
 
     // Samples `steady_clock::now()`, advances one frame, and returns `DeltaTime()`.
@@ -54,7 +50,7 @@ class Clock {
     // simulation loops, replay harnesses, and unit tests).
     auto Advance(double rawSeconds) noexcept -> float {
         const double clampedNonNegative = std::max(0.0, rawSeconds);
-        const float  rawDt              = static_cast<float>(clampedNonNegative);
+        const auto   rawDt              = static_cast<float>(clampedNonNegative);
         const float  clampedDt          = (_maxDeltaTime > 0.0f) ? std::min(rawDt, _maxDeltaTime) : rawDt;
 
         _rawDeltaTime      = rawDt;
@@ -203,8 +199,8 @@ class Clock {
     }
 
   private:
-    TimePoint _start {};
-    TimePoint _last {};
+    TimePoint _start;
+    TimePoint _last;
     float     _maxDeltaTime      = 0.1f;
     float     _timeScale         = 1.0f;
     float     _rawDeltaTime      = 0.0f;

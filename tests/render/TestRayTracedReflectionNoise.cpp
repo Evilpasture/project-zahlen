@@ -25,6 +25,7 @@
 //                    radiance cache both light up the glossy band without
 //                    isolated ray debris.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "helpers/ImageTesting.hpp"
 #include "RayTracedNoiseMetrics.hpp"
@@ -128,7 +129,7 @@ struct RayTracedReflectionNoiseTestSuite {
     }
 
     static void SetAA(ZHLN::Engine& engine, ZHLN::AAMode mode) {
-        auto& reg = engine.GetRegistry();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
             reg.Patch<ZHLN::Components::AASettingsComponent>(e, [mode](auto& aa) {
                 aa.state.mode        = mode;
@@ -142,7 +143,7 @@ struct RayTracedReflectionNoiseTestSuite {
     // which RenderGraphBuilder ANDs with a non-null TLAS to form pc.enableRTR
     // and to select the RTR pipeline variants for lighting and reflection.
     static void SetRTR(ZHLN::Engine& engine, int enableSSR, int enableRTR) {
-        auto&      reg      = engine.GetRegistry();
+        auto&      reg      = ZHLN::EngineAccess::RegistryOf(engine);
         const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
         if (settings.empty()) {
             return;
@@ -181,7 +182,7 @@ struct RayTracedReflectionNoiseTestSuite {
     // and the reflection of every surface -- rendered black, so the RTR term
     // had nothing to add. The switch worked; the scene was black-on-black.
     static bool BuildReflectionScene(ZHLN::Engine& engine) {
-        auto& reg = engine.GetRegistry();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
         auto floorMat =
             engine.Graphics().CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.8f, .baseColor = {0.05f, 0.05f, 0.06f, 1.0f}});
@@ -244,7 +245,7 @@ struct RayTracedReflectionNoiseTestSuite {
             }
         );
 
-        const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+        const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
         if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
             return false;
         }

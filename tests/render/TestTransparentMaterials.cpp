@@ -15,6 +15,7 @@
 // does for alphaMode 2, so the glass mesh is patched after spawn. AA is off
 // so a static scene stays static. Mesh shading is left alone (Hybrid).
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -69,7 +70,7 @@ enum class PaneKind : uint8_t { None, Glass, Opaque };
 enum class SceneBuild : uint8_t { Ok, Material, Camera };
 
 [[nodiscard]] auto SpawnWallAndPane(ZHLN::Engine& engine, PaneKind pane) -> SceneBuild {
-    auto& registry  = engine.GetRegistry();
+    auto& registry  = ZHLN::EngineAccess::RegistryOf(engine);
     auto renderCtx = engine.Graphics();
 
     for (const ZHLN::Entity settings: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
@@ -133,7 +134,7 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
         }
     }
 
-    const auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
         return SceneBuild::Camera;
     }
@@ -272,7 +273,7 @@ struct TransparentMaterialsTestSuite {
             if (!engine.Valid()) return std::unexpected(TransparentMaterialError::EngineInitFailed);
             ZHLN::Test::Headless::DisableAA(*engine);
             auto rc = engine->Graphics();
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             for (const ZHLN::Entity settings: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
                 reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
@@ -287,7 +288,7 @@ struct TransparentMaterialsTestSuite {
                     pp.tonemapper = 3;
                 });
             }
-            const auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }

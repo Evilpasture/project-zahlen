@@ -8,6 +8,7 @@
 // that the transpiler fallback (scripts/transpile_reflection.py, which rewrites
 // reflection calls by translation-unit source offset) sees and flattens it.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
@@ -228,7 +229,7 @@ auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name) -> ZHLN::Enti
 }
 
 void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
-    auto&              reg    = engine.GetRegistry();
+    auto&              reg    = ZHLN::EngineAccess::RegistryOf(engine);
     const ZHLN::Entity victim = state.selectedEntity;
 
     // Cleared first: if the handle turns out to be stale the editor must not be
@@ -520,7 +521,7 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
 }
 
 void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& state, std::string_view id) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     struct Row {
         ZHLN::Entity entity;
         uint32_t     depth;

@@ -25,6 +25,7 @@
 //   ./build/samples/DeviceLostRecoverySample --headless
 //   ZHLN_PROVOKE_DEVICE_LOST_FRAME=60 ./build/samples/DeviceLostRecoverySample --headless
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
@@ -95,7 +96,7 @@ inline const JPH::Vec4     kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
 
 void ClearArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> entities) {
     for (ZHLN::Entity entity: entities) {
-        if (engine.GetRegistry().IsAlive(entity)) {
+        if (ZHLN::EngineAccess::RegistryOf(engine).IsAlive(entity)) {
             ZHLN::DespawnEntity(engine, entity);
         }
     }
@@ -104,7 +105,7 @@ void ClearArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> entities) {
 [[nodiscard]] auto BuildArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> previous = {}) -> std::vector<ZHLN::Entity> {
     ClearArena(engine, previous);
     std::vector<ZHLN::Entity> entities;
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
 
     for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
         registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) -> auto {
@@ -245,7 +246,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
-        auto& registry = engine->GetRegistry();
+        auto& registry = ZHLN::EngineAccess::RegistryOf(*engine);
         bool  f9Down   = false;
         for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::InputStateComponent>()) {
             registry.Patch<ZHLN::Components::InputStateComponent>(e, [&](auto& st) -> auto {

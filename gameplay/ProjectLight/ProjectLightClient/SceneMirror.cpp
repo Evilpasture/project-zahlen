@@ -161,7 +161,7 @@ void WriteTransform(Engine& engine, ReplicatedObject& object, Entity entity, JPH
     object.transformDirty   = true;
     if (entity == Entity::Null())
         return;
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
         transform->position = object.position;
         transform->rotation = object.rotationQuat;
@@ -175,7 +175,7 @@ void WriteInterpolatedTransform(Engine& engine, ReplicatedObject& object, Entity
     object.renderRotation = rotation.Normalized();
     object.transformDirty = true;
     if (entity == Entity::Null()) return;
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
         transform->position = object.renderPosition;
         transform->rotation = object.renderRotation;
@@ -194,7 +194,7 @@ auto ShouldCreatePhysics(const SceneMirrorState& state, const ReplicatedObject& 
     return !state.serverAuthority && state.localPlayerUid != 0 && object.networkOwnerUid == state.localPlayerUid;
 }
 void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, ReplicatedObject& object) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     const JPH::Vec3 size = JPH::Vec3(
         std::clamp(std::abs(object.size.GetX()), 0.001f, 100000.0f),
         std::clamp(std::abs(object.size.GetY()), 0.001f, 100000.0f),
@@ -345,7 +345,7 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
     }
 }
 void SpawnOrUpdateLightEntity(Engine& engine, SceneMirrorState& state, ReplicatedObject& object) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     const bool directional = object.className == "DirectionalLight";
     const ReplicatedObject* lighting = directional ? FindObject(state, state.lightingUid) : nullptr;
     const ResolvedDirectionalLight resolved = directional
@@ -400,7 +400,7 @@ void SpawnOrUpdateLightEntity(Engine& engine, SceneMirrorState& state, Replicate
 void SyncEnvironment(Engine& engine, SceneMirrorState& state) {
     const ReplicatedObject* lighting = FindObject(state, state.lightingUid);
     if (lighting == nullptr) return;
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
 
     // ProjectLight Ambient is a normalized scalar (default 0.01). Zahlen uses
     // ambientExposure as the environment-light multiplier (default 25), so
@@ -509,7 +509,7 @@ void UpdateSoundVoices(Engine& engine, SceneMirrorState& state) {
 } // namespace
 
 void SceneMirror::SyncSceneEntities(Engine& engine, SceneMirrorState& state) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
 
     for (uint64_t uid: state.pendingRemovals) {
         auto found = state.objects.find(uid);
@@ -598,7 +598,7 @@ void SceneMirror::SyncSceneEntities(Engine& engine, SceneMirrorState& state) {
     }
 }
 void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     auto bindCamera = [&](Entity target) -> void {
         if (target == Entity::Null()) return;
         for (Entity camera: registry.GetEntitiesWith<Components::MainCameraTagComponent>()) {
@@ -683,7 +683,7 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
 }
 void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& state, float dt) {
     if (state.localController == Entity::Null() || state.localControllerBody == Physics::BodyID::Null()) return;
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     auto movement = registry.Get<Character::MovementComponent>(state.localController);
     if (!movement) return;
 

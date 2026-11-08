@@ -247,7 +247,7 @@ struct MorphPosePassSuite {
     [[nodiscard]] static auto SpawnInstances(
         ZHLN::Engine& engine, const ZHLN::ModelPrefab& prefab, const ZHLN::Material& material, uint32_t count
     ) -> std::vector<Instance> {
-        auto& reg = engine.GetRegistry();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
         for (uint32_t i = 0; i < count; ++i) {
             const float x = (static_cast<float>(i) - (static_cast<float>(count) - 1.0f) * 0.5f) * 1.5f;
@@ -298,7 +298,7 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
             auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());
             if (!material) {
@@ -343,7 +343,7 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());
@@ -408,7 +408,7 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());
@@ -488,12 +488,12 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             // Straight-on view of the only mesh in the scene, so the frame is a
             // silhouette comparison and nothing else moves between captures.
-            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }

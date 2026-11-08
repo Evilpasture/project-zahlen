@@ -14,6 +14,7 @@
 // fall back to SSR. No RT support → skip. A blank capture after RTR is on
 // is a failure, not a retry.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -169,7 +170,7 @@ struct RTRPBRReflectionTestSuite {
     }
 
     static void DisableAAAndFreeCam(ZHLN::Engine& engine) {
-        auto& reg = engine.GetRegistry();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
             reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
                 aa.state.mode        = ZHLN::AAMode::None;
@@ -179,7 +180,7 @@ struct RTRPBRReflectionTestSuite {
     }
 
     static void SetReflectionFlags(ZHLN::Engine& engine, int enableSSR, int enableRTR) {
-        auto&      reg      = engine.GetRegistry();
+        auto&      reg      = ZHLN::EngineAccess::RegistryOf(engine);
         const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
         if (settings.empty()) {
             return;
@@ -199,7 +200,7 @@ struct RTRPBRReflectionTestSuite {
     }
 
     static void PlaceSunAndCamera(ZHLN::Engine& engine) {
-        auto&              reg    = engine.GetRegistry();
+        auto&              reg    = ZHLN::EngineAccess::RegistryOf(engine);
         const ZHLN::Entity sunEnt = reg.Create();
         // Intensity 0: LightingSystem falls back to a 180-nit default sun if
         // no Sun exists, which floods dielectric albedo and hides F0 tint.
@@ -211,7 +212,7 @@ struct RTRPBRReflectionTestSuite {
             }
         );
 
-        const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+        const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
         if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
             return;
         }
@@ -344,7 +345,7 @@ struct RTRPBRReflectionTestSuite {
             }
 
             SpawnEmitter(*s.engine, *whiteEm);
-            auto&              reg    = s.engine->GetRegistry();
+            auto&              reg    = ZHLN::EngineAccess::RegistryOf(*s.engine);
             const ZHLN::Entity chrome = SpawnMirror(*s.engine, *chromeRes);
             auto               rtrOn  = EnableRTR(s);
             if (!rtrOn) {
@@ -421,7 +422,7 @@ struct RTRPBRReflectionTestSuite {
             }
 
             SpawnEmitter(*s.engine, *redEm);
-            auto&              reg     = s.engine->GetRegistry();
+            auto&              reg     = ZHLN::EngineAccess::RegistryOf(*s.engine);
             const ZHLN::Entity eSmooth = SpawnMirror(*s.engine, *smooth);
             auto               rtrOn   = EnableRTR(s);
             if (!rtrOn) {
@@ -546,7 +547,7 @@ struct RTRPBRReflectionTestSuite {
                 return rtrOn;
             }
 
-            auto& reg         = s.engine->GetRegistry();
+            auto& reg         = ZHLN::EngineAccess::RegistryOf(*s.engine);
             auto  captureTile = [&](const char* path, float metallic, float roughness) -> std::expected<RegionStats, ZHLN::ErrorCode> {
                 if (!reg.Patch<ZHLN::Components::PBRComponent>(tile, [&](auto& pbr) {
                         pbr.metallic  = metallic;
@@ -627,7 +628,7 @@ struct RTRPBRReflectionTestSuite {
             }
 
             SpawnEmitter(*s.engine, *whiteEm);
-            auto&              reg   = s.engine->GetRegistry();
+            auto&              reg   = ZHLN::EngineAccess::RegistryOf(*s.engine);
             const ZHLN::Entity eSil  = SpawnMirror(*s.engine, *silver);
             auto               rtrOn = EnableRTR(s);
             if (!rtrOn) {

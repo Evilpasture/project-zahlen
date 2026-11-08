@@ -243,7 +243,7 @@ auto SpawnCharacter(
     float                           speed         = 14.5f,
     float                           jumpForce     = 14.8f
 ) -> Entity {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto pc = engine.Physics();
 
     // Create physics first, then publish the complete gameplay entity in one
@@ -296,7 +296,7 @@ auto SpawnCharacter(
  */
 auto
     RenderDebugRig(Engine& engine, Entity playerEntity, const Physics::DualShapeConfig& config = {}, const DebugPalette& palette = {}) noexcept -> void {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto scene = engine.Debug();
 
     if (!reg.IsAlive(playerEntity)) {

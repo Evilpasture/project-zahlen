@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/CharacterController/PlayerInput.cpp
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "PlayerInput.hpp"
 
 #include "CharacterComponents.hpp"
@@ -36,7 +37,7 @@ namespace {
 } // namespace
 
 void PlayerInputSystem::Update(Engine& engine) {
-    auto&               reg      = engine.GetRegistry();
+    auto&               reg      = ZHLN::EngineAccess::RegistryOf(engine);
     const InputContext& inputCtx = engine.GetInput();
 
     for (Entity e: reg.GetEntitiesWith<InputComponent>()) {
@@ -122,7 +123,7 @@ void PlayerInputSystem::Update(Engine& engine) {
 }
 
 void PlayerInputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     Entity camEnt = reg.SingletonEntity<Components::MainCameraTagComponent>();
     if (camEnt != Entity::Null() && reg.Get<FreeCam::FreeCamTagComponent>(camEnt)) {

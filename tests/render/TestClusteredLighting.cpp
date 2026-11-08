@@ -10,6 +10,7 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
@@ -45,7 +46,7 @@ struct ClusteredLightingTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = engine->GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -109,7 +110,7 @@ struct ClusteredLightingTestSuite {
                 addPointLight(JPH::Vec3(-4.0f, 3.0f, 2.0f), JPH::Vec3(1.0f, 0.55f, 0.3f), 800.0f);
                 addPointLight(JPH::Vec3(4.0f, 3.0f, -3.0f), JPH::Vec3(0.3f, 0.5f, 1.0f), 800.0f);
 
-                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
@@ -238,7 +239,7 @@ struct ClusteredLightingTestSuite {
 
             ZHLN::Entity redLight = ZHLN::Entity::Null();
             {
-                auto& reg = engine->GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -288,7 +289,7 @@ struct ClusteredLightingTestSuite {
                     }
                 );
 
-                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
@@ -315,7 +316,7 @@ struct ClusteredLightingTestSuite {
                 [&](ZHLN::Engine& eng) -> bool {
                     captureFailed = false;
                     lightCullingPop = false;
-                    auto& reg = eng.GetRegistry();
+                    auto& reg = ZHLN::EngineAccess::RegistryOf(eng);
                     ZHLN::Test::ExpectTrue(reg.IsAlive(redLight));
 
                     std::vector<double>   redCounts;
@@ -476,7 +477,7 @@ struct ClusteredLightingTestSuite {
             const JPH::Vec3 lightPos(6.4f, 2.4f, 5.0f);
 
             {
-                auto& reg = engine->GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -524,7 +525,7 @@ struct ClusteredLightingTestSuite {
                         .type = ZHLN::LightType::Point, .color = JPH::Vec3(1.0f, 0.06f, 0.03f), .intensity = 1600.0f, .range = 40.0f
                     }
                 );
-                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
@@ -611,7 +612,7 @@ struct ClusteredLightingTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = engine->GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -694,7 +695,7 @@ struct ClusteredLightingTestSuite {
                     }
                 }
 
-                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
@@ -872,7 +873,7 @@ struct ClusteredLightingTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = engine->GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -930,7 +931,7 @@ struct ClusteredLightingTestSuite {
                     );
                 }
 
-                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
@@ -954,7 +955,7 @@ struct ClusteredLightingTestSuite {
                     // scene in full-bright mode for a coverage mask; otherwise
                     // empty sky in a corner (notably tile 0,0) looks exactly
                     // like the old false-positive "black cluster tile".
-                    auto& reg = eng.GetRegistry();
+                    auto& reg = ZHLN::EngineAccess::RegistryOf(eng);
                     const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                     if (!ZHLN::Test::ExpectTrue(!settingsEnts.empty())) {
                         return false;

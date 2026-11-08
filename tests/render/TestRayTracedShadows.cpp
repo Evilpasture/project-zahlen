@@ -8,6 +8,7 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
@@ -46,7 +47,7 @@ struct RayTracedShadowsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = engine->GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -82,7 +83,7 @@ struct RayTracedShadowsTestSuite {
                     }
                 );
 
-                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
@@ -102,7 +103,7 @@ struct RayTracedShadowsTestSuite {
                 *engine, 8, "raytraced_shadow_occlusion_and_stability",
                 [&](ZHLN::Engine& eng) -> bool {
                     captureFailed = false;
-                    auto& reg = eng.GetRegistry();
+                    auto& reg = ZHLN::EngineAccess::RegistryOf(eng);
 
                     const ZHLN::Entity occluder = ZHLN::PrefabFactory::CreateBox(
                         eng, {0.5f, 3.0f, 4.0f},

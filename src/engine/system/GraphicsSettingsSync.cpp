@@ -87,7 +87,7 @@ void GovernFidelity(Engine& engine, GraphicsSettings& gfx) {
 }
 
 GraphicsSettings CollectGraphicsSettings(Engine& engine) {
-    auto&            reg = engine.GetRegistry();
+    auto&            reg = ZHLN::EngineAccess::RegistryOf(engine);
     GraphicsSettings gfx {};
 
     Entity ppEnt = SettingsEntity(reg);
@@ -163,7 +163,7 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
         return false;
     }
 
-    auto&            reg = engine.GetRegistry();
+    auto&            reg = ZHLN::EngineAccess::RegistryOf(engine);
     GraphicsSettings gfx = CollectGraphicsSettings(engine);
     gfx.ApplyPreset(preset);
     bool changed = false;
@@ -227,7 +227,7 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
 }
 
 void ApplyGraphicsSettings(Engine& engine, const GraphicsSettings& settings) {
-    auto&            reg = engine.GetRegistry();
+    auto&            reg = ZHLN::EngineAccess::RegistryOf(engine);
     GraphicsSettings gfx = settings;
     gfx.rayTracing.enableReflections = (gfx.post.enableRTR != 0) || gfx.rayTracing.enableReflections;
     if (gfx.rayTracing.enableReflections) {

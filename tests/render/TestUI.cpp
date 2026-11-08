@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -173,7 +174,7 @@ struct UITestSuite {
             }
 
             auto setInput = [&](float mx, float my, bool lbutton) {
-                auto& in = engine->GetRegistry().GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+                auto& in = ZHLN::EngineAccess::RegistryOf(*engine).GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
                 in.mouseX = mx;
                 in.mouseY = my;
                 in.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), lbutton);
@@ -591,7 +592,7 @@ struct UITestSuite {
             }
 
             auto& host  = engine->GetPlatformHost();
-            auto& input = engine->GetRegistry().GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+            auto& input = ZHLN::EngineAccess::RegistryOf(*engine).GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
             input.ApplyLocalMotion(320.0f, 240.0f);
 
             if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::System) ||

@@ -7,6 +7,7 @@
 // vertex/fragment shaders, which testing the imported Material alone cannot.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -149,7 +150,7 @@ struct TextureTransformsTestSuite {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Khronos UV transforms", 480, 320);
             if (!engine.Valid()) return std::unexpected(TextureTransformError::EngineInitFailed);
             auto rc = engine->Graphics();
-            auto& reg = engine->GetRegistry();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             ZHLN::Test::Headless::DisableAA(*engine);
 
             for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
@@ -160,7 +161,7 @@ struct TextureTransformsTestSuite {
                     pp.bloomStrength     = 0.0f;
                 });
             }
-            const auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
@@ -215,9 +216,7 @@ struct TextureTransformsTestSuite {
                 reg.Add(e, ZHLN::Components::TransformComponent {.position = offset});
                 reg.Add(e, ZHLN::Components::WorldTransformComponent {.world = world, .previous = world});
                 reg.Add(e, ZHLN::Components::MeshComponent {.meshAsset = meshID, .materialAsset = materialID, .cullRadius = 1.0f});
-                ZHLN::SceneResources::Attach<ZHLN::Components::OwnedMeshComponent>(
-                    *engine, e, {.meshAsset = meshID, .mesh = mesh}
-                );
+                engine->Entities().Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
             }
 
             ZHLN::Test::Headless::TickFrames(*engine, 5);

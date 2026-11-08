@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "AnimationSystem.hpp"
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Engine.hpp>
@@ -22,7 +23,7 @@ void ReleaseAnimations(Engine& engine, bool all) {
         return;
     }
 
-    auto&      registry = engine.GetRegistry();
+    auto&      registry = ZHLN::EngineAccess::RegistryOf(engine);
     const auto owners   = registry.GetEntitiesWith<Components::AnimatorComponent>();
     if (all) {
         if (!owners.empty()) {

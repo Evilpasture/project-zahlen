@@ -63,7 +63,7 @@ static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {
 namespace ZHLN::Character {
 
 void MovementSystem(Engine& engine, float dt) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     auto entities = reg.GetEntitiesWith<MovementComponent>();
     if (entities.empty()) {
@@ -183,7 +183,7 @@ void MovementSystem(Engine& engine, float dt) {
 }
 
 void CommitCharacterSteering(Engine& engine) {
-    auto& reg      = engine.GetRegistry();
+    auto& reg      = ZHLN::EngineAccess::RegistryOf(engine);
     auto& pc = ZHLN::EngineAccess::PhysicsOf(engine);
     auto  entities = reg.GetEntitiesWith<MovementComponent>();
     auto  moves    = reg.GetRawArray<MovementComponent>();
@@ -266,7 +266,7 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
 }
 
 void WriteCharacterGrounded(Engine& engine) {
-    auto& reg      = engine.GetRegistry();
+    auto& reg      = ZHLN::EngineAccess::RegistryOf(engine);
     auto& pc = ZHLN::EngineAccess::PhysicsOf(engine);
     auto  entities = reg.GetEntitiesWith<MovementComponent>();
     auto  moves    = reg.GetRawArray<MovementComponent>();

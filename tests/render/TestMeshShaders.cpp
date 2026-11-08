@@ -457,7 +457,7 @@ struct MeshShaderTestSuite {
             // Declared (not deduced) return: every path returns, so a missing
             // camera fails the test instead of flowing off the end (-Wreturn-type).
             auto setupScene = [](ZHLN::Engine& engine) -> std::expected<void, ZHLN::ErrorCode> {
-                auto& reg = engine.GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
                 auto rc = engine.Graphics();
 
                 // --- Determinism ---------------------------------------------
@@ -481,7 +481,7 @@ struct MeshShaderTestSuite {
                 }
                 rc.SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 
-                const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
@@ -675,7 +675,7 @@ struct MeshShaderTestSuite {
             // Declared (not deduced) return: every path returns, so a missing
             // camera fails the test instead of flowing off the end (-Wreturn-type).
             auto setupCloseup = [](ZHLN::Engine& engine, const CloseupSubject& subject) -> std::expected<void, ZHLN::ErrorCode> {
-                auto& reg = engine.GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
                 auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
@@ -693,7 +693,7 @@ struct MeshShaderTestSuite {
 
                 // Camera 0.1-0.2m off the surface it is aimed at, the regime
                 // where the apex formulation used to cull what it was facing.
-                const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
@@ -847,7 +847,7 @@ struct MeshShaderTestSuite {
 
             auto setupBackplane = [](ZHLN::Engine& engine) -> bool {
                 ZHLN::Test::Headless::DisableAA(engine);
-                auto& reg = engine.GetRegistry();
+                auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
                 for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) {
                         pp.fullBright = 1;
@@ -869,7 +869,7 @@ struct MeshShaderTestSuite {
                     return false;
                 }
 
-                const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                     return false;
                 }

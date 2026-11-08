@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 module;
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 
 // Public Engine & Jolt Headers
 // clang-format off
@@ -198,8 +199,8 @@ class System {
 
         // 1. Spawn Decal via ECS DecalComponent (Heightmap & Geometry Agnostic)
         if (cfg.spawnDecal && cfg.decalTexture != TextureID::Invalid) {
-            auto& reg = engine.GetRegistry();
-            auto& ecb = engine.GetMainECB();
+            auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+            auto& ecb = engine.Commands();
 
             JPH::Vec3 zAxis = -normal.Normalized();
             JPH::Vec3 up    = (std::abs(zAxis.GetY()) > 0.95f) ? JPH::Vec3::sAxisX() : JPH::Vec3::sAxisY();

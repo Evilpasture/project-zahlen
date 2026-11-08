@@ -20,7 +20,7 @@ namespace {
 
 template <typename T>
 void ReleaseSelected(Engine& engine, bool all) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     const auto entities = registry.GetEntitiesWith<T>();
     if (entities.empty()) {
         return;
@@ -34,7 +34,7 @@ void ReleaseSelected(Engine& engine, bool all) {
 }
 
 void ReleasePhysics(Engine& engine, bool all) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     auto physics = engine.Physics();
 
     // Queue all body releases under one physics shadow lock while components
@@ -78,7 +78,7 @@ void ReleaseOwnedResources(Engine& engine, bool all) {
 } // namespace
 
 void SceneCleanupSystem::ProcessPending(Engine& engine) {
-    auto& registry = engine.GetRegistry();
+    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     const auto marked = registry.GetEntitiesWith<Components::PendingDestroy>();
     if (marked.empty()) {
         return;
@@ -99,8 +99,8 @@ void SceneCleanupSystem::ProcessPending(Engine& engine) {
 
 void SceneCleanupSystem::ClearAll(Engine& engine) {
     ReleaseOwnedResources(engine, true);
-    engine.GetMainECB().Reset();
-    engine.GetRegistry().Clear();
+    engine.Commands().Reset();
+    ZHLN::EngineAccess::RegistryOf(engine).Clear();
 }
 
 } // namespace ZHLN

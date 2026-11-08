@@ -10,6 +10,7 @@
 // ============================================================================
 
 module;
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
@@ -44,7 +45,7 @@ auto ClientReplicator::ApplyInitialObjects(Engine& engine, std::span<const uint8
         return std::unexpected(ErrorCode(NetworkError::ReplicationFailed));
     }
 
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     for (const ObjectSnapshot& object: message->objects) {
         const Entity e = GetOrCreateEntity(reg, object.uid);
@@ -71,7 +72,7 @@ auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t
         return std::unexpected(ErrorCode(NetworkError::ReplicationFailed));
     }
 
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     for (const PhysicsBodyState& body: message->bodies) {
         if (const auto e = uidToEntityMap.Find(body.uid)) {

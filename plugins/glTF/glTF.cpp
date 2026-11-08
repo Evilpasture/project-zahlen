@@ -111,7 +111,7 @@ struct InspectorState {
 }
 
 void AddInspectorLighting(ZHLN::Engine& engine) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     const JPH::Vec3  sunPos   = JPH::Vec3(15.0f, 30.0f, 15.0f);
     const JPH::Quat  sunRot   = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f});
@@ -164,7 +164,7 @@ void ClearInstances(InspectorState& state) {
     if (state.engine == nullptr) {
         return;
     }
-    auto& reg = state.engine->GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(*state.engine);
     for (ZHLN::Entity e: state.instances) {
         if (e != ZHLN::Entity::Null() && reg.IsAlive(e)) {
             DespawnEntity(*state.engine, e);
@@ -190,7 +190,7 @@ void ToggleClipPlayback(InspectorState& state, int32_t clipIndex) {
     if ((state.engine == nullptr) || state.instances.empty()) {
         return;
     }
-    auto&              reg  = state.engine->GetRegistry();
+    auto&              reg  = ZHLN::EngineAccess::RegistryOf(*state.engine);
     const ZHLN::Entity root = state.instances[0];
     if (root == ZHLN::Entity::Null() || !reg.IsAlive(root)) {
         return;
@@ -683,7 +683,7 @@ void OnFileDropped(void* userdata, const ZHLN::FileDrop* files, uint32_t count) 
 }
 
 void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
-    auto& reg  = engine.GetRegistry();
+    auto& reg  = ZHLN::EngineAccess::RegistryOf(engine);
     auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
     if (ents.empty()) {
         return;
@@ -731,7 +731,7 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
     }
 
     const JPH::Vec3 dir        = OrbitDirection(state.yaw, state.pitch);
-    auto            cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    auto            cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!cameraComp) {
         return;
     }

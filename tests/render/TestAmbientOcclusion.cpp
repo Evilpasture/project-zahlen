@@ -24,6 +24,7 @@
 // The shared error enum, frame I/O and engine fixture live in
 // LightingRTCommon.hpp.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
@@ -179,7 +180,7 @@ void PrintReportRow(int mode, const char* name, double meanLuma, const AoDeltaSt
 // alone, and the sample budget is raised so the GTAO branch (steps =
 // giSamples/6) gets more than its minimum.
 void BuildAoScene(ZHLN::Engine& engine) {
-    auto& reg = engine.GetRegistry();
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
     const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -231,7 +232,7 @@ void BuildAoScene(ZHLN::Engine& engine) {
         }
     );
 
-    const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
         return;
     }
@@ -243,7 +244,7 @@ void BuildAoScene(ZHLN::Engine& engine) {
 }
 
 void SetGiMode(ZHLN::Engine& engine, int mode) {
-    auto&      reg  = engine.GetRegistry();
+    auto&      reg  = ZHLN::EngineAccess::RegistryOf(engine);
     const auto ents = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
     if (ents.empty()) {
         return;
@@ -252,7 +253,7 @@ void SetGiMode(ZHLN::Engine& engine, int mode) {
 }
 
 void SetAoRadius(ZHLN::Engine& engine, float radius) {
-    auto&      reg  = engine.GetRegistry();
+    auto&      reg  = ZHLN::EngineAccess::RegistryOf(engine);
     const auto ents = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
     if (ents.empty()) {
         return;

@@ -21,6 +21,7 @@
 #pragma GCC optimize("no-inline")
 #endif
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "ConsoleDebugger.hpp"
 #include "SymbolResolver.hpp"
 
@@ -151,7 +152,7 @@ namespace {
 } // namespace
 
 void ConsoleDebugger::Execute(Engine& engine, GameConsole& console, std::string_view commandLine) {
-    Execute(engine.GetRegistry(), console, commandLine);
+    Execute(ZHLN::EngineAccess::RegistryOf(engine), console, commandLine);
 }
 
 void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::string_view commandLine) {

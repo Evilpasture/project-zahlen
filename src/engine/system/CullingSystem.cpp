@@ -325,7 +325,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
 }
 
 void CullingSystem::DrawDebugFrustum(Engine& engine) {
-    auto& reg    = engine.GetRegistry();
+    auto& reg    = ZHLN::EngineAccess::RegistryOf(engine);
     auto  stats  = reg.GetSingleton<Components::CullingStatsComponent>();
     if (!stats || !stats->stats.FreezeFrustum) {
         return;
