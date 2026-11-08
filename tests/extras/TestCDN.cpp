@@ -73,7 +73,7 @@ auto AgeFile(const std::filesystem::path& file, std::chrono::seconds age) -> boo
     return !ec;
 }
 
-auto WaitFor(ZHLN::CDN::CDNManager& cdn, ZHLN::Remote::FetchHandle handle) -> std::optional<std::expected<ZHLN::Remote::FetchPayload, ZHLN::ErrorCode>> {
+auto WaitFor(ZHLN::CDN::CDNManager& cdn, ZHLN::Remote::FetchID handle) -> std::optional<std::expected<ZHLN::Remote::FetchPayload, ZHLN::ErrorCode>> {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     do {
         if (auto result = cdn.Poll(handle)) {

@@ -1,6 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/Core/Platform.hpp>
@@ -426,7 +430,7 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
         materialDesc.metallic         = metallic;
         materialDesc.roughness        = 0.32f;
         materialDesc.baseColor        = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()};
-        const ZHLN::Material material = engine.GetRenderContext().CreateMaterial(materialDesc).value_or(ZHLN::Material {});
+        const ZHLN::Material material = engine.Graphics().CreateMaterial(materialDesc).value_or(ZHLN::Material {});
         const ZHLN::Entity   part     = ZHLN::PrefabFactory::CreateBox(
             engine, JPH::Vec3(halfExtents) * scale,
             ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = material}
@@ -724,7 +728,7 @@ auto main(int argc, char* argv[]) -> int {
     // -- the path Scene::ShapeKind::Prefab and the scripting bindings use -- finds
     // it without core knowing a parser exists.
     ZHLN::GLTF::InstallDeviceLostHandler(*engine);
-    const auto prefab = ZHLN::GLTF::LoadGLBPrefab(engine->GetRenderContext(), engine->GetAssetManager(), rigPath);
+    const auto prefab = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), rigPath);
 
     const ZHLN::Locomotion::CharacterBoundsEstimate bounds =
         prefab.transform([](const ZHLN::ModelPrefab& p) { return ZHLN::Locomotion::EstimateCharacterBounds(p); })
@@ -791,7 +795,7 @@ auto main(int argc, char* argv[]) -> int {
                     st.mouseWheel = 0.0f;
                 }
                 if (st.needsResize) {
-                    engine->GetRenderContext().SetResolution(st.newSize);
+                    engine->Graphics().SetResolution(st.newSize);
                     st.needsResize = false;
                 }
                 if (st.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) {
@@ -855,7 +859,7 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Locomotion::RenderDebugRig(*engine, player, dualShapeConfig);
             registry.Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(player, [&](const auto& trans, const auto& rig) -> auto {
                 const auto gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
-                ZHLN::ProceduralAnimation::DrawDebugRig(engine->GetSceneData(), trans.position, trans.rotation, rig, gait ? &*gait : nullptr);
+                ZHLN::ProceduralAnimation::DrawDebugRig(ZHLN::EngineAccess::SceneOf(*engine), trans.position, trans.rotation, rig, gait ? &*gait : nullptr);
             });
         }
     }

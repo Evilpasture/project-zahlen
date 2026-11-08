@@ -135,19 +135,19 @@ auto CDNManager::Create(const CDNConfig& config) -> std::expected<CDNManager, ZH
     return CDNManager(std::move(*base), std::move(cache), std::move(fetcher));
 }
 
-auto CDNManager::RequestAsset(std::string_view relativePath, ValidatorFn validator) -> std::optional<ZHLN::Remote::FetchHandle> {
+auto CDNManager::RequestAsset(std::string_view relativePath, ValidatorFn validator) -> std::optional<ZHLN::Remote::FetchID> {
     auto url = GetURL(relativePath);
     if (!url || m_fetcher == nullptr) {
         return std::nullopt;
     }
-    const ZHLN::Remote::FetchHandle handle = m_fetcher->Request(*url, validator);
+    const ZHLN::Remote::FetchID handle = m_fetcher->Request(*url, validator);
     if (!handle.IsValid()) {
         return std::nullopt;
     }
     return handle;
 }
 
-auto CDNManager::Poll(ZHLN::Remote::FetchHandle handle)
+auto CDNManager::Poll(ZHLN::Remote::FetchID handle)
     -> std::optional<std::expected<ZHLN::Remote::FetchPayload, ZHLN::ErrorCode>> {
     if (m_fetcher == nullptr) {
         return std::nullopt;
@@ -155,7 +155,7 @@ auto CDNManager::Poll(ZHLN::Remote::FetchHandle handle)
     return m_fetcher->PollResult(handle);
 }
 
-void CDNManager::Cancel(ZHLN::Remote::FetchHandle handle) {
+void CDNManager::Cancel(ZHLN::Remote::FetchID handle) {
     if (m_fetcher != nullptr) {
         m_fetcher->Cancel(handle);
     }

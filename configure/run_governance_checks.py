@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Run all repository configure-time governance checks in parallel with stat-manifest caching.
 
-Invoked once by cmake/GovernanceChecks.cmake so configure does not pay 12
-sequential interpreter startups and 12 sequential tree walks on every reconfigure:
+Invoked once by cmake/GovernanceChecks.cmake so configure does not pay 13
+sequential interpreter startups and 13 sequential tree walks on every reconfigure:
   * On POSIX hosts (Linux/macOS), forks lightweight worker processes (avoiding
     11 extra Python startup/import cycles while bypassing the GIL across cores)
     and runs Perl's check_include_provenance.pl concurrently.
@@ -80,6 +80,7 @@ HISTORICAL_PYTHON_ORDER: tuple[str, ...] = (
     "check_namespace_governance.py",
     "check_module_linkage.py",
     "check_error_ordinals.py",
+    "check_handle_taxonomy.py",
 )
 # Longest-pole checks scheduled first to minimize parallel tail latency.
 SCHEDULE_PYTHON_ORDER: tuple[str, ...] = (
@@ -94,6 +95,7 @@ SCHEDULE_PYTHON_ORDER: tuple[str, ...] = (
     "check_macro_governance.py",
     "check_subsystem_boundaries.py",
     "check_pimpl_encapsulation.py",
+    "check_handle_taxonomy.py",
 )
 PERL_CHECK = "check_include_provenance.pl"
 

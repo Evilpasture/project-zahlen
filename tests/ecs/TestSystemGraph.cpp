@@ -159,7 +159,7 @@ struct SystemGraphTestSuite {
             graph.Compile();
 
             // Minimal frame: these systems only exercise ordering, never services.
-            const ZHLN::Frame frame {.dt = TestDeltaTime};
+            const ZHLN::Frame frame {.dt = {TestDeltaTime}};
             graph.Execute(frame);
 
             // Verification: WriterA must precede ReaderA
@@ -206,7 +206,7 @@ struct SystemGraphTestSuite {
             }
 
             graph.Compile();
-            const ZHLN::Frame frame {.dt = TestDeltaTime};
+            const ZHLN::Frame frame {.dt = {TestDeltaTime}};
             graph.Execute(frame);
             if (!(extensionOrder.load() > 0 && anchorOrder.load() > extensionOrder.load())) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
@@ -262,7 +262,7 @@ struct SystemGraphTestSuite {
 
             graph.Compile();
 
-            const ZHLN::Frame frame {.dt = TestDeltaTime};
+            const ZHLN::Frame frame {.dt = {TestDeltaTime}};
             graph.Execute(frame);
 
             // SysC MUST execute after both SysA and SysB complete.
@@ -333,7 +333,7 @@ struct SystemGraphTestSuite {
             }
 
             graph.Compile();
-            const ZHLN::Frame frame {.dt = TestDeltaTime};
+            const ZHLN::Frame frame {.dt = {TestDeltaTime}};
             graph.Execute(frame);
 
             // Both systems ran exactly once: the null-function anchor neither
@@ -441,7 +441,7 @@ struct SystemGraphTestSuite {
                 return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
             }
             graph.Compile();
-            const ZHLN::Frame frame {.frame = 42, .alpha = 0.25f, .dt = TestDeltaTime};
+            const ZHLN::Frame frame {.frame = {42}, .alpha = {0.25f}, .dt = {TestDeltaTime}};
             graph.Execute(frame);
             if (observedDt != TestDeltaTime || observedAlpha != 0.25f || observedFrame != 42 || !observedMissingAudio ||
                 reg.Get<TestCompA>(entity)->value != 5 || writerOrder.load() == 0 || readerOrder.load() <= writerOrder.load()) {
@@ -510,7 +510,7 @@ struct SystemGraphTestSuite {
             graph.AddSystem<&CommandBufferSystemA>();
             graph.AddSystem<&CommandBufferSystemB>();
             graph.Compile();
-            graph.Execute(ZHLN::Frame {.frame = 1, .alpha = 0.0f, .dt = TestDeltaTime});
+            graph.Execute(ZHLN::Frame {.frame = {1}, .alpha = {0.0f}, .dt = {TestDeltaTime}});
 
             if (!reg.Get<TestCompA>(e1) || reg.Get<TestCompA>(e1)->value != 15 ||
                 !reg.Get<TestCompB>(e1) || reg.Get<TestCompB>(e1)->value != 77 ||
@@ -603,7 +603,7 @@ struct SystemGraphTestSuite {
             graph.AddSystem<readDamage1>();
             graph.AddSystem<readDamage2>();
             graph.Compile();
-            graph.Execute(ZHLN::Frame {.frame = 1, .alpha = 0.0f, .dt = TestDeltaTime});
+            graph.Execute(ZHLN::Frame {.frame = {1}, .alpha = {0.0f}, .dt = {TestDeltaTime}});
 
             if (sumReader1.load() != 42 || sumReader2.load() != 84 || bus.Count<AudioEvt>() != 1 || bus.View<AudioEvt>()[0].cue != 7) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
@@ -622,7 +622,7 @@ struct SystemGraphTestSuite {
             extGraph.AddSystem<writeDamage>();
             extGraph.AddSystem<readDamage1>();
             extGraph.Compile();
-            extGraph.Execute(ZHLN::Frame {.frame = 2, .alpha = 0.0f, .dt = TestDeltaTime});
+            extGraph.Execute(ZHLN::Frame {.frame = {2}, .alpha = {0.0f}, .dt = {TestDeltaTime}});
 
             if (sumReader1.load() != 42 || extBus.Count<DamageEvt>() != 2) {
                 return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);

@@ -67,7 +67,7 @@ struct CombatFXTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> surface_presets_and_decal_instantiation() {
             auto engine      = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(CombatFXTestError::SystemInitFailed);
             }
 
@@ -124,7 +124,7 @@ struct CombatFXTestSuite {
                 ZHLN::Test::ExpectEq(transComp->position.x, hitPos1.GetX());
                 ZHLN::Test::ExpectEq(transComp->position.y, hitPos1.GetY());
                 ZHLN::Test::ExpectEq(transComp->position.z, hitPos1.GetZ());
-                ZHLN::Test::ExpectTrue(decalComp->albedoMap != ZHLN::TextureHandle::Invalid);
+                ZHLN::Test::ExpectTrue(decalComp->albedoMap != ZHLN::TextureID::Invalid);
             }
 
             return {};
@@ -135,7 +135,7 @@ struct CombatFXTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> ballistic_tracer_progression_and_termination() {
             auto engine      = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(CombatFXTestError::SystemInitFailed);
             }
 
@@ -175,7 +175,7 @@ struct CombatFXTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> shockwave_rings_and_particle_physics() {
             auto engine      = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(CombatFXTestError::SystemInitFailed);
             }
 

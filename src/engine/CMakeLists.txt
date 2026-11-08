@@ -20,6 +20,8 @@ set(RAW_ENGINE_SOURCES
     InputContext.cpp
     Kernel.cpp
     World.cpp
+    VisibilityList.cpp
+    Capabilities.cpp
     SystemWiring.cpp
     Hierarchy.cpp
     PrefabFactory.cpp

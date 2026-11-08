@@ -24,7 +24,7 @@
 enum class TwoBoneIKTestError : uint32_t {
     IKSolverFailed ZHLN_ANNOTATION(ZHLN::Description<"TwoBoneIK solver produced invalid joint orientations or positions."> {}) = 1,
     ExtensionServiceFailed ZHLN_ANNOTATION(ZHLN::Description<"ExtensionServices failed to emplace or resolve typed domain services through SystemGraph."> {}),
-    HandleLifecycleFailed ZHLN_ANNOTATION(ZHLN::Description<"AnimationContext generational handle lifecycle or playback transition failed."> {}),
+    HandleLifecycleFailed ZHLN_ANNOTATION(ZHLN::Description<"AnimationContext generational ID lifecycle or playback transition failed."> {}),
     RestingIKDrift ZHLN_ANNOTATION(ZHLN::Description<"AnimationContext IK drifted on a resting clip or failed to propagate descendant FK."> {}),
     ECSBridgeFailed ZHLN_ANNOTATION(ZHLN::Description<"Stateless Animation ECS systems failed to publish morphs, rigid nodes, or kinematic poses."> {}),
 };
@@ -206,7 +206,7 @@ struct TwoBoneIKTestSuite {
             ZHLN::ECS::SystemGraph<ExtensionGraphServices> graph(registry, services);
             graph.AddSystem<&ServiceProbeSystem::Update>();
             graph.Compile();
-            graph.Execute(ZHLN::Frame {.dt = 1.0f / 60.0f});
+            graph.Execute(ZHLN::Frame {.dt = {1.0f / 60.0f}});
 
             if (!ZHLN::Test::ExpectEq(counter.ticks, 4u)) {
                 return std::unexpected(TwoBoneIKTestError::ExtensionServiceFailed);
@@ -214,8 +214,8 @@ struct TwoBoneIKTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> animation_context_generational_handles_and_playback() {
-            constexpr std::string_view kPath = "test_anim_ctx_handles.glb";
+        std::expected<void, ZHLN::ErrorCode> animation_context_generational_ids_and_playback() {
+            constexpr std::string_view kPath = "test_anim_ctx_ids.glb";
             const ZHLN::AssetID        id    = ZHLN::HashAssetPath(kPath);
 
             ZHLN::AssetManager assets;
@@ -224,8 +224,8 @@ struct TwoBoneIKTestSuite {
             ZHLN::PoseUploadQueue             uploads;
             ZHLN::Animation::AnimationContext ctx;
 
-            const ZHLN::AnimationHandle h0 = ctx.Create(id);
-            const ZHLN::AnimationHandle h1 = ctx.Create(id);
+            const ZHLN::AnimationID h0 = ctx.Create(id);
+            const ZHLN::AnimationID h1 = ctx.Create(id);
             if (!ZHLN::Test::ExpectTrue(ctx.Valid(h0)) || !ZHLN::Test::ExpectTrue(ctx.Valid(h1)) ||
                 !ZHLN::Test::ExpectEq(ctx.ActiveCount(), static_cast<size_t>(2))) {
                 return std::unexpected(TwoBoneIKTestError::HandleLifecycleFailed);
@@ -234,7 +234,7 @@ struct TwoBoneIKTestSuite {
             // Destroy h0 -> slot recycled with bumped generation; h0 becomes stale, h1 remains valid after swap-and-pop.
             const std::array doomed {h0};
             ctx.Destroy(doomed);
-            const ZHLN::AnimationHandle h2 = ctx.Create(id);
+            const ZHLN::AnimationID h2 = ctx.Create(id);
             if (!ZHLN::Test::ExpectFalse(ctx.Valid(h0)) || !ZHLN::Test::ExpectFalse(ctx.Playback(h0).has_value()) ||
                 !ZHLN::Test::ExpectTrue(ctx.Valid(h1)) || !ZHLN::Test::ExpectTrue(ctx.Valid(h2)) || !ZHLN::Test::ExpectTrue(h0 != h2)) {
                 return std::unexpected(TwoBoneIKTestError::HandleLifecycleFailed);
@@ -285,7 +285,7 @@ struct TwoBoneIKTestSuite {
 
             ZHLN::PoseUploadQueue             uploads;
             ZHLN::Animation::AnimationContext ctx;
-            const ZHLN::AnimationHandle       h = ctx.Create(id);
+            const ZHLN::AnimationID       h = ctx.Create(id);
 
             ctx.Sync(
                 h, ZHLN::Animation::PlaybackConfig {
@@ -389,7 +389,7 @@ struct TwoBoneIKTestSuite {
             );
 
             // 1. Idle tick: handle allocated, kinematic ragdoll pose uploaded, authored morph weights preserved.
-            graph.Execute(ZHLN::Frame {.dt = 0.25f});
+            graph.Execute(ZHLN::Frame {.dt = {0.25f}});
             const auto idleMorph     = registry.Get<ZHLN::Components::MorphTargetComponent>(rigidMorphChild);
             const auto kinematicSpan = uploads.KinematicPose(32);
             if (!ZHLN::Test::ExpectTrue(idleMorph.has_value()) || !ZHLN::Test::ExpectEq(idleMorph->weights[0], 0.2f) ||
@@ -403,7 +403,7 @@ struct TwoBoneIKTestSuite {
                 anim.currentTrackIdx  = 1;
                 anim.currentTrackTime = 0.0f;
             });
-            graph.Execute(ZHLN::Frame {.dt = 0.5f});
+            graph.Execute(ZHLN::Frame {.dt = {0.5f}});
             if (!ZHLN::Test::ExpectEq(idleMorph->weights[0], 0.2f) || !ZHLN::Test::ExpectEq(idleMorph->weights[1], 0.4f)) {
                 return std::unexpected(TwoBoneIKTestError::ECSBridgeFailed);
             }
@@ -417,7 +417,7 @@ struct TwoBoneIKTestSuite {
                 anim.currentLoop      = false;
                 anim.isFinished       = false;
             });
-            graph.Execute(ZHLN::Frame {.dt = 1.2f});
+            graph.Execute(ZHLN::Frame {.dt = {1.2f}});
 
             const auto rigidTr   = registry.Get<ZHLN::Components::TransformComponent>(rigidMorphChild);
             const auto skinnedTr = registry.Get<ZHLN::Components::TransformComponent>(skinnedChild);
@@ -497,7 +497,7 @@ struct TwoBoneIKTestSuite {
             );
 
             for (int frame = 0; frame < 10; ++frame) {
-                graph.Execute(ZHLN::Frame {.dt = 1.0f / 60.0f});
+                graph.Execute(ZHLN::Frame {.dt = {1.0f / 60.0f}});
                 uploads.Clear();
             }
 
@@ -507,7 +507,7 @@ struct TwoBoneIKTestSuite {
                 return std::unexpected(TwoBoneIKTestError::ECSBridgeFailed);
             }
 
-            const auto modelPose = animCtx.ModelPose(animComp->animationHandle);
+            const auto modelPose = animCtx.ModelPose(animComp->animationID);
             if (!ZHLN::Test::ExpectEq(modelPose.size(), static_cast<size_t>(4)) ||
                 !ZHLN::Test::ExpectTrue(modelPose[2].GetTranslation().IsClose(JPH::Vec3(0.0f, 2.0f, 2.8f), 1.0e-3f)) ||
                 !ZHLN::Test::ExpectTrue(JPH::Vec3(fingerTr->position).IsClose(JPH::Vec3(0.0f, 2.0f, 3.3f), 1.0e-3f))) {

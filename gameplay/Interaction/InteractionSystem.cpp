@@ -55,7 +55,7 @@ void TeleportPlayer(
         return;
     }
     const auto playerPhys = registry.Get<Components::PhysicsComponent>(playerEnt);
-    if (!playerPhys || playerPhys->physicsHandle == Physics::BodyHandle::Null()) {
+    if (!playerPhys || playerPhys->physicsID == Physics::BodyID::Null()) {
         return;
     }
 
@@ -79,9 +79,9 @@ void TeleportPlayer(
     // The destination origin is at floor level while the character body origin
     // sits at the capsule centre, so lift by the shape's own ground offset.
     const JPH::Vec3 destPos = destTrans->position;
-    const JPH::Vec3 center  = destPos + JPH::Vec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsHandle) + 0.05f, 0.0f);
-    physics->SetCharacterPosition(playerPhys->physicsHandle, center);
-    physics->SetCharacterVelocity(playerPhys->physicsHandle, {0.0f, 0.0f, 0.0f});
+    const JPH::Vec3 center  = destPos + JPH::Vec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsID) + 0.05f, 0.0f);
+    physics->SetCharacterPosition(playerPhys->physicsID, center);
+    physics->SetCharacterVelocity(playerPhys->physicsID, {0.0f, 0.0f, 0.0f});
 
     if (const auto playerTrans = registry.Get<Components::TransformComponent>(playerEnt)) {
         playerTrans->position = center;
@@ -406,8 +406,8 @@ void DoorMovementSystem::Update(
         // their collision as well.
         if (physics) {
             if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
-                if (phys->physicsHandle.Pack() != 0) {
-                    physics->SetKinematicPose(phys->physicsHandle, trans->position, trans->rotation);
+                if (phys->physicsID.Pack() != 0) {
+                    physics->SetKinematicPose(phys->physicsID, trans->position, trans->rotation);
                 }
             }
         }
@@ -475,8 +475,8 @@ void ButtonMovementSystem::Update(
             // Keep the kinematic collider in sync with the moving button.
             if (physics) {
                 if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
-                    if (phys->physicsHandle.Pack() != 0) {
-                        physics->SetKinematicPose(phys->physicsHandle, trans->position, trans->rotation);
+                    if (phys->physicsID.Pack() != 0) {
+                        physics->SetKinematicPose(phys->physicsID, trans->position, trans->rotation);
                     }
                 }
             }

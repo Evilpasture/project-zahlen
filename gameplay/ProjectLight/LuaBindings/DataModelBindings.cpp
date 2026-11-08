@@ -941,8 +941,8 @@ int InstanceIndex(lua_State* state) {
     else if (instance->IsA("Sound") && property == "Loops") lua_pushboolean(state, static_cast<Sound*>(instance.GetPtr())->Loops());
     else if (instance->IsA("Sound") && property == "Playing") lua_pushboolean(state, static_cast<Sound*>(instance.GetPtr())->Playing());
     else if (instance->IsA("Decal") && property == "TextureId") {
-        const std::string_view textureId = static_cast<Decal*>(instance.GetPtr())->TextureId();
-        lua_pushlstring(state, textureId.data(), textureId.size());
+        const std::string_view textureID = static_cast<Decal*>(instance.GetPtr())->GetTextureID();
+        lua_pushlstring(state, textureID.data(), textureID.size());
     } else if (instance->IsA("Decal") && property == "Color") {
         const JPH::Vec3& color = static_cast<Decal*>(instance.GetPtr())->Color();
         PushColor3(state, color.GetX(), color.GetY(), color.GetZ());
@@ -1100,7 +1100,7 @@ int InstanceNewIndex(lua_State* state) {
     } else if (instance.IsA("Sound") && property == "Loops") static_cast<Sound&>(instance).SetLoops(lua_toboolean(state, 3) != 0);
     else if (instance.IsA("Sound") && property == "Playing") static_cast<Sound&>(instance).SetPlaying(lua_toboolean(state, 3) != 0);
     else if (instance.IsA("Decal") && property == "TextureId") {
-        if (auto textureId = ReadString(state, 3)) static_cast<Decal&>(instance).SetTextureId(std::move(*textureId));
+        if (auto textureID = ReadString(state, 3)) static_cast<Decal&>(instance).SetTextureID(std::move(*textureID));
     } else if (instance.IsA("Decal") && property == "Color") {
         JPH::Vec3 color;
         if (ReadColor3(state, 3, color)) static_cast<Decal&>(instance).SetColor(color);

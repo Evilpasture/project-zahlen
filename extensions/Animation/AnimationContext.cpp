@@ -26,15 +26,15 @@ constexpr uint32_t kInvalidDense  = std::numeric_limits<uint32_t>::max();
 constexpr size_t kMaxBoundSkeletons = 8;
 constexpr size_t kMaxIKChains       = 4;
 
-[[nodiscard]] constexpr auto PackHandle(uint32_t slotIndex, uint16_t generation) noexcept -> AnimationHandle {
-    return AnimationHandle {.id = (static_cast<uint32_t>(generation) << kIndexBits) | (slotIndex & kIndexMask)};
+[[nodiscard]] constexpr auto PackID(uint32_t slotIndex, uint16_t generation) noexcept -> AnimationID {
+    return AnimationID {.id = (static_cast<uint32_t>(generation) << kIndexBits) | (slotIndex & kIndexMask)};
 }
 
-[[nodiscard]] constexpr auto UnpackSlot(AnimationHandle handle) noexcept -> uint32_t {
+[[nodiscard]] constexpr auto UnpackSlot(AnimationID handle) noexcept -> uint32_t {
     return handle.id & kIndexMask;
 }
 
-[[nodiscard]] constexpr auto UnpackGeneration(AnimationHandle handle) noexcept -> uint16_t {
+[[nodiscard]] constexpr auto UnpackGeneration(AnimationID handle) noexcept -> uint16_t {
     return static_cast<uint16_t>(handle.id >> kIndexBits);
 }
 
@@ -470,7 +470,7 @@ void ApplyIKAndPropagateDescendantFK(
 struct AnimationContext::Impl {
     std::vector<Slot>            slots;
     std::vector<uint32_t>        freeSlots;
-    std::vector<AnimationHandle> activeHandles;
+    std::vector<AnimationID> activeIDs;
     std::vector<InstanceState>   instances;
     PosePool                     poses;
 
@@ -478,7 +478,7 @@ struct AnimationContext::Impl {
     std::vector<JPH::Mat44>         paletteScratch;
     std::vector<JPH::Mat44>         kinematicScratch;
 
-    [[nodiscard]] auto ResolveDense(AnimationHandle handle) const noexcept -> ZHLN::Optional<uint32_t> {
+    [[nodiscard]] auto ResolveDense(AnimationID handle) const noexcept -> ZHLN::Optional<uint32_t> {
         if (!handle.IsValid()) {
             return std::nullopt;
         }
@@ -503,7 +503,7 @@ AnimationContext::AnimationContext(AnimationContext&&) noexcept = default;
 
 auto AnimationContext::operator=(AnimationContext&&) noexcept -> AnimationContext& = default;
 
-auto AnimationContext::Create(AssetID prefabAsset) -> AnimationHandle {
+auto AnimationContext::Create(AssetID prefabAsset) -> AnimationID {
     uint32_t slotIdx = 0;
     if (!_impl->freeSlots.empty()) {
         slotIdx = _impl->freeSlots.back();
@@ -516,15 +516,15 @@ auto AnimationContext::Create(AssetID prefabAsset) -> AnimationHandle {
     const auto            denseIdx = static_cast<uint32_t>(_impl->instances.size());
     Slot&                 slot     = _impl->slots[slotIdx];
     slot.denseIndex                = denseIdx;
-    const AnimationHandle handle   = PackHandle(slotIdx, slot.generation);
+    const AnimationID handle   = PackID(slotIdx, slot.generation);
 
-    _impl->activeHandles.push_back(handle);
+    _impl->activeIDs.push_back(handle);
     _impl->instances.push_back(InstanceState {.prefabAsset = prefabAsset});
     return handle;
 }
 
-void AnimationContext::Destroy(std::span<const AnimationHandle> handles) noexcept {
-    for (const AnimationHandle handle: handles) {
+void AnimationContext::Destroy(std::span<const AnimationID> handles) noexcept {
+    for (const AnimationID handle: handles) {
         const auto denseOpt = _impl->ResolveDense(handle);
         if (!denseOpt) {
             continue;
@@ -537,12 +537,12 @@ void AnimationContext::Destroy(std::span<const AnimationHandle> handles) noexcep
 
         const auto lastDense = static_cast<uint32_t>(_impl->instances.size() - 1);
         if (denseIdx != lastDense) {
-            const AnimationHandle movedHandle            = _impl->activeHandles[lastDense];
-            _impl->activeHandles[denseIdx]               = movedHandle;
+            const AnimationID movedID            = _impl->activeIDs[lastDense];
+            _impl->activeIDs[denseIdx]               = movedID;
             _impl->instances[denseIdx]                   = _impl->instances[lastDense];
-            _impl->slots[UnpackSlot(movedHandle)].denseIndex = denseIdx;
+            _impl->slots[UnpackSlot(movedID)].denseIndex = denseIdx;
         }
-        _impl->activeHandles.pop_back();
+        _impl->activeIDs.pop_back();
         _impl->instances.pop_back();
 
         Slot& slot      = _impl->slots[slotIdx];
@@ -561,12 +561,12 @@ void AnimationContext::Clear() noexcept {
             _impl->freeSlots.push_back(slotIdx);
         }
     }
-    _impl->activeHandles.clear();
+    _impl->activeIDs.clear();
     _impl->instances.clear();
     _impl->poses.Clear();
 }
 
-auto AnimationContext::Valid(AnimationHandle handle) const noexcept -> bool {
+auto AnimationContext::Valid(AnimationID handle) const noexcept -> bool {
     return _impl->ResolveDense(handle).has_value();
 }
 
@@ -574,7 +574,7 @@ auto AnimationContext::ActiveCount() const noexcept -> size_t {
     return _impl->instances.size();
 }
 
-void AnimationContext::Sync(AnimationHandle handle, const PlaybackConfig& config) noexcept {
+void AnimationContext::Sync(AnimationID handle, const PlaybackConfig& config) noexcept {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return;
@@ -641,7 +641,7 @@ void AnimationContext::Sync(AnimationHandle handle, const PlaybackConfig& config
     }
 }
 
-void AnimationContext::BindSkeletons(AnimationHandle handle, std::span<const SkeletonBinding> bindings) noexcept {
+void AnimationContext::BindSkeletons(AnimationID handle, std::span<const SkeletonBinding> bindings) noexcept {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return;
@@ -652,7 +652,7 @@ void AnimationContext::BindSkeletons(AnimationHandle handle, std::span<const Ske
     inst.skeletonCount = static_cast<uint32_t>(copied);
 }
 
-void AnimationContext::SetIKChains(AnimationHandle handle, std::span<const IKChain> chains) noexcept {
+void AnimationContext::SetIKChains(AnimationID handle, std::span<const IKChain> chains) noexcept {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return;
@@ -663,7 +663,7 @@ void AnimationContext::SetIKChains(AnimationHandle handle, std::span<const IKCha
     inst.ikChainCount = static_cast<uint32_t>(copied);
 }
 
-void AnimationContext::SuppressPaletteUpload(AnimationHandle handle) noexcept {
+void AnimationContext::SuppressPaletteUpload(AnimationID handle) noexcept {
     if (const auto denseOpt = _impl->ResolveDense(handle)) {
         _impl->instances[*denseOpt].suppressPaletteUpload = true;
     }
@@ -890,14 +890,14 @@ void AnimationContext::Step(float dt, const AssetManager& assets, PoseUploadQueu
     }
 }
 
-auto AnimationContext::Playback(AnimationHandle handle) const noexcept -> ZHLN::Optional<PlaybackState> {
+auto AnimationContext::Playback(AnimationID handle) const noexcept -> ZHLN::Optional<PlaybackState> {
     return _impl->ResolveDense(handle).transform([this](uint32_t denseIdx) {
         const InstanceState& inst = _impl->instances[denseIdx];
         return PlaybackState {.trackTime = inst.activeTime, .finished = inst.finished};
     });
 }
 
-auto AnimationContext::Morph(AnimationHandle handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<MorphSample> {
+auto AnimationContext::Morph(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<MorphSample> {
     return _impl->ResolveDense(handle).and_then([this, nodeIndex](uint32_t denseIdx) -> ZHLN::Optional<MorphSample> {
         const InstanceState& inst = _impl->instances[denseIdx];
         if (nodeIndex >= inst.nodeCount) {
@@ -911,7 +911,7 @@ auto AnimationContext::Morph(AnimationHandle handle, uint32_t nodeIndex) const n
     });
 }
 
-auto AnimationContext::RigidNode(AnimationHandle handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<Math::TransformTRS> {
+auto AnimationContext::RigidNode(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<Math::TransformTRS> {
     return _impl->ResolveDense(handle).and_then([this, nodeIndex](uint32_t denseIdx) -> ZHLN::Optional<Math::TransformTRS> {
         const InstanceState& inst = _impl->instances[denseIdx];
         if (nodeIndex >= inst.nodeCount) {
@@ -925,7 +925,7 @@ auto AnimationContext::RigidNode(AnimationHandle handle, uint32_t nodeIndex) con
     });
 }
 
-auto AnimationContext::LocalPose(AnimationHandle handle) const noexcept -> std::span<const JPH::Mat44> {
+auto AnimationContext::LocalPose(AnimationID handle) const noexcept -> std::span<const JPH::Mat44> {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return {};
@@ -934,7 +934,7 @@ auto AnimationContext::LocalPose(AnimationHandle handle) const noexcept -> std::
     return _impl->poses.Local(inst.poseOffset, inst.nodeCount);
 }
 
-auto AnimationContext::ModelPose(AnimationHandle handle) const noexcept -> std::span<const JPH::Mat44> {
+auto AnimationContext::ModelPose(AnimationID handle) const noexcept -> std::span<const JPH::Mat44> {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return {};

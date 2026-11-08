@@ -5,6 +5,10 @@ module;
 
 // Public Engine & Jolt Headers
 // clang-format off
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
@@ -371,7 +375,7 @@ export class ExplosionSystem {
     }
 
     static void Init(Engine& engine) {
-        auto& rc  = engine.GetRenderContext();
+        auto rc = engine.Graphics();
         auto& reg = engine.GetRegistry();
 
         // Register ECS components for the current registry instance
@@ -396,19 +400,19 @@ export class ExplosionSystem {
                 break;
             }
         }
-        if (s_LastRenderContext == &rc && resourceEntity != Entity::Null() &&
-            rc.GetGPUMesh(s_DebrisMeshAsset).has_value() && rc.GetGPUMaterial(s_DebrisMatAsset).has_value()) {
+        if (s_LastRenderContext == &ZHLN::EngineAccess::RenderOf(engine) && resourceEntity != Entity::Null() &&
+            rc.Mesh(s_DebrisMeshAsset).has_value() && rc.Material(s_DebrisMatAsset).has_value()) {
             return;
         }
-        s_LastRenderContext = &rc;
+        s_LastRenderContext = &ZHLN::EngineAccess::RenderOf(engine);
 
         // Register procedural textures into TextureManager
-        s_FireTexHandle         = rc.CreateProceduralTexture("vfx_artillery_fire", {256, 256}, GenerateFireTexture(256), true);
-        s_SoilTexHandle         = rc.CreateProceduralTexture("vfx_artillery_soil", {256, 256}, GenerateSoilTexture(256), true);
-        s_ShockwaveTexHandle    = rc.CreateProceduralTexture("vfx_artillery_shockwave", {512, 512}, GenerateShockwaveRingTexture(512), true);
-        s_GroundRingHandle      = rc.CreateProceduralTexture("vfx_artillery_ground_ring", {512, 512}, GenerateGroundRingTexture(512), true);
-        s_CraterTexHandle       = rc.CreateProceduralTexture("vfx_artillery_crater", {256, 256}, GenerateCraterTexture(256), true);
-        s_CraterNormalTexHandle = rc.CreateProceduralTexture("vfx_artillery_crater_norm", {256, 256}, GenerateCraterNormalTexture(256), false);
+        s_FireTexID         = rc.CreateProceduralTexture("vfx_artillery_fire", {256, 256}, GenerateFireTexture(256), true);
+        s_SoilTexID         = rc.CreateProceduralTexture("vfx_artillery_soil", {256, 256}, GenerateSoilTexture(256), true);
+        s_ShockwaveTexID    = rc.CreateProceduralTexture("vfx_artillery_shockwave", {512, 512}, GenerateShockwaveRingTexture(512), true);
+        s_GroundRingID      = rc.CreateProceduralTexture("vfx_artillery_ground_ring", {512, 512}, GenerateGroundRingTexture(512), true);
+        s_CraterTexID       = rc.CreateProceduralTexture("vfx_artillery_crater", {256, 256}, GenerateCraterTexture(256), true);
+        s_CraterNormalTexID = rc.CreateProceduralTexture("vfx_artillery_crater_norm", {256, 256}, GenerateCraterNormalTexture(256), false);
 
         Mesh boxMesh;
         // Registry::Get answers nullopt when the entity has no such component, and
@@ -419,23 +423,23 @@ export class ExplosionSystem {
         auto owned = resourceEntity != Entity::Null() ? reg.Get<Components::OwnedMeshComponent>(resourceEntity) : ZHLN::Optional<Components::OwnedMeshComponent&> {};
         if (owned) {
             boxMesh = owned->mesh;
-            if (boxMesh.posBuffer == BufferHandle::Invalid) {
-                boxMesh = PrefabFactory::CreateBoxMesh(rc, {0.5f, 0.5f, 0.5f}, {0.28f, 0.22f, 0.16f, 1.0f});
+            if (boxMesh.posBuffer == BufferID::Invalid) {
+                boxMesh = PrefabFactory::CreateBoxMesh(engine.Graphics(), {0.5f, 0.5f, 0.5f}, {0.28f, 0.22f, 0.16f, 1.0f});
                 rc.DestroyMesh(std::exchange(owned->mesh, boxMesh));
             }
         } else {
-            boxMesh = PrefabFactory::CreateBoxMesh(rc, {0.5f, 0.5f, 0.5f}, {0.28f, 0.22f, 0.16f, 1.0f});
+            boxMesh = PrefabFactory::CreateBoxMesh(engine.Graphics(), {0.5f, 0.5f, 0.5f}, {0.28f, 0.22f, 0.16f, 1.0f});
             reg.Create(Components::OwnedMeshComponent {.meshAsset = s_DebrisMeshAsset, .mesh = boxMesh});
         }
-        rc.RegisterGPUMesh(s_DebrisMeshAsset, boxMesh);
+        rc.RegisterMesh(s_DebrisMeshAsset, boxMesh);
 
-        if (!rc.GetGPUMaterial(s_DebrisMatAsset).has_value()) {
+        if (!rc.Material(s_DebrisMatAsset).has_value()) {
             Material debrisMat = rc.CreateMaterial({
                                      .roughness = 0.94f,
                                      .baseColor = {0.28f, 0.22f, 0.16f, 1.0f},
                                  })
                                      .value_or(Material {});
-            rc.RegisterGPUMaterial(s_DebrisMatAsset, debrisMat);
+            rc.RegisterMaterial(s_DebrisMatAsset, debrisMat);
         }
     }
 
@@ -512,7 +516,7 @@ export class ExplosionSystem {
         }
 
         // Procedural Audio DSP
-        auto& audio = engine.GetAudioContext();
+        auto audio = engine.Audio();
         audio.PostEvent(
             {.type       = AudioEventType::NoiseBurst3D,
              .position   = static_cast<JPH::Vec3>(origin),
@@ -553,7 +557,7 @@ export class ExplosionSystem {
 
         auto& reg = engine.GetRegistry();
         auto& ecb = engine.GetMainECB();
-        auto& scene = engine.GetSceneData();
+        auto scene = engine.Debug();
 
         // --------------------------------------------------------------------
         // 1. UPDATE ACTIVE EXPLOSIONS (Fireball, Flash, Shockwaves)
@@ -603,7 +607,7 @@ export class ExplosionSystem {
                         crater, Components::NameComponent {.name = String64("ArtilleryCraterDecal")},
                         Components::TransformComponent {.position = exp.origin, .rotation = decalRot, .scale = decalScale},
                         Components::WorldTransformComponent {.world = localMat, .previous = localMat},
-                        Components::DecalComponent {.albedoMap = s_CraterTexHandle, .normalMap = s_CraterNormalTexHandle, .roughness = 0.96f, .metallic = 0.0f},
+                        Components::DecalComponent {.albedoMap = s_CraterTexID, .normalMap = s_CraterNormalTexID, .roughness = 0.96f, .metallic = 0.0f},
                         CraterDecalComponent {
                             .age          = 0.0f,
                             .lifetime     = 28.0f,
@@ -619,7 +623,7 @@ export class ExplosionSystem {
                 // Update Particle Emitters
                 UpdateGroup(exp.fireball, dt, false);
                 UpdateGroup(exp.soilSmoke, dt, true);
-                RenderBatchGPU(scene, exp);
+                RenderBatchGPU(ZHLN::EngineAccess::SceneOf(engine), exp);
 
                 // Clean up explosion particle root and children when particles finish
                 if (exp.age > exp.duration) {
@@ -838,7 +842,7 @@ export class ExplosionSystem {
                 );
             }
 
-            scene.AddBillboards(s_FireTexHandle, std::span {t_quads}, true);
+            scene.AddBillboards(s_FireTexID, std::span {t_quads}, true);
         }
 
         // 2. SOIL SMOKE
@@ -866,7 +870,7 @@ export class ExplosionSystem {
                 );
             }
 
-            scene.AddBillboards(s_SoilTexHandle, std::span {t_quads}, false);
+            scene.AddBillboards(s_SoilTexID, std::span {t_quads}, false);
         }
 
         // 3. SHOCKWAVE AIR & GROUND FRONTS
@@ -897,7 +901,7 @@ export class ExplosionSystem {
                     );
                 }
 
-                scene.AddBillboards(s_ShockwaveTexHandle, std::span {t_quads}, true);
+                scene.AddBillboards(s_ShockwaveTexID, std::span {t_quads}, true);
             }
 
             // Ground Dust Flat Front (1 Plane)
@@ -922,7 +926,7 @@ export class ExplosionSystem {
                     .color    = JPH::Vec4(color, opacity),
                     .facing   = ParticleAlignment::GroundFlat,
                 };
-                scene.AddBillboards(s_GroundRingHandle, std::span {&quad, 1}, true);
+                scene.AddBillboards(s_GroundRingID, std::span {&quad, 1}, true);
             }
         }
     }
@@ -936,12 +940,12 @@ export class ExplosionSystem {
     static RenderContext* s_LastRenderContext;
 
     // Type-safe registered Texture Handles
-    static TextureHandle s_FireTexHandle;
-    static TextureHandle s_SoilTexHandle;
-    static TextureHandle s_ShockwaveTexHandle;
-    static TextureHandle s_GroundRingHandle;
-    static TextureHandle s_CraterTexHandle;
-    static TextureHandle s_CraterNormalTexHandle;
+    static TextureID s_FireTexID;
+    static TextureID s_SoilTexID;
+    static TextureID s_ShockwaveTexID;
+    static TextureID s_GroundRingID;
+    static TextureID s_CraterTexID;
+    static TextureID s_CraterNormalTexID;
 
     static AssetID    s_DebrisMeshAsset;
     static MaterialID s_DebrisMatAsset;
@@ -949,12 +953,12 @@ export class ExplosionSystem {
 
 RenderContext* ExplosionSystem::s_LastRenderContext = nullptr;
 
-TextureHandle ExplosionSystem::s_FireTexHandle         = TextureHandle::Invalid;
-TextureHandle ExplosionSystem::s_SoilTexHandle         = TextureHandle::Invalid;
-TextureHandle ExplosionSystem::s_ShockwaveTexHandle    = TextureHandle::Invalid;
-TextureHandle ExplosionSystem::s_GroundRingHandle      = TextureHandle::Invalid;
-TextureHandle ExplosionSystem::s_CraterTexHandle       = TextureHandle::Invalid;
-TextureHandle ExplosionSystem::s_CraterNormalTexHandle = TextureHandle::Invalid;
+TextureID ExplosionSystem::s_FireTexID         = TextureID::Invalid;
+TextureID ExplosionSystem::s_SoilTexID         = TextureID::Invalid;
+TextureID ExplosionSystem::s_ShockwaveTexID    = TextureID::Invalid;
+TextureID ExplosionSystem::s_GroundRingID      = TextureID::Invalid;
+TextureID ExplosionSystem::s_CraterTexID       = TextureID::Invalid;
+TextureID ExplosionSystem::s_CraterNormalTexID = TextureID::Invalid;
 
 AssetID    ExplosionSystem::s_DebrisMeshAsset = InvalidAssetID;
 MaterialID ExplosionSystem::s_DebrisMatAsset  = InvalidMaterialID;

@@ -3,6 +3,8 @@
 
 // Application composes the game and its frame plan. CMake generates the
 // optional default-module install pass in DefaultModules.cpp.
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/HostRunner.hpp>
@@ -52,7 +54,7 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     // construction. Its pipeline byte span now points into Kernel-owned storage
     // (including on device recovery), never a caller-owned temporary. No argv
     // or handler borrows enter services, including on no-CLI Run.
-    engine->EmplaceService<EngineConfig>(engine->GetKernel().GetConfig());
+    engine->EmplaceService<EngineConfig>(engine->State().Configuration());
 
     if (_defaultModules) {
         InstallApplicationDefaults(*engine);
@@ -101,7 +103,7 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
         }
 
         const float rawDt = runClock.Tick();
-        const std::optional<float> pacedDt = engine->GetRenderContext().GetPacedDeltaTime();
+        const std::optional<float> pacedDt = engine->Graphics().PacedDeltaTime();
         const float dt = pacer.SelectDelta(rawDt, pacedDt);
         for (const auto& layer: _layers) {
             if (layer.tick != nullptr) {

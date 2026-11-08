@@ -14,7 +14,7 @@
 namespace ZHLN::ProjectLight {
 
 struct DataModelState: JPH::RefTarget<DataModelState> {
-    InstanceId nextId = 1;
+    InstanceId nextID = 1;
     bool        ownerAlive = true;
     // The local root has a stable internal alias even while its protocol ID
     // changes from reserved zero to the server-assigned ID.
@@ -740,7 +740,7 @@ Decal::Decal(const JPH::Ref<DataModelState>& state, InstanceId id, std::string n
     Instance(state, id, std::string(ReflectedClassName<Decal>()), std::move(name)) {
 }
 
-void Decal::SetTextureId(std::string value) {
+void Decal::SetTextureID(std::string value) {
     if (IsDestroyed() || m_textureId == value) {
         return;
     }
@@ -1059,20 +1059,20 @@ DataModel::~DataModel() {
 }
 
 auto DataModel::AllocateId() noexcept -> std::expected<InstanceId, DataModelError> {
-    if (!m_state || m_state->nextId == 0) {
+    if (!m_state || m_state->nextID == 0) {
         return std::unexpected(DataModelError::IdExhausted);
     }
-    while (m_state->instances.Find(m_state->nextId)) {
-        if (m_state->nextId == std::numeric_limits<InstanceId>::max()) {
+    while (m_state->instances.Find(m_state->nextID)) {
+        if (m_state->nextID == std::numeric_limits<InstanceId>::max()) {
             return std::unexpected(DataModelError::IdExhausted);
         }
-        ++m_state->nextId;
+        ++m_state->nextID;
     }
-    const InstanceId id = m_state->nextId;
-    if (m_state->nextId == std::numeric_limits<InstanceId>::max()) {
-        m_state->nextId = 0;
+    const InstanceId id = m_state->nextID;
+    if (m_state->nextID == std::numeric_limits<InstanceId>::max()) {
+        m_state->nextID = 0;
     } else {
-        ++m_state->nextId;
+        ++m_state->nextID;
     }
     return id;
 }
@@ -1086,8 +1086,8 @@ void DataModel::RegisterInstance(Instance* instance) {
         return;
     }
     m_state->instances.Insert(instance->Id(), instance);
-    if (instance->Id() >= m_state->nextId) {
-        m_state->nextId = instance->Id() == std::numeric_limits<InstanceId>::max() ? 0 : instance->Id() + 1;
+    if (instance->Id() >= m_state->nextID) {
+        m_state->nextID = instance->Id() == std::numeric_limits<InstanceId>::max() ? 0 : instance->Id() + 1;
     }
 }
 

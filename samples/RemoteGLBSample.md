@@ -177,7 +177,7 @@ Helmet that chain is a -90° turn about X that stands the model up — then the
 oriented box's world AABB is `center ± Σ|axis_i * halfExtent_i|`.
 
 HUD reports: parts, nodes, triangles (`indexCount/3` or `vertexCount/3`),
-distinct `TextureHandle`s (deduped, because several parts may share one GPU
+distinct `TextureID`s (deduped, because several parts may share one GPU
 image), centre, radius, instance count.
 
 ## The studio

@@ -8,6 +8,7 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
 // ============================================================================
@@ -33,11 +34,11 @@ struct RayTracedShadowsTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> raytraced_shadow_occlusion_and_stability() {
             auto engine      = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
+            if (!engine->Graphics().Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] No raytracing support on this device; nothing to verify for RT shadows.");
                 return {};
             }
@@ -46,7 +47,7 @@ struct RayTracedShadowsTestSuite {
 
             {
                 auto& reg = engine->GetRegistry();
-                auto& rc  = engine->GetRenderContext();
+                auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {

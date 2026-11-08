@@ -13,6 +13,9 @@
 
 module;
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
@@ -313,8 +316,8 @@ void DrawModelNodeRows(
            (a.textureSamplers == b.textureSamplers) && (a.textureTransforms == b.textureTransforms);
 }
 
-[[nodiscard]] std::string FormatTextureSlot(const char* slot, ZHLN::TextureHandle handle) {
-    return std::format("{}: {}", slot, (handle != ZHLN::TextureHandle::Invalid) ? std::format("#{}", static_cast<uint64_t>(handle)) : std::string("-"));
+[[nodiscard]] std::string FormatTextureSlot(const char* slot, ZHLN::TextureID handle) {
+    return std::format("{}: {}", slot, (handle != ZHLN::TextureID::Invalid) ? std::format("#{}", static_cast<uint64_t>(handle)) : std::string("-"));
 }
 
 void DrawModelContentRows(ZHLN::GUI::Frame& ui, InspectorState& state, const ZHLN::ModelPrefab& prefab, std::string_view modelPath, int depth) {
@@ -427,19 +430,19 @@ void DrawModelContentRows(ZHLN::GUI::Frame& ui, InspectorState& state, const ZHL
         }
     }
 
-    // ---- TEXTURES (unique handles across all material slots) ----
+    // ---- TEXTURES (unique texture IDs across all material slots) ----
     struct TextureEntry {
-        ZHLN::TextureHandle handle;
+        ZHLN::TextureID textureID;
         std::string         roles;
         std::string         parts;
     };
     std::vector<TextureEntry> textures;
-    auto                      addTextureSlot = [&](ZHLN::TextureHandle handle, const char* role, std::string_view partName) {
-        if (handle == ZHLN::TextureHandle::Invalid) {
+    auto                      addTextureSlot = [&](ZHLN::TextureID handle, const char* role, std::string_view partName) {
+        if (handle == ZHLN::TextureID::Invalid) {
             return;
         }
         for (auto& entry: textures) {
-            if (entry.handle == handle) {
+            if (entry.textureID == handle) {
                 if (entry.roles.find(role) == std::string::npos) {
                     entry.roles += ", ";
                     entry.roles += role;
@@ -451,7 +454,7 @@ void DrawModelContentRows(ZHLN::GUI::Frame& ui, InspectorState& state, const ZHL
                 return;
             }
         }
-        textures.push_back(TextureEntry {.handle = handle, .roles = role, .parts = std::string(partName)});
+        textures.push_back(TextureEntry {.textureID = handle, .roles = role, .parts = std::string(partName)});
     };
     for (size_t i = 0; i < prefab.parts.size(); ++i) {
         const ZHLN::Material& mat   = prefab.parts[i].defaultMaterial;
@@ -473,9 +476,9 @@ void DrawModelContentRows(ZHLN::GUI::Frame& ui, InspectorState& state, const ZHL
         for (size_t t = 0; t < textures.size(); ++t) {
             const TextureEntry& entry = textures[t];
             TreeRow(
-                ui, state, std::format("{}/t{}", texturesPath, t), depth + 1, std::format("#{}  ({})", static_cast<uint64_t>(entry.handle), entry.roles), false,
-                std::format("Texture #{}", static_cast<uint64_t>(entry.handle)),
-                ClampDetail(std::format("Handle: #{}\nRole(s): {}\nUsed by: {}", static_cast<uint64_t>(entry.handle), entry.roles, entry.parts)), ThemeText()
+                ui, state, std::format("{}/t{}", texturesPath, t), depth + 1, std::format("#{}  ({})", static_cast<uint64_t>(entry.textureID), entry.roles), false,
+                std::format("Texture #{}", static_cast<uint64_t>(entry.textureID)),
+                ClampDetail(std::format("Texture ID: #{}\nRole(s): {}\nUsed by: {}", static_cast<uint64_t>(entry.textureID), entry.roles, entry.parts)), ThemeText()
             );
         }
     }
@@ -622,7 +625,7 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
     ClearInstances(state);
 
     auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-        engine.GetRenderContext(), engine.GetAssetManager(), std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
+        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
     );
     if (!prefab) {
         ZHLN::Log("[glTF Inspector] Failed to parse '{}' as glTF.", drop.fileName);

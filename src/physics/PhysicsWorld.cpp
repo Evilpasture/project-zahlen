@@ -228,7 +228,7 @@ void BodyTable::Init(uint32_t maxBodies) {
     slotBodyIDs.resize(slotCapacity);
     slotMaterialIDs.resize(slotCapacity);
 
-    idToHandleMap.resize(slotCapacity + 1);
+    joltIndexToBodyID.resize(slotCapacity + 1);
     joltBodyPtrs.resize(slotCapacity + 1, nullptr);
 
     slotToDense.resize(slotCapacity, 0u);
@@ -243,8 +243,8 @@ void BodyTable::Init(uint32_t maxBodies) {
     spawnPositions.resize(slotCapacity, JPH::RVec3::sZero());
     spawnRotations.resize(slotCapacity, JPH::Quat::sIdentity());
 
-    for (size_t i = 0; i < idToHandleMap.size(); ++i) {
-        idToHandleMap[i].store(0u, std::memory_order::relaxed);
+    for (size_t i = 0; i < joltIndexToBodyID.size(); ++i) {
+        joltIndexToBodyID[i].store(0u, std::memory_order::relaxed);
         joltBodyPtrs[i] = nullptr;
     }
 
@@ -267,7 +267,7 @@ void BodyTable::Shutdown() noexcept {
     slotMotionTypes.clear();
     slotBodyIDs.clear();
     slotMaterialIDs.clear();
-    idToHandleMap.clear();
+    joltIndexToBodyID.clear();
     joltBodyPtrs.clear();
     slotToDense.clear();
     denseToSlot.clear();
@@ -284,7 +284,7 @@ void BodyTable::Shutdown() noexcept {
     slotCapacity = 0;
 }
 
-auto BodyTable::ReserveSlot(SlotState pendingState, JPH::EMotionType motion, JPH::RVec3Arg spawnPos, JPH::QuatArg spawnRot) -> BodyHandle {
+auto BodyTable::ReserveSlot(SlotState pendingState, JPH::EMotionType motion, JPH::RVec3Arg spawnPos, JPH::QuatArg spawnRot) -> BodyID {
     ZHLN::MutexGuard guard(allocMutex);
     size_t           available = freeCount.load(std::memory_order::relaxed);
     if (available == 0) {
@@ -302,10 +302,10 @@ auto BodyTable::ReserveSlot(SlotState pendingState, JPH::EMotionType motion, JPH
     slotMaterialIDs[slot].store(0u, std::memory_order::relaxed);
     StoreSlotState(slot, pendingState);
 
-    return BodyHandle {.index = slot, .generation = gen};
+    return BodyID {.index = slot, .generation = gen};
 }
 
-auto BodyTable::TryMarkPendingDestroy(BodyHandle handle) noexcept -> bool {
+auto BodyTable::TryMarkPendingDestroy(BodyID handle) noexcept -> bool {
     const uint32_t slot = handle.index;
     if (slot >= slotCapacity || generations[slot].load(std::memory_order::acquire) != handle.generation) {
         return false;
@@ -325,7 +325,7 @@ auto BodyTable::TryMarkPendingDestroy(BodyHandle handle) noexcept -> bool {
     return false;
 }
 
-auto BodyTable::IsSlotActive(BodyHandle handle) const noexcept -> bool {
+auto BodyTable::IsSlotActive(BodyID handle) const noexcept -> bool {
     return handle.index < slotCapacity && generations[handle.index].load(std::memory_order::acquire) == handle.generation &&
            GetSlotPredicate(LoadSlotState(handle.index)).isActive;
 }
@@ -452,7 +452,7 @@ auto PhysicsWorld::ResolveMaterial(uint32_t id) const -> MaterialData {
     return materialDefault;
 }
 
-auto PhysicsWorld::AllocateConstraintHandle() -> ConstraintHandle {
+auto PhysicsWorld::AllocateConstraintID() -> ConstraintID {
     ZHLN::MutexGuard guard(constraintMutex);
     if (freeConstraintCount == 0) {
         ZHLN::Panic("PhysicsWorld: Exhausted fixed constraint capacity ({})!", constraintCapacity);
@@ -460,7 +460,7 @@ auto PhysicsWorld::AllocateConstraintHandle() -> ConstraintHandle {
 
     const uint32_t slot = freeConstraintSlots[--freeConstraintCount];
     const uint32_t gen  = constraintGenerations[slot].load(std::memory_order::relaxed);
-    return ConstraintHandle {.index = slot, .generation = gen};
+    return ConstraintID {.index = slot, .generation = gen};
 }
 
 void PhysicsWorld::RemoveConstraintSlot(uint32_t slot) noexcept {

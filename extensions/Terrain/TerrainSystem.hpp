@@ -39,9 +39,9 @@ class TerrainSystem {
         ECS::EntityCommandBuffer&  ecb
     );
 
-    static TerrainHandle      RegisterTerrainData(TerrainData data) noexcept;
-    static const TerrainData* GetTerrainData(TerrainHandle handle) noexcept;
-    static void               UnregisterTerrainData(TerrainHandle handle) noexcept;
+    static TerrainID      RegisterTerrainData(TerrainData data) noexcept;
+    static const TerrainData* GetTerrainData(TerrainID handle) noexcept;
+    static void               UnregisterTerrainData(TerrainID handle) noexcept;
 
     // Explicit ownership operations for TerrainComponent's heightmap slot.
     static void Attach(Engine& engine, Entity entity, TerrainComponent component);

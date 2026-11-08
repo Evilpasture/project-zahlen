@@ -108,7 +108,7 @@ ZHLN::Physics::PhysicsWorld {
   size_t commandCount = %zu
   size_t commandCapacity = %zu
   JPH::Array<const void *> joltBodyPtrs = *0x1365ecb80
-  JPH::Array<ZHLN::Atomic<uint64_t>> idToHandleMap = *0x1365ecb98
+  JPH::Array<ZHLN::Atomic<uint64_t>> joltIndexToBodyID = *0x1365ecb98
   JPH::Array<uint32_t> slotToDense = *0x1365ecbb0
   JPH::Array<uint32_t> denseToSlot = *0x1365ecbc8
   JPH::Array<uint32_t> freeSlots = *0x1365ecbe0

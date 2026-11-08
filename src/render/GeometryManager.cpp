@@ -20,7 +20,7 @@ enum class BufferSourceError : uint8_t {
 };
 
 enum class BufferUpdateError : uint8_t {
-    InvalidHandle   ZHLN_ANNOTATION(ZHLN::Description<"Buffer update received an invalid or unknown buffer handle"> {}) = 1,
+    InvalidBufferID   ZHLN_ANNOTATION(ZHLN::Description<"Buffer update received an invalid or unknown buffer ID"> {}) = 1,
     NullData        ZHLN_ANNOTATION(ZHLN::Description<"Buffer update received a null data pointer"> {}),
     EmptyData       ZHLN_ANNOTATION(ZHLN::Description<"Buffer update received zero bytes"> {}),
     ExceedsCapacity ZHLN_ANNOTATION(ZHLN::Description<"Buffer update byte count exceeds destination buffer capacity"> {}),
@@ -81,14 +81,14 @@ auto GeometryManager::AllocateGpuBuffer(size_t size, Vk::BufferUsage usage) -> s
     );
 }
 
-auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage usage) -> std::expected<BufferHandle, ErrorCode> {
+auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage usage) -> std::expected<BufferID, ErrorCode> {
     if (const auto contradiction = SourceError(source)) {
         return std::unexpected(*contradiction);
     }
 
     const size_t size = source.TotalSize();
     return AllocateGpuBuffer(size, usage)
-        .and_then([this, size, bytes = source.bytes, elementCount = source.ElementCount()](Vk::Buffer gpu_buf) -> std::expected<BufferHandle, ErrorCode> {
+        .and_then([this, size, bytes = source.bytes, elementCount = source.ElementCount()](Vk::Buffer gpu_buf) -> std::expected<BufferID, ErrorCode> {
             defer _([&] { _allocator.DestroyBuffer(gpu_buf); });
             auto  staging = AllocateStaging(_transferRing, size);
             if (!staging) {
@@ -113,20 +113,20 @@ auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage u
 }
 
 auto GeometryManager::CreateUninitializedBuffer(size_t allocationSize, Vk::BufferUsage usage, uint32_t elementCount)
-    -> std::expected<BufferHandle, ErrorCode> {
+    -> std::expected<BufferID, ErrorCode> {
     if (allocationSize == 0) {
         return std::unexpected(BufferSourceError::EmptySource);
     }
 
-    return AllocateGpuBuffer(allocationSize, usage).transform([this, elementCount](Vk::Buffer gpu_buf) -> BufferHandle {
+    return AllocateGpuBuffer(allocationSize, usage).transform([this, elementCount](Vk::Buffer gpu_buf) -> BufferID {
         const Vk::DeviceAddress<> address {_ctx.BufferAddress(gpu_buf.Handle())};
         return Adopt(std::move(gpu_buf), elementCount, address);
     });
 }
 
-auto GeometryManager::Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceAddress<> address) -> BufferHandle {
-    const BufferHandle handle = _buffers.Create(std::move(buffer), vertexCount, address);
-    if (handle == BufferHandle::Invalid) {
+auto GeometryManager::Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceAddress<> address) -> BufferID {
+    const BufferID handle = _buffers.Create(std::move(buffer), vertexCount, address);
+    if (handle == BufferID::Invalid) {
         _allocator.DestroyBuffer(buffer);
 
     } else if (NativeMesh* mesh = _buffers.Resolve(handle)) {
@@ -135,9 +135,9 @@ auto GeometryManager::Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceA
     return handle;
 }
 
-auto GeometryManager::Update(BufferHandle handle, const void* data, size_t size) noexcept -> std::expected<void, ErrorCode> {
-    if (handle == BufferHandle::Invalid) {
-        return std::unexpected(BufferUpdateError::InvalidHandle);
+auto GeometryManager::Update(BufferID handle, const void* data, size_t size) noexcept -> std::expected<void, ErrorCode> {
+    if (handle == BufferID::Invalid) {
+        return std::unexpected(BufferUpdateError::InvalidBufferID);
     }
     if (data == nullptr) {
         return std::unexpected(BufferUpdateError::NullData);
@@ -147,7 +147,7 @@ auto GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
     }
     auto* nativeMesh = _buffers.Resolve(handle);
     if (nativeMesh == nullptr) {
-        return std::unexpected(BufferUpdateError::InvalidHandle);
+        return std::unexpected(BufferUpdateError::InvalidBufferID);
     }
     if (size > nativeMesh->buffer.Size()) {
         return std::unexpected(BufferUpdateError::ExceedsCapacity);
@@ -185,7 +185,7 @@ auto GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
 
     _pendingCopies.push_back(PendingBufferCopy {
         .srcBuffer = slot.buffer.Handle(),
-        .dstHandle = handle,
+        .dstID = handle,
         .srcOffset = static_cast<VkDeviceSize>(alignedOffset),
         .size      = static_cast<VkDeviceSize>(size),
     });
@@ -202,7 +202,7 @@ void GeometryManager::RecordPendingUpdates(VkCommandBuffer cmd) noexcept {
     writtenBuffers.reserve(_pendingCopies.size());
 
     for (const PendingBufferCopy& copy: _pendingCopies) {
-        NativeMesh* dstMesh = _buffers.Resolve(copy.dstHandle);
+        NativeMesh* dstMesh = _buffers.Resolve(copy.dstID);
         if (dstMesh == nullptr || !dstMesh->buffer.Valid() || copy.size > dstMesh->buffer.Size()) {
             continue;
         }
@@ -254,7 +254,7 @@ void GeometryManager::DiscardPendingUpdates() noexcept {
     }
 }
 
-auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
+auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferID {
     const size_t size = (static_cast<size_t>(vertexCount) * sizeof(VertexPosition)) + (static_cast<size_t>(vertexCount) * sizeof(VertexTangentFrame));
 
     Vk::BufferUsage usage = Vk::BufferUsage::Vertex | Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
@@ -263,11 +263,11 @@ auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> Buffer
     }
 
     return Vk::Buffer::Create(_allocator, size, usage, Vk::MemoryUsage::GPUOnly)
-        .transform([this, vertexCount](auto&& gpu_buf) -> BufferHandle {
+        .transform([this, vertexCount](auto&& gpu_buf) -> BufferID {
             const Vk::DeviceAddress<> address {_ctx.BufferAddress(gpu_buf.Handle())};
             return Adopt(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
         })
-        .value_or(BufferHandle::Invalid);
+        .value_or(BufferID::Invalid);
 }
 
 void GeometryManager::Retire(NativeMesh& mesh) noexcept {
@@ -276,7 +276,7 @@ void GeometryManager::Retire(NativeMesh& mesh) noexcept {
     _deletionQueue.Enqueue(std::move(mesh.buffer));
 }
 
-void GeometryManager::Destroy(BufferHandle handle) {
+void GeometryManager::Destroy(BufferID handle) {
     if (auto* mesh = _buffers.Resolve(handle)) {
         Retire(*mesh);
         _buffers.Destroy(handle);

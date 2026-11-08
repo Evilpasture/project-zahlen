@@ -16,7 +16,7 @@
 #include <Zahlen/Render/FrameData.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Render/FrameScope.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/PipelineStats.hpp>
 #include <Zahlen/Render/PresentTiming.hpp>
@@ -86,19 +86,19 @@ struct RenderContext::Impl {
         }
     }
 
-    [[nodiscard]] auto AllocateTexture() -> TextureHandle {
+    [[nodiscard]] auto AllocateTexture() -> TextureID {
         const uint64_t id = nextTextureId++;
         liveTextures.insert(id);
-        return static_cast<TextureHandle>(id);
+        return static_cast<TextureID>(id);
     }
 
-    [[nodiscard]] auto AllocateNamedTexture(std::string_view name) -> TextureHandle {
+    [[nodiscard]] auto AllocateNamedTexture(std::string_view name) -> TextureID {
         if (!name.empty()) {
             const std::string key {name};
             if (const auto it = namedTextures.find(key); it != namedTextures.end()) {
-                return static_cast<TextureHandle>(it->second);
+                return static_cast<TextureID>(it->second);
             }
-            const TextureHandle handle = AllocateTexture();
+            const TextureID handle = AllocateTexture();
             namedTextures.emplace(key, static_cast<uint64_t>(handle));
             return handle;
         }
@@ -270,23 +270,23 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->liveTextures = {1, 2, 3};
 }
 
-auto RenderContext::CreateBuffer(BufferDesc desc) -> BufferHandle {
+auto RenderContext::CreateBuffer(BufferDesc desc) -> BufferID {
     const size_t byteSize = !desc.data.empty() ? desc.data.size_bytes() : desc.size;
     if (byteSize == 0) {
-        return BufferHandle::Invalid;
+        return BufferID::Invalid;
     }
     const uint64_t id = _impl->nextBufferId++;
     _impl->liveBuffers.insert(id);
-    return static_cast<BufferHandle>(id);
+    return static_cast<BufferID>(id);
 }
 
-auto RenderContext::CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferHandle {
+auto RenderContext::CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferID {
     if (meshlets.empty()) {
-        return BufferHandle::Invalid;
+        return BufferID::Invalid;
     }
     const uint64_t id = _impl->nextBufferId++;
     _impl->liveBuffers.insert(id);
-    return static_cast<BufferHandle>(id);
+    return static_cast<BufferID>(id);
 }
 
 auto RenderContext::UploadMeshlets(const MeshletBuildResult& built) -> MeshletStreams {
@@ -294,10 +294,10 @@ auto RenderContext::UploadMeshlets(const MeshletBuildResult& built) -> MeshletSt
         return {};
     }
 
-    const BufferHandle meshlets  = CreateMeshletBuffer(built.meshlets);
-    const BufferHandle vertices  = CreateBuffer<BufferUsage::Storage>(std::span {built.vertices});
-    const BufferHandle triangles = CreateBuffer<BufferUsage::Storage>(std::span {built.triangles});
-    if (meshlets == BufferHandle::Invalid || vertices == BufferHandle::Invalid || triangles == BufferHandle::Invalid) {
+    const BufferID meshlets  = CreateMeshletBuffer(built.meshlets);
+    const BufferID vertices  = CreateBuffer<BufferUsage::Storage>(std::span {built.vertices});
+    const BufferID triangles = CreateBuffer<BufferUsage::Storage>(std::span {built.triangles});
+    if (meshlets == BufferID::Invalid || vertices == BufferID::Invalid || triangles == BufferID::Invalid) {
         DestroyBuffer(meshlets);
         DestroyBuffer(vertices);
         DestroyBuffer(triangles);
@@ -312,24 +312,24 @@ auto RenderContext::UploadMeshlets(const MeshletBuildResult& built) -> MeshletSt
     };
 }
 
-void RenderContext::DestroyBuffer(BufferHandle handle) {
-    if (handle != BufferHandle::Invalid) {
+void RenderContext::DestroyBuffer(BufferID handle) {
+    if (handle != BufferID::Invalid) {
         _impl->liveBuffers.erase(static_cast<uint64_t>(handle));
     }
 }
 
-auto RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte> /*bytes*/) noexcept -> std::expected<void, ErrorCode> {
-    if (handle == BufferHandle::Invalid || !_impl->liveBuffers.contains(static_cast<uint64_t>(handle))) {
-        return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
+auto RenderContext::UpdateBuffer(BufferID handle, std::span<const std::byte> /*bytes*/) noexcept -> std::expected<void, ErrorCode> {
+    if (handle == BufferID::Invalid || !_impl->liveBuffers.contains(static_cast<uint64_t>(handle))) {
+        return std::unexpected(RenderFeatureError::UnresolvedMeshID);
     }
     return {};
 }
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
-    const auto pipeline = static_cast<PipelineHandle>(_impl->nextPipelineId++);
+    const auto pipeline = static_cast<PipelineID>(_impl->nextPipelineId++);
     const auto prePass  = (desc.alphaBlend || desc.transmissionFactor > 0.0f)
-        ? static_cast<PipelineHandle>(_impl->nextPipelineId++)
-        : PipelineHandle::Invalid;
+        ? static_cast<PipelineID>(_impl->nextPipelineId++)
+        : PipelineID::Invalid;
 
     return Material {
         .pipeline                       = pipeline,
@@ -416,52 +416,52 @@ void RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept {
     _impl->acquiredTargets.erase(reinterpret_cast<uintptr_t>(&target));
 }
 
-auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool /*hdr*/) -> std::expected<TextureHandle, ErrorCode> {
+auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool /*hdr*/) -> std::expected<TextureID, ErrorCode> {
     if (width == 0 || height == 0) {
-        return TextureHandle::Invalid;
+        return TextureID::Invalid;
     }
     return _impl->AllocateTexture();
 }
 
-void RenderContext::DestroyRenderTexture(TextureHandle handle) noexcept {
+void RenderContext::DestroyRenderTexture(TextureID handle) noexcept {
     if (static_cast<uint64_t>(handle) > 3) {
         _impl->liveTextures.erase(static_cast<uint64_t>(handle));
     }
 }
 
-auto RenderContext::CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool /*isSRGB*/) -> std::expected<TextureHandle, ErrorCode> {
+auto RenderContext::CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool /*isSRGB*/) -> std::expected<TextureID, ErrorCode> {
     if (rgba.empty() || extent.width == 0 || extent.height == 0) {
-        return TextureHandle::Invalid;
+        return TextureID::Invalid;
     }
     return _impl->AllocateTexture();
 }
 
 auto RenderContext::CreateTexture(
     std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool /*isSRGB*/, bool /*generateMips*/
-) -> std::expected<TextureHandle, ErrorCode> {
+) -> std::expected<TextureID, ErrorCode> {
     if (rgba.empty() || extent.width == 0 || extent.height == 0) {
-        return TextureHandle::Invalid;
+        return TextureID::Invalid;
     }
     return _impl->AllocateNamedTexture(name);
 }
 
-auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode> {
+auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureID, ErrorCode> {
     if (faceSize == 0 || faces[0].empty()) {
-        return TextureHandle::Invalid;
+        return TextureID::Invalid;
     }
     return _impl->AllocateTexture();
 }
 
 auto RenderContext::CreateTextureHDR(
     std::string_view name, std::span<const std::byte> rgba16f, Extent2D extent, bool /*generateMips*/
-) -> std::expected<TextureHandle, ErrorCode> {
+) -> std::expected<TextureID, ErrorCode> {
     if (rgba16f.empty() || extent.width == 0 || extent.height == 0) {
-        return TextureHandle::Invalid;
+        return TextureID::Invalid;
     }
     return _impl->AllocateNamedTexture(name);
 }
 
-void RenderContext::UnloadTexture(TextureHandle handle) {
+void RenderContext::UnloadTexture(TextureID handle) {
     if (static_cast<uint64_t>(handle) > 3) {
         _impl->liveTextures.erase(static_cast<uint64_t>(handle));
     }
@@ -484,8 +484,8 @@ auto RenderContext::CapturePipelineStats() noexcept -> PipelineStatsCapture {
 }
 
 auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
-    if (mesh.posBuffer == BufferHandle::Invalid || !_impl->liveBuffers.contains(static_cast<uint64_t>(mesh.posBuffer))) {
-        return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
+    if (mesh.posBuffer == BufferID::Invalid || !_impl->liveBuffers.contains(static_cast<uint64_t>(mesh.posBuffer))) {
+        return std::unexpected(RenderFeatureError::UnresolvedMeshID);
     }
     return std::unexpected(RenderFeatureError::FeatureNotSupported);
 }
@@ -501,18 +501,18 @@ void RenderContext::ProvokeDeviceLost() {
 
 auto RenderContext::BakeProceduralTexture(
     uint32_t width, uint32_t height, uint32_t /*variantIdx*/, float /*scale*/, float /*randomness*/
-) -> std::expected<TextureHandle, ErrorCode> {
+) -> std::expected<TextureID, ErrorCode> {
     if (width == 0 || height == 0) {
-        return TextureHandle::Invalid;
+        return TextureID::Invalid;
     }
     return _impl->AllocateTexture();
 }
 
 auto RenderContext::CreateProceduralTexture(
     std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool /*isSRGB*/, bool /*generateMips*/
-) -> TextureHandle {
+) -> TextureID {
     if (pixels.empty() || extent.width == 0 || extent.height == 0) {
-        return TextureHandle::Invalid;
+        return TextureID::Invalid;
     }
     return _impl->AllocateNamedTexture(name);
 }
@@ -565,7 +565,7 @@ void RenderContext::DrawDecal(const DecalParams& /*params*/) noexcept {
 }
 
 void RenderContext::SubmitParticleEmitter(
-    uint64_t /*emitterId*/, uint32_t /*maxParticles*/, const ParticleEmitterDesc& /*desc*/, TextureHandle /*texture*/, bool /*additive*/
+    uint64_t /*emitterId*/, uint32_t /*maxParticles*/, const ParticleEmitterDesc& /*desc*/, TextureID /*texture*/, bool /*additive*/
 ) {
 }
 
@@ -574,7 +574,7 @@ void RenderContext::SubmitMeshParticleEmitter(
 ) {
 }
 
-void RenderContext::DrawBillboards(TextureHandle /*texture*/, std::span<const BillboardQuad> /*billboards*/, bool /*additive*/) {
+void RenderContext::DrawBillboards(TextureID /*texture*/, std::span<const BillboardQuad> /*billboards*/, bool /*additive*/) {
 }
 
 auto RenderContext::DispatchSimulations(float /*dt*/) noexcept -> RenderResult {

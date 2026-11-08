@@ -79,24 +79,24 @@ class AnimationContext {
     AnimationContext(AnimationContext&&) noexcept;
     auto operator=(AnimationContext&&) noexcept -> AnimationContext&;
 
-    [[nodiscard]] auto Create(AssetID prefabAsset) -> AnimationHandle;
-    void               Destroy(std::span<const AnimationHandle> handles) noexcept;
+    [[nodiscard]] auto Create(AssetID prefabAsset) -> AnimationID;
+    void               Destroy(std::span<const AnimationID> handles) noexcept;
     void               Clear() noexcept;
-    [[nodiscard]] auto Valid(AnimationHandle handle) const noexcept -> bool;
+    [[nodiscard]] auto Valid(AnimationID handle) const noexcept -> bool;
     [[nodiscard]] auto ActiveCount() const noexcept -> size_t;
 
-    void Sync(AnimationHandle handle, const PlaybackConfig& config) noexcept;
-    void BindSkeletons(AnimationHandle handle, std::span<const SkeletonBinding> bindings) noexcept;
-    void SetIKChains(AnimationHandle handle, std::span<const IKChain> chains) noexcept;
-    void SuppressPaletteUpload(AnimationHandle handle) noexcept;
+    void Sync(AnimationID handle, const PlaybackConfig& config) noexcept;
+    void BindSkeletons(AnimationID handle, std::span<const SkeletonBinding> bindings) noexcept;
+    void SetIKChains(AnimationID handle, std::span<const IKChain> chains) noexcept;
+    void SuppressPaletteUpload(AnimationID handle) noexcept;
 
     void Step(float dt, const AssetManager& assets, PoseUploadQueue& poseUploads);
 
-    [[nodiscard]] auto Playback(AnimationHandle handle) const noexcept -> ZHLN::Optional<PlaybackState>;
-    [[nodiscard]] auto Morph(AnimationHandle handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<MorphSample>;
-    [[nodiscard]] auto RigidNode(AnimationHandle handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<Math::TransformTRS>;
-    [[nodiscard]] auto LocalPose(AnimationHandle handle) const noexcept -> std::span<const JPH::Mat44>;
-    [[nodiscard]] auto ModelPose(AnimationHandle handle) const noexcept -> std::span<const JPH::Mat44>;
+    [[nodiscard]] auto Playback(AnimationID handle) const noexcept -> ZHLN::Optional<PlaybackState>;
+    [[nodiscard]] auto Morph(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<MorphSample>;
+    [[nodiscard]] auto RigidNode(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<Math::TransformTRS>;
+    [[nodiscard]] auto LocalPose(AnimationID handle) const noexcept -> std::span<const JPH::Mat44>;
+    [[nodiscard]] auto ModelPose(AnimationID handle) const noexcept -> std::span<const JPH::Mat44>;
 
   private:
     struct Impl;

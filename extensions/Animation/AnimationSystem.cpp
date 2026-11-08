@@ -28,7 +28,7 @@ void ReleaseAnimations(Engine& engine, bool all) {
         if (!owners.empty()) {
             auto components = registry.GetRawArray<Components::AnimatorComponent>();
             for (Components::AnimatorComponent& comp: components) {
-                comp.animationHandle = AnimationHandle::Null();
+                comp.animationID = AnimationID::Null();
             }
         }
         animOpt->Clear();
@@ -39,12 +39,12 @@ void ReleaseAnimations(Engine& engine, bool all) {
         return;
     }
 
-    std::vector<AnimationHandle> doomed;
+    std::vector<AnimationID> doomed;
     doomed.reserve(owners.size());
     auto components = registry.GetRawArray<Components::AnimatorComponent>();
     for (size_t i = 0; i < owners.size(); ++i) {
         if (registry.Get<Components::PendingDestroy>(owners[i]).has_value()) {
-            const AnimationHandle handle = std::exchange(components[i].animationHandle, AnimationHandle::Null());
+            const AnimationID handle = std::exchange(components[i].animationID, AnimationID::Null());
             if (handle.IsValid()) {
                 doomed.push_back(handle);
             }
@@ -93,12 +93,12 @@ void AnimationSyncSystem::Update(
         if (animComp.prefabAsset == InvalidAssetID) {
             continue;
         }
-        if (!animComp.animationHandle.IsValid() || !anim->Valid(animComp.animationHandle)) {
-            animComp.animationHandle = anim->Create(animComp.prefabAsset);
+        if (!animComp.animationID.IsValid() || !anim->Valid(animComp.animationID)) {
+            animComp.animationID = anim->Create(animComp.prefabAsset);
         }
 
         anim->Sync(
-            animComp.animationHandle,
+            animComp.animationID,
             PlaybackConfig {
                 .prefabAsset   = animComp.prefabAsset,
                 .trackIndex    = animComp.currentTrackIdx,
@@ -114,7 +114,7 @@ void AnimationSyncSystem::Update(
     // Collect skinning/ragdoll bindings from both root and child SkeletalMeshComponent entities in O(A + S).
     struct RootBindings {
         Entity                       root = Entity::Null();
-        AnimationHandle              handle {};
+        AnimationID              animationID {};
         bool                         rootRagdoll = false;
         std::vector<SkeletonBinding> list;
     };
@@ -123,12 +123,12 @@ void AnimationSyncSystem::Update(
     perRoot.reserve(entities.size());
     for (size_t i = 0; i < entities.size(); ++i) {
         const Components::AnimatorComponent& animComp = animators[i];
-        if (!animComp.animationHandle.IsValid()) {
+        if (!animComp.animationID.IsValid()) {
             continue;
         }
         const Entity root        = entities[i];
         const bool   rootRagdoll = query.Get<Components::RagdollComponent>(root).has_value();
-        RootBindings entry {.root = root, .handle = animComp.animationHandle, .rootRagdoll = rootRagdoll, .list = {}};
+        RootBindings entry {.root = root, .animationID = animComp.animationID, .rootRagdoll = rootRagdoll, .list = {}};
         if (const auto rootSkel = query.Get<Components::SkeletalMeshComponent>(root); rootSkel && rootSkel->skeletonIndex >= 0) {
             AppendUniqueBinding(
                 entry.list,
@@ -166,7 +166,7 @@ void AnimationSyncSystem::Update(
     }
 
     for (const RootBindings& entry: perRoot) {
-        anim->BindSkeletons(entry.handle, entry.list);
+        anim->BindSkeletons(entry.animationID, entry.list);
     }
 }
 
@@ -189,7 +189,7 @@ void AnimationStepSystem::Update(
 
     for (size_t i = 0; i < entities.size(); ++i) {
         Components::AnimatorComponent& animComp = animators[i];
-        const AnimationHandle          handle   = animComp.animationHandle;
+        const AnimationID          handle   = animComp.animationID;
         if (!handle.IsValid()) {
             continue;
         }
@@ -216,7 +216,7 @@ void AnimationStepSystem::Update(
             continue;
         }
         const auto parentAnim = query.Get<Components::AnimatorComponent>(hier->parent);
-        if (!parentAnim || !parentAnim->animationHandle.IsValid()) {
+        if (!parentAnim || !parentAnim->animationID.IsValid()) {
             continue;
         }
         const auto mesh = query.Get<Components::MeshComponent>(childEnt);
@@ -224,7 +224,7 @@ void AnimationStepSystem::Update(
             continue;
         }
 
-        const AnimationHandle handle  = parentAnim->animationHandle;
+        const AnimationID handle  = parentAnim->animationID;
         const uint32_t        nodeIdx = static_cast<uint32_t>(mesh->nodeIndex);
 
         if (auto morphComp = query.Get<Components::MorphTargetComponent>(childEnt)) {

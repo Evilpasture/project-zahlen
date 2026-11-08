@@ -7,7 +7,7 @@
 
 namespace ZHLN {
 
-auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode> {
+auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureID, ErrorCode> {
     if (width == 0 || height == 0 || ctx.Device() == VK_NULL_HANDLE) {
         return std::unexpected(Vk::DescriptorHeapError::AllocationFailed);
     }
@@ -22,7 +22,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
     }
     auto image = std::move(*imageRes);
     defer _([&] { allocator.DestroyImage(image); });
-    const VkImage imageHandle = image.Handle();
+    const VkImage imageID = image.Handle();
 
     auto viewRes = image.CreateAttachmentView(ctx.Device());
     if (!viewRes) {
@@ -38,11 +38,11 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
 
     auto& entry = renderTextures.emplace(*texture, RenderTexture {}).first->second;
     entry.attachmentView = std::move(attachmentView);
-    entry.image = Vk::ImageSlice {imageHandle, entry.attachmentView, VkExtent2D {width, height}, format};
+    entry.image = Vk::ImageSlice {imageID, entry.attachmentView, VkExtent2D {width, height}, format};
     return *texture;
 }
 
-void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
+void RenderContext::Impl::DestroyRenderTexture(TextureID handle) noexcept {
     const auto it = renderTextures.find(handle);
     if (it == renderTextures.end()) {
         return;

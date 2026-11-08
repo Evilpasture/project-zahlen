@@ -24,6 +24,7 @@
 // The shared error enum, frame I/O and engine fixture live in
 // LightingRTCommon.hpp.
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
 namespace {
@@ -179,7 +180,7 @@ void PrintReportRow(int mode, const char* name, double meanLuma, const AoDeltaSt
 // giSamples/6) gets more than its minimum.
 void BuildAoScene(ZHLN::Engine& engine) {
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto rc = engine.Graphics();
 
     const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
     if (!settingsEnts.empty()) {
@@ -284,7 +285,7 @@ struct AmbientOcclusionTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> all_ao_modes_produce_their_signature() {
             auto engine = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -446,7 +447,7 @@ struct AmbientOcclusionTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> gtao_radius_responds_to_settings() {
             auto engine = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 

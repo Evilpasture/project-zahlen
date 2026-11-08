@@ -10,6 +10,8 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 #include <Zahlen/Engine/World.hpp>
 
@@ -36,7 +38,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> lit_scene_static_frame_stability() {
             auto engine      = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -44,7 +46,7 @@ struct ClusteredLightingTestSuite {
 
             {
                 auto& reg = engine->GetRegistry();
-                auto& rc  = engine->GetRenderContext();
+                auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {
@@ -160,7 +162,7 @@ struct ClusteredLightingTestSuite {
                     }
 
                     ZHLN::Test::ExpectFalse(eng.GetVisibleEntities().empty());
-                    ZHLN::Test::ExpectGt(eng.GetWorld().GetCullingStats().TotalTriangles, 0);
+                    ZHLN::Test::ExpectGt(eng.State().CullingStats().TotalTriangles, 0);
 
                     const bool frameProduced   = ZHLN::Test::ExpectGt(Mean(lumaSeries), 1.0);
                     const bool geometryVisible = ZHLN::Test::ExpectGt(Mean(litSeries), 500.0);
@@ -228,7 +230,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> point_light_cluster_culling_sweep() {
             auto engine      = CreateTestEngine(320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -237,7 +239,7 @@ struct ClusteredLightingTestSuite {
             ZHLN::Entity redLight = ZHLN::Entity::Null();
             {
                 auto& reg = engine->GetRegistry();
-                auto& rc  = engine->GetRenderContext();
+                auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {
@@ -465,7 +467,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> point_light_static_reference_no_history() {
             auto engine      = CreateTestEngine(320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -475,7 +477,7 @@ struct ClusteredLightingTestSuite {
 
             {
                 auto& reg = engine->GetRegistry();
-                auto& rc  = engine->GetRenderContext();
+                auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {
@@ -602,7 +604,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> multi_light_cluster_accumulation_and_chromatic_interaction() {
             auto engine      = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -610,7 +612,7 @@ struct ClusteredLightingTestSuite {
 
             {
                 auto& reg = engine->GetRegistry();
-                auto& rc  = engine->GetRenderContext();
+                auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {
@@ -863,7 +865,7 @@ struct ClusteredLightingTestSuite {
         std::expected<void, ZHLN::ErrorCode> clustered_lighting_no_flat_black_tile() {
             // Use 640x480 to keep the test cheap; tile size = 40x53
             auto engine = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -871,7 +873,7 @@ struct ClusteredLightingTestSuite {
 
             {
                 auto& reg = engine->GetRegistry();
-                auto& rc  = engine->GetRenderContext();
+                auto rc = engine->Graphics();
 
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {

@@ -91,7 +91,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
                 auto gpu_buf = std::move(*gpu_buf_res);
 
                 auto address               = ctx.BufferAddress(gpu_buf.Handle());
-                frames.debugMeshHandles[i] = geometry.Adopt(std::move(gpu_buf), kMaxDebugVertices, Vk::DeviceAddress<> {address});
+                frames.debugMeshIDs[i] = geometry.Adopt(std::move(gpu_buf), kMaxDebugVertices, Vk::DeviceAddress<> {address});
             }
             return {};
         });
@@ -113,11 +113,11 @@ auto RenderContext::Impl::InitSceneHeaps(Vk::Sampler globalSamplerValue, Vk::Sam
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    // Registration is one step: a handle that comes back is already written.
+    // Registration is one step: an ID that comes back is already written.
     auto globalSlot = heapManager.RegisterSampler(globalSampler);
     auto clampSlot  = heapManager.RegisterSampler(clampSampler);
     // The point sampler is chosen by the post-process feature after this point, so
-    // its handle is reserved and bound there.
+    // its slot is reserved and bound there.
     auto pointSlot = heapManager.ReserveSampler();
     if (!globalSlot || !clampSlot || !pointSlot) {
         return std::unexpected(Vk::DescriptorHeapError::SamplerSlotsExhausted);
@@ -143,7 +143,7 @@ auto RenderContext::Impl::InitSceneHeaps(Vk::Sampler globalSamplerValue, Vk::Sam
     materialSamplerBaseSlot = *materialBase;
 
     // The IBL and lighting images do not exist yet: their mappings are baked into
-    // pipelines first, so the handles are reserved here and bound when the images
+    // pipelines first, so the slots are reserved here and bound when the images
     // are created.
     auto iblSlot   = heapManager.ReserveImage();
     auto brdfSlot  = heapManager.ReserveImage();
@@ -191,7 +191,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
             .Sampler(set, 9, clampSamplerSlot)
             .SampledImage(set, 10, transLightingSlot)
             .SamplerArray(set, 11, materialSamplerBaseSlot)
-            .BindlessTextureArray(set, 12, textureManager.BindlessBaseHandle())
+            .BindlessTextureArray(set, 12, textureManager.BindlessBaseSlotID())
             .Build();
     };
 

@@ -12,7 +12,7 @@
 // short version: left generic, a Vec3 crosses as an opaque BoxedObject, so a
 // script could only hand back one it had already been given. Physics calls like
 //   SetCharacterVelocity(Entity, Float3)
-//   Raycast(Double3 origin, Float3 dir, float max, Physics::BodyHandle ignore)
+//   Raycast(Double3 origin, Float3 dir, float max, Physics::BodyID ignore)
 // would be uncallable from Lua, which is most of the reason the
 // ZHLN_DispatchCommand table still exists.
 //

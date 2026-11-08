@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <Jolt/Jolt.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Optional.hpp>
@@ -16,7 +15,7 @@
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Engine/SystemContext.hpp>
 #include <Zahlen/Window/WindowInput.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/GUI/Font.hpp>
 #include <Zahlen/GUI/UIData.hpp>
 #include <cstddef>
@@ -60,6 +59,13 @@ struct UIInput;
 
 class ArticulationSystem;
 class Engine;
+struct EngineAccess;
+class GraphicsDevice;
+class Simulation;
+class DebugDraw;
+class AssetLibrary;
+class AudioEngine;
+class EngineState;
 
 class ZHLN_API Engine {
   public:
@@ -115,23 +121,25 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetAcquiredTarget() noexcept -> std::optional<FrameTarget>;
     [[nodiscard]] auto GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget>;
 
-    auto GetKernel() -> Kernel&;
-    auto GetWorld() -> World&;
+    // Capability facades: small value-type views of engine-owned subsystems.
+    // The concrete Kernel/World/RenderContext/... stay inside the engine.
+    [[nodiscard]] auto Graphics() noexcept -> GraphicsDevice;
+    [[nodiscard]] auto Physics() noexcept -> Simulation;
+    [[nodiscard]] auto Debug() noexcept -> DebugDraw;
+    [[nodiscard]] auto Assets() noexcept -> AssetLibrary;
+    [[nodiscard]] auto Audio() noexcept -> AudioEngine;
+    [[nodiscard]] auto State() noexcept -> ZHLN::EngineState;
 
-    // This execution's clock and scratch pool. Engine services are not part of
-    // it: they belong to the graphs, bound once (see EnsureSystemGraphs).
-    auto MakeFrame(float dt) -> Frame;
+    // This execution's clock, interpolation state and scratch pool. Engine
+    // services are not part of it: they belong to the graphs, bound once (see
+    // EnsureSystemGraphs). Alpha comes from Clock::ConsumeFixedSteps.
+    auto MakeFrame(float dt, FrameAlpha alpha) -> Frame;
 
     // Hand every worker's scratch arena back. Called at the start of each graph,
     // where no system is running: the memory the previous graph's systems were
     // handed stops being valid here.
     void ResetWorkerScratch() noexcept;
 
-    auto               GetPhysicsContext() -> PhysicsContext&;
-    auto               GetRenderContext() -> RenderContext&;
-    auto               GetSceneData() -> SceneData&;
-    auto               GetAssetManager() -> AssetManager&;
-    auto               GetAudioContext() -> AudioContext&;
     auto               GetInput() noexcept -> InputContext&;
     [[nodiscard]] auto GetInput() const noexcept -> const InputContext&;
     auto               GetFileSystemWatcher() -> FileSystemWatcher&;
@@ -154,10 +162,13 @@ class ZHLN_API Engine {
     // Simulation-produced skinning poses, drained once per frame by RenderSystem.
     auto               GetPoseUploads() -> PoseUploadQueue&;
     auto               GetArticulationSystem() -> ArticulationSystem&;
-    auto               GetVisibleEntities() -> JPH::Array<Entity>&;
-    auto               GetVisibleShadowEntities() -> JPH::Array<Entity>&;
-    auto               GetCurrentAlpha() -> float&;
-    auto GetPhysicsAccumulator() -> float&;
+    [[nodiscard]] auto GetVisibleEntities() const noexcept -> std::span<const Entity>;
+    [[nodiscard]] auto GetVisibleShadowEntities() const noexcept -> std::span<const Entity>;
+
+    // Scene teardown: the culling output belongs to the last frame, so clearing
+    // the scene has to invalidate it. Explicit operation, not a mutable
+    // container handed to the caller.
+    void ClearVisibilityLists() noexcept;
 
     // Host-owned, per-engine state (also used by the glTF inspector).
     [[nodiscard]] auto GetGameState() const -> void*;
@@ -259,6 +270,8 @@ class ZHLN_API Engine {
                     EventPoller pollEvents = nullptr) -> std::expected<void, ErrorCode>;
 
   private:
+    friend struct ZHLN::EngineAccess;
+
     // Consume window-input resize notifications during the event pump. The
     // application and bespoke hosts never need to inspect ECS resize flags.
     void SynchronizeResize();

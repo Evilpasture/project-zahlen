@@ -90,7 +90,7 @@ auto MakeGLB(size_t contentBytes) -> std::vector<uint8_t> {
 }
 
 // Polls @p fetcher until @p id is terminal or the budget runs out.
-auto WaitTerminal(ZHLN::Remote::AsyncAssetFetcher& fetcher, ZHLN::Remote::FetchHandle id, int milliseconds = 10000) -> FetchStatus {
+auto WaitTerminal(ZHLN::Remote::AsyncAssetFetcher& fetcher, ZHLN::Remote::FetchID id, int milliseconds = 10000) -> FetchStatus {
     for (int waited = 0; waited < milliseconds; waited += 10) {
         const FetchStatus status = fetcher.Status(id);
         if (status == FetchStatus::Succeeded || status == FetchStatus::Failed) {
@@ -865,8 +865,8 @@ struct RemoteAssetTestSuite {
             ZHLN::Test::ExpectFalse(fetcher.Take(id).has_value());
 
             // Unknown ids are Idle, not an out-of-bounds.
-            ZHLN::Test::ExpectEq(fetcher.Status(ZHLN::Remote::FetchHandle {}), FetchStatus::Idle);
-            ZHLN::Test::ExpectFalse(fetcher.Take(ZHLN::Remote::FetchHandle {}).has_value());
+            ZHLN::Test::ExpectEq(fetcher.Status(ZHLN::Remote::FetchID {}), FetchStatus::Idle);
+            ZHLN::Test::ExpectFalse(fetcher.Take(ZHLN::Remote::FetchID {}).has_value());
             return {};
         }
 

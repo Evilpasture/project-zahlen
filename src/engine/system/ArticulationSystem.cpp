@@ -82,8 +82,8 @@ bool ArticulationSystem::AttachRagdoll(
 
     const std::vector<Physics::RagdollPartParams> parts(authoredParts.begin(), authoredParts.end());
 
-    const auto ragdollHandle = pc.CreateSkeletalRagdoll(joltSkel, parts);
-    if (ragdollHandle == Physics::RagdollHandle::Invalid) {
+    const auto ragdollID = pc.CreateSkeletalRagdoll(joltSkel, parts);
+    if (ragdollID == Physics::RagdollID::Invalid) {
         return false;
     }
 
@@ -91,7 +91,7 @@ bool ArticulationSystem::AttachRagdoll(
 
     SceneResources::Attach(
         pc, reg, rootEntity, Components::RagdollComponent {
-                        .ragdollHandle    = ragdollHandle,
+                        .ragdollID    = ragdollID,
                         .skeletonAsset    = InvalidAssetID,
                         .state            = RagdollState::Inactive,
                         .prevState        = RagdollState::Inactive,
@@ -121,10 +121,10 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         Components::RagdollComponent& ragComp = ragdolls[i];
         auto                          phys    = query.Get<Components::PhysicsComponent>(e);
 
-        if (ragComp.ragdollHandle == Physics::RagdollHandle::Invalid) {
+        if (ragComp.ragdollID == Physics::RagdollID::Invalid) {
             continue;
         }
-        auto ragdoll = pc.GetRagdoll(ragComp.ragdollHandle);
+        auto ragdoll = pc.GetRagdoll(ragComp.ragdollID);
         if (!ragdoll) {
             continue;
         }
@@ -145,7 +145,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         }
 
         if (auto impulseCmd = query.Get<Components::RagdollImpulseCommand>(e)) {
-            pc.AddRagdollImpulse(ragComp.ragdollHandle, impulseCmd->jointIndex, impulseCmd->impulse);
+            pc.AddRagdollImpulse(ragComp.ragdollID, impulseCmd->jointIndex, impulseCmd->impulse);
             ecb.RemoveComponent<Components::RagdollImpulseCommand>(e);
         }
 
@@ -182,7 +182,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
 
         JPH::RVec3 capsuleWorldPos = JPH::RVec3::sZero();
         if (phys) {
-            if (const auto bodyPos = pc.BodyPosition(phys->physicsHandle)) {
+            if (const auto bodyPos = pc.BodyPosition(phys->physicsID)) {
                 capsuleWorldPos = *bodyPos;
             }
         }
@@ -217,26 +217,26 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         if (ragComp.state != ragComp.prevState) {
             if (ragComp.state == RagdollState::Dynamic || ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
                 if (!ragComp.isAddedToPhysics) {
-                    const JPH::Vec3 initialVelocity = phys ? pc.GetCharacterVelocity(phys->physicsHandle) : JPH::Vec3::sZero();
-                    pc.ActivateRagdoll(ragComp.ragdollHandle, animPose, initialVelocity);
+                    const JPH::Vec3 initialVelocity = phys ? pc.GetCharacterVelocity(phys->physicsID) : JPH::Vec3::sZero();
+                    pc.ActivateRagdoll(ragComp.ragdollID, animPose, initialVelocity);
                     ragComp.isAddedToPhysics = true;
                 }
             } else if (ragComp.state == RagdollState::Inactive && ragComp.isAddedToPhysics) {
-                pc.RemoveRagdoll(ragComp.ragdollHandle);
+                pc.RemoveRagdoll(ragComp.ragdollID);
                 ragComp.isAddedToPhysics = false;
             }
             ragComp.prevState = ragComp.state;
         }
 
         if (ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
-            pc.DriveRagdollPose(ragComp.ragdollHandle, animPose);
+            pc.DriveRagdollPose(ragComp.ragdollID, animPose);
         }
 
         if (ragComp.state != RagdollState::Inactive) {
             JPH::Array<JPH::Mat44> physicalWorldJoints(count, JPH::Mat44::sIdentity());
             JPH::RVec3             actualRootOffset = JPH::RVec3::sZero();
 
-            if (!pc.GetRagdollPose(ragComp.ragdollHandle, actualRootOffset, physicalWorldJoints.data())) {
+            if (!pc.GetRagdollPose(ragComp.ragdollID, actualRootOffset, physicalWorldJoints.data())) {
                 continue;
             }
 

@@ -33,6 +33,9 @@
 // error. See scripts/run_fidelity.sh for the driver that feeds it the Khronos
 // scenario set and compares the frames against the reference goldens.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
@@ -262,7 +265,7 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
     // authored 2048px shoe/cloth normal and color textures in fidelity stills;
     // the renderer's trilinear/aniso samplers select the right mip at a distance.
     auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-        engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath, virtualPath,
+        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), bytes, virtualPath, virtualPath,
         ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048}
     );
     if (!prefab) {
@@ -540,7 +543,7 @@ enum class DiagnosticCapture {
     }
 
     auto& registry = engine.GetRegistry();
-    auto& renderer = engine.GetRenderContext();
+    auto renderer = engine.Graphics();
     uint32_t transmitting = 0;
     uint32_t opaque       = 0;
     uint32_t iridescent   = 0;
@@ -550,7 +553,7 @@ enum class DiagnosticCapture {
         if (!mesh) {
             return false;
         }
-        auto material = renderer.GetGPUMaterial(mesh->materialAsset);
+        auto material = renderer.Material(mesh->materialAsset);
         if (!material) {
             ZHLN::Log("[Fidelity] Diagnostic cannot find a material for an imported mesh.");
             return false;
@@ -572,19 +575,19 @@ enum class DiagnosticCapture {
                 // BLEND with alpha 1 keeps this otherwise OPAQUE mesh in the
                 // forward pass, at unchanged full coverage. Textured or
                 // alpha-covered glass needs a separate shader mask.
-                if (material->alphaMode != 0 || material->albedoMap != ZHLN::TextureHandle::Invalid) {
+                if (material->alphaMode != 0 || material->albedoMap != ZHLN::TextureID::Invalid) {
                     ZHLN::Log("[Fidelity] Transmission coverage requires untextured OPAQUE glass; this material is unsupported.");
                     return false;
                 }
                 material->unlit           = true;
                 material->alphaMode       = 2;
                 material->baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
-                renderer.RegisterGPUMaterial(mesh->materialAsset, *material);
+                renderer.RegisterMaterial(mesh->materialAsset, *material);
             } else if (mode == DiagnosticCapture::TransmissionWithoutIridescence) {
                 if (material->iridescenceFactor > 0.0f) {
                     ++iridescent;
                     material->iridescenceFactor = 0.0f;
-                    renderer.RegisterGPUMaterial(mesh->materialAsset, *material);
+                    renderer.RegisterMaterial(mesh->materialAsset, *material);
                 }
             }
         } else if (mode == DiagnosticCapture::DielectricSpecular && !material->unlit) {
@@ -599,7 +602,7 @@ enum class DiagnosticCapture {
             material->emissiveFactor.x   = 0.0f;
             material->emissiveFactor.y   = 0.0f;
             material->emissiveFactor.z   = 0.0f;
-            renderer.RegisterGPUMaterial(mesh->materialAsset, *material);
+            renderer.RegisterMaterial(mesh->materialAsset, *material);
         }
     }
 
@@ -797,8 +800,8 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Log("[Fidelity] Lighting path exceeds {} characters.", ZHLN::String256::kMaxTextLength);
             return EXIT_FAILURE;
         }
-        auto& assets = engine->GetAssetManager();
-        auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(assets.VFS(), scenario.lighting);
+        auto assets = engine->Assets();
+        auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(ZHLN::EngineAccess::AssetsOf(*engine).VFS(), scenario.lighting);
         if (!decoded) {
             ZHLN::Log("[Fidelity] Cannot decode lighting '{}': {}", scenario.lighting, decoded.error());
             return EXIT_FAILURE;
@@ -832,7 +835,7 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
 
-    engine->GetRenderContext().SetResolution(
+    engine->Graphics().SetResolution(
         ZHLN::Extent2D {
             .width  = scenario.dimensions.width * kDevicePixelRatio,
             .height = scenario.dimensions.height * kDevicePixelRatio,
@@ -885,7 +888,7 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
 
-    const auto capture = engine->GetRenderContext().CaptureFrame();
+    const auto capture = engine->Graphics().CaptureFrame();
     if (!capture) {
         ZHLN::Log("[Fidelity] Capture failed: {}", capture.error());
         return EXIT_FAILURE;

@@ -168,7 +168,7 @@ struct TestLuaDataModelSuite {
             const auto spawn = StaticRefCast<SpawnPoint>(spawnInstance);
             ZHLN::Test::ExpectTrue(humanoid->RootPart() == torso);
             ZHLN::Test::ExpectTrue(humanoid->State() == HumanoidState::Running);
-            ZHLN::Test::ExpectEq(decal->TextureId(), std::string("images/logo_tshirt.png"));
+            ZHLN::Test::ExpectEq(decal->GetTextureID(), std::string("images/logo_tshirt.png"));
             ZHLN::Test::ExpectTrue(decal->Face() == DecalFace::Front && decal->WrapMode() == DecalWrapMode::Stretch);
             ZHLN::Test::ExpectTrue(sound->Playing() && sound->Loops() && sound->Volume() == 0.75f);
             ZHLN::Test::ExpectTrue(motor->Part1() == torso && motor->Part2() == torso);

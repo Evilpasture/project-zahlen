@@ -25,6 +25,11 @@
 //   ./build/p2996/samples/BSPMurderDronesSample
 //   ./build/p2996/samples/BSPMurderDronesSample import/engine_assets/maps/gm_murder_drones.bsp
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <BSP/BSPGeometry.hpp>
 #include <BSP/BSPImporter.hpp>
 #include <BSP/BSPRead.hpp>
@@ -55,7 +60,7 @@
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Engine/Scene.hpp>
@@ -285,30 +290,30 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
 
     // The player is a CharacterVirtual, not a Jolt body, so it is not
     // in the broadphase and cannot be hit -- no ignore handle is needed.
-    const ZHLN::Physics::RaycastResult hit = engine.GetPhysicsContext().Raycast(cc->camera.position, dir, kPickDistance);
+    const ZHLN::Physics::RaycastResult hit = engine.Physics().Raycast(cc->camera.position, dir, kPickDistance);
     if (!hit.hasHit) {
         return;
     }
 
     g_pick.hasHit = true;
-    // RaycastResult::position is RVec3 (double) and this struct is Vec3 (float):
-    // DVec3's Vec3 conversion operator is explicit, so it has to be spelled out.
-    g_pick.position  = static_cast<JPH::Vec3>(hit.position);
+    // RaycastResult::position is Double3 (world space) and this struct is Vec3
+    // (local space): widen to RVec3 first, then narrow to the local spelling.
+    g_pick.position  = static_cast<JPH::Vec3>(static_cast<JPH::RVec3>(hit.position));
     g_pick.normal    = hit.normal;
     g_pick.distance  = hit.fraction * kPickDistance;
-    g_pick.bodyIndex = hit.handle.index;
+    g_pick.bodyIndex = hit.bodyID.index;
 
     // Body -> entity. Physics slots are a separate generational pool from ECS
-    // entities, and PhysicsContext::Raycast hands back a validated BodyHandle
+    // entities, and PhysicsContext::Raycast hands back a validated BodyID
     // (it unpacks Jolt's user data and checks the generation), so the mapping
     // is a direct handle comparison. GetEntitiesWith returns a span, not a
     // vector, so this walk allocates nothing.
     for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
         const auto phys = reg.Get<ZHLN::Components::PhysicsComponent>(e);
-        if (!phys || phys->physicsHandle == ZHLN::Physics::BodyHandle::Null()) {
+        if (!phys || phys->physicsID == ZHLN::Physics::BodyID::Null()) {
             continue;
         }
-        if (phys->physicsHandle == hit.handle) {
+        if (phys->physicsID == hit.bodyID) {
             g_pick.label  = PickLabel(reg, e);
             g_pick.entity = e;
             return;
@@ -1567,7 +1572,7 @@ auto main(int argc, char* argv[]) -> int {
     const std::string virtualPath = mapPath.string();
     ZHLN::Log("[BSPSample] Importing BSP geometry and resolving materials...");
     g_rigImportOpts = importOpts;
-    auto prefabOpt  = ZHLN::BSP::LoadBSPPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bspBytes, virtualPath, importOpts);
+    auto prefabOpt  = ZHLN::BSP::LoadBSPPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bspBytes, virtualPath, importOpts);
     if (!prefabOpt) {
         ZHLN::LogError("[BSPSample] Failed to import BSP prefab for '{}'", virtualPath);
         return EXIT_FAILURE;
@@ -1576,7 +1581,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[BSPSample] Imported prefab: {} part(s), {} node(s), {} light(s)", prefab.parts.size(), prefab.nodes.size(), prefab.lights.size());
 
     // 5b. Preload static prop models referenced by the map into AssetManager
-    const size_t preloadedProps = ZHLN::BSP::PreloadStaticProps(engine->GetRenderContext(), engine->GetAssetManager(), bspMap, importOpts);
+    const size_t preloadedProps = ZHLN::BSP::PreloadStaticProps(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bspMap, importOpts);
     ZHLN::Log("[BSPSample] Preloaded {} static prop model prefab(s)", preloadedProps);
 
     // 6. Describe and Instantiate Scene
@@ -1626,13 +1631,13 @@ auto main(int argc, char* argv[]) -> int {
     // VoidCatcherContactListener). Static props and brush bodies can never
     // reach it, and the player is a CharacterVirtual, not a Jolt body.
     {
-        auto& physics = engine->GetPhysicsContext();
+        auto& physics = ZHLN::EngineAccess::PhysicsOf(*engine);
         auto& reg     = engine->GetRegistry();
 
         std::unordered_map<uint32_t, VoidCatcherContactListener::PropInfo> propBodies;
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
             const auto phys = reg.Get<ZHLN::Components::PhysicsComponent>(e);
-            if (!phys || phys->isStatic || phys->physicsHandle == ZHLN::Physics::BodyHandle::Null()) {
+            if (!phys || phys->isStatic || phys->physicsID == ZHLN::Physics::BodyID::Null()) {
                 continue;
             }
             const auto source = reg.Get<ZHLN::Components::SceneSourceComponent>(e);
@@ -1641,7 +1646,7 @@ auto main(int argc, char* argv[]) -> int {
             }
             const auto        name                     = reg.Get<ZHLN::Components::NameComponent>(e);
             std::string       display                  = (name && name->name.c_str()[0] != '\0') ? name->name.c_str() : source->source.c_str();
-            const JPH::BodyID id                       = ZHLN::Physics::GetBodyID(physics.GetWorld(), phys->physicsHandle);
+            const JPH::BodyID id                       = ZHLN::Physics::GetBodyID(physics.GetWorld(), phys->physicsID);
             propBodies[id.GetIndexAndSequenceNumber()] = VoidCatcherContactListener::PropInfo {std::move(display)};
         }
 
@@ -1671,14 +1676,14 @@ auto main(int argc, char* argv[]) -> int {
     // core knowing a parser exists.
     const char*                        rigOverride = std::getenv("ZHLN_PROCEDURAL_RIG");
     const std::string_view             rigName     = rigOverride != nullptr && rigOverride[0] != '\0' ? std::string_view(rigOverride) : kDefaultRigPath;
-    ZHLN::Optional<ZHLN::ModelPrefab&> rigPrefab   = ZHLN::GLTF::LoadGLBPrefab(engine->GetRenderContext(), engine->GetAssetManager(), rigName);
+    ZHLN::Optional<ZHLN::ModelPrefab&> rigPrefab   = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), rigName);
     std::string_view                   rigPath     = rigName;
     if (!rigPrefab && rigName != kFallbackRigPath) {
         // UziProc.glb is an LFS object, so a checkout without the payload sees a
         // pointer file that cgltf refuses. The reference rig is committed
         // outright; try it before giving up on GLBs.
         ZHLN::LogWarning("[BSPSample] Could not load '{}' (an unpulled Git LFS pointer?). Trying '{}'.", rigName, kFallbackRigPath);
-        rigPrefab = ZHLN::GLTF::LoadGLBPrefab(engine->GetRenderContext(), engine->GetAssetManager(), kFallbackRigPath);
+        rigPrefab = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), kFallbackRigPath);
         rigPath   = kFallbackRigPath;
     }
     if (rigPrefab) {
@@ -1711,7 +1716,7 @@ auto main(int argc, char* argv[]) -> int {
 
     {
         auto& reg     = engine->GetRegistry();
-        auto& physics = engine->GetPhysicsContext();
+        auto& physics = ZHLN::EngineAccess::PhysicsOf(*engine);
 
         // DescribeScene already converted the first info_player_start into
         // scene.camera (or kept the authored default when the map has none).
@@ -1732,8 +1737,8 @@ auto main(int argc, char* argv[]) -> int {
             .maxSlopeAngle    = JPH::DegreesToRadians(50.0f),
             .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -playerHull.GetLifterOffsetY()),
         };
-        const ZHLN::Physics::BodyHandle playerBody = physics.CreateCharacter(spawnCenter, characterParams);
-        if (playerBody == ZHLN::Physics::BodyHandle::Null()) {
+        const ZHLN::Physics::BodyID playerBody = physics.CreateCharacter(spawnCenter, characterParams);
+        if (playerBody == ZHLN::Physics::BodyID::Null()) {
             ZHLN::LogError("[BSPSample] Failed to create the player CharacterVirtual body.");
             return EXIT_FAILURE;
         }
@@ -1743,7 +1748,7 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Components::PlayerTagComponent {}, ZHLN::Components::NameComponent {.name = ZHLN::String64("Player_Procedural")},
             ZHLN::Components::TransformComponent {.position = spawnCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
             ZHLN::Components::WorldTransformComponent {.world = playerWorld, .previous = playerWorld},
-            ZHLN::Components::PhysicsComponent {.physicsHandle = playerBody, .isStatic = false}, ZHLN::Character::InputComponent {},
+            ZHLN::Components::PhysicsComponent {.physicsID = playerBody, .isStatic = false}, ZHLN::Character::InputComponent {},
             ZHLN::Character::MovementComponent {.speed = kWalkSpeedMeters, .jumpForce = kJumpForceMeters}
         );
 
@@ -1884,7 +1889,7 @@ auto main(int argc, char* argv[]) -> int {
         auto&      reg   = engine->GetRegistry();
         const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
         if (input && input->needsResize) {
-            engine->GetRenderContext().SetResolution(input->newSize);
+            engine->Graphics().SetResolution(input->newSize);
             input->needsResize = false;
             continue;
         }
@@ -2052,7 +2057,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     if (g_voidListener != nullptr) {
-        JPH::PhysicsSystem& system = engine->GetPhysicsContext().GetInternalSystem();
+        JPH::PhysicsSystem& system = ZHLN::EngineAccess::PhysicsOf(*engine).GetInternalSystem();
         system.SetContactListener(g_voidListener->Inner());
         system.GetBodyInterface().RemoveBody(g_voidCatcher);
         system.GetBodyInterface().DestroyBody(g_voidCatcher);

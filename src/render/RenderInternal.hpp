@@ -155,14 +155,14 @@ struct RenderContext::Impl: Renderer {
     Vk::Sampler pointSampler;
     Vk::Sampler blueNoiseSampler;
 
-    Vk::SamplerHandle globalSamplerSlot;
-    Vk::SamplerHandle materialSamplerBaseSlot; // Nine contiguous S/T wrap combinations.
-    Vk::SamplerHandle clampSamplerSlot;
-    Vk::SamplerHandle pointSamplerSlot;
-    Vk::TextureHandle iblPrefilteredSlot;
-    Vk::TextureHandle iblBrdfLutSlot;
-    Vk::TextureHandle transLightingSlot;
-    Vk::TextureHandle decalDepthSlot;
+    Vk::SamplerSlotID globalSamplerSlot;
+    Vk::SamplerSlotID materialSamplerBaseSlot; // Nine contiguous S/T wrap combinations.
+    Vk::SamplerSlotID clampSamplerSlot;
+    Vk::SamplerSlotID pointSamplerSlot;
+    Vk::TextureSlotID iblPrefilteredSlot;
+    Vk::TextureSlotID iblBrdfLutSlot;
+    Vk::TextureSlotID transLightingSlot;
+    Vk::TextureSlotID decalDepthSlot;
 
     // The six AA pipelines, owned as one group by the passes that read them.
     AntiAliasingResources antiAliasing;
@@ -171,7 +171,7 @@ struct RenderContext::Impl: Renderer {
     ComputePassResources compute;
 
     struct EmitterStorage {
-        BufferHandle buffer                  = BufferHandle::Invalid;
+        BufferID buffer                  = BufferID::Invalid;
         uint32_t     capacity                = 0;
         uint64_t     lastSeenFrame           = 0;
         bool         allocationWarningLogged = false;
@@ -216,7 +216,7 @@ struct RenderContext::Impl: Renderer {
         uint32_t               blendMode    = 0;
         uint32_t               alignment    = 0;
         uint32_t               serial       = 0;
-        PerFrame<BufferHandle> buffers {};
+        PerFrame<BufferID> buffers {};
         PerFrame<uint32_t>     capacities {};
     };
     ZHLN::Array<BillboardSlot> billboardSlots;
@@ -240,7 +240,7 @@ struct RenderContext::Impl: Renderer {
         Vk::AttachmentLayout layout = Vk::AttachmentLayout::Undefined;
         bool                 drawn  = false;
     };
-    std::unordered_map<TextureHandle, RenderTexture> renderTextures;
+    std::unordered_map<TextureID, RenderTexture> renderTextures;
 
     static inline std::atomic<uint64_t> nextRendererId {1};
     uint64_t                            rendererId      = nextRendererId.fetch_add(1, std::memory_order::relaxed);
@@ -285,9 +285,9 @@ struct RenderContext::Impl: Renderer {
     [[nodiscard]] auto FrameCommand() const noexcept -> VkCommandBuffer;
     void               ReleaseTarget(const PresentationTarget& aux) noexcept;
     void               DestroyDestinations() noexcept;
-    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
-    void               DestroyRenderTexture(TextureHandle handle) noexcept;
-    [[nodiscard]] auto EnsureEmitterStorage(EmitterStorageMap& emitters, uint64_t emitterId, uint32_t maxParticles, size_t particleStride) -> BufferHandle;
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureID, ErrorCode>;
+    void               DestroyRenderTexture(TextureID handle) noexcept;
+    [[nodiscard]] auto EnsureEmitterStorage(EmitterStorageMap& emitters, uint64_t emitterId, uint32_t maxParticles, size_t particleStride) -> BufferID;
     void               EvictInactiveEmitters() noexcept;
     void               ClearEmitterBuffers() noexcept;
 
@@ -387,7 +387,7 @@ struct RenderContext::Impl: Renderer {
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildProceduralBakePipeline();
     [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
-        -> std::expected<TextureHandle, ErrorCode>;
+        -> std::expected<TextureID, ErrorCode>;
 
     void BuildTLAS(VkCommandBuffer cmd, std::span<const SkinnedBlasEntry> skinnedBlas) noexcept;
 

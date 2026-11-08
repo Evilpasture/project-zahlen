@@ -6,7 +6,7 @@
 #include "PhysicsWorld.hpp"
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Physics/Physics.hpp>
-#include <Zahlen/Physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <atomic>
 #include <cmath>
 
@@ -47,29 +47,29 @@ class ContactListener final: public JPH::ContactListener {
         }
         ContactEvent& ev = _world->contactBuffer[idx];
         ev.type          = ContactType::Removed;
-        ev.body1         = GetHandle(pair.GetBody1ID());
-        ev.body2         = GetHandle(pair.GetBody2ID());
+        ev.body1         = LookupBodyID(pair.GetBody1ID());
+        ev.body2         = LookupBodyID(pair.GetBody2ID());
     }
 
   private:
     PhysicsWorld* _world;
 
-    static auto DecodeHandle(uint64_t raw) noexcept -> BodyHandle {
-        return raw != 0 ? BodyHandle::Unpack(raw) : BodyHandle::Null();
+    static auto DecodeBodyID(uint64_t raw) noexcept -> BodyID {
+        return raw != 0 ? BodyID::Unpack(raw) : BodyID::Null();
     }
 
     auto GetDense(JPH::BodyID id) const noexcept -> uint32_t {
         const auto& bt     = _world->bodyTable;
-        const auto  handle = GetHandle(id);
+        const auto  handle = LookupBodyID(id);
         if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::relaxed) != handle.generation) {
             return 0xFFFFFFFFu;
         }
         return bt.slotToDense[handle.index];
     }
 
-    auto GetHandle(JPH::BodyID id) const noexcept -> BodyHandle {
+    auto LookupBodyID(JPH::BodyID id) const noexcept -> BodyID {
         const uint32_t jIdx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-        return DecodeHandle(_world->bodyTable.idToHandleMap[jIdx].load(std::memory_order::relaxed));
+        return DecodeBodyID(_world->bodyTable.joltIndexToBodyID[jIdx].load(std::memory_order::relaxed));
     }
 
     void Record(ContactType type, const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold) noexcept {
@@ -86,12 +86,12 @@ class ContactListener final: public JPH::ContactListener {
         JPH::Vec3      n  = manifold.mWorldSpaceNormal;
 
         if (r1 > r2) {
-            ev.body1 = DecodeHandle(r2);
-            ev.body2 = DecodeHandle(r1);
+            ev.body1 = DecodeBodyID(r2);
+            ev.body2 = DecodeBodyID(r1);
             n        = -n;
         } else {
-            ev.body1 = DecodeHandle(r1);
-            ev.body2 = DecodeHandle(r2);
+            ev.body1 = DecodeBodyID(r1);
+            ev.body2 = DecodeBodyID(r2);
         }
 
         const JPH::RVec3 p = manifold.GetWorldSpaceContactPointOn1(0);
@@ -137,13 +137,13 @@ class CharacterListener final: public JPH::CharacterContactListener {
     auto Filter(uint64_t u1, JPH::BodyID id2) const noexcept -> bool {
         const auto&    bt    = _world->bodyTable;
         const uint32_t jIdx2 = id2.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-        const uint64_t u2    = bt.idToHandleMap[jIdx2].load(std::memory_order::relaxed);
+        const uint64_t u2    = bt.joltIndexToBodyID[jIdx2].load(std::memory_order::relaxed);
         if (u2 == 0) {
             return false;
         }
 
-        const uint32_t d1 = bt.slotToDense[BodyHandle::Unpack(u1).index];
-        const uint32_t d2 = bt.slotToDense[BodyHandle::Unpack(u2).index];
+        const uint32_t d1 = bt.slotToDense[BodyID::Unpack(u1).index];
+        const uint32_t d2 = bt.slotToDense[BodyID::Unpack(u2).index];
         return ((bt.categories[d1] & bt.masks[d2]) != 0u) && ((bt.categories[d2] & bt.masks[d1]) != 0u);
     }
 
@@ -152,8 +152,8 @@ class CharacterListener final: public JPH::CharacterContactListener {
             return false;
         }
         const auto&    bt = _world->bodyTable;
-        const uint32_t d1 = bt.slotToDense[BodyHandle::Unpack(u1).index];
-        const uint32_t d2 = bt.slotToDense[BodyHandle::Unpack(u2).index];
+        const uint32_t d1 = bt.slotToDense[BodyID::Unpack(u1).index];
+        const uint32_t d2 = bt.slotToDense[BodyID::Unpack(u2).index];
         return ((bt.categories[d1] & bt.masks[d2]) != 0u) && ((bt.categories[d2] & bt.masks[d1]) != 0u);
     }
 };

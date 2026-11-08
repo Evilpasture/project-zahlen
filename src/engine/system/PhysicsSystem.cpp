@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "PhysicsSystem.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
@@ -28,7 +29,7 @@ namespace {
 
 void CommitImpulses(Engine& engine) {
     auto&       reg      = engine.GetRegistry();
-    auto&       pc       = engine.GetPhysicsContext();
+    auto pc = engine.Physics();
     const auto  entities = reg.GetEntitiesWith<Components::ImpulseCommand>();
     for (int i = static_cast<int>(entities.size()) - 1; i >= 0; --i) {
         const Entity e    = entities[static_cast<size_t>(i)];
@@ -37,7 +38,7 @@ void CommitImpulses(Engine& engine) {
         if (cmd && phys) {
             const JPH::Vec3 impulse = cmd->linear;
             if (impulse.LengthSq() > 0.0f) {
-                pc.AddImpulse(phys->physicsHandle, impulse);
+                pc.AddImpulse(phys->physicsID, impulse);
             }
         }
         reg.Remove<Components::ImpulseCommand>(e);
@@ -46,31 +47,22 @@ void CommitImpulses(Engine& engine) {
 
 }
 
-void PhysicsSystem::Update(Engine& engine, float dt, float& accumulator) noexcept {
-    float cappedDt = std::min(dt, 0.1f);
-    accumulator += cappedDt;
-
-    accumulator = std::min(accumulator, TargetDt * 4.0f);
-
+void PhysicsSystem::Update(Engine& engine, uint32_t fixedSteps) noexcept {
     const auto& character = engine.GetPhysicsSubstepHooks();
 
     {
         ZHLN::ScopedTimer profTimer("ECS System: Physics & Movement");
-        while (accumulator >= TargetDt) {
+        for (uint32_t step = 0; step < fixedSteps; ++step) {
             if (character.preStep != nullptr) {
                 character.preStep(engine, TargetDt);
             }
             CommitImpulses(engine);
-            engine.GetPhysicsContext().Step(TargetDt);
+            engine.Physics().Step(TargetDt);
             if (character.postStep != nullptr) {
                 character.postStep(engine);
             }
-
-            accumulator -= TargetDt;
         }
     }
-
-    engine.GetCurrentAlpha() = accumulator / TargetDt;
 }
 
 }

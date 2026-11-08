@@ -2,6 +2,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <ProjectLightClient/LightProtocol.hpp>
 
 #include <CharacterController/CharacterComponents.hpp>
@@ -1268,15 +1271,15 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
 
     MsgPackValue owned = MsgPackValue::Map();
     MsgPackValue ownedTransforms = MsgPackValue::Map();
-    if (m_localController != Entity::Null() && m_localControllerBody != Physics::BodyHandle::Null()) {
-        auto& physics = engine.GetPhysicsContext();
+    if (m_localController != Entity::Null() && m_localControllerBody != Physics::BodyID::Null()) {
+        auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
         const auto movement = registry.Get<Character::MovementComponent>(m_localController);
         if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState && bodyState->valid) {
             const auto& state = *bodyState;
-            const JPH::Quat rotation = movement ? movement->orientation.Normalized() : state.currentRotation.Normalized();
+            const JPH::Quat rotation = movement ? movement->orientation.Normalized() : static_cast<JPH::Quat>(state.currentRotation).Normalized();
             const JPH::Vec3 velocity = physics.GetCharacterVelocity(m_localControllerBody);
             owned.Set("controllerState", FloatArray({
-                state.currentPosition.GetX(), state.currentPosition.GetY(), state.currentPosition.GetZ(),
+                state.currentPosition.x, state.currentPosition.y, state.currentPosition.z,
                 rotation.GetX(), rotation.GetY(), rotation.GetZ(), rotation.GetW(),
                 velocity.GetX(), velocity.GetY(), velocity.GetZ()
             }));
@@ -1289,7 +1292,7 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         }
     }
 
-    auto& physics = engine.GetPhysicsContext();
+    auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
     for (auto& [uid, object]: m_objects) {
         if (m_localPlayerUid == 0 || object.removalPending || !IsPartClass(object.className)
             || object.networkOwnerUid != m_localPlayerUid) continue;
@@ -1300,12 +1303,12 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         } else if (const Entity entity = m_index.Find(uid); entity != Entity::Null() && registry.IsAlive(entity)) {
             const auto body = registry.Get<Components::PhysicsComponent>(entity);
             if (body) {
-                if (const auto bodyState = physics.BodyState(body->physicsHandle); bodyState && bodyState->valid) {
+                if (const auto bodyState = physics.BodyState(body->physicsID); bodyState && bodyState->valid) {
                     const auto& snapshot = *bodyState;
                     transform.position = snapshot.currentPosition;
                     transform.rotation = snapshot.currentRotation;
-                    const JPH::BodyID bodyId = Physics::GetBodyID(physics.GetInternalWorld(), body->physicsHandle);
-                    if (!bodyId.IsInvalid()) transform.linearVelocity = physics.GetInternalSystem().GetBodyInterface().GetLinearVelocity(bodyId);
+                    const JPH::BodyID bodyID = Physics::GetBodyID(physics.GetInternalWorld(), body->physicsID);
+                    if (!bodyID.IsInvalid()) transform.linearVelocity = physics.GetInternalSystem().GetBodyInterface().GetLinearVelocity(bodyID);
                     haveState = true;
                 }
             }
@@ -1353,9 +1356,9 @@ void ClientSession::PostPhysicsTick(Engine& engine, float dt) {
 void ClientSession::ResetSceneBindings(Engine& engine) noexcept {
     for (auto& [uid, object]: m_objects) {
         (void)uid;
-        if (object.audioHandle != AudioHandle::Invalid) {
-            engine.GetAudioContext().StopVoice(object.audioHandle);
-            object.audioHandle = AudioHandle::Invalid;
+        if (object.audioID != VoiceID::Invalid) {
+            engine.Audio().StopVoice(object.audioID);
+            object.audioID = VoiceID::Invalid;
         }
         // The whole scene is going away, so every binding in it is stale by
         // definition; the mirror keeps its records and re-spawns from them.
@@ -1366,9 +1369,9 @@ void ClientSession::ResetSceneBindings(Engine& engine) noexcept {
         object.transformDirty = true;
     }
     m_index.Clear();
-    if (m_localControllerBody != Physics::BodyHandle::Null()) {
-        engine.GetPhysicsContext().DestroyBody(m_localControllerBody);
-        m_localControllerBody = Physics::BodyHandle::Null();
+    if (m_localControllerBody != Physics::BodyID::Null()) {
+        engine.Physics().DestroyBody(m_localControllerBody);
+        m_localControllerBody = Physics::BodyID::Null();
     }
     m_localController = Entity::Null();
     m_controllerForRootUid = 0;

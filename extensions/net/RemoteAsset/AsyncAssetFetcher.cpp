@@ -203,9 +203,9 @@ AsyncAssetFetcher::AsyncAssetFetcher(DiskCache cache, uint32_t timeoutSeconds)
 }
 
 AsyncAssetFetcher::~AsyncAssetFetcher() {
-    FetchHandle live[FetchSlotTable::kMaxSlots] {};
+    FetchID live[FetchSlotTable::kMaxSlots] {};
     uint32_t    liveCount = 0;
-    m_slotTable.ForEachOccupied([&](FetchHandle handle, FetchJob* job) {
+    m_slotTable.ForEachOccupied([&](FetchID handle, FetchJob* job) {
         job->cancelSignal.store(true, std::memory_order::relaxed);
         if (liveCount < FetchSlotTable::kMaxSlots) {
             live[liveCount++] = handle;
@@ -219,7 +219,7 @@ AsyncAssetFetcher::~AsyncAssetFetcher() {
     }
 }
 
-auto AsyncAssetFetcher::Request(std::string_view uri, ValidatorFn validator, bool forceRefresh) -> FetchHandle {
+auto AsyncAssetFetcher::Request(std::string_view uri, ValidatorFn validator, bool forceRefresh) -> FetchID {
     const ValidatorFn check    = (validator != nullptr) ? validator : Validators::AnyNonEmpty;
     const ResolvedURL resolved = ResolveURL(uri);
 
@@ -451,7 +451,7 @@ void AsyncAssetFetcher::ExecuteJob(FetchJob* job) noexcept {
     job->isDone.store(true, std::memory_order::release);
 }
 
-auto AsyncAssetFetcher::PollResult(FetchHandle handle) -> std::optional<std::expected<FetchPayload, ErrorCode>> {
+auto AsyncAssetFetcher::PollResult(FetchID handle) -> std::optional<std::expected<FetchPayload, ErrorCode>> {
     FetchJob* job = m_slotTable.GetJobAndRetain(handle);
     if (job == nullptr) {
         return std::nullopt;
@@ -466,7 +466,7 @@ auto AsyncAssetFetcher::PollResult(FetchHandle handle) -> std::optional<std::exp
     return out;
 }
 
-void AsyncAssetFetcher::Cancel(FetchHandle handle) {
+void AsyncAssetFetcher::Cancel(FetchID handle) {
     FetchJob* job = m_slotTable.GetJobAndRetain(handle);
     if (job == nullptr) {
         return;
@@ -476,7 +476,7 @@ void AsyncAssetFetcher::Cancel(FetchHandle handle) {
     job->Release();
 }
 
-auto AsyncAssetFetcher::Status(FetchHandle handle) const -> FetchStatus {
+auto AsyncAssetFetcher::Status(FetchID handle) const -> FetchStatus {
     FetchJob* job = m_slotTable.GetJobAndRetain(handle);
     if (job == nullptr) {
         return FetchStatus::Idle;
@@ -489,7 +489,7 @@ auto AsyncAssetFetcher::Status(FetchHandle handle) const -> FetchStatus {
     return status;
 }
 
-auto AsyncAssetFetcher::Take(FetchHandle handle) -> std::optional<FetchResult> {
+auto AsyncAssetFetcher::Take(FetchID handle) -> std::optional<FetchResult> {
     FetchJob* job = m_slotTable.GetJobAndRetain(handle);
     if (job == nullptr) {
         return std::nullopt;

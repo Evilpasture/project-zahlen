@@ -9,6 +9,7 @@
 // rather than a plausible-looking zero. Anything else means a paced policy
 // leaked into a session with no display to pace against, and the engine would
 // simulate off a fabricated cadence.
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Engine/Engine.hpp>
@@ -40,7 +41,7 @@ struct PresentPacingSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(
             ZHLN::Test::Headless::EngineOptions {.appName = "Headless Present Pacing Test", .width = 640, .height = 480}
         );
@@ -49,12 +50,12 @@ struct PresentPacingSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> headless_reports_decoupled_without_paced_timing() {
             auto engine = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PresentPacingTestError::EngineInitFailed);
             }
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
-            const ZHLN::PresentTimingMetrics timing = rc.GetPresentTiming();
+            const ZHLN::PresentTimingMetrics timing = rc.PresentTiming();
             if (!ZHLN::Test::ExpectEq(timing.policy, ZHLN::PacingPolicy::Decoupled)) {
                 return std::unexpected(PresentPacingTestError::UnexpectedPolicy);
             }
@@ -64,10 +65,10 @@ struct PresentPacingSuite {
             if (!ZHLN::Test::ExpectTrue(!timing.hasMargin && timing.lastPresentMarginNs == 0)) {
                 return std::unexpected(PresentPacingTestError::UnexpectedMargin);
             }
-            if (!ZHLN::Test::ExpectTrue(!rc.GetPacedDeltaTime().has_value())) {
+            if (!ZHLN::Test::ExpectTrue(!rc.PacedDeltaTime().has_value())) {
                 return std::unexpected(PresentPacingTestError::UnexpectedPacedDelta);
             }
-            if (!ZHLN::Test::ExpectEq(rc.GetInfo().pacingPolicy, ZHLN::PacingPolicy::Decoupled)) {
+            if (!ZHLN::Test::ExpectEq(rc.Info().pacingPolicy, ZHLN::PacingPolicy::Decoupled)) {
                 return std::unexpected(PresentPacingTestError::InfoPolicyMismatch);
             }
             return {};
@@ -75,10 +76,10 @@ struct PresentPacingSuite {
 
         std::expected<void, ZHLN::ErrorCode> pacing_contract_stable_across_frames() {
             auto engine = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PresentPacingTestError::EngineInitFailed);
             }
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 5; ++frame) {
@@ -91,14 +92,14 @@ struct PresentPacingSuite {
             // Frames flowed (acquires, submits, headless presents); the pacer
             // must still report the same unpaced contract, not bootstrap into
             // a timing it cannot have.
-            const ZHLN::PresentTimingMetrics timing = rc.GetPresentTiming();
+            const ZHLN::PresentTimingMetrics timing = rc.PresentTiming();
             if (!ZHLN::Test::ExpectEq(timing.policy, ZHLN::PacingPolicy::Decoupled)) {
                 return std::unexpected(PresentPacingTestError::UnexpectedPolicy);
             }
             if (!ZHLN::Test::ExpectTrue(!timing.hasPacedTiming && !timing.hasMargin)) {
                 return std::unexpected(PresentPacingTestError::UnexpectedPacedTiming);
             }
-            if (!ZHLN::Test::ExpectTrue(!rc.GetPacedDeltaTime().has_value())) {
+            if (!ZHLN::Test::ExpectTrue(!rc.PacedDeltaTime().has_value())) {
                 return std::unexpected(PresentPacingTestError::UnexpectedPacedDelta);
             }
             return {};
@@ -106,12 +107,12 @@ struct PresentPacingSuite {
 
         std::expected<void, ZHLN::ErrorCode> fidelity_governor_inert_without_margin() {
             auto engine = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PresentPacingTestError::EngineInitFailed);
             }
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
-            const ZHLN::QualityLevel before = rc.GetSettings().qualityPreset;
+            const ZHLN::QualityLevel before = rc.Settings().qualityPreset;
             // Past the governor's 90-frame patience: with no margin signal it
             // must never step the preset, whatever the default tier is.
             constexpr float dt = 1.0f / 60.0f;
@@ -121,7 +122,7 @@ struct PresentPacingSuite {
                     return std::unexpected(PresentPacingTestError::TickFailed);
                 }
             }
-            if (!ZHLN::Test::ExpectEq(rc.GetSettings().qualityPreset, before)) {
+            if (!ZHLN::Test::ExpectEq(rc.Settings().qualityPreset, before)) {
                 return std::unexpected(PresentPacingTestError::GovernorSteppedDown);
             }
             return {};
@@ -129,7 +130,7 @@ struct PresentPacingSuite {
 
         std::expected<void, ZHLN::ErrorCode> late_input_latch_safe_headless() {
             auto engine = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PresentPacingTestError::EngineInitFailed);
             }
 

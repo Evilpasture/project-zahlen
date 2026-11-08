@@ -196,7 +196,7 @@ inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, c
             !initialized[*position], "descriptor-heap sampler init: sampler '{}' of set {} is initialized twice", SamplerT::name, b.setIndex
         );
         initialized[*position] = true;
-        batch.AddSampler(SamplerHandle {b.samplerSlots[*position]}, sampler.value);
+        batch.AddSampler(SamplerSlotID {b.samplerSlots[*position]}, sampler.value);
         ++written;
     };
     (init(samplers), ...);
@@ -339,7 +339,7 @@ template <typename Arg>
                 return true;
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                batch.AddStorageImage(StorageImageHandle {slot}, view, VK_IMAGE_LAYOUT_GENERAL);
+                batch.AddStorageImage(StorageImageSlotID {slot}, view, VK_IMAGE_LAYOUT_GENERAL);
             } else {
                 VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                 if constexpr (IsTypedImage<T>::value) {
@@ -349,7 +349,7 @@ template <typename Arg>
                 } else if constexpr (std::is_same_v<T, ImageWrite>) {
                     layout = arg.layout;
                 }
-                batch.AddImage(TextureHandle {slot}, view, layout);
+                batch.AddImage(TextureSlotID {slot}, view, layout);
             }
             return true;
         }
@@ -378,9 +378,9 @@ template <typename Arg>
                 slice.address = DeviceAddress<> {heap.BufferAddress(slice.buffer)};
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-                batch.AddBuffer(UniformBufferHandle {slot}, slice);
+                batch.AddBuffer(UniformBufferSlotID {slot}, slice);
             } else {
-                batch.AddBuffer(StorageBufferHandle {slot}, slice);
+                batch.AddBuffer(StorageBufferSlotID {slot}, slice);
             }
             return true;
         }
@@ -390,7 +390,7 @@ template <typename Arg>
         if constexpr (source != WriteSource::AccelerationStructure) {
             return false;
         } else {
-            batch.AddAccelerationStructure(AccelerationStructureHandle {slot}, arg.address);
+            batch.AddAccelerationStructure(AccelerationStructureSlotID {slot}, arg.address);
             return true;
         }
     }

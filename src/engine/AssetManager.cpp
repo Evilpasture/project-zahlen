@@ -72,7 +72,7 @@ void AssetManager::ReleaseCachedMeshBuffers() noexcept {
     }
     // First drop every alias, then retire buffers. Several ModelParts can
     // reference the same compiled glTF primitive; DestroyMesh is idempotent
-    // for duplicate generational handles.
+    // for duplicate generational IDs.
     _prefabCache.ForEach([this](ModelPrefab& prefab) {
         for (const auto& part: prefab.parts) {
             if (part.meshAsset != InvalidAssetID) {
@@ -90,12 +90,12 @@ void AssetManager::ReleaseCachedMeshBuffers() noexcept {
 
 void AssetManager::InvalidateGPUMeshes() noexcept {
     // The old RenderContext's buffer pool is being destroyed. Do not pass its
-    // handles to the replacement renderer even if it reuses the same slots.
+    // IDs to the replacement renderer even if it reuses the same slots.
     _prefabCache.ForEach([](ModelPrefab& prefab) {
         for (auto& part: prefab.parts) {
             part.mesh                            = {};
-            part.defaultMaterial.pipeline        = PipelineHandle::Invalid;
-            part.defaultMaterial.prePassPipeline = PipelineHandle::Invalid;
+            part.defaultMaterial.pipeline        = PipelineID::Invalid;
+            part.defaultMaterial.prePassPipeline = PipelineID::Invalid;
         }
     });
     _renderContext = nullptr;

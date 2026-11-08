@@ -12,7 +12,7 @@
 
 namespace ZHLN::Remote {
 
-struct FetchHandle {
+struct FetchID {
     uint32_t slotIndex  = 0;
     uint32_t generation = 0;
 
@@ -24,7 +24,7 @@ struct FetchHandle {
         return IsValid();
     }
 
-    constexpr auto operator==(const FetchHandle&) const noexcept -> bool = default;
+    constexpr auto operator==(const FetchID&) const noexcept -> bool = default;
 };
 
 class FetchSlotTable {
@@ -39,7 +39,7 @@ class FetchSlotTable {
 
     FetchSlotTable() = default;
 
-    auto Allocate(FetchJob* job) -> std::optional<FetchHandle> {
+    auto Allocate(FetchJob* job) -> std::optional<FetchID> {
         if (job == nullptr) {
             return std::nullopt;
         }
@@ -53,14 +53,14 @@ class FetchSlotTable {
             job->Retain();
             slot.job               = job;
             const uint32_t generation = slot.generation.load(std::memory_order::relaxed);
-            return FetchHandle {.slotIndex = i, .generation = generation};
+            return FetchID {.slotIndex = i, .generation = generation};
         }
         return std::nullopt;
     }
 
     // Returns the job with an extra Retain. Caller must Release. Null if the
     // handle is stale or the slot is empty.
-    [[nodiscard]] auto GetJobAndRetain(FetchHandle handle) const -> FetchJob* {
+    [[nodiscard]] auto GetJobAndRetain(FetchID handle) const -> FetchJob* {
         if (handle.slotIndex >= kMaxSlots || handle.generation == 0) {
             return nullptr;
         }
@@ -74,7 +74,7 @@ class FetchSlotTable {
         return slot.job;
     }
 
-    void Free(FetchHandle handle) {
+    void Free(FetchID handle) {
         if (handle.slotIndex >= kMaxSlots) {
             return;
         }
@@ -106,7 +106,7 @@ class FetchSlotTable {
             if (!slot.occupied.load(std::memory_order::relaxed) || slot.job == nullptr) {
                 continue;
             }
-            fn(FetchHandle {.slotIndex = i, .generation = slot.generation.load(std::memory_order::relaxed)}, slot.job);
+            fn(FetchID {.slotIndex = i, .generation = slot.generation.load(std::memory_order::relaxed)}, slot.job);
         }
     }
 

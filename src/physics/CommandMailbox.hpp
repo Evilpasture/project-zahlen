@@ -13,7 +13,7 @@
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Physics/Physics.hpp>
-#include <Zahlen/Physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -39,7 +39,7 @@ enum class CommandType : uint8_t {
 };
 
 struct CreateRigidPayload {
-    BodyHandle       handle;
+    BodyID       bodyID;
     JPH::Real        px;
     JPH::Real        py;
     JPH::Real        pz;
@@ -57,7 +57,7 @@ struct CreateRigidPayload {
 };
 
 struct CreateCharacterPayload {
-    BodyHandle handle;
+    BodyID bodyID;
     JPH::Real  px;
     JPH::Real  py;
     JPH::Real  pz;
@@ -74,27 +74,27 @@ struct CreateCharacterPayload {
 };
 
 struct SetFilterPayload {
-    BodyHandle handle;
+    BodyID bodyID;
     uint32_t   category;
     uint32_t   mask;
 };
 
 struct SetVelocityPayload {
-    BodyHandle handle;
+    BodyID bodyID;
     float      vx;
     float      vy;
     float      vz;
 };
 
 struct SetPositionPayload {
-    BodyHandle handle;
+    BodyID bodyID;
     JPH::Real  px;
     JPH::Real  py;
     JPH::Real  pz;
 };
 
 struct SetKinematicPosePayload {
-    BodyHandle handle;
+    BodyID bodyID;
     JPH::Real  px;
     JPH::Real  py;
     JPH::Real  pz;
@@ -105,7 +105,7 @@ struct SetKinematicPosePayload {
 };
 
 struct AddImpulseAtPosPayload {
-    BodyHandle handle;
+    BodyID bodyID;
     JPH::Real  px;
     JPH::Real  py;
     JPH::Real  pz;
@@ -115,22 +115,22 @@ struct AddImpulseAtPosPayload {
 };
 
 struct CreateConstraintPayload {
-    ConstraintHandle cHandle;
-    BodyHandle       b1;
-    BodyHandle       b2;
+    ConstraintID constraintID;
+    BodyID       b1;
+    BodyID       b2;
     ConstraintType   cType;
     ConstraintParams params;
 };
 
 struct SetConstraintTargetPayload {
-    ConstraintHandle targetCHandle;
+    ConstraintID targetConstraintID;
     float            targetValue;
 };
 
 union CommandPayload {
     uint8_t                    empty {};
-    BodyHandle                 handle;
-    ConstraintHandle           cHandle;
+    BodyID                 bodyID;
+    ConstraintID           constraintID;
     CreateRigidPayload         createRigid;
     CreateCharacterPayload     createChar;
     SetFilterPayload           setFilter;

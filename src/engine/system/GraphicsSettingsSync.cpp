@@ -1,6 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "GraphicsSettingsSync.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
@@ -58,7 +60,7 @@ void GovernFidelity(Engine& engine, GraphicsSettings& gfx) {
         governor.probedOptOut = true;
     }
 
-    const PresentTimingMetrics timing = engine.GetRenderContext().GetPresentTiming();
+    const PresentTimingMetrics timing = engine.Graphics().PresentTiming();
     if (governor.optedOut || !timing.hasMargin || timing.lastPresentMarginNs >= kGovernorMarginThresholdNs) {
         governor.lowMarginFrames = 0;
         return;
@@ -152,7 +154,7 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
 GraphicsSettings SyncGraphicsSettings(Engine& engine) {
     GraphicsSettings gfx = CollectGraphicsSettings(engine);
     GovernFidelity(engine, gfx);
-    engine.GetRenderContext().ApplySettings(gfx);
+    engine.Graphics().ApplySettings(gfx);
     return gfx;
 }
 
@@ -301,7 +303,7 @@ void ApplyGraphicsSettings(Engine& engine, const GraphicsSettings& settings) {
     }
     reg.Patch<RayTracingSettingsComponent>(rtEnt, [&gfx](RayTracingSettingsComponent& rt) { rt.config = gfx.rayTracing; });
 
-    engine.GetRenderContext().ApplySettings(gfx);
+    engine.Graphics().ApplySettings(gfx);
 }
 
 } // namespace ZHLN

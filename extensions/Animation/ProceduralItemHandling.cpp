@@ -206,9 +206,9 @@ void UpdateItemDynamics(
         const JPH::Mat44 worldItem = rootWorld * handling.itemModelTransform;
         const JPH::Vec3  origin    = worldItem.GetTranslation();
         const JPH::Vec3  forward   = SafeNormalized(worldItem.Multiply3x3(JPH::Vec3::sAxisZ()), rootRotation * JPH::Vec3::sAxisZ());
-        Physics::BodyHandle ignoredPhysics {};
+        Physics::BodyID ignoredPhysics {};
         if (const auto physicsComponent = registry.Get<Components::PhysicsComponent>(characterEntity)) {
-            ignoredPhysics = physicsComponent->physicsHandle;
+            ignoredPhysics = physicsComponent->physicsID;
         }
         const auto hit = physics.Raycast(origin, forward, handling.avoidance.probeDistance, ignoredPhysics);
         if (hit.hasHit && std::isfinite(hit.fraction)) {

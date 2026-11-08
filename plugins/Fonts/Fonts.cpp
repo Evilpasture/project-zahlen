@@ -13,6 +13,8 @@
 // Zero globals in this high-level module -- loader state lives on the heap
 // and is owned via core's BakedFontLoader hook user pointer.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include "Fonts.hpp"
 #include "FontBMParser.hpp"
 
@@ -353,7 +355,7 @@ void InstallBakedFontLoader(AssetManager& assets, const BakedFontSource& source)
 }
 
 void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source) {
-    InstallBakedFontLoader(engine.GetAssetManager(), source);
+    InstallBakedFontLoader(ZHLN::EngineAccess::AssetsOf(engine), source);
     engine.AddTeardownHook(+[](Engine& e) noexcept -> void {
         if (void* user = GUI::GetBakedFontLoaderUser(); user != nullptr) {
             std::unique_ptr<LoaderInstance> owner{static_cast<LoaderInstance*>(user)};
@@ -460,7 +462,7 @@ auto VendoredDefaultFontSource() -> BakedFontSource {
 }
 
 auto LoadFontAsset(Engine& engine, const BakedFontSource& source) -> std::expected<AssetID, ErrorCode> {
-    auto res = LoadFontAsset(engine.GetAssetManager(), source);
+    auto res = LoadFontAsset(ZHLN::EngineAccess::AssetsOf(engine), source);
     if (res.has_value()) {
         // Ensure teardown still cleans the loader hook; InstallBakedFontLoader(Engine&)
         // already added a hook, but LoadFontAsset(AssetManager&) installed via

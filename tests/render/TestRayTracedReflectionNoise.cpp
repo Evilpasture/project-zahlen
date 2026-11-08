@@ -25,6 +25,7 @@
 //                    radiance cache both light up the glossy band without
 //                    isolated ray debris.
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "helpers/ImageTesting.hpp"
 #include "RayTracedNoiseMetrics.hpp"
 #include "TestsFramework.hpp"
@@ -120,7 +121,7 @@ struct RayTracedReflectionNoiseTestSuite {
     // scene reset between tests. Creating a Vulkan instance per test is
     // what eventually exhausts the loader's static TLS and turns the tail
     // of the group into "vkCreateInstance: Found no drivers!".
-    static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless RTR Noise", .width = kWidth, .height = kHeight
         });
@@ -133,7 +134,7 @@ struct RayTracedReflectionNoiseTestSuite {
                 aa.state.mode        = mode;
             });
         }
-        engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = mode});
+        engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = mode});
     }
 
     // Same switch the shadow suite drives: GraphicsSettingsSync.cpp turns
@@ -183,11 +184,11 @@ struct RayTracedReflectionNoiseTestSuite {
         auto& reg = engine.GetRegistry();
 
         auto floorMat =
-            engine.GetRenderContext().CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.8f, .baseColor = {0.05f, 0.05f, 0.06f, 1.0f}});
-        auto plateMat = engine.GetRenderContext().CreateMaterial(
+            engine.Graphics().CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.8f, .baseColor = {0.05f, 0.05f, 0.06f, 1.0f}});
+        auto plateMat = engine.Graphics().CreateMaterial(
             ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = kPlateRoughness, .baseColor = {0.5f, 0.5f, 0.5f, 1.0f}}
         );
-        auto boxMat = engine.GetRenderContext().CreateMaterial(
+        auto boxMat = engine.Graphics().CreateMaterial(
             ZHLN::MaterialDesc {
                 .metallic  = 0.0f,
                 .roughness = 0.5f,
@@ -293,10 +294,10 @@ struct RayTracedReflectionNoiseTestSuite {
         // frame must stay still.
         std::expected<void, ZHLN::ErrorCode> rtr_is_live_and_rough_surfaces_stay_still() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
+            if (!engine->Graphics().Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; RTR checks are not applicable.");
                 return {};
             }
@@ -414,10 +415,10 @@ struct RayTracedReflectionNoiseTestSuite {
         // band over the on/off delta between RTR=1 and RTR=0.
         std::expected<void, ZHLN::ErrorCode> rtr_reflection_band_is_spatially_coherent() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
+            if (!engine->Graphics().Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; reflection coherence checks are not applicable.");
                 return {};
             }
@@ -468,10 +469,10 @@ struct RayTracedReflectionNoiseTestSuite {
         // frame 1 without requiring multi-frame temporal accumulation.
         std::expected<void, ZHLN::ErrorCode> rtr_converges_deterministically_in_single_frame() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
+            if (!engine->Graphics().Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; convergence check is not applicable.");
                 return {};
             }
@@ -515,10 +516,10 @@ struct RayTracedReflectionNoiseTestSuite {
         // reflections with zero isolated single-pixel ray debris or fireflies.
         std::expected<void, ZHLN::ErrorCode> rtr_hybrid_ssr_and_tlas_have_no_ray_debris() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
+            if (!engine->Graphics().Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; debris check is not applicable.");
                 return {};
             }

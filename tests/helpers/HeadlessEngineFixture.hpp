@@ -19,6 +19,8 @@
 
 #pragma once
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -43,6 +45,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <type_traits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -129,34 +132,44 @@ struct EngineOptions {
 // still persist across tests. A test that needs a genuinely cold device should
 // call CreateEngine and own it.
 
-// Non-owning handle to a pooled engine.
+// Naming taxonomy -- four different things used to all be called "Handle":
 //
-// Deliberately shaped like the std::unique_ptr<Engine> it replaces --
-// `*engine`, `engine->`, `engine.get()`, `engine != nullptr` and `.reset()`
-// all mean what they used to -- so migrating a suite is a change to its
-// CreateTestEngine and nothing else. `.reset()` drops the caller's view of
-// the engine; the pool keeps owning it.
-class EngineHandle {
+//   1. an inert numeric key           -> *ID       (TextureID, BodyID, VoiceID)
+//   2. a non-owning domain facade     -> a noun     (GraphicsDevice, Simulation)
+//   3. a begin/end lifetime token     -> *Scope     (FrameScope, SessionScope)
+//   4. an owning allocation           -> std::unique_ptr<T> or *Instance
+//
+// This type is none of those. It is a BORROW: the process-wide engine pool owns
+// the std::unique_ptr<Engine>; EngineView is a cheap, trivially copyable value
+// that never owns, never destroys, never transfers and never outlives the pool.
+//
+// It is deliberately NOT shaped like unique_ptr. There is no reset(), no
+// get(), no nullptr comparison and no ownership question to answer. A view is
+// constructed from a live Engine&, so a non-empty view always names a real
+// engine; an empty (default-constructed) view means only "acquisition failed",
+// reported through Valid(). Check it before dereferencing, exactly as you would
+// check a span before indexing it.
+class EngineView {
 public:
-    EngineHandle() = default;
-    explicit EngineHandle(ZHLN::Engine* engine) noexcept : _engine(engine) {}
+    constexpr EngineView() noexcept = default;
+    explicit EngineView(ZHLN::Engine& engine) noexcept : _engine(&engine) {}
 
-    [[nodiscard]] auto get() const noexcept -> ZHLN::Engine* { return _engine; }
-    auto               operator->() const noexcept -> ZHLN::Engine* { return _engine; }
-    auto               operator*() const noexcept -> ZHLN::Engine& { return *_engine; }
-    explicit           operator bool() const noexcept { return _engine != nullptr; }
-    void               reset() noexcept { _engine = nullptr; }
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool { return _engine != nullptr; }
+    explicit constexpr operator bool() const noexcept { return Valid(); }
 
-    friend auto operator==(const EngineHandle& handle, std::nullptr_t) noexcept -> bool { return handle._engine == nullptr; }
+    auto operator->() const noexcept -> ZHLN::Engine* { return _engine; }
+    auto operator*() const noexcept -> ZHLN::Engine& { return *_engine; }
 
 private:
     ZHLN::Engine* _engine = nullptr;
 };
 
+static_assert(std::is_trivially_copyable_v<EngineView> && std::is_trivially_destructible_v<EngineView>);
+
 // Returns the engine to the state CreateEngine hands out: no entities, then
 // the default scene seeded again.
 //
-// Registry::Clear bumps every generation, so entity handles a previous test
+// Registry::Clear bumps every generation, so entity IDs a previous test
 // held are dead rather than dangling. InitializeDefaultScene re-registers the
 // component families (idempotent), recreates the camera and settings
 // singletons, and rebuilds the system graphs and frame scheduler.
@@ -249,11 +262,11 @@ inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 
 // Hands out the pooled engine, reusing it when the configuration matches and
 // rebuilding it when it does not.
 //
-// Returns a null handle if the engine could not be created, matching
+// Returns an empty view if the engine could not be created, matching
 // CreateEngine. A failed configuration is retried on the next request rather
 // than remembered: the old per-test code retried too, and with only one engine
 // alive at a time a failure is a real failure rather than a collision.
-[[nodiscard]] inline auto AcquireEngine(const EngineOptions& opts = {}) -> EngineHandle {
+[[nodiscard]] inline auto AcquireEngine(const EngineOptions& opts = {}) -> EngineView {
     auto& slot = Detail::Slot();
 
     if (slot.engine != nullptr && Detail::ServesRequest(slot.opts, opts)) {
@@ -267,14 +280,14 @@ inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 
         // configuration this slot was built with: a test is free to call
         // SetResolution itself (TestRenderHIZ does), and the pool has to
         // notice and put the next test back at the size it asked for.
-        const auto live = slot.engine->GetRenderContext().GetFramebufferSize();
+        const auto live = slot.engine->Graphics().FramebufferSize();
         if (!live.has_value() || live->width != opts.width || live->height != opts.height) {
-            slot.engine->GetRenderContext().SetResolution(ZHLN::Extent2D {.width = opts.width, .height = opts.height});
+            slot.engine->Graphics().SetResolution(ZHLN::Extent2D {.width = opts.width, .height = opts.height});
             slot.opts.width  = opts.width;
             slot.opts.height = opts.height;
             TickFrames(*slot.engine, 1);
         }
-        return EngineHandle {slot.engine.get()};
+        return EngineView {*slot.engine};
     }
 
     // Destroy before create: one engine at a time, see EngineSlot. The new one
@@ -284,11 +297,14 @@ inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 
     slot.engine.reset();
     slot.opts   = widened;
     slot.engine = CreateEngine(widened);
-    return EngineHandle {slot.engine.get()};
+    if (!slot.engine) {
+        return {}; // empty view: the engine could not be created
+    }
+    return EngineView {*slot.engine};
 }
 
 // Convenience overload mirroring the CreateEngine one.
-[[nodiscard]] inline auto AcquireEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> EngineHandle {
+[[nodiscard]] inline auto AcquireEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> EngineView {
     return AcquireEngine(EngineOptions {.appName = appName, .width = width, .height = height});
 }
 
@@ -356,11 +372,11 @@ struct ZHLN_ANNOTATION(ZHLN::Test::SessionFixture {}) SessionScope {
     auto operator=(const SessionScope&) -> SessionScope& = delete;
 };
 
-// Per-test headless Vulkan engine handle backed by the process-wide pool:
+// Per-test borrowed view of the process-wide pooled engine:
 // resets the scene and default camera on entry without recreating VkDevice.
 class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
   public:
-    explicit PooledEngine(SessionScope&) : _handle(AcquireEngine()) {}
+    explicit PooledEngine(SessionScope&) : _view(AcquireEngine()) {}
     ~PooledEngine() = default;
 
     PooledEngine(const PooledEngine&)            = delete;
@@ -368,14 +384,13 @@ class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
     PooledEngine(PooledEngine&&)                 = delete;
     PooledEngine& operator=(PooledEngine&&)      = delete;
 
-    [[nodiscard]] auto Get() const noexcept -> ZHLN::Engine* { return _handle.get(); }
-    [[nodiscard]] auto Handle() const noexcept -> EngineHandle { return _handle; }
-    auto               operator->() const noexcept -> ZHLN::Engine* { return _handle.get(); }
-    auto               operator*() const noexcept -> ZHLN::Engine& { return *_handle; }
-    explicit           operator bool() const noexcept { return static_cast<bool>(_handle); }
+    [[nodiscard]] auto View() const noexcept -> EngineView { return _view; }
+    auto               operator->() const noexcept -> ZHLN::Engine* { return _view.operator->(); }
+    auto               operator*() const noexcept -> ZHLN::Engine& { return *_view; }
+    explicit           operator bool() const noexcept { return _view.Valid(); }
 
   private:
-    EngineHandle _handle;
+    EngineView _view;
 };
 
 // Turns off anti-aliasing.
@@ -390,7 +405,7 @@ inline void DisableAA(ZHLN::Engine& engine) {
             aa.state.mode        = ZHLN::AAMode::None;
         });
     }
-    engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
+    engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 }
 
 // Advances the engine by `frames` fixed steps, asserting each tick succeeded.
@@ -454,7 +469,7 @@ inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt) {
 // failing run leaves something to look at. The mirror is diagnostic only: the
 // returned image never came from disk.
 [[nodiscard]] inline auto Capture(ZHLN::Engine& engine, std::string_view ppmPath) -> Image::RgbImage {
-    const auto captured = engine.GetRenderContext().CaptureFrame();
+    const auto captured = engine.Graphics().CaptureFrame();
     if (!captured) {
         return {};
     }
@@ -500,21 +515,21 @@ RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, S
 
         const uint32_t validationBefore = ZHLN::Test::ValidationErrorCount();
 
-        ZHLN::RenderContext* const preWarmup = &engine.GetRenderContext();
+        ZHLN::RenderContext* const preWarmup = &ZHLN::EngineAccess::RenderOf(engine);
         TickFrames(engine, warmupFrames);
-        if (&engine.GetRenderContext() != preWarmup) {
+        if (&ZHLN::EngineAccess::RenderOf(engine) != preWarmup) {
             continue;
         }
 
-        ZHLN::RenderContext* const preWork = &engine.GetRenderContext();
+        ZHLN::RenderContext* const preWork = &ZHLN::EngineAccess::RenderOf(engine);
         const bool                 ok      = sceneFn(engine);
-        if (ok && &engine.GetRenderContext() == preWork) {
+        if (ok && &ZHLN::EngineAccess::RenderOf(engine) == preWork) {
             if (outValidationDelta != nullptr) {
                 *outValidationDelta = ZHLN::Test::ValidationErrorCount() - validationBefore;
             }
             return StableRunResult::Ok;
         }
-        if (&engine.GetRenderContext() == preWork) {
+        if (&ZHLN::EngineAccess::RenderOf(engine) == preWork) {
             return StableRunResult::AssertionsFailed;
         }
     }

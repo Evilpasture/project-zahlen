@@ -1,6 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "RenderSystem.hpp"
 #include "CullingSystem.hpp"
 #include "GraphicsSettingsSync.hpp"
@@ -39,15 +45,15 @@ enum class RenderSystemError : uint8_t {
 
 namespace {
 
-[[nodiscard]] auto EnsureSkinnedScratch(RenderContext& rc, Components::SkeletalMeshComponent& skeleton, uint32_t vertexCount) -> BufferHandle {
-    if (skeleton.skinnedScratch != BufferHandle::Invalid && skeleton.scratchVertexCount != vertexCount) {
+[[nodiscard]] auto EnsureSkinnedScratch(RenderContext& rc, Components::SkeletalMeshComponent& skeleton, uint32_t vertexCount) -> BufferID {
+    if (skeleton.skinnedScratch != BufferID::Invalid && skeleton.scratchVertexCount != vertexCount) {
         rc.DestroyBuffer(skeleton.skinnedScratch);
-        skeleton.skinnedScratch     = BufferHandle::Invalid;
+        skeleton.skinnedScratch     = BufferID::Invalid;
         skeleton.scratchVertexCount = 0;
     }
-    if (skeleton.skinnedScratch == BufferHandle::Invalid && vertexCount != 0) {
+    if (skeleton.skinnedScratch == BufferID::Invalid && vertexCount != 0) {
         skeleton.skinnedScratch = rc.CreateBuffer<BufferUsage::SkinScratch>(vertexCount);
-        if (skeleton.skinnedScratch != BufferHandle::Invalid) {
+        if (skeleton.skinnedScratch != BufferID::Invalid) {
             skeleton.scratchVertexCount = vertexCount;
         }
     }
@@ -65,7 +71,7 @@ namespace {
 
 [[nodiscard]] auto SyncEnvironmentMap(Engine& engine) -> std::expected<void, ErrorCode> {
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto rc = engine.Graphics();
     const Entity ent = reg.SingletonEntity<Components::EnvironmentMapComponent>();
     if (ent == Entity::Null()) {
         return rc.SetEnvironmentRadiance({});
@@ -74,7 +80,7 @@ namespace {
     if (!env || env->source.empty()) {
         return rc.SetEnvironmentRadiance({});
     }
-    const auto pixels = engine.GetAssetManager().FindEnvironmentImage(std::string_view(env->source));
+    const auto pixels = engine.Assets().FindEnvironmentImage(std::string_view(env->source));
     if (!pixels) {
         Log("[IBL] No prepared environment pixels registered for '{}'", std::string_view(env->source));
         return std::unexpected(RenderSystemError::EnvironmentImageUnavailable);
@@ -99,7 +105,7 @@ constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
 // The simulation description stays in ECS; only a stable emitter identity crosses
 // the API. Persistent particle buffers are private to the RenderContext.
 void SubmitParticleEmitters(Engine& engine) {
-    auto& scene = engine.GetSceneData();
+    auto scene = engine.Debug();
     auto& reg   = engine.GetRegistry();
     // The frame's camera, when the world has one: an attachment is a scene decision
     // made against the view, so a world without a camera has none to submit and the
@@ -121,7 +127,7 @@ void SubmitParticleEmitters(Engine& engine) {
         if (emitter->attachToCamera) {
             desc.spawnOrigin = cam.position;
         }
-        scene.particleEmitters.push_back(
+        scene.SubmitParticles(
             {.emitterId = entity.Pack(), .maxParticles = emitter->maxParticles, .desc = desc, .texture = emitter->textureAsset, .additive = emitter->additive}
         );
     }
@@ -131,7 +137,7 @@ void SubmitParticleEmitters(Engine& engine) {
         if (!emitter || !emitter->active) {
             continue;
         }
-        scene.meshParticleEmitters.push_back(
+        scene.SubmitMeshParticles(
             {.emitterId    = entity.Pack(),
              .maxParticles = emitter->maxParticles,
              .desc         = emitter->params,
@@ -143,12 +149,12 @@ void SubmitParticleEmitters(Engine& engine) {
 
 // The palettes the simulation pushed this frame, applied in order.
 void UploadPosePalettes(Engine& engine) {
-    auto& rc = engine.GetRenderContext();
+    auto rc = engine.Graphics();
     engine.GetPoseUploads().Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
 }
 
 void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
-    auto& rc  = engine.GetRenderContext();
+    auto rc = engine.Graphics();
     auto& reg = engine.GetRegistry();
 
     auto IsInList = [](std::span<const Entity> list, Entity e) -> bool { return std::ranges::find(list, e) != list.end(); };
@@ -166,17 +172,17 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
             continue;
         }
 
-        auto gpuMeshOpt = rc.GetGPUMesh(meshComp->meshAsset);
+        auto gpuMeshOpt = rc.Mesh(meshComp->meshAsset);
         if (!gpuMeshOpt.has_value()) {
             // Explicit cache clears discard lookups, not scene-owned buffers.
             // Rebind the owner's view instead of allocating another mesh.
             if (const auto owned = reg.Get<Components::OwnedMeshComponent>(e);
-                owned && owned->meshAsset == meshComp->meshAsset && owned->mesh.posBuffer != BufferHandle::Invalid) {
-                rc.RegisterGPUMesh(meshComp->meshAsset, owned->mesh);
+                owned && owned->meshAsset == meshComp->meshAsset && owned->mesh.posBuffer != BufferID::Invalid) {
+                rc.RegisterMesh(meshComp->meshAsset, owned->mesh);
                 gpuMeshOpt = owned->mesh;
             }
         }
-        auto gpuMatOpt = rc.GetGPUMaterial(meshComp->materialAsset);
+        auto gpuMatOpt = rc.Material(meshComp->materialAsset);
         if (!gpuMeshOpt.has_value() || !gpuMatOpt.has_value()) {
             continue;
         }
@@ -202,9 +208,9 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         uint32_t                   activeMorphCount = morphComp ? morphComp->activeCount : 0;
         const ZHLN::Float4         morphWeights     = morphComp ? morphComp->weights : ZHLN::Float4 {};
 
-        BufferHandle scratchVbo = BufferHandle::Invalid;
+        BufferID scratchVbo = BufferID::Invalid;
         if (isSkinned) {
-            scratchVbo = EnsureSkinnedScratch(rc, *skelMesh, gpuMesh.vertexCount);
+            scratchVbo = EnsureSkinnedScratch(ZHLN::EngineAccess::RenderOf(engine), *skelMesh, gpuMesh.vertexCount);
         }
 
         // The 3D skybox is ordinary geometry now: it is placed where the
@@ -249,8 +255,8 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
             for (const auto& mod: csg->modifiers) {
                 if (reg.IsAlive(mod.operandEntity)) {
                     if (auto cutMesh = reg.Get<Components::MeshComponent>(mod.operandEntity)) {
-                        auto cutGpuMeshOpt = rc.GetGPUMesh(cutMesh->meshAsset);
-                        auto cutGpuMatOpt  = rc.GetGPUMaterial(cutMesh->materialAsset);
+                        auto cutGpuMeshOpt = rc.Mesh(cutMesh->meshAsset);
+                        auto cutGpuMatOpt  = rc.Material(cutMesh->materialAsset);
                         if (cutGpuMeshOpt && cutGpuMatOpt) {
                             auto       cutSkelMesh   = reg.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
                             auto       cutWorldTrans = reg.Get<Components::WorldTransformComponent>(mod.operandEntity);
@@ -261,9 +267,9 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
                                 cutPrevMat  = cutWorldTrans->previous;
                             }
 
-                            BufferHandle cutScratchVbo = BufferHandle::Invalid;
+                            BufferID cutScratchVbo = BufferID::Invalid;
                             if (cutSkelMesh) {
-                                cutScratchVbo = EnsureSkinnedScratch(rc, *cutSkelMesh, cutGpuMeshOpt->vertexCount);
+                                cutScratchVbo = EnsureSkinnedScratch(ZHLN::EngineAccess::RenderOf(engine), *cutSkelMesh, cutGpuMeshOpt->vertexCount);
                             }
 
                             csgParams.cutters.push_back(
@@ -345,7 +351,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
     } else {
         return std::nullopt;
     }
-    const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
+    const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.Graphics().ViewportAspect();
     const JPH::Mat44 view   = cam.GetViewMatrix();
     const JPH::Mat44 proj   = cam.GetProjectionMatrix(aspect);
     JPH::Mat44       viewProj = proj * view;
@@ -391,7 +397,7 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 }
 
 FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
-    auto&       rc              = engine.GetRenderContext();
+    auto rc = engine.Graphics();
     auto&       reg             = engine.GetRegistry();
     // The frame's pose, and where "there is nothing to render from" is decided:
     // the component lookup answers emptiness, so the caller checks it before
@@ -423,8 +429,8 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         }
     }
 
-    auto& scene = engine.GetSceneData();
-    scene.dt = dt;
+    auto scene = engine.Debug();
+    scene.SetFrameDelta(dt);
     SubmitParticleEmitters(engine);
     RenderDebug(engine, outPhysicsDrawMode);
 
@@ -513,7 +519,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     frame.skyHorizon = gfx.environment.skyHorizon;
     frame.skyGround  = gfx.environment.skyGround;
 
-    scene.dt = dt;
+    scene.SetFrameDelta(dt);
 
     UploadPosePalettes(engine);
 
@@ -521,11 +527,11 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
 
-    if (auto sim_res = gpuFrame.DispatchSimulations(scene, dt); !sim_res) {
+    if (auto sim_res = gpuFrame.DispatchSimulations(ZHLN::EngineAccess::SceneOf(engine), dt); !sim_res) {
         return std::unexpected(sim_res.error());
     }
 
-    const ViewportRect viewport = rc.GetViewport();
+    const ViewportRect viewport = rc.Viewport();
     const auto target = engine.AcquireTarget();
     if (!target) {
         return std::unexpected(target.error());
@@ -542,7 +548,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
             SceneRenderPass {
                 .view = *sceneView, .camera = cam, .frame = frame, .shadowProjView = outShadowProjView, .settings = gfx
             },
-            scene
+            ZHLN::EngineAccess::SceneOf(engine)
         );
         !scene_res) {
         return std::unexpected(scene_res.error());
@@ -589,7 +595,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return std::unexpected(end_res.error());
     }
 
-    auto& cstats = engine.GetWorld().GetCullingStats();
+    auto& cstats = ZHLN::EngineAccess::WorldOf(engine).GetCullingStats();
     cstats.TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();
     cstats.CulledObjects = cstats.TotalObjects - visibleEntities.size();
 
@@ -597,7 +603,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
 }
 
 void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
-    auto& scene = engine.GetSceneData();
+    auto scene = engine.Debug();
 
     CullingSystem::DrawDebugFrustum(engine);
 
@@ -605,7 +611,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
         ZHLN::ScopedTimer profTimer("Physics Debug Extract & Upload");
 
         bool isWireframe = (physicsDrawMode == 1);
-        auto debugData   = engine.GetPhysicsContext().GetDebugDrawData(true, true, isWireframe);
+        auto debugData   = engine.Physics().DebugDrawData(true, true, isWireframe);
 
         if (isWireframe) {
             auto UnpackColorVec4 = [](uint32_t packed) {

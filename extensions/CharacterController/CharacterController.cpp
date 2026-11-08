@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/CharacterController/CharacterController.cpp
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "CharacterController.hpp"
 
 #include "Zahlen/Math/Camera.hpp"
@@ -88,7 +90,7 @@ void CharacterPreStep(Engine& engine, float dt) {
     CommitCharacterSteering(engine);
     // Prop interaction runs with the steering it depends on: the impulse is
     // computed from the character velocity committed into the body just above.
-    PushProps(engine.GetPhysicsContext(), engine.GetRegistry());
+    PushProps(engine.Physics(), engine.GetRegistry());
 }
 
 // --- Update-graph contributions ------------------------------------------------

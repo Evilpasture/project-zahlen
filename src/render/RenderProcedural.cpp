@@ -51,11 +51,11 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
 #endif
 
 auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
-    -> std::expected<TextureHandle, ErrorCode> {
+    -> std::expected<TextureID, ErrorCode> {
     return Vk::Image::Create(
                allocator, Vk::ImageConfig::Texture2D({width, height}, VK_FORMAT_R8G8B8A8_UNORM, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled)
     )
-        .and_then([&, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<TextureHandle, ErrorCode> {
+        .and_then([&, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<TextureID, ErrorCode> {
             defer                       _([&] { allocator.DestroyImage(gpuImage); });
             const Vk::ImageView writeView = gpuImage.View();
 

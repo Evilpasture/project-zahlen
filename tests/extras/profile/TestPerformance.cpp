@@ -425,7 +425,7 @@ struct PerformanceTestSuite {
 
             graph.Compile();
 
-            const ZHLN::Frame graphFrame {.dt = 0.016f};
+            const ZHLN::Frame graphFrame {.dt = {0.016f}};
 
             constexpr int kGraphIterations = 2000;
             auto          graphStats       = ZHLN::Test::Benchmark("cpu.systemgraph_2000_evals")
@@ -628,10 +628,10 @@ struct PerformanceTestSuite {
             ZHLN::GUI::Context   hudGui;
             ZHLN::Camera         mainCamera;
             ZHLN::defer _([&] {
-                std::vector<ZHLN::Physics::BodyHandle> handles;
+                std::vector<ZHLN::Physics::BodyID> handles;
                 if (!registry.GetEntitiesWith<ZHLN::Components::PhysicsComponent>().empty()) {
                     for (const auto& body: registry.GetRawArray<ZHLN::Components::PhysicsComponent>()) {
-                        handles.push_back(body.physicsHandle);
+                        handles.push_back(body.physicsID);
                     }
                 }
                 physicsContext.DestroyBodies(handles);
@@ -664,13 +664,13 @@ struct PerformanceTestSuite {
                 float      spawnZ = posDist(rng);
                 JPH::RVec3 spawnPos(spawnX, 1.5, spawnZ);
 
-                ZHLN::Physics::BodyHandle bodyHandle =
+                ZHLN::Physics::BodyID bodyID =
                     physicsContext.CreateRigidBody(agentShape, spawnPos, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
 
                 ZHLN::Entity agent = registry.Create(
                     ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)},
                     ZHLN::Character::MovementComponent {.speed = 5.0f + static_cast<float>(i % 5)},
-                    ZHLN::Components::PhysicsComponent {.physicsHandle = bodyHandle, .isStatic = false},
+                    ZHLN::Components::PhysicsComponent {.physicsID = bodyID, .isStatic = false},
                     AgentHealthComponent {.currentHealth = 100.0f, .maxHealth = 100.0f},
                     AgentCombatStateComponent {.attackRange = 8.0f + static_cast<float>(i % 6)}, SpatialPerceptionComponent {}
                 );
@@ -741,7 +741,7 @@ struct PerformanceTestSuite {
                                          // Raycast to probe surrounding terrain & dynamic obstacles
                                          JPH::Vec3  forward(std::sin(static_cast<float>(frame + i) * 0.05f), 0.0f, std::cos(static_cast<float>(frame + i) * 0.05f));
                                          const auto rayHit =
-                                             physicsContext.Raycast(JPH::Vec3(trans->position) + JPH::Vec3(0, 0.5f, 0), forward, 10.0f, phys->physicsHandle);
+                                             physicsContext.Raycast(JPH::Vec3(trans->position) + JPH::Vec3(0, 0.5f, 0), forward, 10.0f, phys->physicsID);
                                          totalRaysCast.fetch_add(1, std::memory_order::relaxed);
 
                                          if (rayHit.hasHit) {
@@ -750,7 +750,7 @@ struct PerformanceTestSuite {
                                          }
 
                                          // Apply movement impulse based on perception
-                                         physicsContext.SetLinearVelocity(phys->physicsHandle, forward * 4.0f);
+                                         physicsContext.SetLinearVelocity(phys->physicsID, forward * 4.0f);
                                      }
                                  });
 
@@ -763,7 +763,7 @@ struct PerformanceTestSuite {
                                      auto         trans = registry.Get<ZHLN::Components::TransformComponent>(e);
                                      auto         phys  = registry.Get<ZHLN::Components::PhysicsComponent>(e);
                                      if (trans && phys) {
-                                         if (const auto pos = physicsContext.BodyPosition(phys->physicsHandle)) {
+                                         if (const auto pos = physicsContext.BodyPosition(phys->physicsID)) {
                                              trans->position = JPH::Vec3(*pos);
                                          }
                                      }

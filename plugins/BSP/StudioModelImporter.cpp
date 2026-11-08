@@ -23,7 +23,7 @@
 namespace ZHLN::BSP {
 namespace {
 
-auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureHandle {
+auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureID {
     if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
         auto vtfExp = DecodeVTF(bytes);
         if (vtfExp.has_value()) {
@@ -52,7 +52,7 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
         }
     }
 
-    return TextureHandle::Invalid;
+    return TextureID::Invalid;
 }
 
 auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string_view materialName, const ImportOptions& options) -> MaterialDesc {
@@ -266,17 +266,17 @@ auto LoadStudioModelPrefabFromMemory(
             continue;
         }
 
-        const BufferHandle   posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.positions});
-        const BufferHandle   frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.tangentFrames});
-        const BufferHandle   surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.surfaces});
-        const BufferHandle   ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {partData.indices});
+        const BufferID   posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.positions});
+        const BufferID   frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.tangentFrames});
+        const BufferID   surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.surfaces});
+        const BufferID   ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {partData.indices});
         const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(std::span {partData.indices}, std::span {partData.positions}));
 
         Mesh subMesh = {
             .posBuffer           = posVbo,
             .tangentFrameBuffer  = frameVbo,
             .surfaceBuffer       = surfaceVbo,
-            .skinBuffer          = BufferHandle::Invalid,
+            .skinBuffer          = BufferID::Invalid,
             .indexBuffer         = ibo,
             .vertexCount         = partData.VertexCount(),
             .indexCount          = partData.IndexCount(),

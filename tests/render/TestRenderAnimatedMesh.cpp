@@ -73,7 +73,7 @@ struct RenderAnimatedMeshTestSuite {
                      .maxContactConstraints = 1024,
                      .tempAllocatorSize     = 16 * 1024 * 1024
             });
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(AnimatedMeshTestError::EngineInitFailed);
             }
             ZHLN::Animation::Install(*engine);
@@ -136,14 +136,14 @@ struct RenderAnimatedMeshTestSuite {
 
             // 5. Automated Skinning Sanity Check: Verify Bounding Radii and
             // per-component scratch reuse across another rendered frame.
-            std::vector<std::pair<ZHLN::Entity, ZHLN::BufferHandle>> skinnedScratch;
+            std::vector<std::pair<ZHLN::Entity, ZHLN::BufferID>> skinnedScratch;
             for (const ZHLN::Entity e: spawnedParts) {
                 if (const auto mesh = reg.Get<ZHLN::Components::MeshComponent>(e)) {
                     if (std::isnan(mesh->cullRadius) || std::isinf(mesh->cullRadius) || mesh->cullRadius > 20.0f) {
                         return std::unexpected(AnimatedMeshTestError::MeshDeformationExplosion);
                     }
                     if (const auto skin = reg.Get<ZHLN::Components::SkeletalMeshComponent>(e);
-                        skin && skin->skinnedScratch != ZHLN::BufferHandle::Invalid) {
+                        skin && skin->skinnedScratch != ZHLN::BufferID::Invalid) {
                         skinnedScratch.emplace_back(e, skin->skinnedScratch);
                     }
                 }

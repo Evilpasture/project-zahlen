@@ -7,21 +7,31 @@
 
 namespace ZHLN {
 
+// Naming taxonomy for the four concepts that used to share the word "Handle":
+//
+//   1. inert numeric key         -> *ID   (the enums/structs in this header)
+//   2. non-owning domain facade  -> a noun (GraphicsDevice, Simulation, DebugDraw)
+//   3. scoped begin/end token    -> *Scope (FrameScope, SessionScope, FrameTarget)
+//   4. owning allocation         -> std::unique_ptr<T> / *Instance
+//
+// Nothing below owns GPU memory or has methods that act on a resource: these are
+// opaque keys you hand *to* an API. The renderer resolves them to real objects.
+//
 // NOLINTBEGIN(performance-enum-size)
-enum class TextureHandle : uint64_t { Invalid = 0 };
-enum class BufferHandle : uint64_t { Invalid = 0 };
-enum class PipelineHandle : uint64_t { Invalid = 0 };
+enum class TextureID : uint64_t { Invalid = 0 };
+enum class BufferID : uint64_t { Invalid = 0 };
+enum class PipelineID : uint64_t { Invalid = 0 };
 // NOLINTEND(performance-enum-size)
 
-static_assert(sizeof(BufferHandle) == 8);
-static_assert(sizeof(PipelineHandle) == 8);
-static_assert(sizeof(TextureHandle) == 8);
+static_assert(sizeof(BufferID) == 8);
+static_assert(sizeof(PipelineID) == 8);
+static_assert(sizeof(TextureID) == 8);
 
 namespace SystemTextures {
-inline constexpr TextureHandle Invalid    = TextureHandle(0);
-inline constexpr TextureHandle Black      = TextureHandle(1);
-inline constexpr TextureHandle White      = TextureHandle(2);
-inline constexpr TextureHandle FlatNormal = TextureHandle(3);
+inline constexpr TextureID Invalid    = TextureID(0);
+inline constexpr TextureID Black      = TextureID(1);
+inline constexpr TextureID White      = TextureID(2);
+inline constexpr TextureID FlatNormal = TextureID(3);
 }
 
 class RenderContext;
@@ -42,10 +52,10 @@ class FrameTarget {
     // An offscreen image still records into this frame's acquired command
     // stream. It cannot be passed as a frame target without that association.
     // The texture must be a render texture (CreateRenderTexture): it is the
-    // same TextureHandle used for bindless sampling, with the attachment
+    // same TextureID used for bindless sampling, with the attachment
     // side looked up in the render-texture registry at resolve time.
-    [[nodiscard]] constexpr auto ForTexture(TextureHandle texture) const noexcept -> FrameTarget {
-        if (!Valid() || texture == TextureHandle::Invalid) {
+    [[nodiscard]] constexpr auto ForTexture(TextureID texture) const noexcept -> FrameTarget {
+        if (!Valid() || texture == TextureID::Invalid) {
             return {};
         }
         FrameTarget result = *this;
@@ -65,7 +75,7 @@ class FrameTarget {
     uint64_t            _frame       = 0;
     uint64_t            _window      = 0;
     uint64_t            _acquisition = 0;
-    TextureHandle       _texture     = TextureHandle::Invalid;
+    TextureID          _texture     = TextureID::Invalid;
 };
 
 static_assert(std::is_trivially_copyable_v<FrameTarget>);

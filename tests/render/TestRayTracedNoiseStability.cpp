@@ -22,6 +22,7 @@
 //      without isolated ray debris, and moving the caster updates immediately on
 //      the first frame without temporal history ghost trails.
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "RayTracedNoiseMetrics.hpp"
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -72,7 +73,7 @@ struct RayTracedNoiseStabilityTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless RT Contact Shadow Stability", .width = kWidth, .height = kHeight
         });
@@ -85,7 +86,7 @@ struct RayTracedNoiseStabilityTestSuite {
                 aa.state.mode        = mode;
             });
         }
-        engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = mode});
+        engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = mode});
     }
 
     static void SetRayTracedShadows(ZHLN::Engine& engine, int enableRTR) {
@@ -115,9 +116,9 @@ struct RayTracedNoiseStabilityTestSuite {
         auto& reg = engine.GetRegistry();
 
         auto floorMat =
-            engine.GetRenderContext().CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.82f, 1.0f}});
+            engine.Graphics().CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.82f, 1.0f}});
         auto boxMat =
-            engine.GetRenderContext().CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.75f, .baseColor = {0.25f, 0.25f, 0.28f, 1.0f}});
+            engine.Graphics().CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.75f, .baseColor = {0.25f, 0.25f, 0.28f, 1.0f}});
         if (!floorMat || !boxMat) {
             return false;
         }
@@ -174,10 +175,10 @@ struct RayTracedNoiseStabilityTestSuite {
         //    grounded curb) and zero frame-to-frame temporal boil.
         std::expected<void, ZHLN::ErrorCode> rt_contact_shadow_is_live_and_boil_free() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
+            if (!engine->Graphics().Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; RT contact shadow check is not applicable.");
                 return {};
             }
@@ -234,10 +235,10 @@ struct RayTracedNoiseStabilityTestSuite {
         //    CascadePCSS (broad soft shadow exists, enableRTR leaves >3m untouched).
         std::expected<void, ZHLN::ErrorCode> rt_contact_shadow_respects_3m_range_cutoff() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
+            if (!engine->Graphics().Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; 3.0m cutoff check is not applicable.");
                 return {};
             }
@@ -296,10 +297,10 @@ struct RayTracedNoiseStabilityTestSuite {
         //    response on moving casters (zero temporal shadow history lag).
         std::expected<void, ZHLN::ErrorCode> rt_contact_shadow_has_no_debris_and_zero_motion_lag() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
+            if (!engine->Graphics().Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; debris/motion check is not applicable.");
                 return {};
             }

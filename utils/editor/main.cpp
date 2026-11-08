@@ -3,6 +3,8 @@
 
 // Dedicated world editor. Its paused/simulating loop is intentionally custom;
 // an ordinary game does not link this UI, document layer, or editor logic.
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <SceneDocument.hpp>
 #include "engine/Platform.hpp"
 // clang-format off
@@ -137,7 +139,7 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
     JPH::Vec3 pFar  = JPH::Vec3(farWorld.GetX() / farWorld.GetW(), farWorld.GetY() / farWorld.GetW(), farWorld.GetZ() / farWorld.GetW());
     JPH::Vec3 dir   = (pFar - pNear).Normalized();
 
-    return engine.GetPhysicsContext().Raycast(pNear, dir, 1000.0f);
+    return engine.Physics().Raycast(pNear, dir, 1000.0f);
 }
 
 // Draws one frame of the self-hosted editor using the Clay layout engine:
@@ -274,7 +276,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         if (const auto right = gui.GetLastFrameRect("InspectorPanel")) {
             vpX1 = right->x;
         }
-        auto& rc = engine.GetRenderContext();
+        auto rc = engine.Graphics();
         rc.SetViewport(
             ZHLN::RenderContext::ViewportRect {
                 .x      = static_cast<uint32_t>(std::clamp(vpX0, 0.0f, static_cast<float>(winSize.width))),
@@ -283,7 +285,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
                 .height = winSize.height,
             }
         );
-        const auto sceneViewport = rc.GetViewport();
+        const auto sceneViewport = rc.Viewport();
 
         // TEMP-DIAG (camera jump investigation): log every viewport change so
         // a rectangle jump can be correlated with the camera log.
@@ -362,7 +364,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
                 if (hit.hasHit) {
                     for (ZHLN::Entity entity: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
                         const auto physics = reg.Get<ZHLN::Components::PhysicsComponent>(entity);
-                        if (physics && physics->physicsHandle == hit.handle) {
+                        if (physics && physics->physicsID == hit.bodyID) {
                             s_NativeEditorState.selectedEntity = entity;
                             break;
                         }
@@ -419,7 +421,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         }
 
         if (state && state->needsResize) {
-            engine.GetRenderContext().SetResolution(state->newSize);
+            engine.Graphics().SetResolution(state->newSize);
             state->needsResize = false;
             continue;
         }

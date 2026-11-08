@@ -473,7 +473,7 @@ enum class NvmlFailure : uint8_t {
     EntryPointsMissing   ZHLN_ANNOTATION(ZHLN::Description<"the driver library is loaded but missing entry points"> {}) = 2,
     InitFailed           ZHLN_ANNOTATION(ZHLN::Description<"the driver refused to initialize"> {})                   = 3,
     NoDevices            ZHLN_ANNOTATION(ZHLN::Description<"the driver reports no devices"> {})                      = 4,
-    NoDeviceHandle       ZHLN_ANNOTATION(ZHLN::Description<"no device could be opened"> {})                          = 5,
+    NoDevice       ZHLN_ANNOTATION(ZHLN::Description<"no device could be opened"> {})                          = 5,
 };
 
 // The NVIDIA driver, bound at runtime. A machine with no NVML fails at the first
@@ -591,7 +591,7 @@ auto NvmlProbe::Init(std::string_view gpuNameHint) -> std::expected<void, ErrorC
     }
 
     if (!chosen) {
-        return std::unexpected(NvmlFailure::NoDeviceHandle);
+        return std::unexpected(NvmlFailure::NoDevice);
     }
 
     _device = chosen->first;

@@ -3,6 +3,7 @@
 
 // Scene/document loading, Lua graphics hot reload and optional Discord
 // presence live in this diagnostic host, not in the ordinary game binary.
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "SceneDocument.hpp"
 #include "engine/system/GraphicsSettingsSync.hpp"
 #include <Zahlen/ConfigCli.hpp>
@@ -45,7 +46,7 @@ struct HostLaunchConfig {
 HostLaunchConfig s_HostLaunchConfig;
 
 struct HostStateService {
-    ZHLN::FS::FileWatchHandle graphicsWatch = 0;
+    ZHLN::FS::FileWatchID graphicsWatch = 0;
     bool                      bootApplied   = false;
 };
 
@@ -56,7 +57,7 @@ void ApplyGraphicsProfileFromLua(ZHLN::Engine& engine, const std::filesystem::pa
         return;
     }
     const std::string      chunkName = "@" + path.generic_string();
-    const ZHLN::RenderInfo hw        = engine.GetRenderContext().GetInfo();
+    const ZHLN::RenderInfo hw        = engine.Graphics().Info();
 
     const auto applyOverlay = [&](ZHLN::GraphicsSettings& dst) -> std::expected<void, ZHLN::ErrorCode> {
         auto callRes = ZHLN::ReflectLua::ApplyCallPatchString(dst, *source, chunkName, ZHLN::LuaBudget {}, hw);

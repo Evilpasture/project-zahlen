@@ -23,7 +23,7 @@
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
-#include <Zahlen/Physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <algorithm>
 #include <array>
 #include <bitset>
@@ -98,7 +98,7 @@ struct Components {
     struct SkeletalMeshComponent {
         uint32_t     jointOffset        = 0;
         int32_t      skeletonIndex      = -1;
-        BufferHandle skinnedScratch     = BufferHandle::Invalid;
+        BufferID skinnedScratch     = BufferID::Invalid;
         uint32_t     scratchVertexCount = 0;
     };
 
@@ -120,7 +120,7 @@ struct Components {
     };
 
     struct PhysicsComponent {
-        Physics::BodyHandle physicsHandle = Physics::BodyHandle::Null();
+        Physics::BodyID physicsID = Physics::BodyID::Null();
         bool                isStatic      = true;
     };
 
@@ -143,7 +143,7 @@ struct Components {
     };
 
     struct RagdollComponent {
-        Physics::RagdollHandle ragdollHandle = Physics::RagdollHandle::Invalid;
+        Physics::RagdollID ragdollID = Physics::RagdollID::Invalid;
         AssetID                skeletonAsset = InvalidAssetID;
 
         RagdollState state     = RagdollState::Inactive;
@@ -259,7 +259,7 @@ struct Components {
         int physicsDrawMode = 0;
     };
     struct AnimatorComponent {
-        AnimationHandle animationHandle      = AnimationHandle::Null();
+        AnimationID animationID      = AnimationID::Null();
         AssetID         prefabAsset          = InvalidAssetID;
         int32_t         currentTrackIdx      = -1;
         float           currentTrackTime     = 0.0f;
@@ -285,14 +285,14 @@ struct Components {
         bool                 isSpatialized = true;
         bool                 playOnStart   = true;
         bool                 isPaused      = false;
-        AudioBusId           bus           = AudioBus::SFX;
+        AudioBusID           bus           = AudioBus::SFX;
         AudioPlaybackMode    playbackMode  = AudioPlaybackMode::Decompressed;
         float                reverbSend    = 0.0f;
         ZHLN::Float3         velocity      = {};
         AudioAttenuationDesc attenuation {};
         AudioOcclusionDesc   occlusion {};
 
-        AudioHandle voiceHandle = AudioHandle::Invalid;
+        VoiceID voiceID = VoiceID::Invalid;
     };
     static_assert(std::is_trivially_copyable_v<AudioSourceComponent>);
     struct PlayerSeatComponent {
@@ -632,7 +632,7 @@ struct Components {
     // buffers are renderer-owned and keyed by the emitter entity's packed ID.
     struct ParticleEmitterComponent {
         ParticleEmitterDesc params;
-        TextureHandle       textureAsset   = TextureHandle::Invalid;
+        TextureID       textureAsset   = TextureID::Invalid;
         uint32_t            maxParticles   = 65536;
         bool                active         = true;
         bool                attachToCamera = false;
@@ -650,8 +650,8 @@ struct Components {
     };
 
     struct DecalComponent {
-        TextureHandle albedoMap = TextureHandle::Invalid;
-        TextureHandle normalMap = TextureHandle::Invalid;
+        TextureID albedoMap = TextureID::Invalid;
+        TextureID normalMap = TextureID::Invalid;
         float         roughness = 0.5f;
         float         metallic  = 0.0f;
     };

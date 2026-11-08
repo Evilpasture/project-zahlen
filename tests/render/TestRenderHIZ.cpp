@@ -1,6 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -47,7 +49,7 @@ struct HiZTestSuite {
     // thrown away between tests. Creating a Vulkan instance per test is what
     // eventually exhausts the loader's static TLS and turns the tail of a
     // group into "vkCreateInstance: Found no drivers!".
-    static auto CreateTestEngine(uint32_t width = 1280, uint32_t height = 720) -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine(uint32_t width = 1280, uint32_t height = 720) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Hi-Z Test",
             .width                 = width,
@@ -64,7 +66,7 @@ struct HiZTestSuite {
             constexpr uint32_t kHeight = 720;
 
             auto engine      = CreateTestEngine(kWidth, kHeight);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(HiZTestError::EngineInitFailed);
             }
 
@@ -98,7 +100,7 @@ struct HiZTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> hiz_two_pass_culling_pipeline_execution() {
             auto engine      = CreateTestEngine(1280, 720);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(HiZTestError::EngineInitFailed);
             }
 
@@ -146,7 +148,7 @@ struct HiZTestSuite {
 
             // Verify culling and draw lists are active and non-empty
             ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty());
-            ZHLN::Test::ExpectGt(engine->GetWorld().GetCullingStats().TotalTriangles, 0);
+            ZHLN::Test::ExpectGt(engine->State().CullingStats().TotalTriangles, 0);
 
             return {};
         }
@@ -156,7 +158,7 @@ struct HiZTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> hiz_occlusion_culling_invariants() {
             auto engine      = CreateTestEngine(1280, 720);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(HiZTestError::EngineInitFailed);
             }
 
@@ -223,7 +225,7 @@ struct HiZTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> hiz_dynamic_viewport_resizing() {
             auto engine      = CreateTestEngine(1280, 720);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(HiZTestError::EngineInitFailed);
             }
 
@@ -236,7 +238,7 @@ struct HiZTestSuite {
             }
 
             // Dynamically resize viewport to 800x600 (Triggers RecreateTargets and rebuilds Hi-Z mips)
-            engine->GetRenderContext().SetResolution({.width = 800, .height = 600});
+            engine->Graphics().SetResolution({.width = 800, .height = 600});
 
             // Invariant: 800x600 requires bit_width(800) = 10 mip levels
             const uint32_t expectedNewMips = std::bit_width(800u);
@@ -254,7 +256,7 @@ struct HiZTestSuite {
             // through to the window is the only thing that makes this true --
             // without it the call flagged a recreate at the old size and the
             // ten frames above proved nothing.
-            const auto resized = engine->GetRenderContext().GetFramebufferSize();
+            const auto resized = engine->Graphics().FramebufferSize();
             if (ZHLN::Test::ExpectTrue(resized.has_value())) {
                 ZHLN::Test::ExpectEq(resized->width, 800u);
                 ZHLN::Test::ExpectEq(resized->height, 600u);

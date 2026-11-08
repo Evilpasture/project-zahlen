@@ -6,6 +6,8 @@
 // test the SV_IsFrontFace normal orientation. The vertex/indirect and meshlet
 // paths must agree without making mirrored materials double-sided.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/ImageTesting.hpp"
@@ -88,7 +90,7 @@ struct CaptureResult {
 }
 
 [[nodiscard]] auto Complete(const ZHLN::Mesh& mesh) noexcept -> bool {
-    using enum ZHLN::BufferHandle;
+    using enum ZHLN::BufferID;
     return mesh.posBuffer != Invalid && mesh.tangentFrameBuffer != Invalid && mesh.surfaceBuffer != Invalid && mesh.indexBuffer != Invalid &&
            mesh.meshletBuffer != Invalid && mesh.meshletVertexBuffer != Invalid && mesh.meshletTriBuffer != Invalid && mesh.meshletCount != 0;
 }
@@ -106,11 +108,11 @@ const std::array<JPH::Vec3, 5> kCenters {
         .height = 480,
         .enableMeshShading = meshShading,
     });
-    if (engine == nullptr) return std::unexpected(NegativeScaleError::EngineInitFailed);
+    if (!engine.Valid()) return std::unexpected(NegativeScaleError::EngineInitFailed);
 
-    auto& rc  = engine->GetRenderContext();
+    auto rc = engine->Graphics();
     auto& reg = engine->GetRegistry();
-    const auto info = rc.GetInfo();
+    const auto info = rc.Info();
     if (meshShading && !info.meshShadingActive) return std::unexpected(NegativeScaleError::MeshPathInactive);
 
     ZHLN::Test::Headless::DisableAA(*engine);
@@ -153,26 +155,26 @@ const std::array<JPH::Vec3, 5> kCenters {
         .unlit = true, .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.05f, 0.9f, 0.05f, 1.0f}
     });
     if (!oneSided) return std::unexpected(NegativeScaleError::ResourceCreationFailed);
-    rc.RegisterGPUMaterial(oneSidedID, *oneSided);
+    rc.RegisterMaterial(oneSidedID, *oneSided);
     bool hasDoubleSided = false;
     ZHLN::defer _([&] {
         engine->ClearScene(); // Releases the sole owner of the mesh before unregistering the materials.
-        rc.UnregisterGPUMaterial(oneSidedID);
-        if (hasDoubleSided) rc.UnregisterGPUMaterial(doubleSidedID);
+        rc.UnregisterMaterial(oneSidedID);
+        if (hasDoubleSided) rc.UnregisterMaterial(doubleSidedID);
     });
     const auto doubleSided = rc.CreateMaterial(ZHLN::MaterialDesc {
         .doubleSided = true, .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}
     });
     if (!doubleSided) return std::unexpected(NegativeScaleError::ResourceCreationFailed);
-    rc.RegisterGPUMaterial(doubleSidedID, *doubleSided);
+    rc.RegisterMaterial(doubleSidedID, *doubleSided);
     hasDoubleSided = true;
 
-    ZHLN::Mesh mesh = MakePanel(rc);
+    ZHLN::Mesh mesh = MakePanel(ZHLN::EngineAccess::RenderOf(*engine));
     if (!Complete(mesh)) {
         rc.DestroyMesh(mesh);
         return std::unexpected(NegativeScaleError::ResourceCreationFailed);
     }
-    rc.RegisterGPUMesh(meshID, mesh);
+    rc.RegisterMesh(meshID, mesh);
 
     for (size_t i = 0; i < kCenters.size(); ++i) {
         // Panel 2 reverses its surface direction with a *proper* rotation;

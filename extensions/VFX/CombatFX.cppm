@@ -5,6 +5,9 @@ module;
 
 // Public Engine & Jolt Headers
 // clang-format off
+#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Math/Mat44.h>
@@ -23,7 +26,7 @@ module;
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 
 // Standard Library Headers
 #include <algorithm>
@@ -46,8 +49,8 @@ export namespace ZHLN::CombatFX {
  * @brief Configurable response when a projectile or beam impacts a surface.
  */
 struct SurfaceResponse {
-    TextureHandle decalTexture   = TextureHandle::Invalid;
-    TextureHandle normalTexture  = TextureHandle::Invalid;
+    TextureID decalTexture   = TextureID::Invalid;
+    TextureID normalTexture  = TextureID::Invalid;
     float         decalSize      = 0.28f;
     float         decalLifetime  = 15.0f;
     float         decalRoughness = 0.90f;
@@ -120,7 +123,7 @@ class System {
         }
         m_initialized = true;
 
-        auto& rc = engine.GetRenderContext();
+        auto rc = engine.Graphics();
 
         // 1. Build default bullet hole texture
         m_defaultHoleTex = rc.CreateProceduralTexture("vfx_combat_bullethole", {128, 128}, GenerateBulletHoleTexture(128), true);
@@ -194,7 +197,7 @@ class System {
         std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
 
         // 1. Spawn Decal via ECS DecalComponent (Heightmap & Geometry Agnostic)
-        if (cfg.spawnDecal && cfg.decalTexture != TextureHandle::Invalid) {
+        if (cfg.spawnDecal && cfg.decalTexture != TextureID::Invalid) {
             auto& reg = engine.GetRegistry();
             auto& ecb = engine.GetMainECB();
 
@@ -239,7 +242,7 @@ class System {
 
         // 3. Acoustic Audio Feedback via Unified Fire-and-Forget Event Queue
         if (cfg.hasAudio) {
-            engine.GetAudioContext().PostEvent(
+            engine.Audio().PostEvent(
                 {.type       = AudioEventType::NoiseBurst3D,
                  .position   = point,
                  .volume     = 0.65f,
@@ -304,7 +307,7 @@ class System {
      * @brief Simulates active effects and submits GPU batches.
      */
     void Update(Engine& engine, float dt) {
-        auto& scene = engine.GetSceneData();
+        auto scene = engine.Debug();
 
         // 1. Advance and Render Tracers via Zero-Allocation Line Pipeline (rc.DrawLine)
         for (auto& tracer: m_tracers) {
@@ -407,7 +410,7 @@ class System {
     }
 
     bool                                          m_initialized    = false;
-    TextureHandle                                 m_defaultHoleTex = TextureHandle::Invalid;
+    TextureID                                 m_defaultHoleTex = TextureID::Invalid;
     std::random_device                            m_randomDevice;
     std::unordered_map<uint32_t, SurfaceResponse> m_surfaces;
 

@@ -19,6 +19,7 @@
 // The subject is a saturated red material under fullBright, so the mask is a
 // colour test and every background/tone-map concern cancels out.
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/TargetCameraFixture.hpp"
@@ -155,12 +156,12 @@ struct ViewportSubregionTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> scene_stays_in_its_band_and_keeps_aspect() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Viewport Subregion", 960, 540);
-            if (engine == nullptr) {
+            if (!engine.Valid()) {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             // The engine is pooled across suites; whatever band this test
             // leaves set must not leak into the next suite's captures.
@@ -168,7 +169,7 @@ struct ViewportSubregionTestSuite {
                 ZHLN::RenderContext&                rc;
                 ZHLN::RenderContext::ViewportRect   full;
                 ~ViewportRestore() { rc.SetViewport(full); }
-            } restore {rc, rc.GetViewport()};
+            } restore {rc, rc.Viewport()};
 
             DisableJitterVignetteAndTargetDrive(reg);
 

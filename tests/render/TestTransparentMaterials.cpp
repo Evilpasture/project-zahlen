@@ -15,6 +15,7 @@
 // does for alphaMode 2, so the glass mesh is patched after spawn. AA is off
 // so a static scene stays static. Mesh shading is left alone (Hybrid).
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/ImageTesting.hpp"
@@ -69,7 +70,7 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
 
 [[nodiscard]] auto SpawnWallAndPane(ZHLN::Engine& engine, PaneKind pane) -> SceneBuild {
     auto& registry  = engine.GetRegistry();
-    auto& renderCtx = engine.GetRenderContext();
+    auto renderCtx = engine.Graphics();
 
     for (const ZHLN::Entity settings: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
         registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
@@ -157,7 +158,7 @@ struct PaneMeasurement {
                            pane == PaneKind::Opaque ? "Headless Transparent Opaque Twin" :
                                                       "Headless Transparent Wall Only";
     const auto engine = ZHLN::Test::Headless::AcquireEngine(name);
-    if (engine == nullptr) {
+    if (!engine.Valid()) {
         out.error = TransparentMaterialError::EngineInitFailed;
         return out;
     }
@@ -268,9 +269,9 @@ struct TransparentMaterialsTestSuite {
         // instance parameters, shader sampling, and masked depth writes.
         std::expected<void, ZHLN::ErrorCode> masked_transmission_and_texture_are_independent() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless masked transmission");
-            if (engine == nullptr) return std::unexpected(TransparentMaterialError::EngineInitFailed);
+            if (!engine.Valid()) return std::unexpected(TransparentMaterialError::EngineInitFailed);
             ZHLN::Test::Headless::DisableAA(*engine);
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
             auto& reg = engine->GetRegistry();
 
             for (const ZHLN::Entity settings: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {

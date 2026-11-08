@@ -11,7 +11,7 @@
 
 namespace ZHLN {
 
-template <typename T, size_t MaxObjects, typename HandleType = uint64_t>
+template <typename T, size_t MaxObjects, typename IDType = uint64_t>
 class GenerationalPool {
   public:
     GenerationalPool() {
@@ -34,14 +34,14 @@ class GenerationalPool {
     auto operator=(const GenerationalPool&) -> GenerationalPool& = delete;
 
     template <typename... Args>
-    HandleType Create(Args&&... args) {
+    IDType Create(Args&&... args) {
         if (_freeIndices.empty()) [[unlikely]] {
             ZHLN::LogError(
                 "GenerationalPool has exceeded its maximum capacity of {}! Returning "
                 "invalid handle.",
                 MaxObjects
             );
-            return static_cast<HandleType>(0);
+            return static_cast<IDType>(0);
         }
         uint32_t index = _freeIndices.back();
         _freeIndices.pop_back();
@@ -50,7 +50,7 @@ class GenerationalPool {
         _pointers[index] = _pool.Create(std::forward<Args>(args)...);
 
         uint64_t packed = (static_cast<uint64_t>(gen) << 32) | index;
-        return static_cast<HandleType>(packed);
+        return static_cast<IDType>(packed);
     }
 
     template <typename Fn>
@@ -73,10 +73,10 @@ class GenerationalPool {
         }
     }
 
-    void Destroy(HandleType handle) {
-        auto rawHandle = static_cast<uint64_t>(handle);
-        auto index     = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
-        auto gen       = static_cast<uint32_t>(rawHandle >> 32);
+    void Destroy(IDType handle) {
+        auto rawID = static_cast<uint64_t>(handle);
+        auto index     = static_cast<uint32_t>(rawID & 0xFFFFFFFF);
+        auto gen       = static_cast<uint32_t>(rawID >> 32);
 
         if (index >= MaxObjects || _generations[index] != gen || _pointers[index] == nullptr) {
             return;
@@ -88,14 +88,14 @@ class GenerationalPool {
         _freeIndices.push_back(index);
     }
 
-    [[nodiscard]] auto Resolve(HandleType handle) const noexcept -> T* {
-        const auto rawHandle = static_cast<uint64_t>(handle);
-        if (rawHandle == 0) [[unlikely]] {
+    [[nodiscard]] auto Resolve(IDType handle) const noexcept -> T* {
+        const auto rawID = static_cast<uint64_t>(handle);
+        if (rawID == 0) [[unlikely]] {
             return nullptr;
         }
 
-        const auto index = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
-        const auto gen   = static_cast<uint32_t>(rawHandle >> 32);
+        const auto index = static_cast<uint32_t>(rawID & 0xFFFFFFFF);
+        const auto gen   = static_cast<uint32_t>(rawID >> 32);
 
         if (index >= MaxObjects) [[unlikely]] {
             return nullptr;

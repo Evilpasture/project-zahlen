@@ -54,7 +54,7 @@ ZHLN_API void               UninstallBakedFontLoader() noexcept;
 
 ZHLN_API void SetDefaultBakedFont(BakedFontAsset font) noexcept;
 
-[[nodiscard]] ZHLN_API auto BuildFontAtlas(const BakedFontAsset& asset, TextureHandle texture = TextureHandle::Invalid) noexcept -> FontAtlas;
+[[nodiscard]] ZHLN_API auto BuildFontAtlas(const BakedFontAsset& asset, TextureID texture = TextureID::Invalid) noexcept -> FontAtlas;
 
 [[nodiscard]] ZHLN_API auto DecodeCookedFont(std::span<const std::byte> blob) -> std::expected<BakedFontAsset, ErrorCode>;
 

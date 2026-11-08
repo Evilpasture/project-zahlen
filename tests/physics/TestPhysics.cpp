@@ -41,24 +41,23 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
             // Create static ground box at (0, 0, 0) with half-extents (10, 1, 10)
             auto         boxShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 10.0f, 1.0f, 10.0f);
-            ZHLN::Physics::BodyHandle ground =
+            ZHLN::Physics::BodyID ground =
                 pc.CreateRigidBody(boxShape, {0, 0, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
-            ZHLN::Test::Expect(ground) != ZHLN::Physics::BodyHandle::Null();
+            ZHLN::Test::Expect(ground) != ZHLN::Physics::BodyID::Null();
 
             pc.OptimizeBroadphase();
 
             // 1. Raycast downwards from (0, 10, 0) -> (0, -1, 0)
             auto hit = pc.Raycast({0, 10, 0}, {0, -1, 0}, 20.0f);
             ZHLN::Test::Expect(hit.hasHit);
-            ZHLN::Test::Expect(hit.handle.Pack()) == ground.Pack();
+            ZHLN::Test::Expect(hit.bodyID.Pack()) == ground.Pack();
 
             // Ground box top surface is at Y = 1.0
-            ZHLN::Test::Expect(hit.position.GetY()) == ZHLN::Test::Approx(1.0f, 0.05f);
-            ZHLN::Test::Expect(hit.normal.GetY()) > 0.9f;
+            ZHLN::Test::Expect(hit.position.y) == ZHLN::Test::Approx(1.0f, 0.05f);
+            ZHLN::Test::Expect(hit.normal.y) > 0.9f;
 
             // 2. Sphere overlap at (0, 0, 0)
-            JPH::Array<ZHLN::Physics::BodyHandle> overlapResults;
-            pc.OverlapSphere({0, 0, 0}, 5.0f, overlapResults);
+            const std::vector<ZHLN::Physics::BodyID> overlapResults = pc.OverlapSphere({0, 0, 0}, 5.0f);
             ZHLN::Test::ExpectGe(overlapResults.size(), 1);
 
             return {};
@@ -71,9 +70,9 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             // Create a dynamic falling sphere (radius 0.5) centered at (0, 10, 0)
             // Top surface initially at Y = 10.5
             auto         sphereShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.5f);
-            ZHLN::Physics::BodyHandle sphere =
+            ZHLN::Physics::BodyID sphere =
                 pc.CreateRigidBody(sphereShape, {0, 10, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
-            ZHLN::Test::ExpectTrue(sphere != ZHLN::Physics::BodyHandle::Null());
+            ZHLN::Test::ExpectTrue(sphere != ZHLN::Physics::BodyID::Null());
 
             pc.OptimizeBroadphase();
 
@@ -86,7 +85,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             // Raycast down from (0, 15, 0) to find new fallen position
             auto hit = pc.Raycast({0, 15, 0}, {0, -1, 0}, 30.0f);
             ZHLN::Test::ExpectTrue(hit.hasHit);
-            ZHLN::Test::ExpectLt(hit.position.GetY(), 10.0f); // Top surface fell below 10.0m
+            ZHLN::Test::ExpectLt(hit.position.y, 10.0f); // Top surface fell below 10.0m
 
             // The public physics façade exposes the synchronized position without
             // leaking PhysicsWorld's slot-to-dense mapping or SoA storage.
@@ -96,8 +95,8 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
             const auto bodyState = pc.BodyState(sphere);
             ZHLN::Test::ExpectTrue(bodyState.has_value());
-            ZHLN::Test::ExpectLt(bodyState->currentPosition.GetY(), 9.0f);
-            ZHLN::Test::ExpectGt(bodyState->previousPosition.GetY(), bodyState->currentPosition.GetY());
+            ZHLN::Test::ExpectLt(bodyState->currentPosition.y, 9.0f);
+            ZHLN::Test::ExpectGt(bodyState->previousPosition.y, bodyState->currentPosition.y);
 
             // A queued body destruction invalidates the generation-safe lookup
             // once the following physics step has drained its command queue.
@@ -111,7 +110,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
         std::expected<void, ZHLN::ErrorCode> test_explicit_body_detach_and_batched_destruction(Fixture::TaskSystemAndJoltScope&) {
             using Body = ZHLN::Components::PhysicsComponent;
-            using Handle = ZHLN::Physics::BodyHandle;
+            using Handle = ZHLN::Physics::BodyID;
             ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
             ZHLN::ECS::Registry registry; // destroyed before pc
@@ -121,7 +120,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             };
 
             const auto firstBody = createBody();
-            const auto owner = registry.Create(Body {.physicsHandle = firstBody});
+            const auto owner = registry.Create(Body {.physicsID = firstBody});
             ZHLN::Test::ExpectTrue(ZHLN::SceneResources::Detach<Body>(pc, registry, owner));
             ZHLN::Test::ExpectFalse(ZHLN::SceneResources::Detach<Body>(pc, registry, owner));
             pc.Step(1.0f / 60.0f);
@@ -129,9 +128,9 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::Test::ExpectFalse(pc.IsBodyDynamic(firstBody));
 
             const auto secondBody = createBody();
-            ZHLN::SceneResources::Attach(pc, registry, owner, Body {.physicsHandle = secondBody});
+            ZHLN::SceneResources::Attach(pc, registry, owner, Body {.physicsID = secondBody});
             const auto thirdBody = createBody();
-            ZHLN::SceneResources::Attach(pc, registry, owner, Body {.physicsHandle = thirdBody}); // releases second
+            ZHLN::SceneResources::Attach(pc, registry, owner, Body {.physicsID = thirdBody}); // releases second
             pc.Step(1.0f / 60.0f);
             ZHLN::Test::ExpectFalse(pc.IsBodyDynamic(secondBody));
             ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(thirdBody));
@@ -139,10 +138,10 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             // A scene query observes intact components; a single batched call
             // queues the releases before the registry reclaims their entities.
             const auto otherBody = createBody();
-            const auto other = registry.Create(Body {.physicsHandle = otherBody});
+            const auto other = registry.Create(Body {.physicsID = otherBody});
             registry.Add(owner, ZHLN::Components::PendingDestroy {});
             registry.Add(other, ZHLN::Components::PendingDestroy {});
-            ZHLN::Test::ExpectEq(registry.Get<Body>(owner)->physicsHandle, thirdBody);
+            ZHLN::Test::ExpectEq(registry.Get<Body>(owner)->physicsID, thirdBody);
             const std::vector<Handle> batch {thirdBody, otherBody, thirdBody, Handle::Null(), secondBody};
             pc.DestroyBodies(batch); // duplicate, null and stale handles are safe
             const auto marked = registry.GetEntitiesWith<ZHLN::Components::PendingDestroy>();
@@ -154,7 +153,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 0u);
 
             const auto lastBody = createBody();
-            registry.Create(Body {.physicsHandle = lastBody});
+            registry.Create(Body {.physicsID = lastBody});
             pc.DestroyBodies(std::span {&lastBody, 1});
             registry.Clear(); // data-only storage reset after explicit release
             pc.Step(1.0f / 60.0f);
@@ -163,7 +162,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> test_ragdoll_handles_are_released_explicitly(Fixture::TaskSystemAndJoltScope&) {
+        std::expected<void, ZHLN::ErrorCode> test_ragdoll_ids_are_released_explicitly(Fixture::TaskSystemAndJoltScope&) {
             ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
             ZHLN::ECS::Registry registry;
@@ -175,18 +174,18 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             std::vector<ZHLN::Physics::RagdollPartParams> parts {{.jointIndex = 0, .shape = shape}};
 
             const auto first = pc.CreateSkeletalRagdoll(skeleton, parts);
-            if (!ZHLN::Test::ExpectTrue(first != ZHLN::Physics::RagdollHandle::Invalid)) {
+            if (!ZHLN::Test::ExpectTrue(first != ZHLN::Physics::RagdollID::Invalid)) {
                 return std::unexpected(PhysicsTestError::RagdollCreationFailed);
             }
-            const auto owner = registry.Create(ZHLN::Components::RagdollComponent {.ragdollHandle = first});
+            const auto owner = registry.Create(ZHLN::Components::RagdollComponent {.ragdollID = first});
             ZHLN::Test::ExpectTrue(pc.GetRagdoll(first).has_value());
             ZHLN::SceneResources::Detach<ZHLN::Components::RagdollComponent>(pc, registry, owner);
             ZHLN::Test::ExpectFalse(pc.GetRagdoll(first).has_value());
 
             const auto second = pc.CreateSkeletalRagdoll(skeleton, parts);
             ZHLN::Test::ExpectTrue(second != first);
-            ZHLN::SceneResources::Attach(pc, registry, owner, ZHLN::Components::RagdollComponent {.ragdollHandle = second});
-            const std::vector<ZHLN::Physics::RagdollHandle> handles {second, first, second};
+            ZHLN::SceneResources::Attach(pc, registry, owner, ZHLN::Components::RagdollComponent {.ragdollID = second});
+            const std::vector<ZHLN::Physics::RagdollID> handles {second, first, second};
             pc.DestroyRagdolls(handles);
             registry.Clear();
             ZHLN::Test::ExpectFalse(pc.GetRagdoll(second).has_value());
@@ -201,7 +200,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
         // address and which stays null until a Step's sync pass runs. The
         // handle's generation must also be validated so a stale handle cannot
         // resolve to a slot's new occupant.
-        std::expected<void, ZHLN::ErrorCode> test_is_body_dynamic_reports_motion_type_and_rejects_stale_handles(Fixture::TaskSystemAndJoltScope&) {
+        std::expected<void, ZHLN::ErrorCode> test_is_body_dynamic_reports_motion_type_and_rejects_stale_ids(Fixture::TaskSystemAndJoltScope&) {
             ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
@@ -211,20 +210,20 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             // The motion type is queryable as soon as the body exists in Jolt,
             // before any Step has populated the engine's shadow SoA. A dynamic
             // body is dynamic the moment it is created.
-            const ZHLN::Physics::BodyHandle dynamicBody =
+            const ZHLN::Physics::BodyID dynamicBody =
                 pc.CreateRigidBody(sphereShape, {0, 0, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
-            ZHLN::Test::ExpectTrue(dynamicBody != ZHLN::Physics::BodyHandle::Null());
+            ZHLN::Test::ExpectTrue(dynamicBody != ZHLN::Physics::BodyID::Null());
             ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(dynamicBody));
 
-            const ZHLN::Physics::BodyHandle staticBody =
+            const ZHLN::Physics::BodyID staticBody =
                 pc.CreateRigidBody(boxShape, {0, 5, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
-            const ZHLN::Physics::BodyHandle kinematicBody =
+            const ZHLN::Physics::BodyID kinematicBody =
                 pc.CreateRigidBody(boxShape, {0, 10, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Kinematic, ZHLN::Layers::ID::MOVING);
-            ZHLN::Test::ExpectTrue(staticBody != ZHLN::Physics::BodyHandle::Null());
-            ZHLN::Test::ExpectTrue(kinematicBody != ZHLN::Physics::BodyHandle::Null());
+            ZHLN::Test::ExpectTrue(staticBody != ZHLN::Physics::BodyID::Null());
+            ZHLN::Test::ExpectTrue(kinematicBody != ZHLN::Physics::BodyID::Null());
             ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(staticBody));
             ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(kinematicBody));
-            ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(ZHLN::Physics::BodyHandle::Null()));
+            ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(ZHLN::Physics::BodyID::Null()));
 
             // A destroyed body's slot is the first to be handed back out (LIFO
             // free list) with a bumped generation. The stale handle keeps the
@@ -233,9 +232,9 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             pc.DestroyBody(dynamicBody);
             pc.Step(1.0f / 60.0f);
 
-            const ZHLN::Physics::BodyHandle reused =
+            const ZHLN::Physics::BodyID reused =
                 pc.CreateRigidBody(sphereShape, {0, 0, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
-            ZHLN::Test::ExpectTrue(reused != ZHLN::Physics::BodyHandle::Null());
+            ZHLN::Test::ExpectTrue(reused != ZHLN::Physics::BodyID::Null());
             ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(reused));        // the live occupant is dynamic
             ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(dynamicBody));  // the stale handle is not
             return {};
@@ -250,10 +249,10 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             pc.OptimizeBroadphase();
 
             constexpr size_t                        kCharCount = 8;
-            std::vector<ZHLN::Physics::BodyHandle>  characters(kCharCount);
+            std::vector<ZHLN::Physics::BodyID>  characters(kCharCount);
             for (size_t i = 0; i < kCharCount; ++i) {
                 characters[i] = pc.CreateCharacter({static_cast<double>(i) * 2.5, 1.5, 0.0});
-                if (!ZHLN::Test::ExpectTrue(characters[i] != ZHLN::Physics::BodyHandle::Null())) {
+                if (!ZHLN::Test::ExpectTrue(characters[i] != ZHLN::Physics::BodyID::Null())) {
                     return std::unexpected(PhysicsTestError::ParallelCharacterSyncFailed);
                 }
             }
@@ -266,7 +265,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             std::atomic<bool> shapesValid {true};
             ZHLN::TaskSystem::ParallelFor(static_cast<uint32_t>(kCharCount), 1, [&](uint32_t start, uint32_t end, uint32_t) {
                 pc.FillBodyStates(
-                    std::span<const ZHLN::Physics::BodyHandle>(characters.data() + start, end - start),
+                    std::span<const ZHLN::Physics::BodyID>(characters.data() + start, end - start),
                     std::span<ZHLN::Physics::BodyStateSnapshot>(snapshots.data() + start, end - start)
                 );
                 const auto shape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.25f + static_cast<float>(start) * 0.1f);
@@ -301,7 +300,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             pc.CreateRigidBody(groundShape, {0, -0.5, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
             constexpr size_t                       kPersistentBodies = 12;
-            std::vector<ZHLN::Physics::BodyHandle> persistent(kPersistentBodies);
+            std::vector<ZHLN::Physics::BodyID> persistent(kPersistentBodies);
             for (size_t i = 0; i < kPersistentBodies; ++i) {
                 persistent[i] = pc.CreateRigidBody(
                     sphereShape, {static_cast<double>(i) * 1.25 - 6.0, 4.0 + static_cast<double>(i) * 0.25, 0.0}, {0.0f, 0.0f, 0.0f, 1.0f},
@@ -309,7 +308,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 );
             }
 
-            const ZHLN::Physics::BodyHandle character          = pc.CreateCharacter({0.0, 0.8, 3.0});
+            const ZHLN::Physics::BodyID character          = pc.CreateCharacter({0.0, 0.8, 3.0});
             const float                     cachedGroundOffset = pc.GetCharacterGroundOffset(character);
             if (!ZHLN::Test::ExpectGt(cachedGroundOffset, 0.5f)) {
                 return std::unexpected(PhysicsTestError::LockFreeConcurrencyFailed);
@@ -329,8 +328,8 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 while (keepRunning.load(std::memory_order::acquire)) {
                     pc.FillBodyStates(persistent, snaps);
                     for (const auto& s: snaps) {
-                        if (!s.valid || !std::isfinite(s.currentPosition.GetX()) || !std::isfinite(s.currentPosition.GetY()) ||
-                            !std::isfinite(s.previousPosition.GetY())) {
+                        if (!s.valid || !std::isfinite(s.currentPosition.x) || !std::isfinite(s.currentPosition.y) ||
+                            !std::isfinite(s.previousPosition.y)) {
                             workerFailed.store(true, std::memory_order::release);
                             return;
                         }
@@ -364,7 +363,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                             const auto transient = pc.CreateRigidBody(
                                 shape, {0.0, 8.0 + static_cast<double>(b), -4.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING
                             );
-                            if (transient == ZHLN::Physics::BodyHandle::Null() || !pc.IsBodyDynamic(transient)) {
+                            if (transient == ZHLN::Physics::BodyID::Null() || !pc.IsBodyDynamic(transient)) {
                                 workerFailed.store(true, std::memory_order::release);
                                 return;
                             }

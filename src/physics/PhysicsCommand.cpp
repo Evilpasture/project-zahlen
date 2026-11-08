@@ -26,8 +26,8 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
         switch (cmd.type) {
             case CommandType::CreateRigidBody: {
                 const auto&    c    = cmd.payload.createRigid;
-                const uint32_t slot = c.handle.index;
-                if (slot >= bt.slotCapacity || bt.generations[slot].load(std::memory_order::acquire) != c.handle.generation) {
+                const uint32_t slot = c.bodyID.index;
+                if (slot >= bt.slotCapacity || bt.generations[slot].load(std::memory_order::acquire) != c.bodyID.generation) {
                     break;
                 }
 
@@ -38,7 +38,7 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                 if (id.IsInvalid()) {
                     const MaterialData        mat = ResolveMaterial(c.materialID);
                     JPH::BodyCreationSettings settings(cmd.shape, pos, rot, c.motion, static_cast<JPH::ObjectLayer>(c.layer));
-                    settings.mUserData    = c.handle.Pack();
+                    settings.mUserData    = c.bodyID.Pack();
                     settings.mFriction    = mat.friction;
                     settings.mRestitution = mat.restitution;
 
@@ -57,7 +57,7 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                 bt.slotToDense[slot]  = dense;
                 bt.denseToSlot[dense] = slot;
                 bt.materialIDs[dense] = c.materialID;
-                bt.userData[dense]    = c.handle.Pack();
+                bt.userData[dense]    = c.bodyID.Pack();
                 bt.categories[dense]  = c.category;
                 bt.masks[dense]       = c.mask;
 
@@ -66,9 +66,9 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
 
                 const uint32_t jIdx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
                 ZHLN::Assert(
-                    jIdx < bt.idToHandleMap.size(), "PhysicsCommand: jIdx ({}) exceeds idToHandleMap size ({})!", jIdx, bt.idToHandleMap.size()
+                    jIdx < bt.joltIndexToBodyID.size(), "PhysicsCommand: jIdx ({}) exceeds joltIndexToBodyID size ({})!", jIdx, bt.joltIndexToBodyID.size()
                 );
-                bt.idToHandleMap[jIdx].store(c.handle.Pack(), std::memory_order::release);
+                bt.joltIndexToBodyID[jIdx].store(c.bodyID.Pack(), std::memory_order::release);
 
                 backFrame.WriteInitialPose(dense, pos, rot, 0u);
 
@@ -83,8 +83,8 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
 
             case CommandType::CreateCharacter: {
                 const auto&    c    = cmd.payload.createChar;
-                const uint32_t slot = c.handle.index;
-                if (slot >= bt.slotCapacity || bt.generations[slot].load(std::memory_order::acquire) != c.handle.generation) {
+                const uint32_t slot = c.bodyID.index;
+                if (slot >= bt.slotCapacity || bt.generations[slot].load(std::memory_order::acquire) != c.bodyID.generation) {
                     break;
                 }
 
@@ -95,7 +95,7 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                 bt.slotToDense[slot]  = dense;
                 bt.denseToSlot[dense] = slot;
                 bt.materialIDs[dense] = 0u;
-                bt.userData[dense]    = c.handle.Pack();
+                bt.userData[dense]    = c.bodyID.Pack();
                 bt.categories[dense]  = c.category;
                 bt.masks[dense]       = c.mask;
 
@@ -114,8 +114,8 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
             }
 
             case CommandType::DestroyBody: {
-                const uint32_t slot = cmd.payload.handle.index;
-                if (slot >= bt.slotCapacity || bt.generations[slot].load(std::memory_order::acquire) != cmd.payload.handle.generation) {
+                const uint32_t slot = cmd.payload.bodyID.index;
+                if (slot >= bt.slotCapacity || bt.generations[slot].load(std::memory_order::acquire) != cmd.payload.bodyID.generation) {
                     break;
                 }
 
@@ -130,14 +130,14 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
 
                 const uint32_t joltIdx = bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
                 ZHLN::Assert(
-                    joltIdx < bt.idToHandleMap.size() && joltIdx < bt.joltBodyPtrs.size(),
+                    joltIdx < bt.joltIndexToBodyID.size() && joltIdx < bt.joltBodyPtrs.size(),
                     "PhysicsCommand: joltIdx ({}) exceeds active map sizes ({}, {}) during DestroyBody!",
                     joltIdx,
-                    bt.idToHandleMap.size(),
+                    bt.joltIndexToBodyID.size(),
                     bt.joltBodyPtrs.size()
                 );
 
-                bt.idToHandleMap[joltIdx].store(0u, std::memory_order::release);
+                bt.joltIndexToBodyID[joltIdx].store(0u, std::memory_order::release);
                 bt.joltBodyPtrs[joltIdx] = nullptr;
 
                 bodyInterface->RemoveBody(bodyID);
@@ -148,8 +148,8 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
 
             case CommandType::SetCollisionFilter: {
                 const auto&    c    = cmd.payload.setFilter;
-                const uint32_t slot = c.handle.index;
-                if (slot < bt.slotCapacity && bt.generations[slot].load(std::memory_order::acquire) == c.handle.generation &&
+                const uint32_t slot = c.bodyID.index;
+                if (slot < bt.slotCapacity && bt.generations[slot].load(std::memory_order::acquire) == c.bodyID.generation &&
                     GetSlotPredicate(bt.LoadSlotState(slot)).isActive) {
                     const uint32_t dense = bt.slotToDense[slot];
                     bt.categories[dense] = c.category;
@@ -160,7 +160,7 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
 
             case CommandType::SetLinearVelocity: {
                 const auto&       c  = cmd.payload.setVelocity;
-                const JPH::BodyID id = GetBodyID(*this, c.handle);
+                const JPH::BodyID id = GetBodyID(*this, c.bodyID);
                 if (!id.IsInvalid()) {
                     bodyInterface->ActivateBody(id);
                     bodyInterface->SetLinearVelocity(id, {c.vx, c.vy, c.vz});
@@ -170,34 +170,34 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
 
             case CommandType::SetCharacterVelocity: {
                 const auto& c = cmd.payload.setVelocity;
-                characters.ApplyVelocityCommand(c.handle, JPH::Vec3(c.vx, c.vy, c.vz));
+                characters.ApplyVelocityCommand(c.bodyID, JPH::Vec3(c.vx, c.vy, c.vz));
                 break;
             }
 
             case CommandType::SetCharacterPosition: {
                 const auto&      c   = cmd.payload.setPosition;
                 const JPH::RVec3 pos(c.px, c.py, c.pz);
-                if (characters.ApplyPositionCommand(c.handle, pos) && bt.LoadSlotState(c.handle.index) == SlotState::Character) {
-                    backFrame.WriteTeleportPosition(bt.slotToDense[c.handle.index], pos);
+                if (characters.ApplyPositionCommand(c.bodyID, pos) && bt.LoadSlotState(c.bodyID.index) == SlotState::Character) {
+                    backFrame.WriteTeleportPosition(bt.slotToDense[c.bodyID.index], pos);
                 }
                 break;
             }
 
             case CommandType::SetKinematicPose: {
                 const auto&       c  = cmd.payload.setKinematicPose;
-                const JPH::BodyID id = GetBodyID(*this, c.handle);
+                const JPH::BodyID id = GetBodyID(*this, c.bodyID);
                 if (!id.IsInvalid() && bodyInterface->GetMotionType(id) != JPH::EMotionType::Static) {
                     const JPH::RVec3 pos(c.px, c.py, c.pz);
                     const JPH::Quat  rot(c.rx, c.ry, c.rz, c.rw);
                     bodyInterface->SetPositionAndRotationWhenChanged(id, pos, rot, JPH::EActivation::Activate);
-                    backFrame.WriteTeleportPose(bt.slotToDense[c.handle.index], pos, rot);
+                    backFrame.WriteTeleportPose(bt.slotToDense[c.bodyID.index], pos, rot);
                 }
                 break;
             }
 
             case CommandType::AddImpulse: {
                 const auto&       c  = cmd.payload.setVelocity;
-                const JPH::BodyID id = GetBodyID(*this, c.handle);
+                const JPH::BodyID id = GetBodyID(*this, c.bodyID);
                 if (!id.IsInvalid()) {
                     bodyInterface->AddImpulse(id, {c.vx, c.vy, c.vz});
                     bodyInterface->ActivateBody(id);
@@ -207,7 +207,7 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
 
             case CommandType::AddImpulseAtPosition: {
                 const auto&       c  = cmd.payload.addImpulseAtPos;
-                const JPH::BodyID id = GetBodyID(*this, c.handle);
+                const JPH::BodyID id = GetBodyID(*this, c.bodyID);
                 if (!id.IsInvalid()) {
                     bodyInterface->AddImpulse(id, JPH::Vec3(c.ix, c.iy, c.iz), JPH::RVec3(c.px, c.py, c.pz));
                     bodyInterface->ActivateBody(id);
@@ -229,7 +229,7 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                         joltConstraint->AddRef();
                         system->AddConstraint(joltConstraint);
 
-                        const uint32_t slot    = c.cHandle.index;
+                        const uint32_t slot    = c.constraintID.index;
                         constraints[slot]      = joltConstraint;
                         constraintStates[slot] = SlotState::Alive;
                     }
@@ -238,8 +238,8 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
             }
 
             case CommandType::DestroyConstraint: {
-                const uint32_t slot = cmd.payload.cHandle.index;
-                if (slot < constraintCapacity && constraintGenerations[slot].load(std::memory_order::acquire) == cmd.payload.cHandle.generation) {
+                const uint32_t slot = cmd.payload.constraintID.index;
+                if (slot < constraintCapacity && constraintGenerations[slot].load(std::memory_order::acquire) == cmd.payload.constraintID.generation) {
                     if (constraints[slot] != nullptr) {
                         system->RemoveConstraint(constraints[slot]);
                         constraints[slot]->Release();
@@ -252,8 +252,8 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
 
             case CommandType::SetConstraintTarget: {
                 const auto&    c    = cmd.payload.setConstraintTarget;
-                const uint32_t slot = c.targetCHandle.index;
-                if (slot < constraintCapacity && constraintGenerations[slot].load(std::memory_order::relaxed) == c.targetCHandle.generation) {
+                const uint32_t slot = c.targetConstraintID.index;
+                if (slot < constraintCapacity && constraintGenerations[slot].load(std::memory_order::relaxed) == c.targetConstraintID.generation) {
                     JPH::Constraint* constraint = constraints[slot];
                     if (constraint != nullptr) {
                         switch (constraint->GetSubType()) {

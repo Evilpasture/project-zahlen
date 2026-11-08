@@ -58,7 +58,7 @@ inline constexpr float kMissingTextureDim          = 0.25f;
 // exposure and contributes to bloom instead of stopping at the bloom threshold.
 inline constexpr float kSourceEmissionHdrScale     = 4.0f;
 
-auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureHandle {
+auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureID {
     // 1. Try VTF first
     if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
         auto vtfExp = DecodeVTF(bytes);
@@ -88,7 +88,7 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
         }
     }
 
-    return TextureHandle::Invalid;
+    return TextureID::Invalid;
 }
 
 // A material's .vmt, resolved and parsed once per import. Source's `patch`
@@ -264,7 +264,7 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
                 desc.albedoMap = LoadTextureFromBytes(ctx, material.baseTexture, *texBytes, true);
             }
         }
-        if (desc.albedoMap == TextureHandle::Invalid) {
+        if (desc.albedoMap == TextureID::Invalid) {
             // The VMT references art that is not on disk: darken the flat
             // baseColor so the surface reads as missing (dark grey) instead
             // of rendering as a pure-white wall.
@@ -382,8 +382,8 @@ auto RefineEmissiveSurfaces(const SourceVFS& vfs, std::span<EmissiveSurface> sur
 // Uploads each packed VRAD page exactly once for this imported prefab. The
 // pages remain linear RGBA16F: Source's RGBExp luxels are already linear
 // radiance and must not take the sRGB texture path or the old VPL gain.
-auto UploadVradLightmaps(RenderContext& ctx, const VradLightmapAtlas& atlas, std::string_view prefabPath) -> std::vector<TextureHandle> {
-    std::vector<TextureHandle> handles(atlas.pages.size(), TextureHandle::Invalid);
+auto UploadVradLightmaps(RenderContext& ctx, const VradLightmapAtlas& atlas, std::string_view prefabPath) -> std::vector<TextureID> {
+    std::vector<TextureID> handles(atlas.pages.size(), TextureID::Invalid);
     for (size_t pageIndex = 0; pageIndex < atlas.pages.size(); ++pageIndex) {
         const VradLightmapPage& page = atlas.pages[pageIndex];
         if (page.width == 0 || page.height == 0 || page.rgba16f.empty()) {
@@ -413,24 +413,24 @@ void AssemblePrefabParts(
     // still resolves 40 identical files once. `patch` is followed through so
     // the probe sees the material the surface actually renders with.
     std::unordered_map<std::string, std::optional<VMTMaterial>> vmtCache;
-    const std::vector<TextureHandle> lightmapTextures = UploadVradLightmaps(ctx, data.lightmaps, prefabPath);
+    const std::vector<TextureID> lightmapTextures = UploadVradLightmaps(ctx, data.lightmaps, prefabPath);
 
     for (const MaterialStreams& part: data.parts) {
         if (part.VertexCount() == 0 || part.IndexCount() == 0) {
             continue;
         }
 
-        const BufferHandle   posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.positions});
-        const BufferHandle   frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.tangentFrames});
-        const BufferHandle   surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.surfaces});
-        const BufferHandle   ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {part.indices});
+        const BufferID   posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.positions});
+        const BufferID   frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.tangentFrames});
+        const BufferID   surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.surfaces});
+        const BufferID   ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {part.indices});
         const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(std::span {part.indices}, std::span {part.positions}));
 
         Mesh subMesh = {
             .posBuffer           = posVbo,
             .tangentFrameBuffer  = frameVbo,
             .surfaceBuffer       = surfaceVbo,
-            .skinBuffer          = BufferHandle::Invalid,
+            .skinBuffer          = BufferID::Invalid,
             .indexBuffer         = ibo,
             .vertexCount         = part.VertexCount(),
             .indexCount          = part.IndexCount(),
@@ -457,7 +457,7 @@ void AssemblePrefabParts(
         // UnlitGeneric and blend materials keep their Source shader semantics;
         // forcing a bake through a forward-only path would make it disappear
         // from the deferred additive compositor.
-        if (part.lightmapPage < lightmapTextures.size() && lightmapTextures[part.lightmapPage] != TextureHandle::Invalid && !materialDesc.unlit &&
+        if (part.lightmapPage < lightmapTextures.size() && lightmapTextures[part.lightmapPage] != TextureID::Invalid && !materialDesc.unlit &&
             !materialDesc.alphaBlend && !materialDesc.additiveBlend && materialDesc.alphaMode != 2u) {
             materialDesc.bakedIrradianceMap   = lightmapTextures[part.lightmapPage];
             materialDesc.bakedIrradianceScale = options.sourceLightmapScale;
@@ -896,7 +896,7 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
     // The additive term carries the surface's own art whenever the material
     // builder did not already say so: a screen glows with its picture, not
     // with a flat wash of its average colour.
-    if (desc.emissiveMap == TextureHandle::Invalid && desc.albedoMap != TextureHandle::Invalid) {
+    if (desc.emissiveMap == TextureID::Invalid && desc.albedoMap != TextureID::Invalid) {
         desc.emissiveMap = desc.albedoMap;
     }
 

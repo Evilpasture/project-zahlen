@@ -32,7 +32,7 @@ struct FileWatchEvent {
     FileWatchAction       action = FileWatchAction::Modified;
 };
 
-using FileWatchHandle   = uint64_t;
+using FileWatchID   = uint64_t;
 using FileWatchCallback = std::function<void(const FileWatchEvent&)>;
 
 class ZHLN_API FileSystemWatcher {
@@ -47,11 +47,11 @@ class ZHLN_API FileSystemWatcher {
     FileSystemWatcher(FileSystemWatcher&&)                         = delete;
     auto operator=(FileSystemWatcher&&) -> FileSystemWatcher&      = delete;
 
-    [[nodiscard]] auto Watch(WatchDescriptor descriptor, FileWatchCallback callback) -> FileWatchHandle;
+    [[nodiscard]] auto Watch(WatchDescriptor descriptor, FileWatchCallback callback) -> FileWatchID;
 
     [[nodiscard]] auto WatchFile(
         std::filesystem::path path, FileWatchCallback callback, uint32_t debounceMs = kDefaultDebounceMs
-    ) -> FileWatchHandle;
+    ) -> FileWatchID;
 
     [[nodiscard]] auto WatchDirectory(
         std::filesystem::path directory,
@@ -59,9 +59,9 @@ class ZHLN_API FileSystemWatcher {
         bool                  recursive = true,
         std::string           extensionFilter = {},
         uint32_t              debounceMs = kDefaultDebounceMs
-    ) -> FileWatchHandle;
+    ) -> FileWatchID;
 
-    [[nodiscard]] auto Unwatch(FileWatchHandle handle) -> bool;
+    [[nodiscard]] auto Unwatch(FileWatchID handle) -> bool;
 
     void DispatchEvents();
 

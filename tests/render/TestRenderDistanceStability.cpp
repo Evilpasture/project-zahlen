@@ -44,6 +44,8 @@
 // Diagnostics: every captured frame is written as PPM (engine-native) plus a
 // PNG twin; a failing run leaves the whole series on disk for inspection.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 
@@ -354,7 +356,7 @@ void DisableAA(ZHLN::Engine& engine) {
             aa.state.mode        = ZHLN::AAMode::None;
         });
     }
-    engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
+    engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 }
 
 // Captures through Engine::GetRenderContext() so the call always uses the
@@ -391,21 +393,21 @@ template <typename SceneFn>
 
         const uint32_t validationBefore = ZHLN::Test::ValidationErrorCount();
 
-        ZHLN::RenderContext* const preWarmup = &engine.GetRenderContext();
+        ZHLN::RenderContext* const preWarmup = &ZHLN::EngineAccess::RenderOf(engine);
         TickFrames(engine, warmupFrames);
-        if (&engine.GetRenderContext() != preWarmup) {
+        if (&ZHLN::EngineAccess::RenderOf(engine) != preWarmup) {
             continue;
         }
 
-        ZHLN::RenderContext* const preWork = &engine.GetRenderContext();
+        ZHLN::RenderContext* const preWork = &ZHLN::EngineAccess::RenderOf(engine);
         const bool                 ok      = sceneFn(engine);
-        if (ok && &engine.GetRenderContext() == preWork) {
+        if (ok && &ZHLN::EngineAccess::RenderOf(engine) == preWork) {
             if (outValidationDelta != nullptr) {
                 *outValidationDelta = ZHLN::Test::ValidationErrorCount() - validationBefore;
             }
             return StableRunResult::Ok;
         }
-        if (&engine.GetRenderContext() == preWork) {
+        if (&ZHLN::EngineAccess::RenderOf(engine) == preWork) {
             return StableRunResult::AssertionsFailed;
         }
     }
@@ -506,7 +508,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
         ZHLN::Test::SetTimeout(55);
 
         auto engine      = CreateTestEngine();
-        if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+        if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
             return std::unexpected(DistanceStabilityTestError::EngineInitFailed);
         }
 
@@ -517,7 +519,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
         std::array<ZHLN::Entity, kRingCount> ringEntities {};
         {
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             // Deterministic frame-to-frame comparison needs the per-frame
             // noise sources off (rotating AO/GI pattern). SSR
@@ -971,8 +973,8 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                             const auto& shadowVisible  = eng.GetVisibleShadowEntities();
                             const auto& reg            = eng.GetRegistry();
                             const auto  meshComp       = reg.Get<ZHLN::Components::MeshComponent>(ringEntities[i]);
-                            const bool  meshRegistered = meshComp && eng.GetRenderContext().GetGPUMesh(meshComp->meshAsset).has_value();
-                            const bool  matRegistered  = meshComp && eng.GetRenderContext().GetGPUMaterial(meshComp->materialAsset).has_value();
+                            const bool  meshRegistered = meshComp && eng.Graphics().Mesh(meshComp->meshAsset).has_value();
+                            const bool  matRegistered  = meshComp && eng.Graphics().Material(meshComp->materialAsset).has_value();
                             const int cx = std::clamp((windows[i].first + windows[i].second) / 2, 0, frame.width - 1);
                             const int cy = frame.height / 2;
                             const auto sample = [&](int x, int y) -> std::array<int, 3> {
@@ -1001,7 +1003,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                                 "    [INFO] ring {}: CPU main {}, shadow {}; GPU mesh {}, material {}; mesh shading {}; projected center ({},{}): RGB ({},{},{}), above ({},{},{}); patch mean ({},{},{}), cyan-leaning {}/{}, max chroma {}",
                                 i, std::ranges::find(mainVisible, ringEntities[i]) != mainVisible.end(),
                                 std::ranges::find(shadowVisible, ringEntities[i]) != shadowVisible.end(),
-                                meshRegistered, matRegistered, eng.GetRenderContext().GetInfo().meshShadingActive,
+                                meshRegistered, matRegistered, eng.Graphics().Info().meshShadingActive,
                                 cx, cy, center[0], center[1], center[2], above[0], above[1], above[2],
                                 sum[0] / n, sum[1] / n, sum[2] / n, cyanLeaning, n, maxChroma
                             );

@@ -117,7 +117,7 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> BatchRe
     ZHLN::ScopedTimer profTimer("GPU Compute Skinning");
 
     for (const auto& drawCmd: queues.Draws()) {
-        if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
+        if (drawCmd.skinnedVertexBuffer != BufferID::Invalid) {
             auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
 
             const uint32_t vertexCount = drawCmd.instanceData.vertexCount;
@@ -164,7 +164,7 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> BatchRe
     if (ctx.RayTracingSupported()) {
         ZHLN::ScopedTimer profTimerBLAS("GPU Skinned BLAS Rebuilds");
         for (const auto& drawCmd: queues.Draws()) {
-            if (drawCmd.skinnedVertexBuffer == BufferHandle::Invalid) {
+            if (drawCmd.skinnedVertexBuffer == BufferID::Invalid) {
                 continue;
             }
 
@@ -205,7 +205,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
         const auto& drawCmd = queues.Draws()[i];
 
         Vk::DeviceAddress<> blasAddress = drawCmd.blasAddress;
-        if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
+        if (drawCmd.skinnedVertexBuffer != BufferID::Invalid) {
             blasAddress = nullptr;
             for (const auto& entry: skinnedBlas) {
                 if (entry.scratch == drawCmd.skinnedVertexBuffer) {
@@ -627,11 +627,11 @@ void RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept {
     _impl->ReleaseTarget(target);
 }
 
-auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<TextureHandle, ErrorCode> {
+auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<TextureID, ErrorCode> {
     return _impl->CreateRenderTexture(width, height, hdr);
 }
 
-void RenderContext::DestroyRenderTexture(TextureHandle handle) noexcept {
+void RenderContext::DestroyRenderTexture(TextureID handle) noexcept {
     _impl->DestroyRenderTexture(handle);
 }
 

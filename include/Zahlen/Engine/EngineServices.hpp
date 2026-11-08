@@ -12,9 +12,6 @@
 // what stops this header's types from ending up on a shared, untyped carrier:
 // there is nothing to put them on.
 
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/ECS/ExtensionServices.hpp>
@@ -22,6 +19,7 @@
 namespace ZHLN {
 
 class RenderContext;
+class VisibilityList;
 struct SceneData;
 class AssetManager;
 class PhysicsContext;
@@ -31,12 +29,14 @@ class ArticulationSystem;
 
 // Distinct parameter types for the two otherwise identically typed output
 // lists. They are bundle members of the render domain, so a system resolves one
-// by its type rather than by position.
+// by its type rather than by position. `values` is the engine-owned producer,
+// never a bare container reference: a culling system writes through Clear/Add/
+// AddRange, and everything else sees a std::span<const Entity>.
 struct VisibleEntities {
-    JPH::Array<Entity>& values;
+    VisibilityList& values;
 };
 struct VisibleShadowEntities {
-    JPH::Array<Entity>& values;
+    VisibilityList& values;
 };
 
 namespace ECS {

@@ -12,7 +12,7 @@
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/FrameData.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Render/View.hpp>
 #include <Zahlen/Render/Vertex.hpp>
 #include <span>
@@ -39,7 +39,7 @@ struct ParticleEmitterSubmission {
     uint64_t             emitterId    = 0;
     uint32_t             maxParticles = 0;
     ParticleEmitterDesc  desc {};
-    TextureHandle        texture  = TextureHandle::Invalid;
+    TextureID        texture  = TextureID::Invalid;
     bool                 additive = false;
 };
 
@@ -52,7 +52,7 @@ struct MeshParticleEmitterSubmission {
 };
 
 struct BillboardBatch {
-    TextureHandle         texture  = TextureHandle::Invalid;
+    TextureID         texture  = TextureID::Invalid;
     Array<BillboardQuad>  quads;
     bool                  additive = false;
 };
@@ -93,7 +93,7 @@ struct SceneData {
         AddLine(start, end, color, color);
     }
 
-    void AddBillboards(TextureHandle texture, std::span<const BillboardQuad> quads, bool additive) {
+    void AddBillboards(TextureID texture, std::span<const BillboardQuad> quads, bool additive) {
         if (quads.empty()) {
             return;
         }

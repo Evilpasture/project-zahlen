@@ -9,6 +9,9 @@
 //
 // WASD + mouse: the default-scene free-cam. Escape / window close to quit.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <CDN/CDN.hpp>
 #include <Zahlen/ConfigCli.hpp>
@@ -152,7 +155,7 @@ auto main(int argc, char* argv[]) -> int {
     }
     ZHLN::Log("[CDNMap] {} KiB", bytes->size() / 1024U);
 
-    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), std::span<const uint8_t>(*bytes), kAsset);
+    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), std::span<const uint8_t>(*bytes), kAsset);
     if (!prefab) {
         ZHLN::LogError("[CDNMap] glTF import failed for '{}'", kAsset);
         return EXIT_FAILURE;
@@ -237,7 +240,7 @@ auto main(int argc, char* argv[]) -> int {
         {
             auto& r = engine->GetRegistry();
             if (auto st = r.GetSingleton<ZHLN::Components::InputStateComponent>(); st && st->needsResize) {
-                engine->GetRenderContext().SetResolution(st->newSize);
+                engine->Graphics().SetResolution(st->newSize);
                 st->needsResize = false;
                 continue;
             }

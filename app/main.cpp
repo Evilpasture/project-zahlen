@@ -3,6 +3,9 @@
 
 // The default executable is a statically linked C++ game, not a DLL host.
 // App owns platform setup, modules, input polling, frame pacing and teardown.
+#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Zahlen.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
@@ -131,11 +134,11 @@ struct SandboxGame {
         );
         if (cube != ZHLN::Entity::Null()) {
             if (auto body = reg.Get<ZHLN::Components::PhysicsComponent>(cube)) {
-                engine.GetPhysicsContext().AddImpulse(body->physicsHandle, forward * 12.0f);
+                engine.Physics().AddImpulse(body->physicsID, forward * 12.0f);
             }
         }
-        if (engine.GetAudioContext().IsInitialized()) {
-            engine.GetAudioContext().PostEvent(
+        if (engine.Audio().Initialized()) {
+            engine.Audio().PostEvent(
                 ZHLN::AudioEvent {
                     .type     = ZHLN::AudioEventType::ProceduralBeep,
                     .volume   = 0.22f,
@@ -161,7 +164,7 @@ int main(int argc, char* argv[]) {
             // This callback runs before Engine::Tick. Each prior invocation
             // that reaches here is followed by one completed engine frame.
             if (completedFrames++ < launch.warmupFrames) return;
-            const auto frame = engine.GetRenderContext().CaptureFrame();
+            const auto frame = engine.Graphics().CaptureFrame();
             if (!frame || !frame->Valid()) {
                 ZHLN::LogError("[Capture] Failed to capture a completed frame.");
             } else if (!ZHLN::Screenshot::WritePNG(launch.captureFrame, *frame)) {

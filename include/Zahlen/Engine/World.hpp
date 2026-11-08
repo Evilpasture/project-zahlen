@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <Jolt/Jolt.h>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Common.h>
@@ -12,9 +11,11 @@
 #include <Zahlen/Error.hpp>
 #include <expected>
 #include <memory>
+#include <span>
 
 namespace ZHLN {
 
+class VisibilityList;
 class PhysicsContext;
 class InputContext;
 class ArticulationSystem;
@@ -56,10 +57,19 @@ class ZHLN_API World {
     auto GetArticulationSystem() -> ArticulationSystem&;
     auto GetCullingStats() -> CullingStats&;
 
-    auto GetVisibleEntities() -> JPH::Array<Entity>&;
-    auto GetVisibleShadowEntities() -> JPH::Array<Entity>&;
+    // Read-only views onto the engine-owned visibility lists. No container type
+    // crosses this boundary, and no caller can clear or resize engine state.
+    [[nodiscard]] auto GetVisibleEntities() const noexcept -> std::span<const Entity>;
+    [[nodiscard]] auto GetVisibleShadowEntities() const noexcept -> std::span<const Entity>;
 
   private:
+    // Engine is the only owner of the render services, and the only code that
+    // needs the *writable* producer. These are deliberately not public: a
+    // caller gets a std::span<const Entity>, never a container to mutate.
+    friend class Engine;
+    auto VisibleEntitiesForServices() noexcept -> VisibilityList&;
+    auto VisibleShadowEntitiesForServices() noexcept -> VisibilityList&;
+
     World() = default;
 
     struct Impl;

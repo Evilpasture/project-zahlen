@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -85,18 +86,18 @@ struct UITestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {.appName = "Headless UI Test", .width = width, .height = height});
     }
 
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> immediate_mode_ui_rendering() {
             auto engine = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             // Set up a simple UI scene
             ZHLN::GUI::Context gui(engine->GetFontAtlas());
@@ -167,7 +168,7 @@ struct UITestSuite {
 
         std::expected<void, ZHLN::ErrorCode> button_click_interaction_and_states() {
             auto engine = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
@@ -320,11 +321,11 @@ struct UITestSuite {
         // swapchain to capture).
         std::expected<void, ZHLN::ErrorCode> render_calls_keep_their_own_vertices() {
             auto engine = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             // The engine's own loop initialises the frame schedule; the frame
             // that carries the two calls is driven by hand below, because the
@@ -368,7 +369,7 @@ struct UITestSuite {
                 return std::unexpected(UITestError::DestinationQueryFailed);
             }
 
-            const uint32_t frameIndex = rc.GetFrameIndex();
+            const uint32_t frameIndex = rc.FrameIndex();
             // Both halves must DRAW into the acquired window: the pixel checks
             // below read what these calls recorded. nullopt means drawn.
             const auto greenDrawn = gpuFrame.RenderUI(
@@ -421,11 +422,11 @@ struct UITestSuite {
         // format and keep the window's vertices intact.
         std::expected<void, ZHLN::ErrorCode> second_destination_does_not_replace_the_first() {
             auto engine = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             ZHLN::Test::Headless::TickFrames(*engine, 2);
 
@@ -439,13 +440,13 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(textureRes.has_value())) {
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
-            const ZHLN::TextureHandle texture = *textureRes;
+            const ZHLN::TextureID texture = *textureRes;
             const auto hdrTextureRes = rc.CreateRenderTexture(160, 160, true);
             if (!ZHLN::Test::ExpectTrue(hdrTextureRes.has_value())) {
                 rc.DestroyRenderTexture(texture);
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
-            const ZHLN::TextureHandle hdrTexture = *hdrTextureRes;
+            const ZHLN::TextureID hdrTexture = *hdrTextureRes;
 
             const ZHLN::Extent2D size = engine->GetPlatformHost().GetSize();
 
@@ -460,7 +461,7 @@ struct UITestSuite {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
             const ZHLN::FrameTarget attachment = **target;
-            const uint32_t               frameIndex = rc.GetFrameIndex();
+            const uint32_t               frameIndex = rc.FrameIndex();
             // All destinations must draw. A silent skip would make the window
             // test pass without exercising either offscreen pipeline variant.
             const auto windowDrawn = gpuFrame.RenderUI(
@@ -516,10 +517,10 @@ struct UITestSuite {
         // not revive the previous frame's target or a destroyed offscreen one.
         std::expected<void, ZHLN::ErrorCode> frame_targets_expire_without_rebinding() {
             auto engine = CreateTestEngine(320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
             ZHLN::Test::Headless::TickFrames(*engine, 2);
             const SolidPayload payload = BuildSolidBox(*engine, {0.0f, 1.0f, 0.0f, 1.0f}, 80.0f);
             if (!ZHLN::Test::ExpectTrue(!payload.View().Empty())) {
@@ -585,7 +586,7 @@ struct UITestSuite {
         // 7. System vs. Custom Cursor Mode across PlatformHost + RenderSystem
         std::expected<void, ZHLN::ErrorCode> system_vs_custom_cursor_mode() {
             auto engine = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 

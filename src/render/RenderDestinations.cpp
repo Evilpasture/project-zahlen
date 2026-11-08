@@ -227,7 +227,7 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
         }
 
         // From here on the stream is the destination table's, and it only needs
-        // the handle: the heap state lives on the command buffer, not in the type.
+        // the ID: the heap state lives on the command buffer, not in the type.
         destinations.AddRecording(dest.id, std::move(*recording).Release());
     }
     destinations.SetActive(dest.id);
@@ -249,7 +249,7 @@ auto RenderContext::Impl::ResolveTarget(const FrameTarget& target) noexcept -> s
     if (!recording || !recording->recorder.IsRecording()) {
         return std::unexpected(DestinationError::ExpiredFrameTarget);
     }
-    if (target._texture != TextureHandle::Invalid) {
+    if (target._texture != TextureID::Invalid) {
         const auto it = renderTextures.find(target._texture);
         if (it == renderTextures.end() || !it->second.image.Valid()) {
             return std::unexpected(DestinationError::RenderTextureUnavailable);

@@ -37,21 +37,21 @@ class AsyncAssetFetcher {
     // the worker using persisted origin validators; forceRefresh bypasses both
     // local hits and conditional headers and requests a complete body.
     auto Request(std::string_view uri, ValidatorFn validator = Validators::AnyNonEmpty, bool forceRefresh = false)
-        -> FetchHandle;
+        -> FetchID;
 
     // The same cache validation/revalidation path, on the calling thread.
     auto FetchSync(std::string_view uri, ValidatorFn validator = Validators::AnyNonEmpty)
         -> std::expected<FetchPayload, ErrorCode>;
 
-    auto PollResult(FetchHandle handle) -> std::optional<std::expected<FetchPayload, ErrorCode>>;
+    auto PollResult(FetchID handle) -> std::optional<std::expected<FetchPayload, ErrorCode>>;
 
-    void Cancel(FetchHandle handle);
+    void Cancel(FetchID handle);
 
     void Poll() noexcept {}
 
-    [[nodiscard]] auto Status(FetchHandle handle) const -> FetchStatus;
+    [[nodiscard]] auto Status(FetchID handle) const -> FetchStatus;
 
-    [[nodiscard]] auto Take(FetchHandle handle) -> std::optional<FetchResult>;
+    [[nodiscard]] auto Take(FetchID handle) -> std::optional<FetchResult>;
 
     [[nodiscard]] auto Cache() const noexcept -> const DiskCache& {
         return m_cache;

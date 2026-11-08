@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/Camera/TargetCamera.cpp
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include "TargetCamera.hpp"
 
 #include "Zahlen/Math/Camera.hpp"
@@ -139,7 +140,7 @@ namespace {
 // The rig's frame step: keep the boot camera's component present (core no
 // longer creates any camera rig -- that is gameplay policy), then resolve
 // the orbit before the core CameraSystem projects the matrices.
-void TargetCameraStep(Engine& engine, float dt, FrameContext& /*ctx*/) {
+void TargetCameraStep(Engine& engine, float dt, FrameContext& ctx) {
     auto& reg = engine.GetRegistry();
 
     if (auto mainCams = reg.GetEntitiesWith<Components::MainCameraTagComponent>(); !mainCams.empty()) {
@@ -170,7 +171,7 @@ void TargetCameraStep(Engine& engine, float dt, FrameContext& /*ctx*/) {
     // The borrow is the component itself, so the system's updates land in the
     // registry without a copy to hand back.
     if (const auto camera = reg.GetSingleton<Components::CameraComponent>()) {
-        sys.Update(reg, camera->camera, dt, engine.GetCurrentAlpha());
+        sys.Update(reg, camera->camera, dt, ctx.alpha);
     }
 }
 

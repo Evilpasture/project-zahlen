@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
@@ -86,9 +87,9 @@ struct LightningTestSuite {
 
             ZHLN::Test::ExpectEq(boltComp->phase, ZHLN::LightningPhase::SteppedLeader);
             ZHLN::Test::ExpectEq(boltComp->baseAmbientExposure, kInitialBaselineExposure);
-            ZHLN::Test::ExpectTrue(boltComp->vboPos != ZHLN::BufferHandle::Invalid);
-            ZHLN::Test::ExpectTrue(boltComp->vboFrame != ZHLN::BufferHandle::Invalid);
-            ZHLN::Test::ExpectTrue(boltComp->vboSurface != ZHLN::BufferHandle::Invalid);
+            ZHLN::Test::ExpectTrue(boltComp->vboPos != ZHLN::BufferID::Invalid);
+            ZHLN::Test::ExpectTrue(boltComp->vboFrame != ZHLN::BufferID::Invalid);
+            ZHLN::Test::ExpectTrue(boltComp->vboSurface != ZHLN::BufferID::Invalid);
 
             const ZHLN::Entity flashLight  = boltComp->flashLightEntity;
             const ZHLN::Entity impactLight = boltComp->impactLightEntity;
@@ -236,7 +237,7 @@ struct LightningTestSuite {
             auto engine = std::move(engineRes.value());
             engine->InitializeDefaultScene();
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             const ZHLN::Entity rawBolt = ZHLN::Lightning::Spawn(*engine, {0, 80, 0}, {0, 0, 0});
             const auto         raw     = reg.Get<ZHLN::LightningComponent>(rawBolt);
@@ -252,8 +253,8 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(rawBolt)->vboPos, oldPos);
             engine->ProcessPendingDestroy();
             ZHLN::Test::ExpectFalse(reg.IsAlive(rawBolt));
-            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(oldMesh).has_value());
-            ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(oldMat).has_value());
+            ZHLN::Test::ExpectFalse(rc.Mesh(oldMesh).has_value());
+            ZHLN::Test::ExpectFalse(rc.Material(oldMat).has_value());
             const auto reusedSlot = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(64);
             ZHLN::Test::ExpectNe(reusedSlot, oldPos);
             rc.DestroyBuffer(reusedSlot);
@@ -275,8 +276,8 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectFalse(reg.IsAlive(despawnBolt));
             ZHLN::Test::ExpectFalse(reg.IsAlive(flash));
             ZHLN::Test::ExpectFalse(reg.IsAlive(impact));
-            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(meshAsset).has_value());
-            ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(materialAsset).has_value());
+            ZHLN::Test::ExpectFalse(rc.Mesh(meshAsset).has_value());
+            ZHLN::Test::ExpectFalse(rc.Material(materialAsset).has_value());
 
             const ZHLN::Entity componentBolt = ZHLN::Lightning::Spawn(*engine, {20, 80, 0}, {20, 0, 0});
             const auto         component     = reg.Get<ZHLN::LightningComponent>(componentBolt);
@@ -285,7 +286,7 @@ struct LightningTestSuite {
             }
             const auto componentMesh = component->meshAssetId;
             ZHLN::Lightning::Detach(*engine, componentBolt);
-            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(componentMesh).has_value());
+            ZHLN::Test::ExpectFalse(rc.Mesh(componentMesh).has_value());
             ZHLN::DespawnEntity(*engine, componentBolt);
             engine->ProcessPendingDestroy();
 
@@ -296,15 +297,15 @@ struct LightningTestSuite {
             }
             const auto componentBuffer = cached->vboPos;
             const auto meshID = cached->meshAssetId;
-            rc.ClearGPUCaches(); // the lookup disappears, but the component still owns its VBOs
-            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(meshID).has_value());
+            rc.ClearCaches(); // the lookup disappears, but the component still owns its VBOs
+            ZHLN::Test::ExpectFalse(rc.Mesh(meshID).has_value());
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(cachedBolt)->vboPos, componentBuffer);
             ZHLN::Lightning::Update(*engine, 0.01f);
-            ZHLN::Test::ExpectTrue(rc.GetGPUMesh(meshID).has_value());
+            ZHLN::Test::ExpectTrue(rc.Mesh(meshID).has_value());
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(cachedBolt)->vboPos, componentBuffer);
             ZHLN::DespawnEntity(*engine, cachedBolt);
             engine->ProcessPendingDestroy();
-            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(meshID).has_value());
+            ZHLN::Test::ExpectFalse(rc.Mesh(meshID).has_value());
             return {};
         }
     };

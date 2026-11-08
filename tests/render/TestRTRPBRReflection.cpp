@@ -14,6 +14,7 @@
 // fall back to SSR. No RT support → skip. A blank capture after RTR is on
 // is a failure, not a retry.
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -161,7 +162,7 @@ struct RTRPBRReflectionTestSuite {
     // scene reset between tests. Creating a Vulkan instance per test is
     // what eventually exhausts the loader's static TLS and turns the tail
     // of the group into "vkCreateInstance: Found no drivers!".
-    static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless RTR PBR Colour", .width = 640, .height = 480
         });
@@ -174,7 +175,7 @@ struct RTRPBRReflectionTestSuite {
                 aa.state.mode        = ZHLN::AAMode::None;
             });
         }
-        engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
+        engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
     }
 
     static void SetReflectionFlags(ZHLN::Engine& engine, int enableSSR, int enableRTR) {
@@ -223,7 +224,7 @@ struct RTRPBRReflectionTestSuite {
 
     static auto MakeMat(ZHLN::Engine& engine, float metallic, float roughness, ZHLN::Float4 base, ZHLN::Float4 emissive = JPH::Float4 {0.0f, 0.0f, 0.0f, 1.0f})
         -> std::expected<ZHLN::Material, ZHLN::ErrorCode> {
-        return engine.GetRenderContext().CreateMaterial(
+        return engine.Graphics().CreateMaterial(
             ZHLN::MaterialDesc {.metallic = metallic, .roughness = roughness, .baseColor = base, .emissive = emissive}
         );
     }
@@ -269,9 +270,9 @@ struct RTRPBRReflectionTestSuite {
     static constexpr NormRect kSource {.x0 = 0.30, .y0 = 0.08, .x1 = 0.70, .y1 = 0.42};
 
     struct Session {
-        // Pool-owned, so `engine.reset()` below means "this session is skipping",
+        // Pool-owned, so clearing the view below means "this session is skipping",
         // not "destroy the device".
-        ZHLN::Test::Headless::EngineHandle engine;
+        ZHLN::Test::Headless::EngineView engine;
         uint32_t                           lostBefore = 0;
     };
 
@@ -281,9 +282,9 @@ struct RTRPBRReflectionTestSuite {
         if (!s.engine) {
             return std::unexpected(RTRPBRError::EngineInitFailed);
         }
-        if (!s.engine->GetRenderContext().GetInfo().rayTracingSupported) {
+        if (!s.engine->Graphics().Info().rayTracingSupported) {
             ZHLN::Println("    [SKIP] Device has no raytracing; RTR PBR colour checks are not applicable.");
-            s.engine.reset();
+            s.engine = {};
             return s;
         }
 

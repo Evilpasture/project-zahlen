@@ -1,6 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "SceneCleanupSystem.hpp"
 #include "../Hierarchy.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -33,31 +35,31 @@ void ReleaseSelected(Engine& engine, bool all) {
 
 void ReleasePhysics(Engine& engine, bool all) {
     auto& registry = engine.GetRegistry();
-    auto& physics  = engine.GetPhysicsContext();
+    auto physics = engine.Physics();
 
     // Queue all body releases under one physics shadow lock while components
     // remain readable; ragdoll instances are released in a second bulk call.
     const auto bodyOwners = registry.GetEntitiesWith<Components::PhysicsComponent>();
     if (!bodyOwners.empty()) {
-        std::vector<Physics::BodyHandle> bodies;
+        std::vector<Physics::BodyID> bodies;
         bodies.reserve(bodyOwners.size());
         auto components = registry.GetRawArray<Components::PhysicsComponent>();
         for (size_t i = 0; i < bodyOwners.size(); ++i) {
             if (all || registry.Get<Components::PendingDestroy>(bodyOwners[i]).has_value()) {
-                bodies.push_back(std::exchange(components[i].physicsHandle, Physics::BodyHandle::Null()));
+                bodies.push_back(std::exchange(components[i].physicsID, Physics::BodyID::Null()));
             }
         }
-        physics.DestroyBodies(std::span<const Physics::BodyHandle> {bodies});
+        physics.DestroyBodies(std::span<const Physics::BodyID> {bodies});
     }
 
     const auto ragdollOwners = registry.GetEntitiesWith<Components::RagdollComponent>();
     if (!ragdollOwners.empty()) {
-        std::vector<Physics::RagdollHandle> ragdolls;
+        std::vector<Physics::RagdollID> ragdolls;
         ragdolls.reserve(ragdollOwners.size());
         auto components = registry.GetRawArray<Components::RagdollComponent>();
         for (size_t i = 0; i < ragdollOwners.size(); ++i) {
             if (all || registry.Get<Components::PendingDestroy>(ragdollOwners[i]).has_value()) {
-                ragdolls.push_back(std::exchange(components[i].ragdollHandle, Physics::RagdollHandle::Invalid));
+                ragdolls.push_back(std::exchange(components[i].ragdollID, Physics::RagdollID::Invalid));
                 components[i].isAddedToPhysics = false;
             }
         }

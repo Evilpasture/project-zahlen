@@ -102,9 +102,9 @@ struct ReallocatingIntAllocator {
 
 struct TaggedIntAllocator {
     using value_type = int;
-    static inline int nextId = 0;
+    static inline int nextID = 0;
     static inline int liveAllocations = 0;
-    int id = ++nextId;
+    int id = ++nextID;
 
     [[nodiscard]] auto allocate(size_t count) -> int* {
         auto* block = static_cast<int*>(std::malloc((count + 1) * sizeof(int)));

@@ -71,7 +71,7 @@ struct DrawCommand {
     Vk::DeviceAddress<VertexTangentFrame>  skinFrameAddress;
 
     Vk::DeviceAddress<uint32_t>            skinDataAddress;
-    BufferHandle                           skinnedVertexBuffer;
+    BufferID                           skinnedVertexBuffer;
     uint32_t             jointOffset;
     uint32_t             morphOffset;
     uint32_t             activeMorphCount;
@@ -83,7 +83,7 @@ struct DrawCommand {
 static_assert(std::is_trivially_copyable_v<DrawCommand> && std::is_trivially_constructible_v<DrawCommand>);
 
 struct SkinnedBlasEntry {
-    BufferHandle        scratch;
+    BufferID        scratch;
     Vk::DeviceAddress<> address;
 };
 
@@ -105,7 +105,7 @@ struct CSGDrawCommand {
 };
 
 struct ParticleEmitterCommand {
-    BufferHandle          gpuBuffer;
+    BufferID          gpuBuffer;
     uint32_t              maxParticles;
     ParticleEmitterParams params;
 
@@ -124,7 +124,7 @@ struct DecalDrawCommand {
 };
 
 struct MeshParticleEmitterCommand {
-    BufferHandle              gpuBuffer;
+    BufferID              gpuBuffer;
     uint32_t                  maxParticles;
     MeshParticleEmitterParams params;
     AssetID                   meshAsset;

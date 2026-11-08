@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/Benchmark/Viewer/BenchmarkViewer.cpp
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Log.hpp>
@@ -1134,7 +1135,7 @@ void BenchmarkViewer::Tick(ZHLN::Engine& engine) {
     // actually appears, so a host that ticked before its device was up is still
     // matched on the frame it comes up.
     if (!m_impl->gpuNameTaken) {
-        if (const std::string_view device = engine.GetRenderContext().GetInfo().gpuName; !device.empty()) {
+        if (const std::string_view device = engine.Graphics().Info().gpuName; !device.empty()) {
             m_impl->gpuNameTaken = true;
             m_impl->telemetry.SetGpuNameHint(device);
         }

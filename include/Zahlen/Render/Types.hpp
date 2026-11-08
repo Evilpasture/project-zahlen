@@ -6,7 +6,7 @@
 #include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Math/ValueTypes.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -94,10 +94,10 @@ struct MaterialTextureTransform {
 using MaterialTextureTransforms = std::array<MaterialTextureTransform, kMaterialTextureSlotCount>;
 
 struct MeshletStreams {
-    using enum BufferHandle;
-    BufferHandle meshlets  = Invalid;
-    BufferHandle vertices  = Invalid;
-    BufferHandle triangles = Invalid;
+    using enum BufferID;
+    BufferID meshlets  = Invalid;
+    BufferID vertices  = Invalid;
+    BufferID triangles = Invalid;
     uint32_t     count     = 0;
 
     [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
@@ -106,31 +106,31 @@ struct MeshletStreams {
 };
 
 struct Mesh {
-    using enum BufferHandle;
-    BufferHandle posBuffer          = Invalid;
-    BufferHandle tangentFrameBuffer = Invalid;
-    BufferHandle surfaceBuffer      = Invalid;
-    BufferHandle skinBuffer         = Invalid;
-    BufferHandle indexBuffer        = Invalid;
+    using enum BufferID;
+    BufferID posBuffer          = Invalid;
+    BufferID tangentFrameBuffer = Invalid;
+    BufferID surfaceBuffer      = Invalid;
+    BufferID skinBuffer         = Invalid;
+    BufferID indexBuffer        = Invalid;
     uint32_t     vertexCount        = 0;
     uint32_t     indexCount         = 0;
 
-    BufferHandle meshletBuffer       = Invalid;
-    BufferHandle meshletVertexBuffer = Invalid;
-    BufferHandle meshletTriBuffer    = Invalid;
+    BufferID meshletBuffer       = Invalid;
+    BufferID meshletVertexBuffer = Invalid;
+    BufferID meshletTriBuffer    = Invalid;
     uint32_t     meshletCount        = 0;
 };
 
 struct Material {
-    PipelineHandle            pipeline                 = PipelineHandle::Invalid;
-    PipelineHandle            prePassPipeline          = PipelineHandle::Invalid;
-    TextureHandle             albedoMap                = TextureHandle::Invalid;
-    TextureHandle             normalMap                = TextureHandle::Invalid;
-    TextureHandle             pbrMap                   = TextureHandle::Invalid;
-    TextureHandle             emissiveMap              = TextureHandle::Invalid;
+    PipelineID            pipeline                 = PipelineID::Invalid;
+    PipelineID            prePassPipeline          = PipelineID::Invalid;
+    TextureID             albedoMap                = TextureID::Invalid;
+    TextureID             normalMap                = TextureID::Invalid;
+    TextureID             pbrMap                   = TextureID::Invalid;
+    TextureID             emissiveMap              = TextureID::Invalid;
     // Authoritative static diffuse irradiance (for example Source VRAD), not
     // AO and not material emission. It is sampled with the mesh's UV1.
-    TextureHandle             bakedIrradianceMap       = TextureHandle::Invalid;
+    TextureID             bakedIrradianceMap       = TextureID::Invalid;
     float                     bakedIrradianceScale     = 1.0f;
     ZHLN::Float4              baseColorFactor          = {1.0f, 1.0f, 1.0f, 1.0f};
     ZHLN::Float4              emissiveFactor           = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -141,30 +141,30 @@ struct Material {
     bool                      doubleSided              = false;
     bool                      unlit                    = false; // KHR_materials_unlit: base color without lighting.
     float                     transmissionFactor       = 0.0f;
-    TextureHandle             transmissionMap          = TextureHandle::Invalid;
+    TextureID             transmissionMap          = TextureID::Invalid;
     float                     iridescenceFactor        = 0.0f;
     float                     filmThicknessNm          = 0.0f;
     float                     filmThicknessMinNm       = 0.0f;
     float                     volumeThicknessM         = 0.0f;
     float                     ior                      = 1.5f;
     float                     normalScale              = 1.0f;
-    TextureHandle             filmThicknessMap         = TextureHandle::Invalid;
-    TextureHandle             iridescenceMap           = TextureHandle::Invalid;
-    TextureHandle             volumeThicknessMap       = TextureHandle::Invalid;
+    TextureID             filmThicknessMap         = TextureID::Invalid;
+    TextureID             iridescenceMap           = TextureID::Invalid;
+    TextureID             volumeThicknessMap       = TextureID::Invalid;
     float                     clearcoatFactor          = 0.0f;
     float                     clearcoatRoughnessFactor = 0.0f;
     float                     clearcoatNormalScale     = 1.0f;
-    TextureHandle             clearcoatMap             = TextureHandle::Invalid;
-    TextureHandle             clearcoatRoughnessMap    = TextureHandle::Invalid;
-    TextureHandle             clearcoatNormalMap       = TextureHandle::Invalid;
+    TextureID             clearcoatMap             = TextureID::Invalid;
+    TextureID             clearcoatRoughnessMap    = TextureID::Invalid;
+    TextureID             clearcoatNormalMap       = TextureID::Invalid;
     float                     anisotropyStrength       = 0.0f;
     float                     anisotropyRotation       = 0.0f; // Radians about the surface normal, from the tangent.
-    TextureHandle             anisotropyMap            = TextureHandle::Invalid;
+    TextureID             anisotropyMap            = TextureID::Invalid;
     ZHLN::Float3              sheenColorFactor {0.0f, 0.0f, 0.0f};
     float                     sheenRoughnessFactor = 0.0f;
-    TextureHandle             sheenColorMap        = TextureHandle::Invalid;
-    TextureHandle             sheenRoughnessMap    = TextureHandle::Invalid;
-    TextureHandle             occlusionMap         = TextureHandle::Invalid;
+    TextureID             sheenColorMap        = TextureID::Invalid;
+    TextureID             sheenRoughnessMap    = TextureID::Invalid;
+    TextureID             occlusionMap         = TextureID::Invalid;
     float                     occlusionStrength    = 1.0f;
     // KHR_materials_specular. Absent, the extension's defaults reproduce the
     // engine's own 0.04 dielectric reflectance exactly, so `specularEnabled`
@@ -181,7 +181,7 @@ struct Material {
     float                     environmentReflectionFactor     = 1.0f;
     float                     specularFactor       = 1.0f;
     ZHLN::Float3              specularColorFactor {1.0f, 1.0f, 1.0f};
-    TextureHandle             specularMap          = TextureHandle::Invalid;
+    TextureID             specularMap          = TextureID::Invalid;
     // Which half of the single KHR_materials_specular texture slot this
     // material's image carries: 0 = specularColorTexture.rgb and
     // specularTexture.a of one shared image, 1 = specularTexture.a only,
@@ -241,7 +241,7 @@ struct MaterialDesc {
     ZHLN::Float4  baseColor          = {1.0f, 1.0f, 1.0f, 1.0f};
     ZHLN::Float4  emissive           = {0.0f, 0.0f, 0.0f, 1.0f};
     float         transmissionFactor = 0.0f;
-    TextureHandle transmissionMap    = TextureHandle::Invalid;
+    TextureID transmissionMap    = TextureID::Invalid;
     float         iridescenceFactor  = 0.0f;
     float         filmThicknessNm    = 0.0f;
     float         filmThicknessMinNm = 0.0f;
@@ -249,32 +249,32 @@ struct MaterialDesc {
     float         ior                = 1.5f;
     float         normalScale        = 1.0f;
 
-    TextureHandle             albedoMap                = TextureHandle::Invalid;
-    TextureHandle             normalMap                = TextureHandle::Invalid;
-    TextureHandle             pbrMap                   = TextureHandle::Invalid;
-    TextureHandle             emissiveMap              = TextureHandle::Invalid;
+    TextureID             albedoMap                = TextureID::Invalid;
+    TextureID             normalMap                = TextureID::Invalid;
+    TextureID             pbrMap                   = TextureID::Invalid;
+    TextureID             emissiveMap              = TextureID::Invalid;
     // A linear HDR baked-diffuse input. It has a separate semantic from
     // occlusionMap because authored irradiance and ambient occlusion are not
     // interchangeable PBR quantities.
-    TextureHandle             bakedIrradianceMap       = TextureHandle::Invalid;
+    TextureID             bakedIrradianceMap       = TextureID::Invalid;
     float                     bakedIrradianceScale     = 1.0f;
-    TextureHandle             filmThicknessMap         = TextureHandle::Invalid;
-    TextureHandle             iridescenceMap           = TextureHandle::Invalid;
-    TextureHandle             volumeThicknessMap       = TextureHandle::Invalid;
+    TextureID             filmThicknessMap         = TextureID::Invalid;
+    TextureID             iridescenceMap           = TextureID::Invalid;
+    TextureID             volumeThicknessMap       = TextureID::Invalid;
     float                     clearcoatFactor          = 0.0f;
     float                     clearcoatRoughnessFactor = 0.0f;
     float                     clearcoatNormalScale     = 1.0f;
-    TextureHandle             clearcoatMap             = TextureHandle::Invalid;
-    TextureHandle             clearcoatRoughnessMap    = TextureHandle::Invalid;
-    TextureHandle             clearcoatNormalMap       = TextureHandle::Invalid;
+    TextureID             clearcoatMap             = TextureID::Invalid;
+    TextureID             clearcoatRoughnessMap    = TextureID::Invalid;
+    TextureID             clearcoatNormalMap       = TextureID::Invalid;
     float                     anisotropyStrength       = 0.0f;
     float                     anisotropyRotation       = 0.0f; // KHR_materials_anisotropy radians.
-    TextureHandle             anisotropyMap            = TextureHandle::Invalid;
+    TextureID             anisotropyMap            = TextureID::Invalid;
     ZHLN::Float3              sheenColorFactor {0.0f, 0.0f, 0.0f};
     float                     sheenRoughnessFactor = 0.0f;
-    TextureHandle             sheenColorMap        = TextureHandle::Invalid;
-    TextureHandle             sheenRoughnessMap    = TextureHandle::Invalid;
-    TextureHandle             occlusionMap         = TextureHandle::Invalid;
+    TextureID             sheenColorMap        = TextureID::Invalid;
+    TextureID             sheenRoughnessMap    = TextureID::Invalid;
+    TextureID             occlusionMap         = TextureID::Invalid;
     float                     occlusionStrength    = 1.0f;
     // See Material: `specularEnabled` is the extension's presence on this
     // material, not a deviation of the factors from their defaults.
@@ -286,7 +286,7 @@ struct MaterialDesc {
     float                     environmentReflectionFactor     = 1.0f;
     float                     specularFactor       = 1.0f;
     ZHLN::Float3              specularColorFactor {1.0f, 1.0f, 1.0f};
-    TextureHandle             specularMap          = TextureHandle::Invalid;
+    TextureID             specularMap          = TextureID::Invalid;
     uint32_t                  specularTexMode      = 0;
     MaterialSamplerAddresses  textureSamplers {};
     MaterialTextureTransforms textureTransforms {};
@@ -313,7 +313,7 @@ struct DrawParams {
     ZHLN::Float4 morphWeights    = {};
     DrawFlags   flags            = DrawFlags::None;
 
-    BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
+    BufferID skinnedVertexBuffer = BufferID::Invalid;
 
     float roughness = -1.0f;
     float metallic  = -1.0f;
@@ -335,7 +335,7 @@ struct CSGCutterParams {
     float        cullRadius          = 1.0f;
     CSGOperation operation           = CSGOperation::Difference;
     uint32_t     jointOffset         = 0;
-    BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
+    BufferID skinnedVertexBuffer = BufferID::Invalid;
     DrawFlags    flags               = DrawFlags::None;
 };
 
@@ -347,8 +347,8 @@ struct CSGDrawParams {
 struct DecalParams {
     ZHLN::Mat44   transform    = ZHLN::Mat44::sIdentity();
     ZHLN::Mat44   invTransform = ZHLN::Mat44::sIdentity();
-    TextureHandle albedoMap    = TextureHandle::Invalid;
-    TextureHandle normalMap    = TextureHandle::Invalid;
+    TextureID albedoMap    = TextureID::Invalid;
+    TextureID normalMap    = TextureID::Invalid;
     float         roughness    = 0.5f;
     float         metallic     = 0.0f;
 };

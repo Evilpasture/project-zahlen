@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <cstdint>
 
 namespace ZHLN {
@@ -15,7 +15,7 @@ struct GlyphMetric {
 struct FontAtlas {
     static constexpr uint32_t kMaxGlyphs = 256;
 
-    TextureHandle texture = TextureHandle::Invalid;
+    TextureID texture = TextureID::Invalid;
     float         atlasWidth  = 1024.0f;
     float         atlasHeight = 1024.0f;
     float         fontSize    = 32.0f;

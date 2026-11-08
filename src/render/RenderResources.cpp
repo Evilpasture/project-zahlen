@@ -7,7 +7,7 @@
 #include "Zahlen/Core/AssetID.hpp"
 #include "Zahlen/Math/Geometry2D.hpp"
 #include "Zahlen/Render/GraphicsSettings.hpp"
-#include "Zahlen/Render/Handles.hpp"
+#include "Zahlen/Render/RenderIDs.hpp"
 #include "Zahlen/Render/Types.hpp"
 #include "Zahlen/Render/Vertex.hpp"
 #include "render/passes/forward/ForwardPass.hpp"
@@ -74,7 +74,7 @@ void RenderContext::UnregisterGPUMesh(AssetID id) noexcept {
 }
 
 void RenderContext::DestroyMesh(const Mesh& mesh) noexcept {
-    for (const BufferHandle handle:
+    for (const BufferID handle:
          {mesh.posBuffer, mesh.tangentFrameBuffer, mesh.surfaceBuffer, mesh.skinBuffer, mesh.indexBuffer, mesh.meshletBuffer, mesh.meshletVertexBuffer,
           mesh.meshletTriBuffer}) {
         DestroyBuffer(handle);
@@ -87,10 +87,10 @@ void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept {
 
 void RenderContext::UnregisterGPUMaterial(MaterialID id) noexcept {
     if (const auto mat = _impl->geometry.FindMaterial(id)) {
-        if (mat->pipeline != PipelineHandle::Invalid) {
+        if (mat->pipeline != PipelineID::Invalid) {
             _impl->pipelines.Destroy(mat->pipeline);
         }
-        if (mat->prePassPipeline != PipelineHandle::Invalid) {
+        if (mat->prePassPipeline != PipelineID::Invalid) {
             _impl->pipelines.Destroy(mat->prePassPipeline);
         }
         _impl->geometry.UnregisterMaterial(id);
@@ -98,19 +98,19 @@ void RenderContext::UnregisterGPUMaterial(MaterialID id) noexcept {
 }
 
 auto RenderContext::Impl::EnsureEmitterStorage(EmitterStorageMap& emitters, const uint64_t emitterId, const uint32_t maxParticles, const size_t particleStride)
-    -> BufferHandle {
+    -> BufferID {
     if (maxParticles == 0) {
         if (auto storage = emitters.Find(emitterId)) {
-            if (storage->buffer != BufferHandle::Invalid) {
+            if (storage->buffer != BufferID::Invalid) {
                 geometry.Destroy(storage->buffer);
             }
             emitters.Erase(emitterId);
         }
-        return BufferHandle::Invalid;
+        return BufferID::Invalid;
     }
     if (particleStride == 0 || static_cast<size_t>(maxParticles) > std::numeric_limits<size_t>::max() / particleStride) {
         ZHLN::LogWarning("[Render] Emitter {} requested an overflowing particle buffer (count={}, stride={}).", emitterId, maxParticles, particleStride);
-        return BufferHandle::Invalid;
+        return BufferID::Invalid;
     }
 
     if (!emitters.Find(emitterId)) {
@@ -118,18 +118,18 @@ auto RenderContext::Impl::EnsureEmitterStorage(EmitterStorageMap& emitters, cons
     }
     auto storage = emitters.Find(emitterId);
     if (!storage) {
-        return BufferHandle::Invalid;
+        return BufferID::Invalid;
     }
 
     storage->lastSeenFrame = frameSerial;
-    if (storage->buffer != BufferHandle::Invalid && storage->capacity == maxParticles) {
+    if (storage->buffer != BufferID::Invalid && storage->capacity == maxParticles) {
         storage->allocationWarningLogged = false;
         return storage->buffer;
     }
 
     const size_t allocationSize = static_cast<size_t>(maxParticles) * particleStride;
     auto         created        = geometry.CreateBuffer({.allocationSize = allocationSize}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
-    if (!created || *created == BufferHandle::Invalid) {
+    if (!created || *created == BufferID::Invalid) {
         if (!storage->allocationWarningLogged) {
             if (!created) {
                 ZHLN::LogWarning("[Render] Could not allocate particle storage for emitter {} ({} particles): {}", emitterId, maxParticles, created.error());
@@ -140,10 +140,10 @@ auto RenderContext::Impl::EnsureEmitterStorage(EmitterStorageMap& emitters, cons
             }
             storage->allocationWarningLogged = true;
         }
-        return BufferHandle::Invalid;
+        return BufferID::Invalid;
     }
 
-    if (storage->buffer != BufferHandle::Invalid) {
+    if (storage->buffer != BufferID::Invalid) {
         geometry.Destroy(storage->buffer);
     }
     storage->buffer                  = *created;
@@ -163,7 +163,7 @@ void RenderContext::Impl::EvictInactiveEmitters() noexcept {
 
         for (const uint64_t emitterId: idleEmitters) {
             if (auto storage = emitters.Find(emitterId)) {
-                if (storage->buffer != BufferHandle::Invalid) {
+                if (storage->buffer != BufferID::Invalid) {
                     geometry.Destroy(storage->buffer);
                 }
                 emitters.Erase(emitterId);
@@ -177,7 +177,7 @@ void RenderContext::Impl::EvictInactiveEmitters() noexcept {
 void RenderContext::Impl::ClearEmitterBuffers() noexcept {
     const auto destroy = [this](EmitterStorageMap& emitters) {
         emitters.ForEach([this](const uint64_t&, EmitterStorage& storage) {
-            if (storage.buffer != BufferHandle::Invalid) {
+            if (storage.buffer != BufferID::Invalid) {
                 geometry.Destroy(storage.buffer);
             }
         });
@@ -187,16 +187,16 @@ void RenderContext::Impl::ClearEmitterBuffers() noexcept {
     destroy(meshParticleEmitters);
     for (auto& slot: billboardSlots) {
         for (uint32_t f = 0; f < Vk::kFramesInFlight; ++f) {
-            if (slot.buffers[f] != BufferHandle::Invalid) {
+            if (slot.buffers[f] != BufferID::Invalid) {
                 geometry.Destroy(slot.buffers[f]);
             }
-            slot.buffers[f]    = BufferHandle::Invalid;
+            slot.buffers[f]    = BufferID::Invalid;
             slot.capacities[f] = 0;
         }
     }
 }
 
-auto RenderContext::CreateBuffer(BufferDesc desc) -> BufferHandle {
+auto RenderContext::CreateBuffer(BufferDesc desc) -> BufferID {
     if (desc.usage == BufferUsage::SkinScratch) {
         const uint32_t vertexCount = desc.stride == 0 ? 0U : static_cast<uint32_t>(desc.size / desc.stride);
         return _impl->geometry.CreateSkinnedScratchBuffer(vertexCount);
@@ -225,12 +225,12 @@ auto RenderContext::CreateBuffer(BufferDesc desc) -> BufferHandle {
         .allocationSize = desc.data.empty() ? desc.size : 0,
         .stride         = desc.stride,
     };
-    return _impl->geometry.CreateBuffer(source, vkUsage).value_or(BufferHandle::Invalid);
+    return _impl->geometry.CreateBuffer(source, vkUsage).value_or(BufferID::Invalid);
 }
 
-auto RenderContext::CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferHandle {
+auto RenderContext::CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferID {
     if (meshlets.empty()) {
-        return BufferHandle::Invalid;
+        return BufferID::Invalid;
     }
     std::vector<GPUMeshlet> packed(meshlets.size());
     for (size_t i = 0; i < meshlets.size(); ++i) {
@@ -244,10 +244,10 @@ auto RenderContext::UploadMeshlets(const MeshletBuildResult& built) -> MeshletSt
         return {};
     }
 
-    const BufferHandle meshlets  = CreateMeshletBuffer(built.meshlets);
-    const BufferHandle vertices  = CreateBuffer<BufferUsage::Storage>(std::span {built.vertices});
-    const BufferHandle triangles = CreateBuffer<BufferUsage::Storage>(std::span {built.triangles});
-    if (meshlets == BufferHandle::Invalid || vertices == BufferHandle::Invalid || triangles == BufferHandle::Invalid) {
+    const BufferID meshlets  = CreateMeshletBuffer(built.meshlets);
+    const BufferID vertices  = CreateBuffer<BufferUsage::Storage>(std::span {built.vertices});
+    const BufferID triangles = CreateBuffer<BufferUsage::Storage>(std::span {built.triangles});
+    if (meshlets == BufferID::Invalid || vertices == BufferID::Invalid || triangles == BufferID::Invalid) {
         DestroyBuffer(meshlets);
         DestroyBuffer(vertices);
         DestroyBuffer(triangles);
@@ -266,11 +266,11 @@ void RenderContext::SubmitParticleEmitter(
     const uint64_t             emitterId,
     const uint32_t             maxParticles,
     const ParticleEmitterDesc& desc,
-    const TextureHandle        texture,
+    const TextureID        texture,
     const bool                 additive
 ) {
-    const BufferHandle gpuBuffer = _impl->EnsureEmitterStorage(_impl->particleEmitters, emitterId, maxParticles, sizeof(Particle));
-    if (gpuBuffer == BufferHandle::Invalid) {
+    const BufferID gpuBuffer = _impl->EnsureEmitterStorage(_impl->particleEmitters, emitterId, maxParticles, sizeof(Particle));
+    if (gpuBuffer == BufferID::Invalid) {
         return;
     }
 
@@ -287,8 +287,8 @@ void RenderContext::SubmitMeshParticleEmitter(
     const AssetID                  mesh,
     const MaterialID               mat
 ) {
-    const BufferHandle gpuBuffer = _impl->EnsureEmitterStorage(_impl->meshParticleEmitters, emitterId, maxParticles, sizeof(Particle3D));
-    if (gpuBuffer == BufferHandle::Invalid) {
+    const BufferID gpuBuffer = _impl->EnsureEmitterStorage(_impl->meshParticleEmitters, emitterId, maxParticles, sizeof(Particle3D));
+    if (gpuBuffer == BufferID::Invalid) {
         return;
     }
 
@@ -297,7 +297,7 @@ void RenderContext::SubmitMeshParticleEmitter(
     );
 }
 
-void RenderContext::DrawBillboards(TextureHandle texture, std::span<const BillboardQuad> billboards, bool additive) {
+void RenderContext::DrawBillboards(TextureID texture, std::span<const BillboardQuad> billboards, bool additive) {
     if (billboards.empty()) {
         return;
     }
@@ -342,20 +342,20 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
         }
 
         const uint32_t frameSlot = Vk::FrameSlot(_impl->presenter.frameIndex);
-        BufferHandle&  slotBuf   = group->buffers[frameSlot];
+        BufferID&  slotBuf   = group->buffers[frameSlot];
         uint32_t&      slotCap   = group->capacities[frameSlot];
 
         if (slotCap < count) {
-            if (slotBuf != BufferHandle::Invalid) {
+            if (slotBuf != BufferID::Invalid) {
                 DestroyBuffer(slotBuf);
             }
             const auto created = _impl->geometry.CreateUninitializedBuffer(
                 static_cast<size_t>(count) * sizeof(Particle), Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex, count
             );
-            slotBuf = created.value_or(BufferHandle::Invalid);
-            slotCap = slotBuf != BufferHandle::Invalid ? count : 0;
+            slotBuf = created.value_or(BufferID::Invalid);
+            slotCap = slotBuf != BufferID::Invalid ? count : 0;
         }
-        if (slotBuf == BufferHandle::Invalid) {
+        if (slotBuf == BufferID::Invalid) {
             continue;
         }
 
@@ -514,11 +514,11 @@ auto RenderContext::GetViewportAspect() const noexcept -> float {
     return static_cast<float>(vp.width) / static_cast<float>(vp.height);
 }
 
-void RenderContext::DestroyBuffer(BufferHandle handle) {
+void RenderContext::DestroyBuffer(BufferID handle) {
     _impl->geometry.Destroy(handle);
 }
 
-auto RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept -> std::expected<void, ErrorCode> {
+auto RenderContext::UpdateBuffer(BufferID handle, std::span<const std::byte> bytes) noexcept -> std::expected<void, ErrorCode> {
     return _impl->geometry.Update(handle, bytes.data(), bytes.size());
 }
 
@@ -531,12 +531,12 @@ static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::depth_format == VK
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
     const bool transmission  = !desc.unlit && desc.transmissionFactor > 0.0f;
-    const bool hasClearcoat  = !desc.unlit && (desc.clearcoatFactor > 1.0f / 255.0f || desc.clearcoatMap != TextureHandle::Invalid ||
-                                               desc.clearcoatRoughnessMap != TextureHandle::Invalid || desc.clearcoatNormalMap != TextureHandle::Invalid);
-    const bool hasAnisotropy = !desc.unlit && (desc.anisotropyStrength > 1.0f / 255.0f || desc.anisotropyMap != TextureHandle::Invalid);
+    const bool hasClearcoat  = !desc.unlit && (desc.clearcoatFactor > 1.0f / 255.0f || desc.clearcoatMap != TextureID::Invalid ||
+                                               desc.clearcoatRoughnessMap != TextureID::Invalid || desc.clearcoatNormalMap != TextureID::Invalid);
+    const bool hasAnisotropy = !desc.unlit && (desc.anisotropyStrength > 1.0f / 255.0f || desc.anisotropyMap != TextureID::Invalid);
     const bool hasSheen      = !desc.unlit &&
                                (desc.sheenColorFactor.x > 1.0f / 255.0f || desc.sheenColorFactor.y > 1.0f / 255.0f || desc.sheenColorFactor.z > 1.0f / 255.0f ||
-                                desc.sheenColorMap != TextureHandle::Invalid || desc.sheenRoughnessMap != TextureHandle::Invalid);
+                                desc.sheenColorMap != TextureID::Invalid || desc.sheenRoughnessMap != TextureID::Invalid);
     // These paths previously serialized their data through the discarded
     // attachments. Keep their full material evaluation in ForwardPass instead.
     // Emission is deliberately not a forward-only feature: lit emitters retain
@@ -643,7 +643,7 @@ void RenderContext::NotifyShaderChanged(std::string_view changedPath) {
     }
 }
 
-auto RenderContext::CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB) -> std::expected<TextureHandle, ErrorCode> {
+auto RenderContext::CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB) -> std::expected<TextureID, ErrorCode> {
     const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 4 || rgba.size() != static_cast<size_t>(pixels) * 4) {
         return std::unexpected(TextureDataError::InvalidPixels);
@@ -652,7 +652,7 @@ auto RenderContext::CreateTexture(std::span<const std::byte> rgba, Extent2D exte
 }
 
 auto RenderContext::CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB, bool generateMips)
-    -> std::expected<TextureHandle, ErrorCode> {
+    -> std::expected<TextureID, ErrorCode> {
     const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 4 || rgba.size() != static_cast<size_t>(pixels) * 4) {
         return std::unexpected(TextureDataError::InvalidPixels);
@@ -661,7 +661,7 @@ auto RenderContext::CreateTexture(std::string_view name, std::span<const std::by
 }
 
 auto RenderContext::CreateTextureHDR(std::string_view name, std::span<const std::byte> rgba16f, Extent2D extent, bool generateMips)
-    -> std::expected<TextureHandle, ErrorCode> {
+    -> std::expected<TextureID, ErrorCode> {
     const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 8 || rgba16f.size() != static_cast<size_t>(pixels) * 8u) {
         return std::unexpected(TextureDataError::InvalidPixels);
@@ -669,7 +669,7 @@ auto RenderContext::CreateTextureHDR(std::string_view name, std::span<const std:
     return _impl->textureManager.Upload(name, rgba16f.data(), extent.width, extent.height, VK_FORMAT_R16G16B16A16_SFLOAT, generateMips);
 }
 
-auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode> {
+auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureID, ErrorCode> {
     if (faceSize == 0) {
         return std::unexpected(TextureDataError::InvalidPixels);
     }
@@ -688,7 +688,7 @@ auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> 
     return _impl->textureManager.UploadCube(faceData.data(), faceSize);
 }
 
-void RenderContext::UnloadTexture(TextureHandle handle) {
+void RenderContext::UnloadTexture(TextureID handle) {
     _impl->textureManager.Unload(handle);
 }
 
@@ -768,7 +768,7 @@ auto RebuildSkinnedBLAS(
         return std::unexpected(RenderFeatureError::FeatureNotSupported);
     }
     if (cmd == VK_NULL_HANDLE || drawCmd.skinPosAddress == nullptr || scratchMesh.vertexCount == 0) {
-        return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
+        return std::unexpected(RenderFeatureError::UnresolvedMeshID);
     }
 
     const auto geometry = Vk::GeometryView::Triangles<VertexPosition>(scratchMesh.vboAddress, scratchMesh.vertexCount)
@@ -822,7 +822,7 @@ void RenderContext::DrawDebugTriangles(std::span<const VertexPosition> positions
         ZHLN::Assert(false, "debug vertex positions and surfaces must have the same count");
         return;
     }
-    auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]);
+    auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshIDs[_impl->presenter.frameIndex]);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -845,12 +845,12 @@ void RenderContext::DrawDebugTriangles(std::span<const VertexPosition> positions
         return;
     }
 
-    const BufferHandle buffer = _impl->frames.debugMeshHandles[_impl->presenter.frameIndex];
+    const BufferID buffer = _impl->frames.debugMeshIDs[_impl->presenter.frameIndex];
     Mesh               debugMesh {
         .posBuffer     = buffer,
         .surfaceBuffer = buffer,
-        .skinBuffer    = BufferHandle::Invalid,
-        .indexBuffer   = BufferHandle::Invalid,
+        .skinBuffer    = BufferID::Invalid,
+        .indexBuffer   = BufferID::Invalid,
         .vertexCount   = nativeMesh->vertexCount,
         .indexCount    = 0
     };
@@ -951,9 +951,9 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
 
     auto* posMesh = impl.geometry.Resolve(mesh.posBuffer);
     if (posMesh == nullptr) {
-        return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
+        return std::unexpected(RenderFeatureError::UnresolvedMeshID);
     }
-    auto* indexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
+    auto* indexMesh = mesh.indexBuffer != BufferID::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
 
     const auto geometry = Vk::GeometryView::Triangles<VertexPosition>(posMesh->vboAddress, mesh.vertexCount)
                               .MaybeIndexed((indexMesh != nullptr) ? indexMesh->vboAddress : nullptr, mesh.indexCount);
@@ -1022,21 +1022,21 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
 }
 
 auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
-    -> std::expected<TextureHandle, ErrorCode> {
+    -> std::expected<TextureID, ErrorCode> {
     return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
 }
 
 auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB, bool generateMips)
-    -> TextureHandle {
+    -> TextureID {
     const uint64_t expectedPixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (expectedPixels == 0 || expectedPixels != pixels.size()) {
         ZHLN::Log("[RenderContext] Procedural texture '{}' has an invalid extent or texel count.", name);
-        return TextureHandle::Invalid;
+        return TextureID::Invalid;
     }
     const auto uploaded = CreateTexture(name, std::as_bytes(pixels), extent, isSRGB, generateMips);
     if (!uploaded) {
         ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
-        return TextureHandle::Invalid;
+        return TextureID::Invalid;
     }
     return *uploaded;
 }

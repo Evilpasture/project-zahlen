@@ -25,6 +25,7 @@
 //   ./build/samples/DeviceLostRecoverySample --headless
 //   ZHLN_PROVOKE_DEVICE_LOST_FRAME=60 ./build/samples/DeviceLostRecoverySample --headless
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Signal/SignalManager.hpp>
@@ -228,8 +229,8 @@ auto main(int argc, char* argv[]) -> int {
     const uint32_t autoProvokeFrame = EnvironmentU32("ZHLN_PROVOKE_DEVICE_LOST_FRAME");
     ZHLN::Log(
         "[DeviceLostRecoverySample] Ready (pid={}, {}, gpu={}). F9, Ctrl+\\, or kill -USR1 {}.", ZHLN::GetPID(),
-        engineConfig.headless ? "headless" : "windowed", engine->GetRenderContext().GetInfo().gpuName,
-        engine->GetRenderContext().GetInfo().deviceType == ZHLN::PhysicalDeviceType::CPU ? "simulates device-lost recovery" : "hangs the GPU"
+        engineConfig.headless ? "headless" : "windowed", engine->Graphics().Info().gpuName,
+        engine->Graphics().Info().deviceType == ZHLN::PhysicalDeviceType::CPU ? "simulates device-lost recovery" : "hangs the GPU"
     );
     if (autoProvokeFrame != 0) {
         ZHLN::Log("[DeviceLostRecoverySample] Will ProvokeDeviceLost on frame {}.", autoProvokeFrame);
@@ -250,7 +251,7 @@ auto main(int argc, char* argv[]) -> int {
             registry.Patch<ZHLN::Components::InputStateComponent>(e, [&](auto& st) -> auto {
                 f9Down = f9Down || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F9));
                 if (st.needsResize) {
-                    engine->GetRenderContext().SetResolution(st.newSize);
+                    engine->Graphics().SetResolution(st.newSize);
                     st.needsResize = false;
                 }
             });
@@ -259,8 +260,8 @@ auto main(int argc, char* argv[]) -> int {
         const bool signalNow = g_ProvokeRequested.exchange(false, std::memory_order::relaxed);
         const bool autoNow   = !autoProvoked && autoProvokeFrame != 0 && engine->GetCurrentFrame() >= autoProvokeFrame;
         if ((f9Down && !f9WasDown) || signalNow || autoNow) {
-            auto& rc = engine->GetRenderContext();
-            const auto info = rc.GetInfo();
+            auto rc = engine->Graphics();
+            const auto info = rc.Info();
             if (info.deviceType == ZHLN::PhysicalDeviceType::CPU) {
                 // llvmpipe has no TDR: the hang shader is a host SIGSEGV on a
                 // worker, and the crash handler then deadlocks waiting for Main.

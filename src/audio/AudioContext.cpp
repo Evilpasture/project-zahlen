@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Core/Platform.hpp>
 
 #if defined(ZHLN_SANITIZER_BUILD)
@@ -52,8 +53,8 @@ constexpr float    kVoiceMinFadeOut         = 0.001f;
 constexpr uint32_t kDefaultSampleRate       = 48000;
 constexpr uint32_t kDefaultChannels         = 2;
 constexpr uint32_t kMaxNodeChannels         = 8;
-constexpr uint32_t kHandleGenerationShift   = 32;
-constexpr uint64_t kHandleIndexMask         = 0xFFFFFFFFull;
+constexpr uint32_t kIDGenerationShift   = 32;
+constexpr uint64_t kIDIndexMask         = 0xFFFFFFFFull;
 constexpr float    kTwoPoleCompensation     = 1.55377397f; // 1 / sqrt(sqrt(2) - 1) so -3dB lands at cutoffHz
 constexpr float    kParamSmoothStep         = 0.004f;
 constexpr float    kDenormalFloor           = 1.0e-15f;
@@ -714,7 +715,7 @@ const ma_data_source_vtable g_tone_sweep_vtable = {
 struct BusSlot {
     bool           allocated = false;
     String32       name {};
-    AudioBusId     parent        = AudioBusId::Invalid();
+    AudioBusID     parent        = AudioBusID::Invalid();
     ma_sound_group group {};
     BusFilterNode  lpfNode {};
 
@@ -743,7 +744,7 @@ struct VoiceSlot {
     ZHLN::Atomic<uint32_t> generation {1};
     ZHLN::Atomic<bool>     inUse {false};
 
-    AudioBusId           bus             = AudioBus::SFX;
+    AudioBusID           bus             = AudioBus::SFX;
     AudioPlaybackMode    playbackMode    = AudioPlaybackMode::Decompressed;
     bool                 spatialized     = true;
     bool                 looping         = false;
@@ -763,12 +764,12 @@ struct VoiceSlot {
     AudioOcclusionDesc   occlusion {};
 };
 
-[[nodiscard]] constexpr auto PackHandle(uint32_t slotIdx, uint32_t gen) noexcept -> uint64_t {
-    return (static_cast<uint64_t>(gen) << kHandleGenerationShift) | static_cast<uint64_t>(slotIdx);
+[[nodiscard]] constexpr auto PackID(uint32_t slotIdx, uint32_t gen) noexcept -> uint64_t {
+    return (static_cast<uint64_t>(gen) << kIDGenerationShift) | static_cast<uint64_t>(slotIdx);
 }
 
-[[nodiscard]] constexpr auto UnpackHandle(uint64_t raw) noexcept -> std::pair<uint32_t, uint32_t> {
-    return {static_cast<uint32_t>(raw & kHandleIndexMask), static_cast<uint32_t>(raw >> kHandleGenerationShift)};
+[[nodiscard]] constexpr auto UnpackID(uint64_t raw) noexcept -> std::pair<uint32_t, uint32_t> {
+    return {static_cast<uint32_t>(raw & kIDIndexMask), static_cast<uint32_t>(raw >> kIDGenerationShift)};
 }
 
 void ApplyMiniaudioAttenuation(ma_sound* sound, bool spatialized, const AudioAttenuationDesc& desc) noexcept {
@@ -950,19 +951,19 @@ struct AudioContext::Impl {
         });
     }
 
-    [[nodiscard]] auto ResolveBusIndexLocked(AudioBusId bus) const noexcept -> uint8_t {
+    [[nodiscard]] auto ResolveBusIndexLocked(AudioBusID bus) const noexcept -> uint8_t {
         if (bus.index < kMaxAudioBuses && buses[bus.index].allocated) {
             return bus.index;
         }
         return static_cast<uint8_t>(AudioBus::SFX);
     }
 
-    [[nodiscard]] auto ResolveGroupPtr(AudioBusId bus) noexcept -> ma_sound_group* {
+    [[nodiscard]] auto ResolveGroupPtr(AudioBusID bus) noexcept -> ma_sound_group* {
         const uint8_t idx = Lock(busMutex, [&]() noexcept -> uint8_t { return ResolveBusIndexLocked(bus); });
         return &buses[idx].group;
     }
 
-    [[nodiscard]] auto InitBusSlotLocked(uint8_t idx, const String32& name, AudioBusId parent) -> bool {
+    [[nodiscard]] auto InitBusSlotLocked(uint8_t idx, const String32& name, AudioBusID parent) -> bool {
         auto& bus        = buses[idx];
         bus.allocated    = false;
         bus.name         = name;
@@ -1043,7 +1044,7 @@ struct AudioContext::Impl {
     }
 
     [[nodiscard]] auto HasAncestorSoloLocked(uint8_t idx) const noexcept -> bool {
-        AudioBusId cur = buses[idx].parent;
+        AudioBusID cur = buses[idx].parent;
         size_t     guard = 0;
         while (cur.IsValid() && cur.index < kMaxAudioBuses && guard++ < kMaxAudioBuses) {
             const auto& b = buses[cur.index];
@@ -1055,7 +1056,7 @@ struct AudioContext::Impl {
     }
 
     [[nodiscard]] auto IsAncestorOfLocked(uint8_t candidateAncestor, uint8_t node) const noexcept -> bool {
-        AudioBusId cur   = buses[node].parent;
+        AudioBusID cur   = buses[node].parent;
         size_t     guard = 0;
         while (cur.IsValid() && cur.index < kMaxAudioBuses && guard++ < kMaxAudioBuses) {
             if (cur.index == candidateAncestor) return true;
@@ -1173,7 +1174,7 @@ struct AudioContext::Impl {
     }
 
     void FinalizeVoiceSlotStateLocked(VoiceSlot& slot, uint32_t slotIdx, uint8_t busIdx, const VoiceDesc& desc) {
-        slot.bus             = AudioBusId(busIdx);
+        slot.bus             = AudioBusID(busIdx);
         slot.playbackMode    = desc.playbackMode;
         slot.spatialized     = desc.spatialized;
         slot.looping         = desc.looping;
@@ -1243,7 +1244,7 @@ struct AudioContext::Impl {
     }
 
     // NOLINTBEGIN(bugprone-easily-swappable-parameters)
-    void DispatchProceduralBeep(float frequency, float duration, float volume, float pitch, AudioBusId bus) {
+    void DispatchProceduralBeep(float frequency, float duration, float volume, float pitch, AudioBusID bus) {
         if (!initialized) {
             return;
         }
@@ -1382,7 +1383,7 @@ AudioContext::AudioContext(const AudioConfig& cfg) : _impl(std::make_unique<Impl
     _impl->channels   = ma_engine_get_channels(&_impl->engine);
 
     const bool busesOk =
-        _impl->InitBusSlotLocked(static_cast<uint8_t>(AudioBus::Master), "Master", AudioBusId::Invalid()) &&
+        _impl->InitBusSlotLocked(static_cast<uint8_t>(AudioBus::Master), "Master", AudioBusID::Invalid()) &&
         _impl->InitBusSlotLocked(static_cast<uint8_t>(AudioBus::Music), "Music", AudioBus::Master) &&
         _impl->InitBusSlotLocked(static_cast<uint8_t>(AudioBus::SFX), "SFX", AudioBus::Master) &&
         _impl->InitBusSlotLocked(static_cast<uint8_t>(AudioBus::Dialogue), "Dialogue", AudioBus::Master) &&
@@ -1536,55 +1537,55 @@ void AudioContext::FlushEvents() noexcept {
     }
 }
 
-auto AudioContext::CreateSubBus(const String32& name, AudioBusId parent) -> AudioBusId {
+auto AudioContext::CreateSubBus(const String32& name, AudioBusID parent) -> AudioBusID {
     if (!_impl->initialized || name.empty()) {
-        return AudioBusId::Invalid();
+        return AudioBusID::Invalid();
     }
 
-    return Lock(_impl->busMutex, [&]() -> AudioBusId {
+    return Lock(_impl->busMutex, [&]() -> AudioBusID {
         if (!parent.IsValid() || !_impl->buses[parent.index].allocated) {
-            return AudioBusId::Invalid();
+            return AudioBusID::Invalid();
         }
         for (uint8_t i = 0; i < kMaxAudioBuses; ++i) {
             if (_impl->buses[i].allocated && _impl->buses[i].name == name) {
-                return AudioBusId(i);
+                return AudioBusID(i);
             }
         }
         for (uint8_t i = static_cast<uint8_t>(kAudioBusCount); i < kMaxAudioBuses; ++i) {
             if (!_impl->buses[i].allocated) {
                 if (!_impl->InitBusSlotLocked(i, name, parent)) {
-                    return AudioBusId::Invalid();
+                    return AudioBusID::Invalid();
                 }
                 _impl->RefreshAllBusGainsLocked();
-                return AudioBusId(i);
+                return AudioBusID(i);
             }
         }
-        return AudioBusId::Invalid();
+        return AudioBusID::Invalid();
     });
 }
 
-auto AudioContext::FindBus(std::string_view name) const noexcept -> AudioBusId {
+auto AudioContext::FindBus(std::string_view name) const noexcept -> AudioBusID {
     if (!_impl->initialized || name.empty()) {
-        return AudioBusId::Invalid();
+        return AudioBusID::Invalid();
     }
-    return Lock(_impl->busMutex, [&]() noexcept -> AudioBusId {
+    return Lock(_impl->busMutex, [&]() noexcept -> AudioBusID {
         for (uint8_t i = 0; i < kMaxAudioBuses; ++i) {
             if (_impl->buses[i].allocated && std::string_view(_impl->buses[i].name) == name) {
-                return AudioBusId(i);
+                return AudioBusID(i);
             }
         }
-        return AudioBusId::Invalid();
+        return AudioBusID::Invalid();
     });
 }
 
-auto AudioContext::IsBusValid(AudioBusId bus) const noexcept -> bool {
+auto AudioContext::IsBusValid(AudioBusID bus) const noexcept -> bool {
     if (!_impl->initialized || !bus.IsValid()) {
         return false;
     }
     return Lock(_impl->busMutex, [&]() noexcept -> bool { return _impl->buses[bus.index].allocated; });
 }
 
-auto AudioContext::GetBusName(AudioBusId bus) const noexcept -> std::string_view {
+auto AudioContext::GetBusName(AudioBusID bus) const noexcept -> std::string_view {
     if (!_impl->initialized || !bus.IsValid()) {
         return {};
     }
@@ -1593,16 +1594,16 @@ auto AudioContext::GetBusName(AudioBusId bus) const noexcept -> std::string_view
     });
 }
 
-auto AudioContext::GetBusParent(AudioBusId bus) const noexcept -> AudioBusId {
+auto AudioContext::GetBusParent(AudioBusID bus) const noexcept -> AudioBusID {
     if (!_impl->initialized || !bus.IsValid()) {
-        return AudioBusId::Invalid();
+        return AudioBusID::Invalid();
     }
-    return Lock(_impl->busMutex, [&]() noexcept -> AudioBusId {
-        return _impl->buses[bus.index].allocated ? _impl->buses[bus.index].parent : AudioBusId::Invalid();
+    return Lock(_impl->busMutex, [&]() noexcept -> AudioBusID {
+        return _impl->buses[bus.index].allocated ? _impl->buses[bus.index].parent : AudioBusID::Invalid();
     });
 }
 
-auto AudioContext::SetBusParent(AudioBusId bus, AudioBusId parent) -> bool {
+auto AudioContext::SetBusParent(AudioBusID bus, AudioBusID parent) -> bool {
     if (!_impl->initialized || !bus.IsValid() || !parent.IsValid() || bus == AudioBus::Master || bus == parent) {
         return false;
     }
@@ -1631,7 +1632,7 @@ auto AudioContext::GetMasterVolume() const noexcept -> float {
     return GetBusVolume(AudioBus::Master);
 }
 
-void AudioContext::SetBusVolume(AudioBusId bus, float volume) {
+void AudioContext::SetBusVolume(AudioBusID bus, float volume) {
     if (!_impl->initialized || !bus.IsValid()) {
         return;
     }
@@ -1644,7 +1645,7 @@ void AudioContext::SetBusVolume(AudioBusId bus, float volume) {
     });
 }
 
-auto AudioContext::GetBusVolume(AudioBusId bus) const noexcept -> float {
+auto AudioContext::GetBusVolume(AudioBusID bus) const noexcept -> float {
     if (!_impl->initialized || !bus.IsValid()) {
         return 0.0f;
     }
@@ -1654,7 +1655,7 @@ auto AudioContext::GetBusVolume(AudioBusId bus) const noexcept -> float {
     });
 }
 
-void AudioContext::FadeBusVolume(AudioBusId bus, float targetVolume, float durationSeconds) {
+void AudioContext::FadeBusVolume(AudioBusID bus, float targetVolume, float durationSeconds) {
     if (!_impl->initialized || !bus.IsValid()) {
         return;
     }
@@ -1674,7 +1675,7 @@ void AudioContext::FadeBusVolume(AudioBusId bus, float targetVolume, float durat
     });
 }
 
-void AudioContext::SetBusPitch(AudioBusId bus, float pitch) {
+void AudioContext::SetBusPitch(AudioBusID bus, float pitch) {
     if (!_impl->initialized || !bus.IsValid()) {
         return;
     }
@@ -1686,7 +1687,7 @@ void AudioContext::SetBusPitch(AudioBusId bus, float pitch) {
     });
 }
 
-auto AudioContext::GetBusPitch(AudioBusId bus) const noexcept -> float {
+auto AudioContext::GetBusPitch(AudioBusID bus) const noexcept -> float {
     if (!_impl->initialized || !bus.IsValid()) {
         return 1.0f;
     }
@@ -1696,7 +1697,7 @@ auto AudioContext::GetBusPitch(AudioBusId bus) const noexcept -> float {
     });
 }
 
-void AudioContext::SetBusMuted(AudioBusId bus, bool muted) {
+void AudioContext::SetBusMuted(AudioBusID bus, bool muted) {
     if (!_impl->initialized || !bus.IsValid()) {
         return;
     }
@@ -1708,7 +1709,7 @@ void AudioContext::SetBusMuted(AudioBusId bus, bool muted) {
     });
 }
 
-auto AudioContext::IsBusMuted(AudioBusId bus) const noexcept -> bool {
+auto AudioContext::IsBusMuted(AudioBusID bus) const noexcept -> bool {
     if (!_impl->initialized || !bus.IsValid()) {
         return false;
     }
@@ -1718,7 +1719,7 @@ auto AudioContext::IsBusMuted(AudioBusId bus) const noexcept -> bool {
     });
 }
 
-void AudioContext::SetBusSolo(AudioBusId bus, bool solo) {
+void AudioContext::SetBusSolo(AudioBusID bus, bool solo) {
     if (!_impl->initialized || !bus.IsValid()) {
         return;
     }
@@ -1730,7 +1731,7 @@ void AudioContext::SetBusSolo(AudioBusId bus, bool solo) {
     });
 }
 
-auto AudioContext::IsBusSolo(AudioBusId bus) const noexcept -> bool {
+auto AudioContext::IsBusSolo(AudioBusID bus) const noexcept -> bool {
     if (!_impl->initialized || !bus.IsValid()) {
         return false;
     }
@@ -1740,7 +1741,7 @@ auto AudioContext::IsBusSolo(AudioBusId bus) const noexcept -> bool {
     });
 }
 
-void AudioContext::SetBusDucking(AudioBusId bus, float duckGain, float fadeSeconds) {
+void AudioContext::SetBusDucking(AudioBusID bus, float duckGain, float fadeSeconds) {
     if (!_impl->initialized || !bus.IsValid()) {
         return;
     }
@@ -1759,7 +1760,7 @@ void AudioContext::SetBusDucking(AudioBusId bus, float duckGain, float fadeSecon
     });
 }
 
-auto AudioContext::GetBusDucking(AudioBusId bus) const noexcept -> float {
+auto AudioContext::GetBusDucking(AudioBusID bus) const noexcept -> float {
     if (!_impl->initialized || !bus.IsValid()) {
         return 1.0f;
     }
@@ -1769,7 +1770,7 @@ auto AudioContext::GetBusDucking(AudioBusId bus) const noexcept -> float {
     });
 }
 
-void AudioContext::SetBusLowPassCutoff(AudioBusId bus, float cutoffHz) {
+void AudioContext::SetBusLowPassCutoff(AudioBusID bus, float cutoffHz) {
     if (!_impl->initialized || !bus.IsValid()) {
         return;
     }
@@ -1781,7 +1782,7 @@ void AudioContext::SetBusLowPassCutoff(AudioBusId bus, float cutoffHz) {
     });
 }
 
-auto AudioContext::GetBusLowPassCutoff(AudioBusId bus) const noexcept -> float {
+auto AudioContext::GetBusLowPassCutoff(AudioBusID bus) const noexcept -> float {
     if (!_impl->initialized || !bus.IsValid()) {
         return MAX_CUTOFF_FREQUENCY;
     }
@@ -1791,7 +1792,7 @@ auto AudioContext::GetBusLowPassCutoff(AudioBusId bus) const noexcept -> float {
     });
 }
 
-auto AudioContext::GetEffectiveBusVolume(AudioBusId bus) const noexcept -> float {
+auto AudioContext::GetEffectiveBusVolume(AudioBusID bus) const noexcept -> float {
     if (!_impl->initialized || !bus.IsValid()) {
         return 0.0f;
     }
@@ -1807,7 +1808,7 @@ auto AudioContext::GetEffectiveBusVolume(AudioBusId bus) const noexcept -> float
             }
         }
         float      cumulative = 1.0f;
-        AudioBusId cur        = bus;
+        AudioBusID cur        = bus;
         size_t     guard      = 0;
         while (cur.IsValid() && cur.index < kMaxAudioBuses && guard++ < kMaxAudioBuses) {
             cumulative *= _impl->ComputeLocalBusGainLocked(cur.index, anySolo);
@@ -1843,7 +1844,7 @@ auto AudioContext::GetReverbConfig() const noexcept -> AudioReverbConfig {
     return Lock(_impl->busMutex, [&]() noexcept -> AudioReverbConfig { return _impl->reverbConfig; });
 }
 
-auto AudioContext::CreateVoice(std::string_view filepath, bool spatialized, bool looping, float volume) -> AudioHandle {
+auto AudioContext::CreateVoice(std::string_view filepath, bool spatialized, bool looping, float volume) -> VoiceID {
     return CreateVoice(
         filepath,
         VoiceDesc {
@@ -1859,11 +1860,11 @@ auto AudioContext::CreateVoice(std::string_view filepath, bool spatialized, bool
 
 auto AudioContext::CreateStreamVoice(
     std::string_view filepath,
-    AudioBusId       bus,
+    AudioBusID       bus,
     bool             looping,
     float            volume,
     bool             spatialized
-) -> AudioHandle {
+) -> VoiceID {
     return CreateVoice(
         filepath,
         VoiceDesc {
@@ -1877,24 +1878,24 @@ auto AudioContext::CreateStreamVoice(
     );
 }
 
-auto AudioContext::CreateVoice(std::string_view filepath, const VoiceDesc& desc) -> AudioHandle {
+auto AudioContext::CreateVoice(std::string_view filepath, const VoiceDesc& desc) -> VoiceID {
     if (!_impl->initialized || filepath.empty()) {
-        return AudioHandle::Invalid;
+        return VoiceID::Invalid;
     }
 
     const std::string pathStr(filepath);
     if (!FileExistsNoThrow(pathStr.c_str())) {
-        return AudioHandle::Invalid;
+        return VoiceID::Invalid;
     }
 
     const uint8_t busIdx = Lock(_impl->busMutex, [&]() noexcept -> uint8_t { return _impl->ResolveBusIndexLocked(desc.bus); });
 
-    return Lock(_impl->voiceMutex, [&]() -> AudioHandle {
+    return Lock(_impl->voiceMutex, [&]() -> VoiceID {
         for (uint32_t i = 0; i < MAX_VOICE_SLOTS; ++i) {
             auto& slot = _impl->voiceSlots[i];
             if (!slot.inUse.load(std::memory_order::relaxed)) {
                 if (!_impl->PrepareVoiceSendNodeLocked(slot, busIdx, desc)) {
-                    return AudioHandle::Invalid;
+                    return VoiceID::Invalid;
                 }
 
                 ma_uint32 flags = desc.spatialized ? 0u : static_cast<ma_uint32>(MA_SOUND_FLAG_NO_SPATIALIZATION);
@@ -1912,28 +1913,28 @@ auto AudioContext::CreateVoice(std::string_view filepath, const VoiceDesc& desc)
                 if (ma_sound_init_ex(&_impl->engine, &soundCfg, &slot.sound) != MA_SUCCESS) {
                     ma_node_uninit(&slot.sendNode.base, nullptr);
                     slot.sendNode.nodeInit = false;
-                    return AudioHandle::Invalid;
+                    return VoiceID::Invalid;
                 }
                 _impl->DrainHeadlessResourceManagerJobs();
 
                 slot.hasMemoryDecoder = false;
                 _impl->FinalizeVoiceSlotStateLocked(slot, i, busIdx, desc);
                 const uint32_t gen = slot.generation.load(std::memory_order::relaxed);
-                return static_cast<AudioHandle>(PackHandle(i, gen));
+                return static_cast<VoiceID>(PackID(i, gen));
             }
         }
-        return AudioHandle::Invalid;
+        return VoiceID::Invalid;
     });
 }
 
-auto AudioContext::CreateVoiceFromMemory(std::span<const uint8_t> encodedBytes, const VoiceDesc& desc) -> AudioHandle {
+auto AudioContext::CreateVoiceFromMemory(std::span<const uint8_t> encodedBytes, const VoiceDesc& desc) -> VoiceID {
     if (!_impl->initialized || encodedBytes.empty()) {
-        return AudioHandle::Invalid;
+        return VoiceID::Invalid;
     }
 
     const uint8_t busIdx = Lock(_impl->busMutex, [&]() noexcept -> uint8_t { return _impl->ResolveBusIndexLocked(desc.bus); });
 
-    return Lock(_impl->voiceMutex, [&]() -> AudioHandle {
+    return Lock(_impl->voiceMutex, [&]() -> VoiceID {
         for (uint32_t i = 0; i < MAX_VOICE_SLOTS; ++i) {
             auto& slot = _impl->voiceSlots[i];
             if (!slot.inUse.load(std::memory_order::relaxed)) {
@@ -1942,7 +1943,7 @@ auto AudioContext::CreateVoiceFromMemory(std::span<const uint8_t> encodedBytes, 
                 ma_decoder_config decCfg = ma_decoder_config_init(ma_format_f32, 0, _impl->sampleRate);
                 if (ma_decoder_init_memory(slot.encodedBytes.data(), slot.encodedBytes.size(), &decCfg, &slot.memoryDecoder) != MA_SUCCESS) {
                     slot.encodedBytes.clear();
-                    return AudioHandle::Invalid;
+                    return VoiceID::Invalid;
                 }
                 slot.hasMemoryDecoder = true;
 
@@ -1950,7 +1951,7 @@ auto AudioContext::CreateVoiceFromMemory(std::span<const uint8_t> encodedBytes, 
                     ma_decoder_uninit(&slot.memoryDecoder);
                     slot.hasMemoryDecoder = false;
                     slot.encodedBytes.clear();
-                    return AudioHandle::Invalid;
+                    return VoiceID::Invalid;
                 }
 
                 ma_sound_config soundCfg                = ma_sound_config_init_2(&_impl->engine);
@@ -1966,20 +1967,20 @@ auto AudioContext::CreateVoiceFromMemory(std::span<const uint8_t> encodedBytes, 
                     ma_decoder_uninit(&slot.memoryDecoder);
                     slot.hasMemoryDecoder = false;
                     slot.encodedBytes.clear();
-                    return AudioHandle::Invalid;
+                    return VoiceID::Invalid;
                 }
 
                 _impl->FinalizeVoiceSlotStateLocked(slot, i, busIdx, desc);
                 const uint32_t gen = slot.generation.load(std::memory_order::relaxed);
-                return static_cast<AudioHandle>(PackHandle(i, gen));
+                return static_cast<VoiceID>(PackID(i, gen));
             }
         }
-        return AudioHandle::Invalid;
+        return VoiceID::Invalid;
     });
 }
 
-void AudioContext::PlayVoice(AudioHandle handle) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::PlayVoice(VoiceID handle) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() -> void {
@@ -1997,8 +1998,8 @@ void AudioContext::PlayVoice(AudioHandle handle) {
     });
 }
 
-void AudioContext::PauseVoice(AudioHandle handle) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::PauseVoice(VoiceID handle) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() -> void {
@@ -2011,8 +2012,8 @@ void AudioContext::PauseVoice(AudioHandle handle) {
     });
 }
 
-void AudioContext::ResumeVoice(AudioHandle handle) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::ResumeVoice(VoiceID handle) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() -> void {
@@ -2028,8 +2029,8 @@ void AudioContext::ResumeVoice(AudioHandle handle) {
     });
 }
 
-void AudioContext::StopVoice(AudioHandle handle, float fadeOutSeconds) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::StopVoice(VoiceID handle, float fadeOutSeconds) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() -> void {
@@ -2048,8 +2049,8 @@ void AudioContext::StopVoice(AudioHandle handle, float fadeOutSeconds) {
     });
 }
 
-auto AudioContext::SeekVoiceSeconds(AudioHandle handle, float seconds) -> bool {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::SeekVoiceSeconds(VoiceID handle, float seconds) -> bool {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return false;
 
     return Lock(_impl->voiceMutex, [&]() -> bool {
@@ -2065,8 +2066,8 @@ auto AudioContext::SeekVoiceSeconds(AudioHandle handle, float seconds) -> bool {
     });
 }
 
-auto AudioContext::IsVoicePlaying(AudioHandle handle) const noexcept -> bool {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::IsVoicePlaying(VoiceID handle) const noexcept -> bool {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return false;
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> bool {
@@ -2078,8 +2079,8 @@ auto AudioContext::IsVoicePlaying(AudioHandle handle) const noexcept -> bool {
     });
 }
 
-auto AudioContext::IsVoicePaused(AudioHandle handle) const noexcept -> bool {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::IsVoicePaused(VoiceID handle) const noexcept -> bool {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return false;
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> bool {
@@ -2090,8 +2091,8 @@ auto AudioContext::IsVoicePaused(AudioHandle handle) const noexcept -> bool {
     });
 }
 
-auto AudioContext::IsVoiceStreamed(AudioHandle handle) const noexcept -> bool {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::IsVoiceStreamed(VoiceID handle) const noexcept -> bool {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return false;
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> bool {
@@ -2102,16 +2103,16 @@ auto AudioContext::IsVoiceStreamed(AudioHandle handle) const noexcept -> bool {
     });
 }
 
-auto AudioContext::IsVoiceValid(AudioHandle handle) const noexcept -> bool {
-    if (handle == AudioHandle::Invalid) return false;
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::IsVoiceValid(VoiceID handle) const noexcept -> bool {
+    if (handle == VoiceID::Invalid) return false;
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return false;
     const auto& slot = _impl->voiceSlots[idx];
     return slot.inUse.load(std::memory_order::acquire) && slot.generation.load(std::memory_order::relaxed) == gen;
 }
 
-auto AudioContext::GetVoiceCursorSeconds(AudioHandle handle) const noexcept -> float {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::GetVoiceCursorSeconds(VoiceID handle) const noexcept -> float {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return 0.0f;
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> float {
@@ -2124,8 +2125,8 @@ auto AudioContext::GetVoiceCursorSeconds(AudioHandle handle) const noexcept -> f
     });
 }
 
-auto AudioContext::GetVoiceDurationSeconds(AudioHandle handle) const noexcept -> float {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::GetVoiceDurationSeconds(VoiceID handle) const noexcept -> float {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return 0.0f;
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> float {
@@ -2138,8 +2139,8 @@ auto AudioContext::GetVoiceDurationSeconds(AudioHandle handle) const noexcept ->
     });
 }
 
-void AudioContext::SetVoiceBus(AudioHandle handle, AudioBusId bus) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoiceBus(VoiceID handle, AudioBusID bus) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     const uint8_t targetBusIdx = Lock(_impl->busMutex, [&]() noexcept -> uint8_t { return _impl->ResolveBusIndexLocked(bus); });
@@ -2152,26 +2153,26 @@ void AudioContext::SetVoiceBus(AudioHandle handle, AudioBusId bus) {
             return;
         }
         if (ma_node_attach_output_bus(&slot.sendNode.base, 0, &_impl->buses[targetBusIdx].group, 0) == MA_SUCCESS) {
-            slot.bus = AudioBusId(targetBusIdx);
+            slot.bus = AudioBusID(targetBusIdx);
         }
     });
 }
 
-auto AudioContext::GetVoiceBus(AudioHandle handle) const noexcept -> AudioBusId {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
-    if (idx >= MAX_VOICE_SLOTS) return AudioBusId::Invalid();
+auto AudioContext::GetVoiceBus(VoiceID handle) const noexcept -> AudioBusID {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
+    if (idx >= MAX_VOICE_SLOTS) return AudioBusID::Invalid();
 
-    return Lock(_impl->voiceMutex, [&]() noexcept -> AudioBusId {
+    return Lock(_impl->voiceMutex, [&]() noexcept -> AudioBusID {
         const auto& slot = _impl->voiceSlots[idx];
         if (!slot.inUse.load(std::memory_order::acquire) || slot.generation.load(std::memory_order::relaxed) != gen) {
-            return AudioBusId::Invalid();
+            return AudioBusID::Invalid();
         }
         return slot.bus;
     });
 }
 
-void AudioContext::SetVoicePosition(AudioHandle handle, ZHLN::Float3 position) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoicePosition(VoiceID handle, ZHLN::Float3 position) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
@@ -2187,8 +2188,8 @@ void AudioContext::SetVoicePosition(AudioHandle handle, ZHLN::Float3 position) {
     });
 }
 
-void AudioContext::SetVoiceVelocity(AudioHandle handle, ZHLN::Float3 velocity) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoiceVelocity(VoiceID handle, ZHLN::Float3 velocity) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
@@ -2201,8 +2202,8 @@ void AudioContext::SetVoiceVelocity(AudioHandle handle, ZHLN::Float3 velocity) {
     });
 }
 
-void AudioContext::SetVoiceDirection(AudioHandle handle, ZHLN::Float3 direction) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoiceDirection(VoiceID handle, ZHLN::Float3 direction) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
@@ -2215,8 +2216,8 @@ void AudioContext::SetVoiceDirection(AudioHandle handle, ZHLN::Float3 direction)
     });
 }
 
-void AudioContext::SetVoiceVolume(AudioHandle handle, float volume) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoiceVolume(VoiceID handle, float volume) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
@@ -2229,8 +2230,8 @@ void AudioContext::SetVoiceVolume(AudioHandle handle, float volume) {
     });
 }
 
-auto AudioContext::GetVoiceVolume(AudioHandle handle) const noexcept -> float {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::GetVoiceVolume(VoiceID handle) const noexcept -> float {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return 0.0f;
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> float {
@@ -2241,8 +2242,8 @@ auto AudioContext::GetVoiceVolume(AudioHandle handle) const noexcept -> float {
     });
 }
 
-void AudioContext::SetVoicePitch(AudioHandle handle, float pitch) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoicePitch(VoiceID handle, float pitch) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
@@ -2255,8 +2256,8 @@ void AudioContext::SetVoicePitch(AudioHandle handle, float pitch) {
     });
 }
 
-auto AudioContext::GetVoicePitch(AudioHandle handle) const noexcept -> float {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::GetVoicePitch(VoiceID handle) const noexcept -> float {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return 1.0f;
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> float {
@@ -2267,8 +2268,8 @@ auto AudioContext::GetVoicePitch(AudioHandle handle) const noexcept -> float {
     });
 }
 
-void AudioContext::SetVoicePan(AudioHandle handle, float pan) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoicePan(VoiceID handle, float pan) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
@@ -2281,8 +2282,8 @@ void AudioContext::SetVoicePan(AudioHandle handle, float pan) {
     });
 }
 
-auto AudioContext::GetVoicePan(AudioHandle handle) const noexcept -> float {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::GetVoicePan(VoiceID handle) const noexcept -> float {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return 0.0f;
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> float {
@@ -2293,8 +2294,8 @@ auto AudioContext::GetVoicePan(AudioHandle handle) const noexcept -> float {
     });
 }
 
-void AudioContext::SetVoiceLooping(AudioHandle handle, bool looping) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoiceLooping(VoiceID handle, bool looping) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
@@ -2307,8 +2308,8 @@ void AudioContext::SetVoiceLooping(AudioHandle handle, bool looping) {
     });
 }
 
-auto AudioContext::IsVoiceLooping(AudioHandle handle) const noexcept -> bool {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::IsVoiceLooping(VoiceID handle) const noexcept -> bool {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return false;
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> bool {
@@ -2319,8 +2320,8 @@ auto AudioContext::IsVoiceLooping(AudioHandle handle) const noexcept -> bool {
     });
 }
 
-void AudioContext::SetVoiceAttenuation(AudioHandle handle, const AudioAttenuationDesc& desc) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoiceAttenuation(VoiceID handle, const AudioAttenuationDesc& desc) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
@@ -2337,8 +2338,8 @@ void AudioContext::SetVoiceAttenuation(AudioHandle handle, const AudioAttenuatio
     });
 }
 
-auto AudioContext::GetVoiceAttenuation(AudioHandle handle) const noexcept -> AudioAttenuationDesc {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::GetVoiceAttenuation(VoiceID handle) const noexcept -> AudioAttenuationDesc {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return {};
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> AudioAttenuationDesc {
@@ -2349,8 +2350,8 @@ auto AudioContext::GetVoiceAttenuation(AudioHandle handle) const noexcept -> Aud
     });
 }
 
-void AudioContext::SetVoiceOcclusion(AudioHandle handle, const AudioOcclusionDesc& desc) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoiceOcclusion(VoiceID handle, const AudioOcclusionDesc& desc) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
@@ -2366,8 +2367,8 @@ void AudioContext::SetVoiceOcclusion(AudioHandle handle, const AudioOcclusionDes
     });
 }
 
-void AudioContext::SetVoiceOcclusionFactor(AudioHandle handle, float occlusion) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoiceOcclusionFactor(VoiceID handle, float occlusion) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
@@ -2384,8 +2385,8 @@ void AudioContext::SetVoiceOcclusionFactor(AudioHandle handle, float occlusion) 
     });
 }
 
-auto AudioContext::GetVoiceOcclusion(AudioHandle handle) const noexcept -> AudioOcclusionDesc {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::GetVoiceOcclusion(VoiceID handle) const noexcept -> AudioOcclusionDesc {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return {};
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> AudioOcclusionDesc {
@@ -2396,8 +2397,8 @@ auto AudioContext::GetVoiceOcclusion(AudioHandle handle) const noexcept -> Audio
     });
 }
 
-void AudioContext::SetVoiceReverbSend(AudioHandle handle, float sendLevel) {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+void AudioContext::SetVoiceReverbSend(VoiceID handle, float sendLevel) {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
@@ -2414,8 +2415,8 @@ void AudioContext::SetVoiceReverbSend(AudioHandle handle, float sendLevel) {
     });
 }
 
-auto AudioContext::GetVoiceReverbSend(AudioHandle handle) const noexcept -> float {
-    const auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+auto AudioContext::GetVoiceReverbSend(VoiceID handle) const noexcept -> float {
+    const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return 0.0f;
 
     return Lock(_impl->voiceMutex, [&]() noexcept -> float {
@@ -2580,6 +2581,6 @@ extern "C" void ZHLN_PostAudioEvent(ZHLN_Engine* engine_handle, const ZHLN::Audi
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
     if (engine != nullptr && event != nullptr) {
-        engine->GetAudioContext().PostEvent(*event);
+        engine->Audio().PostEvent(*event);
     }
 }

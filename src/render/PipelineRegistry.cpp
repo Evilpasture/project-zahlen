@@ -8,7 +8,7 @@
 
 namespace ZHLN {
 
-void PipelineRegistry::Destroy(PipelineHandle handle) {
+void PipelineRegistry::Destroy(PipelineID handle) {
     if (_materials.Resolve(handle) != nullptr) {
         _materials.Destroy(handle);
     }

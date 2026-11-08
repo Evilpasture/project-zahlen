@@ -12,7 +12,7 @@
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <array>
 #include <cstddef>
@@ -57,14 +57,14 @@ class GeometryManager {
         }
     };
 
-    [[nodiscard]] auto CreateBuffer(const BufferSource& source, Vk::BufferUsage usage) -> std::expected<BufferHandle, ErrorCode>;
+    [[nodiscard]] auto CreateBuffer(const BufferSource& source, Vk::BufferUsage usage) -> std::expected<BufferID, ErrorCode>;
 
     [[nodiscard]] auto CreateUninitializedBuffer(size_t allocationSize, Vk::BufferUsage usage, uint32_t elementCount = 0)
-        -> std::expected<BufferHandle, ErrorCode>;
+        -> std::expected<BufferID, ErrorCode>;
 
-    [[nodiscard]] auto Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceAddress<> address) -> BufferHandle;
+    [[nodiscard]] auto Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceAddress<> address) -> BufferID;
 
-    [[nodiscard]] auto Update(BufferHandle handle, const void* data, size_t size) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto Update(BufferID handle, const void* data, size_t size) noexcept -> std::expected<void, ErrorCode>;
 
     void RecordPendingUpdates(VkCommandBuffer cmd) noexcept;
     void AdvanceUploadFrame() noexcept;
@@ -73,9 +73,9 @@ class GeometryManager {
         return !_pendingCopies.empty();
     }
 
-    void Destroy(BufferHandle handle);
+    void Destroy(BufferID handle);
 
-    [[nodiscard]] auto Resolve(BufferHandle handle) const noexcept -> NativeMesh* {
+    [[nodiscard]] auto Resolve(BufferID handle) const noexcept -> NativeMesh* {
         return _buffers.Resolve(handle);
     }
 
@@ -107,7 +107,7 @@ class GeometryManager {
         _materials.Clear();
     }
 
-    [[nodiscard]] auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
+    [[nodiscard]] auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferID;
 
     void RetireAll() noexcept;
 
@@ -121,7 +121,7 @@ class GeometryManager {
 
     struct PendingBufferCopy {
         VkBuffer     srcBuffer = VK_NULL_HANDLE;
-        BufferHandle dstHandle = BufferHandle::Invalid;
+        BufferID dstID = BufferID::Invalid;
         VkDeviceSize srcOffset = 0;
         VkDeviceSize size      = 0;
     };
@@ -135,7 +135,7 @@ class GeometryManager {
     Vk::CommandRing<Vk::QueueType::Transfer, 8>& _transferCmdRing;
     Vk::DeletionQueue&                           _deletionQueue;
 
-    GenerationalPool<NativeMesh, 16384, BufferHandle> _buffers;
+    GenerationalPool<NativeMesh, 16384, BufferID> _buffers;
 
     ZHLN::HashMap<AssetID, Mesh>        _meshes;
     ZHLN::HashMap<MaterialID, Material> _materials;

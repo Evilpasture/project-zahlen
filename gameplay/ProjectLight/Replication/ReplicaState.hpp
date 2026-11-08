@@ -214,7 +214,7 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
     bool        visualDirty       = true;
     bool        transformDirty    = true;
     bool        removalPending    = false;
-    AudioHandle audioHandle       = AudioHandle::Invalid;
+    VoiceID audioID       = VoiceID::Invalid;
 };
 
 // Walks the parent chain from a part to a character. Depth-capped because the

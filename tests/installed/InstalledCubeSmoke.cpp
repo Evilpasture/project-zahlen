@@ -1,4 +1,5 @@
 // Lifecycle/capture helper owned by the standalone installed-package consumer.
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "InstalledCubeSmoke.hpp"
 #include <Zahlen/Zahlen.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
@@ -76,7 +77,7 @@ bool RunInstalledCubeSmoke(void (*createScene)(Engine&), const char* ppmPath) {
         constexpr uint64_t warmupTicks = 8;
         if (engine.GetCurrentFrame() <= warmupTicks) return;
         const auto tickCount = engine.GetCurrentFrame();
-        auto frame = engine.GetRenderContext().CaptureFrame();
+        auto frame = engine.Graphics().CaptureFrame();
         if (!frame) {
             // ErrorCode's public formatter includes category and reason. A Tick
             // counter is not proof that a drawable GPU frame was completed.

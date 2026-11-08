@@ -28,18 +28,6 @@ namespace Remote {
 class AsyncAssetFetcher;
 }
 
-// Borrowed linear RGBA pixels from AssetManager's cache. The view remains
-// valid until ClearCache or the manager's destruction; never hold it across
-// either operation (or concurrently with a cache clear).
-struct EnvironmentImageView {
-    std::span<const float> rgba {};
-    std::span<const float> lightingRgba {};
-    std::optional<EnvironmentSun> sun;
-    uint32_t               width       = 0;
-    uint32_t               height      = 0;
-    uint64_t               contentHash = 0;
-};
-
 namespace TaskSystem {
 struct Counter;
 }

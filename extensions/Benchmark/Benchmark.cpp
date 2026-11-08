@@ -130,7 +130,7 @@ auto LogicBenchmark::SpawnFloor() -> void {
     // do.
     m_world->GetRegistry().Create(
         Components::PhysicsComponent {
-            .physicsHandle = physics.CreateRigidBody(
+            .physicsID = physics.CreateRigidBody(
                 slab, {0.0, -static_cast<double>(kFloorHalfHeight), 0.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, Layers::ID::NON_MOVING
             ),
             .isStatic = true
@@ -170,7 +170,7 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
 
         const Entity entity = registry.Create();
         registry.Add(entity, Components::TransformComponent {.position = position});
-        registry.Add(entity, Components::PhysicsComponent {.physicsHandle = handle, .isStatic = false});
+        registry.Add(entity, Components::PhysicsComponent {.physicsID = handle, .isStatic = false});
         ++m_spawnedCubes;
         ++m_liveBodies;
     }
@@ -200,12 +200,12 @@ void LogicBenchmark::Step(float fixedDt) {
     size_t bodies = 0;
     for (const Entity entity: registry.GetEntitiesWith<Components::PhysicsComponent>()) {
         const auto physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
-        if (!physicsComponent || physicsComponent->isStatic || physicsComponent->physicsHandle == Physics::BodyHandle::Null()) {
+        if (!physicsComponent || physicsComponent->isStatic || physicsComponent->physicsID == Physics::BodyID::Null()) {
             continue;
         }
         ++bodies;
 
-        const auto position = physics.BodyPosition(physicsComponent->physicsHandle);
+        const auto position = physics.BodyPosition(physicsComponent->physicsID);
         if (!position) {
             continue;
         }

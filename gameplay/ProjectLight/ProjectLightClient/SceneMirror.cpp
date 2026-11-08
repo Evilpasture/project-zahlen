@@ -7,6 +7,10 @@
 // state; nothing in this file opens a socket, reads a packet or owns a session
 // member. See SceneMirror.hpp for the split and the per-frame ordering.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <ProjectLightClient/SceneMirror.hpp>
 
 #include <Camera/TargetCamera.hpp>
@@ -233,7 +237,7 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
         params.roughness        = object.roughness;
         params.metallic         = object.metallic;
 
-        auto material = engine.GetRenderContext().CreateMaterial(blendMaterial ? ZHLN::MaterialDesc::Transparent() : ZHLN::MaterialDesc::Basic());
+        auto material = engine.Graphics().CreateMaterial(blendMaterial ? ZHLN::MaterialDesc::Transparent() : ZHLN::MaterialDesc::Basic());
         if (material) {
             material->baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
             material->roughnessFactor = object.roughness;
@@ -324,13 +328,13 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
     }
 
     if (object.visualDirty && object.materialId != InvalidMaterialID) {
-        if (auto material = engine.GetRenderContext().GetGPUMaterial(object.materialId)) {
+        if (auto material = engine.Graphics().Material(object.materialId)) {
             material->baseColorFactor = {object.color.GetX(), object.color.GetY(), object.color.GetZ(), 1.0f - object.transparency};
             material->emissiveFactor  = {object.color.GetX() * object.emission, object.color.GetY() * object.emission,
                                          object.color.GetZ() * object.emission, 1.0f};
             material->roughnessFactor = object.roughness;
             material->metallicFactor  = object.metallic;
-            engine.GetRenderContext().RegisterGPUMaterial(object.materialId, *material);
+            engine.Graphics().RegisterMaterial(object.materialId, *material);
         }
         registry.Patch<Components::PBRComponent>(entity, [&](auto& pbr) {
             pbr.roughness = object.roughness;
@@ -480,25 +484,25 @@ void UpdateSoundVoices(Engine& engine, SceneMirrorState& state) {
     for (auto& [uid, object]: state.objects) {
         (void)uid;
         if (object.className != "Sound") continue;
-        auto& audio = engine.GetAudioContext();
+        auto audio = engine.Audio();
         if (object.playing) {
-            if (object.audioHandle == AudioHandle::Invalid || !audio.IsVoiceValid(object.audioHandle)) {
+            if (object.audioID == VoiceID::Invalid || !audio.IsVoiceValid(object.audioID)) {
                 if (object.soundId.empty()) continue;
-                object.audioHandle = audio.CreateVoice(object.soundId, true, object.loops, object.volume);
-                if (object.audioHandle == AudioHandle::Invalid) {
+                object.audioID = audio.CreateVoice(object.soundId, true, object.loops, object.volume);
+                if (object.audioID == VoiceID::Invalid) {
                     continue; // asset may not be present in the local Zahlen installation
                 }
-                audio.PlayVoice(object.audioHandle);
+                audio.PlayVoice(object.audioID);
             } else {
-                audio.SetVoiceVolume(object.audioHandle, object.volume);
-                audio.SetVoiceLooping(object.audioHandle, object.loops);
+                audio.SetVoiceVolume(object.audioID, object.volume);
+                audio.SetVoiceLooping(object.audioID, object.loops);
             }
             const ReplicatedObject* parent = FindObject(state, object.parentUid);
             if (parent != nullptr)
-                audio.SetVoicePosition(object.audioHandle, parent->position);
-        } else if (object.audioHandle != AudioHandle::Invalid) {
-            audio.StopVoice(object.audioHandle);
-            object.audioHandle = AudioHandle::Invalid;
+                audio.SetVoicePosition(object.audioID, parent->position);
+        } else if (object.audioID != VoiceID::Invalid) {
+            audio.StopVoice(object.audioID);
+            object.audioID = VoiceID::Invalid;
         }
     }
 }
@@ -511,9 +515,9 @@ void SceneMirror::SyncSceneEntities(Engine& engine, SceneMirrorState& state) {
         auto found = state.objects.find(uid);
         if (found == state.objects.end()) continue;
         ReplicatedObject& object = found->second;
-        if (object.audioHandle != AudioHandle::Invalid) {
-            engine.GetAudioContext().StopVoice(object.audioHandle);
-            object.audioHandle = AudioHandle::Invalid;
+        if (object.audioID != VoiceID::Invalid) {
+            engine.Audio().StopVoice(object.audioID);
+            object.audioID = VoiceID::Invalid;
         }
         const Entity entity = state.index.Take(uid);
         if (entity != Entity::Null() && registry.IsAlive(entity)) {
@@ -607,9 +611,9 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
         }
     };
     auto destroyController = [&]() -> void {
-        if (state.localControllerBody != Physics::BodyHandle::Null()) {
-            engine.GetPhysicsContext().DestroyBody(state.localControllerBody);
-            state.localControllerBody = Physics::BodyHandle::Null();
+        if (state.localControllerBody != Physics::BodyID::Null()) {
+            engine.Physics().DestroyBody(state.localControllerBody);
+            state.localControllerBody = Physics::BodyID::Null();
         }
         if (state.localController != Entity::Null() && registry.IsAlive(state.localController)) {
             DespawnEntity(engine, state.localController);
@@ -619,7 +623,7 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
     };
 
     if (state.serverAuthority) {
-        if (state.localController != Entity::Null() || state.localControllerBody != Physics::BodyHandle::Null()) destroyController();
+        if (state.localController != Entity::Null() || state.localControllerBody != Physics::BodyID::Null()) destroyController();
         // The server drives the character, so the camera follows the root part's
         // entity; the mirror is only consulted for the uid, never for the entity.
         const Entity rootEntity = state.index.Find(state.localRootPartUid);
@@ -627,11 +631,11 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
         return;
     }
     if (state.localRootPartUid == 0) {
-        if (state.localController != Entity::Null() || state.localControllerBody != Physics::BodyHandle::Null()) destroyController();
+        if (state.localController != Entity::Null() || state.localControllerBody != Physics::BodyID::Null()) destroyController();
         return;
     }
     if (state.controllerForRootUid == state.localRootPartUid && state.localController != Entity::Null()
-        && registry.IsAlive(state.localController) && state.localControllerBody != Physics::BodyHandle::Null()) {
+        && registry.IsAlive(state.localController) && state.localControllerBody != Physics::BodyID::Null()) {
         const ReplicatedObject* humanoid = FindObject(state, state.localHumanoidUid);
         if (auto move = registry.Get<Character::MovementComponent>(state.localController); move && humanoid != nullptr) {
             move->speed = std::max(0.0f, humanoid->walkSpeed);
@@ -645,12 +649,12 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
     const ReplicatedObject* rootPart = FindObject(state, state.localRootPartUid);
     if (rootPart == nullptr) return;
 
-    auto& physics = engine.GetPhysicsContext();
+    auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
     Physics::CharacterParams params;
     params.shape = physics.GetOrCreateShape(Physics::ShapeType::Capsule, 2.0f, 0.5f);
     params.maxSlopeAngle = JPH::DegreesToRadians(45.0f);
     state.localControllerBody = physics.CreateCharacter(rootPart->position, params);
-    if (state.localControllerBody == Physics::BodyHandle::Null()) {
+    if (state.localControllerBody == Physics::BodyID::Null()) {
         Log("[ProjectLight] Could not create the local player CharacterVirtual body.");
         return;
     }
@@ -663,7 +667,7 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
         controller, Components::NameComponent {.name = String64("ProjectLightLocalController")},
         Components::TransformComponent {.position = rootPart->position, .rotation = rootPart->rotationQuat, .scale = JPH::Vec3::sReplicate(1.0f)},
         Components::WorldTransformComponent {.world = matrix, .previous = matrix},
-        Components::PhysicsComponent {.physicsHandle = state.localControllerBody, .isStatic = false},
+        Components::PhysicsComponent {.physicsID = state.localControllerBody, .isStatic = false},
         Character::MovementComponent {.orientation = rootPart->rotationQuat, .prevOrientation = rootPart->rotationQuat}, Character::InputComponent {}
     );
     state.localController = controller;
@@ -678,13 +682,13 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
     bindCamera(controller);
 }
 void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& state, float dt) {
-    if (state.localController == Entity::Null() || state.localControllerBody == Physics::BodyHandle::Null()) return;
+    if (state.localController == Entity::Null() || state.localControllerBody == Physics::BodyID::Null()) return;
     auto& registry = engine.GetRegistry();
     auto movement = registry.Get<Character::MovementComponent>(state.localController);
     if (!movement) return;
 
     // `bodyState` rather than `state`: in this file `state` is the session view.
-    auto& physics = engine.GetPhysicsContext();
+    auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
     const auto bodyStateResult = physics.BodyState(state.localControllerBody);
     if (!bodyStateResult || !bodyStateResult->valid) return;
     const auto& bodyState = *bodyStateResult;

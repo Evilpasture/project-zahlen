@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/Terrain/TerrainFactory.cpp
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TerrainFactory.hpp"
 #include "TerrainSystem.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -119,9 +122,9 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
         }
     }
 
-    BufferHandle         posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
-    BufferHandle         frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
-    BufferHandle         surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
+    BufferID         posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferID         frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
+    BufferID         surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
     const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(positions));
 
     Mesh finalMesh {
@@ -335,17 +338,17 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         }
     }
 
-    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
-    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
+    BufferID posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferID frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
+    BufferID surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
 
     const MeshletStreams ml = ctx.UploadMeshlets(BuildMeshlets(positions));
     auto finalMesh = Mesh {
         .posBuffer           = posVbo,
         .tangentFrameBuffer  = frameVbo,
         .surfaceBuffer       = surfaceVbo,
-        .skinBuffer          = BufferHandle::Invalid,
-        .indexBuffer         = BufferHandle::Invalid,
+        .skinBuffer          = BufferID::Invalid,
+        .indexBuffer         = BufferID::Invalid,
         .vertexCount         = static_cast<uint32_t>(positions.size()),
         .indexCount          = 0,
         .meshletBuffer       = ml.meshlets,
@@ -377,7 +380,7 @@ auto CreateTerrainFromData(
     Mesh mesh = CreateTerrainMeshFromData(ctx, sampleCount, worldSize, heights, colorsRGBA);
 
     Material mat;
-    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
+    if (params.materialOverride.pipeline != PipelineID::Invalid) {
         mat = params.materialOverride;
     } else {
         auto mat_res        = ctx.CreateMaterial(MaterialDesc::Basic());
@@ -399,7 +402,7 @@ auto CreateTerrainFromData(
     if (colorsRGBA != nullptr) {
         tData.colors.assign(colorsRGBA, colorsRGBA + (static_cast<ptrdiff_t>(sampleCount * sampleCount * 4)));
     }
-    TerrainHandle tHandle  = TerrainSystem::RegisterTerrainData(std::move(tData));
+    TerrainID tID  = TerrainSystem::RegisterTerrainData(std::move(tData));
     JPH::Mat44    worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("TerrainData_" + std::to_string(e.index))});
@@ -416,7 +419,7 @@ auto CreateTerrainFromData(
                .maxHeight     = 35.0f,
                .roughness     = mat.roughnessFactor,
                .metallic      = mat.metallicFactor,
-               .terrainHandle = tHandle
+               .terrainID = tID
            }
     );
 
@@ -424,7 +427,7 @@ auto CreateTerrainFromData(
         auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
         // FIXED: Used pc->CreateRigidBody
         auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
-        reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
+        reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
     }
 
     return e;
@@ -440,7 +443,7 @@ auto CreateTerrainFromData(
 ) -> Entity {
     TerrainSystem::RegisterCleanup(engine);
     return CreateTerrainFromData(
-        engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, heights, colorsRGBA, params
+        ZHLN::EngineAccess::RenderOf(engine), engine.GetRegistry(), &ZHLN::EngineAccess::PhysicsOf(engine), sampleCount, worldSize, heights, colorsRGBA, params
     );
 }
 
@@ -462,7 +465,7 @@ auto CreateTerrain(
     Mesh mesh = CreateTerrainMesh(ctx, sampleCount, worldSize, maxHeight, tData.heights.data(), type);
 
     Material mat;
-    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
+    if (params.materialOverride.pipeline != PipelineID::Invalid) {
         mat = params.materialOverride;
     } else {
         auto mat_res        = ctx.CreateMaterial(MaterialDesc::Basic());
@@ -477,7 +480,7 @@ auto CreateTerrain(
     ctx.RegisterGPUMesh(meshAsset, mesh);
     ctx.RegisterGPUMaterial(matAsset, mat);
 
-    TerrainHandle tHandle  = TerrainSystem::RegisterTerrainData(std::move(tData));
+    TerrainID tID  = TerrainSystem::RegisterTerrainData(std::move(tData));
     JPH::Mat44    worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("Terrain_" + std::to_string(e.index))});
@@ -494,17 +497,17 @@ auto CreateTerrain(
                .maxHeight     = maxHeight,
                .roughness     = 0.85f,
                .metallic      = 0.05f,
-               .terrainHandle = tHandle
+               .terrainID = tID
            }
     );
 
     if (params.createPhysics && pc != nullptr) {
-        const TerrainData* stored = TerrainSystem::GetTerrainData(tHandle);
+        const TerrainData* stored = TerrainSystem::GetTerrainData(tID);
         if (stored != nullptr && !stored->heights.empty()) {
             auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
             auto body =
                 pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
-            reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
+            reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
         }
     }
 
@@ -513,7 +516,7 @@ auto CreateTerrain(
 
 auto CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type, const PrefabFactory::SpawnParams& params) -> Entity {
     TerrainSystem::RegisterCleanup(engine);
-    return CreateTerrain(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, maxHeight, type, params);
+    return CreateTerrain(ZHLN::EngineAccess::RenderOf(engine), engine.GetRegistry(), &ZHLN::EngineAccess::PhysicsOf(engine), sampleCount, worldSize, maxHeight, type, params);
 }
 
 } // namespace ZHLN::Terrain

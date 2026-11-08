@@ -15,7 +15,7 @@ namespace {
 
 struct TerrainLifecycleTestSuite {
     struct Tests {
-        std::expected<void, ZHLN::ErrorCode> standalone_scene_releases_heightmap_handles_before_clear() {
+        std::expected<void, ZHLN::ErrorCode> standalone_scene_releases_heightmap_ids_before_clear() {
             ZHLN::ECS::Registry registry;
             ZHLN::Terrain::TerrainData data;
             data.sampleCount = 2;
@@ -23,21 +23,21 @@ struct TerrainLifecycleTestSuite {
             data.heights[0] = 2.5f;
 
             const auto handle = ZHLN::Terrain::TerrainSystem::RegisterTerrainData(std::move(data));
-            if (!ZHLN::Test::ExpectNe(handle, ZHLN::Terrain::TerrainHandle::Invalid)) {
+            if (!ZHLN::Test::ExpectNe(handle, ZHLN::Terrain::TerrainID::Invalid)) {
                 return std::unexpected(TerrainLifecycleTestError::SlotExhausted);
             }
-            const auto entity = registry.Create(ZHLN::Terrain::TerrainComponent {.terrainHandle = handle});
+            const auto entity = registry.Create(ZHLN::Terrain::TerrainComponent {.terrainID = handle});
             ZHLN::Test::ExpectEq(ZHLN::Terrain::TerrainSystem::GetTerrainData(handle)->heights[0], 2.5f);
 
             ZHLN::Terrain::TerrainSystem::ReleaseTerrainData(registry);
             ZHLN::Test::ExpectTrue(ZHLN::Terrain::TerrainSystem::GetTerrainData(handle) == nullptr);
-            ZHLN::Test::ExpectEq(registry.Get<ZHLN::Terrain::TerrainComponent>(entity)->terrainHandle, ZHLN::Terrain::TerrainHandle::Invalid);
+            ZHLN::Test::ExpectEq(registry.Get<ZHLN::Terrain::TerrainComponent>(entity)->terrainID, ZHLN::Terrain::TerrainID::Invalid);
             ZHLN::Terrain::TerrainSystem::ReleaseTerrainData(registry); // repeated release is harmless
             registry.Clear();
             ZHLN::Test::ExpectFalse(registry.IsAlive(entity));
 
             const auto reused = ZHLN::Terrain::TerrainSystem::RegisterTerrainData({});
-            if (ZHLN::Test::ExpectNe(reused, ZHLN::Terrain::TerrainHandle::Invalid)) {
+            if (ZHLN::Test::ExpectNe(reused, ZHLN::Terrain::TerrainID::Invalid)) {
                 ZHLN::Test::ExpectNe(reused, handle); // the slot's generation advanced
                 ZHLN::Terrain::TerrainSystem::UnregisterTerrainData(reused);
             }

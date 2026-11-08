@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/TargetCameraFixture.hpp"
@@ -67,7 +68,7 @@ struct CameraLookAtTestSuite {
         // the decoy off-screen. The default free-cam (origin look-at) does the opposite.
         std::expected<void, ZHLN::ErrorCode> target_camera_centers_colored_subject() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Camera LookAt");
-            if (engine == nullptr) {
+            if (!engine.Valid()) {
                 return std::unexpected(CameraLookAtError::EngineInitFailed);
             }
 
@@ -77,7 +78,7 @@ struct CameraLookAtTestSuite {
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
             DisableJitterAndVignette(reg);
 
             auto redMatRes   = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}});

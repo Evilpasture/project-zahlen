@@ -411,7 +411,7 @@ Here is a typical usage pattern for allocating a mesh, configuring a material, a
 ```cpp
 // 1. Create a vertex buffer
 std::vector<Vertex> vertices = { ... };
-BufferHandle vbo = renderContext.CreateVertexBuffer(std::span {vertices});
+BufferID vbo = renderContext.CreateVertexBuffer(std::span {vertices});
 
 // 2. Create a material. Built-in scene pipelines are compile-time
 //    GraphicsPipeline<ShaderModules, PassContract, MaterialFlags> variants;
@@ -423,7 +423,7 @@ MaterialDesc materialDesc = {
     .metallic = 1.0f,
     .roughness = 0.5f
 };
-materialDesc.albedoMap = renderContext.CreateTexture(std::span {pixels}, {width, height}).value(); // registered TextureHandle
+materialDesc.albedoMap = renderContext.CreateTexture(std::span {pixels}, {width, height}).value(); // registered TextureID
 Material material = renderContext.CreateMaterial(materialDesc).value();
 
 Mesh mesh = { .vertexBuffer = vbo, .vertexCount = vertices.size() };

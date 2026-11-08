@@ -38,6 +38,7 @@
 // application did not ask for.
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Engine/Frame.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -70,6 +71,13 @@ enum class FramePhase : uint8_t {
 
 struct FrameContext {
     FrameStatus status = FrameStatus::OK;
+
+    // Computed once by Engine::Tick from the engine's Clock, before any step
+    // runs: how many fixed simulation steps to execute, and the interpolation
+    // alpha left over after draining them. Steps read these values instead of
+    // poking a mutable float& into the engine.
+    uint32_t   fixedSteps = 0;
+    FrameAlpha alpha {};
 };
 
 using FrameStepFn = void (*)(Engine&, float, FrameContext&);

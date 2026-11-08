@@ -1,6 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -10,11 +14,11 @@
 namespace ZHLN::SceneResources {
 
 void Release(PhysicsContext& physics, Components::PhysicsComponent& component) {
-    physics.DestroyBody(std::exchange(component.physicsHandle, Physics::BodyHandle::Null()));
+    physics.DestroyBody(std::exchange(component.physicsID, Physics::BodyID::Null()));
 }
 
 void Release(PhysicsContext& physics, Components::RagdollComponent& component) {
-    physics.DestroyRagdoll(std::exchange(component.ragdollHandle, Physics::RagdollHandle::Invalid));
+    physics.DestroyRagdoll(std::exchange(component.ragdollID, Physics::RagdollID::Invalid));
     component.isAddedToPhysics = false;
 }
 
@@ -26,28 +30,36 @@ void Release(RenderContext& render, Components::OwnedMeshComponent& component) {
     component.meshAsset = InvalidAssetID;
 }
 
+void Release(GraphicsDevice graphics, Components::OwnedMeshComponent& component) {
+    if (component.meshAsset != InvalidAssetID) {
+        graphics.UnregisterMesh(component.meshAsset);
+    }
+    graphics.DestroyMesh(std::exchange(component.mesh, Mesh {}));
+    component.meshAsset = InvalidAssetID;
+}
+
 void Release(Engine& engine, Components::PhysicsComponent& component) {
-    Release(engine.GetPhysicsContext(), component);
+    Release(ZHLN::EngineAccess::PhysicsOf(engine), component);
 }
 
 void Release(Engine& engine, Components::RagdollComponent& component) {
-    Release(engine.GetPhysicsContext(), component);
+    Release(ZHLN::EngineAccess::PhysicsOf(engine), component);
 }
 
 void Release(AudioContext& audio, Components::AudioSourceComponent& component) {
-    audio.StopVoice(std::exchange(component.voiceHandle, AudioHandle::Invalid), component.fadeOut);
+    audio.StopVoice(std::exchange(component.voiceID, VoiceID::Invalid), component.fadeOut);
 }
 
 void Release(Engine& engine, Components::AudioSourceComponent& component) {
-    Release(engine.GetAudioContext(), component);
+    Release(ZHLN::EngineAccess::AudioOf(engine), component);
 }
 
 void Release(Engine& engine, Components::OwnedMeshComponent& component) {
-    Release(engine.GetRenderContext(), component);
+    Release(engine.Graphics(), component);
 }
 
 void Release(Engine& engine, Components::SkeletalMeshComponent& component) {
-    engine.GetRenderContext().DestroyBuffer(std::exchange(component.skinnedScratch, BufferHandle::Invalid));
+    engine.Graphics().DestroyBuffer(std::exchange(component.skinnedScratch, BufferID::Invalid));
     component.scratchVertexCount = 0;
 }
 

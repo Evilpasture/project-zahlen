@@ -1,7 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include "CullingSystem.hpp"
+#include <Zahlen/Engine/VisibilityList.hpp>
 #include "LightingSystem.hpp"
 #include "Zahlen/Render/Render.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -134,7 +137,7 @@ void CullingSystem::GraphUpdate(CullingQuery query, ECS::Res<RenderContext> rend
 }
 
 void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, const Camera& cam, bool engineCam, CullingScratch& scratch,
-                               CullingStats& stats, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
+                               CullingStats& stats, VisibilityList& outVisible, VisibilityList& outVisibleShadow) {
     ZHLN::ScopedTimer profTimer("Culling (ECS O(N))");
 
     auto entities       = query.Entities<Components::MeshComponent>();
@@ -212,8 +215,10 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
     stats.RenderedTriangles = 0;
 
     if (!stats.EnableCulling) {
-        outVisible.assign(entities.begin(), entities.end());
-        outVisibleShadow.assign(entities.begin(), entities.end());
+        outVisible.Clear();
+        outVisible.AddRange(entities);
+        outVisibleShadow.Clear();
+        outVisibleShadow.AddRange(entities);
 
         uint32_t tris = 0;
         for (size_t i = 0; i < entities.size(); ++i) {
@@ -227,8 +232,8 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
         return;
     }
 
-    outVisible.clear();
-    outVisibleShadow.clear();
+    outVisible.Clear();
+    outVisibleShadow.Clear();
 
     constexpr size_t     kBatch = 4;
     const BatchedFrustum mainPlanes   = BatchedFrustum::FromFrustum(scratch.mainFrustum);
@@ -303,19 +308,19 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
             }
 
             if (mainVisible[j]) {
-                outVisible.push_back(batchEntities[j]);
+                outVisible.Add(batchEntities[j]);
                 stats.RenderedTriangles += batchTris[j];
             }
 
             // A backdrop never casts a cascade shadow (see batchBackground).
             if (!isFullBright && shadowVisible[j] && !batchBackground[j]) {
-                outVisibleShadow.push_back(batchEntities[j]);
+                outVisibleShadow.Add(batchEntities[j]);
             }
         }
     }
 
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyCullingResults(query, outVisible, scratch.mainFrustum, stats);
+        ZHLN::Tests::VerifyCullingResults(query, outVisible.AsSpan(), scratch.mainFrustum, stats);
     }
 }
 
@@ -334,7 +339,7 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
     }
     const std::array<JPH::Vec3, 8> corners = FrustumCornersFromViewProj(camComp->frozenViewProj);
 
-    auto& scene = engine.GetSceneData();
+    auto scene = engine.Debug();
 
     struct FrustumEdge {
         int start;

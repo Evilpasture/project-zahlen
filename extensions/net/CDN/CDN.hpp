@@ -117,11 +117,11 @@ class CDNManager {
         return m_cache;
     }
 
-    auto RequestAsset(std::string_view relativePath, ValidatorFn validator = nullptr) -> std::optional<ZHLN::Remote::FetchHandle>;
+    auto RequestAsset(std::string_view relativePath, ValidatorFn validator = nullptr) -> std::optional<ZHLN::Remote::FetchID>;
 
-    auto Poll(ZHLN::Remote::FetchHandle handle) -> std::optional<std::expected<ZHLN::Remote::FetchPayload, ZHLN::ErrorCode>>;
+    auto Poll(ZHLN::Remote::FetchID handle) -> std::optional<std::expected<ZHLN::Remote::FetchPayload, ZHLN::ErrorCode>>;
 
-    void Cancel(ZHLN::Remote::FetchHandle handle);
+    void Cancel(ZHLN::Remote::FetchID handle);
 
   private:
     CDNManager(std::string baseURL, ZHLN::Remote::DiskCache cache, std::unique_ptr<ZHLN::Remote::AsyncAssetFetcher> fetcher);

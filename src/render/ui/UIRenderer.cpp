@@ -118,7 +118,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     impl.mappings =
         Vk::HeapMappingBuilder(ctx.heapManager)
             .Sampler(0, 0, ctx.globalSamplerSlot)
-            .BindlessTextureArray(0, 1, ctx.textureManager.BindlessBaseHandle())
+            .BindlessTextureArray(0, 1, ctx.textureManager.BindlessBaseSlotID())
             .Build();
 
     auto uiShaders = Vk::ShaderStagesView::Create<Shaders::Modules::UiVS, Shaders::Modules::UiPS>();

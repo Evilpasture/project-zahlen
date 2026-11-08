@@ -75,7 +75,7 @@ class DataModelSignal {
   private:
     using Callback = std::function<void(Args...)>;
     struct SlotState: JPH::RefTarget<SlotState> {
-        uint64_t                                      nextId = 1;
+        uint64_t                                      nextID = 1;
         ZHLN::Array<std::pair<uint64_t, Callback>, 2> slots;
         bool                                          active = true;
     };
@@ -154,7 +154,7 @@ class DataModelSignal {
         if (!m_state) {
             m_state = new SlotState();
         }
-        const uint64_t id = m_state->nextId++;
+        const uint64_t id = m_state->nextID++;
         m_state->slots.emplace_back(id, std::move(callback));
         return Connection {m_state, id};
     }
@@ -544,10 +544,10 @@ enum class DecalWrapMode : uint8_t { Stretch, Repeat };
 
 class Decal final: public Instance {
   public:
-    [[nodiscard]] auto TextureId() const noexcept -> std::string_view {
+    [[nodiscard]] auto GetTextureID() const noexcept -> std::string_view {
         return m_textureId;
     }
-    void               SetTextureId(std::string value);
+    void               SetTextureID(std::string value);
     [[nodiscard]] auto Color() const noexcept -> const JPH::Vec3& {
         return m_color;
     }

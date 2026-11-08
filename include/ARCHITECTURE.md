@@ -39,10 +39,10 @@ To preserve the engine's data-oriented design (DOD), cache locality, zero-alloca
 * Systems MUST NOT store internal state across frames. If a calculation needs memory across frames, that memory belongs in a Component attached to an Entity or a Global Settings Entity.
 
 #### 4. External Resource Lifecycle
-* Components store plain generational handles. Physics, audio, articulation and rendering do **not** keep entity-owner ledgers or poll ECS liveness. The registry has no removal observers.
-* In an Engine scene, `DespawnEntity(engine, entity)` marks the hierarchy with `Components::PendingDestroy`; the Engine's main ECB also marks instead of destroying. The `SceneCleanup` scheduler step runs after `MainECBPlayback` and before camera/rendering. It queries intact components, collects physics handles for one `PhysicsContext::DestroyBodies(span)` call under one shadow lock, releases other owned handles (including registered VFX cleanup passes), then calls `Registry::Destroy` on the marked entities. Bodies finish retiring on the next physics step.
+* Components store plain generational IDs. Physics, audio, articulation and rendering do **not** keep entity-owner ledgers or poll ECS liveness. The registry has no removal observers.
+* In an Engine scene, `DespawnEntity(engine, entity)` marks the hierarchy with `Components::PendingDestroy`; the Engine's main ECB also marks instead of destroying. The `SceneCleanup` scheduler step runs after `MainECBPlayback` and before camera/rendering. It queries intact components, collects physics IDs for one `PhysicsContext::DestroyBodies(span)` call under one shadow lock, releases other owned resources (including registered VFX cleanup passes), then calls `Registry::Destroy` on the marked entities. Bodies finish retiring on the next physics step.
 * Raw `Registry::Destroy` and `Registry::Clear` remain **immediate, data-only** primitives. Generic ECBs (including standalone `World` ECBs) likewise destroy immediately; only the Engine opts its ECB into deferred destruction. Never use raw destruction on an Engine scene with external-resource components: use `DespawnEntity` and `Engine::ClearScene` instead. `Engine::ProcessPendingDestroy` allows an explicit synchronous cleanup before the next frame. Standalone registries must explicitly release their owned resources before raw removal/clear (e.g. `PrefabFactory::ReleaseOwnedMeshes` and `TerrainSystem::ReleaseTerrainData`).
-* Use the typed `SceneResources::Attach/Detach` helpers from `<Zahlen/Engine/SceneResources.hpp>` for direct replacement/removal of core resource-owning components; optional layers supply their own explicit helpers. A raw `Registry::Add` replacement or `Remove` erases the old handle without releasing its external resource. Systems MUST NOT manually manage raw heap pointers or manage class destructors.
+* Use the typed `SceneResources::Attach/Detach` helpers from `<Zahlen/Engine/SceneResources.hpp>` for direct replacement/removal of core resource-owning components; optional layers supply their own explicit helpers. A raw `Registry::Add` replacement or `Remove` erases the old ID without releasing its external resource. Systems MUST NOT manually manage raw heap pointers or manage class destructors.
 
 #### 5. Environment & Global State Isolation
 * Systems modifying global engine state (e.g., Post-Processing, Exposure, Sky Gradients) MUST NOT overwrite global base values.
@@ -76,9 +76,9 @@ struct LightningComponent {
     float           phaseTime           = 0.0f;
     float           baseAmbientExposure = 4.5f;
 
-    BufferHandle vboPos     = BufferHandle::Invalid;
-    BufferHandle vboFrame   = BufferHandle::Invalid;
-    BufferHandle vboSurface = BufferHandle::Invalid;
+    BufferID vboPos     = BufferID::Invalid;
+    BufferID vboFrame   = BufferID::Invalid;
+    BufferID vboSurface = BufferID::Invalid;
 
     // Component state only. The renderer sees non-owning mesh registrations;
     // Engine scene cleanup frees these buffers before destroying the component.
@@ -300,16 +300,36 @@ type it spells through its own includes.
 > prevents. It is invisible in review, it survives every test, and it turns one
 > struct edit into a rebuild of the engine.
 
+### Naming taxonomy: no more "Handle"
+
+Four unrelated concepts used to be called `Handle` in this tree. They now have
+four disjoint vocabularies, and `configure/check_handle_taxonomy.py` fails the
+configure if a public type reintroduces the old word:
+
+| Concept | What it is | Name it |
+| :--- | :--- | :--- |
+| inert key | an integer index, generation or hash with no methods that act on a resource | `*ID` — `TextureID`, `BufferID`, `PipelineID`, `VoiceID`, `BodyID`, `RagdollID` |
+| domain facade | a non-owning object you call methods on to command a subsystem | a noun — `GraphicsDevice`, `Simulation`, `DebugDraw`, `AssetLibrary`, `AudioEngine` |
+| scoped permission | a begin/end token that cleans up on exit | `*Scope` / `*Target` — `FrameScope`, `SessionScope`, `FrameTarget` |
+| owning allocation | creates and destroys a heavy object | `std::unique_ptr<T>` or `*Instance` |
+
+A borrow that is neither an owner nor an ID is a `*View` (`EngineView` in the
+headless test fixture): it is a trivially copyable value constructed from a live
+`Engine&`, with no `reset()`, no `get()` and no ownership semantics. The
+remaining "handle" spellings in the tree are OS/API words (`CloseHandle`,
+`VK_NULL_HANDLE`, `NativeHandle()`), event `*Handler` types and verbs such as
+`HandleDeviceLost` — different meanings, not the four confused ones.
+
 | Type | Home | Who names it |
 | :--- | :--- | :--- |
 | `EnumFlag`, `EnableEnumFlags<Enum>` | `Zahlen/Core/EnumFlags.hpp` | any header with a flags enum |
 | `AssetID`, `MaterialID`, `HashAssetID`, `InvalidAssetID`, `InvalidMaterialID` | `Zahlen/Core/AssetID.hpp` | asset-facing headers and the components that hold a reference |
 | `ScissorRect`, `ViewportRect` (with `Extent2D`, `Offset2D`) | `Zahlen/Math/Geometry2D.hpp` | GUI, windowing and renderer alike |
 | `VertexPosition`, `VertexTangentFrame`, `VertexSurface`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Render/Vertex.hpp` | the cooker and both consumers of a vertex |
-| `AudioHandle`, `AudioBus`, `AudioBusId`, `AudioAttenuationModel`, `AudioPlaybackMode`, `AudioReverbPreset`, `AudioAttenuationDesc`, `AudioOcclusionDesc`, `AudioReverbConfig`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
+| `VoiceID`, `AudioBus`, `AudioBusID`, `AudioAttenuationModel`, `AudioPlaybackMode`, `AudioReverbPreset`, `AudioAttenuationDesc`, `AudioOcclusionDesc`, `AudioReverbConfig`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
 | `UIBatch`, `UIDrawData` | `Zahlen/GUI/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
 | `GlyphMetric`, `FontAtlas` | `Zahlen/GUI/Font.hpp` | text layout and the atlas bake |
-| `TextureHandle`, `RenderTextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `FrameTarget` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
+| `TextureID`, `RenderTextureID`, `BufferID`, `PipelineID`, `ResourceGroupID`, `SystemTextures`, `FrameTarget` | `Zahlen/Render/RenderIDs.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
 | `Mesh`, `MeshletStreams`, `Material`, `DrawFlags`, `CSGOperation`, `CSGModifier` | `Zahlen/Render/Types.hpp` | the renderer |
 | `MeshletDesc`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Render/Meshlet.hpp` | the meshlet cooker and the renderer |
 
@@ -509,8 +529,9 @@ only for declared families. Queries can be projected to a read-only subset.
 Declare `Registry&` explicitly when making structural ECS changes or calling
 an existing callback that may do so; it conservatively conflicts with all
 component accesses. `Res<T>` and `ResMut<T>` inject required services,
-`Optional<T&>` / `Optional<const T&>` injects a nullable service, and `FrameDt`, `FrameAlpha`, and
-`FrameIndex` avoid guessing between otherwise identical scalar types. The
+`Optional<T&>` / `Optional<const T&>` injects a nullable service, and the engine-owned
+`FrameDt`, `FrameAlpha` and `FrameIndex` (declared in `Engine/Frame.hpp`, carried by
+`Frame`) avoid guessing between otherwise identical scalar types. The
 legacy `AddSystem(SystemInfo)` API remains available to external callers.
 `Reflect::CallableInspector` in `Core/Reflection/Callable.hpp` provides
 reusable P2996/P3096 callable names, parameter types, and invocation without
@@ -696,11 +717,11 @@ The returned `FrameTarget` identifies the exact renderer, frame, window and
 acquisition. It is a non-owning value: after `EndFrame`, a window release or
 rebuild, or renderer destruction, rendering through it fails instead of
 adopting whatever image has since reused the slot. To render into a persistent
-render texture, create a `RenderTextureHandle` and use
+render texture, create a `RenderTextureID` and use
 `frameTarget.ForTexture(renderTexture)`: the output still belongs to the
 explicitly acquired frame's command stream. Window presenters persist; their
 acquired images, layout and written state live only with the frame. The two
-are not stored together in a table of versioned texture handles.
+are not stored together in a table of versioned texture IDs.
 
 `Engine` owns the device-scoped SDF `FontAtlas` (`GetFontAtlas` / `EnsureFontAtlas`),
 rebuilding it automatically across GPU device loss and feeding it as a plain

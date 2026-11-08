@@ -15,6 +15,7 @@
 // ambient turned all the way down. Whatever the emissive box shows in that
 // frame can only have come from the emissive term.
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/ImageTesting.hpp"
@@ -130,7 +131,7 @@ constexpr float kHaloBloomStrength = 0.003f;
     ZHLN::Engine& engine, const JPH::Float4& emissiveFactor, std::optional<float> glowIntensity, std::optional<float> bloomStrength
 ) {
     auto& registry = engine.GetRegistry();
-    auto& renderCtx = engine.GetRenderContext();
+    auto renderCtx = engine.Graphics();
 
     for (const ZHLN::Entity settings: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
         registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [glowIntensity, bloomStrength](auto& pp) {
@@ -199,7 +200,7 @@ struct UnlitMeasurement {
     // scene reset in between, so a difference in the frames cannot come from
     // a difference in the engine.
     const auto engine = ZHLN::Test::Headless::AcquireEngine(emissive ? "Headless Emissive Unlit" : "Headless Emissive Control");
-    if (engine == nullptr) {
+    if (!engine.Valid()) {
         return out;
     }
     ZHLN::Test::Headless::DisableAA(*engine);

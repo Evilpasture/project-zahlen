@@ -139,7 +139,7 @@ struct FileSystemWatcher::Impl {
     };
 
     struct SubscriptionSnapshot {
-        FileWatchHandle handle = 0;
+        FileWatchID watchID = 0;
         WatchDescriptor descriptor;
     };
 
@@ -150,7 +150,7 @@ struct FileSystemWatcher::Impl {
     };
 
     struct StagedEvent {
-        FileWatchHandle handle = 0;
+        FileWatchID watchID = 0;
         FileWatchEvent  event;
     };
 
@@ -159,8 +159,8 @@ struct FileSystemWatcher::Impl {
     std::thread::id   dispatchThread = std::this_thread::get_id();
 
     Mutex                                   subscriptionMutex {};
-    std::map<FileWatchHandle, Subscription> subscriptions;
-    FileWatchHandle                         nextHandle = 1;
+    std::map<FileWatchID, Subscription> subscriptions;
+    FileWatchID                         nextID = 1;
 
     Mutex                    readyMutex {};
     std::vector<StagedEvent> readyEvents;
@@ -170,7 +170,7 @@ struct FileSystemWatcher::Impl {
         std::vector<SubscriptionSnapshot> snapshots;
         snapshots.reserve(subscriptions.size());
         for (const auto& [handle, subscription]: subscriptions) {
-            snapshots.push_back({.handle = handle, .descriptor = subscription.descriptor});
+            snapshots.push_back({.watchID = handle, .descriptor = subscription.descriptor});
         }
         return snapshots;
     }
@@ -187,7 +187,7 @@ struct FileSystemWatcher::Impl {
         }
     }
 
-    [[nodiscard]] static auto PromoteSettled(FileWatchHandle handle, WorkerWatch& watch, SteadyClock::time_point now)
+    [[nodiscard]] static auto PromoteSettled(FileWatchID handle, WorkerWatch& watch, SteadyClock::time_point now)
         -> std::vector<StagedEvent> {
         std::vector<StagedEvent> ready;
         const auto settleWindow = std::chrono::milliseconds {watch.descriptor.debounceMs};
@@ -197,14 +197,14 @@ struct FileSystemWatcher::Impl {
                 continue;
             }
 
-            ready.push_back({.handle = handle, .event = {.path = entry.path, .action = entry.pendingAction}});
+            ready.push_back({.watchID = handle, .event = {.path = entry.path, .action = entry.pendingAction}});
             entry.settleState     = SettleState::Idle;
             entry.deliveredExists = entry.pendingAction != FileWatchAction::Deleted;
         }
         return ready;
     }
 
-    [[nodiscard]] static auto Observe(FileWatchHandle handle, WorkerWatch& watch, const ScanResult& scan, SteadyClock::time_point now)
+    [[nodiscard]] static auto Observe(FileWatchID handle, WorkerWatch& watch, const ScanResult& scan, SteadyClock::time_point now)
         -> std::vector<StagedEvent> {
         if (!watch.initialized) {
             if (!scan.complete) {
@@ -270,28 +270,28 @@ struct FileSystemWatcher::Impl {
     }
 
     void Run() {
-        std::map<FileWatchHandle, WorkerWatch> watches;
+        std::map<FileWatchID, WorkerWatch> watches;
         while (!stop.load(std::memory_order_acquire)) {
             const std::vector<SubscriptionSnapshot> snapshots = SnapshotSubscriptions();
-            std::set<FileWatchHandle>               activeHandles;
+            std::set<FileWatchID>               activeIDs;
             std::vector<StagedEvent>                ready;
             const auto                              now = SteadyClock::now();
 
             for (const SubscriptionSnapshot& snapshot: snapshots) {
-                activeHandles.insert(snapshot.handle);
-                auto [it, inserted] = watches.try_emplace(snapshot.handle);
+                activeIDs.insert(snapshot.watchID);
+                auto [it, inserted] = watches.try_emplace(snapshot.watchID);
                 WorkerWatch& watch  = it->second;
                 if (inserted) {
                     watch.descriptor = snapshot.descriptor;
                 }
-                auto observed = Observe(snapshot.handle, watch, Scan(watch.descriptor), now);
+                auto observed = Observe(snapshot.watchID, watch, Scan(watch.descriptor), now);
                 for (StagedEvent& event: observed) {
                     ready.push_back(std::move(event));
                 }
             }
 
             for (auto it = watches.begin(); it != watches.end();) {
-                if (!activeHandles.contains(it->first)) {
+                if (!activeIDs.contains(it->first)) {
                     it = watches.erase(it);
                 } else {
                     ++it;
@@ -319,19 +319,19 @@ FileSystemWatcher::~FileSystemWatcher() {
     }
 }
 
-auto FileSystemWatcher::Watch(WatchDescriptor descriptor, FileWatchCallback callback) -> FileWatchHandle {
+auto FileSystemWatcher::Watch(WatchDescriptor descriptor, FileWatchCallback callback) -> FileWatchID {
     if (descriptor.path.empty() || !callback) {
         return 0;
     }
 
     descriptor.path = descriptor.path.lexically_normal();
     const std::lock_guard<Mutex> lock(_impl->subscriptionMutex);
-    const FileWatchHandle        handle = _impl->nextHandle++;
+    const FileWatchID        handle = _impl->nextID++;
     _impl->subscriptions.emplace(handle, Impl::Subscription {.descriptor = std::move(descriptor), .callback = std::move(callback)});
     return handle;
 }
 
-auto FileSystemWatcher::WatchFile(std::filesystem::path path, FileWatchCallback callback, uint32_t debounceMs) -> FileWatchHandle {
+auto FileSystemWatcher::WatchFile(std::filesystem::path path, FileWatchCallback callback, uint32_t debounceMs) -> FileWatchID {
     return Watch({.path = std::move(path), .isDirectory = false, .recursive = false, .extensionFilter = {}, .debounceMs = debounceMs}, std::move(callback));
 }
 
@@ -341,14 +341,14 @@ auto FileSystemWatcher::WatchDirectory(
     bool                  recursive,
     std::string           extensionFilter,
     uint32_t              debounceMs
-) -> FileWatchHandle {
+) -> FileWatchID {
     return Watch(
         {.path = std::move(directory), .isDirectory = true, .recursive = recursive, .extensionFilter = std::move(extensionFilter), .debounceMs = debounceMs},
         std::move(callback)
     );
 }
 
-auto FileSystemWatcher::Unwatch(FileWatchHandle handle) -> bool {
+auto FileSystemWatcher::Unwatch(FileWatchID handle) -> bool {
     if (handle == 0) {
         return false;
     }
@@ -372,7 +372,7 @@ void FileSystemWatcher::DispatchEvents() {
         FileWatchCallback callback;
         {
             const std::lock_guard<Mutex> lock(_impl->subscriptionMutex);
-            const auto                   it = _impl->subscriptions.find(staged.handle);
+            const auto                   it = _impl->subscriptions.find(staged.watchID);
             if (it == _impl->subscriptions.end()) {
                 continue;
             }

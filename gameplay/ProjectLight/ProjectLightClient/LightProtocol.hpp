@@ -14,7 +14,7 @@
 #include <Replication/ReplicationComponents.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/Physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -298,7 +298,7 @@ class ClientSession {
     InputControls       m_lastControls {};
     Entity              m_localController      = Entity::Null();
     uint64_t            m_controllerForRootUid = 0u;
-    Physics::BodyHandle m_localControllerBody  = Physics::BodyHandle::Null();
+    Physics::BodyID m_localControllerBody  = Physics::BodyID::Null();
 
     std::vector<uint8_t>                                  m_tcpRxBuffer;
     std::vector<uint8_t>                                  m_tcpTxBuffer;

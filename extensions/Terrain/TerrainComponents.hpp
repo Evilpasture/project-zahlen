@@ -14,8 +14,8 @@
 
 namespace ZHLN::Terrain {
 
-enum class TerrainHandle : uint64_t { Invalid = 0 };
-static_assert(sizeof(TerrainHandle) == 8);
+enum class TerrainID : uint64_t { Invalid = 0 };
+static_assert(sizeof(TerrainID) == 8);
 
 enum class TerrainType : uint8_t { Default = 0, Snow = 1, Desert = 2 };
 
@@ -37,7 +37,7 @@ struct TerrainComponent {
     float         maxHeight     = 35.0f;
     float         roughness     = 0.85f;
     float         metallic      = 0.05f;
-    TerrainHandle terrainHandle = TerrainHandle::Invalid;
+    TerrainID terrainID = TerrainID::Invalid;
 };
 
 } // namespace ZHLN::Terrain

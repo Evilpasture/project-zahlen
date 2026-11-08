@@ -98,17 +98,17 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
 
 auto PhysicsContext::CreateConstraint(
     Physics::ConstraintType          type,
-    Physics::BodyHandle              b1,
-    Physics::BodyHandle              b2,
+    Physics::BodyID              b1,
+    Physics::BodyID              b2,
     const Physics::ConstraintParams& params
-) -> Physics::ConstraintHandle {
+) -> Physics::ConstraintID {
     auto&                           world  = GetInternalWorld();
-    const Physics::ConstraintHandle handle = world.AllocateConstraintHandle();
+    const Physics::ConstraintID handle = world.AllocateConstraintID();
 
     Physics::Command cmd {};
     cmd.type                     = Physics::CommandType::CreateConstraint;
     cmd.payload.createConstraint = Physics::CreateConstraintPayload {
-        .cHandle = handle,
+        .constraintID = handle,
         .b1      = b1,
         .b2      = b2,
         .cType   = type,
@@ -118,12 +118,12 @@ auto PhysicsContext::CreateConstraint(
     return handle;
 }
 
-void PhysicsContext::SetConstraintTarget(Physics::ConstraintHandle handle, float value) {
+void PhysicsContext::SetConstraintTarget(Physics::ConstraintID handle, float value) {
     auto&            world = GetInternalWorld();
     Physics::Command cmd {};
     cmd.type                        = Physics::CommandType::SetConstraintTarget;
     cmd.payload.setConstraintTarget = Physics::SetConstraintTargetPayload {
-        .targetCHandle = handle,
+        .targetConstraintID = handle,
         .targetValue   = value,
     };
     world.mailbox.Enqueue(std::move(cmd));

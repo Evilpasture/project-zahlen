@@ -88,15 +88,15 @@ ZHLN_API void AudioSystem(
             dir                      = rotation * JPH::Vec3(0.0f, 0.0f, -1.0f);
         }
 
-        if (src.voiceHandle != AudioHandle::Invalid && !device.IsVoiceValid(src.voiceHandle)) {
-            // A non-looping voice reached end-of-stream naturally; clear handle so it does not re-trigger every frame.
-            src.voiceHandle = AudioHandle::Invalid;
+        if (src.voiceID != VoiceID::Invalid && !device.IsVoiceValid(src.voiceID)) {
+            // A non-looping voice reached end-of-stream naturally; clear the voice ID so it does not re-trigger every frame.
+            src.voiceID = VoiceID::Invalid;
             if (!src.isLooping) {
                 src.playOnStart = false;
             }
         }
 
-        if (src.voiceHandle == AudioHandle::Invalid && src.playOnStart && !src.filepath.empty()) {
+        if (src.voiceID == VoiceID::Invalid && src.playOnStart && !src.filepath.empty()) {
             const VoiceDesc desc {
                 .bus          = src.bus,
                 .playbackMode = src.playbackMode,
@@ -115,40 +115,40 @@ ZHLN_API void AudioSystem(
             };
 
             const std::string_view pathView(src.filepath);
-            src.voiceHandle                 = device.CreateVoice(pathView, desc);
-            if (src.voiceHandle == AudioHandle::Invalid && assets) {
+            src.voiceID                 = device.CreateVoice(pathView, desc);
+            if (src.voiceID == VoiceID::Invalid && assets) {
                 if (const size_t byteSize = assets->ReadFile(pathView, nullptr, 0); byteSize > 0) {
                     std::vector<uint8_t> encodedBytes(byteSize);
                     if (assets->ReadFile(pathView, encodedBytes.data(), encodedBytes.size()) == byteSize) {
-                        src.voiceHandle = device.CreateVoiceFromMemory(encodedBytes, desc);
+                        src.voiceID = device.CreateVoiceFromMemory(encodedBytes, desc);
                     }
                 }
             }
 
-            if (src.voiceHandle != AudioHandle::Invalid && !src.isPaused) {
-                device.PlayVoice(src.voiceHandle);
+            if (src.voiceID != VoiceID::Invalid && !src.isPaused) {
+                device.PlayVoice(src.voiceID);
             }
         }
 
-        if (src.voiceHandle != AudioHandle::Invalid && device.IsVoiceValid(src.voiceHandle)) {
-            device.SetVoiceBus(src.voiceHandle, src.bus);
-            device.SetVoiceVolume(src.voiceHandle, src.volume);
-            device.SetVoicePitch(src.voiceHandle, src.pitch);
-            device.SetVoiceLooping(src.voiceHandle, src.isLooping);
-            device.SetVoiceReverbSend(src.voiceHandle, src.reverbSend);
-            device.SetVoiceOcclusion(src.voiceHandle, src.occlusion);
+        if (src.voiceID != VoiceID::Invalid && device.IsVoiceValid(src.voiceID)) {
+            device.SetVoiceBus(src.voiceID, src.bus);
+            device.SetVoiceVolume(src.voiceID, src.volume);
+            device.SetVoicePitch(src.voiceID, src.pitch);
+            device.SetVoiceLooping(src.voiceID, src.isLooping);
+            device.SetVoiceReverbSend(src.voiceID, src.reverbSend);
+            device.SetVoiceOcclusion(src.voiceID, src.occlusion);
 
             if (src.isSpatialized) {
-                device.SetVoicePosition(src.voiceHandle, pos);
-                device.SetVoiceDirection(src.voiceHandle, dir);
-                device.SetVoiceVelocity(src.voiceHandle, src.velocity);
-                device.SetVoiceAttenuation(src.voiceHandle, src.attenuation);
+                device.SetVoicePosition(src.voiceID, pos);
+                device.SetVoiceDirection(src.voiceID, dir);
+                device.SetVoiceVelocity(src.voiceID, src.velocity);
+                device.SetVoiceAttenuation(src.voiceID, src.attenuation);
             }
 
-            if (src.isPaused && !device.IsVoicePaused(src.voiceHandle)) {
-                device.PauseVoice(src.voiceHandle);
-            } else if (!src.isPaused && device.IsVoicePaused(src.voiceHandle)) {
-                device.ResumeVoice(src.voiceHandle);
+            if (src.isPaused && !device.IsVoicePaused(src.voiceID)) {
+                device.PauseVoice(src.voiceID);
+            } else if (!src.isPaused && device.IsVoicePaused(src.voiceID)) {
+                device.ResumeVoice(src.voiceID);
             }
         }
     }

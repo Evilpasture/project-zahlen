@@ -1677,8 +1677,8 @@ struct ProceduralSuppressUploadSystem {
         ECS::ResMut<Animation::AnimationContext>                                             anim
     ) {
         for (const Entity entity: query.Entities<ProceduralLocomotionComponent>()) {
-            if (const auto animator = query.Get<Components::AnimatorComponent>(entity); animator && animator->animationHandle.IsValid()) {
-                anim->SuppressPaletteUpload(animator->animationHandle);
+            if (const auto animator = query.Get<Components::AnimatorComponent>(entity); animator && animator->animationID.IsValid()) {
+                anim->SuppressPaletteUpload(animator->animationID);
             }
         }
     }
@@ -2121,7 +2121,7 @@ void ProceduralAnimationSystem(
                                            footAttachmentsEnabled;
         const bool locomotionSyncEnabled = animator && tracks && tracks->synchronizeToStrideWheel;
 
-        const JPH::Vec3 velocityWorld   = physicsComponent ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
+        const JPH::Vec3 velocityWorld   = physicsComponent ? physics.GetCharacterVelocity(physicsComponent->physicsID) : JPH::Vec3::sZero();
         const JPH::Quat entityRotation  = transform->rotation;
         const JPH::Quat rootRotation    = entityRotation.Normalized();
         const JPH::Vec3 velocityLocal   = rootRotation.Inversed() * velocityWorld;
@@ -2192,7 +2192,7 @@ void ProceduralAnimationSystem(
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
         if (ikEnabled) {
             ZHLN::ScopedTimer stageTimer("PA Stage: Leg grounding");
-            const Physics::BodyHandle ignoredHandle          = physicsComponent ? physicsComponent->physicsHandle : Physics::BodyHandle {};
+            const Physics::BodyID ignoredID          = physicsComponent ? physicsComponent->physicsID : Physics::BodyID {};
             const float               legIKWeight            = config ? config->legIKWeight : 1.0f;
             const float               pelvisDropWeight       = config ? config->pelvisDropWeight : 1.0f;
             const float               maxHeightCorrection    = config ? config->maxFootHeightCorrection : 0.18f;
@@ -2203,7 +2203,7 @@ void ProceduralAnimationSystem(
             const bool                preserveAuthoredFootXZ = !config || config->preserveAuthoredFootXZ;
             const bool                worldLockFeet          = config && config->worldLockFeet;
             Animation::SolveLegGrounding(
-                physics, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
+                physics, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredID, legIKWeight, preserveAuthoredFootXZ,
                 worldLockFeet, maxHeightCorrection, dt, pelvisDropWeight, maxLegExtension, maxBodyTilt, maxAnkleSideways, maxAnkleForward
             );
         } else {

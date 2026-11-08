@@ -98,7 +98,7 @@ struct Kernel::Impl {
     // Own the bytes backing config.initialPipelineBinaryData across renderer
     // recreation. Only persist cache data loaded by the kernel itself.
     std::vector<uint8_t> pipelineBinaryData;
-    FS::FileWatchHandle  shaderDirectoryWatch    = 0;
+    FS::FileWatchID  shaderDirectoryWatch    = 0;
     bool                 persistPipelineBinaries = false;
     bool                 glfwAcquired            = false;
 

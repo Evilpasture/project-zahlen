@@ -31,7 +31,7 @@ void Release(PhysicsContext&, Components::PhysicsComponent&) {
 } // namespace SceneResources
 void AudioContext::PostEvent(const AudioEvent&) noexcept {
 }
-void PhysicsContext::SetCharacterPosition(Physics::BodyHandle, ZHLN::Double3) {
+void PhysicsContext::SetCharacterPosition(Physics::BodyID, ZHLN::Double3) {
 }
 auto Engine::GetRegistry() -> ECS::Registry& {
     static ECS::Registry reg;
@@ -423,7 +423,7 @@ struct BSPInteractionTestSuite {
                 reg.Add<ZHLN::Components::PhysicsComponent>(
                     e,
                     ZHLN::Components::PhysicsComponent {
-                        .physicsHandle = ZHLN::Physics::BodyHandle {.index = 1, .generation = 1},
+                        .physicsID = ZHLN::Physics::BodyID {.index = 1, .generation = 1},
                         .isStatic      = false,
                     }
                 );

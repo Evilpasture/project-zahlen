@@ -797,7 +797,7 @@ InputActionMap::InputActionMap(std::string_view name, int32_t priority) noexcept
     : _id(Hash64(name)), _name(name), _priority(priority) {}
 
 auto InputActionMap::AddAction(std::string_view name, ActionKind kind) -> InputAction& {
-    const ActionId id(name);
+    const ActionID id(name);
     for (InputAction& existing : _actions) {
         if (existing.Id() == id) {
             return existing;
@@ -807,7 +807,7 @@ auto InputActionMap::AddAction(std::string_view name, ActionKind kind) -> InputA
     return _actions.back();
 }
 
-auto InputActionMap::FindAction(ActionId id) noexcept -> Optional<InputAction&> {
+auto InputActionMap::FindAction(ActionID id) noexcept -> Optional<InputAction&> {
     for (InputAction& action : _actions) {
         if (action.Id() == id) {
             return action;
@@ -816,7 +816,7 @@ auto InputActionMap::FindAction(ActionId id) noexcept -> Optional<InputAction&> 
     return {};
 }
 
-auto InputActionMap::FindAction(ActionId id) const noexcept -> Optional<const InputAction&> {
+auto InputActionMap::FindAction(ActionID id) const noexcept -> Optional<const InputAction&> {
     for (const InputAction& action : _actions) {
         if (action.Id() == id) {
             return action;
@@ -1189,7 +1189,7 @@ void InputContext::RefreshActionsForCurrentFrame(ECS::EventBus* eventBus) {
             entry.current = ActionState {.activeDevice = seat.lastActiveDevice};
         }
 
-        const auto findOrCreateEntry = [&](ActionId id) -> EvaluatedActionEntry& {
+        const auto findOrCreateEntry = [&](ActionID id) -> EvaluatedActionEntry& {
             for (EvaluatedActionEntry& e : seat.actions) {
                 if (e.id == id) {
                     return e;
@@ -1294,7 +1294,7 @@ void InputContext::RefreshActionsForCurrentFrame(ECS::EventBus* eventBus) {
                         isDown          = mag >= action.ActuationThreshold();
                     }
 
-                    // Merge across multiple enabled maps sharing the same ActionId cleanly (OR digital, sum/clamp axes).
+                    // Merge across multiple enabled maps sharing the same ActionID cleanly (OR digital, sum/clamp axes).
                     if (entry.current.down || std::abs(entry.current.x) > 1e-6f || std::abs(entry.current.y) > 1e-6f) {
                         entry.current.x += accumX;
                         entry.current.y += accumY;
@@ -1603,7 +1603,7 @@ auto InputContext::SetActionMapEnabledForSeat(std::string_view name, PlayerSeat 
     return false;
 }
 
-auto InputContext::Action(ActionId id, PlayerSeat seat) const noexcept -> ActionState {
+auto InputContext::Action(ActionID id, PlayerSeat seat) const noexcept -> ActionState {
     if (seat >= kMaxPlayerSeats || !id.Valid()) {
         return {};
     }
@@ -1667,15 +1667,15 @@ void InputContext::ResetAllToDefaults() {
 }
 
 auto InputContext::FindConflictingActions(std::string_view mapName, const InputBinding& candidate, std::string_view ignoreAction) const
-    -> std::vector<ActionId> {
-    std::vector<ActionId> conflicts;
+    -> std::vector<ActionID> {
+    std::vector<ActionID> conflicts;
     const auto            map = FindActionMap(mapName);
     if (!map) {
         return conflicts;
     }
-    const ActionId ignoredId(ignoreAction);
+    const ActionID ignoredID(ignoreAction);
     for (const InputAction& action : map->Actions()) {
-        if (ignoredId.Valid() && action.Id() == ignoredId) {
+        if (ignoredID.Valid() && action.Id() == ignoredID) {
             continue;
         }
         for (const InputBinding& existing : action.Bindings()) {

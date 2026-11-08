@@ -10,6 +10,7 @@
 // re-push the per-frame device-address block via vkCmdPushDataEXT, and draw
 // with heap pipelines. 400 cubes in 4 shared materials verify the pipeline.
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -63,7 +64,7 @@ struct DescriptorHeapsParallelSuite {
     // thrown away between tests. Creating a Vulkan instance per test is what
     // eventually exhausts the loader's static TLS and turns the tail of a
     // group into "vkCreateInstance: Found no drivers!".
-    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Parallel Descriptor Heap Test",
             .width                 = width,
@@ -82,12 +83,12 @@ struct DescriptorHeapsParallelSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> secondary_command_buffers_inherit_and_draw_from_heaps() {
             auto engine      = DescriptorHeapsParallelSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(DescriptorHeapsParallelTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
             if (!settingsEnts.empty()) {

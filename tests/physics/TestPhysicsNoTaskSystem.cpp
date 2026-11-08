@@ -23,7 +23,7 @@ void test_physics_step_without_task_scheduler_uses_serial_fallback() {
         return;
     }
     const auto body = pc.CreateRigidBody(shape, {0.0, 10.0, 0.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, Layers::ID::MOVING);
-    if (!ExpectTrue(body != Physics::BodyHandle::Null())) {
+    if (!ExpectTrue(body != Physics::BodyID::Null())) {
         return;
     }
     pc.OptimizeBroadphase();

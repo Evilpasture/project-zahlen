@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Engine/Frame.hpp>  // FrameDt / FrameAlpha / FrameIndex
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/SoA.hpp>
 #include <Zahlen/ECS/Entity.hpp>
@@ -21,26 +22,9 @@
 
 namespace ZHLN {
 
-// Unlike float/uint64_t, these ambient values cannot be confused with one
-// another by the system parameter resolver.
-struct FrameDt {
-    float     value;
-    constexpr operator float() const noexcept {
-        return value;
-    }
-};
-struct FrameAlpha {
-    float     value;
-    constexpr operator float() const noexcept {
-        return value;
-    }
-};
-struct FrameIndex {
-    uint64_t  value;
-    constexpr operator uint64_t() const noexcept {
-        return value;
-    }
-};
+// FrameDt, FrameAlpha and FrameIndex live in Engine/Frame.hpp: they are the
+// ambient values Frame itself carries, not ECS machinery. The resolvers below
+// only project them out of the carrier.
 
 namespace ECS {
 

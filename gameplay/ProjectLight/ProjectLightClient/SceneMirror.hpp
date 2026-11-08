@@ -28,7 +28,7 @@
 #include <Replication/ReplicaState.hpp>
 #include <Replication/ReplicationComponents.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -60,7 +60,7 @@ struct SceneMirrorState {
     const float&    time;
 
     Entity&              localController;
-    Physics::BodyHandle& localControllerBody;
+    Physics::BodyID& localControllerBody;
     uint64_t&            controllerForRootUid;
     float&               jumpRemaining;
     bool&                wasJumpDown;

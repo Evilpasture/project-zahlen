@@ -131,16 +131,16 @@ inline void SyncTestAudioSourcesSystem(
     for (Entity e: query.Entities<Components::AudioSourceComponent>()) {
         auto src = query.Get<Components::AudioSourceComponent>(e);
         if (!src) continue;
-        if (src->voiceHandle != AudioHandle::Invalid && audio->IsVoiceValid(src->voiceHandle)) {
+        if (src->voiceID != VoiceID::Invalid && audio->IsVoiceValid(src->voiceID)) {
             if (auto t = query.Get<Components::TransformComponent>(e)) {
-                audio->SetVoicePosition(src->voiceHandle, t->position);
+                audio->SetVoicePosition(src->voiceID, t->position);
             }
-            audio->SetVoiceBus(src->voiceHandle, src->bus);
-            audio->SetVoiceOcclusion(src->voiceHandle, src->occlusion);
-            if (src->isPaused && !audio->IsVoicePaused(src->voiceHandle)) {
-                audio->PauseVoice(src->voiceHandle);
-            } else if (!src->isPaused && audio->IsVoicePaused(src->voiceHandle)) {
-                audio->ResumeVoice(src->voiceHandle);
+            audio->SetVoiceBus(src->voiceID, src->bus);
+            audio->SetVoiceOcclusion(src->voiceID, src->occlusion);
+            if (src->isPaused && !audio->IsVoicePaused(src->voiceID)) {
+                audio->PauseVoice(src->voiceID);
+            } else if (!src->isPaused && audio->IsVoicePaused(src->voiceID)) {
+                audio->ResumeVoice(src->voiceID);
             }
         }
     }
@@ -206,13 +206,13 @@ void test_mixer_bus_hierarchy_mute_solo_fade_and_ducking() {
     Expect(audio.IsBusValid(AudioBus::Ambient));
     Expect(audio.IsBusValid(AudioBus::UI));
     Expect(!audio.GetBusParent(AudioBus::Master).IsValid());
-    Expect(audio.GetBusParent(AudioBus::Music) == AudioBusId(AudioBus::Master));
-    Expect(audio.FindBus("Dialogue") == AudioBusId(AudioBus::Dialogue));
+    Expect(audio.GetBusParent(AudioBus::Music) == AudioBusID(AudioBus::Master));
+    Expect(audio.FindBus("Dialogue") == AudioBusID(AudioBus::Dialogue));
 
     // Create nested sub-bus: Master -> SFX -> Weapons.
-    const AudioBusId weaponsBus = audio.CreateSubBus("Weapons", AudioBus::SFX);
+    const AudioBusID weaponsBus = audio.CreateSubBus("Weapons", AudioBus::SFX);
     Expect(weaponsBus.IsValid());
-    Expect(audio.GetBusParent(weaponsBus) == AudioBusId(AudioBus::SFX));
+    Expect(audio.GetBusParent(weaponsBus) == AudioBusID(AudioBus::SFX));
     Expect(audio.FindBus("Weapons") == weaponsBus);
 
     // Reject DAG cycles and re-parenting Master.
@@ -261,11 +261,11 @@ void test_mixer_bus_hierarchy_mute_solo_fade_and_ducking() {
 
     // Verify bus mute and solo directly on rendered PCM output!
     const auto wavBytes = BuildSineWavBytes(48000, 0.5f, 440.0f, 0.8f);
-    const AudioHandle musicVoice = audio.CreateVoiceFromMemory(
+    const VoiceID musicVoice = audio.CreateVoiceFromMemory(
         wavBytes,
         VoiceDesc {.bus = AudioBus::Music, .spatialized = false, .looping = true, .volume = 1.0f}
     );
-    Expect(musicVoice != AudioHandle::Invalid);
+    Expect(musicVoice != VoiceID::Invalid);
     audio.SetBusDucking(AudioBus::Music, 1.0f, 0.0f);
     audio.PlayVoice(musicVoice);
 
@@ -286,7 +286,7 @@ void test_mixer_bus_hierarchy_mute_solo_fade_and_ducking() {
     Expect(ComputeStereoRms(pcm).total > 0.15f);
 }
 
-void test_streaming_voices_pause_seek_and_generational_handles() {
+void test_streaming_voices_pause_seek_and_generational_ids() {
     AudioContext audio(AudioConfig {.sampleRate = 48000, .channels = 2, .headless = true});
 
     const auto                  streamBytes = BuildSineWavBytes(48000, 1.2f, 520.0f, 0.7f);
@@ -296,58 +296,58 @@ void test_streaming_voices_pause_seek_and_generational_handles() {
         std::filesystem::remove(tempWav, ec);
     });
 
-    const AudioHandle streamHandle = audio.CreateStreamVoice(tempWav.string(), AudioBus::Dialogue, /*looping=*/false, 0.9f, /*spatialized=*/false);
-    Expect(streamHandle != AudioHandle::Invalid);
-    Expect(audio.IsVoiceValid(streamHandle));
-    Expect(audio.IsVoiceStreamed(streamHandle));
-    Expect(audio.GetVoiceBus(streamHandle) == AudioBusId(AudioBus::Dialogue));
-    Expect(Near(audio.GetVoiceDurationSeconds(streamHandle), 1.2f, 0.05f));
+    const VoiceID streamID = audio.CreateStreamVoice(tempWav.string(), AudioBus::Dialogue, /*looping=*/false, 0.9f, /*spatialized=*/false);
+    Expect(streamID != VoiceID::Invalid);
+    Expect(audio.IsVoiceValid(streamID));
+    Expect(audio.IsVoiceStreamed(streamID));
+    Expect(audio.GetVoiceBus(streamID) == AudioBusID(AudioBus::Dialogue));
+    Expect(Near(audio.GetVoiceDurationSeconds(streamID), 1.2f, 0.05f));
 
-    audio.PlayVoice(streamHandle);
-    Expect(audio.IsVoicePlaying(streamHandle));
+    audio.PlayVoice(streamID);
+    Expect(audio.IsVoicePlaying(streamID));
 
     std::vector<float> pcm(4800 * 2, 0.0f); // 100 ms
     ExpectEq(audio.RenderOfflineFrames(pcm), 4800u);
     Expect(ComputeStereoRms(pcm).total > 0.15f);
-    const float cursorAfter100ms = audio.GetVoiceCursorSeconds(streamHandle);
+    const float cursorAfter100ms = audio.GetVoiceCursorSeconds(streamID);
     Expect(cursorAfter100ms > 0.05f && cursorAfter100ms < 0.25f);
 
     // Pause freezes cursor and renders silence (after draining the downstream 256-frame node cache).
-    audio.PauseVoice(streamHandle);
-    Expect(audio.IsVoicePaused(streamHandle));
-    Expect(!audio.IsVoicePlaying(streamHandle));
+    audio.PauseVoice(streamID);
+    Expect(audio.IsVoicePaused(streamID));
+    Expect(!audio.IsVoicePlaying(streamID));
     ExpectEq(audio.RenderOfflineFrames(pcm), 4800u);
     Expect(ComputeStereoRms(pcm).total < 0.01f);
     ExpectEq(audio.RenderOfflineFrames(pcm), 4800u);
     Expect(ComputeStereoRms(pcm).total < 1.0e-6f);
-    Expect(Near(audio.GetVoiceCursorSeconds(streamHandle), cursorAfter100ms, 0.02f));
+    Expect(Near(audio.GetVoiceCursorSeconds(streamID), cursorAfter100ms, 0.02f));
 
     // Resume continues playback and SeekVoiceSeconds repositions the stream cursor.
-    audio.ResumeVoice(streamHandle);
-    Expect(!audio.IsVoicePaused(streamHandle));
-    Expect(audio.SeekVoiceSeconds(streamHandle, 0.85f));
-    Expect(Near(audio.GetVoiceCursorSeconds(streamHandle), 0.85f, 0.03f));
+    audio.ResumeVoice(streamID);
+    Expect(!audio.IsVoicePaused(streamID));
+    Expect(audio.SeekVoiceSeconds(streamID, 0.85f));
+    Expect(Near(audio.GetVoiceCursorSeconds(streamID), 0.85f, 0.03f));
 
     // Render past 1.2s end-of-stream and confirm ProcessAudioFades reclaims the non-looping stream slot.
     std::vector<float> tailPcm(24000 * 2, 0.0f); // 500 ms
     ExpectEq(audio.RenderOfflineFrames(tailPcm), 24000u);
     audio.UpdatePlayback(0.016f);
-    Expect(!audio.IsVoiceValid(streamHandle));
+    Expect(!audio.IsVoiceValid(streamID));
 
     // Creating a new voice reuses slot 0 with an incremented generation; stale handle stays invalid.
-    const AudioHandle nextHandle = audio.CreateVoiceFromMemory(streamBytes, VoiceDesc {.spatialized = false, .looping = true});
-    Expect(nextHandle != AudioHandle::Invalid);
-    Expect(nextHandle != streamHandle);
-    Expect(!audio.IsVoiceValid(streamHandle));
-    Expect(audio.IsVoiceValid(nextHandle));
+    const VoiceID nextID = audio.CreateVoiceFromMemory(streamBytes, VoiceDesc {.spatialized = false, .looping = true});
+    Expect(nextID != VoiceID::Invalid);
+    Expect(nextID != streamID);
+    Expect(!audio.IsVoiceValid(streamID));
+    Expect(audio.IsVoiceValid(nextID));
 
     // Fade-out stop smoothly releases the slot after fade duration elapses.
-    audio.PlayVoice(nextHandle);
-    audio.StopVoice(nextHandle, 0.10f);
+    audio.PlayVoice(nextID);
+    audio.StopVoice(nextID, 0.10f);
     audio.ProcessAudioFades(0.05f);
-    Expect(audio.IsVoiceValid(nextHandle));
+    Expect(audio.IsVoiceValid(nextID));
     audio.ProcessAudioFades(0.06f);
-    Expect(!audio.IsVoiceValid(nextHandle));
+    Expect(!audio.IsVoiceValid(nextID));
 }
 
 void test_spatial_panning_logarithmic_rolloff_and_occlusion_lowpass_dsp() {
@@ -363,7 +363,7 @@ void test_spatial_panning_logarithmic_rolloff_and_occlusion_lowpass_dsp() {
         .rolloff     = 1.0f,
     };
 
-    const AudioHandle spatialVoice = audio.CreateVoiceFromMemory(
+    const VoiceID spatialVoice = audio.CreateVoiceFromMemory(
         toneBytes, VoiceDesc {
                        .bus         = AudioBus::SFX,
                        .spatialized = true,
@@ -373,7 +373,7 @@ void test_spatial_panning_logarithmic_rolloff_and_occlusion_lowpass_dsp() {
                        .attenuation = logAtten,
                    }
     );
-    Expect(spatialVoice != AudioHandle::Invalid);
+    Expect(spatialVoice != VoiceID::Invalid);
     audio.PlayVoice(spatialVoice);
 
     std::vector<float> pcmNear(4800 * 2, 0.0f);
@@ -396,7 +396,7 @@ void test_spatial_panning_logarithmic_rolloff_and_occlusion_lowpass_dsp() {
     const auto trebleBytes = BuildSineWavBytes(48000, 1.0f, 6500.0f, 0.8f);
 
     const auto measureRatioWithOcclusion = [&](std::span<const uint8_t> wav) -> float {
-        const AudioHandle h = audio.CreateVoiceFromMemory(
+        const VoiceID h = audio.CreateVoiceFromMemory(
             wav,
             VoiceDesc {
                 .bus         = AudioBus::SFX,
@@ -437,7 +437,7 @@ void test_aux_reverb_bus_wet_tail_and_preset_switching() {
 
     const auto renderTailRms = [&](AudioReverbPreset preset) -> StereoRms {
         audio.SetReverbPreset(preset);
-        const AudioHandle h = audio.CreateVoiceFromMemory(
+        const VoiceID h = audio.CreateVoiceFromMemory(
             impulseBytes,
             VoiceDesc {
                 .bus         = AudioBus::SFX,
@@ -481,8 +481,8 @@ void test_ecs_audio_components_and_scene_resource_release() {
     registry.RegisterComponent<Components::AudioSourceComponent>();
 
     const auto        wavBytes = BuildSineWavBytes(48000, 0.5f, 330.0f, 0.6f);
-    const AudioHandle handle   = audio.CreateVoiceFromMemory(wavBytes, VoiceDesc {.bus = AudioBus::SFX, .looping = true});
-    Expect(handle != AudioHandle::Invalid);
+    const VoiceID handle   = audio.CreateVoiceFromMemory(wavBytes, VoiceDesc {.bus = AudioBus::SFX, .looping = true});
+    Expect(handle != VoiceID::Invalid);
     audio.PlayVoice(handle);
 
     const Entity srcEntity = registry.Create(
@@ -500,7 +500,7 @@ void test_ecs_audio_components_and_scene_resource_release() {
             .playbackMode  = AudioPlaybackMode::Streamed,
             .reverbSend    = 0.4f,
             .occlusion     = AudioOcclusionDesc {.occlusion = 0.5f},
-            .voiceHandle   = handle,
+            .voiceID   = handle,
         }
     );
 
@@ -508,17 +508,17 @@ void test_ecs_audio_components_and_scene_resource_release() {
     ECS::SystemGraph<AudioGraphTestServices> graph(registry, services);
     graph.AddSystem<&SyncTestAudioSourcesSystem>();
     graph.Compile();
-    graph.Execute(ZHLN::Frame {.dt = 0.016f});
+    graph.Execute(ZHLN::Frame {.dt = {0.016f}});
 
     Expect(audio.IsVoicePaused(handle));
-    Expect(audio.GetVoiceBus(handle) == AudioBusId(AudioBus::Ambient));
+    Expect(audio.GetVoiceBus(handle) == AudioBusID(AudioBus::Ambient));
     Expect(Near(audio.GetVoiceOcclusion(handle).occlusion, 0.5f));
 
     // Unpausing on the component resumes the voice on the next graph tick.
     auto srcComp = registry.Get<Components::AudioSourceComponent>(srcEntity);
     Expect(static_cast<bool>(srcComp));
     srcComp->isPaused = false;
-    graph.Execute(ZHLN::Frame {.dt = 0.016f});
+    graph.Execute(ZHLN::Frame {.dt = {0.016f}});
     Expect(!audio.IsVoicePaused(handle));
 
     // SceneResources::Detach releases the voice handle cleanly.

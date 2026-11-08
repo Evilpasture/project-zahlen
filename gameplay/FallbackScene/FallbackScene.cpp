@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // gameplay/FallbackScene/FallbackScene.cpp
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "FallbackScene.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Config.hpp>
@@ -203,7 +204,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
     s_AccumTime += dt;
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto rc = engine.Graphics();
 
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
     auto        inputState = reg.GetSingleton<Components::InputStateComponent>();
@@ -281,7 +282,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         // System environment info box
         std::string envSummary = std::format(
             "Engine Version:   {}\nCompiler:         {}\nTarget Triple:    {}\nGPU Hardware:     {}",
-            ZHLN::Version::String, Compiler, ZHLN_TARGET_TRIPLE, rc.GetInfo().gpuName
+            ZHLN::Version::String, Compiler, ZHLN_TARGET_TRIPLE, rc.Info().gpuName
         );
         ui.BeginBox("FallbackEnvBox", GUI::BoxConfig {
             .width        = { .grow = 1.0f },

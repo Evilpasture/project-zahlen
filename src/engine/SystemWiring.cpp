@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include "SystemWiring.hpp"
 #include "ArticulationSystem.hpp"
 #include "AudioSystem.hpp"
@@ -55,15 +56,15 @@ void HotReload(Engine& engine, float, FrameContext&) {
     engine.GetFileSystemWatcher().DispatchEvents();
 }
 
-void Physics(Engine& engine, float dt, FrameContext&) {
-    PhysicsSystem::Update(engine, dt, engine.GetPhysicsAccumulator());
+void Physics(Engine& engine, float, FrameContext& ctx) {
+    PhysicsSystem::Update(engine, ctx.fixedSteps);
 }
 
-void UpdateGraph(Engine& engine, float dt, FrameContext&) {
+void UpdateGraph(Engine& engine, float dt, FrameContext& ctx) {
     // Before Execute, and on this thread: the scratch arenas are per-worker and
     // this is the last point at which no worker holds a pointer into one.
     engine.ResetWorkerScratch();
-    const Frame frame = engine.MakeFrame(dt);
+    const Frame frame = engine.MakeFrame(dt, ctx.alpha);
     engine.GetUpdateGraph().Execute(frame);
 }
 
@@ -75,10 +76,10 @@ void CleanupScene(Engine& engine, float, FrameContext&) {
     engine.ProcessPendingDestroy();
 }
 
-void Camera(Engine& engine, float dt, FrameContext&) {
+void Camera(Engine& engine, float dt, FrameContext& ctx) {
     // No instance and no function-local static: the pass is stateless, and the
     // camera it projects is component data.
-    CameraSystem::Update(engine, dt, engine.GetCurrentAlpha());
+    CameraSystem::Update(engine, dt, ctx.alpha);
 }
 
 void LOD(Engine&, float, FrameContext&) {
@@ -87,10 +88,10 @@ void LOD(Engine&, float, FrameContext&) {
     // DecalSystem and LightingSystem ahead of CullingSystem.
 }
 
-void RenderGraph(Engine& engine, float dt, FrameContext&) {
-    engine.GetSceneData().Clear();
+void RenderGraph(Engine& engine, float dt, FrameContext& ctx) {
+    engine.Debug().Clear();
     engine.ResetWorkerScratch();
-    const Frame frame = engine.MakeFrame(dt);
+    const Frame frame = engine.MakeFrame(dt, ctx.alpha);
     engine.GetRenderGraph().Execute(frame);
 }
 

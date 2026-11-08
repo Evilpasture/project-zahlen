@@ -13,8 +13,8 @@
 
 namespace ZHLN::Physics {
 
-auto RagdollManager::FindSlotUnlocked(RagdollHandle handle) noexcept -> RagdollSlot* {
-    if (handle == RagdollHandle::Invalid) {
+auto RagdollManager::FindSlotUnlocked(RagdollID handle) noexcept -> RagdollSlot* {
+    if (handle == RagdollID::Invalid) {
         return nullptr;
     }
     const auto     raw   = static_cast<uint64_t>(handle);
@@ -27,8 +27,8 @@ auto RagdollManager::FindSlotUnlocked(RagdollHandle handle) noexcept -> RagdollS
     return (slot.generation == gen && slot.instance != nullptr) ? &slot : nullptr;
 }
 
-auto RagdollManager::FindSlotUnlocked(RagdollHandle handle) const noexcept -> const RagdollSlot* {
-    if (handle == RagdollHandle::Invalid) {
+auto RagdollManager::FindSlotUnlocked(RagdollID handle) const noexcept -> const RagdollSlot* {
+    if (handle == RagdollID::Invalid) {
         return nullptr;
     }
     const auto     raw   = static_cast<uint64_t>(handle);
@@ -60,7 +60,7 @@ auto RagdollManager::CreateSkeletalRagdoll(
     JPH::PhysicsSystem&               joltSystem,
     JPH::Ref<JPH::Skeleton>           skeleton,
     std::span<const RagdollPartParams> parts
-) -> RagdollHandle {
+) -> RagdollID {
     JPH::Ref<JPH::RagdollSettings> settings = new JPH::RagdollSettings();
     settings->mSkeleton                     = skeleton;
     settings->mParts.resize(static_cast<size_t>(skeleton->GetJointCount()));
@@ -125,7 +125,7 @@ auto RagdollManager::CreateSkeletalRagdoll(
     ZHLN::MutexGuard       guard(mutex);
     JPH::Ref<JPH::Ragdoll> createdRagdoll {settings->CreateRagdoll(0, 0, &joltSystem)};
     if (createdRagdoll == nullptr) {
-        return RagdollHandle::Invalid;
+        return RagdollID::Invalid;
     }
 
     uint32_t index = 0;
@@ -141,10 +141,10 @@ auto RagdollManager::CreateSkeletalRagdoll(
     auto& slot    = slots[index];
     slot.instance = std::move(createdRagdoll);
     slot.active   = false;
-    return static_cast<RagdollHandle>((static_cast<uint64_t>(slot.generation) << 32) | index);
+    return static_cast<RagdollID>((static_cast<uint64_t>(slot.generation) << 32) | index);
 }
 
-void RagdollManager::DestroyRagdolls(std::span<const RagdollHandle> handles) noexcept {
+void RagdollManager::DestroyRagdolls(std::span<const RagdollID> handles) noexcept {
     if (handles.empty()) {
         return;
     }
@@ -164,7 +164,7 @@ void RagdollManager::DestroyRagdolls(std::span<const RagdollHandle> handles) noe
     }
 }
 
-auto RagdollManager::GetRagdoll(RagdollHandle handle) const noexcept -> ZHLN::Optional<JPH::Ragdoll&> {
+auto RagdollManager::GetRagdoll(RagdollID handle) const noexcept -> ZHLN::Optional<JPH::Ragdoll&> {
     ZHLN::MutexGuard guard(mutex);
     const auto*      slot = FindSlotUnlocked(handle);
     if (slot != nullptr && slot->instance != nullptr) {
@@ -173,7 +173,7 @@ auto RagdollManager::GetRagdoll(RagdollHandle handle) const noexcept -> ZHLN::Op
     return std::nullopt;
 }
 
-void RagdollManager::ActivateRagdoll(RagdollHandle handle, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept {
+void RagdollManager::ActivateRagdoll(RagdollID handle, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept {
     ZHLN::MutexGuard guard(mutex);
     auto*            slot = FindSlotUnlocked(handle);
     if (slot == nullptr) {
@@ -187,7 +187,7 @@ void RagdollManager::ActivateRagdoll(RagdollHandle handle, const JPH::SkeletonPo
     slot->instance->SetLinearAndAngularVelocity(initialVelocity, JPH::Vec3::sZero());
 }
 
-void RagdollManager::RemoveRagdoll(RagdollHandle handle) noexcept {
+void RagdollManager::RemoveRagdoll(RagdollID handle) noexcept {
     ZHLN::MutexGuard guard(mutex);
     auto*            slot = FindSlotUnlocked(handle);
     if (slot != nullptr && slot->active) {
@@ -196,7 +196,7 @@ void RagdollManager::RemoveRagdoll(RagdollHandle handle) noexcept {
     }
 }
 
-void RagdollManager::DriveRagdollPose(RagdollHandle handle, const JPH::SkeletonPose& pose) noexcept {
+void RagdollManager::DriveRagdollPose(RagdollID handle, const JPH::SkeletonPose& pose) noexcept {
     ZHLN::MutexGuard guard(mutex);
     auto*            slot = FindSlotUnlocked(handle);
     if (slot == nullptr || !slot->active) {
@@ -206,7 +206,7 @@ void RagdollManager::DriveRagdollPose(RagdollHandle handle, const JPH::SkeletonP
     slot->instance->DriveToPoseUsingMotors(pose);
 }
 
-void RagdollManager::AddRagdollImpulse(RagdollHandle handle, uint32_t jointIndex, JPH::Vec3Arg impulse, JPH::BodyInterface& bodyInterface) noexcept {
+void RagdollManager::AddRagdollImpulse(RagdollID handle, uint32_t jointIndex, JPH::Vec3Arg impulse, JPH::BodyInterface& bodyInterface) noexcept {
     ZHLN::MutexGuard guard(mutex);
     auto*            slot = FindSlotUnlocked(handle);
     if (slot == nullptr || !slot->active || jointIndex >= slot->instance->GetBodyCount()) {
@@ -219,7 +219,7 @@ void RagdollManager::AddRagdollImpulse(RagdollHandle handle, uint32_t jointIndex
     }
 }
 
-auto RagdollManager::GetRagdollPose(RagdollHandle handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept -> bool {
+auto RagdollManager::GetRagdollPose(RagdollID handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept -> bool {
     if (outWorldJoints == nullptr) {
         return false;
     }

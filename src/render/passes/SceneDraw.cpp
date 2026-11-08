@@ -84,7 +84,7 @@ void Draw3DParticles(RenderFrame& ctx, Vk::CommandEncoder& encoder, const MeshPa
         const auto* const posMesh     = ctx.renderer.geometry.Resolve(gpuMesh->posBuffer);
         const auto* const frameMesh   = ctx.renderer.geometry.Resolve(gpuMesh->tangentFrameBuffer);
         const auto* const surfaceMesh = ctx.renderer.geometry.Resolve(gpuMesh->surfaceBuffer);
-        const auto* const iboMesh     = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.renderer.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
+        const auto* const iboMesh     = (gpuMesh->indexBuffer != BufferID::Invalid) ? ctx.renderer.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
         if (posMesh == nullptr || frameMesh == nullptr || surfaceMesh == nullptr || iboMesh == nullptr) {
             continue;
         }
@@ -134,7 +134,7 @@ void Draw3DParticleShadows(RenderFrame& ctx, Vk::CommandEncoder& encoder, const 
 
         const auto* const posMesh     = ctx.renderer.geometry.Resolve(gpuMesh->posBuffer);
         const auto* const surfaceMesh = ctx.renderer.geometry.Resolve(gpuMesh->surfaceBuffer);
-        const auto* const iboMesh     = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.renderer.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
+        const auto* const iboMesh     = (gpuMesh->indexBuffer != BufferID::Invalid) ? ctx.renderer.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
         if (posMesh == nullptr || surfaceMesh == nullptr || iboMesh == nullptr) {
             continue;
         }

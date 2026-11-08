@@ -39,7 +39,7 @@ namespace ZHLN::Test {
 
 auto test_gui_font_atlas_value_feeds_sdf_batches_without_ecs() -> std::expected<void, ZHLN::ErrorCode> {
     const ZHLN::GUI::BakedFontAsset& baked = ZHLN::GUI::GetDefaultBakedFont();
-    const ZHLN::TextureHandle        tex {42};
+    const ZHLN::TextureID        tex {42};
     const ZHLN::FontAtlas            atlas = ZHLN::GUI::BuildFontAtlas(baked, tex);
 
     ExpectEq(atlas.texture, tex);
@@ -56,7 +56,7 @@ auto test_gui_font_atlas_value_feeds_sdf_batches_without_ecs() -> std::expected<
         ExpectTrue(!draw.Empty());
         ExpectEq(draw.positions.size(), draw.surfaces.size());
         ExpectFalse(draw.batches[0].isSDF);
-        ExpectEq(draw.batches[0].texture, ZHLN::TextureHandle::Invalid);
+        ExpectEq(draw.batches[0].texture, ZHLN::TextureID::Invalid);
     }
 
     // Feeding the FontAtlas value directly into GUI::Context switches text to SDF batches.
@@ -336,7 +336,7 @@ auto test_custom_cursor_geometry_and_batch_invariants() -> std::expected<void, Z
     ExpectEq(draw.batches.size(), size_t {1});
     ExpectEq(draw.positions.size(), ZHLN::CustomCursor::kVertexCount);
     ExpectEq(draw.surfaces.size(), ZHLN::CustomCursor::kVertexCount);
-    ExpectEq(draw.batches[0].texture, ZHLN::TextureHandle::Invalid);
+    ExpectEq(draw.batches[0].texture, ZHLN::TextureID::Invalid);
     ExpectEq(draw.batches[0].vertexStart, 0u);
     ExpectEq(draw.batches[0].vertexCount, static_cast<uint32_t>(ZHLN::CustomCursor::kVertexCount));
     ExpectFalse(draw.batches[0].useScissor);

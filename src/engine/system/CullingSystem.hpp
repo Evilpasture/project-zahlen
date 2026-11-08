@@ -57,7 +57,7 @@ class ZHLN_API CullingSystem {
 
   private:
     static void UpdateCore(CullingQuery query, const RenderContext& rc, const Camera& cam, bool engineCam, CullingScratch& scratch,
-                           CullingStats& stats, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
+                           CullingStats& stats, VisibilityList& outVisible, VisibilityList& outVisibleShadow);
 };
 
 // The eight world-space corners of a view-projection, in the order the debug

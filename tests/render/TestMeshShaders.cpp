@@ -14,6 +14,8 @@
 // Every GPU test degrades to a skip (not a failure) when the device does not
 // expose mesh shading, so this binary stays green on lavapipe/older hardware.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -205,7 +207,7 @@ struct MeshShaderTestSuite {
     // thrown away between tests. Creating a Vulkan instance per test is what
     // eventually exhausts the loader's static TLS and turns the tail of a
     // group into "vkCreateInstance: Found no drivers!".
-    static auto CreateTestEngine(uint32_t width = 320, uint32_t height = 240) -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine(uint32_t width = 320, uint32_t height = 240) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Mesh Shader Test",
             .width                 = width,
@@ -338,11 +340,11 @@ struct MeshShaderTestSuite {
         // stayed on the vertex pipeline and the mesh path was never exercised.
         std::expected<void, ZHLN::ErrorCode> procedural_meshes_carry_meshlet_streams() {
             auto engine      = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             struct Case {
                 const char* name;
@@ -350,22 +352,22 @@ struct MeshShaderTestSuite {
             };
 
             const std::array<Case, 3> cases = {
-                Case {.name = "box", .mesh = ZHLN::PrefabFactory::CreateBoxMesh(rc, {0.5f, 0.5f, 0.5f})},
-                Case {.name = "plane", .mesh = ZHLN::PrefabFactory::CreatePlaneMesh(rc, 4.0f)},
-                Case {.name = "tetrahedron", .mesh = ZHLN::PrefabFactory::CreateTetrahedronMesh(rc)},
+                Case {.name = "box", .mesh = ZHLN::PrefabFactory::CreateBoxMesh(engine.Graphics(), {0.5f, 0.5f, 0.5f})},
+                Case {.name = "plane", .mesh = ZHLN::PrefabFactory::CreatePlaneMesh(engine.Graphics(), 4.0f)},
+                Case {.name = "tetrahedron", .mesh = ZHLN::PrefabFactory::CreateTetrahedronMesh(engine.Graphics())},
             };
 
             bool allOk = true;
             for (const auto& c: cases) {
-                const bool hasStreams = c.mesh.meshletCount > 0 && c.mesh.meshletBuffer != ZHLN::BufferHandle::Invalid &&
-                                        c.mesh.meshletVertexBuffer != ZHLN::BufferHandle::Invalid && c.mesh.meshletTriBuffer != ZHLN::BufferHandle::Invalid;
+                const bool hasStreams = c.mesh.meshletCount > 0 && c.mesh.meshletBuffer != ZHLN::BufferID::Invalid &&
+                                        c.mesh.meshletVertexBuffer != ZHLN::BufferID::Invalid && c.mesh.meshletTriBuffer != ZHLN::BufferID::Invalid;
                 allOk &= ZHLN::Test::ExpectTrue(hasStreams);
 
                 // Meshlets are an ADDITIONAL view: the raw vertex pool must stay
                 // intact for BLAS builds and the vertex pipeline fallback.
-                allOk &= ZHLN::Test::ExpectTrue(c.mesh.posBuffer != ZHLN::BufferHandle::Invalid);
-                allOk &= ZHLN::Test::ExpectTrue(c.mesh.tangentFrameBuffer != ZHLN::BufferHandle::Invalid);
-                allOk &= ZHLN::Test::ExpectTrue(c.mesh.surfaceBuffer != ZHLN::BufferHandle::Invalid);
+                allOk &= ZHLN::Test::ExpectTrue(c.mesh.posBuffer != ZHLN::BufferID::Invalid);
+                allOk &= ZHLN::Test::ExpectTrue(c.mesh.tangentFrameBuffer != ZHLN::BufferID::Invalid);
+                allOk &= ZHLN::Test::ExpectTrue(c.mesh.surfaceBuffer != ZHLN::BufferID::Invalid);
                 allOk &= ZHLN::Test::ExpectTrue(
                     c.mesh.posBuffer != c.mesh.tangentFrameBuffer && c.mesh.posBuffer != c.mesh.surfaceBuffer &&
                     c.mesh.tangentFrameBuffer != c.mesh.surfaceBuffer
@@ -398,7 +400,7 @@ struct MeshShaderTestSuite {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
-            const auto enabledInfo = enabledEngine->GetRenderContext().GetInfo();
+            const auto enabledInfo = enabledEngine->Graphics().Info();
             if (!enabledInfo.meshShadingSupported) {
                 // Unsupported hardware must never claim the path is active.
                 ZHLN::Test::ExpectFalse(enabledInfo.meshShadingActive);
@@ -421,7 +423,7 @@ struct MeshShaderTestSuite {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
-            const auto disabledInfo = disabledEngine->GetRenderContext().GetInfo();
+            const auto disabledInfo = disabledEngine->Graphics().Info();
             ZHLN::Test::ExpectFalse(disabledInfo.meshShadingActive);
             if (disabledInfo.meshShadingActive) {
                 return std::unexpected(MeshShaderTestError::ConfigDidNotSelectPath);
@@ -447,7 +449,7 @@ struct MeshShaderTestSuite {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
-            if (!vertexEngine->GetRenderContext().GetInfo().meshShadingSupported) {
+            if (!vertexEngine->Graphics().Info().meshShadingSupported) {
                 ZHLN::Println("    [SKIP] VK_EXT_mesh_shader unsupported on this device; nothing to compare.");
                 return {};
             }
@@ -456,7 +458,7 @@ struct MeshShaderTestSuite {
             // camera fails the test instead of flowing off the end (-Wreturn-type).
             auto setupScene = [](ZHLN::Engine& engine) -> std::expected<void, ZHLN::ErrorCode> {
                 auto& reg = engine.GetRegistry();
-                auto& rc  = engine.GetRenderContext();
+                auto rc = engine.Graphics();
 
                 // --- Determinism ---------------------------------------------
                 // fullBright bypasses lighting/shadow variance...
@@ -477,7 +479,7 @@ struct MeshShaderTestSuite {
                         aa.state.mode        = ZHLN::AAMode::None;
                     });
                 }
-                rc.SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
+                rc.SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 
                 const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
                 if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
@@ -522,7 +524,7 @@ struct MeshShaderTestSuite {
                 return std::unexpected(setupResult.error());
             }
             const Image vertexA = capture(*vertexEngine, "headless_meshshader_vertex_a.ppm");
-            ZHLN::Test::ExpectFalse(vertexEngine->GetRenderContext().GetInfo().meshShadingActive);
+            ZHLN::Test::ExpectFalse(vertexEngine->Graphics().Info().meshShadingActive);
             const Image vertexB = capture(*vertexEngine, "headless_meshshader_vertex_b.ppm");
 
             auto meshEngine = acquire(true);
@@ -533,7 +535,7 @@ struct MeshShaderTestSuite {
                 return std::unexpected(setupResult.error());
             }
             const Image meshImage = capture(*meshEngine, "headless_meshshader_mesh.ppm");
-            ZHLN::Test::ExpectTrue(meshEngine->GetRenderContext().GetInfo().meshShadingActive);
+            ZHLN::Test::ExpectTrue(meshEngine->Graphics().Info().meshShadingActive);
 
             const uint32_t validationRaised = ZHLN::Test::ValidationErrorCount() - validationBefore;
 
@@ -665,7 +667,7 @@ struct MeshShaderTestSuite {
             if (!ZHLN::Test::ExpectTrue(vertexEngine != nullptr)) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
-            if (!vertexEngine->GetRenderContext().GetInfo().meshShadingSupported) {
+            if (!vertexEngine->Graphics().Info().meshShadingSupported) {
                 ZHLN::Println("    [SKIP] mesh shading unsupported; closeup test skipped.");
                 return {};
             }
@@ -687,7 +689,7 @@ struct MeshShaderTestSuite {
                         aa.state.mode = ZHLN::AAMode::None;
                     });
                 }
-                engine.GetRenderContext().SetAAState(ZHLN::AAState{.mode = ZHLN::AAMode::None});
+                engine.Graphics().SetAntiAliasing(ZHLN::AAState{.mode = ZHLN::AAMode::None});
 
                 // Camera 0.1-0.2m off the surface it is aimed at, the regime
                 // where the apex formulation used to cull what it was facing.
@@ -838,7 +840,7 @@ struct MeshShaderTestSuite {
             if (!ZHLN::Test::ExpectTrue(vertexEngine != nullptr)) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
-            if (!vertexEngine->GetRenderContext().GetInfo().meshShadingSupported) {
+            if (!vertexEngine->Graphics().Info().meshShadingSupported) {
                 ZHLN::Println("    [SKIP] mesh shading unsupported; double-sided plane test skipped.");
                 return {};
             }
@@ -859,7 +861,7 @@ struct MeshShaderTestSuite {
                     });
                 }
 
-                auto& rc = engine.GetRenderContext();
+                auto rc = engine.Graphics();
                 auto material = rc.CreateMaterial(ZHLN::MaterialDesc {
                     .doubleSided = true, .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.9f, 0.1f, 0.1f, 1.0f}
                 });
@@ -887,7 +889,7 @@ struct MeshShaderTestSuite {
                     }
                 );
                 const auto part = reg.Get<ZHLN::Components::MeshComponent>(plane);
-                const auto mesh = part ? rc.GetGPUMesh(part->meshAsset) : std::nullopt;
+                const auto mesh = part ? rc.Mesh(part->meshAsset) : std::nullopt;
                 return ZHLN::Test::ExpectTrue(mesh.has_value() && mesh->meshletCount > 0);
             };
 
@@ -903,7 +905,7 @@ struct MeshShaderTestSuite {
             if (!ZHLN::Test::ExpectTrue(meshEngine != nullptr)) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
-            if (!ZHLN::Test::ExpectTrue(meshEngine->GetRenderContext().GetInfo().meshShadingActive)) {
+            if (!ZHLN::Test::ExpectTrue(meshEngine->Graphics().Info().meshShadingActive)) {
                 return std::unexpected(MeshShaderTestError::ConfigDidNotSelectPath);
             }
             if (!setupBackplane(*meshEngine)) {

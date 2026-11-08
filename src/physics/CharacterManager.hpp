@@ -16,7 +16,7 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -48,17 +48,17 @@ struct CharacterManager {
     void Init(uint32_t maxBodies, PhysicsWorld* world);
     void Shutdown() noexcept;
 
-    void InitReservedSlot(BodyHandle handle, float groundOffset) noexcept;
+    void InitReservedSlot(BodyID handle, float groundOffset) noexcept;
 
     auto MaterializeCharacter(const CreateCharacterPayload& p, const JPH::ShapeRefC& shape, JPH::PhysicsSystem& physicsSystem) -> JPH::CharacterVirtual*;
     void DestroyCharacterSlot(uint32_t slot) noexcept;
 
-    [[nodiscard]] auto RecordDesiredVelocity(BodyHandle handle, JPH::Vec3Arg velocity) noexcept -> bool;
-    void               ApplyVelocityCommand(BodyHandle handle, JPH::Vec3Arg velocity) noexcept;
-    [[nodiscard]] auto ApplyPositionCommand(BodyHandle handle, JPH::RVec3Arg position) noexcept -> bool;
+    [[nodiscard]] auto RecordDesiredVelocity(BodyID handle, JPH::Vec3Arg velocity) noexcept -> bool;
+    void               ApplyVelocityCommand(BodyID handle, JPH::Vec3Arg velocity) noexcept;
+    [[nodiscard]] auto ApplyPositionCommand(BodyID handle, JPH::RVec3Arg position) noexcept -> bool;
 
-    [[nodiscard]] auto GetVelocity(BodyHandle handle) const noexcept -> JPH::Vec3;
-    [[nodiscard]] auto GetGroundOffset(BodyHandle handle) const noexcept -> float;
+    [[nodiscard]] auto GetVelocity(BodyID handle) const noexcept -> JPH::Vec3;
+    [[nodiscard]] auto GetGroundOffset(BodyID handle) const noexcept -> float;
 
     [[nodiscard]] auto ActiveSpan() const noexcept -> std::span<JPH::CharacterVirtual* const> {
         return std::span<JPH::CharacterVirtual* const>(activeCharacters.data(), activeCharacters.size());

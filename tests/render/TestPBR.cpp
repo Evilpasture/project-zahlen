@@ -1,6 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <AssetCooking/EnvironmentPreparation.hpp>
@@ -62,7 +64,7 @@ struct PBRTestSuite {
     // scene reset between tests. Creating a Vulkan instance per test is
     // what eventually exhausts the loader's static TLS and turns the tail
     // of the group into "vkCreateInstance: Found no drivers!".
-    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless PBR Test", .width = width, .height = height
         });
@@ -74,12 +76,12 @@ struct PBRTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> pbr_dielectric_vs_metallic_surface_response() {
             auto engine      = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             // Set Fullbright = 0 to evaluate full PBR lighting and tonemapping.
             // Scene levels are load-bearing: sun 220 + exposure 12 overexpose
@@ -220,12 +222,12 @@ struct PBRTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> pbr_roughness_distribution_broadening() {
             auto engine      = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
                 reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
@@ -417,11 +419,11 @@ struct PBRTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> pbr_hdr_sun_does_not_tint_shadowed_dielectric() {
             auto engine = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
             auto& reg = engine->GetRegistry();
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
             ZHLN::Test::Headless::DisableAA(*engine);
             const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
             if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
@@ -478,7 +480,7 @@ struct PBRTestSuite {
             ZHLN::AssetCooking::PrepareEnvironmentImage(hotspot);
             if (!hotspot.sun || hotspot.lightingRgba.empty()) return std::unexpected(PBRTestError::EnvironmentBakeFailed);
             const auto expectedSun = *hotspot.sun;
-            auto& assets = engine->GetAssetManager();
+            auto assets = engine->Assets();
             if (!assets.CacheEnvironmentImage("pbr_flat_hdr", std::move(flat)) ||
                 !assets.CacheEnvironmentImage("pbr_compact_hdr", std::move(hotspot))) {
                 return std::unexpected(PBRTestError::EnvironmentBakeFailed);
@@ -567,7 +569,7 @@ struct PBRTestSuite {
             auto engine = CreateTestEngine(640, 480);
             if (!engine) return std::unexpected(PBRTestError::EngineInitFailed);
             auto& reg = engine->GetRegistry();
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
             ZHLN::Test::Headless::DisableAA(*engine);
             const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
             if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
@@ -623,7 +625,7 @@ struct PBRTestSuite {
             ZHLN::AssetCooking::PrepareEnvironmentImage(env);
             if (!env.sun) return std::unexpected(PBRTestError::EnvironmentBakeFailed);
             const auto sunDirection = env.sun->direction;
-            if (!engine->GetAssetManager().CacheEnvironmentImage("pbr_shadowed_hdr", std::move(env)))
+            if (!engine->Assets().CacheEnvironmentImage("pbr_shadowed_hdr", std::move(env)))
                 return std::unexpected(PBRTestError::EnvironmentBakeFailed);
             ZHLN::Components::EnvironmentMapComponent environment;
             environment.source.assign("pbr_shadowed_hdr");
@@ -669,7 +671,7 @@ struct PBRTestSuite {
             if (!engine) return std::unexpected(PBRTestError::EngineInitFailed);
             ZHLN::Test::Headless::DisableAA(*engine);
             auto& reg = engine->GetRegistry();
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
             const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
             if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
             reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
@@ -697,7 +699,7 @@ struct PBRTestSuite {
             }
             ZHLN::AssetCooking::PrepareEnvironmentImage(env);
             if (env.sun ||
-                !engine->GetAssetManager().CacheEnvironmentImage("pbr_black_emissive_flat_ibl", std::move(env)))
+                !engine->Assets().CacheEnvironmentImage("pbr_black_emissive_flat_ibl", std::move(env)))
                 return std::unexpected(PBRTestError::EnvironmentBakeFailed);
             ZHLN::Components::EnvironmentMapComponent map;
             map.source.assign("pbr_black_emissive_flat_ibl");
@@ -742,12 +744,12 @@ struct PBRTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> pbr_fullbright_mode_override() {
             auto engine      = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             // Set Fullbright ON: Disables direct lighting/shadows and outputs raw G-buffer albedo directly
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();

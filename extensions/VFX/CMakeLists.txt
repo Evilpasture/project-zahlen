@@ -9,7 +9,7 @@
 # with its interface: CMake orders an implementation unit against the BMI it
 # belongs to, and that edge only exists inside one target.
 #
-# These are the extensions that do reach for the renderer -- BufferHandle, MaterialID
+# These are the extensions that do reach for the renderer -- BufferID, MaterialID
 # and the creative-works factory all appear in the exported structs -- so this
 # target links core publicly and is deliberately not something a CPU-only
 # consumer has to pull in.
@@ -53,7 +53,7 @@ target_sources(${TARGET_NAME}
 target_sources(${TARGET_NAME} PRIVATE ${ZHLN_VFX_SOURCES})
 
 # Core is a public dependency: Lightning.cppm's exported LightningComponent
-# carries BufferHandle, MaterialID and Entity members, and CombatFX.cppm and
+# carries BufferID, MaterialID and Entity members, and CombatFX.cppm and
 # Explosion.cppm include <Zahlen/ECS/Components.hpp> and <Zahlen/Render/Render.hpp>. A
 # consumer needs core's include path and its symbols, not just this archive.
 target_link_libraries(${TARGET_NAME} PUBLIC

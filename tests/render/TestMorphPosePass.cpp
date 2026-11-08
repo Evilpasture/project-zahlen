@@ -46,6 +46,9 @@
 // (up to four targets). This fixture exercises the same instantiate -> pose ->
 // extract -> shader path with a predictable authored base pose.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Animation/AnimationSystem.hpp>
@@ -130,11 +133,11 @@ struct MorphPosePassSuite {
 
     // Pooled, like every other suite in this group: the scene is what gets
     // thrown away between tests, and each test below spawns its own instances.
-    [[nodiscard]] static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
+    [[nodiscard]] static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineView {
         auto engine = ZHLN::Test::Headless::AcquireEngine(
             ZHLN::Test::Headless::EngineOptions {.appName = "Headless Morph Pose Pass", .width = 640, .height = 480}
         );
-        if (engine != nullptr) {
+        if (engine.Valid()) {
             ZHLN::Animation::Install(*engine);
         }
         return engine;
@@ -152,14 +155,14 @@ struct MorphPosePassSuite {
     [[nodiscard]] static auto BuildMorphPrefab(ZHLN::Engine& engine, bool degenerateClip) -> const ZHLN::ModelPrefab& {
         const std::string_view vPath = degenerateClip ? "zahlen_test_morph_pose_prefab_degenerate" : "zahlen_test_morph_pose_prefab";
         const ZHLN::AssetID    id    = ZHLN::HashAssetPath(vPath);
-        if (const auto existing = engine.GetAssetManager().GetCachedPrefab(id)) {
+        if (const auto existing = engine.Assets().CachedPrefab(id)) {
             return *existing;
         }
 
-        auto& rc     = engine.GetRenderContext();
+        auto rc = engine.Graphics();
         auto  prefab = std::make_unique<ZHLN::ModelPrefab>();
 
-        const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(rc, {0.6f, 0.6f, 0.6f}, {0.85f, 0.45f, 0.2f, 1.0f});
+        const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(engine->Graphics(), {0.6f, 0.6f, 0.6f}, {0.85f, 0.45f, 0.2f, 1.0f});
 
         // Deltas are float4-per-vertex blocks laid out target-major:
         // common.slang's GetMorphDisplacement reads
@@ -227,8 +230,8 @@ struct MorphPosePassSuite {
             prefab->animations.push_back(std::move(keyless));
         }
 
-        engine.GetAssetManager().CachePrefab(id, std::move(prefab));
-        return *engine.GetAssetManager().GetCachedPrefab(id);
+        engine.Assets().CachePrefab(id, std::move(prefab));
+        return *engine.Assets().CachedPrefab(id);
     }
 
     struct Instance {
@@ -288,13 +291,13 @@ struct MorphPosePassSuite {
         // exists and would normally override them on the first tick.
         std::expected<void, ZHLN::ErrorCode> idle_animator_preserves_authored_morph_weights() {
             auto engine = MorphPosePassSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
-            auto material = MorphPosePassSuite::CreateMorphMaterial(rc);
+            auto rc = engine->Graphics();
+            auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());
             if (!material) {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }
@@ -329,14 +332,14 @@ struct MorphPosePassSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> parallel_pose_pass_writes_weights_without_inserting_components() {
             auto engine = MorphPosePassSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
-            auto material = MorphPosePassSuite::CreateMorphMaterial(rc);
+            auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());
             if (!material) {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }
@@ -390,14 +393,14 @@ struct MorphPosePassSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> weights_channel_without_key_times_is_skipped_not_divided() {
             auto engine = MorphPosePassSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
-            auto material = MorphPosePassSuite::CreateMorphMaterial(rc);
+            auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());
             if (!material) {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }
@@ -466,12 +469,12 @@ struct MorphPosePassSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> morph_weights_deform_the_rendered_frame() {
             auto engine = MorphPosePassSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             // Straight-on view of the only mesh in the scene, so the frame is a
             // silhouette comparison and nothing else moves between captures.
@@ -486,7 +489,7 @@ struct MorphPosePassSuite {
             cam.fov      = 60.0f;
             ZHLN::Test::Headless::DisableAA(*engine);
 
-            auto material = MorphPosePassSuite::CreateMorphMaterial(rc);
+            auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());
             if (!material) {
                 return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
             }

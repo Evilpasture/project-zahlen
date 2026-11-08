@@ -17,6 +17,7 @@
 #include <Zahlen/Physics/Physics.hpp>
 #include <cmath>
 #include <optional>
+#include <vector>
 
 namespace ZHLN {
 
@@ -26,23 +27,23 @@ namespace {
     return state == Physics::SlotState::Alive || state == Physics::SlotState::PendingCreateRigid;
 }
 
-auto FindBodyHandle(const Physics::PhysicsWorld& world, JPH::BodyID bodyID) noexcept -> std::optional<Physics::BodyHandle> {
+auto FindBodyID(const Physics::PhysicsWorld& world, JPH::BodyID bodyID) noexcept -> std::optional<Physics::BodyID> {
     if (bodyID.IsInvalid()) [[unlikely]] {
         return std::nullopt;
     }
 
     const auto&    bt        = world.bodyTable;
     const uint32_t joltIndex = bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-    if (joltIndex >= bt.idToHandleMap.size()) [[unlikely]] {
+    if (joltIndex >= bt.joltIndexToBodyID.size()) [[unlikely]] {
         return std::nullopt;
     }
 
-    const uint64_t rawData = bt.idToHandleMap[joltIndex].load(std::memory_order::acquire);
+    const uint64_t rawData = bt.joltIndexToBodyID[joltIndex].load(std::memory_order::acquire);
     if (rawData == 0u) {
         return std::nullopt;
     }
 
-    const Physics::BodyHandle handle = Physics::BodyHandle::Unpack(rawData);
+    const Physics::BodyID handle = Physics::BodyID::Unpack(rawData);
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) [[unlikely]] {
         return std::nullopt;
     }
@@ -64,13 +65,13 @@ class QueryFilter final: public JPH::BodyFilter {
         if (inBodyID == _ignoreID) {
             return false;
         }
-        return FindBodyHandle(_world, inBodyID).has_value();
+        return FindBodyID(_world, inBodyID).has_value();
     }
 };
 
 } // namespace
 
-auto PhysicsContext::Raycast(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance, Physics::BodyHandle ignore) const -> Physics::RaycastResult {
+auto PhysicsContext::Raycast(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance, Physics::BodyID ignore) const -> Physics::RaycastResult {
     const JPH::Vec3 dir   = static_cast<JPH::Vec3>(direction);
     const auto&     world = GetWorld();
 
@@ -95,8 +96,8 @@ auto PhysicsContext::Raycast(ZHLN::Double3 origin, ZHLN::Float3 direction, float
 
     Physics::RaycastResult result {};
     if (hasHit) {
-        if (const auto handle = FindBodyHandle(world, hit.mBodyID)) {
-            result.handle   = *handle;
+        if (const auto handle = FindBodyID(world, hit.mBodyID)) {
+            result.bodyID   = *handle;
             result.hasHit   = true;
             result.fraction = hit.mFraction;
             result.position = ray.GetPointOnRay(hit.mFraction);
@@ -113,23 +114,19 @@ auto PhysicsContext::Raycast(ZHLN::Double3 origin, ZHLN::Float3 direction, float
     return result;
 }
 
-void PhysicsContext::RaycastAll(
-    ZHLN::Double3                       origin,
-    ZHLN::Float3                        direction,
-    float                               maxDistance,
-    JPH::Array<Physics::RaycastResult>& outResults,
-    Physics::BodyHandle                 ignore
-) const {
+auto PhysicsContext::RaycastAll(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance, Physics::BodyID ignore) const
+    -> std::vector<Physics::RaycastResult> {
+    std::vector<Physics::RaycastResult> results;
     const JPH::Vec3 dir   = static_cast<JPH::Vec3>(direction);
     const auto&     world = GetWorld();
 
     if (world.isStepping.load(std::memory_order::acquire)) {
-        return;
+        return results;
     }
 
     const float lengthSq = dir.LengthSq();
     if (lengthSq < 1e-6f) {
-        return;
+        return results;
     }
 
     const JPH::Vec3     scaledDir = dir.Normalized() * maxDistance;
@@ -154,8 +151,8 @@ void PhysicsContext::RaycastAll(
 
         for (const auto& hit: collector.mHits) {
             Physics::RaycastResult result {};
-            if (const auto handle = FindBodyHandle(world, hit.mBodyID)) {
-                result.handle   = *handle;
+            if (const auto handle = FindBodyID(world, hit.mBodyID)) {
+                result.bodyID   = *handle;
                 result.hasHit   = true;
                 result.fraction = hit.mFraction;
                 result.position = ray.GetPointOnRay(hit.mFraction);
@@ -166,28 +163,26 @@ void PhysicsContext::RaycastAll(
                 } else {
                     result.normal = JPH::Vec3::sAxisY();
                 }
-                outResults.push_back(result);
+                results.push_back(result);
             }
         }
     }
+    return results;
 }
 
-void PhysicsContext::RaycastAllPenetrations(
-    ZHLN::Double3                                  origin,
-    ZHLN::Float3                                   direction,
-    float                                          maxDistance,
-    JPH::Array<Physics::RaycastPenetrationResult>& outResults,
-    Physics::BodyHandle                            ignore
-) const {
+auto PhysicsContext::RaycastAllPenetrations(
+    ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance, Physics::BodyID ignore
+) const -> std::vector<Physics::RaycastPenetrationResult> {
+    std::vector<Physics::RaycastPenetrationResult> results;
     const JPH::Vec3 dir   = static_cast<JPH::Vec3>(direction);
     const auto&     world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
-        return;
+        return results;
     }
 
     const float lengthSq = dir.LengthSq();
     if (lengthSq < 1e-6f) {
-        return;
+        return results;
     }
 
     const JPH::Vec3     dirNorm   = dir.Normalized();
@@ -209,7 +204,7 @@ void PhysicsContext::RaycastAllPenetrations(
     collector.Sort();
 
     if (!collector.HadHit()) {
-        return;
+        return results;
     }
 
     struct IntermediateHit {
@@ -226,7 +221,7 @@ void PhysicsContext::RaycastAllPenetrations(
     hits.reserve(collector.mHits.size());
 
     for (const auto& hit: collector.mHits) {
-        if (FindBodyHandle(world, hit.mBodyID).has_value()) {
+        if (FindBodyID(world, hit.mBodyID).has_value()) {
             JPH::BodyLockRead lock(*lockInterface, hit.mBodyID);
             if (lock.Succeeded()) {
                 const JPH::RVec3 hitPos     = ray.GetPointOnRay(hit.mFraction);
@@ -251,7 +246,7 @@ void PhysicsContext::RaycastAllPenetrations(
         }
 
         const auto& entryHit = hits[i];
-        const auto  handle   = FindBodyHandle(world, entryHit.bodyID);
+        const auto  handle   = FindBodyID(world, entryHit.bodyID);
         if (!handle) {
             continue;
         }
@@ -260,7 +255,7 @@ void PhysicsContext::RaycastAllPenetrations(
 
         Physics::RaycastPenetrationResult res {};
         res.hasHit     = true;
-        res.handle     = *handle;
+        res.bodyID     = *handle;
         res.materialID = world.bodyTable.slotMaterialIDs[handle->index].load(std::memory_order::relaxed);
 
         if (!entryHit.isBackFace) {
@@ -295,14 +290,14 @@ void PhysicsContext::RaycastAllPenetrations(
         }
 
         res.thickness = static_cast<float>((res.exitPosition - res.entryPosition).Length());
-        outResults.push_back(res);
+        results.push_back(res);
     }
+    return results;
 }
 
-auto PhysicsContext::RaycastPenetration(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance, Physics::BodyHandle ignore) const
+auto PhysicsContext::RaycastPenetration(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance, Physics::BodyID ignore) const
     -> Physics::RaycastPenetrationResult {
-    JPH::Array<Physics::RaycastPenetrationResult> results;
-    RaycastAllPenetrations(origin, direction, maxDistance, results, ignore);
+    const auto results = RaycastAllPenetrations(origin, direction, maxDistance, ignore);
     if (!results.empty()) {
         return results[0];
     }
@@ -315,7 +310,7 @@ auto PhysicsContext::Shapecast(
     ZHLN::Float4          rot,
     ZHLN::Float3          direction,
     float                 maxDistance,
-    Physics::BodyHandle   ignore
+    Physics::BodyID   ignore
 ) const -> Physics::ShapeCastResult {
     const JPH::Vec3 dir   = static_cast<JPH::Vec3>(direction);
     const auto&     world = GetWorld();
@@ -347,8 +342,8 @@ auto PhysicsContext::Shapecast(
 
     Physics::ShapeCastResult result {};
     if (collector.HadHit()) {
-        if (const auto handle = FindBodyHandle(world, collector.mHit.mBodyID2)) {
-            result.handle       = *handle;
+        if (const auto handle = FindBodyID(world, collector.mHit.mBodyID2)) {
+            result.bodyID       = *handle;
             result.hasHit       = true;
             result.fraction     = collector.mHit.mFraction;
             result.contactPoint = JPH::RVec3(collector.mHit.mContactPointOn2);
@@ -361,10 +356,11 @@ auto PhysicsContext::Shapecast(
     return result;
 }
 
-void PhysicsContext::OverlapSphere(ZHLN::Double3 center, float radius, JPH::Array<Physics::BodyHandle>& outResults) const {
+auto PhysicsContext::OverlapSphere(ZHLN::Double3 center, float radius) const -> std::vector<Physics::BodyID> {
+    std::vector<Physics::BodyID> results;
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
-        return;
+        return results;
     }
 
     const JPH::SphereShapeSettings settings(radius);
@@ -376,16 +372,18 @@ void PhysicsContext::OverlapSphere(ZHLN::Double3 center, float radius, JPH::Arra
     query->CollideShape(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(static_cast<JPH::RVec3>(center)), {}, JPH::RVec3::sZero(), collector);
 
     for (const auto& hit: collector.mHits) {
-        if (const auto handle = FindBodyHandle(world, hit.mBodyID2)) {
-            outResults.push_back(*handle);
+        if (const auto handle = FindBodyID(world, hit.mBodyID2)) {
+            results.push_back(*handle);
         }
     }
+    return results;
 }
 
-void PhysicsContext::OverlapAABB(ZHLN::Double3 minBox, ZHLN::Double3 maxBox, JPH::Array<Physics::BodyHandle>& outResults) const {
+auto PhysicsContext::OverlapAABB(ZHLN::Double3 minBox, ZHLN::Double3 maxBox) const -> std::vector<Physics::BodyID> {
+    std::vector<Physics::BodyID> results;
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
-        return;
+        return results;
     }
 
     const JPH::AABox                                              box {static_cast<JPH::RVec3>(minBox), static_cast<JPH::RVec3>(maxBox)};
@@ -395,42 +393,46 @@ void PhysicsContext::OverlapAABB(ZHLN::Double3 minBox, ZHLN::Double3 maxBox, JPH
     query->CollideAABox(box, collector);
 
     for (const auto& hitID: collector.mHits) {
-        if (const auto handle = FindBodyHandle(world, hitID)) {
-            outResults.push_back(*handle);
+        if (const auto handle = FindBodyID(world, hitID)) {
+            results.push_back(*handle);
         }
     }
+    return results;
 }
 
-void PhysicsContext::QueryAABB(ZHLN::Float3 min, ZHLN::Float3 max, JPH::Array<Physics::BodyHandle>& outEntities) const {
+auto PhysicsContext::QueryAABB(ZHLN::Float3 min, ZHLN::Float3 max) const -> std::vector<Physics::BodyID> {
+    std::vector<Physics::BodyID> results;
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
-        return;
+        return results;
     }
 
     const JPH::AABox box(static_cast<JPH::Vec3>(min), static_cast<JPH::Vec3>(max));
 
     struct SimpleCollector final: public JPH::CollideShapeBodyCollector {
         const Physics::PhysicsWorld&     worldRef;
-        JPH::Array<Physics::BodyHandle>& out;
+        std::vector<Physics::BodyID>& out;
 
-        SimpleCollector(const Physics::PhysicsWorld& w, JPH::Array<Physics::BodyHandle>& o): worldRef(w), out(o) {
+        SimpleCollector(const Physics::PhysicsWorld& w, std::vector<Physics::BodyID>& o): worldRef(w), out(o) {
         }
 
         void AddHit(const JPH::BodyID& inBodyID) override {
-            if (const auto handle = FindBodyHandle(worldRef, inBodyID)) {
+            if (const auto handle = FindBodyID(worldRef, inBodyID)) {
                 out.push_back(*handle);
             }
         }
     };
 
-    SimpleCollector collector(world, outEntities);
+    SimpleCollector collector(world, results);
     world.system->GetBroadPhaseQuery().CollideAABox(box, collector);
+    return results;
 }
 
-void PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frustum, JPH::Array<Physics::BodyHandle>& outEntities) const {
+auto PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frustum) const -> std::vector<Physics::BodyID> {
+    std::vector<Physics::BodyID> results;
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
-        return;
+        return results;
     }
 
     const JPH::AABox frustumAABB = Math::CalculateFrustumAABB(viewProj);
@@ -438,13 +440,13 @@ void PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frus
     struct CullCollector final: public JPH::CollideShapeBodyCollector {
         const Physics::PhysicsWorld&     worldRef;
         const Frustum&                   frustumRef;
-        JPH::Array<Physics::BodyHandle>& out;
+        std::vector<Physics::BodyID>& out;
 
-        CullCollector(const Physics::PhysicsWorld& w, const Frustum& f, JPH::Array<Physics::BodyHandle>& o): worldRef(w), frustumRef(f), out(o) {
+        CullCollector(const Physics::PhysicsWorld& w, const Frustum& f, std::vector<Physics::BodyID>& o): worldRef(w), frustumRef(f), out(o) {
         }
 
         void AddHit(const JPH::BodyID& inBodyID) override {
-            if (const auto handle = FindBodyHandle(worldRef, inBodyID)) {
+            if (const auto handle = FindBodyID(worldRef, inBodyID)) {
                 JPH::BodyLockRead lock(worldRef.system->GetBodyLockInterfaceNoLock(), inBodyID);
                 if (lock.Succeeded()) {
                     const JPH::AABox bounds = lock.GetBody().GetWorldSpaceBounds();
@@ -459,8 +461,9 @@ void PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frus
         }
     };
 
-    CullCollector collector(world, frustum, outEntities);
+    CullCollector collector(world, frustum, results);
     world.system->GetBroadPhaseQuery().CollideAABox(frustumAABB, collector);
+    return results;
 }
 
 } // namespace ZHLN

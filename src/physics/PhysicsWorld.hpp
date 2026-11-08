@@ -19,7 +19,7 @@
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Physics/Physics.hpp>
-#include <Zahlen/Physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -44,8 +44,8 @@ inline constexpr std::size_t CACHE_LINE = 64;
 enum class ContactType : uint8_t { Added = 0, Persisted = 1, Removed = 2 };
 
 struct alignas(128) ContactEvent {
-    BodyHandle  body1;
-    BodyHandle  body2;
+    BodyID  body1;
+    BodyID  body2;
     JPH::Real   px, py, pz;
     float       nx, ny, nz;
     float       impulse;
@@ -138,7 +138,7 @@ struct PhysicsWorld {
     void               RegisterMaterial(uint32_t id, float friction, float restitution);
     [[nodiscard]] auto ResolveMaterial(uint32_t id) const -> MaterialData;
 
-    [[nodiscard]] auto AllocateConstraintHandle() -> ConstraintHandle;
+    [[nodiscard]] auto AllocateConstraintID() -> ConstraintID;
     void               RemoveConstraintSlot(uint32_t slot) noexcept;
 
     void ProcessCommands(std::span<Command> commands, CharacterManager& characters, TransformFrame& backFrame);

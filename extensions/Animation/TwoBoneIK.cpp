@@ -33,7 +33,7 @@ void TwoBoneIKSystem::Update(
     for (const Entity entity: query.Entities<TwoBoneIKComponent>()) {
         const auto animComp = query.Get<Components::AnimatorComponent>(entity);
         const auto ikComp   = query.Get<TwoBoneIKComponent>(entity);
-        if (!animComp || !ikComp || !animComp->animationHandle.IsValid()) {
+        if (!animComp || !ikComp || !animComp->animationID.IsValid()) {
             continue;
         }
 
@@ -76,7 +76,7 @@ void TwoBoneIKSystem::Update(
             };
         }
 
-        anim->SetIKChains(animComp->animationHandle, std::span<const Animation::IKChain> {translated.data(), count});
+        anim->SetIKChains(animComp->animationID, std::span<const Animation::IKChain> {translated.data(), count});
     }
 }
 

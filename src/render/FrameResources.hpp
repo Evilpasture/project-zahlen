@@ -7,7 +7,7 @@
 
 #include "vulkan/Rendering.hpp"
 #include "vulkan/core/FrameStorage.hpp"
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <cstdint>
 
 namespace ZHLN {
@@ -71,7 +71,7 @@ struct FrameResources {
             shadowTileBuffers(resources.shadowTileBuffers[index]), instanceDataBuffers(resources.instanceDataBuffers[index]),
             indirectCommandsBuffers(resources.indirectCommandsBuffers[index]), indirectCommandsBuffersPass2(resources.indirectCommandsBuffersPass2[index]),
             secondPassCandidatesBuffers(resources.secondPassCandidatesBuffers[index]), secondPassCountBuffers(resources.secondPassCountBuffers[index]),
-            tlas(resources.tlas[index]), tlasAddresses(resources.tlasAddresses[index]), debugMeshHandles(resources.debugMeshHandles[index]),
+            tlas(resources.tlas[index]), tlasAddresses(resources.tlasAddresses[index]), debugMeshIDs(resources.debugMeshIDs[index]),
             currentJoint(resources.jointBuffers[resources.currentJointSlot]), previousJoint(resources.jointBuffers[resources.previousJointSlot]) {
         }
 
@@ -90,7 +90,7 @@ struct FrameResources {
         Vk::Buffer&                secondPassCountBuffers;
         Vk::AccelerationStructure& tlas;
         Vk::DeviceAddress<>&       tlasAddresses;
-        BufferHandle&              debugMeshHandles;
+        BufferID&              debugMeshIDs;
         Vk::Buffer&                currentJoint;
         Vk::Buffer&                previousJoint;
     };
@@ -99,7 +99,7 @@ struct FrameResources {
     PerFrame<Vk::Buffer>                tlasBuffer;
     PerFrame<Vk::Buffer>                tlasScratchBuffer;
     PerFrame<Vk::Buffer>                tlasInstanceBuffers;
-    PerFrame<BufferHandle>              debugMeshHandles;
+    PerFrame<BufferID>              debugMeshIDs;
 
     void Destroy(Vk::Allocator& allocator) noexcept {
         for (auto& accel: tlas) {

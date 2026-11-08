@@ -14,7 +14,7 @@
 #include <Jolt/Physics/Body/MotionType.h>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
-#include <Zahlen/Physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -52,8 +52,8 @@ struct SlotPredicate {
 
 // Fixed-capacity generational slot map bounded strictly by `cfg.maxBodies`.
 // Because no buffer ever reallocates after `Init()`, `generations`, `slotStates`,
-// `slotBodyIDs`, and `idToHandleMap` expose stable addresses for lock-free
-// spatial query filtering and handle validation across worker threads.
+// `slotBodyIDs`, and `joltIndexToBodyID` expose stable addresses for lock-free
+// spatial query filtering and ID validation across worker threads.
 struct alignas(64) BodyTable {
     mutable ZHLN::Mutex  allocMutex {};
     ZHLN::Atomic<size_t> count {0};
@@ -65,7 +65,7 @@ struct alignas(64) BodyTable {
     JPH::Array<ZHLN::Atomic<uint8_t>>  slotMotionTypes;
     JPH::Array<ZHLN::Atomic<uint32_t>> slotBodyIDs;
     JPH::Array<ZHLN::Atomic<uint32_t>> slotMaterialIDs;
-    JPH::Array<ZHLN::Atomic<uint64_t>> idToHandleMap;
+    JPH::Array<ZHLN::Atomic<uint64_t>> joltIndexToBodyID;
     JPH::Array<const void*>            joltBodyPtrs;
 
     JPH::Array<uint32_t>    slotToDense;
@@ -90,9 +90,9 @@ struct alignas(64) BodyTable {
         slotStates[slot].store(static_cast<uint8_t>(state), std::memory_order::release);
     }
 
-    [[nodiscard]] auto ReserveSlot(SlotState pendingState, JPH::EMotionType motion, JPH::RVec3Arg spawnPos, JPH::QuatArg spawnRot) -> BodyHandle;
-    [[nodiscard]] auto TryMarkPendingDestroy(BodyHandle handle) noexcept -> bool;
-    [[nodiscard]] auto IsSlotActive(BodyHandle handle) const noexcept -> bool;
+    [[nodiscard]] auto ReserveSlot(SlotState pendingState, JPH::EMotionType motion, JPH::RVec3Arg spawnPos, JPH::QuatArg spawnRot) -> BodyID;
+    [[nodiscard]] auto TryMarkPendingDestroy(BodyID handle) noexcept -> bool;
+    [[nodiscard]] auto IsSlotActive(BodyID handle) const noexcept -> bool;
     void               RemoveDenseAndReleaseSlot(uint32_t slot, TransformFrame& backFrame) noexcept;
 };
 

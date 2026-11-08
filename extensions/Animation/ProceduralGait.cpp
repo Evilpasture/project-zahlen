@@ -497,7 +497,7 @@ void SolveLegGrounding(
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
-    Physics::BodyHandle            ignoredPhysicsHandle,
+    Physics::BodyID            ignoredPhysicsID,
     float                          ikWeight,
     bool                           preserveAuthoredFootXZ,
     bool                           worldLockFeet,
@@ -527,12 +527,12 @@ void SolveLegGrounding(
         JPH::Vec3 probeWorld   = (planted && lockValid && !enteringPlant) ? lockedWorld : desiredWorld;
         probeWorld.SetY(desiredWorld.GetY());
 
-        const auto hit = physics.Raycast(probeWorld + JPH::Vec3(0.0f, 0.75f, 0.0f), {0.0f, -1.0f, 0.0f}, 1.80f, ignoredPhysicsHandle);
+        const auto hit = physics.Raycast(probeWorld + JPH::Vec3(0.0f, 0.75f, 0.0f), {0.0f, -1.0f, 0.0f}, 1.80f, ignoredPhysicsID);
 
         FootContact contact {.position = desiredWorld, .normal = hit.hasHit ? SafeNormalized(hit.normal, JPH::Vec3::sAxisY()) : JPH::Vec3::sAxisY()};
         if (hit.hasHit) {
             const float maxCorrection    = std::max(maxFootHeightCorrection, 0.0f);
-            const float heightCorrection = std::clamp(JPH::Vec3(hit.position).GetY() - desiredWorld.GetY(), -maxCorrection, maxCorrection);
+            const float heightCorrection = std::clamp(static_cast<float>(hit.position.y) - desiredWorld.GetY(), -maxCorrection, maxCorrection);
             contact.position.SetY(desiredWorld.GetY() + heightCorrection);
         }
 

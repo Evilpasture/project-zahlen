@@ -101,7 +101,7 @@ enum class DescriptorHeapError : uint8_t {
 };
 
 template <DescriptorHeapType Heap, VkDescriptorType Type>
-struct HeapHandle {
+struct DescriptorSlotID {
     uint32_t index = kInvalidIndex;
 
     static constexpr uint32_t kInvalidIndex = ~0U;
@@ -113,35 +113,35 @@ struct HeapHandle {
         return Valid();
     }
 
-    constexpr bool operator==(const HeapHandle&) const noexcept = default;
+    constexpr bool operator==(const DescriptorSlotID&) const noexcept = default;
 };
 
 template <DescriptorHeapType Heap, VkDescriptorType Type>
-inline constexpr HeapHandle<Heap, Type> kInvalidHandle {HeapHandle<Heap, Type>::kInvalidIndex};
+inline constexpr DescriptorSlotID<Heap, Type> kInvalidSlotID {DescriptorSlotID<Heap, Type>::kInvalidIndex};
 
-using TextureHandle               = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
-using StorageImageHandle          = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
-using UniformBufferHandle         = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
-using StorageBufferHandle         = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER>;
-using SamplerHandle               = HeapHandle<DescriptorHeapType::Samplers, VK_DESCRIPTOR_TYPE_SAMPLER>;
-using AccelerationStructureHandle = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR>;
+using TextureSlotID               = DescriptorSlotID<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
+using StorageImageSlotID          = DescriptorSlotID<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
+using UniformBufferSlotID         = DescriptorSlotID<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
+using StorageBufferSlotID         = DescriptorSlotID<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER>;
+using SamplerSlotID               = DescriptorSlotID<DescriptorHeapType::Samplers, VK_DESCRIPTOR_TYPE_SAMPLER>;
+using AccelerationStructureSlotID = DescriptorSlotID<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR>;
 
 template <VkDescriptorType Type>
 concept ValidResourceDescriptorType = Type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || Type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
                                       Type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || Type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
                                       Type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
 
-inline constexpr TextureHandle               kInvalidTextureHandle       = kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
-inline constexpr StorageImageHandle          kInvalidStorageImageHandle  = kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
-inline constexpr UniformBufferHandle         kInvalidUniformBufferHandle = kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
-inline constexpr StorageBufferHandle         kInvalidStorageBufferHandle = kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER>;
-inline constexpr SamplerHandle               kInvalidSamplerHandle       = kInvalidHandle<DescriptorHeapType::Samplers, VK_DESCRIPTOR_TYPE_SAMPLER>;
-inline constexpr AccelerationStructureHandle kInvalidAccelerationStructureHandle =
-    kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR>;
+inline constexpr TextureSlotID               kInvalidTextureSlotID       = kInvalidSlotID<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
+inline constexpr StorageImageSlotID          kInvalidStorageImageSlotID  = kInvalidSlotID<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
+inline constexpr UniformBufferSlotID         kInvalidUniformBufferSlotID = kInvalidSlotID<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
+inline constexpr StorageBufferSlotID         kInvalidStorageBufferSlotID = kInvalidSlotID<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER>;
+inline constexpr SamplerSlotID               kInvalidSamplerSlotID       = kInvalidSlotID<DescriptorHeapType::Samplers, VK_DESCRIPTOR_TYPE_SAMPLER>;
+inline constexpr AccelerationStructureSlotID kInvalidAccelerationStructureSlotID =
+    kInvalidSlotID<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR>;
 
-static_assert(sizeof(TextureHandle) == sizeof(uint32_t));
-static_assert(std::is_standard_layout_v<TextureHandle>);
-static_assert(std::is_trivially_copyable_v<TextureHandle>);
+static_assert(sizeof(TextureSlotID) == sizeof(uint32_t));
+static_assert(std::is_standard_layout_v<TextureSlotID>);
+static_assert(std::is_trivially_copyable_v<TextureSlotID>);
 
 // -----------------------------------------------------------------------------
 // Passive Descriptor Staging Batches
@@ -198,19 +198,19 @@ class ResourceWriteBatch {
   public:
     ResourceWriteBatch() noexcept = default;
 
-    void AddImage(TextureHandle handle, ImageView view, VkImageLayout layout) noexcept {
+    void AddImage(TextureSlotID handle, ImageView view, VkImageLayout layout) noexcept {
         if (handle.Valid() && view.Handle() != VK_NULL_HANDLE) {
             _entries.push_back(ResourceWriteEntry::Image(handle.index, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, view, layout));
         }
     }
 
-    void AddStorageImage(StorageImageHandle handle, ImageView view, VkImageLayout layout) noexcept {
+    void AddStorageImage(StorageImageSlotID handle, ImageView view, VkImageLayout layout) noexcept {
         if (handle.Valid() && view.Handle() != VK_NULL_HANDLE) {
             _entries.push_back(ResourceWriteEntry::Image(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, view, layout));
         }
     }
 
-    void AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept {
+    void AddBuffer(StorageBufferSlotID handle, BufferSlice slice) noexcept {
         if (handle.Valid()) {
             _entries.push_back(
                 ResourceWriteEntry::Address(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, {.address = slice.Address().Get(), .size = slice.Size()})
@@ -218,7 +218,7 @@ class ResourceWriteBatch {
         }
     }
 
-    void AddBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept {
+    void AddBuffer(UniformBufferSlotID handle, BufferSlice slice) noexcept {
         if (handle.Valid()) {
             _entries.push_back(
                 ResourceWriteEntry::Address(handle.index, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {.address = slice.Address().Get(), .size = slice.Size()})
@@ -226,7 +226,7 @@ class ResourceWriteBatch {
         }
     }
 
-    void AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept {
+    void AddAccelerationStructure(AccelerationStructureSlotID handle, VkDeviceAddress address) noexcept {
         if (handle.Valid()) {
             _entries.push_back(ResourceWriteEntry::Address(handle.index, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, {.address = address, .size = 0}));
         }
@@ -259,7 +259,7 @@ class SamplerWriteBatch {
   public:
     SamplerWriteBatch() noexcept = default;
 
-    void AddSampler(SamplerHandle handle, Sampler sampler) noexcept {
+    void AddSampler(SamplerSlotID handle, Sampler sampler) noexcept {
         if (handle.Valid()) {
             _entries.push_back({.slot = handle.index, .sampler = sampler});
         }
@@ -375,7 +375,7 @@ class DescriptorHeap {
     void Write(const ResourceWriteBatch& batch) noexcept;
     void Write(const SamplerWriteBatch& batch) noexcept;
     void WriteResource(const ResourceWriteEntry& entry) noexcept;
-    void WriteSampler(SamplerHandle handle, Sampler sampler) noexcept;
+    void WriteSampler(SamplerSlotID handle, Sampler sampler) noexcept;
 
     // -------------------------------------------------------------------------
     // Pipeline Mapping Resolution (Heap resolves slot -> byte offset/stride)
@@ -474,56 +474,56 @@ class HeapManager {
     // Registration: slot assignment and descriptor write are one operation, so a
     // handle that exists is a handle that is already written.
     // -------------------------------------------------------------------------
-    [[nodiscard]] auto RegisterSampler(Sampler sampler) noexcept -> std::expected<SamplerHandle, ErrorCode>;
+    [[nodiscard]] auto RegisterSampler(Sampler sampler) noexcept -> std::expected<SamplerSlotID, ErrorCode>;
 
     // `SamplerAt(i)` builds the i-th variant, so the caller describes the array
     // (the nine material address-mode combinations) instead of materializing one.
     template <typename SamplerAt>
-    [[nodiscard]] auto RegisterSamplerArray(uint32_t count, SamplerAt&& samplerAt) noexcept -> std::expected<SamplerHandle, ErrorCode> {
+    [[nodiscard]] auto RegisterSamplerArray(uint32_t count, SamplerAt&& samplerAt) noexcept -> std::expected<SamplerSlotID, ErrorCode> {
         auto base = ReserveSamplerRange(count);
         if (!base) [[unlikely]] {
             return base;
         }
         SamplerWriteBatch batch;
         for (uint32_t i = 0; i < count; ++i) {
-            batch.AddSampler(SamplerHandle {base->index + i}, samplerAt(i));
+            batch.AddSampler(SamplerSlotID {base->index + i}, samplerAt(i));
         }
         WriteSamplers(batch);
         return base;
     }
 
-    [[nodiscard]] auto RegisterImage(ImageView view, VkImageLayout layout) noexcept -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto RegisterStorageImage(ImageView view, VkImageLayout layout) noexcept -> std::expected<StorageImageHandle, ErrorCode>;
-    [[nodiscard]] auto RegisterStorageBuffer(BufferSlice slice) noexcept -> std::expected<StorageBufferHandle, ErrorCode>;
-    [[nodiscard]] auto RegisterUniformBuffer(BufferSlice slice) noexcept -> std::expected<UniformBufferHandle, ErrorCode>;
-    [[nodiscard]] auto RegisterAccelerationStructure(VkDeviceAddress address) noexcept -> std::expected<AccelerationStructureHandle, ErrorCode>;
+    [[nodiscard]] auto RegisterImage(ImageView view, VkImageLayout layout) noexcept -> std::expected<TextureSlotID, ErrorCode>;
+    [[nodiscard]] auto RegisterStorageImage(ImageView view, VkImageLayout layout) noexcept -> std::expected<StorageImageSlotID, ErrorCode>;
+    [[nodiscard]] auto RegisterStorageBuffer(BufferSlice slice) noexcept -> std::expected<StorageBufferSlotID, ErrorCode>;
+    [[nodiscard]] auto RegisterUniformBuffer(BufferSlice slice) noexcept -> std::expected<UniformBufferSlotID, ErrorCode>;
+    [[nodiscard]] auto RegisterAccelerationStructure(VkDeviceAddress address) noexcept -> std::expected<AccelerationStructureSlotID, ErrorCode>;
 
     // -------------------------------------------------------------------------
     // Reservation: only for handles whose payload cannot exist yet, because the
     // mapping that addresses them is baked into a pipeline first. The result is a
     // typed capability, never a slot index, and it is expected to be bound.
     // -------------------------------------------------------------------------
-    [[nodiscard]] auto ReserveSampler() noexcept -> std::expected<SamplerHandle, ErrorCode>;
-    [[nodiscard]] auto ReserveImage() noexcept -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto ReserveSamplerRange(uint32_t count) noexcept -> std::expected<SamplerHandle, ErrorCode>;
-    [[nodiscard]] auto ReserveImageRange(uint32_t count) noexcept -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] auto ReserveSampler() noexcept -> std::expected<SamplerSlotID, ErrorCode>;
+    [[nodiscard]] auto ReserveImage() noexcept -> std::expected<TextureSlotID, ErrorCode>;
+    [[nodiscard]] auto ReserveSamplerRange(uint32_t count) noexcept -> std::expected<SamplerSlotID, ErrorCode>;
+    [[nodiscard]] auto ReserveImageRange(uint32_t count) noexcept -> std::expected<TextureSlotID, ErrorCode>;
 
     // -------------------------------------------------------------------------
     // Binding a payload to a handle, registered or reserved.
     // -------------------------------------------------------------------------
-    void BindSampler(SamplerHandle handle, Sampler sampler) noexcept;
-    void BindImage(TextureHandle handle, ImageView view, VkImageLayout layout) noexcept;
-    void BindStorageImage(StorageImageHandle handle, ImageView view, VkImageLayout layout) noexcept;
-    void BindStorageBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
-    void BindUniformBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
-    void BindAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
+    void BindSampler(SamplerSlotID handle, Sampler sampler) noexcept;
+    void BindImage(TextureSlotID handle, ImageView view, VkImageLayout layout) noexcept;
+    void BindStorageImage(StorageImageSlotID handle, ImageView view, VkImageLayout layout) noexcept;
+    void BindStorageBuffer(StorageBufferSlotID handle, BufferSlice slice) noexcept;
+    void BindUniformBuffer(UniformBufferSlotID handle, BufferSlice slice) noexcept;
+    void BindAccelerationStructure(AccelerationStructureSlotID handle, VkDeviceAddress address) noexcept;
     void WriteResources(const ResourceWriteBatch& batch) noexcept;
     void WriteSamplers(const SamplerWriteBatch& batch) noexcept;
 
-    void ReleaseSampler(SamplerHandle handle) noexcept;
+    void ReleaseSampler(SamplerSlotID handle) noexcept;
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>
-    void ReleaseResource(HeapHandle<DescriptorHeapType::Resources, Type> handle) noexcept {
+    void ReleaseResource(DescriptorSlotID<DescriptorHeapType::Resources, Type> handle) noexcept {
         if (handle.Valid()) {
             FreeStaticResourceSlot(handle.index);
         }
@@ -534,10 +534,10 @@ class HeapManager {
     // layout; these append semantic entries naming slots, and Materialize()
     // delegates byte-offset resolution to the target heap.
     // -------------------------------------------------------------------------
-    void ApplySamplerMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerHandle handle) const noexcept;
-    void ApplySamplerArrayMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerHandle base) const noexcept;
-    void ApplySampledImageMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, TextureHandle handle) const noexcept;
-    void ApplyBindlessTextureArrayMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, TextureHandle base) const noexcept;
+    void ApplySamplerMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerSlotID handle) const noexcept;
+    void ApplySamplerArrayMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, SamplerSlotID base) const noexcept;
+    void ApplySampledImageMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, TextureSlotID handle) const noexcept;
+    void ApplyBindlessTextureArrayMapping(HeapMappingTable& mappings, uint32_t set, uint32_t binding, TextureSlotID base) const noexcept;
     void ApplyPushIndexMapping(
         HeapMappingTable&           mappings,
         uint32_t                    set,
@@ -551,11 +551,11 @@ class HeapManager {
     /// mapping entry that points at it.
     [[nodiscard]] auto ApplyNewSamplerMapping(
         HeapMappingTable& mappings, uint32_t set, uint32_t binding, VkSpirvResourceTypeFlagsEXT mask
-    ) noexcept -> std::expected<SamplerHandle, ErrorCode>;
+    ) noexcept -> std::expected<SamplerSlotID, ErrorCode>;
 
     /// Pairs a freshly allocated sampler with an entry that already maps an image
     /// (COMBINED_IMAGE_SAMPLER).
-    [[nodiscard]] auto ApplyPairedSamplerMapping(DescriptorMapping& entry) noexcept -> std::expected<SamplerHandle, ErrorCode>;
+    [[nodiscard]] auto ApplyPairedSamplerMapping(DescriptorMapping& entry) noexcept -> std::expected<SamplerSlotID, ErrorCode>;
 
     /// The API boundary: tells each DescriptorHeap to materialize its semantic
     /// `mappings` into `out` as the driver struct.

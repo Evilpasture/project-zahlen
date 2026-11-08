@@ -122,7 +122,7 @@ using ZHLN::Test::Headless::TickFrames;
 //
 // Pooled: one engine per resolution for the whole binary, with the scene
 // reset between tests. See the engine-reuse notes in HeadlessEngineFixture.
-[[nodiscard]] inline auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
+[[nodiscard]] inline auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineView {
     return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
         .appName               = "Headless Lighting RT Test",
         .width                 = width,

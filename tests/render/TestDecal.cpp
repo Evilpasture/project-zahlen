@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/TargetCameraFixture.hpp"
@@ -48,7 +49,7 @@ struct DecalTestSuite {
     // scene reset between tests. Creating a Vulkan instance per test is
     // what eventually exhausts the loader's static TLS and turns the tail
     // of the group into "vkCreateInstance: Found no drivers!".
-    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless Decal Test", .width = width, .height = height
         });
@@ -78,19 +79,19 @@ struct DecalTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> decal_component_registration_and_setup() {
             auto engine      = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(DecalTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             // 1. Create a 64x64 bright yellow procedural decal texture
             auto                yellowPixels = GenerateCircularDecalTexture(64, 255, 230, 20);
-            ZHLN::TextureHandle decalTex     = rc.CreateProceduralTexture("vfx_test_decal_yellow", {64, 64}, yellowPixels, true);
+            ZHLN::TextureID decalTex     = rc.CreateProceduralTexture("vfx_test_decal_yellow", {64, 64}, yellowPixels, true);
 
-            ZHLN::Test::ExpectTrue(decalTex != ZHLN::TextureHandle::Invalid);
-            if (decalTex == ZHLN::TextureHandle::Invalid) {
+            ZHLN::Test::ExpectTrue(decalTex != ZHLN::TextureID::Invalid);
+            if (decalTex == ZHLN::TextureID::Invalid) {
                 return std::unexpected(DecalTestError::ProceduralTextureFailed);
             }
 
@@ -105,7 +106,7 @@ struct DecalTestSuite {
                 decalEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("TestDecalEntity")},
                 ZHLN::Components::TransformComponent {.position = decalPos, .rotation = decalRot, .scale = decalScale},
                 ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
-                ZHLN::Components::DecalComponent {.albedoMap = decalTex, .normalMap = ZHLN::TextureHandle::Invalid, .roughness = 0.85f, .metallic = 0.05f}
+                ZHLN::Components::DecalComponent {.albedoMap = decalTex, .normalMap = ZHLN::TextureID::Invalid, .roughness = 0.85f, .metallic = 0.05f}
             );
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(decalEnt));
@@ -127,7 +128,7 @@ struct DecalTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> decal_surface_projection_and_pixel_verification() {
             auto engine      = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(DecalTestError::EngineInitFailed);
             }
 
@@ -137,7 +138,7 @@ struct DecalTestSuite {
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             // Set Fullbright to test raw G-buffer decal color stamping without lighting variance
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -183,7 +184,7 @@ struct DecalTestSuite {
 
             // 3. Create solid red procedural decal texture (R=255, G=0, B=0, A=255)
             auto                redPixels   = GenerateCircularDecalTexture(64, 255, 0, 0);
-            ZHLN::TextureHandle redDecalTex = rc.CreateProceduralTexture("vfx_test_decal_red", {64, 64}, redPixels, true);
+            ZHLN::TextureID redDecalTex = rc.CreateProceduralTexture("vfx_test_decal_red", {64, 64}, redPixels, true);
 
             // 4. Spawn Decal centered on the wall (at Z = -2.0m, Scale 2.5m x 2.5m x 2.0m depth)
             const JPH::Vec3  decalPos(0.0f, 1.5f, -2.0f);
@@ -196,7 +197,7 @@ struct DecalTestSuite {
                 decalEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("ProjectedRedDecal")},
                 ZHLN::Components::TransformComponent {.position = decalPos, .rotation = decalRot, .scale = decalScale},
                 ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
-                ZHLN::Components::DecalComponent {.albedoMap = redDecalTex, .normalMap = ZHLN::TextureHandle::Invalid, .roughness = 0.90f, .metallic = 0.0f}
+                ZHLN::Components::DecalComponent {.albedoMap = redDecalTex, .normalMap = ZHLN::TextureID::Invalid, .roughness = 0.90f, .metallic = 0.0f}
             );
 
             // 5. Simulate 10 frames of G-buffer, Decal pass, and lighting resolution
@@ -252,12 +253,12 @@ struct DecalTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> decal_bounding_box_volume_clipping() {
             auto engine      = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(DecalTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
@@ -283,7 +284,7 @@ struct DecalTestSuite {
 
             // 3. Small decal positioned tightly around the front wall (depth extent = 1.0m)
             auto                bluePixels   = GenerateCircularDecalTexture(64, 0, 120, 255);
-            ZHLN::TextureHandle blueDecalTex = rc.CreateProceduralTexture("vfx_test_decal_blue", {64, 64}, bluePixels, true);
+            ZHLN::TextureID blueDecalTex = rc.CreateProceduralTexture("vfx_test_decal_blue", {64, 64}, bluePixels, true);
 
             const JPH::Vec3  decalPos(0.0f, 1.5f, -2.0f);
             const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(decalPos, {0.0f, 0.0f, 0.0f, 1.0f}, {1.5f, 1.5f, 1.0f});

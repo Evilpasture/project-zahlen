@@ -47,7 +47,7 @@ struct ViewmodelTestSuite {
     // thrown away between tests. Creating a Vulkan instance per test is what
     // eventually exhausts the loader's static TLS and turns the tail of a
     // group into "vkCreateInstance: Found no drivers!".
-    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Viewmodel Test",
             .width                 = width,
@@ -61,7 +61,7 @@ struct ViewmodelTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> viewmodel_fov_decoupling_invariants() {
             auto engine      = CreateTestEngine(1280, 720);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
@@ -103,7 +103,7 @@ struct ViewmodelTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> viewmodel_draw_flag_pipeline_routing() {
             auto engine      = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
@@ -151,7 +151,7 @@ struct ViewmodelTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> viewmodel_depth_priority_and_pixel_verification() {
             auto engine      = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 

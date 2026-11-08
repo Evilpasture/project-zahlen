@@ -11,7 +11,7 @@
 #include "vulkan/diagnostics/GPUDiagnostics.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <array>
 #include <cstdint>
@@ -94,11 +94,11 @@ class PipelineRegistry {
         }
     }
 
-    void Destroy(PipelineHandle handle);
+    void Destroy(PipelineID handle);
 
     void RetireAll() noexcept;
 
-    [[nodiscard]] auto Resolve(PipelineHandle handle) const noexcept -> NativeMaterial* {
+    [[nodiscard]] auto Resolve(PipelineID handle) const noexcept -> NativeMaterial* {
         return _materials.Resolve(handle);
     }
 
@@ -177,8 +177,8 @@ class PipelineRegistry {
             }
         }
 
-        const PipelineHandle handle = _materials.Create();
-        if (handle == PipelineHandle::Invalid) {
+        const PipelineID handle = _materials.Create();
+        if (handle == PipelineID::Invalid) {
             return std::unexpected(MaterialCreationError::MaterialSlotsExhausted);
         }
 
@@ -206,9 +206,9 @@ class PipelineRegistry {
     std::array<Vk::Pipeline, kPipelineVariantCount> _sharedPipelines {};
     std::array<bool, kPipelineVariantCount>         _meshVariantAttempted {};
 
-    GenerationalPool<NativeMaterial, 2048, PipelineHandle> _materials;
+    GenerationalPool<NativeMaterial, 2048, PipelineID> _materials;
 };
 
-static_assert(std::is_same_v<decltype(std::declval<const PipelineRegistry&>().Resolve(std::declval<PipelineHandle>())), NativeMaterial*>);
+static_assert(std::is_same_v<decltype(std::declval<const PipelineRegistry&>().Resolve(std::declval<PipelineID>())), NativeMaterial*>);
 
 } // namespace ZHLN

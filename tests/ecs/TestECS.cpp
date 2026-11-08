@@ -44,7 +44,7 @@ struct CountedComponent {
 };
 
 enum class ECSTestError : uint8_t {
-    EntityGenerationMismatch ZHLN_ANNOTATION(ZHLN::Description<"Recycled entity handle failed generation check.">{}) = 1,
+    EntityGenerationMismatch ZHLN_ANNOTATION(ZHLN::Description<"Recycled entity ID failed generation check.">{}) = 1,
     ComponentAccessFailed ZHLN_ANNOTATION(ZHLN::Description<"Component addition, retrieval, or removal failed.">{}),
     CommandBufferFailed ZHLN_ANNOTATION(ZHLN::Description<"Deferred EntityCommandBuffer operations failed.">{}),
 };

@@ -88,9 +88,9 @@ my %FIRST_PARTY = (
     VertexSurface      => ['include/Zahlen/Render/Vertex.hpp'],
     VertexSkin         => ['include/Zahlen/Render/Vertex.hpp'],
     # Audio
-    AudioHandle           => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    VoiceID           => ['include/Zahlen/Audio/AudioTypes.hpp'],
     AudioBus              => ['include/Zahlen/Audio/AudioTypes.hpp'],
-    AudioBusId            => ['include/Zahlen/Audio/AudioTypes.hpp'],
+    AudioBusID            => ['include/Zahlen/Audio/AudioTypes.hpp'],
     AudioAttenuationModel => ['include/Zahlen/Audio/AudioTypes.hpp'],
     AudioPlaybackMode     => ['include/Zahlen/Audio/AudioTypes.hpp'],
     AudioReverbPreset     => ['include/Zahlen/Audio/AudioTypes.hpp'],
@@ -106,13 +106,13 @@ my %FIRST_PARTY = (
     GlyphMetric      => ['include/Zahlen/GUI/Font.hpp'],
     FontAtlas        => ['include/Zahlen/GUI/Font.hpp'],
     # Renderer vocabulary
-    TextureHandle    => ['include/Zahlen/Render/Handles.hpp'],
-    BufferHandle     => ['include/Zahlen/Render/Handles.hpp'],
-    PipelineHandle   => ['include/Zahlen/Render/Handles.hpp'],
-    ResourceGroupHandle => ['include/Zahlen/Render/Handles.hpp'],
-    SystemTextures   => ['include/Zahlen/Render/Handles.hpp'],
-    RenderTextureHandle => ['include/Zahlen/Render/Handles.hpp'],
-    FrameTarget      => ['include/Zahlen/Render/Handles.hpp'],
+    TextureID    => ['include/Zahlen/Render/RenderIDs.hpp'],
+    BufferID     => ['include/Zahlen/Render/RenderIDs.hpp'],
+    PipelineID   => ['include/Zahlen/Render/RenderIDs.hpp'],
+    ResourceGroupID => ['include/Zahlen/Render/RenderIDs.hpp'],
+    SystemTextures   => ['include/Zahlen/Render/RenderIDs.hpp'],
+    RenderTextureID => ['include/Zahlen/Render/RenderIDs.hpp'],
+    FrameTarget      => ['include/Zahlen/Render/RenderIDs.hpp'],
     Mesh             => ['include/Zahlen/Render/Types.hpp'],
     MeshletStreams   => ['include/Zahlen/Render/Types.hpp'],
     Material         => ['include/Zahlen/Render/Types.hpp'],
@@ -189,7 +189,7 @@ my %SKIP_PATHS = map { $_ => 1 } ('modules/zahlen.cppm');
 # Trees whose headers are umbrella-dependent on purpose: src/vulkan's leaf
 # headers carry a #error demanding the umbrella, include nothing themselves,
 # and are only ever compiled underneath it. Their vocabulary is local to that
-# layer anyway -- Vk's TextureHandle is a heap handle and Vk's Extent2D() is a
+# layer anyway -- Vk's TextureSlotID is a descriptor slot ID and Vk's Extent2D() is a
 # method, neither of them the public engine types this table is about.
 my @SKIP_PREFIXES = ('src/vulkan/');
 
@@ -213,7 +213,7 @@ my $WORD_SYMBOL_RE = do {
 my @prefix_symbols = grep { /::$/ } keys %THIRD_PARTY;
 
 # A file that defines a name itself is not reaching for someone else's:
-# `using TextureHandle = HeapHandle<...>` and `auto Extent2D() const` are
+# `using TextureSlotID = DescriptorSlotID<...>` and `auto Extent2D() const` are
 # locals. <name> is named the same in both branches, so $+{name} works for
 # either; the keyword shapes share one leading alternation, which the regex
 # engine can trie-dispatch (a (?|) branch reset defeats that and cost real

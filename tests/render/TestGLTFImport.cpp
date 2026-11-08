@@ -16,6 +16,9 @@
 // This suite lives in a GPU group because BuildModelPrefab uploads textures
 // and geometry through RenderContext, so it needs a real (headless) device.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Engine/Engine.hpp>
@@ -70,8 +73,8 @@ namespace {
 // A material map that resolved to a real upload. Anything else -- invalid
 // or one of the built-in fallback textures -- means the import fell back
 // instead of referencing the image it was supposed to load.
-[[nodiscard]] bool IsFallbackTexture(ZHLN::TextureHandle handle) noexcept {
-    return handle == ZHLN::TextureHandle::Invalid || handle == ZHLN::SystemTextures::Black || handle == ZHLN::SystemTextures::White ||
+[[nodiscard]] bool IsFallbackTexture(ZHLN::TextureID handle) noexcept {
+    return handle == ZHLN::TextureID::Invalid || handle == ZHLN::SystemTextures::Black || handle == ZHLN::SystemTextures::White ||
            handle == ZHLN::SystemTextures::FlatNormal;
 }
 
@@ -992,11 +995,11 @@ struct GLTFImportTestSuite {
             const cgltf_data& document = *source.data;
 
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Import");
-            if (engine == nullptr) {
+            if (!engine.Valid()) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
 
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, kVirtualPath);
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, kVirtualPath);
             if (!prefab) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1076,8 +1079,8 @@ struct GLTFImportTestSuite {
                 // The importer must upload three independently addressable
                 // vertex streams, including the surface that carries UV1.
                 const auto& mesh = part.mesh;
-                if (mesh.posBuffer == ZHLN::BufferHandle::Invalid || mesh.tangentFrameBuffer == ZHLN::BufferHandle::Invalid ||
-                    mesh.surfaceBuffer == ZHLN::BufferHandle::Invalid || mesh.posBuffer == mesh.tangentFrameBuffer || mesh.posBuffer == mesh.surfaceBuffer ||
+                if (mesh.posBuffer == ZHLN::BufferID::Invalid || mesh.tangentFrameBuffer == ZHLN::BufferID::Invalid ||
+                    mesh.surfaceBuffer == ZHLN::BufferID::Invalid || mesh.posBuffer == mesh.tangentFrameBuffer || mesh.posBuffer == mesh.surfaceBuffer ||
                     mesh.tangentFrameBuffer == mesh.surfaceBuffer) {
                     return std::unexpected(GLTFImportError::PartMismatch);
                 }
@@ -1108,7 +1111,7 @@ struct GLTFImportTestSuite {
             }
 
             // The loader is cache-backed: the same virtual path must not import twice.
-            const auto cachedPrefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, kVirtualPath);
+            const auto cachedPrefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, kVirtualPath);
             if (!cachedPrefab || &*cachedPrefab != &*prefab) {
                 return std::unexpected(GLTFImportError::PrefabCacheMismatch);
             }
@@ -1137,7 +1140,7 @@ struct GLTFImportTestSuite {
             }
 
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Skin Import");
-            if (engine == nullptr) {
+            if (!engine.Valid()) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
 
@@ -1145,7 +1148,7 @@ struct GLTFImportTestSuite {
             // test, so the distinct virtual path is what keeps the two imports
             // apart in the engine log.
             const auto prefab =
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "ProceduralAnimationBaseRig_Skins.glb");
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "ProceduralAnimationBaseRig_Skins.glb");
             if (!prefab) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1277,7 +1280,7 @@ struct GLTFImportTestSuite {
          */
         std::expected<void, ZHLN::ErrorCode> importer_applies_supported_khronos_extensions() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Extensions");
-            if (engine == nullptr) {
+            if (!engine.Valid()) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
 
@@ -1285,7 +1288,7 @@ struct GLTFImportTestSuite {
             //    factor, on top of the import-time unit conversion.
             const std::vector<uint8_t> strengthBytes = MakeEmissiveStrengthFixture();
             const auto                 withStrength =
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), strengthBytes, "ext_emissive_strength.glb");
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), strengthBytes, "ext_emissive_strength.glb");
             if (!withStrength || withStrength->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1302,7 +1305,7 @@ struct GLTFImportTestSuite {
             //    emissiveStrength = 1 must import identically to one that omits
             //    the extension, rather than 100x darker.
             const std::vector<uint8_t> plainBytes = MakePlainEmissiveFixture();
-            const auto plain = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), plainBytes, "ext_emissive_plain.glb");
+            const auto plain = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), plainBytes, "ext_emissive_plain.glb");
             if (!plain || plain->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1320,7 +1323,7 @@ struct GLTFImportTestSuite {
 
             // 3. Lit mesh fixture: now imports both the emissive material AND the light
             const std::vector<uint8_t> litBytes = MakeLitMeshFixture();
-            const auto litMesh = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), litBytes, "ext_lit_mesh.glb");
+            const auto litMesh = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), litBytes, "ext_lit_mesh.glb");
             if (!litMesh || litMesh->nodes.size() != 1 || litMesh->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1332,7 +1335,7 @@ struct GLTFImportTestSuite {
             // 4. Geometry-free light document: imports the transform node AND the light
             const std::vector<uint8_t> lightOnlyBytes = MakeLightOnlyFixture();
             const auto                 lightOnly =
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), lightOnlyBytes, "ext_light_only.glb");
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), lightOnlyBytes, "ext_light_only.glb");
             if (!lightOnly || lightOnly->nodes.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1359,11 +1362,11 @@ struct GLTFImportTestSuite {
          */
         std::expected<void, ZHLN::ErrorCode> importer_preserves_conformance_emission_and_texture_color_space() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Emissive Fidelity");
-            if (engine == nullptr) {
+            if (!engine.Valid()) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
-            auto&                               rc     = engine->GetRenderContext();
-            auto&                               assets = engine->GetAssetManager();
+            auto& rc = ZHLN::EngineAccess::RenderOf(*engine);
+            auto& assets = ZHLN::EngineAccess::AssetsOf(*engine);
             constexpr ZHLN::GLTF::ImportOptions conformant {.emissiveFactorScale = 1.0f};
 
             const auto plainBytes    = MakePlainEmissiveFixture();
@@ -1389,7 +1392,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = textured->parts[0].defaultMaterial;
-            if (material.emissiveFactor != ZHLN::Float4 {0.0f, 1.0f, 0.0f, 1.0f} || material.emissiveMap == ZHLN::TextureHandle::Invalid ||
+            if (material.emissiveFactor != ZHLN::Float4 {0.0f, 1.0f, 0.0f, 1.0f} || material.emissiveMap == ZHLN::TextureID::Invalid ||
                 material.emissiveMap != material.albedoMap || material.emissiveMap == material.pbrMap || IsFallbackTexture(material.emissiveMap)) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1423,7 +1426,7 @@ struct GLTFImportTestSuite {
          */
         std::expected<void, ZHLN::ErrorCode> importer_preserves_anisotropy_material() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Anisotropy");
-            if (engine == nullptr) {
+            if (!engine.Valid()) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
             const auto     bytes = MakeAnisotropyFixture();
@@ -1435,15 +1438,15 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
 
-            auto&      rc     = engine->GetRenderContext();
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, engine->GetAssetManager(), bytes, "ext_anisotropy.glb");
+            auto& rc = ZHLN::EngineAccess::RenderOf(*engine);
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, ZHLN::EngineAccess::AssetsOf(*engine), bytes, "ext_anisotropy.glb");
             if (!prefab || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& expected = source.data->materials[0].anisotropy;
             const auto& material = prefab->parts[0].defaultMaterial;
             if (std::abs(material.anisotropyStrength - expected.anisotropy_strength) > 1e-5f ||
-                std::abs(material.anisotropyRotation - expected.anisotropy_rotation) > 1e-5f || material.anisotropyMap == ZHLN::TextureHandle::Invalid ||
+                std::abs(material.anisotropyRotation - expected.anisotropy_rotation) > 1e-5f || material.anisotropyMap == ZHLN::TextureID::Invalid ||
                 IsFallbackTexture(material.anisotropyMap) || material.metallicFactor != 1.0f || material.roughnessFactor != 0.15f ||
                 material.clearcoatFactor != 0.0f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
@@ -1459,7 +1462,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const ZHLN::Material defaults {};
-            if (defaults.anisotropyStrength != 0.0f || defaults.anisotropyRotation != 0.0f || defaults.anisotropyMap != ZHLN::TextureHandle::Invalid ||
+            if (defaults.anisotropyStrength != 0.0f || defaults.anisotropyRotation != 0.0f || defaults.anisotropyMap != ZHLN::TextureID::Invalid ||
                 defaults.textureSamplers != ZHLN::MaterialSamplerAddresses {}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1523,18 +1526,18 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Unlit");
-            if (engine == nullptr)
+            if (!engine.Valid())
                 return std::unexpected(GLTFImportError::EngineInitFailed);
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "KHR_materials_unlit.glb");
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "KHR_materials_unlit.glb");
             if (!prefab || prefab->parts.size() != 2) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             for (size_t i = 0; i < 2; ++i) {
                 const auto& expected = source.data->materials[i];
                 const auto& material = prefab->parts[i].defaultMaterial;
-                if (!material.unlit || material.alphaMode != 0u || material.albedoMap != ZHLN::TextureHandle::Invalid ||
+                if (!material.unlit || material.alphaMode != 0u || material.albedoMap != ZHLN::TextureID::Invalid ||
                     material.metallicFactor != expected.pbr_metallic_roughness.metallic_factor || material.metallicFactor != 1.0f ||
-                    material.pipeline == ZHLN::PipelineHandle::Invalid) {
+                    material.pipeline == ZHLN::PipelineID::Invalid) {
                     return std::unexpected(GLTFImportError::ExtensionMismatch);
                 }
                 for (size_t channel = 0; channel < 4; ++channel) {
@@ -1562,16 +1565,16 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Required SpecGloss");
-            if (engine == nullptr)
+            if (!engine.Valid())
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             const auto prefab =
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "required_specular_glossiness.glb");
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "required_specular_glossiness.glb");
             if (!prefab || prefab->nodes.size() != 1 || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = prefab->parts[0].defaultMaterial;
             if (material.baseColorFactor != ZHLN::Float4 {1.0f, 1.0f, 1.0f, 1.0f} || material.metallicFactor != 1.0f || material.roughnessFactor != 1.0f ||
-                material.albedoMap != ZHLN::TextureHandle::Invalid || material.pipeline == ZHLN::PipelineHandle::Invalid) {
+                material.albedoMap != ZHLN::TextureID::Invalid || material.pipeline == ZHLN::PipelineID::Invalid) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             return {};
@@ -1591,11 +1594,11 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless NegativeScale Sidedness");
-            if (engine == nullptr)
+            if (!engine.Valid())
                 return std::unexpected(GLTFImportError::EngineInitFailed);
 
             const auto prefab =
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "negative_scale_sidedness.glb");
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "negative_scale_sidedness.glb");
             if (!prefab || prefab->parts.size() != 5)
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
 
@@ -1610,7 +1613,7 @@ struct GLTFImportTestSuite {
                 const auto& node = source.data->nodes[static_cast<size_t>(part.nodeIndex)];
                 if (node.mesh == nullptr || node.mesh->primitives_count != 1 || node.mesh->primitives[0].material == nullptr ||
                     part.defaultMaterial.doubleSided != node.mesh->primitives[0].material->double_sided ||
-                    part.defaultMaterial.pipeline == ZHLN::PipelineHandle::Invalid) {
+                    part.defaultMaterial.pipeline == ZHLN::PipelineID::Invalid) {
                     return std::unexpected(GLTFImportError::NegativeScaleMismatch);
                 }
             }
@@ -1633,7 +1636,7 @@ struct GLTFImportTestSuite {
                 const auto* a = findPart(first);
                 const auto* b = findPart(second);
                 if (a == nullptr || b == nullptr || a->defaultMaterial.doubleSided != b->defaultMaterial.doubleSided ||
-                    a->mesh.posBuffer == ZHLN::BufferHandle::Invalid || a->mesh.posBuffer != b->mesh.posBuffer ||
+                    a->mesh.posBuffer == ZHLN::BufferID::Invalid || a->mesh.posBuffer != b->mesh.posBuffer ||
                     a->defaultMaterial.pipeline != b->defaultMaterial.pipeline) {
                     return std::unexpected(GLTFImportError::NegativeScaleMismatch);
                 }
@@ -1682,7 +1685,7 @@ struct GLTFImportTestSuite {
          */
         std::expected<void, ZHLN::ErrorCode> importer_preserves_transmission_texture_and_alpha_coverage() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Transmission");
-            if (engine == nullptr)
+            if (!engine.Valid())
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             const auto     maskedBytes = MakeTransmissionFixture("MASK");
             const auto     opaqueBytes = MakeTransmissionFixture("OPAQUE");
@@ -1693,8 +1696,8 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
 
-            auto&      rc     = engine->GetRenderContext();
-            auto&      assets = engine->GetAssetManager();
+            auto& rc = ZHLN::EngineAccess::RenderOf(*engine);
+            auto& assets = ZHLN::EngineAccess::AssetsOf(*engine);
             const auto masked = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, maskedBytes, "masked_transmission.glb");
             const auto opaque = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, opaqueBytes, "opaque_transmission.glb");
             if (!masked || !opaque || masked->parts.size() != 1 || opaque->parts.size() != 1) {
@@ -1707,9 +1710,9 @@ struct GLTFImportTestSuite {
             if (mat.alphaMode != 1u || opaqueMat.alphaMode != 0u || std::abs(mat.alphaCutoff - expected.alpha_cutoff) > 1e-5f ||
                 std::abs(mat.baseColorFactor[3] - expected.pbr_metallic_roughness.base_color_factor[3]) > 1e-5f ||
                 std::abs(mat.metallicFactor - expected.pbr_metallic_roughness.metallic_factor) > 1e-5f ||
-                std::abs(mat.transmissionFactor - expected.transmission.transmission_factor) > 1e-5f || mat.albedoMap == ZHLN::TextureHandle::Invalid ||
-                mat.transmissionMap == ZHLN::TextureHandle::Invalid || mat.albedoMap == mat.transmissionMap || IsFallbackTexture(mat.transmissionMap) ||
-                opaqueMat.transmissionMap == ZHLN::TextureHandle::Invalid) {
+                std::abs(mat.transmissionFactor - expected.transmission.transmission_factor) > 1e-5f || mat.albedoMap == ZHLN::TextureID::Invalid ||
+                mat.transmissionMap == ZHLN::TextureID::Invalid || mat.albedoMap == mat.transmissionMap || IsFallbackTexture(mat.transmissionMap) ||
+                opaqueMat.transmissionMap == ZHLN::TextureID::Invalid) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const auto albedoSlot = static_cast<size_t>(ZHLN::MaterialTextureSlot::Albedo);
@@ -1728,7 +1731,7 @@ struct GLTFImportTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> importer_preserves_texture_transforms_and_sheen() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Sheen UV transform");
-            if (engine == nullptr)
+            if (!engine.Valid())
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             const auto     bytes = MakeSheenTransformFixture();
             SourceDocument source;
@@ -1737,7 +1740,7 @@ struct GLTFImportTestSuite {
                 source.data->meshes[0].primitives[0].attributes_count != 3) {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "ext_sheen_transform.glb");
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "ext_sheen_transform.glb");
             if (!prefab || prefab->parts.size() != 1)
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
 
@@ -1770,10 +1773,10 @@ struct GLTFImportTestSuite {
                 std::abs(tiled[1] + 15.0f) > 1e-4f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
-            auto& rc = engine->GetRenderContext();
+            auto& rc = ZHLN::EngineAccess::RenderOf(*engine);
             if (material.sheenColorFactor != ZHLN::Float3 {0.25f, 0.5f, 0.75f} || std::abs(material.sheenRoughnessFactor - 0.35f) > 1e-5f ||
-                material.sheenColorMap == ZHLN::TextureHandle::Invalid || material.sheenRoughnessMap == ZHLN::TextureHandle::Invalid ||
-                material.occlusionMap == ZHLN::TextureHandle::Invalid || material.albedoMap != material.sheenColorMap ||
+                material.sheenColorMap == ZHLN::TextureID::Invalid || material.sheenRoughnessMap == ZHLN::TextureID::Invalid ||
+                material.occlusionMap == ZHLN::TextureID::Invalid || material.albedoMap != material.sheenColorMap ||
                 material.pbrMap != material.sheenRoughnessMap || material.sheenRoughnessMap != material.occlusionMap ||
                 std::abs(material.occlusionStrength - 0.4f) > 1e-5f || material.albedoMap == material.pbrMap ||
                 IsFallbackTexture(material.sheenColorMap) || IsFallbackTexture(material.sheenRoughnessMap) ||
@@ -1808,12 +1811,12 @@ struct GLTFImportTestSuite {
          */
         std::expected<void, ZHLN::ErrorCode> emissive_lights_follow_the_prefab_they_belong_to() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Emissive Spawn");
-            if (engine == nullptr) {
+            if (!engine.Valid()) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
 
             const std::vector<uint8_t> bytes = MakeEmissiveStrengthFixture();
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "emissive_spawn.glb");
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "emissive_spawn.glb");
             if (!prefab || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }

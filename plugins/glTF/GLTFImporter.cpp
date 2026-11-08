@@ -2,6 +2,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "GLTFImporter.hpp"
 #include "TangentGenerator.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
@@ -1042,9 +1045,9 @@ auto ProcessCPUTasks(
 }
 
 auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, std::span<CPUTextureJob> textureJobs)
-    -> std::unordered_map<cgltf_image*, std::array<TextureHandle, 2>> {
-    std::unordered_map<cgltf_image*, std::array<TextureHandle, 2>> imageToHandle;
-    imageToHandle.reserve(textureJobs.size());
+    -> std::unordered_map<cgltf_image*, std::array<TextureID, 2>> {
+    std::unordered_map<cgltf_image*, std::array<TextureID, 2>> imageToID;
+    imageToID.reserve(textureJobs.size());
 
     for (size_t i = 0; i < textureJobs.size(); ++i) {
         auto& texJob = textureJobs[i];
@@ -1063,7 +1066,7 @@ auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, std::
             if (!tex_res) {
                 ZHLN::Log("[glTF] Texture '{}' failed to upload: {}", texName, tex_res.error());
             }
-            imageToHandle[texJob.image][texJob.isSRGB ? 1 : 0] = tex_res.value_or(TextureHandle::Invalid);
+            imageToID[texJob.image][texJob.isSRGB ? 1 : 0] = tex_res.value_or(TextureID::Invalid);
         } else {
             WarnImport(
                 virtualPath,
@@ -1071,31 +1074,31 @@ auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, std::
                     "Image '{}' could not be decoded; rendering without this texture.", texJob.image->name != nullptr ? texJob.image->name : "(unnamed)"
                 )
             );
-            imageToHandle[texJob.image][texJob.isSRGB ? 1 : 0] = TextureHandle::Invalid;
+            imageToID[texJob.image][texJob.isSRGB ? 1 : 0] = TextureID::Invalid;
         }
     }
 
-    return imageToHandle;
+    return imageToID;
 }
 
 auto GetOrCreateCompiledPrimitive(
     RenderContext&                                                        ctx,
     const CPUPrimitiveJob&                                                primJob,
-    const std::unordered_map<cgltf_image*, std::array<TextureHandle, 2>>& imageToHandle,
+    const std::unordered_map<cgltf_image*, std::array<TextureID, 2>>& imageToID,
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive>&        primCache
 ) -> CompiledPrimitive {
     if (const auto it = primCache.find(primJob.prim); it != primCache.end()) {
         return it->second;
     }
 
-    const BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.positions});
-    const BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.tangentFrames});
-    const BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.surfaces});
+    const BufferID posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.positions});
+    const BufferID frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.tangentFrames});
+    const BufferID surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.surfaces});
 
-    const BufferHandle skinVbo = !primJob.skins.empty() ? ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.skins}) : BufferHandle::Invalid;
+    const BufferID skinVbo = !primJob.skins.empty() ? ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.skins}) : BufferID::Invalid;
 
-    const BufferHandle ibo = (primJob.indexCount > 0) ? ctx.CreateBuffer<BufferUsage::Index>(std::span {primJob.indices}.first(primJob.indexCount)) :
-                                                        BufferHandle::Invalid;
+    const BufferID ibo = (primJob.indexCount > 0) ? ctx.CreateBuffer<BufferUsage::Index>(std::span {primJob.indices}.first(primJob.indexCount)) :
+                                                        BufferID::Invalid;
 
     // VK_EXT_mesh_shader streams. They are plain storage buffers read through
     // BDA by the task/mesh shaders; the vertex/index buffers above stay live
@@ -1124,11 +1127,11 @@ auto GetOrCreateCompiledPrimitive(
 
     const uint32_t finalMorphOffset = (primJob.activeMorphCount > 0) ? ctx.AllocateMorphDeltas(std::span {primJob.tempDeltas}) : 0;
 
-    const auto textureHandle = [&](cgltf_image* image, bool srgb = false) -> TextureHandle {
+    const auto textureID = [&](cgltf_image* image, bool srgb = false) -> TextureID {
         if (image == nullptr)
-            return TextureHandle::Invalid;
-        const auto found = imageToHandle.find(image);
-        return found != imageToHandle.end() ? found->second[srgb ? 1 : 0] : TextureHandle::Invalid;
+            return TextureID::Invalid;
+        const auto found = imageToID.find(image);
+        return found != imageToID.end() ? found->second[srgb ? 1 : 0] : TextureID::Invalid;
     };
 
     const Material subMaterial =
@@ -1142,41 +1145,41 @@ auto GetOrCreateCompiledPrimitive(
                             .baseColor   = {primJob.baseColorFactor[0], primJob.baseColorFactor[1], primJob.baseColorFactor[2], primJob.baseColorFactor[3]},
                             .emissive    = {primJob.emissiveFactor[0], primJob.emissiveFactor[1], primJob.emissiveFactor[2], primJob.emissiveFactor[3]},
                             .transmissionFactor       = primJob.transmissionFactor,
-                            .transmissionMap          = textureHandle(primJob.transmissionImage),
+                            .transmissionMap          = textureID(primJob.transmissionImage),
                             .iridescenceFactor        = primJob.iridescenceFactor,
                             .filmThicknessNm          = primJob.filmThicknessNm,
                             .filmThicknessMinNm       = primJob.filmThicknessMinNm,
                             .volumeThicknessM         = primJob.volumeThicknessM,
                             .ior                      = primJob.ior,
                             .normalScale              = primJob.normalScale,
-                            .albedoMap                = textureHandle(primJob.albedoImage, true),
-                            .normalMap                = textureHandle(primJob.normalImage),
-                            .pbrMap                   = textureHandle(primJob.pbrImage),
-                            .emissiveMap              = textureHandle(primJob.emissiveImage, true),
-                            .filmThicknessMap         = textureHandle(primJob.filmThicknessImage),
-                            .iridescenceMap           = textureHandle(primJob.iridescenceImage),
-                            .volumeThicknessMap       = textureHandle(primJob.volumeThicknessImage),
+                            .albedoMap                = textureID(primJob.albedoImage, true),
+                            .normalMap                = textureID(primJob.normalImage),
+                            .pbrMap                   = textureID(primJob.pbrImage),
+                            .emissiveMap              = textureID(primJob.emissiveImage, true),
+                            .filmThicknessMap         = textureID(primJob.filmThicknessImage),
+                            .iridescenceMap           = textureID(primJob.iridescenceImage),
+                            .volumeThicknessMap       = textureID(primJob.volumeThicknessImage),
                             .clearcoatFactor          = primJob.clearcoatFactor,
                             .clearcoatRoughnessFactor = primJob.clearcoatRoughnessFactor,
                             .clearcoatNormalScale     = primJob.clearcoatNormalScale,
-                            .clearcoatMap             = textureHandle(primJob.clearcoatImage),
-                            .clearcoatRoughnessMap    = textureHandle(primJob.clearcoatRoughnessImage),
-                            .clearcoatNormalMap       = textureHandle(primJob.clearcoatNormalImage),
+                            .clearcoatMap             = textureID(primJob.clearcoatImage),
+                            .clearcoatRoughnessMap    = textureID(primJob.clearcoatRoughnessImage),
+                            .clearcoatNormalMap       = textureID(primJob.clearcoatNormalImage),
                             .anisotropyStrength       = primJob.anisotropyStrength,
                             .anisotropyRotation       = primJob.anisotropyRotation,
-                            .anisotropyMap            = textureHandle(primJob.anisotropyImage),
+                            .anisotropyMap            = textureID(primJob.anisotropyImage),
                             .sheenColorFactor         = {primJob.sheenColorFactor[0], primJob.sheenColorFactor[1], primJob.sheenColorFactor[2]},
                             .sheenRoughnessFactor     = primJob.sheenRoughnessFactor,
-                            .sheenColorMap            = textureHandle(primJob.sheenColorImage, true),
-                            .sheenRoughnessMap        = textureHandle(primJob.sheenRoughnessImage),
-                            .occlusionMap             = textureHandle(primJob.occlusionImage),
+                            .sheenColorMap            = textureID(primJob.sheenColorImage, true),
+                            .sheenRoughnessMap        = textureID(primJob.sheenRoughnessImage),
+                            .occlusionMap             = textureID(primJob.occlusionImage),
                             .occlusionStrength        = primJob.occlusionStrength,
                             .specularEnabled          = primJob.specularEnabled,
                             .specularFactor           = primJob.specularFactor,
                             .specularColorFactor      = {primJob.specularColorFactor[0], primJob.specularColorFactor[1], primJob.specularColorFactor[2]},
                             // Mode 1 binds specularTexture.a from a linear image;
                             // the packed and color-only modes bind an sRGB one.
-                            .specularMap              = textureHandle(primJob.specularImage, primJob.specularTexMode != 1),
+                            .specularMap              = textureID(primJob.specularImage, primJob.specularTexMode != 1),
                             .specularTexMode          = primJob.specularTexMode,
                             .textureSamplers          = primJob.textureSamplers,
                             .textureTransforms        = primJob.textureTransforms})
@@ -1535,7 +1538,7 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
 }
 
 [[nodiscard]] auto NeedsGPURefresh(const ModelPrefab& prefab) noexcept -> bool {
-    return std::any_of(prefab.parts.begin(), prefab.parts.end(), [](const ModelPart& part) { return part.mesh.posBuffer == BufferHandle::Invalid; });
+    return std::any_of(prefab.parts.begin(), prefab.parts.end(), [](const ModelPart& part) { return part.mesh.posBuffer == BufferID::Invalid; });
 }
 
 [[nodiscard]] bool MatchesCachedImportOptions(ZHLN::Optional<const ModelPrefab&> cached, std::string_view path, ImportOptions options) {
@@ -1554,9 +1557,9 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
 
 void RegisterPrefabGPUResources(RenderContext& ctx, const ModelPrefab& prefab) {
     for (const auto& part: prefab.parts) {
-        if (part.mesh.posBuffer != BufferHandle::Invalid) {
+        if (part.mesh.posBuffer != BufferID::Invalid) {
             ctx.RegisterGPUMesh(part.meshAsset, part.mesh);
-            if (part.defaultMaterial.pipeline != PipelineHandle::Invalid) {
+            if (part.defaultMaterial.pipeline != PipelineID::Invalid) {
                 ctx.RegisterGPUMaterial(part.materialAsset, part.defaultMaterial);
             }
         }
@@ -1704,7 +1707,7 @@ auto InstantiatePrefabFromMemory(
     Entity*                           outBuffer,
     uint32_t                          maxCount
 ) -> uint32_t {
-    const auto prefab = LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath);
+    const auto prefab = LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), bytes, virtualPath);
     if (!prefab) {
         return 0;
     }
@@ -1730,7 +1733,7 @@ void RebuildCachedPrefabs(RenderContext& ctx, AssetManager& cwMgr) {
 }
 
 void InstallDeviceLostHandler(Engine& engine) {
-    engine.AddDeviceLostCallback([](Engine& e) { RebuildCachedPrefabs(e.GetRenderContext(), e.GetAssetManager()); });
+    engine.AddDeviceLostCallback([](Engine& e) { RebuildCachedPrefabs(ZHLN::EngineAccess::RenderOf(e), ZHLN::EngineAccess::AssetsOf(e)); });
 }
 
 } // namespace ZHLN::GLTF

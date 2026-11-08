@@ -1,6 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "extras/profile/PerfBaseline.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -26,7 +28,7 @@
 #include <Zahlen/GUI/GUI.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -137,7 +139,7 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
 
 void PrepareEngineForTest(ZHLN::Engine& engine) {
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto rc = engine.Graphics();
 
     // 1. Reset UI callbacks
     engine.SetUICallback(nullptr);
@@ -150,9 +152,8 @@ void PrepareEngineForTest(ZHLN::Engine& engine) {
     engine.GetRenderGraph().Clear();
 
     // 4. Clear GPU resource caches & temporary buffers
-    rc.ClearGPUCaches();
-    engine.GetVisibleEntities().clear();
-    engine.GetVisibleShadowEntities().clear();
+    rc.ClearCaches();
+    engine.ClearVisibilityLists();
 
     // 5. Rebuild the clean default scene: the camera entity, the settings-tag
     //    singletons, the font atlas. This has to run before the two resets below,
@@ -170,7 +171,7 @@ void PrepareEngineForTest(ZHLN::Engine& engine) {
     auto&      camReg    = engine.GetRegistry();
     const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
     camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
-    engine.GetWorld().GetCullingStats() = ZHLN::CullingStats {};
+    engine.State().ResetCullingStats();
 }
 
 void TickEngine(ZHLN::Engine& engine, uint32_t frameCount, float dt = 1.0f / 60.0f) {
@@ -195,7 +196,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     PrepareEngineForTest(engine);
 
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto rc = engine.Graphics();
 
     auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
     if (!settings.empty()) {
@@ -223,12 +224,12 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
                 return std::unexpected(RenderPerfTestError::GeometryThroughputFailed);
             }
             const auto& mesh = owner->mesh;
-            if (!ZHLN::Test::ExpectNe(mesh.posBuffer, ZHLN::BufferHandle::Invalid) ||
-                !ZHLN::Test::ExpectNe(mesh.tangentFrameBuffer, ZHLN::BufferHandle::Invalid) ||
-                !ZHLN::Test::ExpectNe(mesh.surfaceBuffer, ZHLN::BufferHandle::Invalid) ||
-                !ZHLN::Test::ExpectNe(mesh.meshletBuffer, ZHLN::BufferHandle::Invalid) ||
-                !ZHLN::Test::ExpectNe(mesh.meshletVertexBuffer, ZHLN::BufferHandle::Invalid) ||
-                !ZHLN::Test::ExpectNe(mesh.meshletTriBuffer, ZHLN::BufferHandle::Invalid)) {
+            if (!ZHLN::Test::ExpectNe(mesh.posBuffer, ZHLN::BufferID::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.tangentFrameBuffer, ZHLN::BufferID::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.surfaceBuffer, ZHLN::BufferID::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.meshletBuffer, ZHLN::BufferID::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.meshletVertexBuffer, ZHLN::BufferID::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.meshletTriBuffer, ZHLN::BufferID::Invalid)) {
                 return std::unexpected(RenderPerfTestError::GeometryThroughputFailed);
             }
         }
@@ -267,11 +268,11 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     }
 
     ZHLN::Test::ExpectTrue(!engine.GetVisibleEntities().empty());
-    ZHLN::Test::ExpectGt(engine.GetWorld().GetCullingStats().TotalTriangles, 0);
+    ZHLN::Test::ExpectGt(engine.State().CullingStats().TotalTriangles, 0);
 
     ZHLN::Println(
         "    [Geometry & Culling] 60 frames x 1,600 Meshes in {:.2f} ms ({:.2f} FPS, {:.2f} kTris/frame)", durationMs, (kFrames * 1000.0) / durationMs,
-        engine.GetWorld().GetCullingStats().TotalTriangles / 1000.0
+        engine.State().CullingStats().TotalTriangles / 1000.0
     );
     ZHLN::Test::VerifyBaseline(
         mode == ZHLN::ValidationMode::On ? "render.geometry_culling_60f.val_on" : "render.geometry_culling_60f.val_off", durationMs, 25.0
@@ -363,10 +364,10 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
     PrepareEngineForTest(engine);
 
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto rc = engine.Graphics();
 
     constexpr uint32_t  kMaxParticles = 20000;
-    ZHLN::TextureHandle fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 200, 50), true);
+    ZHLN::TextureID fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 200, 50), true);
 
     reg.Create(
         ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 0.0f)}, ZHLN::Components::ParticleEmitterComponent {
@@ -473,7 +474,7 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
     PrepareEngineForTest(engine);
 
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto rc = engine.Graphics();
 
     ZHLN::PrefabFactory::CreateBox(
         engine, {25.0f, 15.0f, 0.5f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 7.5, 0}, .createPhysics = false, .color = {0.2f, 0.2f, 0.2f, 1.0f}}
@@ -618,8 +619,8 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 8: Hardware Ray Tracing (RTR / RT Shadows) [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
-    auto& rc = engine.GetRenderContext();
-    if (!rc.GetInfo().rayTracingSupported) {
+    auto rc = engine.Graphics();
+    if (!rc.Info().rayTracingSupported) {
         ZHLN::Println("    [SKIP] Device does not support Hardware Ray Tracing (VK_KHR_ray_tracing / VK_KHR_ray_query).");
         return {};
     }
@@ -730,9 +731,9 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     PrepareEngineForTest(engine);
 
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto rc = engine.Graphics();
 
-    const bool useHardwareRT = rc.GetInfo().rayTracingSupported;
+    const bool useHardwareRT = rc.Info().rayTracingSupported;
     ZHLN::Println("    [Pipeline Configuration] Hardware Ray Tracing Available: {}", useHardwareRT ? "YES (RTR Active)" : "NO (SSR Fallback)");
 
     // 1. Scene Backdrop & Floor

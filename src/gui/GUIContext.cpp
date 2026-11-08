@@ -108,7 +108,7 @@ struct Context::Impl {
     }
 
     Impl() noexcept {
-        fontAtlas = BuildFontAtlas(GetDefaultBakedFont(), TextureHandle::Invalid);
+        fontAtlas = BuildFontAtlas(GetDefaultBakedFont(), TextureID::Invalid);
         if (fontAtlas.glyphCount == 0) {
             fontAtlas.firstCodepoint = 32;
             fontAtlas.glyphCount     = 96;
@@ -535,7 +535,7 @@ auto Frame::End() && noexcept -> UIDrawData {
                 EmitQuad(bb.x, bb.y, bb.x + bb.width, bb.y + bb.height, color);
 
                 batches.push_back(
-                    {.texture     = TextureHandle::Invalid,
+                    {.texture     = TextureID::Invalid,
                      .vertexStart = startIdx,
                      .vertexCount = 6,
                      .useScissor  = useScissor,
@@ -565,7 +565,7 @@ auto Frame::End() && noexcept -> UIDrawData {
                      .vertexStart = static_cast<uint32_t>(startIdx),
                      .vertexCount = written,
                      .useScissor  = useScissor,
-                     .isSDF       = (font.texture != TextureHandle::Invalid) && font.isSDF,
+                     .isSDF       = (font.texture != TextureID::Invalid) && font.isSDF,
                      .scissorRect = activeScissor}
                 );
                 break;

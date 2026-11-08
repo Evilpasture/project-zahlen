@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/CharacterController/CharacterMovement.cpp
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "CharacterMovement.hpp"
 
 #include "CharacterComponents.hpp"
@@ -182,7 +184,7 @@ void MovementSystem(Engine& engine, float dt) {
 
 void CommitCharacterSteering(Engine& engine) {
     auto& reg      = engine.GetRegistry();
-    auto& pc       = engine.GetPhysicsContext();
+    auto& pc = ZHLN::EngineAccess::PhysicsOf(engine);
     auto  entities = reg.GetEntitiesWith<MovementComponent>();
     auto  moves    = reg.GetRawArray<MovementComponent>();
     for (size_t i = 0; i < entities.size(); ++i) {
@@ -191,8 +193,12 @@ void CommitCharacterSteering(Engine& engine) {
             continue;
         }
         const auto& move = moves[i];
-        pc.SetCharacterVelocity(phys->physicsHandle, {move.currentVelX, move.currentYVel, move.currentVelZ});
+        pc.SetCharacterVelocity(phys->physicsID, {move.currentVelX, move.currentYVel, move.currentVelZ});
     }
+}
+
+void PushProps(Simulation physics, ECS::Registry& reg) {
+    PushProps(ZHLN::EngineAccess::PhysicsOf(physics), reg);
 }
 
 void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
@@ -214,23 +220,22 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
             continue;
         }
 
-        const auto charPosition = pc.BodyPosition(phys->physicsHandle);
+        const auto charPosition = pc.BodyPosition(phys->physicsID);
         if (!charPosition) {
             // The character may be queued for destruction; nothing to push.
             continue;
         }
 
         const JPH::RVec3& charPos = *charPosition;
-        const JPH::Vec3 charVel = pc.GetCharacterVelocity(phys->physicsHandle);
+        const JPH::Vec3 charVel = pc.GetCharacterVelocity(phys->physicsID);
         if (charVel.LengthSq() < 0.01f) {
             continue; // Not moving: there is no momentum to impart.
         }
 
-        JPH::Array<Physics::BodyHandle> overlaps;
-        pc.OverlapSphere(charPos, kPushRadius, overlaps);
+        const std::vector<Physics::BodyID> overlaps = pc.OverlapSphere(charPos, kPushRadius);
 
-        for (Physics::BodyHandle other: overlaps) {
-            if (other == phys->physicsHandle || !pc.IsBodyDynamic(other)) {
+        for (Physics::BodyID other: overlaps) {
+            if (other == phys->physicsID || !pc.IsBodyDynamic(other)) {
                 continue;
             }
 
@@ -262,7 +267,7 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
 
 void WriteCharacterGrounded(Engine& engine) {
     auto& reg      = engine.GetRegistry();
-    auto& pc       = engine.GetPhysicsContext();
+    auto& pc = ZHLN::EngineAccess::PhysicsOf(engine);
     auto  entities = reg.GetEntitiesWith<MovementComponent>();
     auto  moves    = reg.GetRawArray<MovementComponent>();
     for (size_t i = 0; i < entities.size(); ++i) {
@@ -271,7 +276,7 @@ void WriteCharacterGrounded(Engine& engine) {
             continue;
         }
         moves[i].wasGrounded = moves[i].isGrounded;
-        moves[i].isGrounded  = pc.IsCharacterOnGround(phys->physicsHandle);
+        moves[i].isGrounded  = pc.IsCharacterOnGround(phys->physicsID);
     }
 }
 

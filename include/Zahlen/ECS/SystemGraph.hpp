@@ -106,7 +106,7 @@ template <>
 struct ParameterResolver<FrameDt> {
     template <typename CarrierType>
     static auto Resolve(CarrierType& carrier) noexcept -> FrameDt {
-        return {carrier.frame.dt};
+        return carrier.frame.dt;
     }
 };
 
@@ -114,7 +114,7 @@ template <>
 struct ParameterResolver<FrameAlpha> {
     template <typename CarrierType>
     static auto Resolve(CarrierType& carrier) noexcept -> FrameAlpha {
-        return {carrier.frame.alpha};
+        return carrier.frame.alpha;
     }
 };
 
@@ -122,7 +122,7 @@ template <>
 struct ParameterResolver<FrameIndex> {
     template <typename CarrierType>
     static auto Resolve(CarrierType& carrier) noexcept -> FrameIndex {
-        return {carrier.frame.frame};
+        return carrier.frame.frame;
     }
 };
 

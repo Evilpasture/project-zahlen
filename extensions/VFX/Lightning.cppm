@@ -13,7 +13,7 @@ module;
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Math/ValueTypes.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <cstdint>
 
 export module ZHLN.Lightning;
@@ -44,9 +44,9 @@ export struct LightningComponent {
     JPH::Vec3 cloudOrigin  = JPH::Vec3::sZero();
     JPH::Vec3 groundTarget = JPH::Vec3::sZero();
 
-    BufferHandle vboPos          = BufferHandle::Invalid;
-    BufferHandle vboFrame        = BufferHandle::Invalid;
-    BufferHandle vboSurface      = BufferHandle::Invalid;
+    BufferID vboPos          = BufferID::Invalid;
+    BufferID vboFrame        = BufferID::Invalid;
+    BufferID vboSurface      = BufferID::Invalid;
     AssetID      meshAssetId     = InvalidAssetID;
     MaterialID   matAssetId      = InvalidMaterialID;
     uint32_t     maxVertices     = 0;

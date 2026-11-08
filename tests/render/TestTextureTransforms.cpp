@@ -6,6 +6,8 @@
 // pre-transformed Sample quad. This covers Material -> draw InstanceData ->
 // vertex/fragment shaders, which testing the imported Material alone cannot.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -40,7 +42,7 @@ namespace {
 
 // CTAD gives std::span<T, 4> for std::array<T, 4>; all typed buffer helpers
 // must accept it (including a const element type), not only dynamic spans.
-static_assert(requires(ZHLN::RenderContext& rc, ZHLN::BufferHandle handle,
+static_assert(requires(ZHLN::RenderContext& rc, ZHLN::BufferID handle,
                        std::array<ZHLN::VertexPosition, 4>& vertices,
                        const std::array<ZHLN::VertexPosition, 4>& immutable) {
     rc.CreateBuffer<ZHLN::BufferUsage::Storage>(std::span {vertices});
@@ -145,8 +147,8 @@ struct TextureTransformsTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> rotated_uv0_and_uv1_match_the_sample_atlas() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Khronos UV transforms", 480, 320);
-            if (engine == nullptr) return std::unexpected(TextureTransformError::EngineInitFailed);
-            auto& rc  = engine->GetRenderContext();
+            if (!engine.Valid()) return std::unexpected(TextureTransformError::EngineInitFailed);
+            auto rc = engine->Graphics();
             auto& reg = engine->GetRegistry();
             ZHLN::Test::Headless::DisableAA(*engine);
 
@@ -179,7 +181,7 @@ struct TextureTransformsTestSuite {
             ZHLN::defer _([&] {
                 engine->ClearScene(); // releases the three scene-owned mesh buffers
                 for (size_t i = 0; i < registeredCount; ++i) {
-                    rc.UnregisterGPUMaterial(registeredMaterials[i]);
+                    rc.UnregisterMaterial(registeredMaterials[i]);
                 }
                 rc.UnloadTexture(*texture);
             });
@@ -196,17 +198,17 @@ struct TextureTransformsTestSuite {
                 const auto material = rc.CreateMaterial(desc);
                 if (!material) return std::unexpected(TextureTransformError::ResourceCreationFailed);
                 const auto materialID = ZHLN::HashAssetID(materialKeys[column]);
-                rc.RegisterGPUMaterial(materialID, *material);
+                rc.RegisterMaterial(materialID, *material);
                 registeredMaterials[registeredCount++] = materialID;
 
-                ZHLN::Mesh mesh = MakePanel(rc, column);
-                if (mesh.posBuffer == ZHLN::BufferHandle::Invalid || mesh.tangentFrameBuffer == ZHLN::BufferHandle::Invalid ||
-                    mesh.surfaceBuffer == ZHLN::BufferHandle::Invalid || mesh.indexBuffer == ZHLN::BufferHandle::Invalid) {
+                ZHLN::Mesh mesh = MakePanel(ZHLN::EngineAccess::RenderOf(*engine), column);
+                if (mesh.posBuffer == ZHLN::BufferID::Invalid || mesh.tangentFrameBuffer == ZHLN::BufferID::Invalid ||
+                    mesh.surfaceBuffer == ZHLN::BufferID::Invalid || mesh.indexBuffer == ZHLN::BufferID::Invalid) {
                     rc.DestroyMesh(mesh);
                     return std::unexpected(TextureTransformError::ResourceCreationFailed);
                 }
                 const auto meshID = ZHLN::HashAssetID(meshKeys[column]);
-                rc.RegisterGPUMesh(meshID, mesh);
+                rc.RegisterMesh(meshID, mesh);
                 const JPH::Vec3 offset(kPanelX[column], 0.0f, 0.0f);
                 const JPH::Mat44 world = JPH::Mat44::sTranslation(offset);
                 const ZHLN::Entity e = reg.Create();

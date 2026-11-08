@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <span>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -36,6 +37,18 @@ struct EnvironmentImage {
     // Optional. When zero, RenderContext hashes both panoramas and SH before
     // baking IBL. Supplied hashes must cover all prepared lighting data.
     uint64_t           contentHash = 0;
+};
+
+// Borrowed linear RGBA pixels from AssetLibrary's cache. The view remains
+// valid until ClearCache or the engine's destruction; never hold it across
+// either operation (or concurrently with a cache clear).
+struct EnvironmentImageView {
+    std::span<const float> rgba {};
+    std::span<const float> lightingRgba {};
+    std::optional<EnvironmentSun> sun;
+    uint32_t               width       = 0;
+    uint32_t               height      = 0;
+    uint64_t               contentHash = 0;
 };
 
 } // namespace ZHLN

@@ -7,7 +7,7 @@
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Render/Types.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>

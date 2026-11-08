@@ -328,7 +328,7 @@ void test_runtime_rebinding_conflict_detection_capture_and_serialization() {
     // Conflict detection finds Reload when probing Key(R), unless Reload itself is ignored.
     const auto conflicts = input.FindConflictingActions("Combat", InputBinding::Key(KeyCode::R));
     ExpectEq(conflicts.size(), size_t {1});
-    Expect(conflicts[0] == ActionId("Reload"));
+    Expect(conflicts[0] == ActionID("Reload"));
     Expect(input.FindConflictingActions("Combat", InputBinding::Key(KeyCode::R), "Reload").empty());
 
     // Interactive binding capture:
@@ -405,7 +405,7 @@ void test_ecs_system_graph_input_context_service_resolution() {
     input.InjectKey(KeyCode::D, true);
     input.RefreshActionsForCurrentFrame(&events);
 
-    graph.Execute(Frame {.frame = 1, .alpha = 1.0f, .dt = 1.0f / 60.0f, .scratch = nullptr});
+    graph.Execute(Frame {.frame = {1}, .alpha = {1.0f}, .dt = {1.0f / 60.0f}, .scratch = nullptr});
 
     const auto summary = reg.Get<ObservedInputSummary>(observer);
     Expect(summary.has_value());
@@ -435,7 +435,7 @@ void test_relative_mouse_motion_preserves_deltas_when_cursor_clamped() {
     InputContext   input;
     ECS::EventBus  bus;
     auto&          map  = input.CreateActionMap("TTYLook", 0);
-    const ActionId look =
+    const ActionID look =
         map.AddAction("Look", ActionKind::Axis2D).SetClampUnitCircle(false).Bind(InputBinding::MouseDelta2D(1.0f, 1.0f)).Id();
 
     input.BeginFrame();

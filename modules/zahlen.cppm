@@ -153,6 +153,7 @@ module;
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
@@ -263,7 +264,7 @@ using ZHLN::FS::FileSystemWatcher;
 using ZHLN::FS::FileWatchAction;
 using ZHLN::FS::FileWatchCallback;
 using ZHLN::FS::FileWatchEvent;
-using ZHLN::FS::FileWatchHandle;
+using ZHLN::FS::FileWatchID;
 using ZHLN::FS::HashPath;
 using ZHLN::FS::kPakFormatVersion;
 using ZHLN::FS::LoadRequest;
@@ -422,7 +423,7 @@ using ZHLN::ECS::Write;
 using ZHLN::PhysicsContext;
 
 namespace Physics {
-using ZHLN::Physics::ConstraintHandle;
+using ZHLN::Physics::ConstraintID;
 using ZHLN::Physics::ConstraintParams;
 using ZHLN::Physics::ConstraintType;
 using ZHLN::Physics::CreateHeightFieldShape;
@@ -435,14 +436,14 @@ using ZHLN::Physics::ShapeCastResult;
 using ZHLN::Physics::ShapeType;
 } // namespace Physics
 
-using ZHLN::BufferHandle;
+using ZHLN::BufferID;
 using ZHLN::DrawFlags;
 using ZHLN::DrawParams;
 using ZHLN::Material;
 using ZHLN::MaterialDesc;
 using ZHLN::Mesh;
 using ZHLN::MeshletStreams;
-using ZHLN::PipelineHandle;
+using ZHLN::PipelineID;
 using ZHLN::RenderContext;
 
 namespace GUI {
@@ -475,13 +476,13 @@ using ZHLN::GUI::UninstallBakedFontLoader;
 using ZHLN::AudioAttenuationDesc;
 using ZHLN::AudioAttenuationModel;
 using ZHLN::AudioBus;
-using ZHLN::AudioBusId;
+using ZHLN::AudioBusID;
 using ZHLN::AudioConfig;
 using ZHLN::AudioContext;
 using ZHLN::AudioEvent;
 using ZHLN::AudioEventType;
 using ZHLN::AudioFilterType;
-using ZHLN::AudioHandle;
+using ZHLN::VoiceID;
 using ZHLN::AudioNoiseType;
 using ZHLN::AudioOcclusionDesc;
 using ZHLN::AudioPlaybackMode;
@@ -503,7 +504,7 @@ using ZHLN::kMaxAudioBuses;
 using ZHLN::MAX_VOICE_SLOTS;
 using ZHLN::VoiceDesc;
 
-using ZHLN::ActionId;
+using ZHLN::ActionID;
 using ZHLN::ActionKind;
 using ZHLN::ActionState;
 using ZHLN::ApplyAxisDeadzone;
@@ -534,7 +535,7 @@ using ZHLN::InputBinding;
 using ZHLN::InputBindingKind;
 using ZHLN::InputBindingParseError;
 using ZHLN::InputContext;
-using ZHLN::InputDeviceId;
+using ZHLN::InputDeviceID;
 using ZHLN::InputDeviceKind;
 using ZHLN::Kernel;
 using ZHLN::KeyCode;

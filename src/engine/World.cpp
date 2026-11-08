@@ -8,6 +8,7 @@
 #include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/World.hpp>
+#include <Zahlen/Engine/VisibilityList.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/ECS/EventBus.hpp>
@@ -34,8 +35,8 @@ struct World::Impl {
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
     std::unique_ptr<ArticulationSystem>       articulationSystem;
 
-    JPH::Array<Entity> visibleEntities;
-    JPH::Array<Entity> visibleShadowEntities;
+    VisibilityList visibleEntities;
+    VisibilityList visibleShadowEntities;
 
     bool joltAcquired = false;
 };
@@ -72,8 +73,8 @@ World::~World() {
         return;
     }
 
-    _impl->visibleShadowEntities.clear();
-    _impl->visibleEntities.clear();
+    _impl->visibleShadowEntities.Clear();
+    _impl->visibleEntities.Clear();
     _impl->articulationSystem.reset();
     _impl->mainECB.reset();
 
@@ -81,16 +82,16 @@ World::~World() {
     // handles before clearing their components and tearing down Jolt.
     auto& registry = _impl->registry;
     if (!registry.GetEntitiesWith<Components::RagdollComponent>().empty()) {
-        std::vector<Physics::RagdollHandle> ragdolls;
+        std::vector<Physics::RagdollID> ragdolls;
         for (auto& component: registry.GetRawArray<Components::RagdollComponent>()) {
-            ragdolls.push_back(std::exchange(component.ragdollHandle, Physics::RagdollHandle::Invalid));
+            ragdolls.push_back(std::exchange(component.ragdollID, Physics::RagdollID::Invalid));
         }
         _impl->physicsContext->DestroyRagdolls(ragdolls);
     }
     if (!registry.GetEntitiesWith<Components::PhysicsComponent>().empty()) {
-        std::vector<Physics::BodyHandle> bodies;
+        std::vector<Physics::BodyID> bodies;
         for (auto& component: registry.GetRawArray<Components::PhysicsComponent>()) {
-            bodies.push_back(std::exchange(component.physicsHandle, Physics::BodyHandle::Null()));
+            bodies.push_back(std::exchange(component.physicsID, Physics::BodyID::Null()));
         }
         _impl->physicsContext->DestroyBodies(bodies);
     }
@@ -147,11 +148,18 @@ auto World::GetCullingStats() -> CullingStats& {
     return _impl->registry.GetOrEmplaceSingleton<Components::CullingStatsComponent>().stats;
 }
 
-auto World::GetVisibleEntities() -> JPH::Array<Entity>& {
+auto World::VisibleEntitiesForServices() noexcept -> VisibilityList& {
     return _impl->visibleEntities;
 }
-auto World::GetVisibleShadowEntities() -> JPH::Array<Entity>& {
+auto World::VisibleShadowEntitiesForServices() noexcept -> VisibilityList& {
     return _impl->visibleShadowEntities;
+}
+
+auto World::GetVisibleEntities() const noexcept -> std::span<const Entity> {
+    return _impl->visibleEntities.AsSpan();
+}
+auto World::GetVisibleShadowEntities() const noexcept -> std::span<const Entity> {
+    return _impl->visibleShadowEntities.AsSpan();
 }
 
 }

@@ -55,7 +55,7 @@ void CharacterManager::Shutdown() noexcept {
     slotCapacity = 0;
 }
 
-void CharacterManager::InitReservedSlot(BodyHandle handle, float groundOffset) noexcept {
+void CharacterManager::InitReservedSlot(BodyID handle, float groundOffset) noexcept {
     const uint32_t slot = handle.index;
     ZHLN::Assert(slot < slotCapacity, "CharacterManager::InitReservedSlot: slot ({}) >= slotCapacity ({})", slot, slotCapacity);
     groundOffsets[slot] = groundOffset;
@@ -67,7 +67,7 @@ void CharacterManager::InitReservedSlot(BodyHandle handle, float groundOffset) n
 
 auto CharacterManager::MaterializeCharacter(const CreateCharacterPayload& p, const JPH::ShapeRefC& shape, JPH::PhysicsSystem& physicsSystem)
     -> JPH::CharacterVirtual* {
-    const uint32_t slot = p.handle.index;
+    const uint32_t slot = p.bodyID.index;
     ZHLN::Assert(slot < slotCapacity, "CharacterManager::MaterializeCharacter: slot ({}) >= slotCapacity ({})", slot, slotCapacity);
 
     JPH::CharacterVirtualSettings settings;
@@ -82,7 +82,7 @@ auto CharacterManager::MaterializeCharacter(const CreateCharacterPayload& p, con
 
     auto* character = new JPH::CharacterVirtual(&settings, JPH::RVec3(p.px, p.py, p.pz), JPH::Quat::sIdentity(), &physicsSystem);
     character->SetListener(listener.get());
-    character->SetUserData(p.handle.Pack());
+    character->SetUserData(p.bodyID.Pack());
 
     const JPH::Vec3 initialVel(
         velX[slot].load(std::memory_order::acquire),
@@ -109,7 +109,7 @@ void CharacterManager::DestroyCharacterSlot(uint32_t slot) noexcept {
     }
 }
 
-auto CharacterManager::RecordDesiredVelocity(BodyHandle handle, JPH::Vec3Arg velocity) noexcept -> bool {
+auto CharacterManager::RecordDesiredVelocity(BodyID handle, JPH::Vec3Arg velocity) noexcept -> bool {
     if (handle.index >= slotCapacity || generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return false;
     }
@@ -119,7 +119,7 @@ auto CharacterManager::RecordDesiredVelocity(BodyHandle handle, JPH::Vec3Arg vel
     return true;
 }
 
-void CharacterManager::ApplyVelocityCommand(BodyHandle handle, JPH::Vec3Arg velocity) noexcept {
+void CharacterManager::ApplyVelocityCommand(BodyID handle, JPH::Vec3Arg velocity) noexcept {
     if (handle.index >= slotCapacity || generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
     }
@@ -127,24 +127,24 @@ void CharacterManager::ApplyVelocityCommand(BodyHandle handle, JPH::Vec3Arg velo
     velY[handle.index].store(velocity.GetY(), std::memory_order::release);
     velZ[handle.index].store(velocity.GetZ(), std::memory_order::release);
     auto& character = instances[handle.index];
-    if (character != nullptr && BodyHandle::Unpack(character->GetUserData()).generation == handle.generation) {
+    if (character != nullptr && BodyID::Unpack(character->GetUserData()).generation == handle.generation) {
         character->SetLinearVelocity(velocity);
     }
 }
 
-auto CharacterManager::ApplyPositionCommand(BodyHandle handle, JPH::RVec3Arg position) noexcept -> bool {
+auto CharacterManager::ApplyPositionCommand(BodyID handle, JPH::RVec3Arg position) noexcept -> bool {
     if (handle.index >= slotCapacity || generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return false;
     }
     auto& character = instances[handle.index];
-    if (character != nullptr && BodyHandle::Unpack(character->GetUserData()).generation == handle.generation) {
+    if (character != nullptr && BodyID::Unpack(character->GetUserData()).generation == handle.generation) {
         character->SetPosition(position);
         return true;
     }
     return false;
 }
 
-auto CharacterManager::GetVelocity(BodyHandle handle) const noexcept -> JPH::Vec3 {
+auto CharacterManager::GetVelocity(BodyID handle) const noexcept -> JPH::Vec3 {
     if (handle.index >= slotCapacity || generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return JPH::Vec3::sZero();
     }
@@ -155,7 +155,7 @@ auto CharacterManager::GetVelocity(BodyHandle handle) const noexcept -> JPH::Vec
     );
 }
 
-auto CharacterManager::GetGroundOffset(BodyHandle handle) const noexcept -> float {
+auto CharacterManager::GetGroundOffset(BodyID handle) const noexcept -> float {
     if (handle.index >= slotCapacity || generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return 0.0f;
     }
@@ -185,7 +185,7 @@ void CharacterManager::UpdateCharacters(float deltaTime, JPH::PhysicsSystem& phy
             allocator
         );
 
-        const BodyHandle h    = BodyHandle::Unpack(character->GetUserData());
+        const BodyID h    = BodyID::Unpack(character->GetUserData());
         const uint32_t   slot = h.index;
         if (slot < slotCapacity && generations[slot].load(std::memory_order::relaxed) == h.generation) {
             const JPH::Vec3 postVel = character->GetLinearVelocity();

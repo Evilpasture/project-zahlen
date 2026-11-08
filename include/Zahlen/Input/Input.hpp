@@ -181,19 +181,19 @@ enum class InputDeviceKind : uint8_t {
     Gamepad       = 1,
 };
 
-struct InputDeviceId {
+struct InputDeviceID {
     InputDeviceKind kind = InputDeviceKind::KeyboardMouse;
     uint8_t         slot = 0;
 
-    [[nodiscard]] static constexpr auto KeyboardMouse(uint8_t deviceSlot = 0) noexcept -> InputDeviceId {
-        return InputDeviceId {.kind = InputDeviceKind::KeyboardMouse, .slot = deviceSlot};
+    [[nodiscard]] static constexpr auto KeyboardMouse(uint8_t deviceSlot = 0) noexcept -> InputDeviceID {
+        return InputDeviceID {.kind = InputDeviceKind::KeyboardMouse, .slot = deviceSlot};
     }
 
-    [[nodiscard]] static constexpr auto Gamepad(uint8_t gamepadSlot) noexcept -> InputDeviceId {
-        return InputDeviceId {.kind = InputDeviceKind::Gamepad, .slot = gamepadSlot};
+    [[nodiscard]] static constexpr auto Gamepad(uint8_t gamepadSlot) noexcept -> InputDeviceID {
+        return InputDeviceID {.kind = InputDeviceKind::Gamepad, .slot = gamepadSlot};
     }
 
-    constexpr auto operator==(const InputDeviceId&) const noexcept -> bool = default;
+    constexpr auto operator==(const InputDeviceID&) const noexcept -> bool = default;
 };
 
 enum class SeatRoutingPolicy : uint8_t {
@@ -584,7 +584,7 @@ struct GamepadConnectionEvent {
     String32   name {};
 };
 
-static_assert(std::is_trivially_copyable_v<InputDeviceId>);
+static_assert(std::is_trivially_copyable_v<InputDeviceID>);
 static_assert(std::is_trivially_copyable_v<DeadzoneConfig>);
 static_assert(std::is_trivially_copyable_v<StickSample>);
 static_assert(std::is_trivially_copyable_v<GamepadRawSample>);

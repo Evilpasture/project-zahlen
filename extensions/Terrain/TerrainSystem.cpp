@@ -38,8 +38,8 @@ ZHLN::Mutex                                s_LifecycleMutex {};
 std::vector<TerrainData>                   s_DeferredCleanup;
 } // namespace
 
-TerrainHandle TerrainSystem::RegisterTerrainData(TerrainData data) noexcept {
-    return Lock(s_LifecycleMutex, [&]() -> TerrainHandle {
+TerrainID TerrainSystem::RegisterTerrainData(TerrainData data) noexcept {
+    return Lock(s_LifecycleMutex, [&]() -> TerrainID {
         for (size_t i = 0; i < MAX_TERRAIN_SLOTS; ++i) {
             auto& slot = s_TerrainSlots[i];
             if (!slot.occupied.load(std::memory_order::relaxed)) {
@@ -47,17 +47,17 @@ TerrainHandle TerrainSystem::RegisterTerrainData(TerrainData data) noexcept {
                 uint32_t gen = slot.generation.load(std::memory_order::relaxed);
                 slot.occupied.store(true, std::memory_order::release);
 
-                uint64_t handleRaw = (static_cast<uint64_t>(gen) << 32) | static_cast<uint64_t>(i + 1);
-                return static_cast<TerrainHandle>(handleRaw);
+                uint64_t idRaw = (static_cast<uint64_t>(gen) << 32) | static_cast<uint64_t>(i + 1);
+                return static_cast<TerrainID>(idRaw);
             }
         }
         ZHLN::LogError("[TerrainSystem] Exceeded maximum terrain slot capacity ({})!", MAX_TERRAIN_SLOTS);
-        return TerrainHandle::Invalid;
+        return TerrainID::Invalid;
     });
 }
 
-const TerrainData* TerrainSystem::GetTerrainData(TerrainHandle handle) noexcept {
-    if (handle == TerrainHandle::Invalid) {
+const TerrainData* TerrainSystem::GetTerrainData(TerrainID handle) noexcept {
+    if (handle == TerrainID::Invalid) {
         return nullptr;
     }
     auto     raw     = static_cast<uint64_t>(handle);
@@ -78,8 +78,8 @@ const TerrainData* TerrainSystem::GetTerrainData(TerrainHandle handle) noexcept 
     return &slot.data;
 }
 
-void TerrainSystem::UnregisterTerrainData(TerrainHandle handle) noexcept {
-    if (handle == TerrainHandle::Invalid) {
+void TerrainSystem::UnregisterTerrainData(TerrainID handle) noexcept {
+    if (handle == TerrainID::Invalid) {
         return;
     }
     auto     raw     = static_cast<uint64_t>(handle);
@@ -111,7 +111,7 @@ void TerrainSystem::RegisterCleanup(Engine& engine) {
 void TerrainSystem::Detach(Engine& engine, Entity entity) {
     auto& registry = engine.GetRegistry();
     if (auto terrain = registry.Get<TerrainComponent>(entity)) {
-        UnregisterTerrainData(std::exchange(terrain->terrainHandle, TerrainHandle::Invalid));
+        UnregisterTerrainData(std::exchange(terrain->terrainID, TerrainID::Invalid));
         registry.Remove<TerrainComponent>(entity);
     }
 }
@@ -127,7 +127,7 @@ void TerrainSystem::ReleaseTerrainData(ECS::Registry& registry) {
         return;
     }
     for (auto& terrain: registry.GetRawArray<TerrainComponent>()) {
-        UnregisterTerrainData(std::exchange(terrain.terrainHandle, TerrainHandle::Invalid));
+        UnregisterTerrainData(std::exchange(terrain.terrainID, TerrainID::Invalid));
     }
 }
 
@@ -138,7 +138,7 @@ void TerrainSystem::Cleanup(Engine& engine, bool all) {
         auto terrains = registry.GetRawArray<TerrainComponent>();
         for (size_t i = 0; i < entities.size(); ++i) {
             if (all || registry.Get<Components::PendingDestroy>(entities[i])) {
-                UnregisterTerrainData(std::exchange(terrains[i].terrainHandle, TerrainHandle::Invalid));
+                UnregisterTerrainData(std::exchange(terrains[i].terrainID, TerrainID::Invalid));
             }
         }
     }
@@ -182,7 +182,7 @@ void TerrainSystem::Update(
             meshComp->materialAsset = HashAssetID(ZHLN::FormatTo(buf, "terrain_mat_{}", e.index));
         }
 
-        const TerrainData* tData = GetTerrainData(terrain.terrainHandle);
+        const TerrainData* tData = GetTerrainData(terrain.terrainID);
 
         // 2. Cache clears drop only the lookup. Rebind the scene-owned mesh
         // without baking a second set of buffers; after device loss the owner
@@ -193,7 +193,7 @@ void TerrainSystem::Update(
                 rc.UnregisterGPUMesh(owned->meshAsset);
                 owned->meshAsset = meshComp->meshAsset;
             }
-            if (owned && owned->mesh.posBuffer != BufferHandle::Invalid) {
+            if (owned && owned->mesh.posBuffer != BufferID::Invalid) {
                 rc.RegisterGPUMesh(meshComp->meshAsset, owned->mesh);
             } else if (tData != nullptr && !tData->heights.empty()) {
                 Mesh tMesh = CreateTerrainMeshFromData(
@@ -229,7 +229,7 @@ float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float wo
         const auto& terrain = terrains[i];
 
         // Lock-free O(1) slot resolution
-        const TerrainData* tData = GetTerrainData(terrain.terrainHandle);
+        const TerrainData* tData = GetTerrainData(terrain.terrainID);
         if (tData == nullptr) {
             continue;
         }

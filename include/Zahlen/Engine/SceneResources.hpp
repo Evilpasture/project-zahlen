@@ -4,6 +4,7 @@
 
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <type_traits>
 #include <utility>
@@ -24,6 +25,7 @@ ZHLN_API void Release(PhysicsContext& physics, Components::PhysicsComponent& com
 ZHLN_API void Release(PhysicsContext& physics, Components::RagdollComponent& component);
 ZHLN_API void Release(AudioContext& audio, Components::AudioSourceComponent& component);
 ZHLN_API void Release(RenderContext& render, Components::OwnedMeshComponent& component);
+ZHLN_API void Release(GraphicsDevice graphics, Components::OwnedMeshComponent& component);
 
 ZHLN_API void Release(Engine& engine, Components::PhysicsComponent& component);
 ZHLN_API void Release(Engine& engine, Components::RagdollComponent& component);

@@ -1,6 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -172,7 +175,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         PrefabFactory::SpawnParams params = MakeSpawnParams(entity);
 
         if (NeedsMaterial(entity.material)) {
-            auto material = BuildMaterial(engine.GetRenderContext(), entity.material);
+            auto material = BuildMaterial(ZHLN::EngineAccess::RenderOf(engine), entity.material);
             if (!material) {
                 ZHLN::Log("[Scene] entity '{}': material creation failed", entity.name);
                 return std::unexpected(SceneError::MaterialCreationFailed);
@@ -257,12 +260,12 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                     }
                     half = JPH::Vec3::sMax(half, JPH::Vec3::sReplicate(0.05f));
 
-                    auto&                physics = engine.GetPhysicsContext();
+                    auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
                     const JPH::ShapeRefC shape   = physics.GetOrCreateShape(Physics::ShapeType::Box, half.GetX(), half.GetY(), half.GetZ());
                     if (shape != nullptr) {
                         registry.Add(
                             parts[0], Components::PhysicsComponent {
-                                          .physicsHandle = physics.CreateRigidBody(
+                                          .physicsID = physics.CreateRigidBody(
                                               shape, params.position, params.rotation, JPH::EMotionType::Kinematic, Layers::ID::MOVING, 0,
                                               params.physicsCategory, params.physicsMask
                                           ),
@@ -504,7 +507,7 @@ auto Extract(Engine& engine) -> Scene {
     const auto camera  = camComp ? camComp->camera : Camera {};
     return Extract(
         camera, engine.GetRegistry(),
-        MaterialLookup {.userdata = &engine.GetRenderContext(), .find = [](const void* userdata, MaterialID id) -> std::optional<Material> {
+        MaterialLookup {.userdata = &ZHLN::EngineAccess::RenderOf(engine), .find = [](const void* userdata, MaterialID id) -> std::optional<Material> {
                             return static_cast<const RenderContext*>(userdata)->GetGPUMaterial(id);
                         }}
     );

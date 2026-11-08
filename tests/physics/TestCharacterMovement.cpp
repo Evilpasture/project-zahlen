@@ -65,7 +65,7 @@ struct CPUPipelineHarness {
     ZHLN::ECS::Registry  reg;
     ZHLN::Camera         cam;
     ZHLN::Entity         player {};
-    ZHLN::Physics::BodyHandle charPhys {};
+    ZHLN::Physics::BodyID charPhys {};
     JPH::Vec3            prevPos = JPH::Vec3::sZero();
     JPH::Vec3            currPos = JPH::Vec3::sZero();
 
@@ -90,7 +90,7 @@ struct CPUPipelineHarness {
         );
         player   = reg.Create(
             ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Character::MovementComponent {.speed = 6.0f},
-            ZHLN::Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
+            ZHLN::Components::PhysicsComponent {.physicsID = charPhys, .isStatic = false}
         );
         prevPos = JPH::Vec3(spawnPos);
         currPos = JPH::Vec3(spawnPos);
@@ -103,9 +103,9 @@ struct CPUPipelineHarness {
     }
 
     ~CPUPipelineHarness() {
-        std::vector<ZHLN::Physics::BodyHandle> handles;
+        std::vector<ZHLN::Physics::BodyID> handles;
         for (const auto& component: reg.GetRawArray<ZHLN::Components::PhysicsComponent>()) {
-            handles.push_back(component.physicsHandle);
+            handles.push_back(component.physicsID);
         }
         pc.DestroyBodies(handles);
         reg.Clear();
@@ -442,7 +442,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             CPUPipelineHarness  harness(cfg);
 
             auto         boxShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
-            ZHLN::Physics::BodyHandle pushBox =
+            ZHLN::Physics::BodyID pushBox =
                 harness.pc.CreateRigidBody(boxShape, {0.0, 0.25, 2.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             harness.pc.OptimizeBroadphase();
 
@@ -454,10 +454,10 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
             auto rayHit = harness.pc.Raycast({0.0, 0.25, 0.0}, {0.0f, 0.0f, 1.0f}, 10.0f);
             ZHLN::Test::ExpectTrue(rayHit.hasHit);
-            ZHLN::Test::ExpectTrue(rayHit.handle == pushBox);
-            ZHLN::Test::ExpectGt(rayHit.position.GetZ(), 2.6f);
+            ZHLN::Test::ExpectTrue(rayHit.bodyID == pushBox);
+            ZHLN::Test::ExpectGt(rayHit.position.z, 2.6f);
 
-            if (!rayHit.hasHit || rayHit.position.GetZ() <= 2.6f) {
+            if (!rayHit.hasHit || rayHit.position.z <= 2.6f) {
                 return std::unexpected(CharacterTestError::DynamicPushFailed);
             }
             return {};

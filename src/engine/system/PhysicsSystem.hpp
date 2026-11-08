@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 
 namespace ZHLN {
@@ -18,9 +19,11 @@ void AccumulateImpulse(ECS::Registry& registry, Entity entity, float x, float y,
 
 class ZHLN_API PhysicsSystem {
   public:
-    static constexpr float TargetDt = 1.0f / 60.0f;
+    static constexpr float TargetDt = kFixedStepDt;
 
-    static void Update(Engine& engine, float dt, float& accumulator) noexcept;
+    // Engine::Tick has already drained the clock; the physics step just runs
+    // the number of fixed steps it was handed.
+    static void Update(Engine& engine, uint32_t fixedSteps) noexcept;
 };
 
 }

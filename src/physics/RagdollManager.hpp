@@ -17,7 +17,7 @@
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Physics/Physics.hpp>
-#include <Zahlen/Physics/PhysicsHandles.hpp>
+#include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -41,20 +41,20 @@ struct alignas(64) RagdollManager {
     void Shutdown() noexcept;
 
     [[nodiscard]] auto CreateSkeletalRagdoll(JPH::PhysicsSystem& joltSystem, JPH::Ref<JPH::Skeleton> skeleton, std::span<const RagdollPartParams> parts)
-        -> RagdollHandle;
+        -> RagdollID;
 
-    void DestroyRagdolls(std::span<const RagdollHandle> handles) noexcept;
+    void DestroyRagdolls(std::span<const RagdollID> handles) noexcept;
 
-    [[nodiscard]] auto GetRagdoll(RagdollHandle handle) const noexcept -> ZHLN::Optional<JPH::Ragdoll&>;
-    void               ActivateRagdoll(RagdollHandle handle, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept;
-    void               RemoveRagdoll(RagdollHandle handle) noexcept;
-    void               DriveRagdollPose(RagdollHandle handle, const JPH::SkeletonPose& pose) noexcept;
-    void               AddRagdollImpulse(RagdollHandle handle, uint32_t jointIndex, JPH::Vec3Arg impulse, JPH::BodyInterface& bodyInterface) noexcept;
-    [[nodiscard]] auto GetRagdollPose(RagdollHandle handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept -> bool;
+    [[nodiscard]] auto GetRagdoll(RagdollID handle) const noexcept -> ZHLN::Optional<JPH::Ragdoll&>;
+    void               ActivateRagdoll(RagdollID handle, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept;
+    void               RemoveRagdoll(RagdollID handle) noexcept;
+    void               DriveRagdollPose(RagdollID handle, const JPH::SkeletonPose& pose) noexcept;
+    void               AddRagdollImpulse(RagdollID handle, uint32_t jointIndex, JPH::Vec3Arg impulse, JPH::BodyInterface& bodyInterface) noexcept;
+    [[nodiscard]] auto GetRagdollPose(RagdollID handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept -> bool;
 
   private:
-    [[nodiscard]] auto FindSlotUnlocked(RagdollHandle handle) noexcept -> RagdollSlot*;
-    [[nodiscard]] auto FindSlotUnlocked(RagdollHandle handle) const noexcept -> const RagdollSlot*;
+    [[nodiscard]] auto FindSlotUnlocked(RagdollID handle) noexcept -> RagdollSlot*;
+    [[nodiscard]] auto FindSlotUnlocked(RagdollID handle) const noexcept -> const RagdollSlot*;
 };
 
 } // namespace ZHLN::Physics

@@ -12,6 +12,8 @@
 //      must change the rendered output, proving the frame UBO/instance
 //      addresses re-pushed via vkCmdPushDataEXT are actually consumed.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/TargetCameraFixture.hpp"
@@ -67,7 +69,7 @@ struct DescriptorHeapsSuite {
     // thrown away between tests. Creating a Vulkan instance per test is what
     // eventually exhausts the loader's static TLS and turns the tail of a
     // group into "vkCreateInstance: Found no drivers!".
-    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
+    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Descriptor Heap Test",
             .width                 = width,
@@ -135,12 +137,12 @@ struct DescriptorHeapsSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> bindless_texture_array_resolves_across_heap_region() {
             auto engine      = DescriptorHeapsSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             // Fullbright: raw albedo stamping so texture color is the output.
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -182,8 +184,8 @@ struct DescriptorHeapsSuite {
                 texelBlock.fill(texel);
 
                 const std::string   texName = std::format("dheap_tex_{:02}", i);
-                ZHLN::TextureHandle tex     = rc.CreateProceduralTexture(texName, {8, 8}, texelBlock, true);
-                if (tex == ZHLN::TextureHandle::Invalid) {
+                ZHLN::TextureID tex     = rc.CreateProceduralTexture(texName, {8, 8}, texelBlock, true);
+                if (tex == ZHLN::TextureID::Invalid) {
                     return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
                 }
 
@@ -213,7 +215,7 @@ struct DescriptorHeapsSuite {
             }
 
             uint32_t width = 0, height = 0;
-            auto     pixelsRes = CapturePixels(rc, "headless_dheap_array.ppm", width, height);
+            auto     pixelsRes = CapturePixels(ZHLN::EngineAccess::RenderOf(*engine), "headless_dheap_array.ppm", width, height);
             if (!pixelsRes) {
                 return std::unexpected(pixelsRes.error());
             }
@@ -278,24 +280,24 @@ struct DescriptorHeapsSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> recreating_a_procedural_texture_reuses_its_bindless_slot() {
             auto engine      = DescriptorHeapsSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
 
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             std::array<uint32_t, 16 * 16> texels {};
             texels.fill(0xFF3366CCu);
 
-            const ZHLN::TextureHandle first = rc.CreateProceduralTexture("dheap_slot_reuse", {16, 16}, texels, false);
-            if (first == ZHLN::TextureHandle::Invalid) {
+            const ZHLN::TextureID first = rc.CreateProceduralTexture("dheap_slot_reuse", {16, 16}, texels, false);
+            if (first == ZHLN::TextureID::Invalid) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
             // Byte-identical re-creation, ten times over: same handle, same
             // slot, no new upload. Before the guard each of these consumed a
             // fresh globalTextures[] index and leaked the previous image.
             for (uint32_t attempt = 0; attempt < 10; ++attempt) {
-                const ZHLN::TextureHandle again = rc.CreateProceduralTexture("dheap_slot_reuse", {16, 16}, texels, false);
+                const ZHLN::TextureID again = rc.CreateProceduralTexture("dheap_slot_reuse", {16, 16}, texels, false);
                 ZHLN::Test::ExpectTrue(again == first);
             }
 
@@ -303,7 +305,7 @@ struct DescriptorHeapsSuite {
             // the dedupe is by asset id and content, not a blanket refusal.
             std::array<uint32_t, 16 * 16> otherTexels {};
             otherTexels.fill(0xFF22AA55u);
-            const ZHLN::TextureHandle other = rc.CreateProceduralTexture("dheap_slot_reuse_other", {16, 16}, otherTexels, false);
+            const ZHLN::TextureID other = rc.CreateProceduralTexture("dheap_slot_reuse_other", {16, 16}, otherTexels, false);
             ZHLN::Test::ExpectTrue(other != first);
             // The slot still samples: one frame with the reused texture on a
             // box has to render rather than trip a validation error.
@@ -316,12 +318,12 @@ struct DescriptorHeapsSuite {
         //     unnamed creation owns a distinct handle even for identical
         //     pixels; named uploads preserve their identity and dedupe.
         // ====================================================================
-        std::expected<void, ZHLN::ErrorCode> texture_creation_registers_2d_and_cube_handles() {
+        std::expected<void, ZHLN::ErrorCode> texture_creation_registers_2d_and_cube_ids() {
             auto engine = DescriptorHeapsSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             std::array<uint32_t, 16> texels {};
             texels.fill(0xFF3366CCu);
@@ -330,7 +332,7 @@ struct DescriptorHeapsSuite {
             if (!ZHLN::Test::ExpectTrue(first.has_value() && second.has_value())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
-            ZHLN::Test::ExpectNe(*first, ZHLN::TextureHandle::Invalid);
+            ZHLN::Test::ExpectNe(*first, ZHLN::TextureID::Invalid);
             ZHLN::Test::ExpectNe(*first, *second);
             // Neither handle is a built-in fallback texture: each creation
             // owns a real upload. (Which descriptor slot that is stays an
@@ -393,7 +395,7 @@ struct DescriptorHeapsSuite {
             // Unloading is per-handle: the surviving texture keeps its
             // identity (and renders through it below); nothing about the
             // retired handles can be observed -- or resurrected -- out here.
-            ZHLN::Test::ExpectNe(*second, ZHLN::TextureHandle::Invalid);
+            ZHLN::Test::ExpectNe(*second, ZHLN::TextureID::Invalid);
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
             const auto newer = rc.CreateTexture(std::span {texels}, {4, 4}, false);
@@ -416,7 +418,7 @@ struct DescriptorHeapsSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> per_frame_push_address_block_updates() {
             auto engine      = DescriptorHeapsSuite::CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
 
@@ -426,7 +428,7 @@ struct DescriptorHeapsSuite {
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
             auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
             if (!settingsEnts.empty()) {
@@ -493,7 +495,7 @@ struct DescriptorHeapsSuite {
             }
 
             uint32_t wA = 0, hA = 0;
-            auto     frameA = CapturePixels(rc, "headless_dheap_frameA.ppm", wA, hA);
+            auto     frameA = CapturePixels(ZHLN::EngineAccess::RenderOf(*engine), "headless_dheap_frameA.ppm", wA, hA);
             if (!frameA) {
                 return std::unexpected(frameA.error());
             }
@@ -509,7 +511,7 @@ struct DescriptorHeapsSuite {
             }
 
             uint32_t wB = 0, hB = 0;
-            auto     frameB = CapturePixels(rc, "headless_dheap_frameB.ppm", wB, hB);
+            auto     frameB = CapturePixels(ZHLN::EngineAccess::RenderOf(*engine), "headless_dheap_frameB.ppm", wB, hB);
             if (!frameB) {
                 return std::unexpected(frameB.error());
             }

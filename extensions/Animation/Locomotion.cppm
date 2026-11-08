@@ -4,6 +4,9 @@
 module;
 
 // clang-format off
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Math/Mat44.h>
@@ -171,7 +174,7 @@ struct EllipsoidDesc {
     int   segments = 36;
 };
 
-auto DrawWireframeEllipsoid(SceneData& scene, const JPH::Vec3& center, const EllipsoidDesc& desc, const JPH::Vec4& color) noexcept -> void {
+auto DrawWireframeEllipsoid(DebugDraw scene, const JPH::Vec3& center, const EllipsoidDesc& desc, const JPH::Vec4& color) noexcept -> void {
     // 1. Latitudinal Parallel Rings
     for (int lat = 1; lat < desc.latRings; ++lat) {
         const auto phi        = -std::numbers::pi_v<float> * 0.5f + (static_cast<float>(lat) / static_cast<float>(desc.latRings)) * std::numbers::pi_v<float>;
@@ -213,7 +216,7 @@ auto DrawWireframeEllipsoid(SceneData& scene, const JPH::Vec3& center, const Ell
 }
 
 auto DrawWireframeSphere(
-    SceneData&       scene,
+    DebugDraw        scene,
     const JPH::Vec3& center,
     float            radius,
     const JPH::Vec4& color,
@@ -241,7 +244,7 @@ auto SpawnCharacter(
     float                           jumpForce     = 14.8f
 ) -> Entity {
     auto& reg = engine.GetRegistry();
-    auto& pc  = engine.GetPhysicsContext();
+    auto pc = engine.Physics();
 
     // Create physics first, then publish the complete gameplay entity in one
     // atomic ECS insertion. No system can observe a partially assembled player.
@@ -252,13 +255,13 @@ auto SpawnCharacter(
         .shape            = Physics::CreateDualShape(config),
         .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -config.GetLifterOffsetY())
     };
-    const Physics::BodyHandle charPhys = pc.CreateCharacter(spawnPosition, characterParams);
+    const Physics::BodyID charPhys = pc.CreateCharacter(spawnPosition, characterParams);
     const JPH::Mat44          world    = Math::CreateTransform(spawnPosition, {0.0f, 0.0f, 0.0f, 1.0f});
     const Entity              player   = reg.Create(
         Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
         Components::TransformComponent {.position = spawnPosition}, Components::WorldTransformComponent {.world = world, .previous = world},
         Character::InputComponent {}, Character::MovementComponent {.speed = speed, .jumpForce = jumpForce},
-        Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
+        Components::PhysicsComponent {.physicsID = charPhys, .isStatic = false}
     );
     // Configure third-person follow camera and strip FreeCam. The rig
     // component lives in extensions/Camera: this is gameplay camera policy the
@@ -294,7 +297,7 @@ auto SpawnCharacter(
 auto
     RenderDebugRig(Engine& engine, Entity playerEntity, const Physics::DualShapeConfig& config = {}, const DebugPalette& palette = {}) noexcept -> void {
     auto& reg = engine.GetRegistry();
-    auto& scene = engine.GetSceneData();
+    auto scene = engine.Debug();
 
     if (!reg.IsAlive(playerEntity)) {
         return;

@@ -1,6 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include "ArticulationSystem.hpp"
 #include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
@@ -11,6 +18,7 @@
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Core/Diagnostics.hpp>
 #include <Zahlen/Core/Trace.hpp>
@@ -18,6 +26,7 @@
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/VisibilityList.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Input/Input.hpp>
@@ -80,8 +89,10 @@ struct EngineImpl {
     std::vector<Engine::TeardownHook>            teardownHooks;
     std::vector<Engine::SceneCleanupPass>        sceneCleanupPasses;
 
-    float          currentAlpha = 0.0f;
-    float physicsAccumulator = 0.0f;
+    // The simulation clock owns the fixed-step accumulator. Engine::Tick feeds
+    // it once per frame and drains it with ConsumeFixedSteps; no mutable alpha
+    // or accumulator is stored on the engine any more.
+    Clock frameClock;
 
     // Created on the first frame that asks for a system context, because that is
     // the first moment the task system's worker count is known and is also
@@ -102,7 +113,7 @@ struct EngineImpl {
     std::unique_ptr<SimGraph>       updateGraph;
     std::unique_ptr<RenderGraph>    renderGraph;
 
-    FontAtlas             fontAtlas         = GUI::BuildFontAtlas(GUI::GetDefaultBakedFont(), TextureHandle::Invalid);
+    FontAtlas             fontAtlas         = GUI::BuildFontAtlas(GUI::GetDefaultBakedFont(), TextureID::Invalid);
     bool                  fontAtlasUploaded = false;
     std::vector<KeyCode>  uiPressedKeys;
     std::vector<uint32_t> uiCharacterStream;
@@ -120,8 +131,8 @@ void Engine::EnsureFontAtlas() {
     if (_impl->fontAtlasUploaded) {
         return;
     }
-    PrefabFactory::PrimeDefaultBakedFont(GetAssetManager());
-    const FontAtlas uploaded = PrefabFactory::CreateFontAtlas(GetRenderContext(), GetAssetManager(), GUI::kDefaultFontAssetID);
+    PrefabFactory::PrimeDefaultBakedFont(_impl->kernel->GetAssetManager());
+    const FontAtlas uploaded = PrefabFactory::CreateFontAtlas(_impl->kernel->GetRenderContext(), _impl->kernel->GetAssetManager(), GUI::kDefaultFontAssetID);
     if (uploaded.glyphCount > 0) {
         _impl->fontAtlas = uploaded;
     }
@@ -188,7 +199,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     // replacement renderer is created after that. Component authoring data survives.
     auto& reg = _impl->world->GetRegistry();
     for (auto& skeleton: reg.GetRawArray<Components::SkeletalMeshComponent>()) {
-        skeleton.skinnedScratch = BufferHandle::Invalid;
+        skeleton.skinnedScratch = BufferID::Invalid;
         skeleton.scratchVertexCount = 0;
     }
     for (auto& owned: reg.GetRawArray<Components::OwnedMeshComponent>()) {
@@ -198,7 +209,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     if (auto rebuilt = _impl->kernel->HandleDeviceLost(); !rebuilt) {
         return std::unexpected(rebuilt.error());
     }
-    PrefabFactory::RebuildVulkanResources(_impl->kernel->GetRenderContext(), _impl->world->GetRegistry());
+    PrefabFactory::RebuildVulkanResources(Graphics(), _impl->world->GetRegistry());
     _impl->fontAtlasUploaded = false;
     EnsureFontAtlas();
 
@@ -430,11 +441,54 @@ auto Engine::GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTa
     return _impl->kernel->GetAcquiredTarget(window);
 }
 
-auto Engine::GetKernel() -> Kernel& {
-    return *_impl->kernel;
+// --- Capability facades -------------------------------------------------------
+// Each facade is a value carrying a pointer to an engine-owned subsystem. The
+// engine keeps ownership; nothing here returns a mutable reference to a
+// subsystem, and the concrete types are not named in the public header.
+
+auto Engine::Graphics() noexcept -> GraphicsDevice {
+    return GraphicsDevice {_impl->kernel->GetRenderContext()};
 }
-auto Engine::GetWorld() -> World& {
-    return *_impl->world;
+auto Engine::Physics() noexcept -> Simulation {
+    return Simulation {_impl->world->GetPhysics()};
+}
+auto Engine::Debug() noexcept -> DebugDraw {
+    return DebugDraw {_impl->sceneData};
+}
+auto Engine::Assets() noexcept -> AssetLibrary {
+    return AssetLibrary {_impl->kernel->GetAssetManager()};
+}
+auto Engine::Audio() noexcept -> AudioEngine {
+    return AudioEngine {_impl->kernel->GetAudioContext()};
+}
+auto Engine::State() noexcept -> ZHLN::EngineState {
+    return ZHLN::EngineState {*this};
+}
+
+// Build-tree-only seam for engine implementation units and in-repo tooling.
+auto ZHLN::EngineAccess::KernelOf(Engine& e) noexcept -> Kernel& {
+    return *e._impl->kernel;
+}
+auto ZHLN::EngineAccess::WorldOf(Engine& e) noexcept -> World& {
+    return *e._impl->world;
+}
+auto ZHLN::EngineAccess::RenderOf(Engine& e) noexcept -> RenderContext& {
+    return e._impl->kernel->GetRenderContext();
+}
+auto ZHLN::EngineAccess::PhysicsOf(Engine& e) noexcept -> PhysicsContext& {
+    return e._impl->world->GetPhysics();
+}
+auto ZHLN::EngineAccess::AssetsOf(Engine& e) noexcept -> AssetManager& {
+    return e._impl->kernel->GetAssetManager();
+}
+auto ZHLN::EngineAccess::AudioOf(Engine& e) noexcept -> AudioContext& {
+    return e._impl->kernel->GetAudioContext();
+}
+auto ZHLN::EngineAccess::SceneOf(Engine& e) noexcept -> SceneData& {
+    return e._impl->sceneData;
+}
+auto ZHLN::EngineAccess::PhysicsOf(Simulation& sim) noexcept -> PhysicsContext& {
+    return *sim._ctx;
 }
 
 namespace {
@@ -470,8 +524,8 @@ void Engine::EnsureSystemGraphs() {
             .scene      = _impl->sceneData,
             .assets     = _impl->kernel->GetAssetManager(),
             .extensions = _impl->extensions,
-            .visible    = VisibleEntities {_impl->world->GetVisibleEntities()},
-            .shadow     = VisibleShadowEntities {_impl->world->GetVisibleShadowEntities()},
+            .visible    = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
+            .shadow     = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
         }
     );
 
@@ -483,15 +537,15 @@ auto Engine::GetPoseUploads() -> PoseUploadQueue& {
     return _impl->poseUploads;
 }
 
-auto Engine::MakeFrame(float dt) -> Frame {
+auto Engine::MakeFrame(float dt, FrameAlpha alpha) -> Frame {
     if (_impl->workerScratch == nullptr) {
         _impl->workerScratch = std::make_unique<WorkerScratchPool>(kWorkerScratchBytes, TaskSystem::GetWorkerCount());
     }
 
     return Frame {
-        .frame   = _impl->frameCounter,
-        .alpha   = _impl->currentAlpha,
-        .dt      = dt,
+        .frame   = FrameIndex {_impl->frameCounter},
+        .alpha   = alpha,
+        .dt      = FrameDt {dt},
         .scratch = _impl->workerScratch.get(),
     };
 }
@@ -502,21 +556,6 @@ void Engine::ResetWorkerScratch() noexcept {
     }
 }
 
-auto Engine::GetPhysicsContext() -> PhysicsContext& {
-    return _impl->world->GetPhysics();
-}
-auto Engine::GetRenderContext() -> RenderContext& {
-    return _impl->kernel->GetRenderContext();
-}
-auto Engine::GetSceneData() -> SceneData& {
-    return _impl->sceneData;
-}
-auto Engine::GetAssetManager() -> AssetManager& {
-    return _impl->kernel->GetAssetManager();
-}
-auto Engine::GetAudioContext() -> AudioContext& {
-    return _impl->kernel->GetAudioContext();
-}
 auto Engine::GetInput() noexcept -> InputContext& {
     return _impl->world->GetInput();
 }
@@ -559,6 +598,7 @@ void Engine::ProcessPendingDestroy() {
 
 void Engine::ClearScene() {
     SceneCleanupSystem::ClearAll(*this);
+    ClearVisibilityLists();
     _impl->world->GetEventBus().ClearEvents();
 }
 
@@ -579,17 +619,16 @@ void Engine::RunSceneCleanupPasses(bool all) {
 auto Engine::GetArticulationSystem() -> ArticulationSystem& {
     return _impl->world->GetArticulationSystem();
 }
-auto Engine::GetVisibleEntities() -> JPH::Array<Entity>& {
+void Engine::ClearVisibilityLists() noexcept {
+    _impl->world->VisibleEntitiesForServices().Clear();
+    _impl->world->VisibleShadowEntitiesForServices().Clear();
+}
+
+auto Engine::GetVisibleEntities() const noexcept -> std::span<const Entity> {
     return _impl->world->GetVisibleEntities();
 }
-auto Engine::GetVisibleShadowEntities() -> JPH::Array<Entity>& {
+auto Engine::GetVisibleShadowEntities() const noexcept -> std::span<const Entity> {
     return _impl->world->GetVisibleShadowEntities();
-}
-auto Engine::GetCurrentAlpha() -> float& {
-    return _impl->currentAlpha;
-}
-auto Engine::GetPhysicsAccumulator() -> float& {
-    return _impl->physicsAccumulator;
 }
 
 auto Engine::GetGameState() const -> void* {
@@ -788,7 +827,17 @@ auto Engine::InitializeDefaultScene() -> bool {
 auto Engine::Tick(float dt) -> FrameStatus {
     _impl->world->GetInput().StepHaptics(dt);
 
-    FrameContext ctx;
+    // The clock owns the fixed-step accumulator and is drained exactly once per
+    // frame, here, before any step of the plan can run. The physics step runs
+    // `fixedSteps` steps; the leftover fraction is the frame's interpolation
+    // alpha. Nothing writes an alpha into the engine between phases.
+    _impl->frameClock.Advance(dt);
+    const FixedStepBatch batch = _impl->frameClock.ConsumeFixedSteps(kFixedStepDt, kMaxFixedSteps);
+    FrameContext         ctx {
+        .status     = FrameStatus::OK,
+        .fixedSteps = batch.steps,
+        .alpha      = FrameAlpha {batch.alpha},
+    };
 
     // The plan is whatever the composition produced: core's own steps, plus one
     // set of steps per module the application installed. The engine executes it
@@ -845,10 +894,13 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
         }
 
         const float rawDt = runClock.Tick();
+        // The pacing clock only samples wall time; the simulation accumulator
+        // belongs to Engine::Tick, so discard this unused one.
+        runClock.ResetFixedAccumulator();
 
         // Kernel/Engine already synchronized a resize during ProcessEvents.
         constexpr double           kFpsCapSlack  = 1.05;
-        const std::optional<float> pacedDt       = engine->GetRenderContext().GetPacedDeltaTime();
+        const std::optional<float> pacedDt       = engine->Graphics().PacedDeltaTime();
         const bool                 displayPaced  = pacedDt.has_value() &&
                                   (config.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
         const float tickDt = displayPaced ? *pacedDt : rawDt;

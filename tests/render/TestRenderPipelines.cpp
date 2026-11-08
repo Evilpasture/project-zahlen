@@ -1,6 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "Zahlen/Render/Render.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -53,12 +57,12 @@ struct RenderPipelinesTestSuite {
             // invalidates device resources the pooled engine would retain.
             ZHLN::Test::Headless::ShutdownPooledEngines();
             auto engine = ZHLN::Test::Headless::CreateEngine("PipelineLifetime", 320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
 
             auto&      reg = engine->GetRegistry();
-            auto&      rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
             const auto box =
                 ZHLN::PrefabFactory::CreateBox(*engine, {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 3, 0}, .createPhysics = false});
             const auto boxMesh = reg.Get<ZHLN::Components::MeshComponent>(box);
@@ -77,13 +81,13 @@ struct RenderPipelinesTestSuite {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
             }
-            if (!ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty() && rc.GetGPUMaterial(boxMesh->materialAsset).has_value())) {
+            if (!ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty() && rc.Material(boxMesh->materialAsset).has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
 
             const auto validationErrors = ZHLN::Test::ValidationErrorCount();
-            rc.UnregisterGPUMaterial(boxMesh->materialAsset);
-            ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(boxMesh->materialAsset).has_value());
+            rc.UnregisterMaterial(boxMesh->materialAsset);
+            ZHLN::Test::ExpectFalse(rc.Material(boxMesh->materialAsset).has_value());
 
             // The cache drops registered materials, and material creation
             // continues to work after it is cleared. No assertion depends on
@@ -93,15 +97,15 @@ struct RenderPipelinesTestSuite {
                 return std::unexpected(transient.error());
             }
             const ZHLN::MaterialID transientId = ZHLN::HashAssetID("test_pipeline_cache_transient_material");
-            rc.RegisterGPUMaterial(transientId, *transient);
-            ZHLN::Test::ExpectTrue(rc.GetGPUMaterial(transientId).has_value());
-            rc.ClearGPUCaches();
-            ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(transientId).has_value());
+            rc.RegisterMaterial(transientId, *transient);
+            ZHLN::Test::ExpectTrue(rc.Material(transientId).has_value());
+            rc.ClearCaches();
+            ZHLN::Test::ExpectFalse(rc.Material(transientId).has_value());
             auto recreated = rc.CreateMaterial(ZHLN::MaterialDesc::Basic());
             if (!recreated) {
                 return std::unexpected(recreated.error());
             }
-            ZHLN::Test::ExpectNe(recreated->pipeline, ZHLN::PipelineHandle::Invalid);
+            ZHLN::Test::ExpectNe(recreated->pipeline, ZHLN::PipelineID::Invalid);
             ZHLN::Test::ExpectEq(ZHLN::Test::ValidationErrorCount(), validationErrors);
             return {};
         }
@@ -133,7 +137,7 @@ struct RenderPipelinesTestSuite {
             }
 
             auto engine = std::move(engineRes.value());
-            ZHLN::Test::ExpectTrue(engine != nullptr);
+            ZHLN::Test::ExpectTrue(engine.Valid());
             engine->InitializeDefaultScene();
             ZHLN::Test::ExpectTrue(!engine->GetRegistry().GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
 
@@ -141,7 +145,7 @@ struct RenderPipelinesTestSuite {
             // UNDEFINED. A capture must fail without submitting an invalid
             // COLOR_ATTACHMENT -> TRANSFER_SRC readback barrier.
             const auto errorsBefore = ZHLN::Test::ValidationErrorCount();
-            const auto emptyCapture = engine->GetRenderContext().CaptureFrame();
+            const auto emptyCapture = engine->Graphics().CaptureFrame();
             ZHLN::Test::ExpectFalse(emptyCapture.has_value());
             ZHLN::Test::ExpectEq(ZHLN::Test::ValidationErrorCount(), errorsBefore);
             return {};
@@ -149,24 +153,24 @@ struct RenderPipelinesTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> registered_meshes_are_views_of_scene_owned_buffers() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("SceneMeshOwnership", 320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return {};
             }
-            auto& rc  = engine->GetRenderContext();
+            auto rc = engine->Graphics();
             auto& reg = engine->GetRegistry();
 
             const auto entity = ZHLN::PrefabFactory::CreateBox(*engine, {0.5f, 0.5f, 0.5f});
             const auto owner  = reg.Get<ZHLN::Components::OwnedMeshComponent>(entity);
-            if (!ZHLN::Test::ExpectTrue(owner.has_value() && owner->mesh.posBuffer != ZHLN::BufferHandle::Invalid)) {
+            if (!ZHLN::Test::ExpectTrue(owner.has_value() && owner->mesh.posBuffer != ZHLN::BufferID::Invalid)) {
                 return {};
             }
             const auto id     = owner->meshAsset;
             const auto handle = owner->mesh.posBuffer;
 
-            rc.UnregisterGPUMesh(id); // the lookup disappears without freeing scene-owned buffers
-            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(id).has_value());
-            rc.RegisterGPUMesh(id, owner->mesh);
-            const auto rebound = rc.GetGPUMesh(id);
+            rc.UnregisterMesh(id); // the lookup disappears without freeing scene-owned buffers
+            ZHLN::Test::ExpectFalse(rc.Mesh(id).has_value());
+            rc.RegisterMesh(id, owner->mesh);
+            const auto rebound = rc.Mesh(id);
             ZHLN::Test::ExpectTrue(rebound.has_value());
             if (rebound) {
                 ZHLN::Test::ExpectEq(rebound->posBuffer, handle);
@@ -174,14 +178,14 @@ struct RenderPipelinesTestSuite {
 
             // Direct component removal uses a typed owner-aware helper.
             ZHLN::Test::ExpectTrue(ZHLN::SceneResources::Detach<ZHLN::Components::OwnedMeshComponent>(*engine, entity));
-            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(id).has_value());
+            ZHLN::Test::ExpectFalse(rc.Mesh(id).has_value());
             reg.Destroy(entity); // now data-only
 
             // Unlike renderer-owned particle buffers, skinned scratch belongs to
             // its component. Detaching it must invalidate the public buffer handle.
             const auto skinned = reg.Create(ZHLN::Components::SkeletalMeshComponent {});
             const auto scratch = rc.CreateBuffer<ZHLN::BufferUsage::SkinScratch>(3);
-            if (ZHLN::Test::ExpectNe(scratch, ZHLN::BufferHandle::Invalid)) {
+            if (ZHLN::Test::ExpectNe(scratch, ZHLN::BufferID::Invalid)) {
                 reg.Patch<ZHLN::Components::SkeletalMeshComponent>(skinned, [&](auto& comp) {
                     comp.skinnedScratch     = scratch;
                     comp.scratchVertexCount = 3;
@@ -202,7 +206,7 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::OwnedMeshComponent>(plane).has_value());
                 engine->ProcessPendingDestroy();
                 ZHLN::Test::ExpectFalse(reg.IsAlive(plane));
-                ZHLN::Test::ExpectFalse(rc.GetGPUMesh(planeID).has_value());
+                ZHLN::Test::ExpectFalse(rc.Mesh(planeID).has_value());
             }
 
             const auto sphere      = ZHLN::PrefabFactory::CreateSphere(*engine, 0.5f);
@@ -210,32 +214,32 @@ struct RenderPipelinesTestSuite {
             if (ZHLN::Test::ExpectTrue(sphereOwner.has_value())) {
                 const auto sphereID = sphereOwner->meshAsset;
                 engine->ClearScene();
-                ZHLN::Test::ExpectFalse(rc.GetGPUMesh(sphereID).has_value());
+                ZHLN::Test::ExpectFalse(rc.Mesh(sphereID).has_value());
             }
 
             // An independent Registry has no Engine cleanup system. Release
             // its owned meshes explicitly before clearing its data-only ECS.
             ZHLN::ECS::Registry standalone;
-            const auto          loose      = ZHLN::PrefabFactory::CreateBox(rc, standalone, std::nullopt, {0.25f, 0.25f, 0.25f});
+            const auto          loose      = ZHLN::PrefabFactory::CreateBox(engine->Graphics(), standalone, std::nullopt, {0.25f, 0.25f, 0.25f});
             const auto          looseOwner = standalone.Get<ZHLN::Components::OwnedMeshComponent>(loose);
             if (ZHLN::Test::ExpectTrue(looseOwner.has_value())) {
                 const auto looseID = looseOwner->meshAsset;
-                ZHLN::PrefabFactory::ReleaseOwnedMeshes(rc, standalone);
+                ZHLN::PrefabFactory::ReleaseOwnedMeshes(engine->Graphics(), standalone);
                 standalone.Clear();
-                ZHLN::Test::ExpectFalse(rc.GetGPUMesh(looseID).has_value());
+                ZHLN::Test::ExpectFalse(rc.Mesh(looseID).has_value());
             }
             return {};
         }
 
         std::expected<void, ZHLN::ErrorCode> cached_prefab_parts_share_one_owned_mesh() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("PrefabMeshOwnership", 320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return {};
             }
-            auto&      rc     = engine->GetRenderContext();
-            auto&      assets = engine->GetAssetManager();
-            const auto mesh   = ZHLN::PrefabFactory::CreatePlaneMesh(rc, 1.0f);
-            if (!ZHLN::Test::ExpectTrue(mesh.posBuffer != ZHLN::BufferHandle::Invalid)) {
+            auto rc = engine->Graphics();
+            auto assets = engine->Assets();
+            const auto mesh   = ZHLN::PrefabFactory::CreatePlaneMesh(engine->Graphics(), 1.0f);
+            if (!ZHLN::Test::ExpectTrue(mesh.posBuffer != ZHLN::BufferID::Invalid)) {
                 rc.DestroyMesh(mesh);
                 return {};
             }
@@ -249,21 +253,21 @@ struct RenderPipelinesTestSuite {
             prefab->parts[1].meshAsset = secondID;
             prefab->parts[1].mesh      = mesh;
             assets.CachePrefab(ZHLN::HashAssetPath("test_prefab_mesh_shared"), std::move(prefab));
-            rc.RegisterGPUMesh(firstID, mesh);
-            rc.RegisterGPUMesh(secondID, mesh);
+            rc.RegisterMesh(firstID, mesh);
+            rc.RegisterMesh(secondID, mesh);
 
             assets.ClearCache(); // unregister both aliases; release shared buffers once
-            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(firstID).has_value());
-            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(secondID).has_value());
+            ZHLN::Test::ExpectFalse(rc.Mesh(firstID).has_value());
+            ZHLN::Test::ExpectFalse(rc.Mesh(secondID).has_value());
             const auto next = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(64);
-            ZHLN::Test::ExpectTrue(next != ZHLN::BufferHandle::Invalid);
+            ZHLN::Test::ExpectTrue(next != ZHLN::BufferID::Invalid);
             rc.DestroyBuffer(next);
             return {};
         }
 
         std::expected<void, ZHLN::ErrorCode> particle_emitter_edits_and_respawn_keep_rendering_valid() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("RendererOwnedParticleStorage", 320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return {};
             }
 
@@ -308,22 +312,22 @@ struct RenderPipelinesTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> engine_ecb_marks_hierarchies_before_batched_physics_cleanup() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("BatchSceneCleanup", 320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return {};
             }
             auto&                                  reg     = engine->GetRegistry();
-            auto&                                  physics = engine->GetPhysicsContext();
+            auto physics = engine->Physics();
             const auto                             shape   = physics.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
             const ZHLN::Entity                     parent  = reg.Create<ZHLN::Components::TransformComponent>();
             std::vector<ZHLN::Entity>              children;
-            std::vector<ZHLN::Physics::BodyHandle> handles;
+            std::vector<ZHLN::Physics::BodyID> handles;
             for (int i = 0; i < 12; ++i) {
                 auto       double_i = static_cast<double>(i);
                 const auto handle =
                     physics.CreateRigidBody(shape, {double_i, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
                 handles.push_back(handle);
                 children.push_back(reg.Create(
-                    ZHLN::Components::HierarchyComponent {.parent = parent}, ZHLN::Components::PhysicsComponent {.physicsHandle = handle, .isStatic = false}
+                    ZHLN::Components::HierarchyComponent {.parent = parent}, ZHLN::Components::PhysicsComponent {.physicsID = handle, .isStatic = false}
                 ));
             }
 
@@ -334,16 +338,16 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(parent).has_value());
             for (size_t i = 0; i < children.size(); ++i) {
                 ZHLN::Test::ExpectTrue(reg.IsAlive(children[i]));
-                ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::PhysicsComponent>(children[i])->physicsHandle, handles[i]);
+                ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::PhysicsComponent>(children[i])->physicsID, handles[i]);
             }
             // A child attached after the ECB marked its root must also be
             // discovered by the cleanup system before components are erased.
-            const auto lateHandle = physics.CreateRigidBody(shape, {15, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+            const auto lateID = physics.CreateRigidBody(shape, {15, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             const auto lateChild  = reg.Create(
-                ZHLN::Components::HierarchyComponent {.parent = parent}, ZHLN::Components::PhysicsComponent {.physicsHandle = lateHandle, .isStatic = false}
+                ZHLN::Components::HierarchyComponent {.parent = parent}, ZHLN::Components::PhysicsComponent {.physicsID = lateID, .isStatic = false}
             );
             children.push_back(lateChild);
-            handles.push_back(lateHandle);
+            handles.push_back(lateID);
             ZHLN::Test::ExpectFalse(reg.Get<ZHLN::Components::PendingDestroy>(lateChild).has_value());
 
             engine->ProcessPendingDestroy();
@@ -360,11 +364,11 @@ struct RenderPipelinesTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> stale_skinned_scratch_skips_draw_and_csg() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("StaleSkinnedScratch", 320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return {};
             }
 
-            auto& rc       = engine->GetRenderContext();
+            auto rc = engine->Graphics();
             auto  material = rc.CreateMaterial(ZHLN::MaterialDesc::Basic());
             if (!ZHLN::Test::ExpectTrue(material.has_value())) {
                 return {};
@@ -381,8 +385,8 @@ struct RenderPipelinesTestSuite {
             const auto                              surface = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span<ZHLN::VertexSurface> {surfaces});
             const auto                              scratch = rc.CreateBuffer<ZHLN::BufferUsage::SkinScratch>(3);
             if (!ZHLN::Test::ExpectTrue(
-                    pos != ZHLN::BufferHandle::Invalid && frame != ZHLN::BufferHandle::Invalid && surface != ZHLN::BufferHandle::Invalid &&
-                    scratch != ZHLN::BufferHandle::Invalid
+                    pos != ZHLN::BufferID::Invalid && frame != ZHLN::BufferID::Invalid && surface != ZHLN::BufferID::Invalid &&
+                    scratch != ZHLN::BufferID::Invalid
                 )) {
                 rc.DestroyBuffer(pos);
                 rc.DestroyBuffer(frame);
@@ -431,7 +435,7 @@ struct RenderPipelinesTestSuite {
         // device state now, built once on Engine and preserved across scene resets.
         std::expected<void, ZHLN::ErrorCode> scene_reset_rebuilds_engine_state_instead_of_accumulating_it() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("LocalGPUSceneResetTest", 320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return {};
             }
 
@@ -441,8 +445,8 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectGt(renderSystems, 0);
 
             const ZHLN::FontAtlas&    firstFont = engine->GetFontAtlas();
-            const ZHLN::TextureHandle atlas     = firstFont.texture;
-            ZHLN::Test::ExpectTrue(atlas != ZHLN::TextureHandle::Invalid);
+            const ZHLN::TextureID atlas     = firstFont.texture;
+            ZHLN::Test::ExpectTrue(atlas != ZHLN::TextureID::Invalid);
             // 'A' is never an empty box in any baked font, so a zero-area
             // entry means the metrics were not carried over. The lookup goes
             // through the atlas's own glyph range -- the bake declares its
@@ -546,15 +550,15 @@ struct RenderPipelinesTestSuite {
                 const auto  phys  = reg.Get<ZHLN::Components::PhysicsComponent>(box);
                 const char* body  = (!phys) ?
                                         "no PhysicsComponent" :
-                                        ((phys->physicsHandle == ZHLN::Physics::BodyHandle::Null()) ? "null handle" : (phys->isStatic ? "static" : "dynamic"));
-                const auto  hit   = eng.GetPhysicsContext().Raycast({0.0, 15.0, 0.0}, {0.0f, -1.0f, 0.0f}, 30.0f);
+                                        ((phys->physicsID == ZHLN::Physics::BodyID::Null()) ? "null ID" : (phys->isStatic ? "static" : "dynamic"));
+                const auto  hit   = eng.Physics().Raycast({0.0, 15.0, 0.0}, {0.0f, -1.0f, 0.0f}, 30.0f);
 
                 const std::string stateText = (!phys) ? std::string("no PhysicsComponent") : std::string(body);
 
                 ZHLN::Println(
                     "    [INFO] {}: transform Y {:.3f} | physics state {} | body {} | raycast {} | engine frame {}", which,
                     trans ? trans->position.y : -1.0f, stateText, body,
-                    hit.hasHit ? std::format("hit at Y {:.3f}", static_cast<float>(hit.position.GetY())) : std::string("no hit"), eng.GetCurrentFrame()
+                    hit.hasHit ? std::format("hit at Y {:.3f}", static_cast<float>(hit.position.y)) : std::string("no hit"), eng.GetCurrentFrame()
                 );
             };
 

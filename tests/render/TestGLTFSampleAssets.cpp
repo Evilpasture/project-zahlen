@@ -15,6 +15,9 @@
 // (an A/B capture against the empty scene differs). No pixel goldens, no
 // absolute counts: a fidelity improvement must not fail this suite.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -138,17 +141,17 @@ struct GLTFSampleAssetsTestSuite {
             }
 
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Sample Assets", 640, 480);
-            if (engine == nullptr) {
+            if (!engine.Valid()) {
                 return std::unexpected(SampleAssetsError::EngineInitFailed);
             }
-            auto& rc     = engine->GetRenderContext();
-            auto& assets = engine->GetAssetManager();
+            auto rc = engine->Graphics();
+            auto assets = engine->Assets();
             ZHLN::Test::Headless::DisableAA(*engine);
 
             // Fidelity import units: authored linear emission, full texture
             // detail -- the same options the FidelityHarness renders with.
             constexpr ZHLN::GLTF::ImportOptions fidelity {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048};
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, bytes, modelPath, modelPath, fidelity);
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, modelPath, modelPath, fidelity);
             if (!prefab || !ZHLN::Test::ExpectGt(prefab->parts.size(), size_t {0})) {
                 return std::unexpected(SampleAssetsError::ImportFailed);
             }

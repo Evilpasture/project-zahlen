@@ -8,6 +8,8 @@
 // lit box verifies both that lighting actually changed and that full-strength
 // lit anisotropy never aliases the reserved unlit code.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/ChamferedBoxMesh.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -157,7 +159,7 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
         .posBuffer           = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {positions}),
         .tangentFrameBuffer  = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {frames}),
         .surfaceBuffer       = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {surfaces}),
-        .skinBuffer          = ZHLN::BufferHandle::Invalid,
+        .skinBuffer          = ZHLN::BufferID::Invalid,
         .indexBuffer         = rc.CreateBuffer<ZHLN::BufferUsage::Index>(std::span {indices}),
         .vertexCount         = static_cast<uint32_t>(positions.size()),
         .indexCount          = static_cast<uint32_t>(indices.size()),
@@ -177,10 +179,10 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
 // Mirrors PrefabFactory::CreateBox for a caller-built mesh: same registered
 // assets and components, but Shape::None because no rebuild recipe exists.
 auto SpawnUnlitChamfer(ZHLN::Engine& engine, float x, const ZHLN::Material& material) -> ZHLN::Entity {
-    auto&            rc   = engine.GetRenderContext();
+    auto rc = engine.Graphics();
     auto&            reg  = engine.GetRegistry();
-    const ZHLN::Mesh mesh = UploadChamferedMesh(rc);
-    if (mesh.posBuffer == ZHLN::BufferHandle::Invalid || mesh.indexBuffer == ZHLN::BufferHandle::Invalid) {
+    const ZHLN::Mesh mesh = UploadChamferedMesh(ZHLN::EngineAccess::RenderOf(*engine));
+    if (mesh.posBuffer == ZHLN::BufferID::Invalid || mesh.indexBuffer == ZHLN::BufferID::Invalid) {
         return ZHLN::Entity::Null();
     }
 
@@ -188,8 +190,8 @@ auto SpawnUnlitChamfer(ZHLN::Engine& engine, float x, const ZHLN::Material& mate
     const std::string  tag = std::to_string(e.index);
     const ZHLN::AssetID    meshAsset = ZHLN::HashAssetID("unlit_chamfer_mesh_" + tag);
     const ZHLN::MaterialID matAsset  = ZHLN::HashAssetID("unlit_chamfer_mat_" + tag);
-    rc.RegisterGPUMesh(meshAsset, mesh);
-    rc.RegisterGPUMaterial(matAsset, material);
+    rc.RegisterMesh(meshAsset, mesh);
+    rc.RegisterMaterial(matAsset, material);
 
     const JPH::Vec3  position = JPH::Vec3(x, 0.0f, 0.0f);
     const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(position, {0.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 1.0f});
@@ -235,10 +237,10 @@ struct UnlitMaterialsTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> authored_meshes_are_uniform_and_ignore_the_sun() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Authored Unlit", 512, 512);
-            if (engine == nullptr) return std::unexpected(UnlitMaterialError::EngineInitFailed);
+            if (!engine.Valid()) return std::unexpected(UnlitMaterialError::EngineInitFailed);
             ConfigureUnlitCapture(*engine);
 
-            auto&      rc       = engine->GetRenderContext();
+            auto rc = engine->Graphics();
             const auto orangeMat = rc.CreateMaterial(ZHLN::MaterialDesc {.unlit = true, .baseColor = {1.0f, 0.21763764f, 0.0f, 1.0f}});
             const auto blueMat   = rc.CreateMaterial(ZHLN::MaterialDesc {.unlit = true, .baseColor = {0.0f, 0.21763764f, 1.0f, 1.0f}});
             if (!orangeMat || !blueMat) return std::unexpected(UnlitMaterialError::UnlitMaterialFailed);
@@ -252,7 +254,7 @@ struct UnlitMaterialsTestSuite {
             reg.Add(sun, ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 8.0f)},
                     ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f),
                                                       .intensity = 0.0f, .direction = JPH::Vec3(0.0f, 0.0f, 1.0f)});
-            const auto controlMaterial = engine->GetRenderContext().CreateMaterial(
+            const auto controlMaterial = engine->Graphics().CreateMaterial(
                 ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.5f, 0.5f, 0.5f, 1.0f}, .anisotropyStrength = 1.0f}
             );
             if (!controlMaterial) return std::unexpected(UnlitMaterialError::MaterialCreationFailed);
@@ -301,7 +303,7 @@ struct UnlitMaterialsTestSuite {
         // texture cyan over a red wall; only BLEND may show both colors at once.
         std::expected<void, ZHLN::ErrorCode> masked_and_blended_unlit_keep_texture_coverage() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless unlit texture coverage");
-            if (engine == nullptr) return std::unexpected(UnlitMaterialError::EngineInitFailed);
+            if (!engine.Valid()) return std::unexpected(UnlitMaterialError::EngineInitFailed);
             ConfigureUnlitCapture(*engine);
             const auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
@@ -310,7 +312,7 @@ struct UnlitMaterialsTestSuite {
             ZHLN::Camera& camera = cameraComp->camera;
             camera.position = JPH::Vec3(0.0f, 0.0f, 5.0f);
             camera.fov = 60.0f;
-            auto& rc = engine->GetRenderContext();
+            auto rc = engine->Graphics();
 
             constexpr uint32_t side = 64;
             std::vector<uint8_t> rgba(side * side * 4u, 255u);

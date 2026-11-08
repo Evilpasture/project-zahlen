@@ -25,10 +25,10 @@ enum class NetworkError : uint8_t {
     ConnectionReset
 };
 
-enum class HandleError : uint8_t {
-    GenerationMismatch ZHLN_ANNOTATION(ZHLN::Description<"Recycled handle failed generation check. Expected generation {}, got {}"> {}) = 1,
+enum class IDError : uint8_t {
+    GenerationMismatch ZHLN_ANNOTATION(ZHLN::Description<"Recycled ID failed generation check. Expected generation {}, got {}"> {}) = 1,
     SlotOutOfBounds ZHLN_ANNOTATION(ZHLN::Description<"Slot index {} exceeds maximum capacity of {}"> {}),
-    EntityNull ZHLN_ANNOTATION(ZHLN::Description<"Entity handle is null or uninitialized."> {})
+    EntityNull ZHLN_ANNOTATION(ZHLN::Description<"Entity ID is null or uninitialized."> {})
 };
 
 enum class BareError : uint8_t {
@@ -116,13 +116,13 @@ struct ErrorTestSuite {
 
         // --- 3. Parameterized Description Formatting (Zero-Allocation) ---
         std::expected<void, ZHLN::ErrorCode> formatted_description_with_arguments() {
-            auto msg1 = ZHLN::Reflect::FormatEnumMessage(HandleError::GenerationMismatch, 2u, 1u);
-            auto msg2 = ZHLN::Reflect::FormatEnumMessage(HandleError::SlotOutOfBounds, 1050, 1024);
+            auto msg1 = ZHLN::Reflect::FormatEnumMessage(IDError::GenerationMismatch, 2u, 1u);
+            auto msg2 = ZHLN::Reflect::FormatEnumMessage(IDError::SlotOutOfBounds, 1050, 1024);
 
             ZHLN::Println("    [Formatted Message 1] {}", msg1);
             ZHLN::Println("    [Formatted Message 2] {}", msg2);
 
-            ZHLN::Test::ExpectEq(msg1, "Recycled handle failed generation check. Expected generation 2, got 1");
+            ZHLN::Test::ExpectEq(msg1, "Recycled ID failed generation check. Expected generation 2, got 1");
             ZHLN::Test::ExpectEq(msg2, "Slot index 1050 exceeds maximum capacity of 1024");
 
             return {};
@@ -130,21 +130,21 @@ struct ErrorTestSuite {
 
         // --- 4. Description Formatting with Zero Arguments ---
         std::expected<void, ZHLN::ErrorCode> formatted_description_without_arguments() {
-            auto msg = ZHLN::Reflect::FormatEnumMessage(HandleError::EntityNull);
+            auto msg = ZHLN::Reflect::FormatEnumMessage(IDError::EntityNull);
 
             ZHLN::Println("    [Formatted Message (Zero-Arg)] {}", msg);
 
-            ZHLN::Test::ExpectEq(msg, "Entity handle is null or uninitialized.");
+            ZHLN::Test::ExpectEq(msg, "Entity ID is null or uninitialized.");
             return {};
         }
 
         // --- 5. Formatted std::string Generation ---
         std::expected<void, ZHLN::ErrorCode> formatted_description_to_std_string() {
-            std::string str = ZHLN::Reflect::FormatEnumMessageString(HandleError::GenerationMismatch, 10u, 4u);
+            std::string str = ZHLN::Reflect::FormatEnumMessageString(IDError::GenerationMismatch, 10u, 4u);
 
             ZHLN::Println("    [Formatted std::string] {}", str);
 
-            ZHLN::Test::ExpectEq(str, "Recycled handle failed generation check. Expected generation 10, got 4");
+            ZHLN::Test::ExpectEq(str, "Recycled ID failed generation check. Expected generation 10, got 4");
             return {};
         }
 

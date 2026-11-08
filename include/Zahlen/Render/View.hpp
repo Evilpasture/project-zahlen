@@ -6,7 +6,7 @@
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Math/ValueTypes.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <cstdint>
 
 namespace ZHLN {

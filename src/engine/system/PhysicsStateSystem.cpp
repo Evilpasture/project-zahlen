@@ -28,7 +28,7 @@ static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsCo
     auto physComps     = query.Raw<Components::PhysicsComponent>();
     float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
 
-    std::vector<Physics::BodyHandle>        handles;
+    std::vector<Physics::BodyID>        handles;
     std::vector<size_t>                     sourceIndex;
     std::vector<Physics::BodyStateSnapshot> snapshots;
     handles.reserve(entities.size());
@@ -37,7 +37,7 @@ static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsCo
         if (physComps[i].isStatic) {
             continue;
         }
-        handles.push_back(physComps[i].physicsHandle);
+        handles.push_back(physComps[i].physicsID);
         sourceIndex.push_back(i);
     }
     snapshots.resize(handles.size());
@@ -52,7 +52,9 @@ static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsCo
         if (!trans) {
             continue;
         }
-        JPH::Vec3 expected = snapshots[j].previousPosition + clampedAlpha * (snapshots[j].currentPosition - snapshots[j].previousPosition);
+        const JPH::Vec3 previous = static_cast<JPH::Vec3>(snapshots[j].previousPosition);
+        const JPH::Vec3 current  = static_cast<JPH::Vec3>(snapshots[j].currentPosition);
+        JPH::Vec3 expected = previous + clampedAlpha * (current - previous);
         JPH::Vec3 actual(trans->position[0], trans->position[1], trans->position[2]);
         if ((actual - expected).LengthSq() > 1e-3f) {
             ZHLN::Log(
@@ -74,7 +76,7 @@ void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsCompo
 
     float clampedAlpha = std::clamp(alpha.value, 0.0f, 1.0f);
 
-    thread_local std::vector<Physics::BodyHandle>        handles;
+    thread_local std::vector<Physics::BodyID>        handles;
     thread_local std::vector<size_t>                     sourceIndex;
     thread_local std::vector<Physics::BodyStateSnapshot> snapshots;
     handles.clear();
@@ -86,7 +88,7 @@ void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsCompo
         if (phys[i].isStatic) {
             continue;
         }
-        handles.push_back(phys[i].physicsHandle);
+        handles.push_back(phys[i].physicsID);
         sourceIndex.push_back(i);
     }
 
@@ -104,9 +106,11 @@ void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsCompo
         }
 
         const auto& snap = snapshots[j];
-        trans->position  = snap.previousPosition + clampedAlpha * (snap.currentPosition - snap.previousPosition);
+        const JPH::Vec3 previous = static_cast<JPH::Vec3>(snap.previousPosition);
+        const JPH::Vec3 current  = static_cast<JPH::Vec3>(snap.currentPosition);
+        trans->position  = previous + clampedAlpha * (current - previous);
 
-        trans->rotation = snap.previousRotation.SLERP(snap.currentRotation, clampedAlpha);
+        trans->rotation = static_cast<JPH::Quat>(snap.previousRotation).SLERP(static_cast<JPH::Quat>(snap.currentRotation), clampedAlpha);
     }
 
     if constexpr (isDev) {

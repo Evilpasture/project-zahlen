@@ -11,7 +11,7 @@
 
 namespace ZHLN {
 
-enum class AudioHandle : uint64_t { Invalid = 0 };
+enum class VoiceID : uint64_t { Invalid = 0 };
 
 enum class AudioBus : uint8_t {
     Master   = 0,
@@ -24,19 +24,19 @@ enum class AudioBus : uint8_t {
 inline constexpr size_t kAudioBusCount  = 6;
 inline constexpr size_t kMaxAudioBuses  = 16;
 
-struct AudioBusId {
+struct AudioBusID {
     uint8_t index = static_cast<uint8_t>(AudioBus::SFX);
 
-    constexpr AudioBusId() noexcept = default;
+    constexpr AudioBusID() noexcept = default;
     // Implicit from built-in AudioBus so callers can pass AudioBus::Music / AudioBus::SFX directly.
-    constexpr AudioBusId(AudioBus builtin) noexcept : index(static_cast<uint8_t>(builtin)) {}
-    explicit constexpr AudioBusId(uint8_t rawIndex) noexcept : index(rawIndex) {}
+    constexpr AudioBusID(AudioBus builtin) noexcept : index(static_cast<uint8_t>(builtin)) {}
+    explicit constexpr AudioBusID(uint8_t rawIndex) noexcept : index(rawIndex) {}
 
-    [[nodiscard]] static constexpr auto Invalid() noexcept -> AudioBusId { return AudioBusId(0xFFu); }
+    [[nodiscard]] static constexpr auto Invalid() noexcept -> AudioBusID { return AudioBusID(0xFFu); }
     [[nodiscard]] constexpr auto        IsValid() const noexcept -> bool { return index < kMaxAudioBuses; }
-    constexpr auto                      operator==(const AudioBusId&) const noexcept -> bool = default;
+    constexpr auto                      operator==(const AudioBusID&) const noexcept -> bool = default;
 };
-static_assert(std::is_trivially_copyable_v<AudioBusId>);
+static_assert(std::is_trivially_copyable_v<AudioBusID>);
 
 enum class AudioAttenuationModel : uint8_t {
     None            = 0,

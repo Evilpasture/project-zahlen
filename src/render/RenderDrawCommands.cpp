@@ -63,9 +63,9 @@ struct ResolvedMeshMaterial {
     uint32_t                      meshletCount = 0;
 };
 
-[[nodiscard]] inline bool MeshletsUsable(const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
-    return mesh.meshletCount > 0 && mesh.meshletBuffer != BufferHandle::Invalid && mesh.meshletVertexBuffer != BufferHandle::Invalid &&
-           mesh.meshletTriBuffer != BufferHandle::Invalid && skinnedVertexBuffer == BufferHandle::Invalid;
+[[nodiscard]] inline bool MeshletsUsable(const Mesh& mesh, BufferID skinnedVertexBuffer) noexcept {
+    return mesh.meshletCount > 0 && mesh.meshletBuffer != BufferID::Invalid && mesh.meshletVertexBuffer != BufferID::Invalid &&
+           mesh.meshletTriBuffer != BufferID::Invalid && skinnedVertexBuffer == BufferID::Invalid;
 }
 
 struct BindlessIndices {
@@ -77,8 +77,8 @@ struct BindlessIndices {
 
 constexpr uint32_t kNoFilmTexture = 0xFFFFu;
 
-[[nodiscard]] uint32_t OptionalTextureIndex(RenderContext::Impl* impl, TextureHandle handle) noexcept {
-    if (handle == TextureHandle::Invalid) {
+[[nodiscard]] uint32_t OptionalTextureIndex(RenderContext::Impl* impl, TextureID handle) noexcept {
+    if (handle == TextureID::Invalid) {
         return kNoFilmTexture;
     }
     return impl->textureManager.GetBindlessIndex(handle) & kNoFilmTexture;
@@ -86,10 +86,10 @@ constexpr uint32_t kNoFilmTexture = 0xFFFFu;
 
 [[nodiscard]] BindlessIndices ResolveMaterialTextures(RenderContext::Impl* impl, const Material& material) noexcept {
     return {
-        .albedo   = (material.albedoMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.albedoMap) : 1,
-        .normal   = (material.normalMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.normalMap) : 2,
-        .pbr      = (material.pbrMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.pbrMap) : 1,
-        .emissive = (material.emissiveMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.emissiveMap) : 1
+        .albedo   = (material.albedoMap != TextureID::Invalid) ? impl->textureManager.GetBindlessIndex(material.albedoMap) : 1,
+        .normal   = (material.normalMap != TextureID::Invalid) ? impl->textureManager.GetBindlessIndex(material.normalMap) : 2,
+        .pbr      = (material.pbrMap != TextureID::Invalid) ? impl->textureManager.GetBindlessIndex(material.pbrMap) : 1,
+        .emissive = (material.emissiveMap != TextureID::Invalid) ? impl->textureManager.GetBindlessIndex(material.emissiveMap) : 1
     };
 }
 
@@ -294,8 +294,8 @@ struct InstanceDataDesc {
 }
 
 [[nodiscard]] std::optional<ResolvedMeshMaterial>
-    ResolveDrawInputs(RenderContext::Impl* impl, const Material& material, const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
-    using enum BufferHandle;
+    ResolveDrawInputs(RenderContext::Impl* impl, const Material& material, const Mesh& mesh, BufferID skinnedVertexBuffer) noexcept {
+    using enum BufferID;
 
     auto* posMesh        = impl->geometry.Resolve(mesh.posBuffer);
     auto* frameMesh      = impl->geometry.Resolve(mesh.tangentFrameBuffer);
@@ -313,7 +313,7 @@ struct InstanceDataDesc {
     res.surfaceMesh = surfaceMesh;
     res.material    = nativeMaterial;
 
-    if (material.prePassPipeline != PipelineHandle::Invalid) {
+    if (material.prePassPipeline != PipelineID::Invalid) {
         res.prePassMaterial = impl->pipelines.Resolve(material.prePassPipeline);
     }
 
@@ -384,7 +384,7 @@ struct DrawAddressPack {
 
 void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept {
     using enum DrawFlags;
-    using enum BufferHandle;
+    using enum BufferID;
 
     auto resolved = ResolveDrawInputs(_impl.get(), material, mesh, params.skinnedVertexBuffer);
     if (!resolved) [[unlikely]] {
@@ -425,7 +425,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .isSkinned                = isSkinned != 0u,
                  .doubleSided              = material.doubleSided,
                  .unlit                    = material.unlit,
-                 .hasEmissive              = material.bakedIrradianceMap != TextureHandle::Invalid || material.emissiveMap != TextureHandle::Invalid ||
+                 .hasEmissive              = material.bakedIrradianceMap != TextureID::Invalid || material.emissiveMap != TextureID::Invalid ||
                                              material.emissiveFactor.x > 0.0f || material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f ||
                                              params.hasAmbientCube,
                  .vertexCount              = resolved->posMesh->vertexCount,
@@ -496,7 +496,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
 
 void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept {
     auto MakeCommand = [&](const Material& material, const Mesh& mesh, const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,
-                           uint32_t jointOffset, BufferHandle skinnedVertexBuffer, DrawFlags flags) -> std::optional<DrawCommand> {
+                           uint32_t jointOffset, BufferID skinnedVertexBuffer, DrawFlags flags) -> std::optional<DrawCommand> {
         auto resolved = ResolveDrawInputs(_impl.get(), material, mesh, skinnedVertexBuffer);
         if (!resolved) {
             return std::nullopt;
@@ -504,7 +504,7 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
 
         auto tex = ResolveMaterialTextures(_impl.get(), material);
 
-        uint32_t isSkinned = (skinnedVertexBuffer == BufferHandle::Invalid && (flags & DrawFlags::Skinned) != DrawFlags::None) ? 1u : 0u;
+        uint32_t isSkinned = (skinnedVertexBuffer == BufferID::Invalid && (flags & DrawFlags::Skinned) != DrawFlags::None) ? 1u : 0u;
 
         const auto addr = AddressesOf(*resolved);
         return DrawCommand {
@@ -524,7 +524,7 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .isSkinned                = isSkinned != 0u,
                     .doubleSided              = material.doubleSided,
                     .unlit                    = material.unlit,
-                    .hasEmissive              = material.bakedIrradianceMap != TextureHandle::Invalid || material.emissiveMap != TextureHandle::Invalid ||
+                    .hasEmissive              = material.bakedIrradianceMap != TextureID::Invalid || material.emissiveMap != TextureID::Invalid ||
                                                 material.emissiveFactor.x > 0.0f || material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f,
                     .vertexCount              = resolved->posMesh->vertexCount,
                     .indexCount               = mesh.indexCount,
@@ -618,8 +618,8 @@ void RenderContext::DrawDecal(const DecalParams& params) noexcept {
     _impl->queues.Decals().push_back(
         {.transform    = params.transform,
          .invTransform = params.invTransform,
-         .albedoIndex  = params.albedoMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(params.albedoMap) : 1,
-         .normalIndex  = params.normalMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(params.normalMap) : 2,
+         .albedoIndex  = params.albedoMap != TextureID::Invalid ? _impl->textureManager.GetBindlessIndex(params.albedoMap) : 1,
+         .normalIndex  = params.normalMap != TextureID::Invalid ? _impl->textureManager.GetBindlessIndex(params.normalMap) : 2,
          .roughness    = params.roughness,
          .metallic     = params.metallic}
     );

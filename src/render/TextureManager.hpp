@@ -9,7 +9,7 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <array>
 #include <cstddef>
@@ -65,19 +65,19 @@ class TextureManager {
     [[nodiscard]] uint32_t BindlessBaseSlot() const noexcept {
         return _bindlessBaseSlot;
     }
-    [[nodiscard]] Vk::TextureHandle BindlessBaseHandle() const noexcept {
-        return Vk::TextureHandle {_bindlessBaseSlot};
+    [[nodiscard]] Vk::TextureSlotID BindlessBaseSlotID() const noexcept {
+        return Vk::TextureSlotID {_bindlessBaseSlot};
     }
 
     [[nodiscard]] auto Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true)
-        -> std::expected<TextureHandle, ErrorCode>;
+        -> std::expected<TextureID, ErrorCode>;
     [[nodiscard]] auto UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true)
-        -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height) -> std::expected<TextureHandle, ErrorCode>;
+        -> std::expected<TextureID, ErrorCode>;
+    [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureID, ErrorCode>;
+    [[nodiscard]] auto AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height) -> std::expected<TextureID, ErrorCode>;
 
-    [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
-    void                   Unload(TextureHandle handle);
+    [[nodiscard]] uint32_t GetBindlessIndex(TextureID handle) const noexcept;
+    void                   Unload(TextureID handle);
     void                   Clear();
 
     void RetireAll() noexcept;
@@ -106,7 +106,7 @@ class TextureManager {
 
   private:
     struct TextureRecord {
-        TextureHandle handle = TextureHandle::Invalid;
+        TextureID textureID = TextureID::Invalid;
         std::string   identifier;
         bool          named            = false;
         VkFormat      format           = VK_FORMAT_UNDEFINED;
@@ -122,7 +122,7 @@ class TextureManager {
         Vk::ImageView view;
     };
 
-    [[nodiscard]] TextureHandle RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, uint32_t width, uint32_t height);
+    [[nodiscard]] TextureID RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, uint32_t width, uint32_t height);
     void                        WriteSlotToHeap(uint32_t bindlessIndex, Vk::ImageView view) noexcept;
     void                        RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept;
     void                        DestroyAllSlots() noexcept;
@@ -145,9 +145,9 @@ class TextureManager {
 
     HashMap<uint64_t, TextureRecord> _textures;
 
-    uint64_t         _nextAnonymousHandle = 1ull << 63;
+    uint64_t         _nextAnonymousID = 1ull << 63;
     mutable Mutex    _mutex {};
-    mutable uint32_t _missingHandleWarningCount = 0;
+    mutable uint32_t _missingIDWarningCount = 0;
 };
 
 } // namespace ZHLN

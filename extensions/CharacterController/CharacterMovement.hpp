@@ -8,6 +8,7 @@ namespace ZHLN {
 
 class Engine;
 class PhysicsContext;
+class Simulation;
 
 namespace ECS {
 class Registry;
@@ -30,9 +31,10 @@ void CommitCharacterSteering(Engine& engine);
 // direction, so walking into a box pushes it. This used to be a hardcoded
 // impulse formula in the low-level character contact listener; the engine
 // core exerts no forces on bodies from character contacts any more, and the
-// policy lives in the controller that owns the character. Takes the physics
-// context and registry directly so standalone (engine-free) physics tests
-// can drive it the same way the substep hook does.
+// policy lives in the controller that owns the character. The engine substep
+// passes the Simulation capability; the raw-context overload remains for
+// standalone (engine-free) physics fixtures that own a PhysicsContext.
+void PushProps(Simulation physics, ECS::Registry& reg);
 void PushProps(PhysicsContext& pc, ECS::Registry& reg);
 
 // Reads the CharacterVirtual grounded flags back into MovementComponent

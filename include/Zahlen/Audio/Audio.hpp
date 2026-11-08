@@ -55,14 +55,14 @@ struct AudioEvent {
     AudioWaveformType    waveType   = AudioWaveformType::Sine;
     AudioFilterType      filterType = AudioFilterType::LowPass;
     AudioNoiseType       noiseType  = AudioNoiseType::White;
-    AudioBusId           bus        = AudioBus::SFX;
+    AudioBusID           bus        = AudioBus::SFX;
     float                reverbSend = 0.0f;
     AudioAttenuationDesc attenuation {};
 };
 static_assert(std::is_trivially_copyable_v<AudioEvent>);
 
 struct VoiceDesc {
-    AudioBusId           bus          = AudioBus::SFX;
+    AudioBusID           bus          = AudioBus::SFX;
     AudioPlaybackMode    playbackMode = AudioPlaybackMode::Decompressed;
     bool                 spatialized  = true;
     bool                 looping      = false;
@@ -104,37 +104,37 @@ class ZHLN_API AudioContext {
     void FlushEvents() noexcept;
 
     // Mixer bus hierarchy (Master, Music, SFX, Dialogue, Ambient, UI + custom sub-buses).
-    [[nodiscard]] auto CreateSubBus(const String32& name, AudioBusId parent = AudioBus::Master) -> AudioBusId;
-    [[nodiscard]] auto FindBus(std::string_view name) const noexcept -> AudioBusId;
-    [[nodiscard]] auto IsBusValid(AudioBusId bus) const noexcept -> bool;
-    [[nodiscard]] auto GetBusName(AudioBusId bus) const noexcept -> std::string_view;
-    [[nodiscard]] auto GetBusParent(AudioBusId bus) const noexcept -> AudioBusId;
-    auto               SetBusParent(AudioBusId bus, AudioBusId parent) -> bool;
+    [[nodiscard]] auto CreateSubBus(const String32& name, AudioBusID parent = AudioBus::Master) -> AudioBusID;
+    [[nodiscard]] auto FindBus(std::string_view name) const noexcept -> AudioBusID;
+    [[nodiscard]] auto IsBusValid(AudioBusID bus) const noexcept -> bool;
+    [[nodiscard]] auto GetBusName(AudioBusID bus) const noexcept -> std::string_view;
+    [[nodiscard]] auto GetBusParent(AudioBusID bus) const noexcept -> AudioBusID;
+    auto               SetBusParent(AudioBusID bus, AudioBusID parent) -> bool;
 
     void               SetMasterVolume(float volume);
     [[nodiscard]] auto GetMasterVolume() const noexcept -> float;
 
-    void               SetBusVolume(AudioBusId bus, float volume);
-    [[nodiscard]] auto GetBusVolume(AudioBusId bus) const noexcept -> float;
-    void               FadeBusVolume(AudioBusId bus, float targetVolume, float durationSeconds);
+    void               SetBusVolume(AudioBusID bus, float volume);
+    [[nodiscard]] auto GetBusVolume(AudioBusID bus) const noexcept -> float;
+    void               FadeBusVolume(AudioBusID bus, float targetVolume, float durationSeconds);
 
-    void               SetBusPitch(AudioBusId bus, float pitch);
-    [[nodiscard]] auto GetBusPitch(AudioBusId bus) const noexcept -> float;
+    void               SetBusPitch(AudioBusID bus, float pitch);
+    [[nodiscard]] auto GetBusPitch(AudioBusID bus) const noexcept -> float;
 
-    void               SetBusMuted(AudioBusId bus, bool muted);
-    [[nodiscard]] auto IsBusMuted(AudioBusId bus) const noexcept -> bool;
+    void               SetBusMuted(AudioBusID bus, bool muted);
+    [[nodiscard]] auto IsBusMuted(AudioBusID bus) const noexcept -> bool;
 
-    void               SetBusSolo(AudioBusId bus, bool solo);
-    [[nodiscard]] auto IsBusSolo(AudioBusId bus) const noexcept -> bool;
+    void               SetBusSolo(AudioBusID bus, bool solo);
+    [[nodiscard]] auto IsBusSolo(AudioBusID bus) const noexcept -> bool;
 
-    void               SetBusDucking(AudioBusId bus, float duckGain, float fadeSeconds = 0.15f);
-    [[nodiscard]] auto GetBusDucking(AudioBusId bus) const noexcept -> float;
+    void               SetBusDucking(AudioBusID bus, float duckGain, float fadeSeconds = 0.15f);
+    [[nodiscard]] auto GetBusDucking(AudioBusID bus) const noexcept -> float;
 
-    void               SetBusLowPassCutoff(AudioBusId bus, float cutoffHz);
-    [[nodiscard]] auto GetBusLowPassCutoff(AudioBusId bus) const noexcept -> float;
+    void               SetBusLowPassCutoff(AudioBusID bus, float cutoffHz);
+    [[nodiscard]] auto GetBusLowPassCutoff(AudioBusID bus) const noexcept -> float;
 
     // Effective linear gain after mute, hierarchical solo isolation, ducking, and parent chain.
-    [[nodiscard]] auto GetEffectiveBusVolume(AudioBusId bus) const noexcept -> float;
+    [[nodiscard]] auto GetEffectiveBusVolume(AudioBusID bus) const noexcept -> float;
 
     // Global Aux Reverb bus DSP (fed per-voice via VoiceDesc::reverbSend / SetVoiceReverbSend).
     void               SetReverbConfig(const AudioReverbConfig& config);
@@ -148,61 +148,61 @@ class ZHLN_API AudioContext {
         bool             spatialized = true,
         bool             looping     = false,
         float            volume      = 1.0f
-    ) -> AudioHandle;
-    [[nodiscard]] auto CreateVoice(std::string_view filepath, const VoiceDesc& desc) -> AudioHandle;
+    ) -> VoiceID;
+    [[nodiscard]] auto CreateVoice(std::string_view filepath, const VoiceDesc& desc) -> VoiceID;
     [[nodiscard]] auto CreateStreamVoice(
         std::string_view filepath,
-        AudioBusId       bus         = AudioBus::Music,
+        AudioBusID       bus         = AudioBus::Music,
         bool             looping     = true,
         float            volume      = 1.0f,
         bool             spatialized = false
-    ) -> AudioHandle;
+    ) -> VoiceID;
     [[nodiscard]] auto CreateVoiceFromMemory(
         std::span<const uint8_t> encodedBytes,
         const VoiceDesc&         desc = {}
-    ) -> AudioHandle;
+    ) -> VoiceID;
 
-    void               PlayVoice(AudioHandle handle);
-    void               PauseVoice(AudioHandle handle);
-    void               ResumeVoice(AudioHandle handle);
-    void               StopVoice(AudioHandle handle, float fadeOutSeconds = 0.05f);
-    auto               SeekVoiceSeconds(AudioHandle handle, float seconds) -> bool;
+    void               PlayVoice(VoiceID handle);
+    void               PauseVoice(VoiceID handle);
+    void               ResumeVoice(VoiceID handle);
+    void               StopVoice(VoiceID handle, float fadeOutSeconds = 0.05f);
+    auto               SeekVoiceSeconds(VoiceID handle, float seconds) -> bool;
 
-    [[nodiscard]] auto IsVoicePlaying(AudioHandle handle) const noexcept -> bool;
-    [[nodiscard]] auto IsVoicePaused(AudioHandle handle) const noexcept -> bool;
-    [[nodiscard]] auto IsVoiceStreamed(AudioHandle handle) const noexcept -> bool;
-    [[nodiscard]] auto IsVoiceValid(AudioHandle handle) const noexcept -> bool;
-    [[nodiscard]] auto GetVoiceCursorSeconds(AudioHandle handle) const noexcept -> float;
-    [[nodiscard]] auto GetVoiceDurationSeconds(AudioHandle handle) const noexcept -> float;
+    [[nodiscard]] auto IsVoicePlaying(VoiceID handle) const noexcept -> bool;
+    [[nodiscard]] auto IsVoicePaused(VoiceID handle) const noexcept -> bool;
+    [[nodiscard]] auto IsVoiceStreamed(VoiceID handle) const noexcept -> bool;
+    [[nodiscard]] auto IsVoiceValid(VoiceID handle) const noexcept -> bool;
+    [[nodiscard]] auto GetVoiceCursorSeconds(VoiceID handle) const noexcept -> float;
+    [[nodiscard]] auto GetVoiceDurationSeconds(VoiceID handle) const noexcept -> float;
 
-    void               SetVoiceBus(AudioHandle handle, AudioBusId bus);
-    [[nodiscard]] auto GetVoiceBus(AudioHandle handle) const noexcept -> AudioBusId;
+    void               SetVoiceBus(VoiceID handle, AudioBusID bus);
+    [[nodiscard]] auto GetVoiceBus(VoiceID handle) const noexcept -> AudioBusID;
 
-    void SetVoicePosition(AudioHandle handle, ZHLN::Float3 position);
-    void SetVoiceVelocity(AudioHandle handle, ZHLN::Float3 velocity);
-    void SetVoiceDirection(AudioHandle handle, ZHLN::Float3 direction);
+    void SetVoicePosition(VoiceID handle, ZHLN::Float3 position);
+    void SetVoiceVelocity(VoiceID handle, ZHLN::Float3 velocity);
+    void SetVoiceDirection(VoiceID handle, ZHLN::Float3 direction);
 
-    void               SetVoiceVolume(AudioHandle handle, float volume);
-    [[nodiscard]] auto GetVoiceVolume(AudioHandle handle) const noexcept -> float;
+    void               SetVoiceVolume(VoiceID handle, float volume);
+    [[nodiscard]] auto GetVoiceVolume(VoiceID handle) const noexcept -> float;
 
-    void               SetVoicePitch(AudioHandle handle, float pitch);
-    [[nodiscard]] auto GetVoicePitch(AudioHandle handle) const noexcept -> float;
+    void               SetVoicePitch(VoiceID handle, float pitch);
+    [[nodiscard]] auto GetVoicePitch(VoiceID handle) const noexcept -> float;
 
-    void               SetVoicePan(AudioHandle handle, float pan);
-    [[nodiscard]] auto GetVoicePan(AudioHandle handle) const noexcept -> float;
+    void               SetVoicePan(VoiceID handle, float pan);
+    [[nodiscard]] auto GetVoicePan(VoiceID handle) const noexcept -> float;
 
-    void               SetVoiceLooping(AudioHandle handle, bool looping);
-    [[nodiscard]] auto IsVoiceLooping(AudioHandle handle) const noexcept -> bool;
+    void               SetVoiceLooping(VoiceID handle, bool looping);
+    [[nodiscard]] auto IsVoiceLooping(VoiceID handle) const noexcept -> bool;
 
-    void               SetVoiceAttenuation(AudioHandle handle, const AudioAttenuationDesc& desc);
-    [[nodiscard]] auto GetVoiceAttenuation(AudioHandle handle) const noexcept -> AudioAttenuationDesc;
+    void               SetVoiceAttenuation(VoiceID handle, const AudioAttenuationDesc& desc);
+    [[nodiscard]] auto GetVoiceAttenuation(VoiceID handle) const noexcept -> AudioAttenuationDesc;
 
-    void               SetVoiceOcclusion(AudioHandle handle, const AudioOcclusionDesc& desc);
-    void               SetVoiceOcclusionFactor(AudioHandle handle, float occlusion);
-    [[nodiscard]] auto GetVoiceOcclusion(AudioHandle handle) const noexcept -> AudioOcclusionDesc;
+    void               SetVoiceOcclusion(VoiceID handle, const AudioOcclusionDesc& desc);
+    void               SetVoiceOcclusionFactor(VoiceID handle, float occlusion);
+    [[nodiscard]] auto GetVoiceOcclusion(VoiceID handle) const noexcept -> AudioOcclusionDesc;
 
-    void               SetVoiceReverbSend(AudioHandle handle, float sendLevel);
-    [[nodiscard]] auto GetVoiceReverbSend(AudioHandle handle) const noexcept -> float;
+    void               SetVoiceReverbSend(VoiceID handle, float sendLevel);
+    [[nodiscard]] auto GetVoiceReverbSend(VoiceID handle) const noexcept -> float;
 
     // Steps bus fades, ducking envelopes, Logarithmic distance attenuation, and voice stop fades.
     void ProcessAudioFades(float dt);

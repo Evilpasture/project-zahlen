@@ -88,7 +88,7 @@ void SetDefaultBakedFont(BakedFontAsset font) noexcept {
     state.defaultBakeSet = true;
 }
 
-auto BuildFontAtlas(const BakedFontAsset& asset, TextureHandle texture) noexcept -> FontAtlas {
+auto BuildFontAtlas(const BakedFontAsset& asset, TextureID texture) noexcept -> FontAtlas {
     FontAtlas font {};
     font.texture        = texture;
     font.atlasWidth     = asset.atlasWidth > 0 ? static_cast<float>(asset.atlasWidth) : 1024.0f;

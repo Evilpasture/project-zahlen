@@ -85,6 +85,9 @@
 // G hide/show the floor, H hide/show the subject, S toggle screen-space
 // reflections, R re-download, C re-crawl the model list.
 
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
@@ -517,7 +520,7 @@ void ClearSubject(ZHLN::Engine& engine, Subject& subject) {
 // Draco-compressed asset this importer cannot decode, a binary it cannot parse --
 // leaves the previous subject on screen instead of an empty turntable.
 auto ImportSubject(ZHLN::Engine& engine, Subject& subject, std::span<const uint8_t> bytes, std::string_view virtualPath) -> bool {
-    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath);
+    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), bytes, virtualPath);
     if (!prefab) {
         ZHLN::Log("[RemoteGLB] '{}' is not a glTF this importer can read; the previous subject stays on screen.", virtualPath);
         return false;
@@ -549,12 +552,12 @@ auto ImportSubject(ZHLN::Engine& engine, Subject& subject, std::span<const uint8
     // parts may share it -- the Damaged Helmet is a single part, but a multi-part
     // asset would otherwise be counted once per part.
     uint64_t                         triangles = 0;
-    std::vector<ZHLN::TextureHandle> uniqueTextures;
+    std::vector<ZHLN::TextureID> uniqueTextures;
     for (const ZHLN::ModelPart& part: prefab->parts) {
         triangles += (part.mesh.indexCount > 0) ? part.mesh.indexCount / 3U : part.mesh.vertexCount / 3U;
         const std::array slots {part.defaultMaterial.albedoMap, part.defaultMaterial.normalMap, part.defaultMaterial.pbrMap, part.defaultMaterial.emissiveMap};
-        for (const ZHLN::TextureHandle handle: slots) {
-            if (handle == ZHLN::TextureHandle::Invalid || std::ranges::find(uniqueTextures, handle) != uniqueTextures.end()) {
+        for (const ZHLN::TextureID handle: slots) {
+            if (handle == ZHLN::TextureID::Invalid || std::ranges::find(uniqueTextures, handle) != uniqueTextures.end()) {
                 continue;
             }
             uniqueTextures.push_back(handle);
@@ -681,7 +684,7 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     floorDesc.metallic  = 0.0f;
     floorDesc.roughness = kFloorRoughness;
     floorDesc.baseColor = {kFloorColor.GetX(), kFloorColor.GetY(), kFloorColor.GetZ(), kFloorColor.GetW()};
-    const ZHLN::Material floorMaterial = engine.GetRenderContext().CreateMaterial(floorDesc).value_or(ZHLN::Material {});
+    const ZHLN::Material floorMaterial = engine.Graphics().CreateMaterial(floorDesc).value_or(ZHLN::Material {});
 
     studio.floor = ZHLN::PrefabFactory::CreatePlane(
         engine, radius * kFloorExtent, {1.0f, 1.0f, 1.0f, 1.0f},
@@ -1033,7 +1036,7 @@ struct SampleState {
     // is the join): the pointer keeps the state a plain struct, and main
     // declares it before this one, so it is destroyed after.
     ZHLN::Remote::AsyncAssetFetcher* fetcher = nullptr;
-    ZHLN::Remote::FetchHandle        activeRequest {};
+    ZHLN::Remote::FetchID        activeRequest {};
     std::string                      assetUrl;
     double                           fetchStartedAt = 0.0;
 
@@ -1247,7 +1250,7 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
     }
 
     if (input->needsResize) {
-        engine.GetRenderContext().SetResolution(input->newSize);
+        engine.Graphics().SetResolution(input->newSize);
         reg.Patch<ZHLN::Components::InputStateComponent>(entities[0], [](auto& st) -> auto { st.needsResize = false; });
     }
 
@@ -1387,7 +1390,7 @@ void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
     state.gui.SetFontAtlas(engine.GetFontAtlas());
     ZHLN::GUI::Frame ui = state.gui.BeginFrame(engine.ConsumeUIInput(state.dt));
 
-    const ZHLN::RenderInfo info    = engine.GetRenderContext().GetInfo();
+    const ZHLN::RenderInfo info    = engine.Graphics().Info();
     const std::string      subject = state.subject.loaded ?
                                      std::format("{} part(s), {} triangle(s), {} texture(s), radius {:.3f} m", state.subject.prefab->parts.size(),
                                                  state.subject.triangles, state.subject.textures, state.subject.radius) :
@@ -1558,7 +1561,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Remote::DiskCache         diskCache;
     ZHLN::Remote::AsyncAssetFetcher fetcher(diskCache, timeoutSeconds);
     state.fetcher = &fetcher;
-    engine->GetAssetManager().SetRemoteFetcher(&fetcher);
+    engine->Assets().SetRemoteFetcher(&fetcher);
 
     // The crawl and the first download run side by side, on their own workers:
     // the listing is one small API call, and neither should hold up the other.
@@ -1607,7 +1610,7 @@ auto main(int argc, char* argv[]) -> int {
     // below, asks them to retire and joins them. A transfer already inside
     // libcurl runs to its own timeout, which is the one thing that can delay
     // shutdown either way.
-    engine->GetAssetManager().SetRemoteFetcher(nullptr);
+    engine->Assets().SetRemoteFetcher(nullptr);
     state.catalog.worker.request_stop();
     if (state.catalog.worker.joinable()) {
         state.catalog.worker.join();

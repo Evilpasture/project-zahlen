@@ -152,7 +152,7 @@ constexpr auto kComponentKinds =
             std::array<char, 64> buf {};
             auto                 sv = ZHLN::FormatTo(buf, "{}: Entity({})", name, field.Pack());
             gui.Text(sv, 12.0f, {0.7f, 0.7f, 0.7f, 1.0f});
-        } else if constexpr (std::is_same_v<FT, TextureHandle>) {
+        } else if constexpr (std::is_same_v<FT, TextureID>) {
             std::array<char, 64> buf {};
             auto                 sv = ZHLN::FormatTo(buf, "{}: Texture({})", name, static_cast<uint64_t>(field));
             gui.Text(sv, 12.0f, {0.7f, 0.7f, 0.7f, 1.0f});

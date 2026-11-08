@@ -153,7 +153,7 @@ inline void ExecuteSyncRange(
 
         const uint64_t handle = b->GetUserData();
         if (handle == 0u) [[unlikely]] {
-            // Ragdoll bodies do not carry a `BodyHandle` user-data payload.
+            // Ragdoll bodies do not carry a `BodyID` user-data payload.
             continue;
         }
         const auto slot = static_cast<uint32_t>(handle & 0xFFFFFFFFu);
@@ -218,7 +218,7 @@ inline void ExecuteSyncPass(
 [[gnu::always_inline]]
 inline void SyncCharacters(std::span<JPH::CharacterVirtual* const> characters, const MappingDataCreateInfo& map, const WorldDataCreateInfo& world) noexcept {
     for (auto* character: characters) {
-        const BodyHandle h    = BodyHandle::Unpack(character->GetUserData());
+        const BodyID h    = BodyID::Unpack(character->GetUserData());
         const uint32_t   slot = h.index;
         if (slot >= map.slot_capacity) [[unlikely]] {
             continue;

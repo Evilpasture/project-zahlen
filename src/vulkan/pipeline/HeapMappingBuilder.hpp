@@ -123,22 +123,22 @@ class HeapMappingBuilder {
     explicit HeapMappingBuilder(const HeapManager& heap) noexcept: _heap(heap) {
     }
 
-    auto Sampler(uint32_t set, uint32_t binding, SamplerHandle handle) && noexcept -> HeapMappingBuilder&& {
+    auto Sampler(uint32_t set, uint32_t binding, SamplerSlotID handle) && noexcept -> HeapMappingBuilder&& {
         _heap.ApplySamplerMapping(_mappings, set, binding, handle);
         return std::move(*this);
     }
 
-    auto SamplerArray(uint32_t set, uint32_t binding, SamplerHandle base) && noexcept -> HeapMappingBuilder&& {
+    auto SamplerArray(uint32_t set, uint32_t binding, SamplerSlotID base) && noexcept -> HeapMappingBuilder&& {
         _heap.ApplySamplerArrayMapping(_mappings, set, binding, base);
         return std::move(*this);
     }
 
-    auto SampledImage(uint32_t set, uint32_t binding, TextureHandle handle) && noexcept -> HeapMappingBuilder&& {
+    auto SampledImage(uint32_t set, uint32_t binding, TextureSlotID handle) && noexcept -> HeapMappingBuilder&& {
         _heap.ApplySampledImageMapping(_mappings, set, binding, handle);
         return std::move(*this);
     }
 
-    auto BindlessTextureArray(uint32_t set, uint32_t binding, TextureHandle base) && noexcept -> HeapMappingBuilder&& {
+    auto BindlessTextureArray(uint32_t set, uint32_t binding, TextureSlotID base) && noexcept -> HeapMappingBuilder&& {
         _heap.ApplyBindlessTextureArrayMapping(_mappings, set, binding, base);
         return std::move(*this);
     }

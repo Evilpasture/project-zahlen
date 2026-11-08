@@ -117,13 +117,13 @@ class ZHLN_API RenderContext {
     // Drops mesh lookups (not their caller-owned buffers), materials, and textures.
     void ClearGPUCaches() noexcept;
 
-    [[nodiscard]] auto CreateBuffer(BufferDesc desc) -> BufferHandle;
+    [[nodiscard]] auto CreateBuffer(BufferDesc desc) -> BufferID;
 
     // Usage is an NTTP so Index can reject non-integer element types at compile time.
     // (A runtime `if (usage == Index) static_assert` would fire for every T.)
     template <BufferUsage Usage, typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto CreateBuffer(std::span<T, SpanExtent> elements) -> BufferHandle {
+    [[nodiscard]] auto CreateBuffer(std::span<T, SpanExtent> elements) -> BufferID {
         if constexpr (Usage == BufferUsage::Index) {
             static_assert(ValidIndexType<T>, "Index buffers must use uint16_t or uint32_t elements.");
         }
@@ -137,7 +137,7 @@ class ZHLN_API RenderContext {
     }
 
     template <BufferUsage Usage, typename T = std::byte>
-    [[nodiscard]] auto CreateBuffer(size_t elementCount) -> BufferHandle {
+    [[nodiscard]] auto CreateBuffer(size_t elementCount) -> BufferID {
         return CreateBuffer(
             BufferDesc {
                 .usage  = Usage,
@@ -147,15 +147,15 @@ class ZHLN_API RenderContext {
         );
     }
 
-    [[nodiscard]] auto CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferHandle;
+    [[nodiscard]] auto CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferID;
     [[nodiscard]] auto UploadMeshlets(const MeshletBuildResult& built) -> MeshletStreams;
 
-    void DestroyBuffer(BufferHandle handle);
-    [[nodiscard]] auto UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept -> std::expected<void, ErrorCode>;
+    void DestroyBuffer(BufferID handle);
+    [[nodiscard]] auto UpdateBuffer(BufferID handle, std::span<const std::byte> bytes) noexcept -> std::expected<void, ErrorCode>;
 
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto UpdateBuffer(BufferHandle handle, std::span<T, SpanExtent> elements) noexcept -> std::expected<void, ErrorCode> {
+    [[nodiscard]] auto UpdateBuffer(BufferID handle, std::span<T, SpanExtent> elements) noexcept -> std::expected<void, ErrorCode> {
         return UpdateBuffer(handle, std::span<const std::byte> {std::as_bytes(elements)});
     }
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
@@ -166,41 +166,41 @@ class ZHLN_API RenderContext {
 
     void ReleaseTarget(const PresentationTarget& target) noexcept;
 
-    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<TextureHandle, ErrorCode>;
-    void               DestroyRenderTexture(TextureHandle handle) noexcept;
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<TextureID, ErrorCode>;
+    void               DestroyRenderTexture(TextureID handle) noexcept;
 
-    // TextureHandles are the only texture identity outside the renderer.
+    // TextureIDs are the only texture identity outside the renderer.
     // The descriptor index a handle maps to is draw-submission business and
     // stays inside; nothing out here can ask for it.
 
     // Unnamed uploads each get a fresh handle; release it with UnloadTexture.
-    [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureID, ErrorCode>;
     // A name gives repeat uploads a stable identity and deduplicates identical pixels.
     [[nodiscard]] auto
-        CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true, bool generateMips = true) -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode>;
+        CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true, bool generateMips = true) -> std::expected<TextureID, ErrorCode>;
+    [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureID, ErrorCode>;
     // Linear RGBA16F upload for authored radiance fields such as Source VRAD.
     // Mip generation is opt-in because most initial imported lightmaps use
     // exact luxel filtering with atlas gutters at mip zero.
     [[nodiscard]] auto CreateTextureHDR(
         std::string_view name, std::span<const std::byte> rgba16f, Extent2D extent, bool generateMips = false
-    ) -> std::expected<TextureHandle, ErrorCode>;
+    ) -> std::expected<TextureID, ErrorCode>;
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto CreateTexture(std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode> {
+    [[nodiscard]] auto CreateTexture(std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureID, ErrorCode> {
         return CreateTexture(std::span<const std::byte> {std::as_bytes(pixels)}, extent, isSRGB);
     }
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
     [[nodiscard]] auto
-        CreateTexture(std::string_view name, std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode> {
+        CreateTexture(std::string_view name, std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureID, ErrorCode> {
         return CreateTexture(name, std::span<const std::byte> {std::as_bytes(pixels)}, extent, isSRGB);
     }
-    void UnloadTexture(TextureHandle handle);
+    void UnloadTexture(TextureID handle);
 
     template <typename Func>
         requires std::invocable<Func&, std::span<uint32_t>>
-    [[nodiscard]] auto CreateTextureProcedural(Extent2D extent, bool isSRGB, Func&& callback) -> std::expected<TextureHandle, ErrorCode> {
+    [[nodiscard]] auto CreateTextureProcedural(Extent2D extent, bool isSRGB, Func&& callback) -> std::expected<TextureID, ErrorCode> {
         std::vector<uint32_t> pixels(static_cast<size_t>(extent.width) * extent.height);
         std::forward<Func>(callback)(std::span<uint32_t> {pixels});
         return CreateTexture(std::span {pixels}, extent, isSRGB);
@@ -220,8 +220,8 @@ class ZHLN_API RenderContext {
     void                                         ProvokeDeviceLost();
 
     [[nodiscard]] auto
-        BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] TextureHandle CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true, bool generateMips = true);
+        BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<TextureID, ErrorCode>;
+    [[nodiscard]] TextureID CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true, bool generateMips = true);
 
     // A captured frame: the pixels of the last completed frame, in memory, plus
     // the statistics a caller would otherwise compute by parsing the file it
@@ -246,9 +246,9 @@ class ZHLN_API RenderContext {
 
   private:
     friend class FrameScope;
-    void               SubmitParticleEmitter(uint64_t emitterId, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive);
+    void               SubmitParticleEmitter(uint64_t emitterId, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureID texture, bool additive);
     void               SubmitMeshParticleEmitter(uint64_t emitterId, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat);
-    void               DrawBillboards(TextureHandle texture, std::span<const BillboardQuad> billboards, bool additive);
+    void               DrawBillboards(TextureID texture, std::span<const BillboardQuad> billboards, bool additive);
     [[nodiscard]] auto DispatchSimulations(float dt) noexcept -> RenderResult;
     void SetFrameData(const Camera& cam, const FrameData& frame, const ZHLN::Mat44& shadowProjView, std::span<const LightDesc> lights, float dt) noexcept;
     void ApplySimulationData(const SceneData& scene) noexcept;

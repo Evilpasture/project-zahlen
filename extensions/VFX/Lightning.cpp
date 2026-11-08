@@ -5,6 +5,8 @@ module;
 
 // --- Global Module Fragment: Implementation Dependencies ---
 // clang-format off
+#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
@@ -179,18 +181,18 @@ auto EvaluateHeidler(float tUs, float i0, float t1, float t2) noexcept -> float 
 }
 
 void ReleaseLightning(Engine& engine, LightningComponent& bolt) {
-    auto& render = engine.GetRenderContext();
+    auto render = engine.Graphics();
     if (bolt.meshAssetId != InvalidAssetID) {
-        render.UnregisterGPUMesh(bolt.meshAssetId);
+        render.UnregisterMesh(bolt.meshAssetId);
     }
     if (bolt.matAssetId != InvalidMaterialID) {
-        render.UnregisterGPUMaterial(bolt.matAssetId);
+        render.UnregisterMaterial(bolt.matAssetId);
     }
     render.DestroyMesh(
         Mesh {
-            .posBuffer          = std::exchange(bolt.vboPos, BufferHandle::Invalid),
-            .tangentFrameBuffer = std::exchange(bolt.vboFrame, BufferHandle::Invalid),
-            .surfaceBuffer      = std::exchange(bolt.vboSurface, BufferHandle::Invalid)
+            .posBuffer          = std::exchange(bolt.vboPos, BufferID::Invalid),
+            .tangentFrameBuffer = std::exchange(bolt.vboFrame, BufferID::Invalid),
+            .surfaceBuffer      = std::exchange(bolt.vboSurface, BufferID::Invalid)
         }
     );
     bolt.meshAssetId = InvalidAssetID;
@@ -217,9 +219,9 @@ void RegisterCleanup(Engine& engine) {
     if (engine.AddSceneCleanupPass(&CleanupLightning)) {
         engine.AddDeviceLostCallback([](Engine& owner) {
             for (auto& bolt: owner.GetRegistry().GetRawArray<LightningComponent>()) {
-                bolt.vboPos     = BufferHandle::Invalid;
-                bolt.vboFrame   = BufferHandle::Invalid;
-                bolt.vboSurface = BufferHandle::Invalid;
+                bolt.vboPos     = BufferID::Invalid;
+                bolt.vboFrame   = BufferID::Invalid;
+                bolt.vboSurface = BufferID::Invalid;
             }
         });
     }
@@ -244,7 +246,7 @@ void Attach(Engine& engine, Entity entity, LightningComponent component) {
 
 auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, const LightningConfig& cfg) -> Entity {
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto rc = engine.Graphics();
 
     RegisterCleanup(engine);
 
@@ -282,9 +284,9 @@ auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, cons
     const JPH::Vec3 cameraPosition = camComp->camera.position;
     const auto      ribbon         = BuildCameraFacingRibbon(segments, cameraPosition);
 
-    const BufferHandle vboPos     = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.positions});
-    const BufferHandle vboFrame   = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.frames});
-    const BufferHandle vboSurface = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.surfaces});
+    const BufferID vboPos     = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.positions});
+    const BufferID vboFrame   = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.frames});
+    const BufferID vboSurface = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.surfaces});
 
     const Entity boltEntity = reg.Create();
 
@@ -292,11 +294,11 @@ auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, cons
     const AssetID        meshAssetId = HashAssetID(FormatTo(strBuf, "lightning_mesh_{}", boltEntity.index));
     const MaterialID     matAssetId  = HashAssetID(FormatTo(strBuf, "lightning_mat_{}", boltEntity.index));
 
-    rc.RegisterGPUMesh(meshAssetId, Mesh {.posBuffer = vboPos, .tangentFrameBuffer = vboFrame, .surfaceBuffer = vboSurface, .vertexCount = 0});
+    rc.RegisterMesh(meshAssetId, Mesh {.posBuffer = vboPos, .tangentFrameBuffer = vboFrame, .surfaceBuffer = vboSurface, .vertexCount = 0});
 
     if (auto matRes =
             rc.CreateMaterial({.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}})) {
-        rc.RegisterGPUMaterial(matAssetId, *matRes);
+        rc.RegisterMaterial(matAssetId, *matRes);
     }
 
     const JPH::Vec3 flashPos  = cameraPosition + JPH::Vec3(0.0f, 25.0f, 0.0f);
@@ -351,7 +353,7 @@ auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, cons
 }
 
 auto Update(Engine& engine, float dt) -> void {
-    auto&      rc   = engine.GetRenderContext();
+    auto rc = engine.Graphics();
     auto&      reg  = engine.GetRegistry();
     const auto ents = reg.GetEntitiesWith<LightningComponent>();
 
@@ -376,8 +378,8 @@ auto Update(Engine& engine, float dt) -> void {
 
         // A rebuilt renderer has no cached mesh or material. Restore them from
         // component data, never from an entity-keyed buffer table.
-        bool needsMeshRegistration = !rc.GetGPUMesh(bolt.meshAssetId).has_value();
-        if (bolt.vboPos == BufferHandle::Invalid || bolt.vboFrame == BufferHandle::Invalid || bolt.vboSurface == BufferHandle::Invalid) {
+        bool needsMeshRegistration = !rc.Mesh(bolt.meshAssetId).has_value();
+        if (bolt.vboPos == BufferID::Invalid || bolt.vboFrame == BufferID::Invalid || bolt.vboSurface == BufferID::Invalid) {
             const auto camComp = reg.GetSingleton<Components::CameraComponent>();
             if (!camComp) {
                 // No view to face: the ribbon cannot be rebuilt, and the handles stay
@@ -389,31 +391,31 @@ auto Update(Engine& engine, float dt) -> void {
             const auto                       segments = GenerateFractalSegments(bolt.cloudOrigin, bolt.groundTarget, bolt.config.ribbonWidth, bolt.config, rng);
             const JPH::Vec3                  cameraPosition = camComp->camera.position;
             const auto                       ribbon   = BuildCameraFacingRibbon(segments, cameraPosition);
-            if (bolt.vboPos == BufferHandle::Invalid) {
+            if (bolt.vboPos == BufferID::Invalid) {
                 bolt.vboPos = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.positions});
             }
-            if (bolt.vboFrame == BufferHandle::Invalid) {
+            if (bolt.vboFrame == BufferID::Invalid) {
                 bolt.vboFrame = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.frames});
             }
-            if (bolt.vboSurface == BufferHandle::Invalid) {
+            if (bolt.vboSurface == BufferID::Invalid) {
                 bolt.vboSurface = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.surfaces});
             }
             bolt.maxVertices      = ribbon.maxVertices;
             bolt.visibleVertices  = std::min(bolt.visibleVertices, bolt.maxVertices);
             needsMeshRegistration = true;
         }
-        if (needsMeshRegistration && bolt.vboPos != BufferHandle::Invalid && bolt.vboFrame != BufferHandle::Invalid &&
-            bolt.vboSurface != BufferHandle::Invalid) {
-            rc.RegisterGPUMesh(
+        if (needsMeshRegistration && bolt.vboPos != BufferID::Invalid && bolt.vboFrame != BufferID::Invalid &&
+            bolt.vboSurface != BufferID::Invalid) {
+            rc.RegisterMesh(
                 bolt.meshAssetId,
                 Mesh {.posBuffer = bolt.vboPos, .tangentFrameBuffer = bolt.vboFrame, .surfaceBuffer = bolt.vboSurface, .vertexCount = bolt.visibleVertices}
             );
         }
-        if (!rc.GetGPUMaterial(bolt.matAssetId)) {
+        if (!rc.Material(bolt.matAssetId)) {
             if (auto mat = rc.CreateMaterial(
                     {.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}}
                 )) {
-                rc.RegisterGPUMaterial(bolt.matAssetId, *mat);
+                rc.RegisterMaterial(bolt.matAssetId, *mat);
             }
         }
 
@@ -433,7 +435,7 @@ auto Update(Engine& engine, float dt) -> void {
                     bolt.phase           = LightningPhase::ReturnStroke;
                     bolt.phaseTime       = 0.0f;
 
-                    engine.GetAudioContext().PostEvent(
+                    engine.Audio().PostEvent(
                         {.type     = AudioEventType::OneShot3D,
                          .filepath = "resources/assets/audio/lightning.wav",
                          .position = bolt.groundTarget,
@@ -476,7 +478,7 @@ auto Update(Engine& engine, float dt) -> void {
         hasActiveBolts         = true;
         peakLuminanceThisFrame = std::max(peakLuminanceThisFrame, bolt.flashLuminance);
 
-        if (auto gpuMatOpt = rc.GetGPUMaterial(bolt.matAssetId)) {
+        if (auto gpuMatOpt = rc.Material(bolt.matAssetId)) {
             Material    mat       = *gpuMatOpt;
             const float intensity = (bolt.phase == LightningPhase::SteppedLeader) ? 15.0f : (bolt.flashLuminance * bolt.config.emissiveIntensity);
 
@@ -485,13 +487,13 @@ auto Update(Engine& engine, float dt) -> void {
             mat.emissiveFactor.x  = 0.88f * intensity;
             mat.emissiveFactor.y  = 0.95f * intensity;
             mat.emissiveFactor.z  = 1.00f * intensity;
-            rc.RegisterGPUMaterial(bolt.matAssetId, mat);
+            rc.RegisterMaterial(bolt.matAssetId, mat);
         }
 
-        if (auto gpuMeshOpt = rc.GetGPUMesh(bolt.meshAssetId)) {
+        if (auto gpuMeshOpt = rc.Mesh(bolt.meshAssetId)) {
             Mesh m        = *gpuMeshOpt;
             m.vertexCount = bolt.visibleVertices;
-            rc.RegisterGPUMesh(bolt.meshAssetId, m);
+            rc.RegisterMesh(bolt.meshAssetId, m);
         }
 
         if (reg.IsAlive(bolt.flashLightEntity)) {

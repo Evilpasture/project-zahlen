@@ -29,20 +29,20 @@ class EventBus;
 
 namespace ZHLN {
 
-struct ActionId {
+struct ActionID {
     uint64_t value = 0;
 
-    constexpr ActionId() noexcept = default;
-    constexpr explicit ActionId(uint64_t rawHash) noexcept : value(rawHash) {}
-    constexpr ActionId(std::string_view actionName) noexcept : value(actionName.empty() ? 0ULL : Hash64(actionName)) {}
-    constexpr ActionId(const char* actionName) noexcept
+    constexpr ActionID() noexcept = default;
+    constexpr explicit ActionID(uint64_t rawHash) noexcept : value(rawHash) {}
+    constexpr ActionID(std::string_view actionName) noexcept : value(actionName.empty() ? 0ULL : Hash64(actionName)) {}
+    constexpr ActionID(const char* actionName) noexcept
         : value((actionName == nullptr || actionName[0] == '\0') ? 0ULL : Hash64(std::string_view(actionName))) {}
 
     [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
         return value != 0;
     }
 
-    constexpr auto operator==(const ActionId&) const noexcept -> bool = default;
+    constexpr auto operator==(const ActionID&) const noexcept -> bool = default;
 };
 
 enum class ActionKind : uint8_t {
@@ -328,7 +328,7 @@ class ZHLN_API InputAction {
     void SnapshotDefaults();
     void ResetToDefaults();
 
-    [[nodiscard]] auto Id() const noexcept -> ActionId {
+    [[nodiscard]] auto Id() const noexcept -> ActionID {
         return _id;
     }
     [[nodiscard]] auto Name() const noexcept -> std::string_view {
@@ -356,7 +356,7 @@ class ZHLN_API InputAction {
     auto RemoveBinding(size_t slotIndex) -> bool;
 
   private:
-    ActionId                  _id {};
+    ActionID                  _id {};
     String64                  _name {};
     ActionKind                _kind               = ActionKind::Digital;
     bool                      _clampUnitCircle    = true;
@@ -372,8 +372,8 @@ class ZHLN_API InputActionMap {
     InputActionMap(std::string_view name, int32_t priority = 0) noexcept;
 
     auto AddAction(std::string_view name, ActionKind kind = ActionKind::Digital) -> InputAction&;
-    [[nodiscard]] auto FindAction(ActionId id) noexcept -> Optional<InputAction&>;
-    [[nodiscard]] auto FindAction(ActionId id) const noexcept -> Optional<const InputAction&>;
+    [[nodiscard]] auto FindAction(ActionID id) noexcept -> Optional<InputAction&>;
+    [[nodiscard]] auto FindAction(ActionID id) const noexcept -> Optional<const InputAction&>;
 
     void SnapshotDefaults();
     void ResetToDefaults();
@@ -558,29 +558,29 @@ class ZHLN_API InputContext {
 
     // --- Virtual Action Queries (Per-Seat) -----------------------------------
 
-    [[nodiscard]] auto Action(ActionId id, PlayerSeat seat = kPrimarySeat) const noexcept -> ActionState;
+    [[nodiscard]] auto Action(ActionID id, PlayerSeat seat = kPrimarySeat) const noexcept -> ActionState;
 
-    [[nodiscard]] auto ActionDown(ActionId id, PlayerSeat seat = kPrimarySeat) const noexcept -> bool {
+    [[nodiscard]] auto ActionDown(ActionID id, PlayerSeat seat = kPrimarySeat) const noexcept -> bool {
         return Action(id, seat).down;
     }
 
-    [[nodiscard]] auto ActionPressed(ActionId id, PlayerSeat seat = kPrimarySeat) const noexcept -> bool {
+    [[nodiscard]] auto ActionPressed(ActionID id, PlayerSeat seat = kPrimarySeat) const noexcept -> bool {
         return Action(id, seat).pressed;
     }
 
-    [[nodiscard]] auto ActionHeld(ActionId id, PlayerSeat seat = kPrimarySeat) const noexcept -> bool {
+    [[nodiscard]] auto ActionHeld(ActionID id, PlayerSeat seat = kPrimarySeat) const noexcept -> bool {
         return Action(id, seat).held;
     }
 
-    [[nodiscard]] auto ActionReleased(ActionId id, PlayerSeat seat = kPrimarySeat) const noexcept -> bool {
+    [[nodiscard]] auto ActionReleased(ActionID id, PlayerSeat seat = kPrimarySeat) const noexcept -> bool {
         return Action(id, seat).released;
     }
 
-    [[nodiscard]] auto ActionAxis1D(ActionId id, PlayerSeat seat = kPrimarySeat) const noexcept -> float {
+    [[nodiscard]] auto ActionAxis1D(ActionID id, PlayerSeat seat = kPrimarySeat) const noexcept -> float {
         return Action(id, seat).x;
     }
 
-    [[nodiscard]] auto ActionAxis2D(ActionId id, PlayerSeat seat = kPrimarySeat) const noexcept -> Axis2DValue {
+    [[nodiscard]] auto ActionAxis2D(ActionID id, PlayerSeat seat = kPrimarySeat) const noexcept -> Axis2DValue {
         return Action(id, seat).Value2D();
     }
 
@@ -595,7 +595,7 @@ class ZHLN_API InputContext {
 
     [[nodiscard]] auto
         FindConflictingActions(std::string_view mapName, const InputBinding& candidate, std::string_view ignoreAction = {}) const
-        -> std::vector<ActionId>;
+        -> std::vector<ActionID>;
 
     void BeginBindingCapture(PlayerSeat seat = kPrimarySeat, bool captureAxes = false, KeyCode cancelKey = KeyCode::Escape) noexcept;
     void CancelBindingCapture() noexcept;
@@ -609,7 +609,7 @@ class ZHLN_API InputContext {
 
   private:
     struct EvaluatedActionEntry {
-        ActionId    id {};
+        ActionID    id {};
         ActionState previous {};
         ActionState current {};
     };

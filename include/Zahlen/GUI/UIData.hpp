@@ -3,7 +3,7 @@
 
 #pragma once
 #include <Zahlen/Math/Geometry2D.hpp>
-#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Render/Vertex.hpp>
 #include <array>
 #include <cstddef>
@@ -13,7 +13,7 @@
 namespace ZHLN {
 
 struct UIBatch {
-    TextureHandle texture              = TextureHandle::Invalid;
+    TextureID texture              = TextureID::Invalid;
     uint32_t      bindlessTextureIndex = 0;
     uint32_t      vertexStart          = 0;
     uint32_t      vertexCount          = 0;
@@ -88,7 +88,7 @@ class CustomCursor {
         emitDisc(style.innerRadius, style.innerColor);
 
         _batches[0] = UIBatch {
-            .texture     = TextureHandle::Invalid,
+            .texture     = TextureID::Invalid,
             .vertexStart = 0,
             .vertexCount = static_cast<uint32_t>(kVertexCount),
             .useScissor  = false,
