@@ -200,6 +200,9 @@ class ZHLN_API Registry {
     // Only families registered with RegisterComponentDynamic; typed families
     // require constructed components and (when resource-owning) explicit release.
     auto AddDynamic(Entity entity, uint32_t familyID) -> void*;
+    // The erase half of AddDynamic. Remove<T>() cannot serve a type-erased
+    // caller: it resolves the family from a compile-time type.
+    auto RemoveDynamic(Entity entity, uint32_t familyID) -> bool;
 
     static void MapNameToFamilyID(std::string_view name, uint32_t id) noexcept;
     static auto GetFamilyIDFromName(std::string_view name) noexcept -> uint32_t;

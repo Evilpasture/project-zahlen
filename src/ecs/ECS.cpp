@@ -385,6 +385,21 @@ auto Registry::RegisterComponentDynamic(std::string_view name, size_t size, size
     return id;
 }
 
+auto Registry::RemoveDynamic(Entity entity, uint32_t familyID) -> bool {
+    return ZHLN::Lock(sync.shadowLock, [&] -> bool {
+        // Same guards as AddDynamic: never touch a typed family's storage,
+        // whose components were constructed and may own resources.
+        if (familyID >= _compCapacity || _components[familyID] == nullptr || !_typeInfo[familyID].isDynamic) {
+            return false;
+        }
+        if (!_components[familyID]->Contains(entity)) {
+            return false;
+        }
+        _components[familyID]->Remove(entity);
+        return true;
+    });
+}
+
 auto Registry::AddDynamic(Entity entity, uint32_t familyID) -> void* {
     return ZHLN::Lock(sync.shadowLock, [&] -> void* {
         // Do not grow the registry for unknown (or sentinel) family IDs.

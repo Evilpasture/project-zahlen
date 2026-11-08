@@ -734,6 +734,56 @@ Wiring an engine-owned object to this root (and exposing it across
 `libzahlen_engine.so`) is a separate increment; this section defines the
 boundary, not the first tenant.
 
+### 3.7 The SDK boundary
+
+`Zahlen/COM/` is the engine as a consumer outside `libzahlen_engine.so` sees
+it. `Core/COM/` is the mechanism; this is the surface built on it.
+
+| header | contents |
+| :--- | :--- |
+| `COMTypes.hpp` | `EngineConfigCOM`, `ComError`, and the static asserts that keep the reused engine value types (`Extent2D`, `Entity`, `BufferID`, ...) fixed-layout |
+| `IEngine.hpp` | lifecycle, `Tick`, and borrowed accessors for the capability interfaces |
+| `IGraphicsDevice.hpp` | resolution, viewport, buffers, textures |
+| `IEntities.hpp` | type-erased ECS operations plus the consumer-side typed templates |
+| `EngineFactory.hpp` | `CreateEngine`, the single exported symbol, and the inline `CreateEngineRef` wrapper |
+
+One `EngineCOM` implements all three interfaces, so `engine->Graphics()` and
+`engine.As<IGraphicsDevice>()` reach the same subobject of one allocation. The
+accessors are **borrows** and must not be released; `Query` / `As` take a
+reference the way COM expects.
+
+There is no `extern "C"`, no IDL and no dispatch struct. GCC and Clang both
+implement the Itanium C++ ABI, so the mangled name, the vtable layout and the
+calling convention already agree:
+`_ZN4ZHLN3COM12CreateEngineERKNS0_15EngineConfigCOME` is defined in the shared
+library and undefined in every consumer. What the boundary refuses to carry is
+the *standard library*, not C++ itself.
+
+`CreateEngine` returns `Result<IEngine*>`, not `Result<Ref<IEngine>>`:
+`Result<T>` carries `T` by value and therefore requires a trivially copyable
+`T`, which a reference-counting handle is not. `CreateEngineRef` is inline, so
+it runs in the consumer's translation unit and may use `std::expected<Ref<IEngine>,
+ErrorCode>` freely -- that type is built and consumed on one side and never
+crosses.
+
+Every method is `noexcept`, which costs nothing to honour: Zahlen compiles with
+`-fno-exceptions -fno-rtti`. The same flags are why `QueryRaw` is a reflected
+`static_cast` chain rather than `dynamic_cast`.
+
+**The ECS seam.** A virtual function cannot be a template, so the vtable
+carries `AttachRaw` / `GetRaw` / `DetachRaw` keyed on a component's qualified
+type name, and `IEntities` rebuilds the typed API from inline templates that
+compile in the consumer's own TU. The storage behind them is the registry's
+dynamic-component path, which holds raw bytes and runs no destructor -- hence
+the `ComComponent` constraint, which is the storage's real contract and not a
+boundary formality. `Registry::RemoveDynamic` was added as the erase half of
+`AddDynamic`; `Remove<T>()` resolves its family from a compile-time type and
+cannot serve a type-erased caller.
+
+Interface IDs are a hash of the qualified type name, so adding a capability
+interface needs no GUID and no registry. Wiring further capabilities
+(`ISimulation`, `IAudioEngine`, `IAssetLibrary`) is more of the same file.
+
 ## 4. Deferred Render Graph Topology
 
 The renderer executes a multi-pass pipeline managed by a compile-time type-checked frame graph:

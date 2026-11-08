@@ -22,6 +22,7 @@ set(RAW_ENGINE_SOURCES
     World.cpp
     VisibilityList.cpp
     Capabilities.cpp
+    EngineCOM.cpp
     SystemWiring.cpp
     Hierarchy.cpp
     PrefabFactory.cpp

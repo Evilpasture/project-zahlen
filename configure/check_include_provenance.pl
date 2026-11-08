@@ -150,7 +150,7 @@ my %FIRST_PARTY = (
     IObject          => ['include/Zahlen/Core/COM/IObject.hpp'],
     InterfaceID      => ['include/Zahlen/Core/COM/IObject.hpp'],
     InterfaceIdOf    => ['include/Zahlen/Core/COM/IObject.hpp'],
-    Implements       => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    'ZHLN::COM::Implements' => ['include/Zahlen/Core/COM/Reflect.hpp'],
     QualifiedTypeName     => ['include/Zahlen/Core/Reflection/Core.hpp'],
     MethodSignature       => ['include/Zahlen/Core/Reflection/Class.hpp'],
     ForEachMethodSignature => ['include/Zahlen/Core/Reflection/Class.hpp'],
@@ -158,6 +158,16 @@ my %FIRST_PARTY = (
     ComParameterCompliant => ['include/Zahlen/Core/COM/Reflect.hpp'],
     ComReturnCompliant    => ['include/Zahlen/Core/COM/Reflect.hpp'],
     ComParameterAudit     => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    IEngine          => ['include/Zahlen/COM/IEngine.hpp'],
+    IGraphicsDevice  => ['include/Zahlen/COM/IGraphicsDevice.hpp'],
+    IEntities        => ['include/Zahlen/COM/IEntities.hpp'],
+    EngineConfigCOM  => ['include/Zahlen/COM/COMTypes.hpp'],
+    ComComponent     => ['include/Zahlen/COM/IEntities.hpp'],
+    # Qualified: tests/helpers/HeadlessEngineFixture.hpp has its own unrelated
+    # ZHLN::Test::Headless::CreateEngine, and a bare key here would claim every
+    # call to it -- including the unqualified ones a `using` makes possible.
+    'ZHLN::COM::CreateEngine'    => ['include/Zahlen/COM/EngineFactory.hpp'],
+    'ZHLN::COM::CreateEngineRef' => ['include/Zahlen/COM/EngineFactory.hpp'],
     ParseCli           => ['extensions/CommandLine/CommandLine.hpp'],
     CliFlag           => ['extensions/CommandLine/CommandLine.hpp'],
     ConfigCli         => ['app/include/Zahlen/ConfigCli.hpp'],
