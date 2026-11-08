@@ -34,9 +34,11 @@ set -euo pipefail
 PROG=${0##*/}
 # A released GCC 16.x, downloaded and pinned -- not whatever apt calls gcc-16.
 # jammy's PPA carries only a trunk snapshot (16-20260315) and the released 16.2.0
-# differs from it in exactly one way that matters here: it compiles Jolt.
+# differs from it in exactly one way that matters here: it compiles Jolt (GCC PR
+# c++/125280). install-gcc-prebuilt.sh proves that by compiling the construct;
+# there is no version floor to pass along, because the branch that carries the
+# fix reports the same version as the branch that does not.
 GCC_VERSION=16.2.0
-GCC_MIN=${ZHLN_GCC_MIN:-16.1.1}
 GCC_PREFIX=${ZHLN_GCC_PREFIX:-/opt/gcc16}
 PROFILE=
 # The distro the release claims. Tools fetched as prebuilts must also run here,

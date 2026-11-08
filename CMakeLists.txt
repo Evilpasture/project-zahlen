@@ -39,12 +39,16 @@ project(zahlen VERSION 0.1.0 LANGUAGES C CXX ASM)
 
 option(ZHLN_INSTALL_TOOLCHAIN_PACKAGES "Install independently consumable toolchain packages" OFF)
 
-# Floor for the C++26 reflection support in the engine and its public headers.
-# It is a minimum, not a pinned patch release: GCC point releases keep the
-# libstdc++ ABI. Installed package configs check >= this, and the provisioning
-# scripts (build-release-toolchain.sh, ci-ubuntu-2204-env.sh,
-# install-gcc-prebuilt.sh) default GCC_MIN to the same value.
-set(ZHLN_GCC_MIN "16.1.1" CACHE STRING "Minimum GCC version for C++26 reflection")
+# There is deliberately no minimum-compiler-version variable here. What the
+# tree needs from a compiler is behaviour, and the one case that has actually
+# bitten -- GCC PR c++/125280, which rejects Jolt's incomplete static member
+# under -freflection -- was fixed on a branch that reports the same version
+# before and after the fix, so no comparison against a version string can
+# express the gate. cmake/ToolchainCapabilities.cmake compiles
+# cmake/probes/pr125280-static-member.cpp instead, with this build's own
+# reflection flags, and the installed package configs compile it again in the
+# consumer's toolchain. scripts/install-gcc-prebuilt.sh pins a GCC version to
+# *download*, which is provisioning rather than a capability claim.
 
 # CMake's built-in "Link What You Use": link with --no-as-needed and have the
 # linker report every direct dependency that contributes no symbol. It is the
@@ -260,6 +264,15 @@ if(COMPILER_HAS_REFLECTION)
     endif()
 endif()
 zhln_probe_toolchain_capabilities("${_zhln_reflection_probe_flags}")
+
+# The installed package configs re-run the PR 125280 probe in the consumer's
+# toolchain, which is a different compiler from this one. They get the source
+# and the flags by substitution so there is exactly one copy of each.
+set(ZHLN_TOOLCHAIN_REFLECTION_FLAGS "${_zhln_reflection_probe_flags}" CACHE INTERNAL
+    "reflection flags an installed package should probe a consumer toolchain with")
+file(READ "${PROJECT_SOURCE_DIR}/cmake/probes/pr125280-static-member.cpp" _zhln_pr125280_source)
+set(ZHLN_PR125280_PROBE_SOURCE "${_zhln_pr125280_source}" CACHE INTERNAL
+    "GCC PR c++/125280 reproduction, substituted into installed package configs")
 
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
 string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")

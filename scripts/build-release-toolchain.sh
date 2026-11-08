@@ -94,22 +94,29 @@ done
 # Both compilers explicitly: the env script points the `gcc` alternative at gcc-16,
 # but a configure that resolves `c++` on its own would silently pick jammy's g++-11
 # and fail much later, on -freflection.
-# A *released* GCC 16, not the trunk snapshot in jammy's PPA. `16-20260315` is the
-# only 16 apt offers for this distro and it rejects Jolt's
+# The compiler must survive GCC PR c++/125280: it rejects Jolt's
 # `static const StaticArray<Vec3, 1026>` member -- instantiated while Vec3 is still
-# incomplete -- which stops the build in the PCH of three targets. Released 14.2 and
-# 16.2 both defer that instantiation, so the version floor is the cheap detector;
-# scripts/install-gcc-prebuilt.sh compiles the construct as a self-test as well.
-GCC_MIN=${ZHLN_GCC_MIN:-16.1.1}
+# incomplete -- and stops the build in the PCH of three targets. This used to be a
+# version floor, which cannot express the gate: the fix was cherry-picked onto
+# releases/gcc-16, and that branch reports 16.1.1 both before and after it. So the
+# construct is compiled instead of the version being compared. CMake runs the same
+# file at configure time; this is the earlier, cheaper report.
 cxx_version=$("${CXX}" -dumpfullversion -dumpversion 2>/dev/null | head -1)
-if [ -z "${cxx_version}" ] || ! printf '%s\n%s\n' "${GCC_MIN}" "${cxx_version}" | sort -V -C; then
+repro="${script_dir}/../cmake/probes/pr125280-static-member.cpp"
+if ! "${CXX}" -std=c++26 -freflection -fsyntax-only "${repro}" 2>/tmp/zhln-pr125280.$$; then
     {
-        echo "error: ${CXX} is ${cxx_version:-unversioned}; this release needs >= ${GCC_MIN}."
-        echo "       Older 16.x is a trunk snapshot that cannot compile Jolt; see"
-        echo "       scripts/install-gcc-prebuilt.sh for the pinned download."
+        echo "error: ${CXX} (${cxx_version:-unversioned}) cannot compile ${repro##*/}."
+        echo "       This is GCC PR c++/125280 and it would stop the build in Jolt's PCH."
+        echo "       Fixed in r17-498, cherry-picked to releases/gcc-16 as r16-8903 on"
+        echo "       2026-05-13. The branch reports the same version on both sides of that"
+        echo "       commit, so use a build from after it rather than a higher version"
+        echo "       number; scripts/install-gcc-prebuilt.sh downloads one."
+        sed 's/^/       | /' /tmp/zhln-pr125280.$$
     } >&2
+    rm -f /tmp/zhln-pr125280.$$
     exit 1
 fi
+rm -f /tmp/zhln-pr125280.$$
 # The assembler is half of the compiler pair, and the half jammy gets wrong: GCC 16
 # emits `.base64` for large data blobs and GAS only learned that directive in 2.41.
 # It is not probed here any more -- cmake/ToolchainCapabilities.cmake compiles a

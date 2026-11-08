@@ -22,12 +22,25 @@
 # target's output is the wrong check -- which is why `try_run` appears nowhere in
 # this tree.
 #
+# These probes replaced a minimum-GCC-version gate outright, rather than
+# backstopping one. A version floor answers "who made this compiler and when",
+# which is a proxy for the real question and in at least one case a broken
+# proxy: the GCC PR c++/125280 fix was cherry-picked onto releases/gcc-16,
+# which reports 16.1.1 on both sides of the commit. Nothing compared against
+# `16.1.1` can tell those two compilers apart. Compiling the construct can.
+#
 # ZHLN_SKIP_TOOLCHAIN_CAPABILITY_PROBES=ON configures without the probes. It is
 # there for a toolchain that is known to work but cannot be probed, not as a way
 # past a failure the probes are reporting correctly.
 
 include_guard(GLOBAL)
 include(CheckCXXSourceCompiles)
+
+# Captured at include time: inside a function CMAKE_CURRENT_LIST_DIR is the
+# directory of the defining file, but this is also read by the installed
+# package config, so the path is resolved once and named.
+set(ZHLN_PROBE_DIR "${CMAKE_CURRENT_LIST_DIR}/probes" CACHE INTERNAL
+    "directory holding the toolchain probe translation units")
 
 # zhln_probe_toolchain_capabilities(<reflection flags>)
 #
@@ -61,27 +74,17 @@ function(zhln_probe_toolchain_capabilities REFLECTION_FLAGS)
     set(_saved_required_includes "${CMAKE_REQUIRED_INCLUDES}")
     set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${REFLECTION_FLAGS}")
 
-    # ------------------------------------------------------------- Jolt ------
-    # The construct trunk GCC 16 rejects: a static data member whose type is a
-    # class template instantiated while the element type is still incomplete.
-    # extern/JoltPhysics declares exactly that -- `static const
-    # StaticArray<Vec3, 1026> sUnitSphere;` inside Vec3 -- and depends on the
-    # instantiation being deferred. Released GCC 14 and 16 defer it; the
-    # ubuntu-toolchain-r/test snapshot of 16.x does not. This is the probe that
-    # makes the compiler version floor a fact rather than a version string.
-    check_cxx_source_compiles("
-template <typename T, int N>
-struct StaticArray {
-protected:
-    int mSize = 0;
-    union { T mElements[N]; unsigned char mDummy; };
-};
-class alignas(16) Vec3 {
-public:
-    static const StaticArray<Vec3, 1026> sUnitSphere;
-    float x, y, z, w;
-};
-int main() { return 0; }"
+    # --------------------------------------------------- GCC PR c++/125280 ---
+    # A static data member whose type is a class template instantiated while
+    # the owning class is still incomplete. extern/JoltPhysics declares exactly
+    # that -- `static const StaticArray<Vec3, 1026> sUnitSphere;` inside Vec3 --
+    # and GCC's reflection front end used to reject it, because
+    # consteval_only_p() completed the type too eagerly. See the probe source
+    # for the bug, the fix commits, and why this is a compiled construct rather
+    # than a version comparison: the fix was cherry-picked onto a branch that
+    # keeps reporting 16.1.1, so no version floor can separate the two.
+    file(READ "${ZHLN_PROBE_DIR}/pr125280-static-member.cpp" _zhln_pr125280_source)
+    check_cxx_source_compiles("${_zhln_pr125280_source}"
         ZHLN_COMPILER_HANDLES_INCOMPLETE_STATIC_MEMBER)
     if(NOT ZHLN_COMPILER_HANDLES_INCOMPLETE_STATIC_MEMBER)
         # CMake 3.31 prints each line of a FATAL_ERROR as its own paragraph, with a
@@ -89,13 +92,13 @@ int main() { return 0; }"
         # CMake does the wrapping.
         set(_msg "\n")
         string(APPEND _msg "This compiler cannot compile extern/JoltPhysics.\n")
-        string(APPEND _msg "It rejects a static data member whose type is a class template instantiated while the element type is still incomplete, which is how Jolt declares `static const StaticArray<Vec3, 1026> sUnitSphere;` inside Vec3.\n")
-        string(APPEND _msg "Released GCC 14 and 16 defer that instantiation; the ubuntu-toolchain-r/test `gcc-16` trunk snapshot does not, and the build would stop at the Jolt precompiled header of three targets.\n")
-        string(APPEND _msg "Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} (${CMAKE_CXX_COMPILER})\n")
-        string(APPEND _msg "Use a released compiler -- scripts/install-gcc-prebuilt.sh installs a pinned GCC 16.2.0 -- or set ZHLN_SKIP_TOOLCHAIN_CAPABILITY_PROBES=ON if this verdict is known to be wrong for your toolchain.")
+        string(APPEND _msg "It rejects a static data member whose type is a class template instantiated while the owning class is still incomplete, which is how Jolt declares `static const StaticArray<Vec3, 1026> sUnitSphere;` inside Vec3. The build would stop at the Jolt precompiled header of three targets.\n")
+        string(APPEND _msg "This is GCC PR c++/125280, fixed on 2026-05-13 in r17-498 and cherry-picked to releases/gcc-16 as r16-8903. Note that the branch reports the same version before and after that commit, so upgrading to a higher version *number* is not necessarily the fix -- a build of the branch from after 2026-05-13 is.\n")
+        string(APPEND _msg "Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} (${CMAKE_CXX_COMPILER}). The failing command line and the compiler's own output are in ${CMAKE_BINARY_DIR}/CMakeFiles/CMakeConfigureLog.yaml.\n")
+        string(APPEND _msg "scripts/install-gcc-prebuilt.sh installs a pinned GCC 16.2.0 that carries the fix. Set ZHLN_SKIP_TOOLCHAIN_CAPABILITY_PROBES=ON only if this verdict is known to be wrong for your toolchain.")
         message(FATAL_ERROR "${_msg}")
     endif()
-    message(STATUS "toolchain probes: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} compiles Jolt's static-member pattern")
+    message(STATUS "toolchain probes: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} compiles Jolt's static-member pattern (GCC PR c++/125280)")
 
     # -------------------------------------------------------- assembler ------
     # GCC 16 writes `.base64` for large constant data, and GAS only learned that
