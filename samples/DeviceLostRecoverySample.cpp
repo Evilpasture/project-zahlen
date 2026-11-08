@@ -282,8 +282,9 @@ auto main(int argc, char* argv[]) -> int {
         }
         f9WasDown = f9Down;
 
-        const auto status = engine->Tick(dt);
-        if (status == ZHLN::FrameStatus::Error) {
+        const auto result = engine->Tick(dt);
+        if (!result) {
+            ZHLN::LogError("[DeviceLostRecovery] frame failed: {}", result.error());
             return EXIT_FAILURE;
         }
     }

@@ -141,7 +141,7 @@ struct ViewmodelTestSuite {
             for (uint32_t frame = 0; frame < 15; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             return {};
@@ -205,7 +205,7 @@ struct ViewmodelTestSuite {
             for (uint32_t frame = 0; frame < 15; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             // 5. Frame capture and pixel histogram analysis, in memory.

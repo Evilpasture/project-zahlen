@@ -251,7 +251,7 @@ struct RTRPBRReflectionTestSuite {
             if (ZHLN::Test::DeviceLostCount() != lostBefore) {
                 return false;
             }
-            ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+            ZHLN::Test::ExpectTrue(status.has_value());
         }
         return true;
     }

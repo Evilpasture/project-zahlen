@@ -129,7 +129,7 @@ struct CameraLookAtTestSuite {
             for (uint32_t frame = 0; frame < 8; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             // In memory: the .ppm mirror is written for inspection only, so a

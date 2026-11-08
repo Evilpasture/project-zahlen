@@ -144,7 +144,7 @@ struct HiZTestSuite {
             for (uint32_t frame = 0; frame < 15; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             // Verify culling and draw lists are active and non-empty
@@ -205,7 +205,7 @@ struct HiZTestSuite {
             for (uint32_t frame = 0; frame < 20; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             const auto& visible = engine->GetVisibleEntities();
@@ -235,7 +235,7 @@ struct HiZTestSuite {
             // Render initial 5 frames at 1280x720
             for (uint32_t i = 0; i < 5; ++i) {
                 engine->ProcessEvents();
-                engine->Tick(dt);
+                (void) engine->Tick(dt);
             }
 
             // Dynamically resize viewport to 800x600 (Triggers RecreateTargets and rebuilds Hi-Z mips)
@@ -249,7 +249,7 @@ struct HiZTestSuite {
             for (uint32_t i = 0; i < 10; ++i) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             // The resize actually took. Headless there is no compositor to ask

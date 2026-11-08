@@ -38,6 +38,8 @@
 // application did not ask for.
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Engine/Frame.hpp>
 
 #include <cstddef>
@@ -52,8 +54,13 @@ namespace ZHLN {
 
 class Engine;
 
-// Execution result for the engine frame (including device-lost recovery).
-enum class FrameStatus : int8_t { OK = 0, Error = -1 };
+// A frame step aborted the frame. FrameContext::error carries the real
+// ErrorCode: a step that knows why it failed (device loss, swapchain
+// recreation, an assertion) puts that code there. This is the generic
+// reason for a step with nothing richer to report.
+enum class FrameError : uint8_t {
+    StepFailed ZHLN_ANNOTATION(ZHLN::Description<"A frame step aborted the frame."> {}) = 1,
+};
 
 enum class FramePhase : uint8_t {
     Input,
@@ -70,7 +77,11 @@ enum class FramePhase : uint8_t {
 };
 
 struct FrameContext {
-    FrameStatus status = FrameStatus::OK;
+    // std::nullopt means the frame succeeded. A step that cannot continue
+    // sets the actual ErrorCode; FramePlan::Execute stops at the first
+    // engaged error and Engine::Tick returns it as std::unexpected, so the
+    // reason survives to the host instead of being flattened to -1.
+    std::optional<ErrorCode> error = std::nullopt;
 
     // Computed once by Engine::Tick from the engine's Clock, before any step
     // runs: how many fixed simulation steps to execute, and the interpolation

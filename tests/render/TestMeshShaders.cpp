@@ -504,7 +504,7 @@ struct MeshShaderTestSuite {
             auto            capture = [&](ZHLN::Engine& engine, std::string_view path) -> Image {
                 for (uint32_t frame = 0; frame < 6; ++frame) {
                     engine.ProcessEvents();
-                    engine.Tick(dt);
+                    (void) engine.Tick(dt);
                 }
                 return ZHLN::Test::Headless::Capture(engine, path);
             };
@@ -723,7 +723,7 @@ struct MeshShaderTestSuite {
             auto capture = [&](ZHLN::Engine& engine, std::string_view path) -> Image {
                 for (uint32_t f = 0; f < 6; ++f) {
                     engine.ProcessEvents();
-                    engine.Tick(dt);
+                    (void) engine.Tick(dt);
                 }
                 return ZHLN::Test::Headless::Capture(engine, path);
             };

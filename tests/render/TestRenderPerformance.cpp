@@ -178,7 +178,7 @@ void PrepareEngineForTest(ZHLN::Engine& engine) {
 void TickEngine(ZHLN::Engine& engine, uint32_t frameCount, float dt = 1.0f / 60.0f) {
     for (uint32_t i = 0; i < frameCount; ++i) {
         engine.ProcessEvents();
-        engine.Tick(dt);
+        (void) engine.Tick(dt);
     }
 }
 
@@ -259,7 +259,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         // registry's copy: the pose is written back before the tick.
 
         engine.ProcessEvents();
-        engine.Tick(1.0f / 60.0f);
+        (void) engine.Tick(1.0f / 60.0f);
     }
     double durationMs = timer.ElapsedMilliseconds();
 
@@ -346,7 +346,7 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         }
 
         engine.ProcessEvents();
-        engine.Tick(1.0f / 60.0f);
+        (void) engine.Tick(1.0f / 60.0f);
     }
     double durationMs = timer.ElapsedMilliseconds();
 
@@ -698,7 +698,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
         });
 
         engine.ProcessEvents();
-        engine.Tick(1.0f / 60.0f);
+        (void) engine.Tick(1.0f / 60.0f);
     }
     double durationMs = timer.ElapsedMilliseconds();
 
@@ -936,7 +936,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
                          }
 
                          engine.ProcessEvents();
-                         engine.Tick(1.0f / 60.0f);
+                         (void) engine.Tick(1.0f / 60.0f);
                      });
 
     // 10. Frame Capture Verification

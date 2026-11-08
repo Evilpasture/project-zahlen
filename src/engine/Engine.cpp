@@ -66,7 +66,6 @@ enum class EngineInitError : uint8_t {
 
 enum class EngineRunError : uint8_t {
     SceneInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine default scene initialization failed"> {}) = 1,
-    FrameFailed               ZHLN_ANNOTATION(ZHLN::Description<"Engine frame failed"> {})                        = 2,
 };
 
 struct EngineImpl {
@@ -837,7 +836,7 @@ auto Engine::InitializeDefaultScene() -> bool {
     return ZHLN::InitializeDefaultScene(*this);
 }
 
-auto Engine::Tick(float dt) -> FrameStatus {
+auto Engine::Tick(float dt) -> std::expected<void, ErrorCode> {
     _impl->world->GetInput().StepHaptics(dt);
 
     // The clock owns the fixed-step accumulator and is drained exactly once per
@@ -847,7 +846,7 @@ auto Engine::Tick(float dt) -> FrameStatus {
     _impl->frameClock.Advance(static_cast<double>(dt));
     const FixedStepBatch batch = _impl->frameClock.ConsumeFixedSteps(kFixedStepDt, kMaxFixedSteps);
     FrameContext         ctx {
-        .status     = FrameStatus::OK,
+        .error      = std::nullopt,
         .fixedSteps = batch.steps,
         .alpha      = FrameAlpha {batch.alpha},
     };
@@ -861,7 +860,10 @@ auto Engine::Tick(float dt) -> FrameStatus {
 
     _impl->frameCounter++;
 
-    return ctx.status;
+    if (ctx.error) {
+        return std::unexpected(*ctx.error);
+    }
+    return {};
 }
 
 auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstaller installModules, EventPoller pollEvents) -> std::expected<void, ErrorCode> {
@@ -915,8 +917,10 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
         const std::optional<float> pacedDt      = engine->Graphics().PacedDeltaTime();
         const bool  displayPaced = pacedDt.has_value() && (config.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
         const float tickDt       = displayPaced ? *pacedDt : rawDt;
-        if (engine->Tick(tickDt) == FrameStatus::Error) {
-            return std::unexpected(EngineRunError::FrameFailed);
+        // Propagate the frame's real ErrorCode; Engine::Run has no richer
+        // diagnosis of its own and must not flatten it to a generic one.
+        if (auto tick = engine->Tick(tickDt); !tick) {
+            return std::unexpected(tick.error());
         }
 
         if (config.fpsLimit > 0 && !displayPaced) {

@@ -94,8 +94,9 @@ so the assertion stays a silhouette mismatch rather than an absolute colour.
 
 ### D. Scene setup / API smoke — keep
 
-Entity and component liveness, `FrameStatus::OK` per tick, validation-layer
-count deltas. No pixels involved.
+Entity and component liveness, a successful
+`std::expected<void, ErrorCode>` per tick, validation-layer count deltas.
+No pixels involved.
 
 ---
 

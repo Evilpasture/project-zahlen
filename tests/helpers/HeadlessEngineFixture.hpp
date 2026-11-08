@@ -413,7 +413,7 @@ inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt) {
     for (uint32_t i = 0; i < frames; ++i) {
         engine.ProcessEvents();
         const auto status = engine.Tick(dt);
-        ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+        ZHLN::Test::ExpectTrue(status.has_value());
     }
 }
 

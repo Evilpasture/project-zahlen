@@ -78,7 +78,7 @@ struct RenderPipelinesTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (int frame = 0; frame < 3; ++frame) {
                 engine->ProcessEvents();
-                if (!ZHLN::Test::ExpectEq(engine->Tick(dt), ZHLN::FrameStatus::OK)) {
+                if (!ZHLN::Test::ExpectTrue(engine->Tick(dt).has_value())) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
             }
@@ -601,7 +601,7 @@ struct RenderPipelinesTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 first->ProcessEvents();
-                ZHLN::Test::ExpectEq(first->Tick(dt), ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(first->Tick(dt).has_value());
             }
             reportFall(*first, falling, "engine A box");
             if (const auto transform = ZHLN::EngineAccess::RegistryOf(*first).Get<ZHLN::Components::TransformComponent>(falling); ZHLN::Test::ExpectTrue(transform.has_value())) {
@@ -624,7 +624,7 @@ struct RenderPipelinesTestSuite {
             );
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 second->ProcessEvents();
-                ZHLN::Test::ExpectEq(second->Tick(dt), ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(second->Tick(dt).has_value());
             }
             reportFall(*second, fallingB, "engine B box");
             if (const auto transform = ZHLN::EngineAccess::RegistryOf(*second).Get<ZHLN::Components::TransformComponent>(fallingB);

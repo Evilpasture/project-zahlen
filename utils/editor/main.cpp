@@ -434,16 +434,16 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
             }
         }
         if (s_EditorState.simulationRunning) {
-            if (engine.Tick(frameTime) == ZHLN::FrameStatus::Error) {
-                ZHLN::LogError("[WorldEditor] engine frame failed");
+            if (auto tick = engine.Tick(frameTime); !tick) {
+                ZHLN::LogError("[WorldEditor] engine frame failed: {}", tick.error());
                 return std::unexpected(ZHLN::AppError::FrameTickFailed);
             }
         } else {
             if (!transformActive) {
                 ZHLN::FreeCam::Apply(engine, frameTime);
             }
-            if (engine.Tick(0.0f) == ZHLN::FrameStatus::Error) {
-                ZHLN::LogError("[WorldEditor] engine frame failed");
+            if (auto tick = engine.Tick(0.0f); !tick) {
+                ZHLN::LogError("[WorldEditor] engine frame failed: {}", tick.error());
                 return std::unexpected(ZHLN::AppError::FrameTickFailed);
             }
         }

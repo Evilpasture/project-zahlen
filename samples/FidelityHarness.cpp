@@ -873,9 +873,9 @@ auto main(int argc, char* argv[]) -> int {
         if (auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>()) {
             SetFidelityCamera(cameraComp->camera, scenario);
         }
-        const auto status = engine->Tick(dt);
-        if (status != ZHLN::FrameStatus::OK) {
-            ZHLN::Log("[Fidelity] Render tick stopped with status {}; refusing an incomplete capture.", static_cast<int>(status));
+        const auto result = engine->Tick(dt);
+        if (!result) {
+            ZHLN::Log("[Fidelity] Render tick failed: {}; refusing an incomplete capture.", result.error());
             return EXIT_FAILURE;
         }
     }

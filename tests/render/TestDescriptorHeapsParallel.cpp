@@ -152,7 +152,7 @@ struct DescriptorHeapsParallelSuite {
             for (uint32_t frame = 0; frame < 8; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             const std::string ppmPath = "headless_dheap_parallel.ppm";

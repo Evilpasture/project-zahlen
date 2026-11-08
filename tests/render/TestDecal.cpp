@@ -206,7 +206,7 @@ struct DecalTestSuite {
             for (uint32_t frame = 0; frame < 10; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             // 6. Frame capture & pixel validation
@@ -301,7 +301,7 @@ struct DecalTestSuite {
             for (uint32_t frame = 0; frame < 5; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             return {};

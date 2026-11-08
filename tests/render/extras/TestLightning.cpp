@@ -127,7 +127,7 @@ struct LightningTestSuite {
 
                 // Tick engine pipeline
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             // Invariant 1: Return stroke and HDR exposure flash must have occurred
@@ -206,7 +206,7 @@ struct LightningTestSuite {
             for (uint32_t frame = 0; frame < 150; ++frame) {
                 engine->ProcessEvents();
                 ZHLN::Lightning::Update(*engine, dt);
-                engine->Tick(dt);
+                (void) engine->Tick(dt);
             }
 
             // Both strikes expired

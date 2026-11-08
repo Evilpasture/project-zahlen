@@ -2023,7 +2023,8 @@ auto main(int argc, char* argv[]) -> int {
             reg.Patch<ZHLN::ProceduralLookAtComponent>(g_player, [&aim](auto& lookAt) -> auto { lookAt.targetWorldPos = aim; });
         }
 
-        if (engine->Tick(dt) == ZHLN::FrameStatus::Error) {
+        if (auto tick = engine->Tick(dt); !tick) {
+            ZHLN::LogError("[BSPMurderDrones] frame failed: {}", tick.error());
             return EXIT_FAILURE;
         }
         UpdatePlayerRigAmbientCube(*engine);

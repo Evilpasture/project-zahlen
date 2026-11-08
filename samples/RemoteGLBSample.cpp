@@ -1594,8 +1594,9 @@ auto main(int argc, char* argv[]) -> int {
         UpdateShadowExtent(*engine, state.orbit.distance, state.orbit.maxDistance, state.subject.radius);
         ApplyOrbit(*engine, state.orbit, state.subject);
 
-        const auto status = engine->Tick(state.dt);
-        if (status == ZHLN::FrameStatus::Error) {
+        const auto result = engine->Tick(state.dt);
+        if (!result) {
+            ZHLN::LogError("[RemoteGLB] frame failed: {}", result.error());
             return EXIT_FAILURE;
         }
 

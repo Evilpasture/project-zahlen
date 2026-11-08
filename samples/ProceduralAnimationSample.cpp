@@ -848,8 +848,9 @@ auto main(int argc, char* argv[]) -> int {
         });
 
         // 3. Synchronized Engine Tick (uses Clock's scaled DeltaTime)
-        const auto status = engine->Tick(clock.DeltaTime());
-        if (status == ZHLN::FrameStatus::Error) {
+        const auto result = engine->Tick(clock.DeltaTime());
+        if (!result) {
+            ZHLN::LogError("[ProceduralAnimation] frame failed: {}", result.error());
             return EXIT_FAILURE;
         }
 

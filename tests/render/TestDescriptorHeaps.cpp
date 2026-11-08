@@ -211,7 +211,7 @@ struct DescriptorHeapsSuite {
             for (uint32_t frame = 0; frame < 10; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             uint32_t width = 0, height = 0;
@@ -491,7 +491,7 @@ struct DescriptorHeapsSuite {
             for (uint32_t frame = 0; frame < 6; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             uint32_t wA = 0, hA = 0;
@@ -507,7 +507,7 @@ struct DescriptorHeapsSuite {
                 applyCameraPose(-20.0f);
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectEq(status, ZHLN::FrameStatus::OK);
+                ZHLN::Test::ExpectTrue(status.has_value());
             }
 
             uint32_t wB = 0, hB = 0;

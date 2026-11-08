@@ -249,7 +249,7 @@ class ZHLN_API Engine {
 
     auto InitializeDefaultScene() -> bool;
 
-    auto Tick(float dt) -> FrameStatus;
+    [[nodiscard]] auto Tick(float dt) -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto FallbackSceneEnabled() const noexcept -> bool;
 

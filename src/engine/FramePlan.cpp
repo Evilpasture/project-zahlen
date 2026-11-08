@@ -79,9 +79,12 @@ void FramePlan::Execute(Engine& engine, float dt, FrameContext& ctx) const {
     // composes into this plan -- a host callback installing a module, say --
     // takes effect on the next tick. The bound is re-read because a Clear()
     // during the frame would otherwise be indexed straight past the end.
+    // A step that sets ctx.error ends the frame: later steps must not run
+    // against a half-finished or unrecoverable frame. The error itself is
+    // returned by Engine::Tick, not stored as a binary status.
     const size_t stepCount = _steps.size();
     for (size_t i = 0; i < stepCount; ++i) {
-        if (i >= _steps.size()) {
+        if (i >= _steps.size() || ctx.error.has_value()) {
             break;
         }
         if (const FrameStepFn run = _steps[i].run; run != nullptr) {

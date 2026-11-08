@@ -102,7 +102,9 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
         if (render_res.error().Is(FrameResult::DeviceLost)) {
             if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
                 ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
-                ctx.status = FrameStatus::Error;
+                // Carry the recovery failure out of the frame: the caller
+                // gets the real ErrorCode instead of a C-style -1.
+                ctx.error = lost_res.error();
                 engine.GetPlatformHost().Close();
             }
         }

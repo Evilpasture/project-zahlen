@@ -246,8 +246,9 @@ auto main(int argc, char* argv[]) -> int {
             }
         }
 
-        const auto status = engine->Tick(dt);
-        if (status == ZHLN::FrameStatus::Error) {
+        const auto result = engine->Tick(dt);
+        if (!result) {
+            ZHLN::LogError("[CDNMap] frame failed: {}", result.error());
             return EXIT_FAILURE;
         }
     }

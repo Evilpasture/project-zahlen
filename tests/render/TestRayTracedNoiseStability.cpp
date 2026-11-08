@@ -158,7 +158,7 @@ struct RayTracedNoiseStabilityTestSuite {
         constexpr float dt = 1.0f / 60.0f;
         for (uint32_t i = 0; i < frames; ++i) {
             engine.ProcessEvents();
-            engine.Tick(dt);
+            (void) engine.Tick(dt);
         }
     }
 

@@ -122,8 +122,8 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
                 break;
             }
         }
-        if (engine->Tick(dt) == FrameStatus::Error) {
-            LogError("[Application] engine frame failed");
+        if (auto tick = engine->Tick(dt); !tick) {
+            LogError("[Application] engine frame failed: {}", tick.error());
             frameFailed = true;
             break;
         }

@@ -180,7 +180,7 @@ void RunHostUIPhaseForTest(Engine& engine) {
         if (uiStep->run != nullptr) {
             FrameContext frame;
             uiStep->run(engine, 0.0f, frame);
-            Expect(frame.status == FrameStatus::OK);
+            Expect(!frame.error.has_value());
         }
     }
 }
@@ -245,7 +245,7 @@ void test_app_stops_layers_on_typed_frame_failure() {
             if (const auto cb = active.GetUICallback()) {
                 (*cb)(active);
             }
-            frame.status = FrameStatus::Error;
+            frame.error = ZHLN::ErrorCode(ZHLN::FrameError::StepFailed);
         });
         Expect(placed.has_value());
     });

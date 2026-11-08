@@ -503,7 +503,7 @@ Exit: layers.Stop (reverse registration order) → Engine destroyed
    `Application::Run` and `KernelApp::Run` return `AppRunResult = std::expected<AppExitReason, ErrorCode>` rather than an OS exit integer. CLI help/version/graph requests and normal host closure are distinct `AppExitReason` values; the parser's `CommandLineError` and the underlying Engine/Kernel/render/recovery errors are propagated unchanged. `AppError` represents invalid C argument vectors or scene/tick failures without a lower-layer error code. `app/main.cpp` and `app/UIEditor.cpp` map success/failure to process status **only inside main**; tests inspect typed outcomes. This does not make process-wide `ProcessScope` state safe for uncoordinated concurrent runners.
 3. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
 4. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching modules are installed, Interaction and Terrain nodes contributed through the `Module` the application installed; `BuildSystemGraphs` walks `Engine::GetInstalledModules()` and asks each one for its systems). `VisualInterpolationSystem` reads PhysicsWorld pose history and writes interpolated transforms; static bodies are skipped.
-5. **Render Graph Execution**: `CullingSystem` performs frustum culling, `LightingSystem` gathers lights, and `RenderSystem` records Vulkan commands and presents. `Engine::Tick` reports `FrameStatus::Error` if device-lost recovery fails.
+5. **Render Graph Execution**: `CullingSystem` performs frustum culling, `LightingSystem` gathers lights, and `RenderSystem` records Vulkan commands and presents. `Engine::Tick` returns a `std::expected<void, ErrorCode>` carrying the real device-lost recovery failure; `FramePlan::Execute` stops at the first step that sets `FrameContext::error`.
 
 ### 3.1 Signature-driven ECS systems
 
@@ -657,6 +657,19 @@ The remaining work -- rewriting every in-tree system to `Query<...>` /
 `EntityCommandBuffer&` signatures so `RegistryOf` survives only in the three
 cold-start seams -- is tracked in `todo/ecs_capability_boundary.md`. It is a
 multi-patch change and is deliberately not folded into this one.
+
+### 3.5 Frame outcome
+
+`FrameContext` has no binary status. Its `std::optional<ErrorCode> error`
+starts at `std::nullopt`; a step that cannot continue sets the actual
+`ErrorCode` (device loss, swapchain recreation, an assertion, or a
+`FrameError` with nothing richer to report). `FramePlan::Execute` breaks
+out of the step loop on the first engaged error, and `Engine::Tick`
+returns `std::unexpected(*ctx.error)` so the detail reaches the host
+unchanged -- `Engine::Run`, `Application::Run` and the editor propagate
+that same `ErrorCode` rather than substituting a generic one. Success is
+an empty `std::expected<void, ErrorCode>`. A host that deliberately
+ignores the outcome spells it `(void)engine.Tick(dt);`.
 
 ## 4. Deferred Render Graph Topology
 
