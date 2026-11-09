@@ -36,12 +36,13 @@
 // ---------------------------------------------------------------------------
 // Upstream minimal reproduction, verbatim.
 // ---------------------------------------------------------------------------
-template <class T, int N> class Array {
-public:
+template <class T, int N>
+class Array {
+  public:
     T mElements[N];
 };
 class Element {
-public:
+  public:
     static const Array<Element, 10> mData;
 };
 const Array<Element, 10> Element::mData;
@@ -54,7 +55,7 @@ const Array<Element, 10> Element::mData;
 // ---------------------------------------------------------------------------
 template <typename T, int N>
 struct StaticArray {
-protected:
+  protected:
     int mSize = 0;
     union {
         T             mElements[N];
@@ -63,9 +64,9 @@ protected:
 };
 
 class alignas(16) Vec3 {
-public:
+  public:
     static const StaticArray<Vec3, 1026> sUnitSphere;
-    float x, y, z, w;
+    float                                x, y, z, w;
 };
 
 int main() {

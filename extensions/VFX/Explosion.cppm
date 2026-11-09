@@ -17,17 +17,17 @@ module;
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Audio/Audio.hpp>
-#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
-#include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
 
 // Standard Library Headers
@@ -47,7 +47,7 @@ namespace ZHLN {
 // Ordnance Types
 // ============================================================================
 
-export enum class OrdnanceType: uint8_t {
+export enum class OrdnanceType : uint8_t {
     StandardFireball, // Standard omnidirectional fireball
     ArtilleryMortar   // Anisotropic cone, shockwave rings, heavy soil ejecta, crater decal & blast impulse
 };
@@ -375,7 +375,7 @@ export class ExplosionSystem {
     }
 
     static void Init(Engine& engine) {
-        auto rc = engine.Graphics();
+        auto  rc  = engine.Graphics();
         auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
         // Register ECS components for the current registry instance
@@ -394,14 +394,13 @@ export class ExplosionSystem {
         // one emitter. Keep its buffers on a dedicated ECS resource entity.
         Entity resourceEntity = Entity::Null();
         for (const Entity e: reg.GetEntitiesWith<Components::OwnedMeshComponent>()) {
-            if (const auto owned = reg.Get<Components::OwnedMeshComponent>(e);
-                owned && owned->meshAsset == s_DebrisMeshAsset) {
+            if (const auto owned = reg.Get<Components::OwnedMeshComponent>(e); owned && owned->meshAsset == s_DebrisMeshAsset) {
                 resourceEntity = e;
                 break;
             }
         }
-        if (s_LastRenderContext == &ZHLN::EngineAccess::RenderOf(engine) && resourceEntity != Entity::Null() &&
-            rc.Mesh(s_DebrisMeshAsset).has_value() && rc.Material(s_DebrisMatAsset).has_value()) {
+        if (s_LastRenderContext == &ZHLN::EngineAccess::RenderOf(engine) && resourceEntity != Entity::Null() && rc.Mesh(s_DebrisMeshAsset).has_value() &&
+            rc.Material(s_DebrisMatAsset).has_value()) {
             return;
         }
         s_LastRenderContext = &ZHLN::EngineAccess::RenderOf(engine);
@@ -420,7 +419,8 @@ export class ExplosionSystem {
         // non-null -- which is the null dereference GCC reports. A missing
         // component now takes the same path as a missing entity: the debris mesh
         // the asset is registered from gets created either way.
-        auto owned = resourceEntity != Entity::Null() ? reg.Get<Components::OwnedMeshComponent>(resourceEntity) : ZHLN::Optional<Components::OwnedMeshComponent&> {};
+        auto owned = resourceEntity != Entity::Null() ? reg.Get<Components::OwnedMeshComponent>(resourceEntity) :
+                                                        ZHLN::Optional<Components::OwnedMeshComponent&> {};
         if (owned) {
             boxMesh = owned->mesh;
             if (boxMesh.posBuffer == BufferID::Invalid) {
@@ -435,9 +435,9 @@ export class ExplosionSystem {
 
         if (!rc.Material(s_DebrisMatAsset).has_value()) {
             Material debrisMat = rc.CreateMaterial({
-                                     .roughness = 0.94f,
-                                     .baseColor = {0.28f, 0.22f, 0.16f, 1.0f},
-                                 })
+                                                       .roughness = 0.94f,
+                                                       .baseColor = {0.28f, 0.22f, 0.16f, 1.0f},
+                                                   })
                                      .value_or(Material {});
             rc.RegisterMaterial(s_DebrisMatAsset, debrisMat);
         }
@@ -478,11 +478,7 @@ export class ExplosionSystem {
             root, Components::NameComponent {.name = String64("ArtilleryExplosionRoot")}, Components::TransformComponent {.position = lightWorldPos},
             Components::WorldTransformComponent {.world = rootTransform, .previous = rootTransform},
             Components::LightComponent {
-                .type        = LightType::Point,
-                .color       = JPH::Vec3(1.0f, 0.48f, 0.09f),
-                .intensity   = 2800.0f * scale * scale,
-                .radius      = 1.5f,
-                .range       = 60.0f * scale
+                .type = LightType::Point, .color = JPH::Vec3(1.0f, 0.48f, 0.09f), .intensity = 2800.0f * scale * scale, .radius = 1.5f, .range = 60.0f * scale
             },
             std::move(initialExp)
         );
@@ -557,7 +553,6 @@ export class ExplosionSystem {
 
         auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         auto& ecb = engine.Commands();
-        auto scene = engine.Debug();
 
         // --------------------------------------------------------------------
         // 1. UPDATE ACTIVE EXPLOSIONS (Fireball, Flash, Shockwaves)

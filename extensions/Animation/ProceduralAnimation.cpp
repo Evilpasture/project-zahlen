@@ -6,25 +6,25 @@ module;
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
+#include <Animation/AnimationContext.hpp>
+#include <Animation/AnimationSystem.hpp>
+#include <CharacterController/CharacterComponents.hpp>
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <Animation/AnimationContext.hpp>
-#include <Animation/AnimationSystem.hpp>
-#include <CharacterController/CharacterComponents.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Core/Profiler.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Render/SkeletalAnimation.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -468,8 +468,7 @@ void ApplyAuthoredPose(
 
         // Cross-fade between the previous and current tracks when a stride-wheel
         // blend is active on ProceduralLocomotionTracksComponent.
-        if (tracks != nullptr && tracks->prevTrack >= 0 && tracks->blendFactor < 1.0f &&
-            tracks->prevTrack < static_cast<int32_t>(prefab->animations.size())) {
+        if (tracks != nullptr && tracks->prevTrack >= 0 && tracks->blendFactor < 1.0f && tracks->prevTrack < static_cast<int32_t>(prefab->animations.size())) {
             std::array<JPH::Vec3, kMaxRigNodes> prevTranslations {};
             std::array<JPH::Quat, kMaxRigNodes> prevRotations {};
             std::array<JPH::Vec3, kMaxRigNodes> prevScales {};
@@ -485,10 +484,7 @@ void ApplyAuthoredPose(
                     continue;
                 }
                 const size_t node = static_cast<size_t>(channel.targetNodeIndex);
-                SamplePoseChannel(
-                    channel, tracks->prevTrackTime, mode, bicubicTension,
-                    prevTranslations[node], prevRotations[node], prevScales[node]
-                );
+                SamplePoseChannel(channel, tracks->prevTrackTime, mode, bicubicTension, prevTranslations[node], prevRotations[node], prevScales[node]);
             }
             const float t = SmootherStep(tracks->blendFactor);
             for (size_t node = 0; node < map.nodeCount; ++node) {
@@ -549,11 +545,8 @@ struct AuthoredUpperBodyCoverage {
     bool torsoHead = false;
 };
 
-[[nodiscard]] AuthoredUpperBodyCoverage FindAuthoredUpperBodyCoverage(
-    const Components::AnimatorComponent* animator,
-    const ModelPrefab*                   prefab,
-    const RigBoneMap&                    map
-) noexcept {
+[[nodiscard]] AuthoredUpperBodyCoverage
+    FindAuthoredUpperBodyCoverage(const Components::AnimatorComponent* animator, const ModelPrefab* prefab, const RigBoneMap& map) noexcept {
     AuthoredUpperBodyCoverage coverage;
     if (animator == nullptr || prefab == nullptr || animator->currentTrackIdx < 0 ||
         animator->currentTrackIdx >= static_cast<int32_t>(prefab->animations.size())) {
@@ -591,7 +584,7 @@ void SynchronizeLocomotionTrack(
     Components::AnimatorComponent&       animator,
     const ModelPrefab*                   prefab,
     ProceduralLocomotionTracksComponent& tracks,
-    const Character::MovementComponent* movement,
+    const Character::MovementComponent*  movement,
     ProceduralLocomotionComponent&       gait,
     float                                speed,
     float                                dt
@@ -611,7 +604,7 @@ void SynchronizeLocomotionTrack(
     const bool running  = tracks.gaitMode ? !belowEnter : enterRun;
     tracks.gaitMode     = running;
 
-    const bool moving  = speed > std::max(tracks.movementThreshold, 0.0f);
+    const bool moving = speed > std::max(tracks.movementThreshold, 0.0f);
 
     int32_t desiredTrack = tracks.idleTrack;
     if (moving) {
@@ -630,21 +623,21 @@ void SynchronizeLocomotionTrack(
     // one had reached rather than snapping back to walk defaults.
     {
         constexpr GaitPreset kWalkPreset {
-            .strideLength       = 1.60f,
-            .stepHeight         = 0.28f,
-            .maxBounceHeight    = 0.025f,
-            .bounceGravity      = 9.81f,
-            .pelvisSwayScale    = 0.30f,
-            .armSwingScale      = 0.80f,
-            .forwardLeanScale   = 0.50f,
-            .lateralBankScale   = 0.40f,
+            .strideLength     = 1.60f,
+            .stepHeight       = 0.28f,
+            .maxBounceHeight  = 0.025f,
+            .bounceGravity    = 9.81f,
+            .pelvisSwayScale  = 0.30f,
+            .armSwingScale    = 0.80f,
+            .forwardLeanScale = 0.50f,
+            .lateralBankScale = 0.40f,
         };
         constexpr GaitPreset kRunPreset {
             .strideLength     = 2.40f,
             .stepHeight       = 0.45f,
             .maxBounceHeight  = 0.065f,
             .bounceGravity    = 12.50f,
-            .pelvisSwayScale  = 1.50f,  // More pronounced sway for running
+            .pelvisSwayScale  = 1.50f, // More pronounced sway for running
             .armSwingScale    = 1.50f,
             .forwardLeanScale = 1.40f,
             .lateralBankScale = 1.20f,
@@ -657,7 +650,7 @@ void SynchronizeLocomotionTrack(
             std::abs(desiredPreset.stepHeight - gait.targetPreset.stepHeight) > 0.01f) {
             // Snapshot the current blended state as the new starting point so
             // walk -> run -> walk transitions chain without popping.
-            gait.currentPreset   = GaitPreset {
+            gait.currentPreset = GaitPreset {
                 .strideLength     = gait.strideLength,
                 .stepHeight       = gait.stepHeight,
                 .maxBounceHeight  = gait.maxBounceHeight,
@@ -722,7 +715,7 @@ void SynchronizeLocomotionTrack(
 
     tracks.passWeight  = 0.5f * (gait.passWeightL + gait.passWeightR);
     tracks.reachWeight = 0.5f * (gait.reachWeightL + gait.reachWeightR);
-    
+
     // Always sync to stride wheel for accurate foot placement
     if (moving && tracks.synchronizeToStrideWheel) {
         const float wheelPhase = gait.phase;
@@ -744,29 +737,33 @@ void ResolveForwardKinematics(RigBoneMap& map) noexcept {
     std::array<bool, kMaxRigNodes> computed {};
     std::array<bool, kMaxRigNodes> visiting {};
 
-    auto resolveNode = [&](auto& self, RigNodeIndex node) -> JPH::Mat44 {
-        if (!IsValidRigNode(node, map.nodeCount)) {
-            return JPH::Mat44::sIdentity();
-        }
-        if (computed[node]) {
-            return map.modelTransforms[node];
+    auto resolveNode = [&](auto& self, RigNodeIndex node) -> void {
+        if (!IsValidRigNode(node, map.nodeCount) || computed[node]) {
+            return;
         }
         if (visiting[node]) {
             map.modelTransforms[node] = map.localTransforms[node];
             computed[node]            = true;
-            return map.modelTransforms[node];
+            return;
         }
 
         visiting[node]            = true;
         const RigNodeIndex parent = map.parentIndices[node];
-        map.modelTransforms[node] = IsValidRigNode(parent, map.nodeCount) ? self(self, parent) * map.localTransforms[node] : map.localTransforms[node];
-        visiting[node]            = false;
-        computed[node]            = true;
-        return map.modelTransforms[node];
+
+        if (IsValidRigNode(parent, map.nodeCount)) {
+            // Recursively resolve parent first so its modelTransform is computed and stored
+            self(self, parent);
+            map.modelTransforms[node] = map.modelTransforms[parent] * map.localTransforms[node];
+        } else {
+            map.modelTransforms[node] = map.localTransforms[node];
+        }
+
+        visiting[node] = false;
+        computed[node] = true;
     };
 
     for (RigNodeIndex node = 0; node < map.nodeCount; ++node) {
-        static_cast<void>(resolveNode(resolveNode, node));
+        resolveNode(resolveNode, node);
     }
 }
 
@@ -1054,26 +1051,26 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
     addConstraint(CharacterBone::SupSpine, CharacterBone::Chest, RigChildOfKind::Chest);
     addConstraint(CharacterBone::Chest, CharacterBone::Neck, RigChildOfKind::Neck);
     addConstraint(CharacterBone::Neck, CharacterBone::Head, RigChildOfKind::Head);
-    
+
     // Hand constraints: log whether they're created and if the hand is already
     // a hierarchy child of the forearm (in which case the constraint is redundant).
     auto addHandConstraint = [&](CharacterBone forearmBone, CharacterBone handBone) {
         const RigNodeIndex forearm = map.nodeIndices[BoneSlot(forearmBone)];
         const RigNodeIndex hand    = map.nodeIndices[BoneSlot(handBone)];
         if (!IsValidRigNode(forearm, map.nodeCount) || !IsValidRigNode(hand, map.nodeCount)) {
-            ZHLN::LogWarning("[ProceduralAnimation] hand constraint not created — forearm={} hand={}",
-                      IsValidRigNode(forearm, map.nodeCount) ? "valid" : "missing",
-                      IsValidRigNode(hand, map.nodeCount) ? "valid" : "missing");
+            ZHLN::LogWarning(
+                "[ProceduralAnimation] hand constraint not created — forearm={} hand={}", IsValidRigNode(forearm, map.nodeCount) ? "valid" : "missing",
+                IsValidRigNode(hand, map.nodeCount) ? "valid" : "missing"
+            );
             return;
         }
         const bool isHierarchyChild = IsNodeDescendant(map, hand, forearm);
         addConstraint(forearmBone, handBone, RigChildOfKind::Hand);
-        ZHLN::Log("[ProceduralAnimation] Hand constraint: forearm={} hand={} hierarchyChild={}",
-                  forearm, hand, isHierarchyChild ? "yes" : "no (detached)");
+        ZHLN::Log("[ProceduralAnimation] Hand constraint: forearm={} hand={} hierarchyChild={}", forearm, hand, isHierarchyChild ? "yes" : "no (detached)");
     };
     addHandConstraint(CharacterBone::ForearmL, CharacterBone::HandL);
     addHandConstraint(CharacterBone::ForearmR, CharacterBone::HandR);
-    
+
     addConstraint(CharacterBone::FootL, CharacterBone::ToeL, RigChildOfKind::FootAttachment);
     addConstraint(CharacterBone::FootR, CharacterBone::ToeR, RigChildOfKind::FootAttachment);
 }
@@ -1104,6 +1101,7 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
     auto addFootConstraint = [&](RigNodeIndex parent, RigNodeIndex child) {
         if (!IsValidRigNode(parent, map.nodeCount) || !IsValidRigNode(child, map.nodeCount) || parent == child || constrainedNodes[child] ||
             IsNodeDescendant(map, child, parent) || IsNodeDescendant(map, parent, child) || map.childOfConstraintCount >= map.childOfConstraints.size()) {
+            // TODO(Evilpasture): What's the entire fucking point of returning a bool if every single caller discards?
             return false;
         }
         RigChildOfConstraint& constraint = map.childOfConstraints[map.childOfConstraintCount++];
@@ -1315,10 +1313,10 @@ struct SkinBinding {
     }
 
     SkinBinding best;
-    size_t      bestScore = 0;
+    size_t      bestScore  = 0;
     size_t      considered = 0;
     size_t      skipped    = 0;
-    auto        consider  = [&](Entity entity) {
+    auto        consider   = [&](Entity entity) {
         auto mesh = registry.Get<Components::SkeletalMeshComponent>(entity);
         if (!mesh || mesh->skeletonIndex < 0 || mesh->skeletonIndex >= static_cast<int32_t>(prefab->skeletons.size())) {
             return;
@@ -1361,8 +1359,8 @@ struct SkinBinding {
     if (!reported && (considered + skipped) > 1) {
         reported = true;
         ZHLN::Log(
-            "[ProceduralAnimation] FindSkinBinding: scored {} distinct skeleton(s) and skipped {} part(s) sharing one, out of {} considered.",
-            considered, skipped, considered + skipped
+            "[ProceduralAnimation] FindSkinBinding: scored {} distinct skeleton(s) and skipped {} part(s) sharing one, out of {} considered.", considered,
+            skipped, considered + skipped
         );
     }
     return best;
@@ -1401,7 +1399,7 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     const std::string_view vPath = std::string_view(prefab.virtualPath);
     outMap.sourcePrefabAsset     = vPath.empty() ? InvalidAssetID : HashAssetPath(vPath);
     outMap.nodeCount             = std::min(prefab.nodes.size(), kMaxRigNodes);
-    outMap.jointCount   = static_cast<uint32_t>(std::min(skeleton.joints.size(), kMaxRigNodes));
+    outMap.jointCount            = static_cast<uint32_t>(std::min(skeleton.joints.size(), kMaxRigNodes));
     if (prefab.nodes.size() > kMaxRigNodes) {
         ZHLN::Log(
             "[ProceduralAnimation] Rig '{}' contains {} nodes; evaluating the first {} and safely detaching parents outside that window.", prefab.virtualPath,
@@ -1662,20 +1660,18 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
 }
 
 void ProceduralAnimationSystem(
-    ECS::Registry&                             registry,
-    FrameDt                                    frameDt,
-    ECS::Res<PhysicsContext>                   physicsRes,
-    ECS::Res<AssetManager>                     assetsRes,
-    ECS::ResMut<PoseUploadQueue>               poseUploads
+    ECS::Registry&               registry,
+    FrameDt                      frameDt,
+    ECS::Res<PhysicsContext>     physicsRes,
+    ECS::Res<AssetManager>       assetsRes,
+    ECS::ResMut<PoseUploadQueue> poseUploads
 ) noexcept;
 
 namespace {
 
 struct ProceduralSuppressUploadSystem {
-    static void Update(
-        ECS::Query<const ProceduralLocomotionComponent, const Components::AnimatorComponent> query,
-        ECS::ResMut<Animation::AnimationContext>                                             anim
-    ) {
+    static void
+        Update(ECS::Query<const ProceduralLocomotionComponent, const Components::AnimatorComponent> query, ECS::ResMut<Animation::AnimationContext> anim) {
         for (const Entity entity: query.Entities<ProceduralLocomotionComponent>()) {
             if (const auto animator = query.Get<Components::AnimatorComponent>(entity); animator && animator->animationID.IsValid()) {
                 anim->SuppressPaletteUpload(animator->animationID);
@@ -1933,20 +1929,17 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
 // produces goes to the palette queue rather than to a renderer reference.
 void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
     ProceduralAnimationSystem(
-        ctx.registry,
-        FrameDt {dt},
-        ECS::Res<PhysicsContext> {&ctx.services.physics},
-        ECS::Res<AssetManager> {&ctx.services.assets},
+        ctx.registry, FrameDt {dt}, ECS::Res<PhysicsContext> {&ctx.services.physics}, ECS::Res<AssetManager> {&ctx.services.assets},
         ECS::ResMut<PoseUploadQueue> {&ctx.services.poseUploads}
     );
 }
 
 void ProceduralAnimationSystem(
-    ECS::Registry&                             registry,
-    FrameDt                                    frameDt,
-    ECS::Res<PhysicsContext>                   physicsRes,
-    ECS::Res<AssetManager>                     assetsRes,
-    ECS::ResMut<PoseUploadQueue>               poseUploads
+    ECS::Registry&               registry,
+    FrameDt                      frameDt,
+    ECS::Res<PhysicsContext>     physicsRes,
+    ECS::Res<AssetManager>       assetsRes,
+    ECS::ResMut<PoseUploadQueue> poseUploads
 ) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
 
@@ -1988,7 +1981,7 @@ void ProceduralAnimationSystem(
             const bool complete        = BuildBoneMap(*prefab, *skin.skeleton, *boneMap);
             boneMap->sourcePrefabAsset = prefabAsset;
             boneMap->jointOffset       = skin.skeletalMesh->jointOffset;
-            boneMap->skeletonIndex = skin.skeletalMesh->skeletonIndex;
+            boneMap->skeletonIndex     = skin.skeletalMesh->skeletonIndex;
             if (hair) {
                 hair->bindPoseInitialized = false;
                 hair->initialized         = false;
@@ -2131,10 +2124,10 @@ void ProceduralAnimationSystem(
         if (gait->orientationInitialized) {
             const JPH::Quat previousRootRotation = gait->previousRootRotation;
             const JPH::Vec3 oldForward           = previousRootRotation * JPH::Vec3::sAxisZ();
-            const JPH::Vec3 newForward = rootRotation * JPH::Vec3::sAxisZ();
-            const float     dot        = std::clamp(oldForward.Dot(newForward), -1.0f, 1.0f);
-            const float     sign       = oldForward.Cross(newForward).GetY() < 0.0f ? -1.0f : 1.0f;
-            angularVelocity            = sign * std::acos(dot) / std::max(dt, 0.0001f);
+            const JPH::Vec3 newForward           = rootRotation * JPH::Vec3::sAxisZ();
+            const float     dot                  = std::clamp(oldForward.Dot(newForward), -1.0f, 1.0f);
+            const float     sign                 = oldForward.Cross(newForward).GetY() < 0.0f ? -1.0f : 1.0f;
+            angularVelocity                      = sign * std::acos(dot) / std::max(dt, 0.0001f);
         }
         gait->previousRootRotation   = rootRotation;
         gait->orientationInitialized = true;
@@ -2191,17 +2184,17 @@ void ProceduralAnimationSystem(
 
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
         if (ikEnabled) {
-            ZHLN::ScopedTimer stageTimer("PA Stage: Leg grounding");
-            const Physics::BodyID ignoredID          = physicsComponent ? physicsComponent->physicsID : Physics::BodyID {};
-            const float               legIKWeight            = config ? config->legIKWeight : 1.0f;
-            const float               pelvisDropWeight       = config ? config->pelvisDropWeight : 1.0f;
-            const float               maxHeightCorrection    = config ? config->maxFootHeightCorrection : 0.18f;
-            const float               maxLegExtension        = config ? config->maxLegExtension : 0.98f;
-            const float               maxBodyTilt            = JPH::DegreesToRadians(config ? config->maxIKBodyTiltDegrees : 10.0f);
-            const float               maxAnkleSideways       = JPH::DegreesToRadians(config ? config->maxAnkleSidewaysDegrees : 15.0f);
-            const float               maxAnkleForward        = JPH::DegreesToRadians(config ? config->maxAnkleForwardDegrees : 35.0f);
-            const bool                preserveAuthoredFootXZ = !config || config->preserveAuthoredFootXZ;
-            const bool                worldLockFeet          = config && config->worldLockFeet;
+            ZHLN::ScopedTimer     stageTimer("PA Stage: Leg grounding");
+            const Physics::BodyID ignoredID              = physicsComponent ? physicsComponent->physicsID : Physics::BodyID {};
+            const float           legIKWeight            = config ? config->legIKWeight : 1.0f;
+            const float           pelvisDropWeight       = config ? config->pelvisDropWeight : 1.0f;
+            const float           maxHeightCorrection    = config ? config->maxFootHeightCorrection : 0.18f;
+            const float           maxLegExtension        = config ? config->maxLegExtension : 0.98f;
+            const float           maxBodyTilt            = JPH::DegreesToRadians(config ? config->maxIKBodyTiltDegrees : 10.0f);
+            const float           maxAnkleSideways       = JPH::DegreesToRadians(config ? config->maxAnkleSidewaysDegrees : 15.0f);
+            const float           maxAnkleForward        = JPH::DegreesToRadians(config ? config->maxAnkleForwardDegrees : 35.0f);
+            const bool            preserveAuthoredFootXZ = !config || config->preserveAuthoredFootXZ;
+            const bool            worldLockFeet          = config && config->worldLockFeet;
             Animation::SolveLegGrounding(
                 physics, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredID, legIKWeight, preserveAuthoredFootXZ,
                 worldLockFeet, maxHeightCorrection, dt, pelvisDropWeight, maxLegExtension, maxBodyTilt, maxAnkleSideways, maxAnkleForward
@@ -2221,7 +2214,7 @@ void ProceduralAnimationSystem(
         // Stage 4: authored upper-body channels win by default. Procedural arm
         // swing/look-at only fill groups not keyed by the active GLB track.
         if (upperBodyEnabled) {
-            ZHLN::ScopedTimer stageTimer("PA Stage: Upper body");
+            ZHLN::ScopedTimer               stageTimer("PA Stage: Upper body");
             const AuthoredUpperBodyCoverage coverage      = FindAuthoredUpperBodyCoverage(animator ? &*animator : nullptr, prefab, *boneMap);
             const bool                      forceLayering = config && config->layerUpperBodyOverAuthoredChannels;
             const bool                      applyArmSwing = forceLayering || !coverage.arms;
@@ -2237,7 +2230,7 @@ void ProceduralAnimationSystem(
         // Stage 4.5: item driver, inertial/obstacle dynamics, upper-body reach,
         // constrained arm IK, wrist limits, and procedural grasp.
         if (itemHandlingEnabled) {
-            ZHLN::ScopedTimer stageTimer("PA Stage: Item handling");
+            ZHLN::ScopedTimer   stageTimer("PA Stage: Item handling");
             const size_t        gripCount       = std::min(itemHandling->gripCount, itemHandling->grips.size());
             const CharacterBone primaryHandBone = itemHandling->grips[0].assignedLimb == CharacterBone::HandL ? CharacterBone::HandL : CharacterBone::HandR;
             const RigNodeIndex  primaryHandNode = boneMap->nodeIndices[BoneSlot(primaryHandBone)];
@@ -2253,7 +2246,7 @@ void ProceduralAnimationSystem(
                 const JPH::Vec3 entityPosition = transform->position;
                 const JPH::Vec3 lookAtTarget   = lookAt->targetWorldPos;
                 const JPH::Vec3 targetModel    = rootRotation.Inversed() * (lookAtTarget - entityPosition);
-                const JPH::Vec3 fromHead    = targetModel - headPosition;
+                const JPH::Vec3 fromHead       = targetModel - headPosition;
                 if (fromHead.LengthSq() > 1.0e-8f) {
                     aimDirection = fromHead.Normalized();
                 }
@@ -2287,11 +2280,11 @@ void ProceduralAnimationSystem(
                     continue;
                 }
                 const JPH::Vec3 upperPosition = boneMap->modelTransforms[upperNode].GetTranslation();
-                const float armLength  = (boneMap->modelTransforms[foreNode].GetTranslation() - upperPosition).Length() +
-                                         (boneMap->modelTransforms[handNode].GetTranslation() - boneMap->modelTransforms[foreNode].GetTranslation()).Length();
+                const float armLength = (boneMap->modelTransforms[foreNode].GetTranslation() - upperPosition).Length() +
+                                        (boneMap->modelTransforms[handNode].GetTranslation() - boneMap->modelTransforms[foreNode].GetTranslation()).Length();
                 const JPH::Mat44 itemModel   = itemHandling->itemModelTransform;
                 const JPH::Vec3  target      = (itemModel * grip.localTransform).GetTranslation();
-                const float     reachExcess = std::max((target - upperPosition).Length() - armLength * 0.90f, 0.0f) * grip.evaluatedIKWeight;
+                const float      reachExcess = std::max((target - upperPosition).Length() - armLength * 0.90f, 0.0f) * grip.evaluatedIKWeight;
                 if (primaryReachGrip == gripCount || reachExcess > greatestReachExcess) {
                     primaryReachGrip    = gripIndex;
                     greatestReachExcess = reachExcess;
@@ -2358,7 +2351,7 @@ void ProceduralAnimationSystem(
         if (hair && secondaryMotionEnabled) {
             // The whole secondary-motion stage. The XPBD solve keeps its own timer
             // below, so extraction is this total minus that one.
-            ZHLN::ScopedTimer stageTimer("PA Stage: Secondary motion");
+            ZHLN::ScopedTimer  stageTimer("PA Stage: Secondary motion");
             const RigNodeIndex headNode          = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
             const bool         hasHead           = IsValidRigNode(headNode, boneMap->nodeCount);
             const JPH::Vec3    headModelPosition = hasHead ? boneMap->modelTransforms[headNode].GetTranslation() : JPH::Vec3(0.0f, 1.60f, 0.0f);
@@ -2381,10 +2374,10 @@ void ProceduralAnimationSystem(
                 if (!IsValidRigNode(node, boneMap->nodeCount)) {
                     continue;
                 }
-                const JPH::Mat44 world         = boneMap->modelTransforms[node];
+                const JPH::Mat44 world          = boneMap->modelTransforms[node];
                 const JPH::Vec3  entityPosition = transform->position;
                 const JPH::Vec3  modelPosition  = inverseRoot * (world.GetTranslation() - entityPosition);
-                const JPH::Quat  modelRotation = (inverseRoot * ExtractRotation(world)).Normalized();
+                const JPH::Quat  modelRotation  = (inverseRoot * ExtractRotation(world)).Normalized();
                 const JPH::Vec3  worldScale(world.GetColumn3(0).Length(), world.GetColumn3(1).Length(), world.GetColumn3(2).Length());
                 boneMap->modelTransforms[node] = JPH::Mat44::sRotationTranslation(modelRotation, modelPosition).PreScaled(worldScale);
             }
@@ -2413,7 +2406,7 @@ void ProceduralAnimationSystem(
         // remains authoritative and cannot be neutralized by item state.
         if (itemHandlingEnabled) {
             ZHLN::ScopedTimer stageTimer("PA Stage: Hand constraint IK");
-            const size_t gripCount = std::min(itemHandling->gripCount, itemHandling->grips.size());
+            const size_t      gripCount = std::min(itemHandling->gripCount, itemHandling->grips.size());
             for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
                 const Animation::GripPoint& grip = itemHandling->grips[gripIndex];
                 if (grip.evaluatedIKWeight <= 0.001f) {
@@ -2460,7 +2453,7 @@ void ProceduralAnimationSystem(
         // translation remains immediate so forward movement cannot pull the
         // camera behind the body.
         if (firstPerson && firstPerson->enabled) {
-            ZHLN::ScopedTimer stageTimer("PA Stage: First-person camera");
+            ZHLN::ScopedTimer  stageTimer("PA Stage: First-person camera");
             const RigNodeIndex headNode = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
             if (IsValidRigNode(headNode, boneMap->nodeCount)) {
                 const JPH::Mat44& headModel      = boneMap->modelTransforms[headNode];
@@ -2495,16 +2488,16 @@ void ProceduralAnimationSystem(
                 // component: the engine owns no camera, so there is no service
                 // to reach through.
                 if (auto cameraComp = registry.Get<Components::CameraComponent>(registry.SingletonEntity<Components::MainCameraTagComponent>())) {
-                    Camera& camera            = cameraComp->camera;
-                    const JPH::Vec3 entityPosition    = transform->position;
-                    camera.position                   = entityPosition + rootRotation * firstPerson->smoothedEyeModel;
-                    const JPH::Quat worldView = (rootRotation * firstPerson->smoothedViewModel).Normalized();
-                    JPH::Vec3       forward   = worldView * JPH::Vec3::sAxisZ();
-                    forward                   = forward.LengthSq() > 1.0e-8f ? forward.Normalized() : rootRotation * JPH::Vec3::sAxisZ();
-                    camera.yaw                = std::atan2(forward.GetZ(), forward.GetX()) * (180.0f / std::numbers::pi_v<float>);
-                    camera.pitch              = std::asin(std::clamp(forward.GetY(), -1.0f, 1.0f)) * (180.0f / std::numbers::pi_v<float>);
-                    camera.fov                = firstPerson->fov;
-                    camera.nearZ              = firstPerson->nearPlane;
+                    Camera&         camera         = cameraComp->camera;
+                    const JPH::Vec3 entityPosition = transform->position;
+                    camera.position                = entityPosition + rootRotation * firstPerson->smoothedEyeModel;
+                    const JPH::Quat worldView      = (rootRotation * firstPerson->smoothedViewModel).Normalized();
+                    JPH::Vec3       forward        = worldView * JPH::Vec3::sAxisZ();
+                    forward                        = forward.LengthSq() > 1.0e-8f ? forward.Normalized() : rootRotation * JPH::Vec3::sAxisZ();
+                    camera.yaw                     = std::atan2(forward.GetZ(), forward.GetX()) * (180.0f / std::numbers::pi_v<float>);
+                    camera.pitch                   = std::asin(std::clamp(forward.GetY(), -1.0f, 1.0f)) * (180.0f / std::numbers::pi_v<float>);
+                    camera.fov                     = firstPerson->fov;
+                    camera.nearZ                   = firstPerson->nearPlane;
                 }
             }
         } else if (firstPerson) {
@@ -2547,10 +2540,9 @@ void ProceduralAnimationSystem(
                     std::array<JPH::Mat44, kMaxRigNodes> kinematicJoints {};
                     const size_t                         kinematicCount = std::min(paletteCount, kinematicJoints.size());
                     for (size_t jointIndex = 0; jointIndex < kinematicCount; ++jointIndex) {
-                        const int32_t      importedNode  = skeleton.joints[jointIndex].nodeIndex;
-                        const RigNodeIndex node          = importedNode >= 0 ? static_cast<RigNodeIndex>(importedNode) : InvalidRigNode;
-                        kinematicJoints[jointIndex]      = IsValidRigNode(node, boneMap->nodeCount) ? boneMap->modelTransforms[node] :
-                                                                                                      JPH::Mat44::sIdentity();
+                        const int32_t      importedNode = skeleton.joints[jointIndex].nodeIndex;
+                        const RigNodeIndex node         = importedNode >= 0 ? static_cast<RigNodeIndex>(importedNode) : InvalidRigNode;
+                        kinematicJoints[jointIndex]     = IsValidRigNode(node, boneMap->nodeCount) ? boneMap->modelTransforms[node] : JPH::Mat44::sIdentity();
                     }
                     poseUploads->PushKinematic(skeletalMesh->jointOffset, std::span<const JPH::Mat44> {kinematicJoints.data(), kinematicCount});
                 }
@@ -2643,12 +2635,11 @@ void DrawProceduralDebugRig(
         }
         drawCross(worldPosition(node), semantic == BoneSlot(CharacterBone::Head) ? 0.07f : 0.025f, color);
     }
-    
+
     // Draw child-of constraints as magenta lines
     for (size_t index = 0; index < boneMap.childOfConstraintCount; ++index) {
         const RigChildOfConstraint& constraint = boneMap.childOfConstraints[index];
-        if (constraint.kind == RigChildOfKind::Hand && 
-            IsValidRigNode(constraint.parent, boneMap.nodeCount) && 
+        if (constraint.kind == RigChildOfKind::Hand && IsValidRigNode(constraint.parent, boneMap.nodeCount) &&
             IsValidRigNode(constraint.child, boneMap.nodeCount)) {
             scene.AddLine(worldPosition(constraint.parent), worldPosition(constraint.child), constraintColor);
             drawCross(worldPosition(constraint.child), 0.04f, constraintColor);

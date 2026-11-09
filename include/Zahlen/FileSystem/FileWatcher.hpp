@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <Zahlen/Common.h>
@@ -21,10 +20,10 @@ enum class FileWatchAction : uint8_t {
 
 struct WatchDescriptor {
     std::filesystem::path path;
-    bool                  isDirectory     = false;
-    bool                  recursive       = false;
+    bool                  isDirectory = false;
+    bool                  recursive   = false;
     std::string           extensionFilter;
-    uint32_t              debounceMs      = 100;
+    uint32_t              debounceMs = 100;
 };
 
 struct FileWatchEvent {
@@ -32,7 +31,7 @@ struct FileWatchEvent {
     FileWatchAction       action = FileWatchAction::Modified;
 };
 
-using FileWatchID   = uint64_t;
+using FileWatchID       = uint64_t;
 using FileWatchCallback = std::function<void(const FileWatchEvent&)>;
 
 class ZHLN_API FileSystemWatcher {
@@ -49,19 +48,17 @@ class ZHLN_API FileSystemWatcher {
 
     [[nodiscard]] auto Watch(WatchDescriptor descriptor, FileWatchCallback callback) -> FileWatchID;
 
-    [[nodiscard]] auto WatchFile(
-        std::filesystem::path path, FileWatchCallback callback, uint32_t debounceMs = kDefaultDebounceMs
-    ) -> FileWatchID;
+    [[nodiscard]] auto WatchFile(std::filesystem::path path, FileWatchCallback callback, uint32_t debounceMs = kDefaultDebounceMs) -> FileWatchID;
 
     [[nodiscard]] auto WatchDirectory(
         std::filesystem::path directory,
         FileWatchCallback     callback,
-        bool                  recursive = true,
+        bool                  recursive       = true,
         std::string           extensionFilter = {},
-        uint32_t              debounceMs = kDefaultDebounceMs
+        uint32_t              debounceMs      = kDefaultDebounceMs
     ) -> FileWatchID;
 
-    [[nodiscard]] auto Unwatch(FileWatchID handle) -> bool;
+    auto Unwatch(FileWatchID handle) -> bool;
 
     void DispatchEvents();
 
@@ -70,4 +67,4 @@ class ZHLN_API FileSystemWatcher {
     std::unique_ptr<Impl> _impl;
 };
 
-}
+} // namespace ZHLN::FS

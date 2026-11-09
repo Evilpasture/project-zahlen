@@ -160,8 +160,8 @@ class ZHLN_API Engine {
     // Release every scene-owned resource before clearing the registry/ECB.
     void ClearScene();
     // Register an extra bulk cleanup system once per Engine, not per entity.
-    [[nodiscard]] auto AddSceneCleanupPass(SceneCleanupPass pass) -> bool;
-    void               RunSceneCleanupPasses(bool all);
+    auto AddSceneCleanupPass(SceneCleanupPass pass) -> bool;
+    void RunSceneCleanupPasses(bool all);
 
     [[nodiscard]] auto GetVisibleEntities() const noexcept -> std::span<const Entity>;
     [[nodiscard]] auto GetVisibleShadowEntities() const noexcept -> std::span<const Entity>;
@@ -256,8 +256,8 @@ class ZHLN_API Engine {
     // each iteration. 0 disables the cap.
     // The frame cap lives in EngineImpl, seeded from EngineConfig at
     // creation and re-read by the loop every frame. 0 disables it.
-    void                          SetMaxFramesPerSecond(uint32_t fps) noexcept;
-    [[nodiscard]] auto            MaxFramesPerSecond() const noexcept -> uint32_t;
+    void               SetMaxFramesPerSecond(uint32_t fps) noexcept;
+    [[nodiscard]] auto MaxFramesPerSecond() const noexcept -> uint32_t;
 
     void EnsureFontAtlas();
 

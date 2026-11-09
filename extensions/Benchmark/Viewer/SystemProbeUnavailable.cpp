@@ -15,7 +15,6 @@
 // performance counters for GPU; macOS, host_statistics and IOKit). Nothing in
 // SystemProbe.hpp, SystemTelemetry.hpp or the panel changes, which is the whole
 // point of the seam.
-#if !defined(__linux__)
 
 #include "SystemProbe.hpp"
 
@@ -23,8 +22,7 @@ namespace ZHLN::Bench::Platform {
 
 namespace {
 
-inline constexpr std::string_view kReason =
-    "no hardware counter backend is compiled in for this platform (Linux procfs and sysfs are the only ones today)";
+inline constexpr std::string_view kReason = "no hardware counter backend is compiled in for this platform (Linux procfs and sysfs are the only ones today)";
 
 class UnavailableProbe final: public SystemProbe {
   public:
@@ -61,5 +59,3 @@ auto MakeSystemProbe(std::string_view gpuNameHint) -> std::unique_ptr<SystemProb
 }
 
 } // namespace ZHLN::Bench::Platform
-
-#endif // !__linux__

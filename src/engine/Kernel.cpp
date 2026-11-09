@@ -3,15 +3,15 @@
 
 #include "EngineGlobals.hpp"
 #include "Platform.hpp"
-#include <Zahlen/FileSystem/Paths.hpp>
 #include "tty/TTYBackend.hpp"
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Engine/Kernel.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Window/Window.hpp>
 #include <algorithm>
 #include <cstdint>
@@ -21,7 +21,6 @@
 #include <vector>
 
 namespace ZHLN {
-
 
 namespace {
 
@@ -84,10 +83,10 @@ enum class KernelInitError : uint8_t {
 };
 
 struct Kernel::Impl {
-    std::unique_ptr<FS::FileSystemWatcher>    fileSystemWatcher;
-    std::unique_ptr<RenderContext>        renderContext;
-    std::unique_ptr<AudioContext>         audioContext;
-    std::unique_ptr<AssetManager> assetManager;
+    std::unique_ptr<FS::FileSystemWatcher> fileSystemWatcher;
+    std::unique_ptr<RenderContext>         renderContext;
+    std::unique_ptr<AudioContext>          audioContext;
+    std::unique_ptr<AssetManager>          assetManager;
 
     PlatformHost primaryHost;
     Extent2D     primaryExtent {}; // last size synchronized during ProcessEvents
@@ -98,7 +97,7 @@ struct Kernel::Impl {
     // Own the bytes backing config.initialPipelineBinaryData across renderer
     // recreation. Only persist cache data loaded by the kernel itself.
     std::vector<uint8_t> pipelineBinaryData;
-    FS::FileWatchID  shaderDirectoryWatch    = 0;
+    FS::FileWatchID      shaderDirectoryWatch    = 0;
     bool                 persistPipelineBinaries = false;
     bool                 glfwAcquired            = false;
 
@@ -121,7 +120,7 @@ struct Kernel::Impl {
     void StopShaderObservation() noexcept {
         if constexpr (isDev) {
             if (fileSystemWatcher != nullptr && shaderDirectoryWatch != 0) {
-                static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
+                fileSystemWatcher->Unwatch(shaderDirectoryWatch);
                 shaderDirectoryWatch = 0;
             }
         }
@@ -147,7 +146,7 @@ auto Kernel::InitInternal(const EngineConfig& cfg, const WindowInputReceiver& in
     // Own caller-supplied bytes as well as on-disk bytes: the config's span
     // must remain valid if a device is recreated after the caller returns.
     if (_impl->config.initialPipelineBinaryData.empty()) {
-        _impl->pipelineBinaryData = LoadPipelineBinaryBytes(FS::Paths::PipelineCacheFile());
+        _impl->pipelineBinaryData      = LoadPipelineBinaryBytes(FS::Paths::PipelineCacheFile());
         _impl->persistPipelineBinaries = true;
     } else {
         _impl->pipelineBinaryData.assign(cfg.initialPipelineBinaryData.begin(), cfg.initialPipelineBinaryData.end());
@@ -298,7 +297,6 @@ void Kernel::RemoveWindow(Window& window) {
     std::erase_if(_impl->secondaryWindows, [&](const auto& owned) -> bool { return owned.get() == &window; });
 }
 
-
 auto Kernel::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {
     return _impl->renderContext->AcquireTarget(_impl->primaryHost.Target());
 }
@@ -351,4 +349,4 @@ void Kernel::ProvokeDeviceLost() {
     _impl->renderContext->ProvokeDeviceLost();
 }
 
-}
+} // namespace ZHLN
