@@ -924,12 +924,6 @@ void InputContext::SyncCaptureFlags(bool wantCaptureKeyboard, bool wantCaptureMo
     _seats[seat].kbm.wantCaptureMouse    = wantCaptureMouse;
 }
 
-void InputContext::SyncFromInputStateComponent(const Components::InputStateComponent& component) noexcept {
-    const PlayerSeat seat = (component.seat < kMaxPlayerSeats) ? component.seat : kPrimarySeat;
-    _seats[seat].kbm      = component;
-    _seats[seat].kbm.seat = seat;
-}
-
 auto InputContext::SelectAutoSeatForGamepad(uint8_t slot) const noexcept -> PlayerSeat {
     if (_routingPolicy == SeatRoutingPolicy::SharePrimarySeat) {
         return (slot < kMaxPlayerSeats) ? static_cast<PlayerSeat>(slot) : kUnassignedSeat;

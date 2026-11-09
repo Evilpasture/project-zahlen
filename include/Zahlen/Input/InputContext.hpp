@@ -202,7 +202,6 @@ class ZHLN_API InputContext {
     void InjectMouseScroll(float delta, PlayerSeat targetSeat = kPrimarySeat) noexcept;
     void InjectChar(uint32_t codepoint, PlayerSeat targetSeat = kPrimarySeat) noexcept;
     void SyncCaptureFlags(bool wantCaptureKeyboard, bool wantCaptureMouse, PlayerSeat seat = kPrimarySeat) noexcept;
-    void SyncFromInputStateComponent(const Components::InputStateComponent& component) noexcept;
 
     void InjectGamepadConnection(uint8_t slot, bool connected, std::string_view name = {}) noexcept;
     void InjectGamepadSample(uint8_t slot, const GamepadRawSample& sample) noexcept;

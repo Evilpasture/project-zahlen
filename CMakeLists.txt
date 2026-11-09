@@ -294,9 +294,10 @@ add_subdirectory(src/render)
 # zahlen_vulkan target, which is where the explanation lives. The script was
 # ELF-only, matched symbols by hand-written glob (so it missed every mangled
 # C++ name that did not happen to start with `vma`), and silently overrode
-# source annotations: ZHLN_PostAudioEvent is declared ZHLN_API in a public
-# header and the script localized it anyway, making it unlinkable for the
-# consumers the declaration was written for.
+# source annotations -- a function could be declared ZHLN_API in a public
+# header and localized anyway, leaving the declaration unlinkable for the
+# consumers it was written for. Visibility is now stated where it can be read:
+# on the target in src/vulkan/CMakeLists.txt, or at the declaration itself.
 
 if(MINGW)
     # PE side of the question visibility answers for ELF: what does the engine's

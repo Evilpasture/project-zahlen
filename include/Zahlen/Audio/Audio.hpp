@@ -171,6 +171,3 @@ class ZHLN_API AudioContext {
 };
 
 } // namespace ZHLN
-
-struct ZHLN_Engine;
-extern "C" ZHLN_API void ZHLN_PostAudioEvent(ZHLN_Engine* engine_handle, const ZHLN::AudioEvent* event);

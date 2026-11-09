@@ -2576,11 +2576,3 @@ auto AudioContext::RenderOfflineFrames(std::span<float> interleavedOutput) -> ui
 }
 
 } // namespace ZHLN
-
-extern "C" void ZHLN_PostAudioEvent(ZHLN_Engine* engine_handle, const ZHLN::AudioEvent* event) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-    if (engine != nullptr && event != nullptr) {
-        engine->Audio().PostEvent(*event);
-    }
-}

@@ -23,6 +23,12 @@ struct IGraphicsDevice : IObject {
     [[nodiscard]] virtual ViewportRect Viewport() const noexcept = 0;
     [[nodiscard]] virtual uint32_t     FrameIndex() const noexcept = 0;
 
+    // Pipeline configuration, read/modify/write. A host changes shadow
+    // resolution or anti-aliasing by editing the value it got back, not by
+    // reaching into the ECS.
+    virtual void                           ApplySettings(const GraphicsSettings& settings) noexcept = 0;
+    [[nodiscard]] virtual GraphicsSettings Settings() const noexcept = 0;
+
     // BufferID::Invalid on failure: the engine's CreateBuffer has no error
     // channel of its own, so inventing a Result here would promise a
     // distinction the implementation cannot make.

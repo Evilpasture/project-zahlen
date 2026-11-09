@@ -18,6 +18,7 @@
 #include <Zahlen/Core/COM/Types.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Render/Types.hpp>
 
@@ -45,5 +46,15 @@ static_assert(std::is_standard_layout_v<Entity> && std::is_trivially_copyable_v<
 static_assert(std::is_standard_layout_v<BufferID> && std::is_trivially_copyable_v<BufferID>);
 static_assert(std::is_standard_layout_v<TextureID> && std::is_trivially_copyable_v<TextureID>);
 static_assert(std::is_standard_layout_v<BufferUsage> && std::is_trivially_copyable_v<BufferUsage>);
+
+// Pipeline configuration crosses by value. These are dumb data containers --
+// no preset logic, no detection, no policy -- so their layout is stable and
+// a host can read, edit and write one back without touching the registry.
+static_assert(std::is_standard_layout_v<GraphicsSettings> && std::is_trivially_copyable_v<GraphicsSettings>);
+static_assert(std::is_standard_layout_v<GISettings> && std::is_trivially_copyable_v<GISettings>);
+static_assert(std::is_standard_layout_v<ShadowSettings> && std::is_trivially_copyable_v<ShadowSettings>);
+static_assert(std::is_standard_layout_v<RayTracingConfig> && std::is_trivially_copyable_v<RayTracingConfig>);
+static_assert(std::is_standard_layout_v<EnvironmentSettings> && std::is_trivially_copyable_v<EnvironmentSettings>);
+static_assert(std::is_standard_layout_v<AAState> && std::is_trivially_copyable_v<AAState>);
 
 } // namespace ZHLN::COM

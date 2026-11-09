@@ -13,22 +13,16 @@ This document provides a technical overview of Project Zahlen's architecture, ma
 
 ---
 
-## 1.1 Strict ECS Mandate & Architectural Constraints
+## 1.1 State Ownership & Architectural Constraints
 
-To preserve the engine's data-oriented design (DOD), cache locality, zero-allocation memory guarantees, and C++26 reflection-based tooling, **ALL state in Zahlen MUST reside in ECS Components, and ALL logic MUST reside in ECS Systems.**
-
-### The Core Law
-> **There are no "Manager" or "Simulation" classes for gameplay or visual effects in Zahlen.**
-> Every entity, bolt, particle, projectile, sound, and light source is represented as a plain-data `struct` inside the `ZHLN::Components` namespace.
-
----
+Zahlen is data-oriented, which is a statement about how data is laid out and accessed -- not a rule that every value must be an ECS component. **ECS owns scene state: things there are many of, keyed by entity.** **Subsystems own their own state: things there is exactly one of.** `RenderContext` owns pipeline configuration, `InputContext` owns input, `AudioContext` owns audio. A singleton component is a global variable with extra indirection, and it pushes configuration through the registry for no benefit.
 
 ### Strict Development Rules
 
-#### 1. Zero Class-Based State
-* **NO `class` instances may hold simulation, timing, or visual state.**
-* Features MUST NOT wrap state inside private member variables (`m_phase`, `m_time`, `m_luminance`).
-* All state MUST be stored in `ZHLN::Components` as POD (Plain Old Data) structs and accessed via `reg.Get<Component>()` or `reg.GetRawArray<Component>()`.
+#### 1. State Lives With Its Owner
+* **Per-entity state belongs in `ZHLN::Components`** as POD structs, accessed via `reg.Get<Component>()` or `reg.GetRawArray<Component>()`. That is what the registry is for and where it pays off.
+* **Single-instance state belongs to the subsystem that owns it**, as ordinary members of a stateful class. Pipeline configuration lives on `RenderContext`, input on `InputContext`, audio on `AudioContext`.
+* The test is simply *how many of these are there?* If the answer is one, a component is the wrong container: it costs a lookup, invites a second copy, and makes external hosts mutate the registry to change a setting.
 
 #### 2. The $N$-Concurrent Rule
 * **Every feature MUST support $N$ simultaneous instances out of the box.**
@@ -36,7 +30,7 @@ To preserve the engine's data-oriented design (DOD), cache locality, zero-alloca
 
 #### 3. Pure System Functions
 * Logic MUST be written as pure, stateless system functions (`void SystemName(Engine& engine, float dt)`).
-* Systems MUST NOT store internal state across frames. If a calculation needs memory across frames, that memory belongs in a Component attached to an Entity or a Global Settings Entity.
+* Systems MUST NOT store internal state across frames in function-local statics. Per-entity memory belongs in a Component; single-instance memory belongs to the owning subsystem, which is a real object with a lifetime, not a hidden static.
 
 #### 4. External Resource Lifecycle
 * Components store plain generational IDs. Physics, audio, articulation and rendering do **not** keep entity-owner ledgers or poll ECS liveness. The registry has no removal observers.
@@ -46,69 +40,7 @@ To preserve the engine's data-oriented design (DOD), cache locality, zero-alloca
 
 #### 5. Environment & Global State Isolation
 * Systems modifying global engine state (e.g., Post-Processing, Exposure, Sky Gradients) MUST NOT overwrite global base values.
-* Global state changes MUST be applied as non-destructive deltas or read from an un-flashed baseline cached on the Global Settings entity.
-
----
-
-### Anti-Pattern Reference Guide
-
-#### ❌ FORBIDDEN: Classic OOP Class Bypass
-```cpp
-// BAD: Stateful class holding simulation variables, non-DOD memory, single-instance lock
-class LightningSimulation {
-  private:
-    float  m_phaseTime    = 0.0f;
-    float  m_baseExposure = 4.5f; // Clobbers global exposure!
-    Entity m_flashLight;
-
-  public:
-    void TriggerStrike(Engine& engine, ...);
-    void Update(Engine& engine, float dt);
-};
-```
-
-#### ✅ MANDATED: Idiomatic Data-Oriented ECS
-```cpp
-// GOOD: Pure POD Component
-struct LightningComponent {
-    LightningConfig config {};
-    LightningPhase  phase               = LightningPhase::Idle;
-    float           phaseTime           = 0.0f;
-    float           baseAmbientExposure = 4.5f;
-
-    BufferID vboPos     = BufferID::Invalid;
-    BufferID vboFrame   = BufferID::Invalid;
-    BufferID vboSurface = BufferID::Invalid;
-
-    // Component state only. The renderer sees non-owning mesh registrations;
-    // Engine scene cleanup frees these buffers before destroying the component.
-    // Direct replacement/removal must release them explicitly first.
-};
-
-// GOOD: Stateless System Function
-// Parameters that cross a subsystem boundary are the engine's own value types --
-// ZHLN::Float3, ZHLN::Float4, ZHLN::Double3 -- never Vec3Arg/QuatArg/RVec3Arg,
-// never `const JPH::Vec3&`, and never a conversion helper at the call site. A
-// caller writes `{1.0f, 2.0f, 3.0f}`, or passes the Vec3 it was already holding;
-// the crossing is a conversion owned by the type (Math/ValueTypes.hpp), so Jolt's
-// SIMD classes appear only where the maths happens. Quat has no value type yet
-// and stays JPH::Quat.
-namespace ZHLN::Lightning {
-Entity Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, const LightningConfig& cfg);
-void   Update(Engine& engine, float dt);
-} // namespace ZHLN::Lightning
-```
-
----
-
-### Architectural Rationale
-
-| Requirement | Why OOP Fails | Why ECS Succeeds |
-| :--- | :--- | :--- |
-| **Cache Locality** | Heap-allocated objects (`new MyClass()`) scatter data across RAM pages, causing CPU L1/L2 cache misses. | `SparseSet` arrays store components contiguously in RAM, allowing SIMD vectorization and prefetching. |
-| **Parallel Execution** | Mutable class methods introduce thread races when accessed concurrently by multiple workers. | `SystemGraph` derives component Read/Write hazards from each system's `Query<const T, U&>` signature (or explicit `Registry&` for structural writers) and orders fiber tasks accordingly. |
-| **State Save/Load** | Private class members cannot be serialized without custom, error-prone boilerplate. | Reflection (`std::meta`) automatically serializes all Component POD structs to disk or network instantly. |
-
+* Read the current value from the owning subsystem, apply a non-destructive delta, and write it back through that subsystem's API -- `Graphics().Settings()` then `Graphics().ApplySettings()`. There is no global settings entity.
 
 ---
 
@@ -738,8 +670,7 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 
 | header | contents |
 | :--- | :--- |
-| `COMTypes.hpp` | `ComError` and the static asserts that keep the reused engine value types (`Extent2D`, `Entity`, `BufferID`, ...) fixed-layout |
-| `IEngineBuilder.hpp` | typed setters for every engine option, then `Build()`. Replaces `EngineConfigCOM`, which the consumer allocated and the library read back by layout |
+| `COMTypes.hpp` | `EngineConfigCOM`, `ComError`, and the static asserts that keep the reused engine value types (`Extent2D`, `Entity`, `BufferID`, ...) fixed-layout |
 | `IEngine.hpp` | lifecycle, `Tick`, and borrowed accessors for the capability interfaces |
 | `IGraphicsDevice.hpp` | resolution, viewport, buffers, textures |
 | `IEntities.hpp` | type-erased ECS operations plus the consumer-side typed templates |
@@ -747,7 +678,7 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 | `IAudioDevice.hpp` | voices and posted events, described by `VoiceDesc` / `AudioEvent` |
 | `IAssetLibrary.hpp` | prefab cache interrogation and instantiation, plus borrowed environment-image pixels |
 | `IActionContext.hpp` | raw device injection in, virtual actions and physical state out |
-| `EngineFactory.hpp` | `CreateEngineBuilder`, the single exported symbol, and the inline `CreateEngineBuilderRef` / `CreateEngineRef` wrappers |
+| `EngineFactory.hpp` | `CreateEngine`, the single exported symbol, and the inline `CreateEngineRef` wrapper |
 
 One `EngineCOM` implements all seven interfaces, so `engine->Graphics()` and
 `engine.As<IGraphicsDevice>()` reach the same subobject of one allocation. The
@@ -757,13 +688,13 @@ reference the way COM expects.
 There is no `extern "C"`, no IDL and no dispatch struct. GCC and Clang both
 implement the Itanium C++ ABI, so the mangled name, the vtable layout and the
 calling convention already agree:
-`_ZN4ZHLN3COM19CreateEngineBuilderEv` is defined in the shared
+`_ZN4ZHLN3COM12CreateEngineERKNS0_15EngineConfigCOME` is defined in the shared
 library and undefined in every consumer. What the boundary refuses to carry is
 the *standard library*, not C++ itself.
 
-`CreateEngineBuilder` and `Build` return `Result<T*>`, not `Result<Ref<T>>`:
+`CreateEngine` returns `Result<IEngine*>`, not `Result<Ref<IEngine>>`:
 `Result<T>` carries `T` by value and therefore requires a trivially copyable
-`T`, which a reference-counting handle is not. `CreateEngineBuilderRef` is inline, so
+`T`, which a reference-counting handle is not. `CreateEngineRef` is inline, so
 it runs in the consumer's translation unit and may use `std::expected<Ref<IEngine>,
 ErrorCode>` freely -- that type is built and consumed on one side and never
 crosses.

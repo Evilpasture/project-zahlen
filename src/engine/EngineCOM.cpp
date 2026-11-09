@@ -201,6 +201,14 @@ public:
         return Device().FrameIndex();
     }
 
+    void ApplySettings(const GraphicsSettings& settings) noexcept override {
+        m_engine->Graphics().ApplySettings(settings);
+    }
+
+    [[nodiscard]] GraphicsSettings Settings() const noexcept override {
+        return m_engine->Graphics().Settings();
+    }
+
     [[nodiscard]] BufferID CreateBuffer(BufferUsage usage, Span<const std::byte> data) noexcept override {
         return m_engine->Graphics().CreateBuffer(BufferDesc {.usage = usage, .data = std::span<const std::byte>(data)});
     }
