@@ -400,7 +400,6 @@ void SpawnOrUpdateLightEntity(Engine& engine, SceneMirrorState& state, Replicate
 void SyncEnvironment(Engine& engine, SceneMirrorState& state) {
     const ReplicatedObject* lighting = FindObject(state, state.lightingUid);
     if (lighting == nullptr) return;
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
 
     // ProjectLight Ambient is a normalized scalar (default 0.01). Zahlen uses
     // ambientExposure as the environment-light multiplier (default 25), so
@@ -431,21 +430,19 @@ void SyncEnvironment(Engine& engine, SceneMirrorState& state) {
     // highlight-to-shade separation -- is still `exposure`, not this.
     constexpr float kProjectLightSkyScale = 20.0f;
 
-    for (Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<Components::PostProcessSettingsComponent>(settings, [&](auto& post) {
-            post.ambientExposure = ambientExposure;
-            post.exposure        = kProjectLightExposure;
-            if (lighting->proceduralSky) {
-                post.skyZenith  = JPH::Vec4(0.003f * kProjectLightSkyScale, 0.008f * kProjectLightSkyScale, 0.020f * kProjectLightSkyScale, 1.0f);
-                post.skyHorizon = JPH::Vec4(0.015f * kProjectLightSkyScale, 0.035f * kProjectLightSkyScale, 0.080f * kProjectLightSkyScale, 1.0f);
-                post.skyGround  = JPH::Vec4(0.001f * kProjectLightSkyScale, 0.001f * kProjectLightSkyScale, 0.003f * kProjectLightSkyScale, 1.0f);
-            } else {
-                post.skyZenith  = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-                post.skyHorizon = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-                post.skyGround  = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            }
-        });
+    GraphicsSettings gfx            = engine.Graphics().Settings();
+    gfx.environment.ambientExposure = ambientExposure;
+    gfx.post.exposure               = kProjectLightExposure;
+    if (lighting->proceduralSky) {
+        gfx.environment.skyZenith  = {0.003f * kProjectLightSkyScale, 0.008f * kProjectLightSkyScale, 0.020f * kProjectLightSkyScale, 1.0f};
+        gfx.environment.skyHorizon = {0.015f * kProjectLightSkyScale, 0.035f * kProjectLightSkyScale, 0.080f * kProjectLightSkyScale, 1.0f};
+        gfx.environment.skyGround  = {0.001f * kProjectLightSkyScale, 0.001f * kProjectLightSkyScale, 0.003f * kProjectLightSkyScale, 1.0f};
+    } else {
+        gfx.environment.skyZenith  = {0.0f, 0.0f, 0.0f, 1.0f};
+        gfx.environment.skyHorizon = {0.0f, 0.0f, 0.0f, 1.0f};
+        gfx.environment.skyGround  = {0.0f, 0.0f, 0.0f, 1.0f};
     }
+    engine.Graphics().ApplySettings(gfx);
 }
 void UpdateRemoteCharacterParts(Engine& engine, SceneMirrorState& state, float dt) {
     (void)dt;

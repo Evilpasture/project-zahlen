@@ -33,19 +33,14 @@ enum class CameraLookAtError : uint8_t {
 
 namespace {
 
-void DisableJitterAndVignette(ZHLN::ECS::Registry& reg) {
-    for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-        reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
-    }
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
-            pp.fullBright        = 1;
-            pp.vignetteIntensity = 0.0f;
-            pp.enableSSR         = 0;
-            pp.enableRTR         = 0;
-        });
-    }
+void DisableJitterAndVignette(ZHLN::Engine& engine) {
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.antiAliasing.mode            = ZHLN::AAMode::None;
+        gfx.environment.fullBright       = 1;
+        gfx.post.vignetteIntensity       = 0.0f;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = false;
+    });
 }
 
 } // namespace
@@ -80,7 +75,7 @@ struct CameraLookAtTestSuite {
 
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
-            DisableJitterAndVignette(reg);
+            DisableJitterAndVignette(*engine);
 
             auto redMatRes   = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}});
             auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.0f, 1.0f, 0.0f, 1.0f}});

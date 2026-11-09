@@ -117,23 +117,21 @@ const std::array<JPH::Vec3, 5> kCenters {
     if (meshShading && !info.meshShadingActive) return std::unexpected(NegativeScaleError::MeshPathInactive);
 
     ZHLN::Test::Headless::DisableAA(*engine);
-    for (const auto e: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) {
-            pp.fullBright = 0; // Must exercise front/back normal orientation.
-            pp.giMode = 0;
-            pp.enableSSR = 0;
-            pp.enableRTR = 0;
-            pp.ambientExposure = 0.0f;
-            pp.exposure = 1.0f;
-            pp.tonemapper = 3;
-            pp.vignetteIntensity = 0.0f;
-            pp.glowIntensity = 0.0f;
-            pp.bloomStrength = 0.0f;
-            pp.skyZenith = JPH::Vec4(0, 0, 0, 1);
-            pp.skyHorizon = JPH::Vec4(0, 0, 0, 1);
-            pp.skyGround = JPH::Vec4(0, 0, 0, 1);
-        });
-    }
+    engine->Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright       = 0; // Must exercise front/back normal orientation.
+        gfx.post.mode                    = 0;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = false;
+        gfx.environment.ambientExposure  = 0.0f;
+        gfx.post.exposure                = 1.0f;
+        gfx.post.tonemapper              = 3;
+        gfx.post.vignetteIntensity       = 0.0f;
+        gfx.post.glowIntensity           = 0.0f;
+        gfx.post.bloomStrength           = 0.0f;
+        gfx.environment.skyZenith        = JPH::Vec4(0, 0, 0, 1);
+        gfx.environment.skyHorizon       = JPH::Vec4(0, 0, 0, 1);
+        gfx.environment.skyGround        = JPH::Vec4(0, 0, 0, 1);
+    });
     const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));

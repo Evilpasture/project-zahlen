@@ -57,7 +57,7 @@ using ScenePushConstants = Slang::ScenePassPushConstants;
         .giSamples   = settings.post.giSamples,
         .enableSSR   = settings.post.enableSSR,
         .enableRTR   = (impl.frames.tlas[impl.presenter.frameIndex] && (settings.rayTracing.enableReflections || settings.rayTracing.enableShadows)) ?
-                           settings.post.enableRTR :
+                           (settings.rayTracing.enableReflections ? 1 : 0) :
                            0,
     };
 }

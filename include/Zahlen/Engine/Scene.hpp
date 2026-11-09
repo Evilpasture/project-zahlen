@@ -8,6 +8,7 @@
 // clang-format on
 #include <Jolt/Math/Float3.h>
 #include <Jolt/Math/Float4.h>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Entity.hpp>
@@ -196,7 +197,11 @@ struct MaterialLookup {
     std::optional<Material> (*find)(const void* userdata, MaterialID id) = nullptr;
 };
 
-[[nodiscard]] auto Extract(const Camera& camera, const ECS::Registry& registry, MaterialLookup materials = {}) -> Scene;
+// The registry answers for scene content -- entities, transforms, lights. It no
+// longer answers for the environment, which belongs to whoever owns the
+// pipeline, so that half is passed in rather than scraped out.
+[[nodiscard]] auto Extract(const Camera& camera, const GraphicsSettings& gfx, const ECS::Registry& registry, MaterialLookup materials = {})
+    -> Scene;
 
 } // namespace Scene
 } // namespace ZHLN

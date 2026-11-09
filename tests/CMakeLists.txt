@@ -102,6 +102,7 @@ target_link_libraries(ztest_cpu PRIVATE
 # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(ztest_cpu PRIVATE
     ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/app/include
     ${PROJECT_SOURCE_DIR}/tests
     ${PROJECT_SOURCE_DIR}/plugins
     ${PROJECT_SOURCE_DIR}/extensions

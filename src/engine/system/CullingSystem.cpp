@@ -148,24 +148,12 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
         cComp = query.Get<Components::CameraComponent>(cameraEntities[0]);
     }
 
-    bool     isFullBright     = false;
-    float    shadowWidth      = 80.0f;
-    uint32_t shadowResolution = 2048;
-
-    auto settingsEntities = query.Entities<Components::GlobalSettingsTagComponent>();
-    if (!settingsEntities.empty()) {
-        if (auto pp = query.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
-            isFullBright = (pp->fullBright != 0);
-        }
-    }
-
-    auto shadowEntities = query.Entities<Components::ShadowSettingsComponent>();
-    if (!shadowEntities.empty()) {
-        if (auto shadowSettings = query.Get<Components::ShadowSettingsComponent>(shadowEntities[0])) {
-            shadowWidth      = shadowSettings->shadowWidth;
-            shadowResolution = shadowSettings->shadowResolution;
-        }
-    }
+    // Pipeline settings come from the context that owns them, not from a
+    // registry entity the pass has to go hunting for.
+    const GraphicsSettings& gfx              = rc.GetSettings();
+    const bool              isFullBright     = (gfx.environment.fullBright != 0);
+    const float             shadowWidth      = gfx.shadows.width;
+    const uint32_t          shadowResolution = gfx.shadows.resolution;
 
     if (stats.FreezeFrustum && engineCam) {
         if (!scratch.wasFrozen) {

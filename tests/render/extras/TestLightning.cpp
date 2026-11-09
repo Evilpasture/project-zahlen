@@ -67,9 +67,7 @@ struct LightningTestSuite {
 
             // Set clean baseline ambient exposure
             constexpr float kInitialBaselineExposure = 6.0f;
-            const auto      settingsEnts             = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            ZHLN::Test::ExpectTrue(!settingsEnts.empty());
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.ambientExposure = kInitialBaselineExposure; });
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.ambientExposure = kInitialBaselineExposure; });
 
             // 1. Spawn Lightning Strike
             const JPH::RVec3 cloudPos(0.0, 180.0, 0.0);
@@ -114,11 +112,9 @@ struct LightningTestSuite {
                             returnStrokeObserved = true;
                             if (activeBolt->flashLuminance > 0.01f) {
                                 // Check if post-process exposure flashed
-                                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [&](const auto& pp) {
-                                    if (pp.ambientExposure > kInitialBaselineExposure + 5.0f) {
-                                        exposureSpikeObserved = true;
-                                    }
-                                });
+                                if (engine->Graphics().Settings().environment.ambientExposure > kInitialBaselineExposure + 5.0f) {
+                                    exposureSpikeObserved = true;
+                                }
                             }
                         }
                     }
@@ -142,9 +138,7 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectFalse(reg.IsAlive(impactLight));
 
             // Invariant 4: Ambient exposure must be cleanly restored to un-flashed baseline
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [&](const auto& pp) {
-                ZHLN::Test::ExpectEq(pp.ambientExposure, kInitialBaselineExposure);
-            });
+            ZHLN::Test::ExpectEq(engine->Graphics().Settings().environment.ambientExposure, kInitialBaselineExposure);
 
             return {};
         }
@@ -176,8 +170,7 @@ struct LightningTestSuite {
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             constexpr float kBaselineExposure = 5.0f;
-            const auto      settingsEnts      = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.ambientExposure = kBaselineExposure; });
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.ambientExposure = kBaselineExposure; });
 
             // Spawn first strike
             const ZHLN::Entity bolt1 = ZHLN::Lightning::Spawn(*engine, {0, 150, 0}, {-10, 0, 0});
@@ -211,9 +204,7 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::LightningComponent>().empty());
 
             // Exposure returned to 5.0f without compound accumulation
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [&](const auto& pp) {
-                ZHLN::Test::ExpectEq(pp.ambientExposure, kBaselineExposure);
-            });
+            ZHLN::Test::ExpectEq(engine->Graphics().Settings().environment.ambientExposure, kBaselineExposure);
 
             return {};
         }

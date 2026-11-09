@@ -318,14 +318,12 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     // 1. Configure Post-Processing Atmosphere via ECS Patch
-    for (ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) -> auto {
-            pp.ambientExposure = kAmbientExposure;
-            pp.skyZenith       = kSkyZenith;
-            pp.skyHorizon      = kSkyHorizon;
-            pp.skyGround       = kSkyGround;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.ambientExposure = kAmbientExposure;
+        gfx.environment.skyZenith       = kSkyZenith;
+        gfx.environment.skyHorizon      = kSkyHorizon;
+        gfx.environment.skyGround       = kSkyGround;
+    });
 
     // 2. Terrain (220m procedural rolling landscape)
     ZHLN::Terrain::CreateTerrain(

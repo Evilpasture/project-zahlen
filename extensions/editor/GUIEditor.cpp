@@ -79,8 +79,7 @@ consteval auto MakeComponentKinds() -> std::array<ComponentKind, sizeof...(Cs)> 
 // static type, which the transpiler fallback requires (see the invariant note
 // in DrawInspectorPanel), and a table-driven version would make that type
 // dependent and flatten to zero rows.
-constexpr auto kComponentKinds =
-    MakeComponentKinds<Comp::NameComponent, Comp::TransformComponent, Comp::PBRComponent, Comp::LightComponent, Comp::PostProcessSettingsComponent>();
+constexpr auto kComponentKinds = MakeComponentKinds<Comp::NameComponent, Comp::TransformComponent, Comp::PBRComponent, Comp::LightComponent>();
 
 // The editor and the edited scene share one registry, so the hierarchy
 // has to know which subtree is chrome. Walk HierarchyComponent upward
@@ -684,9 +683,8 @@ void DrawInspectorPanel(GUI::Frame& gui, ZHLN::ECS::Registry& reg, EditorState& 
     section("light", "Light", reg.Get<Comp::LightComponent>(sel), [](Comp::LightComponent& c, auto&& sink) -> void {
         ZHLN::Reflect::ForEachFieldWithName(c, sink);
     });
-    section("postprocess", "Post Process", reg.Get<Comp::PostProcessSettingsComponent>(sel), [](Comp::PostProcessSettingsComponent& c, auto&& sink) -> void {
-        ZHLN::Reflect::ForEachFieldWithName(c, sink);
-    });
+    // No post-process section: those values are the graphics device's, not a
+    // property of the selected entity. They belong in a settings panel.
 
     // --- Add Component ------------------------------------------------------
     //

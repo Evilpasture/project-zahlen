@@ -73,20 +73,18 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
     auto& registry  = ZHLN::EngineAccess::RegistryOf(engine);
     auto renderCtx = engine.Graphics();
 
-    for (const ZHLN::Entity settings: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
-            pp.fullBright        = 1;
-            pp.vignetteIntensity = 0.0f;
-            pp.glowIntensity     = 0.0f;
-            pp.bloomStrength     = 0.0f;
-            pp.enableSSR         = 0;
-            pp.enableRTR         = 0;
-            pp.giMode            = 0;
-            pp.skyZenith         = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            pp.skyHorizon        = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            pp.skyGround         = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright       = 1;
+        gfx.post.vignetteIntensity       = 0.0f;
+        gfx.post.glowIntensity           = 0.0f;
+        gfx.post.bloomStrength           = 0.0f;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = false;
+        gfx.post.mode                    = 0;
+        gfx.environment.skyZenith        = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyHorizon       = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyGround        = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    });
 
     // ForwardPass still shades; a sun on the camera-facing +Z faces keeps the
     // glass from compositing as an unlit black film on top of the wall albedo.
@@ -275,19 +273,17 @@ struct TransparentMaterialsTestSuite {
             auto rc = engine->Graphics();
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
-            for (const ZHLN::Entity settings: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
-                    pp.fullBright = 0;
-                    pp.ambientExposure = 1.0f;
-                    pp.giMode = 0;
-                    pp.enableSSR = 0;
-                    pp.enableRTR = 0;
-                    pp.vignetteIntensity = 0.0f;
-                    pp.glowIntensity = 0.0f;
-                    pp.bloomStrength = 0.0f;
-                    pp.tonemapper = 3;
-                });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.environment.fullBright       = 0;
+                gfx.environment.ambientExposure  = 1.0f;
+                gfx.post.mode                    = 0;
+                gfx.post.enableSSR               = 0;
+                gfx.rayTracing.enableReflections = false;
+                gfx.post.vignetteIntensity       = 0.0f;
+                gfx.post.glowIntensity           = 0.0f;
+                gfx.post.bloomStrength           = 0.0f;
+                gfx.post.tonemapper              = 3;
+            });
             const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));

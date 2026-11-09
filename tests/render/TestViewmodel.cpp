@@ -159,10 +159,7 @@ struct ViewmodelTestSuite {
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             // Set Fullbright to test raw G-buffer viewmodel color resolution without lighting variance
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // 1. Setup Camera looking along standard forward direction (-Z)
             const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();

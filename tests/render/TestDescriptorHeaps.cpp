@@ -141,14 +141,10 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             // Fullbright: raw albedo stamping so texture color is the output.
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // Camera centered on the 8x8 grid, looking down -Z.
             const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
@@ -430,10 +426,7 @@ struct DescriptorHeapsSuite {
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {

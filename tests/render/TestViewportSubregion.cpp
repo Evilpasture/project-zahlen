@@ -118,27 +118,25 @@ struct BBox {
     return leaked;
 }
 
-void DisableJitterVignetteAndTargetDrive(ZHLN::ECS::Registry& reg) {
+void DisableJitterVignetteAndTargetDrive(ZHLN::Engine& engine) {
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         // The test drives the main camera through the registry; the target-orbit lerp
-        // would fight it. AA off so the static scene is actually static. The
-        // rig component is an extras component (extensions/Camera); removing it
-        // is inert when no sibling suite installed the rig, and when the rig
-        // is present its frame step re-seeds the boot default -- a Null
-        // target that takes no drive anyway.
+        // would fight it. The rig component is an extras component
+        // (extensions/Camera); removing it is inert when no sibling suite
+        // installed the rig, and when the rig is present its frame step
+        // re-seeds the boot default -- a Null target that takes no drive anyway.
         reg.Remove<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
-        reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
     }
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
-            pp.fullBright        = 1;
-            pp.vignetteIntensity = 0.0f;
-            pp.bloomStrength     = 0.0f;
-            pp.enableSSR         = 0;
-            pp.enableRTR         = 0;
-        });
-    }
+    // AA off so the static scene is actually static.
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.antiAliasing.mode            = ZHLN::AAMode::None;
+        gfx.environment.fullBright       = 1;
+        gfx.post.vignetteIntensity       = 0.0f;
+        gfx.post.bloomStrength           = 0.0f;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = false;
+    });
 }
 
 } // namespace
@@ -172,7 +170,7 @@ struct ViewportSubregionTestSuite {
                 ~ViewportRestore() { rc.SetViewport(full); }
             } restore {rc, rc.Viewport()};
 
-            DisableJitterVignetteAndTargetDrive(reg);
+            DisableJitterVignetteAndTargetDrive(*engine);
 
             if (!ZHLN::Test::ExpectTrue(!reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty())) {
                 return std::unexpected(ViewportSubregionError::NoCameraFound);

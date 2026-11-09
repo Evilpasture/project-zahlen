@@ -138,7 +138,6 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
 }
 
 void PrepareEngineForTest(ZHLN::Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
     // 1. Reset UI callbacks
@@ -198,10 +197,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.fullBright = 1; });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
     constexpr size_t kGridCols = 40;
     constexpr size_t kGridRows = 40;
@@ -289,13 +285,10 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
 
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
-            pp.fullBright      = 0;
-            pp.ambientExposure = 8.0f;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright      = 0;
+        gfx.environment.ambientExposure = 8.0f;
+    });
 
     ZHLN::PrefabFactory::CreatePlane(
         engine, 100.0f, {0.6f, 0.6f, 0.65f, 1.0f},
@@ -582,21 +575,16 @@ auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> s
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-        reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) {
-            aa.state.mode        = ZHLN::AAMode::SMAA;
-        });
+        engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::SMAA; });
     }
 
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
-            pp.fullBright        = 0;
-            pp.ambientExposure   = 10.0f;
-            pp.vignetteIntensity = 1.2f;
-            pp.vignettePower     = 1.6f;
-            pp.enableSSR         = 1;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright      = 0;
+        gfx.environment.ambientExposure = 10.0f;
+        gfx.post.vignetteIntensity      = 1.2f;
+        gfx.post.vignettePower          = 1.6f;
+        gfx.post.enableSSR              = 1;
+    });
 
     ZHLN::PrefabFactory::CreateBox(
         engine, {2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 2, 0}, .createPhysics = false, .roughness = 0.3f, .metallic = 0.8f}
@@ -629,16 +617,13 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
 
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
-            pp.fullBright      = 0;
-            pp.ambientExposure = 6.0f;
-            pp.enableSSR       = 0;
-            pp.enableRTR       = 1;
-            pp.giMode          = 0;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright       = 0;
+        gfx.environment.ambientExposure  = 6.0f;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = true;
+        gfx.post.mode                    = 0;
+    });
 
     reg.Create(
         ZHLN::Components::TransformComponent {.position = JPH::Vec3(40.0f, 50.0f, 30.0f)},
@@ -879,21 +864,16 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     // 8. Configure Post-Processing
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-        reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) {
-            aa.state.mode        = ZHLN::AAMode::SMAA;
-        });
+        engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::SMAA; });
     }
 
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [useHardwareRT](auto& pp) {
-            pp.fullBright        = 0;
-            pp.ambientExposure   = 10.0f;
-            pp.vignetteIntensity = 1.15f;
-            pp.enableSSR         = useHardwareRT ? 0 : 1;
-            pp.enableRTR         = useHardwareRT ? 1 : 0;
-        });
-    }
+    engine.Graphics().PatchSettings([useHardwareRT](auto& gfx) {
+        gfx.environment.fullBright       = 0;
+        gfx.environment.ambientExposure  = 10.0f;
+        gfx.post.vignetteIntensity       = 1.15f;
+        gfx.post.enableSSR               = useHardwareRT ? 0 : 1;
+        gfx.rayTracing.enableReflections = useHardwareRT;
+    });
 
     const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {

@@ -9,7 +9,6 @@
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "RenderSystem.hpp"
 #include "CullingSystem.hpp"
-#include "GraphicsSettingsSync.hpp"
 #include "LightingSystem.hpp"
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -420,11 +419,12 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     // entity itself, for the viewport views built below.
     auto cameraEntities = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
 
-    const GraphicsSettings gfx = SyncGraphicsSettings(engine);
+    // The graphics owner is authoritative; nothing scrapes the registry for it.
+    const GraphicsSettings gfx = engine.Graphics().Settings();
 
     outPhysicsDrawMode = 0;
-    if (auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>(); !settingsEntities.empty()) {
-        if (auto dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0])) {
+    if (const Entity dbgEnt = reg.SingletonEntity<Components::DebugSettingsComponent>(); dbgEnt != Entity::Null()) {
+        if (auto dbg = reg.Get<Components::DebugSettingsComponent>(dbgEnt)) {
             outPhysicsDrawMode = dbg->physicsDrawMode;
         }
     }
@@ -508,7 +508,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     frame.probeMax               = gfx.environment.probeMax;
     frame.probePos               = gfx.environment.probePos;
     frame.useLocalProbe          = gfx.environment.useLocalProbe;
-    frame.enableRTR              = gfx.post.enableRTR;
+    frame.enableRTR              = gfx.rayTracing.enableReflections ? 1 : 0;
     frame.fullBright             = gfx.environment.fullBright;
     frame.frameIndex             = static_cast<uint32_t>(engine.GetCurrentFrame());
     frame.shadowWidth            = gfx.shadows.width;

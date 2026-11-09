@@ -196,7 +196,6 @@ struct ReflectLuaSuite {
                     post = {
                         exposure  = 1.25,
                         mode      = rt and 2 or 0,
-                        enableRTR = rt and 1 or 0,
                     },
                     rayTracing = {
                         enableReflections = rt,
@@ -217,7 +216,7 @@ struct ReflectLuaSuite {
         if (hi->qualityPreset != ZHLN::QualityLevel::Ultra || hi->antiAliasing.mode != ZHLN::AAMode::SMAA) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
-        if (!Near(hi->post.exposure, 1.25f) || hi->post.mode != 2 || hi->post.enableRTR != 1 || !hi->rayTracing.enableDiffuseGI) {
+        if (!Near(hi->post.exposure, 1.25f) || hi->post.mode != 2 || !hi->rayTracing.enableReflections || !hi->rayTracing.enableDiffuseGI) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
 
@@ -228,7 +227,7 @@ struct ReflectLuaSuite {
         if (!lo) {
             return std::unexpected(LuaSuiteFail::UnexpectedError);
         }
-        if (lo->qualityPreset != ZHLN::QualityLevel::Medium || lo->post.enableRTR != 0 || lo->rayTracing.enableReflections) {
+        if (lo->qualityPreset != ZHLN::QualityLevel::Medium || lo->rayTracing.enableReflections) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
         return {};
@@ -270,34 +269,34 @@ struct ReflectLuaSuite {
         }
 
         // 4. Native Float3 / Float4 accept both sequence and named forms.
-        ZHLN::Components::PostProcessSettingsComponent postComp {};
-        postComp.exposure = 1.5f;
+        ZHLN::EnvironmentSettings envComp {};
+        envComp.ambientExposure = 1.5f;
         if (auto vecOk = ZHLN::ReflectLua::ApplyPatchString(
-                postComp,
-                "return { colorFilter = { 0.9, 0.8, 0.7 }, skyZenith = { x = 0.1, y = 0.2, z = 0.3, w = 1.0 } }"
+                envComp,
+                "return { probeMin = { 0.9, 0.8, 0.7 }, skyZenith = { x = 0.1, y = 0.2, z = 0.3, w = 1.0 } }"
             );
             !vecOk) {
             return std::unexpected(LuaSuiteFail::UnexpectedError);
         }
-        if (!Near(postComp.exposure, 1.5f) || !Near(postComp.colorFilter.y, 0.8f) || !Near(postComp.skyZenith.z, 0.3f)) {
+        if (!Near(envComp.ambientExposure, 1.5f) || !Near(envComp.probeMin.y, 0.8f) || !Near(envComp.skyZenith.z, 0.3f)) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
 
         // Named and short sequence patches preserve untouched coordinates;
-        // an invalid coordinate rolls back the entire component.
+        // an invalid coordinate rolls back the entire struct.
         if (auto ok = ZHLN::ReflectLua::ApplyPatchString(
-                postComp, "return { colorFilter = { x = 0.4 }, skyZenith = { 0.6 } }"); !ok) {
+                envComp, "return { probeMin = { x = 0.4 }, skyZenith = { 0.6 } }"); !ok) {
             return std::unexpected(LuaSuiteFail::UnexpectedError);
         }
-        if (!Near(postComp.colorFilter.x, 0.4f) || !Near(postComp.colorFilter.y, 0.8f) ||
-            !Near(postComp.skyZenith.x, 0.6f) || !Near(postComp.skyZenith.z, 0.3f)) {
+        if (!Near(envComp.probeMin.x, 0.4f) || !Near(envComp.probeMin.y, 0.8f) ||
+            !Near(envComp.skyZenith.x, 0.6f) || !Near(envComp.skyZenith.z, 0.3f)) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
         if (auto bad = ZHLN::ReflectLua::ApplyPatchString(
-                postComp, "return { exposure = 8, colorFilter = { x = 'bad' } }"); bad) {
+                envComp, "return { ambientExposure = 8, probeMin = { x = 'bad' } }"); bad) {
             return std::unexpected(LuaSuiteFail::ExpectedFailureDidNotHappen);
         }
-        if (!Near(postComp.exposure, 1.5f) || !Near(postComp.colorFilter.x, 0.4f)) {
+        if (!Near(envComp.ambientExposure, 1.5f) || !Near(envComp.probeMin.x, 0.4f)) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
 
@@ -391,7 +390,7 @@ struct ReflectLuaSuite {
                 *gfxSrc, "@config/graphics.lua", ZHLN::LuaBudget {}, rtDesktop
             );
             if (!ultraGfx || ultraGfx->qualityPreset != ZHLN::QualityLevel::Ultra ||
-                ultraGfx->post.enableRTR != 1 || !ultraGfx->rayTracing.enableDiffuseGI ||
+                !ultraGfx->rayTracing.enableReflections || !ultraGfx->rayTracing.enableDiffuseGI ||
                 ultraGfx->shadows.resolution != 4096) {
                 return std::unexpected(LuaSuiteFail::WrongValue);
             }

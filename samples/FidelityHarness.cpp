@@ -37,6 +37,7 @@
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/QualityPresets.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -361,7 +362,7 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 // removes anything a later spawn attaches (an emissive part becomes a point light).
 [[nodiscard]] auto MakeConformanceSettings(float ambientScale, bool noAA) -> ZHLN::GraphicsSettings {
     ZHLN::GraphicsSettings gfx {};
-    gfx.ApplyPreset(ZHLN::QualityLevel::High);
+    ZHLN::ApplyPreset(gfx, ZHLN::QualityLevel::High);
 
     // Final blit: the generator's ACES_HILL_EXPOSURE_BOOST path (index 4 in
     // blit.slang). `exposure` remains 1.0; the curve applies the 1/0.6 boost.
@@ -380,7 +381,6 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     gfx.post.mode        = 0;
     gfx.post.giIntensity = 1.0f;
     gfx.post.enableSSR   = 0;
-    gfx.post.enableRTR   = 0;
 
     // The reference stills have antialiased geometry. SMAA smooths the final
     // scene edges, including alpha, without moving the camera or accumulating
@@ -411,79 +411,10 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 
 // Writes a GraphicsSettings back into the ECS editing surface the renderer's
 // collector reads every frame -- post/GI/environment on the global-settings
-// entity, shadows and ray tracing beside it, AA on the main camera. This is the
-// same write-back RemoteGLBSample performs, minus the studio fields; it is what
-// makes RenderSystem re-apply the conformance numbers each frame instead of the
-// engine defaults.
-//
-// InitializeDefaultScene already attached these components. Patch replaces the
-// stored value; Add is only the path where the component was never created.
+// Hands the conformance settings to the device that owns them: one transition,
+// no per-field write-back.
 void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& gfx) {
-    auto&              registry = ZHLN::EngineAccess::RegistryOf(engine);
-    const ZHLN::Entity settings = registry.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (settings == ZHLN::Entity::Null()) {
-        ZHLN::Log("[Fidelity] No global-settings entity; the render settings have nowhere to go.");
-        return;
-    }
-
-    const ZHLN::Components::PostProcessSettingsComponent post {
-        .giMode            = gfx.post.mode,
-        .aoRadius          = gfx.post.aoRadius,
-        .aoBias            = gfx.post.aoBias,
-        .aoPower           = gfx.post.aoPower,
-        .giIntensity       = gfx.post.giIntensity,
-        .giSamples         = gfx.post.giSamples,
-        .useLocalProbe     = gfx.environment.useLocalProbe,
-        .vignetteIntensity = gfx.post.vignetteIntensity,
-        .vignettePower     = gfx.post.vignettePower,
-        .glowIntensity     = gfx.post.glowIntensity,
-        .enableSSR         = gfx.post.enableSSR,
-        .enableRTR         = gfx.post.enableRTR,
-        .fullBright        = gfx.environment.fullBright,
-        .exposure          = gfx.post.exposure,
-        .bloomStrength     = gfx.post.bloomStrength,
-        .contrast          = gfx.post.contrast,
-        .saturation        = gfx.post.saturation,
-        .tonemapper        = gfx.post.tonemapper,
-        .colorFilter       = gfx.post.colorFilter,
-        .ambientExposure   = gfx.environment.ambientExposure,
-        .probeMin          = gfx.environment.probeMin,
-        .probeMax          = gfx.environment.probeMax,
-        .probePos          = gfx.environment.probePos,
-        .skyZenith         = gfx.environment.skyZenith,
-        .skyHorizon        = gfx.environment.skyHorizon,
-        .skyGround         = gfx.environment.skyGround,
-    };
-    if (!registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [&](auto& pp) { pp = post; })) {
-        registry.Add(settings, post);
-    }
-
-    const ZHLN::Components::ShadowSettingsComponent shadows {
-        .shadowWidth      = gfx.shadows.width,
-        .shadowResolution = static_cast<int>(gfx.shadows.resolution),
-        .sunSize          = gfx.shadows.sunSize,
-    };
-    if (!registry.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [&](auto& shadow) { shadow = shadows; })) {
-        registry.Add(settings, shadows);
-    }
-
-    const ZHLN::Components::RayTracingSettingsComponent rays {.config = gfx.rayTracing};
-    if (!registry.Patch<ZHLN::Components::RayTracingSettingsComponent>(settings, [&](auto& rt) { rt = rays; })) {
-        registry.Add(settings, rays);
-    }
-
-    const ZHLN::Entity camera = registry.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
-    if (camera == ZHLN::Entity::Null()) {
-        return;
-    }
-    if (!registry.Patch<ZHLN::Components::AASettingsComponent>(camera, [&gfx](auto& aa) -> auto {
-            aa.state.mode                 = gfx.antiAliasing.mode;
-            aa.state.fxaaSubpix           = gfx.antiAliasing.fxaaSubpix;
-            aa.state.fxaaEdgeThreshold    = gfx.antiAliasing.fxaaEdgeThreshold;
-            aa.state.fxaaEdgeThresholdMin = gfx.antiAliasing.fxaaEdgeThresholdMin;
-        })) {
-        registry.Add(camera, ZHLN::Components::AASettingsComponent {.state = gfx.antiAliasing});
-    }
+    engine.Graphics().ApplySettings(gfx);
 }
 
 // Khronos fidelity is the environment and nothing else. Copy the handles
@@ -809,16 +740,12 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Log("[Fidelity] Lighting '{}' has invalid pixel dimensions or data.", scenario.lighting);
             return EXIT_FAILURE;
         }
-        auto& registry = ZHLN::EngineAccess::RegistryOf(*engine);
-        const ZHLN::Entity settingsEnt = registry.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-        if (settingsEnt == ZHLN::Entity::Null()) {
-            ZHLN::Log("[Fidelity] No global-settings entity; the environment has nowhere to go.");
-            return EXIT_FAILURE;
-        }
+        // The environment map is scene content and carries itself: RenderSystem
+        // finds it by component, not by which entity holds it.
         ZHLN::Components::EnvironmentMapComponent env;
         env.source.assign(scenario.lighting);
         env.renderSkybox = scenario.renderSkybox;
-        registry.Add(settingsEnt, std::move(env));
+        ZHLN::EngineAccess::RegistryOf(*engine).Create(std::move(env));
     }
 
     auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();

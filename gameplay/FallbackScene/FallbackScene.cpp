@@ -151,18 +151,6 @@ void DefaultPreset::BuildFallbackScene(Engine& engine) {
 
     Log("[DefaultPreset] No scene document selected; showing diagnostic scene.");
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-
-    // ========================================================================
-    // 0. THE SETTINGS ENTITY
-    // ========================================================================
-    // Scene::Instantiate writes the environment onto whatever carries the
-    // global settings tag, so the entity has to exist before it runs. In the
-    // default scene layout it already does.
-    if (reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>().empty()) {
-        reg.Create(Components::GlobalSettingsTagComponent {});
-    }
-
     engine.EnsureFontAtlas();
     s_FallbackGui = std::make_unique<GUI::Context>(engine.GetFontAtlas());
 

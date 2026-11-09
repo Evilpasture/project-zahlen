@@ -142,10 +142,7 @@ struct DecalTestSuite {
             auto rc = engine->Graphics();
 
             // Set Fullbright to test raw G-buffer decal color stamping without lighting variance
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // 1. Camera looking along standard forward direction (-Z) from Z = 2.0m
             const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();

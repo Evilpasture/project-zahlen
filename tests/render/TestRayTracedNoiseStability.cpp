@@ -83,30 +83,23 @@ struct RayTracedNoiseStabilityTestSuite {
     static void SetAA(ZHLN::Engine& engine, ZHLN::AAMode mode) {
         auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            reg.Patch<ZHLN::Components::AASettingsComponent>(e, [mode](auto& aa) {
-                aa.state.mode        = mode;
-            });
+            engine.Graphics().PatchSettings([mode](auto& gfx) { gfx.antiAliasing.mode        = mode; });
         }
         engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = mode});
     }
 
     static void SetRayTracedShadows(ZHLN::Engine& engine, int enableRTR) {
-        auto&      reg      = ZHLN::EngineAccess::RegistryOf(engine);
-        const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-        if (settings.empty()) {
-            return;
-        }
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [enableRTR](auto& pp) {
-            pp.fullBright        = 0;
-            pp.enableSSR         = 0;
-            pp.enableRTR         = enableRTR;
-            pp.giMode            = 0;
-            pp.giIntensity       = 0.0f;
-            pp.vignetteIntensity = 0.0f;
-            pp.ambientExposure   = 3.0f;
-            pp.skyZenith         = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
-            pp.skyHorizon        = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
-            pp.skyGround         = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
+        engine.Graphics().PatchSettings([enableRTR](auto& gfx) {
+            gfx.environment.fullBright       = 0;
+            gfx.post.enableSSR               = 0;
+            gfx.rayTracing.enableReflections = enableRTR != 0;
+            gfx.post.mode                    = 0;
+            gfx.post.giIntensity             = 0.0f;
+            gfx.post.vignetteIntensity       = 0.0f;
+            gfx.environment.ambientExposure  = 3.0f;
+            gfx.environment.skyZenith        = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
+            gfx.environment.skyHorizon       = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
+            gfx.environment.skyGround        = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
         });
     }
 

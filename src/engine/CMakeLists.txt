@@ -32,7 +32,6 @@ set(RAW_ENGINE_SOURCES
     Platform.cpp
     Profiler.cpp
     system/RenderSystem.cpp
-    system/GraphicsSettingsSync.cpp
     system/DecalSystem.cpp
     system/AudioSystem.cpp
     system/ArticulationSystem.cpp

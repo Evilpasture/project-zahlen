@@ -153,14 +153,12 @@ struct TextureTransformsTestSuite {
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             ZHLN::Test::Headless::DisableAA(*engine);
 
-            for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) {
-                    pp.fullBright        = 1;
-                    pp.vignetteIntensity = 0.0f;
-                    pp.glowIntensity     = 0.0f;
-                    pp.bloomStrength     = 0.0f;
-                });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.environment.fullBright = 1;
+                gfx.post.vignetteIntensity = 0.0f;
+                gfx.post.glowIntensity     = 0.0f;
+                gfx.post.bloomStrength     = 0.0f;
+            });
             const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));

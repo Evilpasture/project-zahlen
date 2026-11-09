@@ -131,28 +131,25 @@ constexpr float kHaloBloomStrength = 0.003f;
 [[nodiscard]] bool BuildUnlitBoxScene(
     ZHLN::Engine& engine, const JPH::Float4& emissiveFactor, std::optional<float> glowIntensity, std::optional<float> bloomStrength
 ) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     auto renderCtx = engine.Graphics();
 
-    for (const ZHLN::Entity settings: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [glowIntensity, bloomStrength](auto& pp) {
-            if (glowIntensity.has_value()) {
-                pp.glowIntensity = *glowIntensity;
-            }
-            if (bloomStrength.has_value()) {
-                pp.bloomStrength = *bloomStrength;
-            }
-            pp.fullBright      = 0;
-            pp.ambientExposure = 0.0f;
-            pp.giMode          = 0;
-            pp.giIntensity     = 0.0f;
-            pp.enableSSR       = 0;
-            pp.enableRTR       = 0;
-            pp.skyZenith       = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            pp.skyHorizon      = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            pp.skyGround       = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        });
-    }
+    engine.Graphics().PatchSettings([glowIntensity, bloomStrength](auto& gfx) {
+        if (glowIntensity.has_value()) {
+            gfx.post.glowIntensity = *glowIntensity;
+        }
+        if (bloomStrength.has_value()) {
+            gfx.post.bloomStrength = *bloomStrength;
+        }
+        gfx.environment.fullBright      = 0;
+        gfx.environment.ambientExposure = 0.0f;
+        gfx.post.mode          = 0;
+        gfx.post.giIntensity     = 0.0f;
+        gfx.post.enableSSR       = 0;
+        gfx.rayTracing.enableReflections       = false;
+        gfx.environment.skyZenith       = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyHorizon      = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyGround       = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    });
 
     const auto material =
         renderCtx.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = kBoxBaseColor, .emissive = emissiveFactor});

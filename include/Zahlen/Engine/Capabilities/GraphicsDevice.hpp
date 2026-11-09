@@ -33,6 +33,7 @@
 #include <string_view>
 #include <vector>
 #include <type_traits>
+#include <utility>
 
 namespace ZHLN {
 
@@ -56,6 +57,17 @@ class ZHLN_API GraphicsDevice {
 
     void               ApplySettings(const GraphicsSettings& settings) noexcept;
     [[nodiscard]] auto Settings() const noexcept -> const GraphicsSettings&;
+
+    // Read-modify-write for callers that want to change a field or two. The
+    // device stays the owner: `fn` edits a copy, and the result goes back
+    // through ApplySettings, so delta detection still sees one transition.
+    template <typename Fn>
+        requires std::is_invocable_v<Fn, GraphicsSettings&>
+    void PatchSettings(Fn&& fn) noexcept(std::is_nothrow_invocable_v<Fn, GraphicsSettings&>) {
+        GraphicsSettings edited = Settings();
+        std::forward<Fn>(fn)(edited);
+        ApplySettings(edited);
+    }
     void               SetAntiAliasing(AAState state);
     void               ClearCaches() noexcept;
     [[nodiscard]] auto SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept -> std::expected<void, ErrorCode>;

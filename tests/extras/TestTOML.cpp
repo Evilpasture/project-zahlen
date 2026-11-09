@@ -586,26 +586,24 @@ onClickAction = "editor.save_scene"
         std::expected<void, ZHLN::ErrorCode> extract_reads_a_world_back_into_a_description() {
             ZHLN::ECS::Registry registry;
 
-            // The settings entity is how a scene owns the environment.
-            registry.Create(
-                ZHLN::Components::GlobalSettingsTagComponent {}, ZHLN::Components::PostProcessSettingsComponent {
-                                                                     .giIntensity     = 2.5f,
-                                                                     .enableSSR       = 0,
-                                                                     .enableRTR       = 1,
-                                                                     .exposure        = 0.02f,
-                                                                     .bloomStrength   = 0.75f,
-                                                                     .contrast        = 1.15f,
-                                                                     .saturation      = 0.8f,
-                                                                     .tonemapper      = 3,
-                                                                     .colorFilter     = JPH::Vec3(1.0f, 0.9f, 0.8f),
-                                                                     .ambientExposure = 40.0f,
-                                                                     .probeMin        = {1.0f, 2.0f, 3.0f},
-                                                                     .probeMax        = {4.0f, 5.0f, 6.0f},
-                                                                     .skyZenith       = JPH::Vec4(0.5f, 0.25f, 0.125f, 0.3f),
-                                                                     .skyHorizon      = {0.6f, 0.7f, 0.8f, 0.2f},
-                                                                     .skyGround       = {0.1f, 0.2f, 0.3f, 0.4f},
-                                                                 }
-            );
+            // The environment is the graphics owner's, so it is handed to Extract
+            // rather than seeded into the world.
+            ZHLN::GraphicsSettings gfx {};
+            gfx.post.giIntensity             = 2.5f;
+            gfx.post.enableSSR               = 0;
+            gfx.rayTracing.enableReflections = true;
+            gfx.post.exposure                = 0.02f;
+            gfx.post.bloomStrength           = 0.75f;
+            gfx.post.contrast                = 1.15f;
+            gfx.post.saturation              = 0.8f;
+            gfx.post.tonemapper              = 3;
+            gfx.post.colorFilter             = {1.0f, 0.9f, 0.8f};
+            gfx.environment.ambientExposure  = 40.0f;
+            gfx.environment.probeMin         = {1.0f, 2.0f, 3.0f};
+            gfx.environment.probeMax         = {4.0f, 5.0f, 6.0f};
+            gfx.environment.skyZenith        = {0.5f, 0.25f, 0.125f, 0.3f};
+            gfx.environment.skyHorizon       = {0.6f, 0.7f, 0.8f, 0.2f};
+            gfx.environment.skyGround        = {0.1f, 0.2f, 0.3f, 0.4f};
 
             // A dynamic box: everything the live components can answer for
             // itself, plus the provenance record for what they cannot.
@@ -676,7 +674,7 @@ onClickAction = "editor.save_scene"
             materials[2]                   = boxMaterial;
 
             const auto scene = ZHLN::Scene::Extract(
-                camera, registry,
+                camera, gfx, registry,
                 ZHLN::Scene::MaterialLookup {.userdata = &materials, .find = [](const void* userdata, ZHLN::MaterialID id) -> std::optional<ZHLN::Material> {
                                                  const auto& table = *static_cast<const std::unordered_map<ZHLN::MaterialID, ZHLN::Material>*>(userdata);
                                                  const auto  hit   = table.find(id);
@@ -693,7 +691,7 @@ onClickAction = "editor.save_scene"
             ZHLN::Test::ExpectEq(scene.camera.position.y, 3.8f);
             ZHLN::Test::ExpectEq(scene.camera.fov, 52.0f);
 
-            // The environment comes out of the settings component by field name,
+            // The environment comes back out of the settings by field name,
             // int -> bool and native Float3/Float4 -> JPH::Float3 included.
             ZHLN::Test::ExpectEq(scene.environment.giIntensity, 2.5f);
             ZHLN::Test::ExpectEq(scene.environment.ambientExposure, 40.0f);

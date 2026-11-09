@@ -81,12 +81,6 @@ consteval auto SharesEveryField() -> bool {
     return true;
 }
 
-static_assert(
-    SharesEveryField<SceneEnvironment, Components::PostProcessSettingsComponent>(),
-    "SceneEnvironment declares a field PostProcessSettingsComponent does not have. Add it to the component (with the same "
-    "default) or drop it from the description -- the two are copied by field name, in both directions."
-);
-
 [[nodiscard]] auto MakeSpawnParams(const SceneEntity& entity) -> PrefabFactory::SpawnParams {
     return PrefabFactory::SpawnParams {
         .position           = entity.transform.position,
@@ -166,9 +160,15 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         c.camera.fov      = description.camera.fov;
     });
 
+    // The scene description is a source of settings, not their owner: it hands
+    // them to the graphics device and keeps no copy.
     const SceneEnvironment& environment = description.environment;
-    for (const Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<Components::PostProcessSettingsComponent>(settings, [&](auto& pp) { CopySharedFields(pp, environment); });
+    {
+        GraphicsSettings gfx = engine.Graphics().Settings();
+        CopySharedFields(gfx.post, environment);
+        CopySharedFields(gfx.environment, environment);
+        gfx.rayTracing.enableReflections = environment.enableRTR;
+        engine.Graphics().ApplySettings(gfx);
     }
 
     for (const SceneEntity& entity: description.entities) {
@@ -367,14 +367,11 @@ namespace {
     return SceneCamera {.position = ToDescriptionFloat3(camera.position), .yaw = camera.yaw, .pitch = camera.pitch, .fov = camera.fov};
 }
 
-[[nodiscard]] auto ExtractEnvironment(const ECS::Registry& registry) -> SceneEnvironment {
+[[nodiscard]] auto ExtractEnvironment(const GraphicsSettings& gfx) -> SceneEnvironment {
     SceneEnvironment environment;
-    for (const Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
-        if (const auto pp = registry.Get<Components::PostProcessSettingsComponent>(settings)) {
-            CopySharedFields(environment, *pp);
-            break;
-        }
-    }
+    CopySharedFields(environment, gfx.post);
+    CopySharedFields(environment, gfx.environment);
+    environment.enableRTR = gfx.rayTracing.enableReflections;
     return environment;
 }
 
@@ -490,10 +487,10 @@ namespace {
 
 } // namespace
 
-auto Extract(const Camera& camera, const ECS::Registry& registry, MaterialLookup materials) -> Scene {
+auto Extract(const Camera& camera, const GraphicsSettings& gfx, const ECS::Registry& registry, MaterialLookup materials) -> Scene {
     return Scene {
         .camera      = ToDescriptionCamera(camera),
-        .environment = ExtractEnvironment(registry),
+        .environment = ExtractEnvironment(gfx),
         .entities    = ExtractEntities(registry, materials),
         .lights      = ExtractLights(registry),
     };
@@ -506,7 +503,7 @@ auto Extract(Engine& engine) -> Scene {
     const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::CameraComponent>();
     const auto camera  = camComp ? camComp->camera : Camera {};
     return Extract(
-        camera, ZHLN::EngineAccess::RegistryOf(engine),
+        camera, engine.Graphics().Settings(), ZHLN::EngineAccess::RegistryOf(engine),
         MaterialLookup {.userdata = &ZHLN::EngineAccess::RenderOf(engine), .find = [](const void* userdata, MaterialID id) -> std::optional<Material> {
                             return static_cast<const RenderContext*>(userdata)->GetGPUMaterial(id);
                         }}

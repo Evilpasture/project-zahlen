@@ -172,30 +172,23 @@ struct RTRPBRReflectionTestSuite {
     static void DisableAAAndFreeCam(ZHLN::Engine& engine) {
         auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
-                aa.state.mode        = ZHLN::AAMode::None;
-            });
+            engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
         }
         engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
     }
 
     static void SetReflectionFlags(ZHLN::Engine& engine, int enableSSR, int enableRTR) {
-        auto&      reg      = ZHLN::EngineAccess::RegistryOf(engine);
-        const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-        if (settings.empty()) {
-            return;
-        }
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [enableSSR, enableRTR](auto& pp) {
-            pp.fullBright        = 0;
-            pp.ambientExposure   = 6.0f;
-            pp.vignetteIntensity = 0.0f;
-            pp.enableSSR         = enableSSR;
-            pp.enableRTR         = enableRTR;
-            pp.giMode            = 0;
-            pp.giIntensity       = 0.0f;
-            pp.skyZenith         = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
-            pp.skyHorizon        = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
-            pp.skyGround         = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
+        engine.Graphics().PatchSettings([enableSSR, enableRTR](auto& gfx) {
+            gfx.environment.fullBright       = 0;
+            gfx.environment.ambientExposure  = 6.0f;
+            gfx.post.vignetteIntensity       = 0.0f;
+            gfx.post.enableSSR               = enableSSR;
+            gfx.rayTracing.enableReflections = enableRTR != 0;
+            gfx.post.mode                    = 0;
+            gfx.post.giIntensity             = 0.0f;
+            gfx.environment.skyZenith        = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
+            gfx.environment.skyHorizon       = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
+            gfx.environment.skyGround        = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
         });
     }
 
@@ -345,7 +338,6 @@ struct RTRPBRReflectionTestSuite {
             }
 
             SpawnEmitter(*s.engine, *whiteEm);
-            auto&              reg    = ZHLN::EngineAccess::RegistryOf(*s.engine);
             const ZHLN::Entity chrome = SpawnMirror(*s.engine, *chromeRes);
             auto               rtrOn  = EnableRTR(s);
             if (!rtrOn) {
@@ -422,7 +414,6 @@ struct RTRPBRReflectionTestSuite {
             }
 
             SpawnEmitter(*s.engine, *redEm);
-            auto&              reg     = ZHLN::EngineAccess::RegistryOf(*s.engine);
             const ZHLN::Entity eSmooth = SpawnMirror(*s.engine, *smooth);
             auto               rtrOn   = EnableRTR(s);
             if (!rtrOn) {
@@ -628,7 +619,6 @@ struct RTRPBRReflectionTestSuite {
             }
 
             SpawnEmitter(*s.engine, *whiteEm);
-            auto&              reg   = ZHLN::EngineAccess::RegistryOf(*s.engine);
             const ZHLN::Entity eSil  = SpawnMirror(*s.engine, *silver);
             auto               rtrOn = EnableRTR(s);
             if (!rtrOn) {

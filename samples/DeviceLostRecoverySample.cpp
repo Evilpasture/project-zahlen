@@ -107,14 +107,12 @@ void ClearArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> entities) {
     std::vector<ZHLN::Entity> entities;
     auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
 
-    for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) -> auto {
-            pp.ambientExposure = kAmbientExposure;
-            pp.skyZenith       = kSkyZenith;
-            pp.skyHorizon      = kSkyHorizon;
-            pp.skyGround       = kSkyGround;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.ambientExposure = kAmbientExposure;
+        gfx.environment.skyZenith       = kSkyZenith;
+        gfx.environment.skyHorizon      = kSkyHorizon;
+        gfx.environment.skyGround       = kSkyGround;
+    });
 
     entities.push_back(
         ZHLN::PrefabFactory::CreatePlane(

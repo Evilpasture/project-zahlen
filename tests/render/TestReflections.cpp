@@ -47,15 +47,12 @@ struct ReflectionsTestSuite {
                 auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.ambientExposure = 6.0f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 1;   // BVH ray gate: reflection.slang only traces when wantRTR
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.environment.ambientExposure  = 6.0f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = true;   // BVH ray gate: reflection.slang only traces when wantRTR
+                });
 
                 auto mirrorMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.03f, .baseColor = {0.85f, 0.85f, 0.88f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(mirrorMatRes.has_value())) {
@@ -141,16 +138,10 @@ struct ReflectionsTestSuite {
                         return false;
                     }
 
-                    auto&      reg      = ZHLN::EngineAccess::RegistryOf(eng);
-                    const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                    if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 0; });
-                    }
+                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
                     TickFrames(eng, 2);
                     const RgbImage off = Capture(eng, "headless_lighting_rt_reflect_rtr_off.ppm");
-                    if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 1; });
-                    }
+                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
                     if (!ZHLN::Test::ExpectTrue(off.Valid())) {
                         captureFailed = true;
                         return false;
@@ -217,16 +208,13 @@ struct ReflectionsTestSuite {
                 auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.ambientExposure = 6.0f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 1;   // BVH ray gate: reflection.slang only traces when wantRTR
-                        pp.giMode          = 0;
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.environment.ambientExposure  = 6.0f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = true;   // BVH ray gate: reflection.slang only traces when wantRTR
+                    gfx.post.mode                    = 0;
+                });
 
                 // Sun illumination to support scene depth and HDR tone mapping
                 const ZHLN::Entity sunEnt = reg.Create();
@@ -323,16 +311,10 @@ struct ReflectionsTestSuite {
                         return false;
                     }
 
-                    auto&      reg      = ZHLN::EngineAccess::RegistryOf(eng);
-                    const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                    if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 0; });
-                    }
+                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
                     TickFrames(eng, 2);
                     const RgbImage off = Capture(eng, "headless_lighting_multi_emissive_rtr_off.ppm");
-                    if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 1; });
-                    }
+                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
                     if (!ZHLN::Test::ExpectTrue(off.Valid())) {
                         captureFailed = true;
                         return false;
@@ -511,17 +493,14 @@ struct ReflectionsTestSuite {
                 auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.exposure        = 0.015f;
-                        pp.ambientExposure = 6.0f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 1;   // BVH ray gate: reflection.slang only traces when wantRTR
-                        pp.giMode          = 0;
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.post.exposure                = 0.015f;
+                    gfx.environment.ambientExposure  = 6.0f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = true;   // BVH ray gate: reflection.slang only traces when wantRTR
+                    gfx.post.mode                    = 0;
+                });
 
                 auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.5f, .roughness = 0.25f, .baseColor = {0.6f, 0.6f, 0.65f, 1.0f}});
                 ZHLN::PrefabFactory::CreatePlane(

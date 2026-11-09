@@ -184,21 +184,16 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[CDNMap] Bounds centre ({:.1f}, {:.1f}, {:.1f}), radius {:.1f} m.", center.GetX(), center.GetY(), center.GetZ(), radius);
 
     {
-        auto&              reg      = ZHLN::EngineAccess::RegistryOf(*engine);
-        const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
+        auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
         // Default exposure is 1.0; a sun of 60 (the studio number at exposure 0.08)
         // clips the whole framebuffer to white. Grade for an outdoor map.
-        if (settings != ZHLN::Entity::Null()) {
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& p) -> auto {
-                p.exposure        = 0.12f;
-                p.tonemapper      = 1;
-                p.ambientExposure = 2.0f;
-            });
-            reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [radius](auto& s) -> auto {
-                s.shadowWidth      = std::clamp(radius * 8.0f, 32.0f, 4000.0f);
-                s.shadowResolution = 2048;
-            });
-        }
+        engine->Graphics().PatchSettings([radius](auto& gfx) {
+            gfx.post.exposure               = 0.12f;
+            gfx.post.tonemapper             = 1;
+            gfx.environment.ambientExposure = 2.0f;
+            gfx.shadows.width               = std::clamp(radius * 8.0f, 32.0f, 4000.0f);
+            gfx.shadows.resolution          = 2048;
+        });
 
         const JPH::Vec3  sunPos = center + JPH::Vec3(radius * 4.0f, radius * 8.0f, radius * 3.0f);
         const JPH::Mat44 world  = ZHLN::Math::CreateTransform(sunPos, {0.0f, 0.0f, 0.0f, 1.0f});

@@ -39,8 +39,7 @@ class ZHLN_API CullingSystem {
   public:
     using CullingQuery = ECS::Query<
         const Components::MeshComponent, const Components::WorldTransformComponent, Components::CameraComponent&,
-        const Components::GlobalSettingsTagComponent, const Components::PostProcessSettingsComponent,
-        const Components::ShadowSettingsComponent, const Components::LightComponent, const Components::SunTagComponent,
+        const Components::LightComponent, const Components::SunTagComponent,
         const Components::EnvironmentSunTagComponent, const Components::TransformComponent, Components::CullingStatsComponent&>;
 
     // Reflected graph entry point. The pass owns its scratch (ECS::Local), reads

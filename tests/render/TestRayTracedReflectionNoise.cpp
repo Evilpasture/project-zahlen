@@ -131,34 +131,27 @@ struct RayTracedReflectionNoiseTestSuite {
     static void SetAA(ZHLN::Engine& engine, ZHLN::AAMode mode) {
         auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            reg.Patch<ZHLN::Components::AASettingsComponent>(e, [mode](auto& aa) {
-                aa.state.mode        = mode;
-            });
+            engine.Graphics().PatchSettings([mode](auto& gfx) { gfx.antiAliasing.mode        = mode; });
         }
         engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = mode});
     }
 
-    // Same switch the shadow suite drives: GraphicsSettingsSync.cpp turns
-    // PostProcessSettingsComponent::enableRTR into rayTracing.enableReflections,
-    // which RenderGraphBuilder ANDs with a non-null TLAS to form pc.enableRTR
-    // and to select the RTR pipeline variants for lighting and reflection.
+    // Same switch the shadow suite drives: rayTracing.enableReflections is the
+    // one stored fact, which RenderGraphBuilder ANDs with a non-null TLAS to
+    // form pc.enableRTR and to select the RTR pipeline variants for lighting
+    // and reflection.
     static void SetRTR(ZHLN::Engine& engine, int enableSSR, int enableRTR) {
-        auto&      reg      = ZHLN::EngineAccess::RegistryOf(engine);
-        const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-        if (settings.empty()) {
-            return;
-        }
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [enableSSR, enableRTR](auto& pp) {
-            pp.fullBright        = 0;
-            pp.enableSSR         = enableSSR;
-            pp.enableRTR         = enableRTR;
-            pp.giMode            = 0;
-            pp.giIntensity       = 0.0f;
-            pp.vignetteIntensity = 0.0f;
-            pp.ambientExposure   = 3.0f;
-            pp.skyZenith         = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
-            pp.skyHorizon        = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
-            pp.skyGround         = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
+        engine.Graphics().PatchSettings([enableSSR, enableRTR](auto& gfx) {
+            gfx.environment.fullBright       = 0;
+            gfx.post.enableSSR               = enableSSR;
+            gfx.rayTracing.enableReflections = enableRTR != 0;
+            gfx.post.mode                    = 0;
+            gfx.post.giIntensity             = 0.0f;
+            gfx.post.vignetteIntensity       = 0.0f;
+            gfx.environment.ambientExposure  = 3.0f;
+            gfx.environment.skyZenith        = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
+            gfx.environment.skyHorizon       = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
+            gfx.environment.skyGround        = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
         });
     }
 

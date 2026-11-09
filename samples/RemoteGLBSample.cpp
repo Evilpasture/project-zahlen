@@ -90,6 +90,7 @@
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/QualityPresets.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -718,7 +719,7 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
 // one left running.
 [[nodiscard]] auto MakeStudioSettings(float subjectRadius, bool rayTraced) -> ZHLN::GraphicsSettings {
     ZHLN::GraphicsSettings gfx {};
-    gfx.ApplyPreset(ZHLN::QualityLevel::Ultra);
+    ZHLN::ApplyPreset(gfx, ZHLN::QualityLevel::Ultra);
 
     // --- sharpness vs noise tradeoff:
     // Ultra defaults (16 GI samples + 3 atrous passes) smear albedo like an oil
@@ -740,7 +741,6 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     // by default to keep the cascade PCSS penumbra (analytic, not noisy).
     // ZHLN_REMOTE_GLB_RTR=1 enables full RT (shadows + reflections) via env.
     gfx.post.enableSSR               = 1;
-    gfx.post.enableRTR               = 1;
     gfx.rayTracing.enableReflections = true;
     gfx.rayTracing.enableShadows     = rayTraced;
 
@@ -800,91 +800,13 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     return gfx;
 }
 
-// Writes a GraphicsSettings back into the ECS editing surface the renderer
-// collects from every frame: post/GI/environment on the global-settings entity,
-// shadows and ray tracing beside it, AA on the main camera. Core's
-// ApplyQualityPreset performs the same write-back but lives in src/engine/system,
-// so the sample writes the components itself -- which is also the honest way to
-// show what a preset is.
-//
-// Registry::Add replaces an existing instance, so the settings components are
-// built whole from the model. AA is the exception: the main camera owns that
-// component, so a tier change patches its knobs in place instead of replacing
-// the component.
+// Hands a GraphicsSettings to the device that owns them. The whole value goes
+// across in one call, so the renderer sees one transition rather than a field
+// at a time -- which is also the honest way to show what a preset is.
 void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& gfx) {
-    auto&              reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (settings == ZHLN::Entity::Null()) {
-        ZHLN::Log("[RemoteGLB] No global-settings entity; the render settings have nowhere to go.");
-        return;
-    }
-
-    reg.Add(
-        settings,
-        ZHLN::Components::PostProcessSettingsComponent {
-            .giMode            = gfx.post.mode,
-            .aoRadius          = gfx.post.aoRadius,
-            .aoBias            = gfx.post.aoBias,
-            .aoPower           = gfx.post.aoPower,
-            .giIntensity       = gfx.post.giIntensity,
-            .giSamples         = gfx.post.giSamples,
-            .useLocalProbe     = gfx.environment.useLocalProbe,
-            .vignetteIntensity = gfx.post.vignetteIntensity,
-            .vignettePower     = gfx.post.vignettePower,
-            .glowIntensity     = gfx.post.glowIntensity,
-            .enableSSR         = gfx.post.enableSSR,
-            .enableRTR         = gfx.post.enableRTR,
-            .fullBright        = gfx.environment.fullBright,
-            .exposure          = gfx.post.exposure,
-            .bloomStrength     = gfx.post.bloomStrength,
-            .contrast          = gfx.post.contrast,
-            .saturation        = gfx.post.saturation,
-            .tonemapper        = gfx.post.tonemapper,
-            .colorFilter       = gfx.post.colorFilter,
-            .ambientExposure   = gfx.environment.ambientExposure,
-            .probeMin          = gfx.environment.probeMin,
-            .probeMax          = gfx.environment.probeMax,
-            .probePos          = gfx.environment.probePos,
-            .skyZenith         = gfx.environment.skyZenith,
-            .skyHorizon        = gfx.environment.skyHorizon,
-            .skyGround         = gfx.environment.skyGround,
-        }
-    );
-    reg.Add(
-        settings,
-        ZHLN::Components::ShadowSettingsComponent {
-            .shadowWidth      = gfx.shadows.width,
-            .shadowResolution = static_cast<int>(gfx.shadows.resolution),
-            .sunSize          = gfx.shadows.sunSize,
-        }
-    );
-    reg.Add(settings, ZHLN::Components::RayTracingSettingsComponent {.config = gfx.rayTracing});
-
-    // AA lives on the main camera in the default scene, which is where the
-    // collector looks for it first.
-    const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
-    if (camera == ZHLN::Entity::Null()) {
-        return;
-    }
-    if (!reg.Patch<ZHLN::Components::AASettingsComponent>(camera, [&gfx](auto& aa) -> auto {
-            aa.state.mode                  = gfx.antiAliasing.mode;
-            aa.state.fxaaSubpix            = gfx.antiAliasing.fxaaSubpix;
-            aa.state.fxaaEdgeThreshold     = gfx.antiAliasing.fxaaEdgeThreshold;
-            aa.state.fxaaEdgeThresholdMin  = gfx.antiAliasing.fxaaEdgeThresholdMin;
-        })) {
-        reg.Add(camera, ZHLN::Components::AASettingsComponent {.state = gfx.antiAliasing});
-    }
+    engine.Graphics().ApplySettings(gfx);
 }
 
-// The stage (floor, framing, zoom range) scales with the subject's radius, but
-// these two frustum-level quantities used to be clamped to flat metre-scale
-// ceilings. A subject over ~2.7 m in radius outran them: the far plane stopped
-// 2000 m out while the zoom range (60 r) and the 5 r floor ran past it, so the
-// floor's far edge -- and eventually the subject itself -- clipped at far zoom
-// (this is what Fox hit: it is authored in centimetres, so its 87.775 m "radius"
-// is really 0.88 m of geometry). The ceilings are now each formula's own value
-// at the far end of the zoom range, which is exactly 2000/400 for every model
-// the old caps were enough for.
 [[nodiscard]] constexpr auto FrameFarPlane(float orbitDistance, float maxDistance, float subjectRadius) noexcept -> float {
     const float ceiling = std::max(2000.0f, (maxDistance * 12.0f) + (subjectRadius * 24.0f));
     return std::clamp((orbitDistance * 12.0f) + (subjectRadius * 24.0f), 20.0f, ceiling);
@@ -897,21 +819,18 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
 
 // The caster-culling ortho box is centred on the camera, so it has to grow with
 // the orbit or the subject leaves it and stops casting. Written only when it moves
-// by more than 2%: the collector reads the component every frame anyway, and a
-// value that changed with every pixel of wheel travel would be noise.
+// by more than 2%: a value that changed with every pixel of wheel travel would
+// be noise.
 void UpdateShadowExtent(ZHLN::Engine& engine, float orbitDistance, float maxOrbitDistance, float subjectRadius) {
-    const float        wanted = ShadowBoxExtent(orbitDistance, maxOrbitDistance, subjectRadius);
-    auto&              reg    = ZHLN::EngineAccess::RegistryOf(engine);
-    const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-    reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [wanted](auto& shadow) -> auto {
-        if (std::abs(shadow.shadowWidth - wanted) > (wanted * 0.02f)) {
-            shadow.shadowWidth = wanted;
+    const float wanted = ShadowBoxExtent(orbitDistance, maxOrbitDistance, subjectRadius);
+    engine.Graphics().PatchSettings([wanted](auto& gfx) {
+        if (std::abs(gfx.shadows.width - wanted) > (wanted * 0.02f)) {
+            gfx.shadows.width = wanted;
         }
     });
 }
 
-// QualityLevel and AAMode log as integers -- GraphicsSettingsSync names the tiers
-// by hand for the same reason -- so the HUD spells them out.
+// QualityLevel and AAMode log as integers, so the HUD spells them out.
 [[nodiscard]] constexpr auto QualityName(ZHLN::QualityLevel level) noexcept -> std::string_view {
     switch (level) {
         case ZHLN::QualityLevel::Low: return "Low";
@@ -1276,10 +1195,7 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
     // that says whether the shimmer is the reflection or the sun shadow.
     if (KeyPressed(state, *input, ZHLN::KeyCode::S)) {
         state.studio.ssrOn = !state.studio.ssrOn;
-        const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-        if (settings != ZHLN::Entity::Null()) {
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [&](auto& p) -> auto { p.enableSSR = state.studio.ssrOn ? 1 : 0; });
-        }
+        engine.Graphics().PatchSettings([&](auto& gfx) { gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0; });
         ZHLN::Log("[RemoteGLB] Screen-space reflections {}.", state.studio.ssrOn ? "on" : "off");
     }
     // H — hide the subject itself, shadow casters and reflections with it: the
@@ -1325,7 +1241,7 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
         }
         ZHLN::GraphicsSettings gfx = MakeStudioSettings(state.subject.radius, state.rayTraced);
         if (tier.level != ZHLN::QualityLevel::Custom) {
-            gfx.ApplyPreset(tier.level);
+            ZHLN::ApplyPreset(gfx, tier.level);
             // Preset overwrote the sharpness tweaks — re-apply them. Ultra's
             // 3 atrous passes smear albedo, so cap the denoiser at 1 pass and
             // keep SMAA for Custom/Medium+, FXAA for Low.
@@ -1338,11 +1254,9 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
             // Medium+ get RT reflections for the floor, but RT shadows only
             // when ZHLN_REMOTE_GLB_RTR=1 to keep PCSS.
             if (tier.level == ZHLN::QualityLevel::Low) {
-                gfx.post.enableRTR               = 0;
                 gfx.rayTracing.enableReflections = false;
                 gfx.rayTracing.enableShadows     = false;
             } else {
-                gfx.post.enableRTR               = 1;
                 gfx.rayTracing.enableReflections = true;
                 gfx.rayTracing.enableShadows     = state.rayTraced;
             }
@@ -1359,8 +1273,8 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
         gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0;
         state.settings = gfx;
         ApplyGraphicsSettings(engine, gfx);
-        ZHLN::Log("[RemoteGLB] Quality: {} ({} shadow map, {} GI samples, SSR {}, RTR {}, AA {}, denoise {}).", QualityName(gfx.DetectPreset()), gfx.shadows.resolution,
-                  gfx.post.giSamples, gfx.post.enableSSR, gfx.post.enableRTR, AAName(gfx.antiAliasing.mode), gfx.rayTracing.denoiserPasses);
+        ZHLN::Log("[RemoteGLB] Quality: {} ({} shadow map, {} GI samples, SSR {}, RTR {}, AA {}, denoise {}).", QualityName(ZHLN::DetectPreset(gfx)), gfx.shadows.resolution,
+                  gfx.post.giSamples, gfx.post.enableSSR, gfx.rayTracing.enableReflections, AAName(gfx.antiAliasing.mode), gfx.rayTracing.denoiserPasses);
     }
 }
 
@@ -1429,7 +1343,7 @@ void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
             }
             ui.Text(
                 std::format("{}  |  {}  |  quality {}  |  {}  |  AO mode {}  |  {:.0f} fps", info.gpuName, info.rayTracingSupported ? "RT capable" : "no RT",
-                            QualityName(state.settings.DetectPreset()), AAName(state.settings.antiAliasing.mode), state.settings.post.mode, state.fps),
+                            QualityName(ZHLN::DetectPreset(state.settings)), AAName(state.settings.antiAliasing.mode), state.settings.post.mode, state.fps),
                 11.0f, {0.50f, 0.57f, 0.67f, 1.0f}
             );
             ui.Text("LMB orbit   RMB pan   wheel zoom", 12.0f, {0.72f, 0.78f, 0.86f, 1.0f});

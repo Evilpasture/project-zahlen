@@ -1783,45 +1783,28 @@ auto main(int argc, char* argv[]) -> int {
 
     // 9. Lighting & Post-Processing Setup
     {
-        auto&              reg      = ZHLN::EngineAccess::RegistryOf(*engine);
-        const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-        if (settings != ZHLN::Entity::Null()) {
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& p) {
-                p.exposure        = 0.18f;
-                p.tonemapper      = 1;
-                p.ambientExposure = 1.2f;
-                p.giMode          = 0; // No screen-space AO/GI over baked diffuse.
-                p.enableSSR       = 0;
-                // The native VRAD atlas is the static world-lighting source.
-                // Keep the Source-fidelity baseline free of RTR/RTGI work;
-                // dynamic-light experiments can opt these features back in.
-                p.enableRTR = 0;
-            });
-            const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::AASettingsComponent>();
-            reg.Patch<ZHLN::Components::AASettingsComponent>(camera, [](auto& aa) { aa.state.mode = ZHLN::AAMode::SMAA; });
+        auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+        engine->Graphics().PatchSettings([mapRadius](auto& gfx) {
+            gfx.post.exposure               = 0.18f;
+            gfx.post.tonemapper             = 1;
+            gfx.environment.ambientExposure = 1.2f;
+            gfx.post.mode                   = 0; // No screen-space AO/GI over baked diffuse.
+            gfx.post.enableSSR              = 0;
+            gfx.antiAliasing.mode           = ZHLN::AAMode::SMAA;
 
-            // VRAD already contains the static direct/indirect transport.
-            // Until the later stencil-mask stage selectively re-enables RT for
-            // dynamic receivers, do not trace shadows, reflections or diffuse
-            // GI for this Source baseline.
-            const ZHLN::Entity rtSettings = reg.SingletonEntity<ZHLN::Components::RayTracingSettingsComponent>();
-            if (rtSettings == ZHLN::Entity::Null()) {
-                reg.Create(ZHLN::Components::RayTracingSettingsComponent {
-                    .config = {.enableReflections = false, .enableShadows = false, .enableDiffuseGI = false, .denoiserPasses = 0}
-                });
-            } else {
-                reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(rtSettings, [](auto& rt) {
-                    rt.config.enableReflections = false;
-                    rt.config.enableShadows     = false;
-                    rt.config.enableDiffuseGI   = false;
-                    rt.config.denoiserPasses    = 0;
-                });
-            }
-            reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [mapRadius](auto& s) {
-                s.shadowWidth      = std::clamp(mapRadius * 2.5f, 64.0f, 2048.0f);
-                s.shadowResolution = 2048;
-            });
-        }
+            // The native VRAD atlas is the static world-lighting source, and it
+            // already contains the direct/indirect transport. Until the later
+            // stencil-mask stage selectively re-enables RT for dynamic
+            // receivers, do not trace shadows, reflections or diffuse GI for
+            // this Source baseline.
+            gfx.rayTracing.enableReflections = false;
+            gfx.rayTracing.enableShadows     = false;
+            gfx.rayTracing.enableDiffuseGI   = false;
+            gfx.rayTracing.denoiserPasses    = 0;
+
+            gfx.shadows.width      = std::clamp(mapRadius * 2.5f, 64.0f, 2048.0f);
+            gfx.shadows.resolution = 2048;
+        });
 
         // Add ambient sun fill if the map does not have light_environment
         bool hasSun = false;

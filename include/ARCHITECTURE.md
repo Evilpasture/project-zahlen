@@ -547,12 +547,8 @@ Graphics configuration flows in **one direction** through a single canonical mod
 (`include/Zahlen/Render/GraphicsSettings.hpp`):
 
 ```
-UI (ImGui) / Lua scripts / quality presets
-        │ write
-        ▼
-ECS settings components (the editing surface)
-  PostProcessSettingsComponent · ShadowSettingsComponent · AASettingsComponent
-        │ CollectGraphicsSettings() — once per frame, start of RenderSystem::RenderMain
+UI (ImGui) / Lua scripts / quality presets / the settings menu
+        │ GraphicsDevice::ApplySettings() / PatchSettings()
         ▼
 GraphicsSettings (canonical model: quality tier, post/GI, AA, shadows, RT config, environment)
         │ RenderContext::ApplySettings() — delta-detected
@@ -562,17 +558,18 @@ RenderContext state (SetFrameData packs the engine's FrameData into the shader's
   GPU target resizes)
 ```
 
-* **Single collector**: `system/GraphicsSettingsSync.cpp` folds the ECS
-  components into `GraphicsSettings` and applies it once per frame. The
-  renderer never queries the components directly, and the former
-  `PostProcessSystem` ECS→`SetGISettings` bridge is gone.
+* **One owner**: the graphics device holds the settings. There is no ECS
+  editing surface and no per-frame collector: a caller reads the value it owns,
+  edits it, and hands it back. The renderer is a pure sink — it stores what it
+  is given and never asks where the numbers came from.
 * **Reactive deltas**: `ApplySettings` compares against the current state and
   reacts — e.g. a `shadowResolution` change (from ImGui, a script or a preset)
   resizes the cascade targets automatically. `SetGISettings` / `SetAAState` /
   `SetShadowResolution` remain only as legacy bridges for tools/tests.
 * **Quality tiers**: `Low / Medium / High / Ultra / Custom` presets pin a
-  signature of quality-relevant fields (`GraphicsSettings::ApplyPreset`);
-  `DetectPreset()` reports the effective tier (Custom after manual tweaks).
+  signature of quality-relevant fields. They are application policy, not engine
+  behaviour, so they live in `app/include/Zahlen/QualityPresets.hpp` as free
+  functions (`ApplyPreset`, `DetectPreset`) over the dumb settings struct.
   `RayTracingConfig` is the extension point for the planned RT shadow-mask
   pass, À-Trous denoiser and VNDF glossy reflections (SPP, denoiser
   iterations, roughness cutoff, bounce budget).

@@ -1,9 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Pure-logic coverage of the canonical GraphicsSettings model: quality-tier
-// presets, tier detection, and configuration-equality semantics used by
-// RenderContext::ApplySettings delta detection. No GPU / engine required.
+// Pure-logic coverage of the quality policy in <Zahlen/QualityPresets.hpp>
+// -- presets, tier detection -- and of the configuration-equality semantics
+// GraphicsSettings itself keeps for RenderContext::ApplySettings delta
+// detection. The policy is the app layer's; the settings are dumb data. No GPU
+// / engine required.
 //
 // What this file does not do is assert tuned constant values. A preset exists
 // to be retuned, and a test that restates the table only reports that someone
@@ -13,6 +15,7 @@
 // rather than any per-frame state.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/QualityPresets.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <array>
 #include <cstdint>
@@ -39,7 +42,7 @@ struct TierBudget {
         {"shadow map resolution", settings.shadows.resolution},
         {"gi samples", static_cast<uint64_t>(settings.post.giSamples)},
         {"screen-space reflections", static_cast<uint64_t>(settings.post.enableSSR)},
-        {"ray-traced reflections", static_cast<uint64_t>(settings.post.enableRTR)},
+        {"ray-traced reflections", static_cast<uint64_t>(settings.rayTracing.enableReflections)},
         {"ray-traced shadows", static_cast<uint64_t>(settings.rayTracing.enableShadows)},
         {"ray-traced diffuse GI", static_cast<uint64_t>(settings.rayTracing.enableDiffuseGI)},
         {"rt shadow samples", settings.rayTracing.shadowSamples},
@@ -50,7 +53,7 @@ struct TierBudget {
 }
 
 // The blit's colour controls: the part of GISettings a preset must never write.
-// GISettings also holds cost knobs (giSamples, enableSSR, enableRTR), which is
+// GISettings also holds cost knobs (giSamples, enableSSR), which is
 // why "style" is these six fields rather than the whole post block.
 struct BlitStyle {
     float                exposure;
@@ -90,7 +93,7 @@ struct GraphicsSettingsSuite {
         // nested Tests struct, expected<void, ErrorCode> test methods.
     }
     enum class GraphicsSettingsTestError : uint8_t {
-        PresetDetectionFailed ZHLN_ANNOTATION(ZHLN::Description<"QualityLevel::DetectPreset() did not report the tier the settings were configured for."> {}) =
+        PresetDetectionFailed ZHLN_ANNOTATION(ZHLN::Description<"DetectPreset() did not report the tier the settings were configured for."> {}) =
             1,
         TierBudgetRegression ZHLN_ANNOTATION(ZHLN::Description<"A higher tier allocated less of a resource than a lower tier, or the top tier allocated no more than the bottom."> {}),
         PresetSignatureDrift ZHLN_ANNOTATION(ZHLN::Description<"Applying Custom, or applying a tier twice, moved a signature field."> {}),
@@ -106,7 +109,7 @@ struct GraphicsSettingsSuite {
         // detected and the declared tier say so.
         std::expected<void, ZHLN::ErrorCode> defaults_are_not_a_named_tier() {
             const GraphicsSettings defaults {};
-            if (!ZHLN::Test::ExpectEq(defaults.DetectPreset(), QualityLevel::Custom)) {
+            if (!ZHLN::Test::ExpectEq(DetectPreset(defaults), QualityLevel::Custom)) {
                 return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
             }
             if (!ZHLN::Test::ExpectEq(defaults.qualityPreset, QualityLevel::Custom)) {
@@ -126,7 +129,7 @@ struct GraphicsSettingsSuite {
         std::expected<void, ZHLN::ErrorCode> tier_cost_is_ordered() {
             std::array<GraphicsSettings, kCostLadder.size()> rung {};
             for (size_t i = 0; i < kCostLadder.size(); ++i) {
-                rung[i].ApplyPreset(kCostLadder[i]);
+                ApplyPreset(rung[i], kCostLadder[i]);
             }
 
             // Adjacent rungs: never cheaper. Equality is allowed -- a tier may
@@ -169,8 +172,8 @@ struct GraphicsSettingsSuite {
         std::expected<void, ZHLN::ErrorCode> preset_round_trip_detection() {
             for (const QualityLevel tier: kCostLadder) {
                 GraphicsSettings gfx {};
-                gfx.ApplyPreset(tier);
-                if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), tier)) {
+                ApplyPreset(gfx, tier);
+                if (!ZHLN::Test::ExpectEq(DetectPreset(gfx), tier)) {
                     return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
                 }
                 if (!ZHLN::Test::ExpectEq(gfx.qualityPreset, tier)) {
@@ -180,9 +183,9 @@ struct GraphicsSettingsSuite {
                 // Applying the same tier twice is the same tier. This is what
                 // lets a caller re-assert its tier after writing style settings
                 // (test 5) without losing them.
-                const auto firstSignature = gfx.Signature();
-                gfx.ApplyPreset(tier);
-                if (!ZHLN::Test::ExpectTrue(gfx.Signature() == firstSignature)) {
+                const auto firstSignature = SignatureOf(gfx);
+                ApplyPreset(gfx, tier);
+                if (!ZHLN::Test::ExpectTrue(SignatureOf(gfx) == firstSignature)) {
                     return std::unexpected(GraphicsSettingsTestError::PresetSignatureDrift);
                 }
             }
@@ -192,7 +195,7 @@ struct GraphicsSettingsSuite {
         // --- 4. Detection reads the signature, and only the signature --------
         std::expected<void, ZHLN::ErrorCode> tier_detection_reads_only_the_signature() {
             GraphicsSettings       gfx {};
-            gfx.ApplyPreset(QualityLevel::High);
+            ApplyPreset(gfx, QualityLevel::High);
             const GraphicsSettings tuned = gfx;
 
             // Look knobs and non-signature cost knobs: the tier does not move.
@@ -207,13 +210,13 @@ struct GraphicsSettingsSuite {
             gfx.antiAliasing.fxaaEdgeThreshold *= 0.5f;
             gfx.rayTracing.roughnessCutoff *= 0.5f;
             gfx.rayTracing.alphaTestingInBVH = !gfx.rayTracing.alphaTestingInBVH;
-            if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::High)) {
+            if (!ZHLN::Test::ExpectEq(DetectPreset(gfx), QualityLevel::High)) {
                 return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
             }
 
             // A signature field moving drops the configuration to Custom...
             gfx.post.giSamples += 1;
-            if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::Custom)) {
+            if (!ZHLN::Test::ExpectEq(DetectPreset(gfx), QualityLevel::Custom)) {
                 return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
             }
 
@@ -221,7 +224,7 @@ struct GraphicsSettingsSuite {
             // pure function of the signature, so nothing the look knobs did can
             // leak into the answer.
             gfx = tuned;
-            if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::High)) {
+            if (!ZHLN::Test::ExpectEq(DetectPreset(gfx), QualityLevel::High)) {
                 return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
             }
             return {};
@@ -231,7 +234,7 @@ struct GraphicsSettingsSuite {
         std::expected<void, ZHLN::ErrorCode> blit_style_is_non_signature_configuration() {
             GraphicsSettings baseline {};
             GraphicsSettings styled {};
-            styled.ApplyPreset(QualityLevel::High);
+            ApplyPreset(styled, QualityLevel::High);
 
             // Arbitrary payload, chosen to differ from the model's defaults: a
             // payload that repeats a default proves nothing about what survives
@@ -248,13 +251,13 @@ struct GraphicsSettingsSuite {
             // Presets choose cost, not colour: every tier leaves every style
             // control where the caller put it.
             for (const QualityLevel tier: kCostLadder) {
-                styled.ApplyPreset(tier);
+                ApplyPreset(styled, tier);
                 if (!ZHLN::Test::ExpectTrue(StyleOf(styled) == style)) {
                     ZHLN::Println("    [FAIL] {} overwrote blit colour style", std::format("{}", tier));
                     return std::unexpected(GraphicsSettingsTestError::StyleControlsFailed);
                 }
             }
-            if (!ZHLN::Test::ExpectEq(styled.DetectPreset(), QualityLevel::Ultra)) {
+            if (!ZHLN::Test::ExpectEq(DetectPreset(styled), QualityLevel::Ultra)) {
                 return std::unexpected(GraphicsSettingsTestError::StyleControlsFailed);
             }
 
@@ -272,16 +275,16 @@ struct GraphicsSettingsSuite {
         // --- 6. Custom is the absence of a preset, not a tier ------------------
         std::expected<void, ZHLN::ErrorCode> custom_preset_is_noop() {
             GraphicsSettings gfx {};
-            gfx.ApplyPreset(QualityLevel::Ultra);
+            ApplyPreset(gfx, QualityLevel::Ultra);
             const GraphicsSettings before = gfx;
 
-            gfx.ApplyPreset(QualityLevel::Custom);
+            ApplyPreset(gfx, QualityLevel::Custom);
             // Custom names what the ladder cannot describe; applying it describes
             // nothing, so neither the signature nor the declared tier moves.
-            if (!ZHLN::Test::ExpectTrue(gfx.Signature() == before.Signature())) {
+            if (!ZHLN::Test::ExpectTrue(SignatureOf(gfx) == SignatureOf(before))) {
                 return std::unexpected(GraphicsSettingsTestError::PresetSignatureDrift);
             }
-            if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::Ultra)) {
+            if (!ZHLN::Test::ExpectEq(DetectPreset(gfx), QualityLevel::Ultra)) {
                 return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
             }
             if (!ZHLN::Test::ExpectEq(gfx.qualityPreset, QualityLevel::Ultra)) {

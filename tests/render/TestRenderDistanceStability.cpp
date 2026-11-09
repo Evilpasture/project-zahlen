@@ -350,12 +350,7 @@ void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 60.0f) 
 // alone gets overwritten. Both remaining AA modes are spatial filters that
 // would perturb the frame-to-frame comparison at high-contrast edges.
 void DisableAA(ZHLN::Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
-        reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
-            aa.state.mode        = ZHLN::AAMode::None;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
     engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 }
 
@@ -526,18 +521,14 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             // opt-in and covered by its own suites.
             DisableAA(*engine);
 
-            const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            ZHLN::Test::ExpectTrue(!settingsEnts.empty());
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                    pp.fullBright      = 0;
-                    pp.exposure        = 0.015f;
-                    pp.ambientExposure = 10.0f;
-                    pp.enableSSR       = 1;
-                    pp.enableRTR       = 0;
-                    pp.giMode          = 0;
-                });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.environment.fullBright       = 0;
+                gfx.post.exposure                = 0.015f;
+                gfx.environment.ambientExposure  = 10.0f;
+                gfx.post.enableSSR               = 1;
+                gfx.rayTracing.enableReflections = false;
+                gfx.post.mode                    = 0;
+            });
 
             // Ground plane gives the shadow catch + distance reference.
             ZHLN::PrefabFactory::CreatePlane(

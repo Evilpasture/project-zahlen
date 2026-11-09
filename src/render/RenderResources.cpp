@@ -900,7 +900,6 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
 
     return impl->targets.ResizeShadows(resolution).transform([&]() -> void {
         impl->settings.shadows.resolution = resolution;
-        impl->settings.qualityPreset      = impl->settings.DetectPreset();
     });
 }
 
@@ -919,8 +918,9 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings incoming) noexcept {
         }
     }
 
-    incoming.qualityPreset = incoming.DetectPreset();
-    settings               = incoming;
+    // Stored exactly as given. Which tier this is, if any, is the caller's
+    // determination -- the renderer does not re-derive it.
+    settings = incoming;
 
     if (settings.qualityPreset != previousTier) {
         ZHLN::Log("Graphics quality tier: {} -> {}", previousTier, settings.qualityPreset);

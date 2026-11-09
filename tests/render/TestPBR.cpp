@@ -92,13 +92,10 @@ struct PBRTestSuite {
             // scene's proven-sane combo; the INFO means below confirm red
             // reads red -- if a future grade pushes faces back toward clip,
             // re-level here, never in the gates.
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                    pp.fullBright      = 0;
-                    pp.ambientExposure = 2.0f;
-                });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.environment.fullBright      = 0;
+                gfx.environment.ambientExposure = 2.0f;
+            });
 
             // 1. Sun Directional Light aiming directly toward front surfaces (+Z direction from camera view)
             const ZHLN::Entity sunEnt = reg.Create();
@@ -231,23 +228,20 @@ struct PBRTestSuite {
             auto rc = engine->Graphics();
 
             for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-                reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
+                engine->Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode = ZHLN::AAMode::None; });
             }
 
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                    pp.fullBright        = 0;
-                    pp.ambientExposure   = 12.0f;
-                    pp.vignetteIntensity = 0.0f;
-                    pp.enableSSR         = 0;
-                    pp.enableRTR         = 0;
-                });
-                reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settingsEnts[0], [](auto& sh) {
-                    sh.shadowWidth = 400.0f;
-                    sh.sunSize     = 0.001f;
-                });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.environment.fullBright       = 0;
+                gfx.environment.ambientExposure  = 12.0f;
+                gfx.post.vignetteIntensity       = 0.0f;
+                gfx.post.enableSSR               = 0;
+                gfx.rayTracing.enableReflections = false;
+            });
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.shadows.width   = 400.0f;
+                gfx.shadows.sunSize = 0.001f;
+            });
 
             const ZHLN::Entity sunEnt = reg.Create();
             reg.Add(
@@ -426,21 +420,17 @@ struct PBRTestSuite {
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
             ZHLN::Test::Headless::DisableAA(*engine);
-            const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
-            for (const ZHLN::Entity camera: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            }
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
-                pp.giMode = 0;
-                pp.fullBright = 0;
-                pp.ambientExposure = 1.0f;
-                pp.exposure = 1.0f;
-                pp.tonemapper = 3;
-                pp.bloomStrength = 0.0f;
-                pp.glowIntensity = 0.0f;
-                pp.vignetteIntensity = 0.0f;
-                pp.enableSSR = 0;
-                pp.enableRTR = 0;
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.post.mode                    = 0;
+                gfx.environment.fullBright       = 0;
+                gfx.environment.ambientExposure  = 1.0f;
+                gfx.post.exposure                = 1.0f;
+                gfx.post.tonemapper              = 3;
+                gfx.post.bloomStrength           = 0.0f;
+                gfx.post.glowIntensity           = 0.0f;
+                gfx.post.vignetteIntensity       = 0.0f;
+                gfx.post.enableSSR               = 0;
+                gfx.rayTracing.enableReflections = false;
             });
             auto material = rc.CreateMaterial(ZHLN::MaterialDesc {
                 .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}
@@ -488,7 +478,7 @@ struct PBRTestSuite {
             }
             ZHLN::Components::EnvironmentMapComponent environment;
             environment.source.assign("pbr_flat_hdr");
-            reg.Add(settings, std::move(environment));
+            const ZHLN::Entity settings = reg.Create(std::move(environment));
             ZHLN::Test::Headless::TickFrames(*engine, 5, 1.0f / 60.0f);
             const auto baseline = ZHLN::Test::Headless::Capture(*engine, "headless_pbr_hdr_flat.ppm");
             reg.Patch<ZHLN::Components::EnvironmentMapComponent>(settings, [](auto& env) { env.source.assign("pbr_compact_hdr"); });
@@ -572,24 +562,21 @@ struct PBRTestSuite {
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
             ZHLN::Test::Headless::DisableAA(*engine);
-            const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
-            for (const ZHLN::Entity camera: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>())
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
-                pp.giMode = 0;
-                pp.ambientExposure = 1.0f;
-                pp.exposure = 0.1f;
-                pp.tonemapper = 3;
-                pp.bloomStrength = 0.0f;
-                pp.glowIntensity = 0.0f;
-                pp.vignetteIntensity = 0.0f;
-                pp.enableSSR = 0;
-                pp.enableRTR = 0; // Exercise the CSM path, not ambient/RTR.
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.post.mode                    = 0;
+                gfx.environment.ambientExposure  = 1.0f;
+                gfx.post.exposure                = 0.1f;
+                gfx.post.tonemapper              = 3;
+                gfx.post.bloomStrength           = 0.0f;
+                gfx.post.glowIntensity           = 0.0f;
+                gfx.post.vignetteIntensity       = 0.0f;
+                gfx.post.enableSSR               = 0;
+                gfx.rayTracing.enableReflections = false; // Exercise the CSM path, not ambient/RTR.
             });
-            reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [](auto& shadows) {
-                shadows.shadowWidth = 16.0f;
-                shadows.shadowResolution = 2048;
-                shadows.sunSize = 0.001f;
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.shadows.width      = 16.0f;
+                gfx.shadows.resolution = 2048;
+                gfx.shadows.sunSize    = 0.001f;
             });
             const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
@@ -630,7 +617,7 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::EnvironmentBakeFailed);
             ZHLN::Components::EnvironmentMapComponent environment;
             environment.source.assign("pbr_shadowed_hdr");
-            reg.Add(settings, std::move(environment));
+            const ZHLN::Entity settings = reg.Create(std::move(environment));
             ZHLN::Test::Headless::TickFrames(*engine, 6, 1.0f / 60.0f);
             const auto lit = ZHLN::Test::Headless::Capture(*engine, "headless_pbr_hdr_unoccluded.ppm");
 
@@ -673,22 +660,20 @@ struct PBRTestSuite {
             ZHLN::Test::Headless::DisableAA(*engine);
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
-            const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
-                pp.giMode = 0;
-                pp.fullBright = 0;
-                pp.ambientExposure = 2.0f;
-                pp.exposure = 1.0f;
-                pp.tonemapper = 3;
-                pp.enableSSR = 0;
-                pp.enableRTR = 0;
-                pp.bloomStrength = 0.0f;
-                pp.glowIntensity = 0.0f;
-                pp.vignetteIntensity = 0.0f;
-                pp.skyZenith = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-                pp.skyHorizon = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-                pp.skyGround = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.post.mode                    = 0;
+                gfx.environment.fullBright       = 0;
+                gfx.environment.ambientExposure  = 2.0f;
+                gfx.post.exposure                = 1.0f;
+                gfx.post.tonemapper              = 3;
+                gfx.post.enableSSR               = 0;
+                gfx.rayTracing.enableReflections = false;
+                gfx.post.bloomStrength           = 0.0f;
+                gfx.post.glowIntensity           = 0.0f;
+                gfx.post.vignetteIntensity       = 0.0f;
+                gfx.environment.skyZenith        = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                gfx.environment.skyHorizon       = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                gfx.environment.skyGround        = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
             });
             ZHLN::EnvironmentImage env {.width = 64, .height = 32};
             env.rgba.resize(64u * 32u * 4u);
@@ -704,7 +689,7 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::EnvironmentBakeFailed);
             ZHLN::Components::EnvironmentMapComponent map;
             map.source.assign("pbr_black_emissive_flat_ibl");
-            reg.Add(settings, std::move(map));
+            const ZHLN::Entity settings = reg.Create(std::move(map));
 
             const std::array<uint32_t, 1> blackRgba = {0xff000000u}; // black RGB, opaque alpha
             auto black = rc.CreateTexture(std::span {blackRgba}, {1, 1}, true);
@@ -749,14 +734,10 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             // Set Fullbright ON: Disables direct lighting/shadows and outputs raw G-buffer albedo directly
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // Create explicit bright green material
             auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.0f, 1.0f, 0.0f, 1.0f}});

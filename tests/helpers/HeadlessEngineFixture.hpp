@@ -398,12 +398,7 @@ class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
 // are spatial edge filters that perturb high-contrast pixels. Every scene that
 // asserts on stability or on exact pixel values disables AA first.
 inline void DisableAA(ZHLN::Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
-        reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
-            aa.state.mode        = ZHLN::AAMode::None;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
     engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 }
 

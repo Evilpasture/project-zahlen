@@ -33,7 +33,6 @@ struct GISettings {
     float vignettePower     = 1.5f;
     float glowIntensity     = 0.0f;
     int   enableSSR         = 0;
-    int   enableRTR         = 0;
 
     float                exposure      = 1.0f;
     float                bloomStrength = 0.0f;
@@ -44,9 +43,9 @@ struct GISettings {
 
     // Runtime RCAS dial forwarded to BlitPushConstants.rcasSharpness. 0.0 turns
     // sharpening off; positive values are AMD's exp2(-stops) sharpness, 0.2
-    // stops being the default. Deliberately absent from QualitySignature: this
-    // is a subjective look control, not a quality tier, so retuning it never
-    // changes preset detection.
+    // stops being the default. Deliberately absent from the quality signature
+    // in <Zahlen/QualityPresets.hpp>: this is a subjective look control, not a
+    // quality tier, so retuning it never changes preset detection.
     float                rcasSharpness = 0.8705505632961241f; // exp2(-0.2)
 
     auto operator==(const GISettings&) const noexcept -> bool = default;
@@ -90,6 +89,9 @@ struct EnvironmentSettings {
     auto operator==(const EnvironmentSettings&) const noexcept -> bool = default;
 };
 
+// Dumb data. How these values are *chosen* -- presets, tier detection,
+// performance governing -- is application policy and lives in
+// <Zahlen/QualityPresets.hpp> in the app layer, not here.
 struct GraphicsSettings {
     QualityLevel        qualityPreset = QualityLevel::Custom;
     GISettings          post;
@@ -97,109 +99,6 @@ struct GraphicsSettings {
     ShadowSettings      shadows;
     RayTracingConfig    rayTracing;
     EnvironmentSettings environment;
-
-    struct QualitySignature {
-        AAMode   antiAliasMode       = AAMode::SMAA;
-        uint32_t shadowResolution    = 2048;
-        uint32_t giSamples           = 8;
-        int      enableSSR           = 0;
-        int      enableRTR           = 0;
-        bool     rtDiffuseGI         = false;
-        uint32_t rtShadowSamples     = 1;
-        uint32_t rtReflectionSamples = 1;
-        uint32_t rtDenoiserPasses    = 2;
-        uint32_t rtMaxBounces        = 1;
-
-        auto operator==(const QualitySignature&) const noexcept -> bool = default;
-    };
-
-    [[nodiscard]] constexpr auto Signature() const noexcept -> QualitySignature {
-        return QualitySignature {
-            .antiAliasMode       = antiAliasing.mode,
-            .shadowResolution    = shadows.resolution,
-            .giSamples           = static_cast<uint32_t>(post.giSamples),
-            .enableSSR           = post.enableSSR,
-            .enableRTR           = post.enableRTR,
-            .rtDiffuseGI         = rayTracing.enableDiffuseGI,
-            .rtShadowSamples     = rayTracing.shadowSamples,
-            .rtReflectionSamples = rayTracing.reflectionSamples,
-            .rtDenoiserPasses    = rayTracing.denoiserPasses,
-            .rtMaxBounces        = rayTracing.maxBounces,
-        };
-    }
-
-    constexpr void ApplyPreset(QualityLevel preset) noexcept {
-        switch (preset) {
-            case QualityLevel::Low:
-                antiAliasing.mode            = AAMode::FXAA;
-                shadows.resolution           = 1024;
-                post.giSamples               = 4;
-                post.enableSSR               = 0;
-                post.enableRTR               = 0;
-                rayTracing.shadowSamples     = 1;
-                rayTracing.reflectionSamples = 1;
-                rayTracing.denoiserPasses    = 0;
-                rayTracing.maxBounces        = 1;
-                rayTracing.enableShadows     = false;
-                rayTracing.enableDiffuseGI   = false;
-                break;
-            case QualityLevel::Medium:
-                antiAliasing.mode            = AAMode::SMAA;
-                shadows.resolution           = 2048;
-                post.giSamples               = 8;
-                post.enableSSR               = 1;
-                post.enableRTR               = 0;
-                rayTracing.shadowSamples     = 1;
-                rayTracing.reflectionSamples = 1;
-                rayTracing.denoiserPasses    = 1;
-                rayTracing.maxBounces        = 1;
-                rayTracing.enableShadows     = true;
-                rayTracing.enableDiffuseGI   = false;
-                break;
-            case QualityLevel::High:
-                antiAliasing.mode            = AAMode::SMAA;
-                shadows.resolution           = 2048;
-                post.giSamples               = 8;
-                post.enableSSR               = 1;
-                post.enableRTR               = 1;
-                rayTracing.shadowSamples     = 1;
-                rayTracing.reflectionSamples = 1;
-                rayTracing.denoiserPasses    = 2;
-                rayTracing.maxBounces        = 1;
-                rayTracing.enableShadows     = true;
-                rayTracing.enableDiffuseGI   = true;
-                break;
-            case QualityLevel::Ultra:
-                antiAliasing.mode            = AAMode::SMAA;
-                shadows.resolution           = 4096;
-                post.giSamples               = 16;
-                post.enableSSR               = 1;
-                post.enableRTR               = 1;
-                rayTracing.shadowSamples     = 2;
-                rayTracing.reflectionSamples = 2;
-                rayTracing.denoiserPasses    = 3;
-                rayTracing.maxBounces        = 2;
-                rayTracing.enableShadows     = true;
-                rayTracing.enableDiffuseGI   = true;
-                rayTracing.alphaTestingInBVH = true;
-                break;
-            case QualityLevel::Custom:
-                return;
-        }
-        qualityPreset = preset;
-    }
-
-    [[nodiscard]] constexpr auto DetectPreset() const noexcept -> QualityLevel {
-        const QualitySignature current = Signature();
-        for (const QualityLevel tier: {QualityLevel::Low, QualityLevel::Medium, QualityLevel::High, QualityLevel::Ultra}) {
-            GraphicsSettings probe {};
-            probe.ApplyPreset(tier);
-            if (probe.Signature() == current) {
-                return tier;
-            }
-        }
-        return QualityLevel::Custom;
-    }
 
     [[nodiscard]] constexpr auto ConfigEquals(const GraphicsSettings& other) const noexcept -> bool {
         const bool aaMatches = antiAliasing.mode == other.antiAliasing.mode &&
@@ -210,30 +109,15 @@ struct GraphicsSettings {
     }
 };
 
-static_assert(GraphicsSettings {}.DetectPreset() == QualityLevel::Custom);
 static_assert([] -> bool {
     const GraphicsSettings settings {};
     return settings.antiAliasing.mode == AAMode::SMAA && settings.post.mode == 0 && settings.post.giIntensity == 1.0f
-           && settings.post.enableSSR == 0 && settings.post.enableRTR == 0 && settings.post.exposure == 1.0f
+           && settings.post.enableSSR == 0 && settings.post.exposure == 1.0f
            && settings.post.rcasSharpness > 0.0f
            && settings.post.bloomStrength == 0.0f && settings.post.glowIntensity == 0.0f && settings.post.vignetteIntensity == 0.0f
            && settings.post.tonemapper == 3 && settings.shadows.resolution == 2048
            && !settings.rayTracing.enableShadows && !settings.rayTracing.enableReflections && !settings.rayTracing.enableDiffuseGI
            && settings.rayTracing.denoiserPasses == 2 && settings.environment.ambientExposure == 1.0f;
-}());
-static_assert([] -> bool {
-    GraphicsSettings s {};
-    s.ApplyPreset(QualityLevel::Ultra);
-    return s.shadows.resolution == 4096 && s.post.enableRTR == 1 && s.post.giSamples == 16 && s.rayTracing.denoiserPasses == 3 &&
-           s.rayTracing.shadowSamples == 2 && s.rayTracing.enableDiffuseGI && s.DetectPreset() == QualityLevel::Ultra;
-}());
-static_assert([] -> bool {
-    GraphicsSettings s {};
-    s.ApplyPreset(QualityLevel::High);
-    s.shadows.sunSize        = 0.02f;
-    s.post.vignetteIntensity = 1.4f;
-    s.post.tonemapper        = 3;
-    return s.DetectPreset() == QualityLevel::High;
 }());
 
 }

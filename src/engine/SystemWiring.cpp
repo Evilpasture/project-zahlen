@@ -195,14 +195,11 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
 
     reg.GetOrEmplaceSingleton<Components::InputStateComponent>();
 
-    reg.Create(Components::MainCameraTagComponent {}, Components::CameraComponent {}, Components::AASettingsComponent {});
+    reg.Create(Components::MainCameraTagComponent {}, Components::CameraComponent {});
 
     // A scene reset clears the registry, so the engine-level singletons World::Create()
     // seeds are re-seeded here alongside the rest of the scene's settings.
-    reg.Create(
-        Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
-        Components::CullingStatsComponent {}, Components::DebugSettingsComponent {.physicsDrawMode = 0}
-    );
+    reg.Create(Components::CullingStatsComponent {}, Components::DebugSettingsComponent {.physicsDrawMode = 0});
 
     engine.EnsureFontAtlas();
 

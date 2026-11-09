@@ -258,12 +258,7 @@ auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, cons
             baseExposure = existingComp->baseAmbientExposure;
         }
     } else {
-        const auto settingsEnts = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
-        if (!settingsEnts.empty()) {
-            if (const auto pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEnts[0])) {
-                baseExposure = pp->ambientExposure;
-            }
-        }
+        baseExposure = engine.Graphics().Settings().environment.ambientExposure;
     }
 
     static thread_local std::mt19937 s_rng(std::random_device {}());
@@ -505,11 +500,13 @@ auto Update(Engine& engine, float dt) -> void {
         }
     }
 
-    const auto settingsEnts = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
-    if (hasActiveBolts && !settingsEnts.empty()) {
-        reg.Patch<Components::PostProcessSettingsComponent>(settingsEnts[0], [&](auto& pp) {
-            pp.ambientExposure = unflashedBaseExposure + (180.0f * peakLuminanceThisFrame);
-        });
+    const auto setAmbientExposure = [&engine](float value) {
+        GraphicsSettings gfx            = engine.Graphics().Settings();
+        gfx.environment.ambientExposure = value;
+        engine.Graphics().ApplySettings(gfx);
+    };
+    if (hasActiveBolts) {
+        setAmbientExposure(unflashedBaseExposure + (180.0f * peakLuminanceThisFrame));
     }
 
     for (const Entity deadEnt: deadEntities) {
@@ -518,8 +515,8 @@ auto Update(Engine& engine, float dt) -> void {
         DespawnEntity(engine, deadEnt);
     }
 
-    if (!hasActiveBolts && !settingsEnts.empty()) {
-        reg.Patch<Components::PostProcessSettingsComponent>(settingsEnts[0], [&](auto& pp) { pp.ambientExposure = unflashedBaseExposure; });
+    if (!hasActiveBolts) {
+        setAmbientExposure(unflashedBaseExposure);
     }
 }
 

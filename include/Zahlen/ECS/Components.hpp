@@ -124,9 +124,6 @@ struct Components {
         bool                isStatic      = true;
     };
 
-    struct RayTracingSettingsComponent {
-        RayTracingConfig config {};
-    };
     struct ImpulseCommand {
         ZHLN::Float3 linear = {};
     };
@@ -195,15 +192,6 @@ struct Components {
     struct PlayerTagComponent {};
     struct MainCameraTagComponent {};
     struct SunTagComponent {};
-    struct GlobalSettingsTagComponent {};
-    struct AASettingsComponent {
-        AAState state {};
-    };
-    struct ShadowSettingsComponent {
-        float shadowWidth      = 200.0f;
-        int   shadowResolution = 2048;
-        float sunSize          = 0.05f;
-    };
     // The culling pass's published counters. Its *scratch* -- the derived planes
     // and the freeze-frame corners -- is node state and lives in CullingScratch on
     // the pass itself. These counters are read by the debug overlay, the crash
@@ -214,39 +202,6 @@ struct Components {
     // World::GetCullingStats() creates it if neither has happened.
     struct CullingStatsComponent {
         CullingStats stats;
-    };
-    struct PostProcessSettingsComponent {
-        int   giMode            = 0;
-        float aoRadius          = 0.5f;
-        float aoBias            = 0.05f;
-        float aoPower           = 1.8f;
-        float giIntensity       = 1.0f;
-        int   giSamples         = 8;
-        int   useLocalProbe     = 0;
-        float vignetteIntensity = 0.0f;
-        float vignettePower     = 1.50f;
-        float glowIntensity     = 0.0f;
-        int   enableSSR         = 0;
-        int   enableRTR         = 0;
-        int   fullBright        = 0;
-
-        float        exposure      = 1.0f;
-        float        bloomStrength = 0.0f;
-        float        contrast      = 1.0f;
-        float        saturation    = 1.0f;
-        int          tonemapper    = 3;
-        ZHLN::Float3 colorFilter   = {1.0f, 1.0f, 1.0f};
-        // Mirrors GISettings::rcasSharpness; 0.0 disables the post-AA RCAS pass.
-        float        rcasSharpness = 0.8705505632961241f;
-
-        float        ambientExposure = 1.0f;
-        ZHLN::Float3 probeMin        = {-22.0f, 0.0f, -22.0f};
-        ZHLN::Float3 probeMax        = {22.0f, 12.0f, 22.0f};
-        ZHLN::Float3 probePos        = {0.0f, 4.0f, 0.0f};
-
-        ZHLN::Float4 skyZenith  = {0.003f, 0.008f, 0.020f, 1.0f};
-        ZHLN::Float4 skyHorizon = {0.015f, 0.035f, 0.080f, 1.0f};
-        ZHLN::Float4 skyGround  = {0.001f, 0.001f, 0.003f, 1.0f};
     };
 
     struct EnvironmentMapComponent {

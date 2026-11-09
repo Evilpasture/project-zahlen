@@ -50,15 +50,12 @@ struct RayTracedShadowsTestSuite {
                 auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.ambientExposure = 1.5f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 1;
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.environment.ambientExposure  = 1.5f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = true;
+                });
 
                 auto floorMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.55f, 0.55f, 0.55f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(floorMatRes.has_value())) {

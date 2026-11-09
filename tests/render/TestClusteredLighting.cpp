@@ -49,16 +49,13 @@ struct ClusteredLightingTestSuite {
                 auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.exposure        = 0.015f;
-                        pp.ambientExposure = 10.0f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 0;
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.post.exposure                = 0.015f;
+                    gfx.environment.ambientExposure  = 10.0f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = false;
+                });
 
                 ZHLN::PrefabFactory::CreatePlane(
                     *engine, 120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}
@@ -242,16 +239,13 @@ struct ClusteredLightingTestSuite {
                 auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.ambientExposure = 2.0f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 0;
-                        pp.giMode          = 0;
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.environment.ambientExposure  = 2.0f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = false;
+                    gfx.post.mode                    = 0;
+                });
 
                 auto diffuseMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(diffuseMatRes.has_value())) {
@@ -480,17 +474,14 @@ struct ClusteredLightingTestSuite {
                 auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.exposure        = 0.015f;
-                        pp.ambientExposure = 2.0f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 0;
-                        pp.giMode          = 0;
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.post.exposure                = 0.015f;
+                    gfx.environment.ambientExposure  = 2.0f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = false;
+                    gfx.post.mode                    = 0;
+                });
 
                 auto diffuseMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(diffuseMatRes.has_value())) {
@@ -615,17 +606,14 @@ struct ClusteredLightingTestSuite {
                 auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.exposure        = 0.015f;
-                        pp.ambientExposure = 1.0f;
-                        pp.enableSSR       = 0;
-                        pp.enableRTR       = 0;
-                        pp.giMode          = 0;
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.post.exposure                = 0.015f;
+                    gfx.environment.ambientExposure  = 1.0f;
+                    gfx.post.enableSSR               = 0;
+                    gfx.rayTracing.enableReflections = false;
+                    gfx.post.mode                    = 0;
+                });
 
                 // Explicit 0-intensity Sun to suppress the default 180-nit white sun injection
                 const ZHLN::Entity sunEnt = reg.Create();
@@ -876,26 +864,23 @@ struct ClusteredLightingTestSuite {
                 auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.exposure        = 0.015f;
-                        pp.ambientExposure = 8.0f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 0;
-                        // Full-bright bypasses the display exposure, but the
-                        // procedural sky is still rendered in that mode. Its
-                        // default HDR colors appear bright in the reference
-                        // and almost black after exposure (0.015) in the lit
-                        // capture, falsely marking empty sky as bad geometry.
-                        // Keep the sky black in BOTH captures so the reference
-                        // measures the bright floor alone.
-                        pp.skyZenith  = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-                        pp.skyHorizon = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-                        pp.skyGround  = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.post.exposure                = 0.015f;
+                    gfx.environment.ambientExposure  = 8.0f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = false;
+                    // Full-bright bypasses the display exposure, but the
+                    // procedural sky is still rendered in that mode. Its
+                    // default HDR colors appear bright in the reference
+                    // and almost black after exposure (0.015) in the lit
+                    // capture, falsely marking empty sky as bad geometry.
+                    // Keep the sky black in BOTH captures so the reference
+                    // measures the bright floor alone.
+                    gfx.environment.skyZenith  = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                    gfx.environment.skyHorizon = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                    gfx.environment.skyGround  = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                });
 
                 // Bright floor to make black tile obvious
                 auto matRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.7f, .baseColor = {0.85f, 0.85f, 0.85f, 1.0f}});
@@ -955,15 +940,10 @@ struct ClusteredLightingTestSuite {
                     // scene in full-bright mode for a coverage mask; otherwise
                     // empty sky in a corner (notably tile 0,0) looks exactly
                     // like the old false-positive "black cluster tile".
-                    auto& reg = ZHLN::EngineAccess::RegistryOf(eng);
-                    const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                    if (!ZHLN::Test::ExpectTrue(!settingsEnts.empty())) {
-                        return false;
-                    }
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
+                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
                     TickFrames(eng, 2);
                     const RgbImage coverage = Capture(eng, "cluster_no_black_tile_coverage.ppm");
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 0; });
+                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 0; });
                     if (!ZHLN::Test::ExpectTrue(coverage.Valid())) {
                         captureFailed = true;
                         return false;

@@ -457,15 +457,11 @@ struct MeshShaderTestSuite {
             // Declared (not deduced) return: every path returns, so a missing
             // camera fails the test instead of flowing off the end (-Wreturn-type).
             auto setupScene = [](ZHLN::Engine& engine) -> std::expected<void, ZHLN::ErrorCode> {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
                 auto rc = engine.Graphics();
 
                 // --- Determinism ---------------------------------------------
                 // fullBright bypasses lighting/shadow variance...
-                auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-                }
+                engine.Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
                 // ...and AA has to be switched off AT ITS SOURCE. The camera's
                 // AASettingsComponent is authoritative: RenderSystem re-pushes it
@@ -474,11 +470,7 @@ struct MeshShaderTestSuite {
                 // spatial edge filters, so leaving one on changes the pixels at
                 // every high-contrast edge, which has nothing to do with the
                 // geometry pipeline.
-                for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
-                    reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
-                        aa.state.mode        = ZHLN::AAMode::None;
-                    });
-                }
+                engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
                 rc.SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 
                 const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
@@ -675,20 +667,12 @@ struct MeshShaderTestSuite {
             // Declared (not deduced) return: every path returns, so a missing
             // camera fails the test instead of flowing off the end (-Wreturn-type).
             auto setupCloseup = [](ZHLN::Engine& engine, const CloseupSubject& subject) -> std::expected<void, ZHLN::ErrorCode> {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-                auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright = 1;
-                        pp.enableSSR = 0;
-                        pp.enableRTR = 0;
-                    });
-                }
-                for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
-                    reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
-                        aa.state.mode = ZHLN::AAMode::None;
-                    });
-                }
+                engine.Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 1;
+                    gfx.post.enableSSR               = 0;
+                    gfx.rayTracing.enableReflections = false;
+                });
+                engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode = ZHLN::AAMode::None; });
                 engine.Graphics().SetAntiAliasing(ZHLN::AAState{.mode = ZHLN::AAMode::None});
 
                 // Camera 0.1-0.2m off the surface it is aimed at, the regime
@@ -848,18 +832,16 @@ struct MeshShaderTestSuite {
             auto setupBackplane = [](ZHLN::Engine& engine) -> bool {
                 ZHLN::Test::Headless::DisableAA(engine);
                 auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-                for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) {
-                        pp.fullBright = 1;
-                        pp.vignetteIntensity = 0.0f;
-                        pp.enableSSR = 0;
-                        pp.enableRTR = 0;
-                        pp.giMode = 0;
-                        pp.skyZenith = JPH::Vec4(0, 0, 0, 1);
-                        pp.skyHorizon = JPH::Vec4(0, 0, 0, 1);
-                        pp.skyGround = JPH::Vec4(0, 0, 0, 1);
-                    });
-                }
+                engine.Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 1;
+                    gfx.post.vignetteIntensity       = 0.0f;
+                    gfx.post.enableSSR               = 0;
+                    gfx.rayTracing.enableReflections = false;
+                    gfx.post.mode                    = 0;
+                    gfx.environment.skyZenith        = JPH::Vec4(0, 0, 0, 1);
+                    gfx.environment.skyHorizon       = JPH::Vec4(0, 0, 0, 1);
+                    gfx.environment.skyGround        = JPH::Vec4(0, 0, 0, 1);
+                });
 
                 auto rc = engine.Graphics();
                 auto material = rc.CreateMaterial(ZHLN::MaterialDesc {

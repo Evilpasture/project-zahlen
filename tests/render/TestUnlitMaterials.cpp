@@ -73,22 +73,19 @@ struct MeanRgb {
 }
 
 void ConfigureUnlitCapture(ZHLN::Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     ZHLN::Test::Headless::DisableAA(engine);
-    for (const ZHLN::Entity settings: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
-            pp.fullBright        = 0; // fullBright bypasses all shading: it cannot detect an unlit regression.
-            pp.giMode            = 0;
-            pp.enableSSR         = 0;
-            pp.enableRTR         = 0;
-            pp.ambientExposure   = 0.0f;
-            pp.exposure          = 1.0f;
-            pp.tonemapper        = 3;
-            pp.vignetteIntensity = 0.0f;
-            pp.glowIntensity     = 0.0f;
-            pp.bloomStrength     = 0.0f;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright       = 0; // fullBright bypasses all shading: it cannot detect an unlit regression.
+        gfx.post.mode                    = 0;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = false;
+        gfx.environment.ambientExposure  = 0.0f;
+        gfx.post.exposure                = 1.0f;
+        gfx.post.tonemapper              = 3;
+        gfx.post.vignetteIntensity       = 0.0f;
+        gfx.post.glowIntensity           = 0.0f;
+        gfx.post.bloomStrength           = 0.0f;
+    });
     const auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
         return;

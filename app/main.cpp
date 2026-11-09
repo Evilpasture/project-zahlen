@@ -40,13 +40,11 @@ struct SandboxGame {
             camera->camera.pitch    = -10.0f;
         }
 
-        for (ZHLN::Entity settings: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
-                pp.ambientExposure = 3.0f;
-                pp.skyZenith       = JPH::Vec4(0.08f, 0.18f, 0.34f, 1.0f);
-                pp.skyHorizon      = JPH::Vec4(0.40f, 0.55f, 0.72f, 1.0f);
-            });
-        }
+        ZHLN::GraphicsSettings gfx      = engine.Graphics().Settings();
+        gfx.environment.ambientExposure = 3.0f;
+        gfx.environment.skyZenith       = {0.08f, 0.18f, 0.34f, 1.0f};
+        gfx.environment.skyHorizon      = {0.40f, 0.55f, 0.72f, 1.0f};
+        engine.Graphics().ApplySettings(gfx);
 
         // Everything here is scene-owned: Engine's normal teardown reclaims
         // both the generated GPU meshes and their Jolt bodies.

@@ -183,21 +183,18 @@ void BuildAoScene(ZHLN::Engine& engine) {
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
-    const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settingsEnts.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-            pp.fullBright      = 0;
-            pp.ambientExposure = 50.0f;
-            pp.enableSSR       = 0;
-            pp.enableRTR       = 0;
-            pp.giMode          = 0;
-            pp.giSamples       = 24;
-            pp.aoRadius        = 1.0f;
-            pp.aoBias          = 0.05f;
-            pp.aoPower         = 1.8f;
-            pp.giIntensity     = 1.2f;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright       = 0;
+        gfx.environment.ambientExposure  = 50.0f;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = false;
+        gfx.post.mode                    = 0;
+        gfx.post.giSamples               = 24;
+        gfx.post.aoRadius                = 1.0f;
+        gfx.post.aoBias                  = 0.05f;
+        gfx.post.aoPower                 = 1.8f;
+        gfx.post.giIntensity             = 1.2f;
+    });
 
     ZHLN::PrefabFactory::CreatePlane(
         engine, 120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}
@@ -244,21 +241,11 @@ void BuildAoScene(ZHLN::Engine& engine) {
 }
 
 void SetGiMode(ZHLN::Engine& engine, int mode) {
-    auto&      reg  = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto ents = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (ents.empty()) {
-        return;
-    }
-    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(ents[0], [mode](auto& pp) { pp.giMode = mode; });
+    engine.Graphics().PatchSettings([mode](auto& gfx) { gfx.post.mode = mode; });
 }
 
 void SetAoRadius(ZHLN::Engine& engine, float radius) {
-    auto&      reg  = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto ents = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (ents.empty()) {
-        return;
-    }
-    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(ents[0], [radius](auto& pp) { pp.aoRadius = radius; });
+    engine.Graphics().PatchSettings([radius](auto& gfx) { gfx.post.aoRadius = radius; });
 }
 
 } // namespace
