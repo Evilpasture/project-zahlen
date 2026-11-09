@@ -32,6 +32,7 @@
 #include <Zahlen/COM/COMTypes.hpp>
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
+#include <Zahlen/Core/LogLevel.hpp>
 #include <Zahlen/Core/COM/Ref.hpp>
 
 #include <cstdint>
@@ -62,6 +63,16 @@ struct IEngineBuilder : IObject {
     virtual void SetWindowSize(uint32_t width, uint32_t height) noexcept = 0;
     virtual void SetFullscreen(bool fullscreen) noexcept = 0;
     virtual void SetVSync(bool vsync) noexcept = 0;
+
+    // Log level is engine configuration proper -- it is read once at startup
+    // and the engine owns the global it feeds.
+    virtual void SetLogLevel(LogLevel level) noexcept = 0;
+
+    // The frame cap is not creation state: the engine stores it in its own
+    // impl and the loop re-reads it every iteration, so this is applied after
+    // construction and stays changeable through Engine::SetMaxFramesPerSecond.
+    // Offered here only so a consumer can state it once, up front. 0 disables.
+    virtual void SetMaxFramesPerSecond(uint32_t fps) noexcept = 0;
 
     // Consumes nothing: the builder may be reused to create another engine.
     [[nodiscard]] virtual Result<IEngine*> Build() noexcept = 0;

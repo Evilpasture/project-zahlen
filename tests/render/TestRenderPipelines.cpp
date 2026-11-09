@@ -128,7 +128,6 @@ struct RenderPipelinesTestSuite {
                 .fullscreen          = false,
                 .validationMode      = ZHLN::ValidationMode::On,
                 .headless            = true,
-                .enableFallbackScene = false,
             };
 
             ZHLN::Test::Headless::ShutdownPooledEngines();
@@ -524,7 +523,6 @@ struct RenderPipelinesTestSuite {
                     .fullscreen          = false,
                     .validationMode      = ZHLN::ValidationMode::On,
                     .headless            = true,
-                    .enableFallbackScene = false,
                 };
             };
 

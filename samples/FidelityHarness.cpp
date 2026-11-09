@@ -640,7 +640,6 @@ auto main(int argc, char* argv[]) -> int {
         .physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
         .appName = "Zahlen :: Fidelity Harness",
         .vsync = false,
-        .enableFallbackScene = false,
     };
 
     HarnessConfig config;

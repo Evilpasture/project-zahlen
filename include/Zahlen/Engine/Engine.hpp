@@ -251,7 +251,13 @@ class ZHLN_API Engine {
 
     [[nodiscard]] auto Tick(float dt) -> std::expected<void, ErrorCode>;
 
-    [[nodiscard]] auto FallbackSceneEnabled() const noexcept -> bool;
+    // The frame cap lives with the pacing that reads it every frame, not in
+    // a creation struct: it is a runtime value, and Run() re-evaluates it on
+    // each iteration. 0 disables the cap.
+    // The frame cap lives in EngineImpl, seeded from EngineConfig at
+    // creation and re-read by the loop every frame. 0 disables it.
+    void                          SetMaxFramesPerSecond(uint32_t fps) noexcept;
+    [[nodiscard]] auto            MaxFramesPerSecond() const noexcept -> uint32_t;
 
     void EnsureFontAtlas();
 

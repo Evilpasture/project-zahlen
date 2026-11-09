@@ -120,11 +120,18 @@ struct EngineImpl {
 
     void*        gameState    = nullptr;
     uint64_t     frameCounter = 0;
+    // Read by the pacing loop in Run() on every iteration; settable at any
+    // time, which is why it is state here rather than a field of config.
+    uint32_t     maxFramesPerSecond = 0;
     EngineConfig config;
 };
 
-auto Engine::FallbackSceneEnabled() const noexcept -> bool {
-    return _impl->config.enableFallbackScene;
+void Engine::SetMaxFramesPerSecond(uint32_t fps) noexcept {
+    _impl->maxFramesPerSecond = fps;
+}
+
+auto Engine::MaxFramesPerSecond() const noexcept -> uint32_t {
+    return _impl->maxFramesPerSecond;
 }
 
 void Engine::EnsureFontAtlas() {
@@ -237,7 +244,10 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     ZHLN::Fiber::InitMainThread();
 
     _impl         = std::make_unique<EngineImpl>();
-    _impl->config = cfg;
+    _impl->config   = cfg;
+    // Seeded once here; from now on the engine's own value is authoritative
+    // and EngineConfig is never consulted for pacing again.
+    _impl->maxFramesPerSecond = cfg.fpsLimit;
 
     auto world_res = World::Create(cfg.physics, true);
     if (!world_res) {
@@ -894,7 +904,6 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
     if (uiCallback) {
         engine->SetUICallback(std::move(uiCallback));
     }
-    const double targetFrameTime = config.fpsLimit > 0 ? 1.0 / static_cast<double>(config.fpsLimit) : 0.0;
     Clock        runClock({.maxDeltaTime = 0.1f});
 
     while (engine->IsRunning()) {
@@ -907,6 +916,12 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
             break;
         }
 
+        // Re-read per frame: this is a load from EngineImpl, not a config
+        // lookup, and it lets SetMaxFramesPerSecond take effect mid-run.
+        const uint32_t maxFramesPerSecond = engine->MaxFramesPerSecond();
+        const double   targetFrameTime =
+            maxFramesPerSecond > 0 ? 1.0 / static_cast<double>(maxFramesPerSecond) : 0.0;
+
         const float rawDt = runClock.Tick();
         // The pacing clock only samples wall time; the simulation accumulator
         // belongs to Engine::Tick, so discard this unused one.
@@ -915,7 +930,7 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
         // Kernel/Engine already synchronized a resize during ProcessEvents.
         constexpr double           kFpsCapSlack = 1.05;
         const std::optional<float> pacedDt      = engine->Graphics().PacedDeltaTime();
-        const bool  displayPaced = pacedDt.has_value() && (config.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
+        const bool  displayPaced = pacedDt.has_value() && (maxFramesPerSecond == 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
         const float tickDt       = displayPaced ? *pacedDt : rawDt;
         // Propagate the frame's real ErrorCode; Engine::Run has no richer
         // diagnosis of its own and must not flatten it to a generic one.
@@ -923,7 +938,7 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
             return std::unexpected(tick.error());
         }
 
-        if (config.fpsLimit > 0 && !displayPaced) {
+        if (maxFramesPerSecond > 0 && !displayPaced) {
             auto   now          = Clock::SteadyClock::now();
             double frameElapsed = std::chrono::duration<double>(now - frameStart).count();
             if (frameElapsed < targetFrameTime) {

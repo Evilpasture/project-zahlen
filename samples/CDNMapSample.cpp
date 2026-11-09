@@ -96,7 +96,6 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::EngineConfig engineConfig {
         .physics = {.maxBodies = 4096, .maxBodyPairs = 8192, .maxContactConstraints = 8192},
         .appName = "Zahlen :: CDN Map",
-        .enableFallbackScene = false,
     };
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);

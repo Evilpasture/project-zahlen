@@ -659,7 +659,6 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::EngineConfig engineConfig {
         .physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
         .appName = "Zahlen :: Procedural Locomotion Sample",
-        .enableFallbackScene = false,
     };
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);

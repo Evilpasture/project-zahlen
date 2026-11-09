@@ -174,7 +174,6 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::EngineConfig engineConfig {
         .physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
         .appName = "Zahlen :: Device Lost Recovery",
-        .enableFallbackScene = false,
     };
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);

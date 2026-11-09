@@ -117,8 +117,8 @@ void ProcessScope::PollCrashes(const Engine* engine) const {
     }
 }
 
-FramePacer::FramePacer(uint32_t fpsLimit) noexcept:
-    _targetFrameTime(fpsLimit > 0 ? 1.0 / static_cast<double>(fpsLimit) : 0.0) {
+FramePacer::FramePacer(uint32_t maxFramesPerSecond) noexcept:
+    _targetFrameTime(maxFramesPerSecond > 0 ? 1.0 / static_cast<double>(maxFramesPerSecond) : 0.0) {
 }
 
 auto FramePacer::DisplayPaced(std::optional<float> pacedDt) const noexcept -> bool {

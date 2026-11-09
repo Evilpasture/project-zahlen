@@ -188,9 +188,11 @@ struct EngineConfig {
     // creating a renderer, including for later device-lost recovery.
     std::span<const uint8_t> initialPipelineBinaryData;
     std::string crashDumpPath;
+    // Seeds EngineImpl::maxFramesPerSecond at creation and is never read
+    // again -- the loop asks the engine, not this struct. The field name is
+    // the CLI contract: ConfigCli derives --fps-limit from it by reflection.
     uint32_t fpsLimit = 0;
     LogLevel logLevel = LogLevel::Moderate;
-    bool enableFallbackScene = true;
 };
 
 }

@@ -88,7 +88,6 @@ struct EngineOptions {
         .validationMode = ZHLN::ValidationMode::On,
         .headless       = true,
         .enableMeshShading = opts.enableMeshShading,
-        .enableFallbackScene = false,
     };
 
     auto engineRes = ZHLN::Engine::Create(cfg);

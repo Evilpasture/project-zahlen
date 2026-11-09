@@ -1383,7 +1383,6 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::EngineConfig engineConfig {
         .physics = {.maxBodies = 16384, .maxBodyPairs = 32768, .maxContactConstraints = 16384},
         .appName = "Zahlen :: gm_murder_drones",
-        .enableFallbackScene = false,
     };
     std::filesystem::path mapPath = kDefaultMapPath;
 

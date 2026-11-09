@@ -164,7 +164,6 @@ my %FIRST_PARTY = (
     IEngine          => ['include/Zahlen/COM/IEngine.hpp'],
     IGraphicsDevice  => ['include/Zahlen/COM/IGraphicsDevice.hpp'],
     IEntities        => ['include/Zahlen/COM/IEntities.hpp'],
-    EngineConfigCOM  => ['include/Zahlen/COM/COMTypes.hpp'],
     ComComponent     => ['include/Zahlen/COM/IEntities.hpp'],
     # Qualified: tests/helpers/HeadlessEngineFixture.hpp has its own unrelated
     # ZHLN::Test::Headless::CreateEngine, and a bare key here would claim every

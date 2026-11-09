@@ -333,10 +333,6 @@ namespace {
 
 // The standalone scene host installs this only when no document was requested.
 void FallbackStep(Engine& engine, float dt, FrameContext&) {
-    if (!engine.FallbackSceneEnabled()) {
-        return;
-    }
-
     if (!DefaultPreset::IsActive()) {
         DefaultPreset::BuildFallbackScene(engine);
     }

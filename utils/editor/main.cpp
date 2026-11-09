@@ -240,7 +240,9 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
     cam.yaw      = -90.0f;
     cam.pitch    = -20.0f;
 
-    const double targetFrameTime = options.fpsLimit > 0 ? 1.0 / static_cast<double>(options.fpsLimit) : 0.0;
+    const uint32_t maxFramesPerSecond = engine.MaxFramesPerSecond();
+    const double   targetFrameTime =
+        maxFramesPerSecond > 0 ? 1.0 / static_cast<double>(maxFramesPerSecond) : 0.0;
     auto         frameStart      = std::chrono::high_resolution_clock::now();
 
     ZHLN::Log("[WorldEditor] Editor session launched.");
@@ -448,7 +450,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
             }
         }
 
-        if (options.fpsLimit > 0) {
+        if (maxFramesPerSecond > 0) {
             auto   frameEnd = std::chrono::high_resolution_clock::now();
             double elapsed  = std::chrono::duration<double>(frameEnd - frameStart).count();
             if (elapsed < targetFrameTime) {
@@ -472,7 +474,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
 
 auto main(int argc, char* argv[]) -> int {
     static ZHLN::CrashState crashState;
-    ZHLN::EngineConfig config {.appName = "Zahlen World Editor", .enableFallbackScene = false};
+    ZHLN::EngineConfig config {.appName = "Zahlen World Editor"};
     std::filesystem::path scenePath;
     const std::array appHandlers = {
         ZHLN::CliFlag {

@@ -49,7 +49,6 @@ struct CombatFXTestSuite {
             .fullscreen     = false,
             .validationMode = ZHLN::ValidationMode::On,
             .headless       = true,
-            .enableFallbackScene = false,
         };
 
         auto engineRes = ZHLN::Engine::Create(cfg);

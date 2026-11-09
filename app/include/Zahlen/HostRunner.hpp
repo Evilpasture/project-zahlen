@@ -37,7 +37,7 @@ class ProcessScope {
 // duplicating sleep/spin policy. A display-paced frame already meets the cap.
 class FramePacer {
   public:
-    explicit FramePacer(uint32_t fpsLimit = 0) noexcept;
+    explicit FramePacer(uint32_t maxFramesPerSecond = 0) noexcept;
 
     [[nodiscard]] static auto BeginFrame() noexcept -> Clock::TimePoint { return Clock::SteadyClock::now(); }
     [[nodiscard]] auto TargetFrameTime() const noexcept -> double { return _targetFrameTime; }

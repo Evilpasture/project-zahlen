@@ -125,7 +125,6 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
         .fullscreen     = false,
         .validationMode = mode,
         .headless       = true,
-        .enableFallbackScene = false,
     };
 
     auto engineRes = ZHLN::Engine::Create(cfg);

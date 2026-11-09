@@ -651,9 +651,21 @@ public:
         m_config.vsync = vsync;
     }
 
+    void SetLogLevel(LogLevel level) noexcept override {
+        m_config.logLevel = level;
+    }
+
+    void SetMaxFramesPerSecond(uint32_t fps) noexcept override {
+        m_maxFramesPerSecond = fps;
+    }
+
     [[nodiscard]] Result<IEngine*> Build() noexcept override {
         auto created = Engine::Create(m_config);
         if (!created) return created.error();
+
+        // Applied after construction because the pacing loop owns it, not the
+        // config: it is a runtime value that Run() re-reads every frame.
+        (*created)->SetMaxFramesPerSecond(m_maxFramesPerSecond);
 
         auto* instance = new (std::nothrow) EngineCOM(std::move(*created));
         if (instance == nullptr) return ErrorCode(ComError::AllocationFailed);
@@ -663,6 +675,7 @@ public:
 
 private:
     EngineConfig m_config {};
+    uint32_t     m_maxFramesPerSecond = 0;
 };
 
 auto CreateEngineBuilder() noexcept -> Result<IEngineBuilder*> {

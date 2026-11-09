@@ -91,7 +91,7 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
         _start(*engine);
     }
 
-    FramePacer pacer(config.fpsLimit);
+    FramePacer pacer(engine->MaxFramesPerSecond());
     Clock      runClock({.maxDeltaTime = 0.1f});
     bool       frameFailed = false;
     while (engine->IsRunning()) {

@@ -487,7 +487,6 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 // Keep the default path, but allow an isolated vertex-path
                 // run to distinguish task-stage culling from a hue failure.
             .enableMeshShading = std::getenv("ZHLN_TEST_NO_MESH_SHADING") == nullptr,
-            .enableFallbackScene = false,
         };
 
         auto engineRes = ZHLN::Engine::Create(cfg);

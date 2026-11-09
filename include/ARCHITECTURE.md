@@ -741,7 +741,8 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 
 | header | contents |
 | :--- | :--- |
-| `COMTypes.hpp` | `EngineConfigCOM`, `ComError`, and the static asserts that keep the reused engine value types (`Extent2D`, `Entity`, `BufferID`, ...) fixed-layout |
+| `COMTypes.hpp` | `ComError` and the static asserts that keep the reused engine value types (`Extent2D`, `Entity`, `BufferID`, ...) fixed-layout |
+| `IEngineBuilder.hpp` | typed setters for every engine option, then `Build()`. Replaces `EngineConfigCOM`, which the consumer allocated and the library read back by layout |
 | `IEngine.hpp` | lifecycle, `Tick`, and borrowed accessors for the capability interfaces |
 | `IGraphicsDevice.hpp` | resolution, viewport, buffers, textures |
 | `IEntities.hpp` | type-erased ECS operations plus the consumer-side typed templates |
@@ -749,7 +750,7 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 | `IAudioDevice.hpp` | voices and posted events, described by `VoiceDesc` / `AudioEvent` |
 | `IAssetLibrary.hpp` | prefab cache interrogation and instantiation, plus borrowed environment-image pixels |
 | `IActionContext.hpp` | raw device injection in, virtual actions and physical state out |
-| `EngineFactory.hpp` | `CreateEngine`, the single exported symbol, and the inline `CreateEngineRef` wrapper |
+| `EngineFactory.hpp` | `CreateEngineBuilder`, the single exported symbol, and the inline `CreateEngineBuilderRef` / `CreateEngineRef` wrappers |
 
 One `EngineCOM` implements all seven interfaces, so `engine->Graphics()` and
 `engine.As<IGraphicsDevice>()` reach the same subobject of one allocation. The
@@ -759,13 +760,13 @@ reference the way COM expects.
 There is no `extern "C"`, no IDL and no dispatch struct. GCC and Clang both
 implement the Itanium C++ ABI, so the mangled name, the vtable layout and the
 calling convention already agree:
-`_ZN4ZHLN3COM12CreateEngineERKNS0_15EngineConfigCOME` is defined in the shared
+`_ZN4ZHLN3COM19CreateEngineBuilderEv` is defined in the shared
 library and undefined in every consumer. What the boundary refuses to carry is
 the *standard library*, not C++ itself.
 
-`CreateEngine` returns `Result<IEngine*>`, not `Result<Ref<IEngine>>`:
+`CreateEngineBuilder` and `Build` return `Result<T*>`, not `Result<Ref<T>>`:
 `Result<T>` carries `T` by value and therefore requires a trivially copyable
-`T`, which a reference-counting handle is not. `CreateEngineRef` is inline, so
+`T`, which a reference-counting handle is not. `CreateEngineBuilderRef` is inline, so
 it runs in the consumer's translation unit and may use `std::expected<Ref<IEngine>,
 ErrorCode>` freely -- that type is built and consumed on one side and never
 crosses.
