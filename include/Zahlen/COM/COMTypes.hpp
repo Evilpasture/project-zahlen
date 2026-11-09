@@ -36,25 +36,6 @@ enum class ComError : uint8_t {
     AssetNotCached = 2,
 };
 
-// Mirrors the fields of ZHLN::EngineConfig that a consumer can reasonably set
-// from outside the library. The engine's own EngineConfig holds a String64, a
-// std::string and a std::span, so it cannot cross the boundary itself.
-struct EngineConfigCOM {
-    StringView appName           = "Zahlen Engine";
-    StringView crashDumpPath     = "";
-    uint32_t   width             = 1280;
-    uint32_t   height            = 720;
-    uint32_t   fpsLimit          = 0;
-    bool       vsync             = true;
-    bool       enableValidation  = true;
-    bool       fullscreen        = false;
-    bool       headless          = false;
-    bool       enableMeshShading = true;
-};
-
-static_assert(std::is_standard_layout_v<EngineConfigCOM> && std::is_trivially_copyable_v<EngineConfigCOM>,
-              "EngineConfigCOM crosses the ABI boundary by reference and must be a fixed-layout value.");
-
 // The engine vocabulary this boundary hands across, checked rather than
 // assumed. A type that stops satisfying these rules breaks the boundary, and it
 // should say so here and not in a consumer's crash report.

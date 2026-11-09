@@ -24,6 +24,10 @@ struct IActionContext;
 struct IEngine : IObject {
     [[nodiscard]] virtual bool IsRunning() const noexcept = 0;
     virtual void               ProcessEvents() noexcept = 0;
+    // Asks the platform host to close. IsRunning() reports false from the
+    // next ProcessEvents(); nothing else a consumer can call ever made it
+    // false, so without this no COM-driven loop could terminate.
+    virtual void               RequestClose() noexcept = 0;
     [[nodiscard]] virtual Result<void> Tick(float dt) noexcept = 0;
     virtual void                       ClearScene() noexcept = 0;
 

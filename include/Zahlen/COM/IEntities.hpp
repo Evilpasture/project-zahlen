@@ -19,6 +19,7 @@
 #include <Zahlen/COM/COMTypes.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Core/Reflection/Core.hpp>
+#include <Zahlen/Core/Reflection/LayoutHash.hpp>
 
 #include <cstdint>
 #include <new>
@@ -43,10 +44,34 @@ struct IEntities : IObject {
     virtual bool                DetachRaw(Entity entity, StringView typeName) noexcept = 0;
     [[nodiscard]] virtual void* GetRaw(Entity entity, StringView typeName) const noexcept = 0;
 
+    // The engine's own components live in typed storage that its systems
+    // iterate; the dynamic path above deliberately cannot reach them. These
+    // three do, for the families the engine has chosen to publish.
+    //
+    // `layoutHash` is the caller's own fingerprint of the component. A name
+    // the engine publishes is only served when size, alignment and hash all
+    // agree with the definition the library was built against -- otherwise
+    // the call is refused rather than served through a mismatched view.
+    [[nodiscard]] virtual bool  IsEngineComponent(StringView typeName) const noexcept = 0;
+    [[nodiscard]] virtual void* AttachEngineRaw(Entity entity, StringView typeName, uint32_t size, uint32_t alignment,
+                                                uint64_t layoutHash) noexcept = 0;
+    virtual bool                DetachEngineRaw(Entity entity, StringView typeName) noexcept = 0;
+    [[nodiscard]] virtual void* GetEngineRaw(Entity entity, StringView typeName) const noexcept = 0;
+
     // Compiled in the consumer's TU; not part of the vtable. The audit ignores
     // templates, and these never cross the boundary as symbols.
     template <ComComponent T>
     [[nodiscard]] auto Attach(Entity entity, const T& component) noexcept -> T* {
+        if (IsEngineComponent(ComponentName<T>())) {
+            // Already a constructed T in typed storage; assign, do not
+            // placement-new over storage the registry is tracking. No
+            // fallback on refusal -- a mismatch must surface, not degrade
+            // into a parallel family nothing reads.
+            void* storage = AttachEngineRaw(entity, ComponentName<T>(), sizeof(T), alignof(T), Reflect::LayoutHash<T>());
+            if (storage == nullptr) return nullptr;
+            *static_cast<T*>(storage) = component;
+            return static_cast<T*>(storage);
+        }
         void* storage = AttachRaw(entity, ComponentName<T>(), sizeof(T), alignof(T));
         if (storage == nullptr) return nullptr;
         return new (storage) T(component);
@@ -54,11 +79,17 @@ struct IEntities : IObject {
 
     template <ComComponent T>
     [[nodiscard]] auto Get(Entity entity) const noexcept -> T* {
+        if (IsEngineComponent(ComponentName<T>())) {
+            return static_cast<T*>(GetEngineRaw(entity, ComponentName<T>()));
+        }
         return static_cast<T*>(GetRaw(entity, ComponentName<T>()));
     }
 
     template <ComComponent T>
     auto Detach(Entity entity) noexcept -> bool {
+        if (IsEngineComponent(ComponentName<T>())) {
+            return DetachEngineRaw(entity, ComponentName<T>());
+        }
         return DetachRaw(entity, ComponentName<T>());
     }
 

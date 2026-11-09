@@ -11,15 +11,19 @@
 // Zahlen builds with -fno-exceptions, so the noexcept on every method here is
 // a statement of fact rather than a promise that needs a try/catch to keep.
 
+#include <array>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IAudioDevice.hpp>
 #include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEngineBuilder.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
+#include <Zahlen/Core/Reflection/LayoutHash.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
@@ -30,6 +34,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Input/InputContext.hpp>
 
@@ -54,6 +59,77 @@ namespace {
     return registry.RegisterComponentDynamic(std::string_view(typeName), size, alignment);
 }
 
+// The engine components a COM consumer may attach to typed storage.
+//
+// Membership is a public ABI commitment: a published component's layout is
+// frozen for every consumer built against it, which is why this list is
+// written out by hand rather than deduced from "everything that happens to be
+// trivially copyable". It starts at the three that define whether anything
+// appears on screen at all.
+//
+// The registry keys typed families on the *unqualified* name (ECS::BoxedName),
+// while COM names components by their qualified spelling. The two namespaces
+// never met, so before this table a consumer attaching a component called
+// ZHLN::Components::MeshComponent did not collide with the engine's
+// MeshComponent -- it quietly created a second, dynamic family of that name
+// that no system reads. The entity then never rendered, and nothing reported
+// a fault. Routing by qualified name through this table is what closes that.
+struct PublishedComponent {
+    std::string_view name;
+    uint32_t         size;
+    uint32_t         alignment;
+    uint64_t         layoutHash;
+    void* (*ensure)(ECS::Registry&, Entity) noexcept;
+    bool (*remove)(ECS::Registry&, Entity) noexcept;
+    void* (*fetch)(const ECS::Registry&, Entity) noexcept;
+};
+
+template <typename T>
+[[nodiscard]] consteval auto Publish() -> PublishedComponent {
+    static_assert(std::is_trivially_copyable_v<T>, "a published component must be trivially copyable: the boundary copies it as bytes");
+    static_assert(std::is_standard_layout_v<T>, "a published component must be standard layout: the consumer models it from the same offsets");
+    return PublishedComponent {
+        .name       = Reflect::QualifiedTypeName<T>(),
+        .size       = static_cast<uint32_t>(sizeof(T)),
+        .alignment  = static_cast<uint32_t>(alignof(T)),
+        .layoutHash = Reflect::LayoutHash<T>(),
+        .ensure =
+            [](ECS::Registry& registry, Entity entity) noexcept -> void* {
+            if (void* existing = registry.GetRawByFamily(entity, ECS::ComponentFamily::GetTypeID<T>())) {
+                return existing;
+            }
+            // Add() panics on a dead entity rather than returning; the caller
+            // has already refused those, and this keeps that contract local.
+            if (!registry.IsAlive(entity)) return nullptr;
+            return &registry.Add<T>(entity);
+        },
+        .remove =
+            [](ECS::Registry& registry, Entity entity) noexcept -> bool {
+            if (registry.GetRawByFamily(entity, ECS::ComponentFamily::GetTypeID<T>()) == nullptr) return false;
+            registry.Remove<T>(entity);
+            return true;
+        },
+        .fetch =
+            [](const ECS::Registry& registry, Entity entity) noexcept -> void* {
+            return registry.GetRawByFamily(entity, ECS::ComponentFamily::GetTypeID<T>());
+        },
+    };
+}
+
+constexpr std::array kPublishedComponents {
+    Publish<Components::WorldTransformComponent>(),
+    Publish<Components::MeshComponent>(),
+    Publish<Components::CameraComponent>(),
+};
+
+[[nodiscard]] auto FindPublished(StringView typeName) noexcept -> const PublishedComponent* {
+    const std::string_view wanted(typeName);
+    for (const auto& entry: kPublishedComponents) {
+        if (entry.name == wanted) return &entry;
+    }
+    return nullptr;
+}
+
 constexpr uint32_t kInvalidFamily = 0xFFFFFFFFu;
 
 } // namespace
@@ -72,6 +148,10 @@ public:
 
     void ProcessEvents() noexcept override {
         m_engine->ProcessEvents();
+    }
+
+    void RequestClose() noexcept override {
+        m_engine->GetPlatformHost().Close();
     }
 
     [[nodiscard]] Result<void> Tick(float dt) noexcept override {
@@ -177,6 +257,38 @@ public:
         const uint32_t family = ECS::Registry::GetFamilyIDFromName(std::string_view(typeName));
         if (family == kInvalidFamily) return nullptr;
         return EngineAccess::RegistryOf(*m_engine).GetRawByFamily(entity, family);
+    }
+
+    [[nodiscard]] bool IsEngineComponent(StringView typeName) const noexcept override {
+        return FindPublished(typeName) != nullptr;
+    }
+
+    [[nodiscard]] void* AttachEngineRaw(Entity entity, StringView typeName, uint32_t size, uint32_t alignment,
+                                        uint64_t layoutHash) noexcept override {
+        const PublishedComponent* published = FindPublished(typeName);
+        if (published == nullptr) return nullptr;
+        // All three must agree. The hash subsumes the other two, but checking
+        // them separately makes a stale consumer fail for a legible reason.
+        if (published->size != size || published->alignment != alignment || published->layoutHash != layoutHash) {
+            return nullptr;
+        }
+        auto& registry = EngineAccess::RegistryOf(*m_engine);
+        if (!registry.IsAlive(entity)) return nullptr;
+        return published->ensure(registry, entity);
+    }
+
+    bool DetachEngineRaw(Entity entity, StringView typeName) noexcept override {
+        const PublishedComponent* published = FindPublished(typeName);
+        if (published == nullptr) return false;
+        auto& registry = EngineAccess::RegistryOf(*m_engine);
+        if (!registry.IsAlive(entity)) return false;
+        return published->remove(registry, entity);
+    }
+
+    [[nodiscard]] void* GetEngineRaw(Entity entity, StringView typeName) const noexcept override {
+        const PublishedComponent* published = FindPublished(typeName);
+        if (published == nullptr) return nullptr;
+        return published->fetch(EngineAccess::RegistryOf(*m_engine), entity);
     }
 
     // ------------------------------------------------------------ ISimulation
@@ -496,28 +608,67 @@ private:
     std::unique_ptr<Engine> m_engine;
 };
 
-auto CreateEngine(const EngineConfigCOM& config) noexcept -> Result<IEngine*> {
-    EngineConfig internal {};
-    internal.appName           = String64(std::string_view(config.appName));
-    internal.width             = config.width;
-    internal.height            = config.height;
-    internal.vsync             = config.vsync;
-    internal.validationMode    = config.enableValidation ? ValidationMode::On : ValidationMode::Off;
-    internal.fullscreen        = config.fullscreen;
-    internal.headless          = config.headless;
-    internal.enableMeshShading = config.enableMeshShading;
-    internal.fpsLimit          = config.fpsLimit;
-    if (config.crashDumpPath.size > 0) {
-        internal.crashDumpPath = std::string(std::string_view(config.crashDumpPath));
+// Holds a plain EngineConfig and hands it to Engine::Create on Build(). The
+// struct still exists inside the library, where growing it is free; what no
+// longer happens is a consumer allocating it and the library reading it by
+// layout.
+class EngineBuilderCOM final: public Implements<EngineBuilderCOM, IEngineBuilder> {
+public:
+    void SetHeadless(bool headless) noexcept override {
+        m_config.headless = headless;
     }
 
-    auto created = Engine::Create(internal);
-    if (!created) return created.error();
+    void SetValidation(bool enabled) noexcept override {
+        m_config.validationMode = enabled ? ValidationMode::On : ValidationMode::Off;
+    }
 
-    auto* instance = new (std::nothrow) EngineCOM(std::move(*created));
-    if (instance == nullptr) return ErrorCode(ComError::AllocationFailed);
+    void SetMeshShading(bool enabled) noexcept override {
+        m_config.enableMeshShading = enabled;
+    }
 
-    return static_cast<IEngine*>(instance);
+    void SetPhysicsLimits(uint32_t maxBodies, uint32_t maxBodyPairs, uint32_t maxContactConstraints,
+                          uint32_t tempAllocatorBytes) noexcept override {
+        m_config.physics.maxBodies             = maxBodies;
+        m_config.physics.maxBodyPairs          = maxBodyPairs;
+        m_config.physics.maxContactConstraints = maxContactConstraints;
+        m_config.physics.tempAllocatorSize     = tempAllocatorBytes;
+    }
+
+    void SetAppName(StringView name) noexcept override {
+        m_config.appName = String64(std::string_view(name));
+    }
+
+    void SetWindowSize(uint32_t width, uint32_t height) noexcept override {
+        m_config.width  = width;
+        m_config.height = height;
+    }
+
+    void SetFullscreen(bool fullscreen) noexcept override {
+        m_config.fullscreen = fullscreen;
+    }
+
+    void SetVSync(bool vsync) noexcept override {
+        m_config.vsync = vsync;
+    }
+
+    [[nodiscard]] Result<IEngine*> Build() noexcept override {
+        auto created = Engine::Create(m_config);
+        if (!created) return created.error();
+
+        auto* instance = new (std::nothrow) EngineCOM(std::move(*created));
+        if (instance == nullptr) return ErrorCode(ComError::AllocationFailed);
+
+        return static_cast<IEngine*>(instance);
+    }
+
+private:
+    EngineConfig m_config {};
+};
+
+auto CreateEngineBuilder() noexcept -> Result<IEngineBuilder*> {
+    auto* builder = new (std::nothrow) EngineBuilderCOM();
+    if (builder == nullptr) return ErrorCode(ComError::AllocationFailed);
+    return static_cast<IEngineBuilder*>(builder);
 }
 
 } // namespace ZHLN::COM

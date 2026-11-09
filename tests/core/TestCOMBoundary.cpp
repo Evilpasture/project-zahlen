@@ -17,11 +17,13 @@
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IAudioDevice.hpp>
 #include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEngineBuilder.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
 #include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
+#include <Zahlen/Core/Reflection/LayoutHash.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -45,8 +47,11 @@ static_assert(std::is_standard_layout_v<ZHLN::COM::Option<ZHLN::Double3>>);
 static_assert(std::is_trivially_copyable_v<ZHLN::COM::Option<ZHLN::Double3>>);
 static_assert(std::is_standard_layout_v<ZHLN::COM::Option<ZHLN::Physics::BodyStateSnapshot>>);
 static_assert(std::is_trivially_copyable_v<ZHLN::COM::Option<ZHLN::Physics::BodyStateSnapshot>>);
-static_assert(std::is_standard_layout_v<ZHLN::COM::EngineConfigCOM>);
-static_assert(std::is_trivially_copyable_v<ZHLN::COM::EngineConfigCOM>);
+// EngineConfigCOM is gone: a struct the consumer allocates and the library
+// reads by layout cannot survive a field being appended to it. Creation
+// options are calls on IEngineBuilder now, and that interface is held to the
+// same layout rules as every other one here.
+static_assert(ZHLN::COM::ComInterfaceLayoutCompliant<ZHLN::COM::IEngineBuilder>());
 static_assert(std::is_abstract_v<ZHLN::COM::IEngine>);
 static_assert(std::is_abstract_v<ZHLN::COM::IGraphicsDevice>);
 static_assert(std::is_abstract_v<ZHLN::COM::IEntities>);
@@ -268,6 +273,96 @@ void CheckActions(ZHLN::COM::IActionContext& actions) {
     ZHLN::Test::ExpectEq(actions.ActionAxis2D(ZHLN::ActionID {"NothingBindsThis"}).x, 0.0F);
 }
 
+
+// A consumer's own declaration of two engine components. Nothing here
+// includes an engine header: the layout is restated, and the engine's hash
+// check is what decides whether the restatement is true. Mat44Bytes stands in
+// for ZHLN::Mat44 at the only level the boundary cares about -- its bytes.
+namespace ConsumerSide {
+
+// alignas matches ZHLN::Mat44, which is alignas(alignof(JPH::Mat44)). A
+// consumer restating a layout restates its alignment as well -- and if it
+// gets that wrong, the hash is what says so.
+struct alignas(16) Mat44Bytes {
+    float m[16];
+};
+
+struct WorldTransformComponent {
+    Mat44Bytes world;
+    Mat44Bytes previous;
+};
+
+// Deliberately wrong: one extra field, so size and hash both diverge from the
+// engine's MeshComponent while the name still resolves to a published family.
+struct MeshComponent {
+    uint32_t meshAsset;
+    uint32_t materialAsset;
+    float    cullRadius;
+    float    localCenter[3];
+    uint32_t flags;
+    int32_t  nodeIndex;
+    int32_t  bogusExtraField;
+};
+
+} // namespace ConsumerSide
+
+void CheckEngineComponents(ZHLN::COM::IEntities& entities) {
+    const ZHLN::Entity entity = entities.CreateEntity();
+
+    // A published name is recognised as engine-owned; a consumer-defined one
+    // is not, and keeps the dynamic path it has always had.
+    ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::WorldTransformComponent"));
+    ZHLN::Test::ExpectTrue(!entities.IsEngineComponent("ZHLN::Components::NotAComponentAnywhere"));
+
+    // Matching layout: the engine serves typed storage its own systems read.
+    // The consumer's qualified name must be the engine's, so it is passed
+    // explicitly rather than taken from the local declaration's namespace.
+    ZHLN::Test::ExpectTrue(entities.GetEngineRaw(entity, "ZHLN::Components::WorldTransformComponent") == nullptr);
+
+    ConsumerSide::WorldTransformComponent transform {};
+    transform.world.m[0]    = 2.0F;
+    transform.previous.m[5] = 3.0F;
+
+    void* attached = entities.AttachEngineRaw(entity, "ZHLN::Components::WorldTransformComponent",
+                                              sizeof(ConsumerSide::WorldTransformComponent),
+                                              alignof(ConsumerSide::WorldTransformComponent),
+                                              ZHLN::Reflect::LayoutHash<ConsumerSide::WorldTransformComponent>());
+    if (ZHLN::Test::ExpectTrue(attached != nullptr)) {
+        *static_cast<ConsumerSide::WorldTransformComponent*>(attached) = transform;
+
+        // Read back through the boundary, from typed storage.
+        auto* fetched = static_cast<ConsumerSide::WorldTransformComponent*>(
+            entities.GetEngineRaw(entity, "ZHLN::Components::WorldTransformComponent"));
+        if (ZHLN::Test::ExpectTrue(fetched != nullptr)) {
+            ZHLN::Test::ExpectEq(fetched->world.m[0], 2.0F);
+            ZHLN::Test::ExpectEq(fetched->previous.m[5], 3.0F);
+        }
+    }
+
+    // The negative case this whole mechanism exists for: a consumer whose
+    // idea of the component disagrees with the library's is refused, not
+    // served a mismatched view of its own bytes.
+    void* mismatched = entities.AttachEngineRaw(entity, "ZHLN::Components::MeshComponent",
+                                                sizeof(ConsumerSide::MeshComponent),
+                                                alignof(ConsumerSide::MeshComponent),
+                                                ZHLN::Reflect::LayoutHash<ConsumerSide::MeshComponent>());
+    ZHLN::Test::ExpectTrue(mismatched == nullptr);
+
+    // And a right-sized lie is refused too -- the hash is what catches a
+    // same-size substitution that size and alignment cannot see.
+    void* sameSizeLie = entities.AttachEngineRaw(entity, "ZHLN::Components::WorldTransformComponent",
+                                                 sizeof(ConsumerSide::WorldTransformComponent),
+                                                 alignof(ConsumerSide::WorldTransformComponent),
+                                                 ZHLN::Reflect::LayoutHash<ConsumerSide::WorldTransformComponent>() ^ 1ULL);
+    ZHLN::Test::ExpectTrue(sameSizeLie == nullptr);
+
+    ZHLN::Test::ExpectTrue(entities.DetachEngineRaw(entity, "ZHLN::Components::WorldTransformComponent"));
+    ZHLN::Test::ExpectTrue(entities.GetEngineRaw(entity, "ZHLN::Components::WorldTransformComponent") == nullptr);
+    ZHLN::Test::ExpectTrue(!entities.DetachEngineRaw(entity, "ZHLN::Components::MeshComponent"));
+
+    entities.Despawn(entity);
+}
+
 struct COMBoundarySuite {
     struct Tests {
         // One engine, because standing one up is a real device initialisation.
@@ -275,16 +370,17 @@ struct COMBoundarySuite {
         // all; what is asserted unconditionally is that the call crossed the
         // boundary and came back with a well-formed answer either way.
         std::expected<void, ZHLN::ErrorCode> the_com_boundary_works_end_to_end() {
-            const ZHLN::COM::EngineConfigCOM config {
-                .appName          = "COM boundary test",
-                .width            = 320,
-                .height           = 240,
-                .vsync            = false,
-                .enableValidation = false,
-                .headless         = true,
-            };
+            auto builderCreated = ZHLN::COM::CreateEngineBuilderRef();
+            if (!ZHLN::Test::ExpectTrue(builderCreated.has_value())) return {};
+            ZHLN::COM::Ref<ZHLN::COM::IEngineBuilder> builder = std::move(*builderCreated);
 
-            auto created = ZHLN::COM::CreateEngineRef(config);
+            builder->SetAppName("COM boundary test");
+            builder->SetWindowSize(320, 240);
+            builder->SetVSync(false);
+            builder->SetValidation(false);
+            builder->SetHeadless(true);
+
+            auto created = builder->BuildRef();
             if (!created.has_value()) {
                 // The failure travelled back as a fixed-layout ErrorCode, not
                 // an exception and not a std::expected across the ABI, and it
@@ -350,6 +446,8 @@ struct COMBoundarySuite {
             // during pending-destroy processing, so it is deliberately still
             // alive here. Asserting the deferral is the honest check; the
             // boundary forwards the call, it does not change the semantics.
+            CheckEngineComponents(*entities.Get());
+
             entities->Despawn(entity);
             ZHLN::Test::ExpectTrue(entities->IsAlive(entity));
 
