@@ -502,7 +502,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
         ZHLN::Test::SetTimeout(55);
 
         auto engine      = CreateTestEngine();
-        if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
+        if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
             return std::unexpected(DistanceStabilityTestError::EngineInitFailed);
         }
 

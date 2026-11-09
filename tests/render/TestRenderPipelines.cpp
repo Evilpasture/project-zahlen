@@ -58,7 +58,7 @@ struct RenderPipelinesTestSuite {
             // invalidates device resources the pooled engine would retain.
             ZHLN::Test::Headless::ShutdownPooledEngines();
             auto engine = ZHLN::Test::Headless::CreateEngine("PipelineLifetime", 320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
 
@@ -137,7 +137,7 @@ struct RenderPipelinesTestSuite {
             }
 
             auto engine = std::move(engineRes.value());
-            ZHLN::Test::ExpectTrue(engine.Valid());
+            ZHLN::Test::ExpectTrue(engine != nullptr);
             engine->InitializeDefaultScene();
             ZHLN::Test::ExpectTrue(!ZHLN::EngineAccess::RegistryOf(*engine).GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
 
@@ -256,7 +256,7 @@ struct RenderPipelinesTestSuite {
             rc.RegisterMesh(firstID, mesh);
             rc.RegisterMesh(secondID, mesh);
 
-            assets.ClearCache(); // unregister both aliases; release shared buffers once
+            ZHLN::EngineAccess::AssetsOf(*engine).ClearCache(); // unregister both aliases; release shared buffers once
             ZHLN::Test::ExpectFalse(rc.Mesh(firstID).has_value());
             ZHLN::Test::ExpectFalse(rc.Mesh(secondID).has_value());
             const auto next = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(64);
@@ -317,14 +317,14 @@ struct RenderPipelinesTestSuite {
             }
             auto&                                  reg     = ZHLN::EngineAccess::RegistryOf(*engine);
             auto physics = engine->Physics();
-            const auto                             shape   = physics.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
+            const auto                             shape   = ZHLN::EngineAccess::PhysicsOf(*engine).GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
             const ZHLN::Entity                     parent  = reg.Create<ZHLN::Components::TransformComponent>();
             std::vector<ZHLN::Entity>              children;
             std::vector<ZHLN::Physics::BodyID> handles;
             for (int i = 0; i < 12; ++i) {
                 auto       double_i = static_cast<double>(i);
                 const auto handle =
-                    physics.CreateRigidBody(shape, {double_i, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+                    ZHLN::EngineAccess::PhysicsOf(*engine).CreateRigidBody(shape, {double_i, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
                 handles.push_back(handle);
                 children.push_back(reg.Create(
                     ZHLN::Components::HierarchyComponent {.parent = parent}, ZHLN::Components::PhysicsComponent {.physicsID = handle, .isStatic = false}
@@ -342,7 +342,7 @@ struct RenderPipelinesTestSuite {
             }
             // A child attached after the ECB marked its root must also be
             // discovered by the cleanup system before components are erased.
-            const auto lateID = physics.CreateRigidBody(shape, {15, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+            const auto lateID = ZHLN::EngineAccess::PhysicsOf(*engine).CreateRigidBody(shape, {15, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             const auto lateChild  = reg.Create(
                 ZHLN::Components::HierarchyComponent {.parent = parent}, ZHLN::Components::PhysicsComponent {.physicsID = lateID, .isStatic = false}
             );

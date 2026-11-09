@@ -352,9 +352,9 @@ struct MeshShaderTestSuite {
             };
 
             const std::array<Case, 3> cases = {
-                Case {.name = "box", .mesh = ZHLN::PrefabFactory::CreateBoxMesh(engine.Graphics(), {0.5f, 0.5f, 0.5f})},
-                Case {.name = "plane", .mesh = ZHLN::PrefabFactory::CreatePlaneMesh(engine.Graphics(), 4.0f)},
-                Case {.name = "tetrahedron", .mesh = ZHLN::PrefabFactory::CreateTetrahedronMesh(engine.Graphics())},
+                Case {.name = "box", .mesh = ZHLN::PrefabFactory::CreateBoxMesh(engine->Graphics(), {0.5f, 0.5f, 0.5f})},
+                Case {.name = "plane", .mesh = ZHLN::PrefabFactory::CreatePlaneMesh(engine->Graphics(), 4.0f)},
+                Case {.name = "tetrahedron", .mesh = ZHLN::PrefabFactory::CreateTetrahedronMesh(engine->Graphics())},
             };
 
             bool allOk = true;
@@ -396,7 +396,7 @@ struct MeshShaderTestSuite {
                 .height            = 240,
                 .enableMeshShading = true,
             });
-            if (!ZHLN::Test::ExpectTrue(enabledEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(enabledEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
@@ -419,7 +419,7 @@ struct MeshShaderTestSuite {
                 .height            = 240,
                 .enableMeshShading = false,
             });
-            if (!ZHLN::Test::ExpectTrue(disabledEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(disabledEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
@@ -445,7 +445,7 @@ struct MeshShaderTestSuite {
             };
 
             auto vertexEngine = acquire(false);
-            if (!ZHLN::Test::ExpectTrue(vertexEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(vertexEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
@@ -520,7 +520,7 @@ struct MeshShaderTestSuite {
             const Image vertexB = capture(*vertexEngine, "headless_meshshader_vertex_b.ppm");
 
             auto meshEngine = acquire(true);
-            if (!ZHLN::Test::ExpectTrue(meshEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(meshEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
             if (auto setupResult = setupScene(*meshEngine); !setupResult) {
@@ -656,7 +656,7 @@ struct MeshShaderTestSuite {
             };
 
             auto vertexEngine = acquire(false);
-            if (!ZHLN::Test::ExpectTrue(vertexEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(vertexEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
             if (!vertexEngine->Graphics().Info().meshShadingSupported) {
@@ -734,7 +734,7 @@ struct MeshShaderTestSuite {
             }
 
             auto meshEngine = acquire(true);
-            if (!ZHLN::Test::ExpectTrue(meshEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(meshEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
@@ -821,7 +821,7 @@ struct MeshShaderTestSuite {
             };
 
             auto vertexEngine = acquire(false);
-            if (!ZHLN::Test::ExpectTrue(vertexEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(vertexEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
             if (!vertexEngine->Graphics().Info().meshShadingSupported) {
@@ -884,7 +884,7 @@ struct MeshShaderTestSuite {
             const Image vertexImg = capture(*vertexEngine, "headless_double_sided_vertex.ppm");
 
             auto meshEngine = acquire(true);
-            if (!ZHLN::Test::ExpectTrue(meshEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(meshEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
             if (!ZHLN::Test::ExpectTrue(meshEngine->Graphics().Info().meshShadingActive)) {

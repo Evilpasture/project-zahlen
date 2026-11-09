@@ -144,8 +144,8 @@ struct MorphPosePassSuite {
         return engine;
     }
 
-    [[nodiscard]] static auto CreateMorphMaterial(ZHLN::RenderContext& rc) -> std::expected<ZHLN::Material, ZHLN::ErrorCode> {
-        return rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = {0.85f, 0.45f, 0.2f, 1.0f}});
+    [[nodiscard]] static auto CreateMorphMaterial(ZHLN::GraphicsDevice gfx) -> std::expected<ZHLN::Material, ZHLN::ErrorCode> {
+        return gfx.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = {0.85f, 0.45f, 0.2f, 1.0f}});
     }
 
     // One box part under one root node, `kMorphTargets` morph targets with real
@@ -165,7 +165,7 @@ struct MorphPosePassSuite {
         auto rc = engine.Graphics();
         auto  prefab = std::make_unique<ZHLN::ModelPrefab>();
 
-        const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(engine->Graphics(), {0.6f, 0.6f, 0.6f}, {0.85f, 0.45f, 0.2f, 1.0f});
+        const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(engine.Graphics(), {0.6f, 0.6f, 0.6f}, {0.85f, 0.45f, 0.2f, 1.0f});
 
         // Deltas are float4-per-vertex blocks laid out target-major:
         // common.slang's GetMorphDisplacement reads

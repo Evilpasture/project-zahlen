@@ -66,7 +66,7 @@ struct ExplosionTestSuite {
         // ====================================================================
         auto standard_fireball_lifecycle() -> std::expected<void, ZHLN::ErrorCode> {
             auto engine      = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 
@@ -125,7 +125,7 @@ struct ExplosionTestSuite {
         // ====================================================================
         auto artillery_mortar_and_crater() -> std::expected<void, ZHLN::ErrorCode> {
             auto engine      = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 
@@ -187,7 +187,7 @@ struct ExplosionTestSuite {
         // ====================================================================
         auto crater_decal_fade_and_cleanup() -> std::expected<void, ZHLN::ErrorCode> {
             auto engine      = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 

@@ -320,6 +320,9 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
             auto rc = engine->Graphics();
+            // Render targets, cube maps and procedural bakes are not on the
+            // GraphicsDevice capability facade; reach the context for those.
+            auto& rctx = ZHLN::EngineAccess::RenderOf(*engine);
 
             std::array<uint32_t, 16> texels {};
             texels.fill(0xFF3366CCu);
@@ -338,7 +341,7 @@ struct DescriptorHeapsSuite {
             ZHLN::Test::ExpectTrue(*second != ZHLN::SystemTextures::Black && *second != ZHLN::SystemTextures::White &&
                                    *second != ZHLN::SystemTextures::FlatNormal);
 
-            const auto callback = rc.CreateTextureProcedural({4, 4}, false, [](std::span<uint32_t> pixels) {
+            const auto callback = rctx.CreateTextureProcedural({4, 4}, false, [](std::span<uint32_t> pixels) {
                 for (auto& pixel: pixels) {
                     pixel = 0xFF3366CCu;
                 }
@@ -374,7 +377,7 @@ struct DescriptorHeapsSuite {
                 faces[i].fill(std::byte {0xFF});
                 faceSpans[i] = std::span<const std::byte> {faces[i]};
             }
-            const auto cube = rc.CreateTextureCube(faceSpans, 4);
+            const auto cube = rctx.CreateTextureCube(faceSpans, 4);
             if (!ZHLN::Test::ExpectTrue(cube.has_value())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
@@ -385,7 +388,7 @@ struct DescriptorHeapsSuite {
             // Invalid input must not create a handle; unloading one handle
             // cannot invalidate another, and reused slots cannot reuse IDs.
             ZHLN::Test::ExpectTrue(!rc.CreateTexture(std::span {texels}, {5, 5}).has_value());
-            ZHLN::Test::ExpectTrue(!rc.CreateTextureCube(faceSpans, 0).has_value());
+            ZHLN::Test::ExpectTrue(!rctx.CreateTextureCube(faceSpans, 0).has_value());
             rc.UnloadTexture(*first);
             rc.UnloadTexture(*cube);
             // Unloading is per-handle: the surviving texture keeps its

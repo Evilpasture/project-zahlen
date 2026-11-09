@@ -165,7 +165,7 @@ struct ViewportSubregionTestSuite {
             // The engine is pooled across suites; whatever band this test
             // leaves set must not leak into the next suite's captures.
             struct ViewportRestore {
-                ZHLN::RenderContext&                rc;
+                ZHLN::GraphicsDevice                rc;
                 ZHLN::RenderContext::ViewportRect   full;
                 ~ViewportRestore() { rc.SetViewport(full); }
             } restore {rc, rc.Viewport()};

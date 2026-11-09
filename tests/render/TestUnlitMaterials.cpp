@@ -178,7 +178,7 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
 auto SpawnUnlitChamfer(ZHLN::Engine& engine, float x, const ZHLN::Material& material) -> ZHLN::Entity {
     auto rc = engine.Graphics();
     auto&            reg  = ZHLN::EngineAccess::RegistryOf(engine);
-    const ZHLN::Mesh mesh = UploadChamferedMesh(ZHLN::EngineAccess::RenderOf(*engine));
+    const ZHLN::Mesh mesh = UploadChamferedMesh(ZHLN::EngineAccess::RenderOf(engine));
     if (mesh.posBuffer == ZHLN::BufferID::Invalid || mesh.indexBuffer == ZHLN::BufferID::Invalid) {
         return ZHLN::Entity::Null();
     }

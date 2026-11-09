@@ -5,6 +5,7 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -37,8 +38,11 @@ struct RenderComputeTestSuite {
             }
 
             auto rc = engine->Graphics();
+            // Render targets, cube maps and procedural bakes are not on the
+            // GraphicsDevice capability facade; reach the context for those.
+            auto& rctx = ZHLN::EngineAccess::RenderOf(*engine);
 
-            const auto bakeRes = rc.BakeProceduralTexture(128, 128, 0, 4.0f, 1.0f);
+            const auto bakeRes = rctx.BakeProceduralTexture(128, 128, 0, 4.0f, 1.0f);
             if (!ZHLN::Test::ExpectTrue(bakeRes.has_value())) {
                 return std::unexpected(RenderComputeTestError::ProceduralBakeFailed);
             }
@@ -51,7 +55,7 @@ struct RenderComputeTestSuite {
 
             rc.UnloadTexture(*bakeRes);
             // A fresh bake must not resurrect the retired handle.
-            const auto rebaked = rc.BakeProceduralTexture(128, 128, 0, 4.0f, 1.0f);
+            const auto rebaked = rctx.BakeProceduralTexture(128, 128, 0, 4.0f, 1.0f);
             if (!ZHLN::Test::ExpectTrue(rebaked.has_value() && *rebaked != *bakeRes)) {
                 return std::unexpected(RenderComputeTestError::ProceduralBakeFailed);
             }

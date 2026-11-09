@@ -419,6 +419,9 @@ struct UITestSuite {
             }
 
             auto rc = engine->Graphics();
+            // Render targets, cube maps and procedural bakes are not on the
+            // GraphicsDevice capability facade; reach the context for those.
+            auto& rctx = ZHLN::EngineAccess::RenderOf(*engine);
 
             ZHLN::Test::Headless::TickFrames(*engine, 2);
 
@@ -428,14 +431,14 @@ struct UITestSuite {
                 return std::unexpected(UITestError::UINotRendered);
             }
 
-            const auto textureRes = rc.CreateRenderTexture(160, 160, false);
+            const auto textureRes = rctx.CreateRenderTexture(160, 160, false);
             if (!ZHLN::Test::ExpectTrue(textureRes.has_value())) {
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
             const ZHLN::TextureID texture = *textureRes;
-            const auto hdrTextureRes = rc.CreateRenderTexture(160, 160, true);
+            const auto hdrTextureRes = rctx.CreateRenderTexture(160, 160, true);
             if (!ZHLN::Test::ExpectTrue(hdrTextureRes.has_value())) {
-                rc.DestroyRenderTexture(texture);
+                rctx.DestroyRenderTexture(texture);
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
             const ZHLN::TextureID hdrTexture = *hdrTextureRes;
@@ -487,8 +490,8 @@ struct UITestSuite {
             }
 
             const RgbImage frame = ZHLN::Test::Headless::Capture(*engine, "headless_ui_window_and_second_destination.ppm");
-            rc.DestroyRenderTexture(hdrTexture);
-            rc.DestroyRenderTexture(texture);
+            rctx.DestroyRenderTexture(hdrTexture);
+            rctx.DestroyRenderTexture(texture);
             if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                 return std::unexpected(UITestError::RenderOutputBlank);
             }
@@ -513,6 +516,9 @@ struct UITestSuite {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
             auto rc = engine->Graphics();
+            // Render targets, cube maps and procedural bakes are not on the
+            // GraphicsDevice capability facade; reach the context for those.
+            auto& rctx = ZHLN::EngineAccess::RenderOf(*engine);
             ZHLN::Test::Headless::TickFrames(*engine, 2);
             const SolidPayload payload = BuildSolidBox(*engine, {0.0f, 1.0f, 0.0f, 1.0f}, 80.0f);
             if (!ZHLN::Test::ExpectTrue(!payload.View().Empty())) {
@@ -557,12 +563,12 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(!staleUI && !staleScene)) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const auto texture = rc.CreateRenderTexture(32, 32);
+            const auto texture = rctx.CreateRenderTexture(32, 32);
             if (!texture) {
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
             const ZHLN::FrameTarget retiredTexture = (**second).ForTexture(*texture);
-            rc.DestroyRenderTexture(*texture);
+            rctx.DestroyRenderTexture(*texture);
             const auto retiredResult = secondFrame.RenderUI(ZHLN::UIView {.viewport = viewport, .target = retiredTexture}, payload.View());
             if (!ZHLN::Test::ExpectTrue(!retiredResult)) {
                 return std::unexpected(UITestError::FrameDriveFailed);

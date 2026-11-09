@@ -229,7 +229,11 @@ zahlen_add_gpu_test_group(GPU_Performance 900
 # baselines, and those live in tests/extras/profile/PerfBaseline.hpp on top of
 # plugins/json -- so this group links zahlen_serialization, the one extras
 # domain it touches.
-target_link_libraries(GPU_Performance PRIVATE zahlen_serialization)
+# TestRenderPerformance.cpp calls JPH::RegisterDefaultAllocator() from its own
+# object, so Jolt belongs on this link line for the same reason ztest_cpu
+# names it: the suite references JPH symbols directly rather than through
+# zahlen_engine.
+target_link_libraries(GPU_Performance PRIVATE Jolt zahlen_serialization)
 target_include_directories(GPU_Performance PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 
 # --- Extras VFX & Render Tests ---
