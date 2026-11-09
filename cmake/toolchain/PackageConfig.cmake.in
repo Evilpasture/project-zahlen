@@ -51,7 +51,10 @@ int main() { return 0; }" _zahlen_stl_ok)
         unset(_zahlen_pr125280_ok CACHE)
         set(_zahlen_saved_required_flags "${CMAKE_REQUIRED_FLAGS}")
         set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} @ZHLN_TOOLCHAIN_REFLECTION_FLAGS@")
-        check_cxx_source_compiles("@ZHLN_PR125280_PROBE_SOURCE@" _zahlen_pr125280_ok)
+        # The source is substituted into this file at package-generation time.
+        # Bracket arguments keep its quotes, backslashes and semicolons literal;
+        # a quoted argument would be broken by quotes in the C++ source/comments.
+        check_cxx_source_compiles([==[@ZHLN_PR125280_PROBE_SOURCE@]==] _zahlen_pr125280_ok)
         set(CMAKE_REQUIRED_FLAGS "${_zahlen_saved_required_flags}")
         unset(_zahlen_saved_required_flags)
         if(NOT _zahlen_pr125280_ok)

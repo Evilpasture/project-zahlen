@@ -271,6 +271,12 @@ zhln_probe_toolchain_capabilities("${_zhln_reflection_probe_flags}")
 set(ZHLN_TOOLCHAIN_REFLECTION_FLAGS "${_zhln_reflection_probe_flags}" CACHE INTERNAL
     "reflection flags an installed package should probe a consumer toolchain with")
 file(READ "${PROJECT_SOURCE_DIR}/cmake/probes/pr125280-static-member.cpp" _zhln_pr125280_source)
+# PackageConfig.cmake.in embeds the source in a [==[ ... ]==] argument.
+# Refuse a premature closing delimiter rather than shipping a broken config.
+string(FIND "${_zhln_pr125280_source}" "]==]" _zhln_probe_delimiter)
+if(NOT _zhln_probe_delimiter EQUAL -1)
+    message(FATAL_ERROR "PR 125280 probe contains the CMake bracket delimiter ]==]")
+endif()
 set(ZHLN_PR125280_PROBE_SOURCE "${_zhln_pr125280_source}" CACHE INTERNAL
     "GCC PR c++/125280 reproduction, substituted into installed package configs")
 

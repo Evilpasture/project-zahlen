@@ -30,8 +30,8 @@
 // consteval_only_p() is never reached and every compiler passes, which would
 // make the probe meaningless rather than lenient.
 //
-// Keep this file free of quotes and backslashes: CMake reads it with file(READ)
-// and hands it to check_cxx_source_compiles as a quoted argument.
+// The installed package config embeds this file in a CMake bracket argument.
+// Do not put its closing delimiter in this file; packaging checks for it.
 
 // ---------------------------------------------------------------------------
 // Upstream minimal reproduction, verbatim.

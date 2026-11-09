@@ -82,6 +82,9 @@ jobs:
         with:
           submodules: false
 
+      - name: Test generated package config
+        run: python3 tests/cmake/test-package-config.py
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
