@@ -3,15 +3,13 @@
 
 #pragma once
 
-#include "vulkan/VulkanHeader.hpp"
-
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Core/PresentTiming.hpp>
-#include <volk.h>
 #include <array>
 #include <cstdint>
-#include <optional>
 #include <expected>
-#include <Zahlen/Error.hpp>
+#include <optional>
+#include <volk.h>
 
 namespace ZHLN::Vk {
 
@@ -64,20 +62,20 @@ struct TimedPresentChain {
 };
 
 enum class PresentPacerError : uint8_t {
-    TimingInactive ZHLN_ANNOTATION(ZHLN::Description<"Present timing is not active">{}) = 1,
+    TimingInactive ZHLN_ANNOTATION(ZHLN::Description<"Present timing is not active"> {}) = 1,
 };
 
 class PresentPacer {
   public:
-    static constexpr uint32_t kMaxTimings = 16;
-    static constexpr uint32_t kMaxStages = 3;
+    static constexpr uint32_t kMaxTimings = 64;
+    static constexpr uint32_t kMaxStages  = 3;
 
-    PresentPacer() noexcept                    = default;
-    PresentPacer(const PresentPacer&) noexcept = default;
+    PresentPacer() noexcept                               = default;
+    PresentPacer(const PresentPacer&) noexcept            = default;
     PresentPacer& operator=(const PresentPacer&) noexcept = default;
     PresentPacer(PresentPacer&&) noexcept                 = default;
-    PresentPacer& operator=(PresentPacer&&) noexcept = default;
-    ~PresentPacer()                                  = default;
+    PresentPacer& operator=(PresentPacer&&) noexcept      = default;
+    ~PresentPacer()                                       = default;
 
     void Resolve(const Context& ctx, VkSurfaceKHR surface, bool vsync) noexcept;
 
@@ -106,31 +104,31 @@ class PresentPacer {
     void ConsumeResult(const VkPastPresentationTimingEXT& result) noexcept;
     void DowngradeToAdaptive() noexcept;
 
-    PacingPolicy   _policy              = PacingPolicy::LegacyVBlank;
-    bool           _sealed              = false;
-    bool           _timingActive        = false;
-    VkPhysicalDevice _physical          = VK_NULL_HANDLE;
-    VkSurfaceKHR     _surface           = VK_NULL_HANDLE;
-    VkPresentStageFlagsEXT _stageMask   = 0;
-    VkTimeDomainKHR _timeDomain         = VK_TIME_DOMAIN_DEVICE_KHR;
-    uint64_t        _timeDomainId       = 0;
-    bool                   _stageLocal  = false;
-    VkPresentStageFlagsEXT _anchorStage = 0u;
-    uint64_t        _timingPropsCounter = 0;
-    uint64_t        _timeDomainsCounter = 0;
-    uint64_t        _refreshDuration    = 0;
-    uint64_t        _refreshInterval    = 0;
-    bool            _propsKnown         = false;
-    uint64_t        _nextPresentId      = 0;
-    bool            _hasBaseline        = false;
-    uint64_t        _baselineId         = 0;
-    uint64_t        _baselineTime       = 0;
-    bool            _hasMargin          = false;
-    uint64_t        _lastMarginNs       = 0;
-    uint64_t        _lastPresentId      = 0;
+    PacingPolicy           _policy             = PacingPolicy::LegacyVBlank;
+    bool                   _sealed             = false;
+    bool                   _timingActive       = false;
+    VkPhysicalDevice       _physical           = VK_NULL_HANDLE;
+    VkSurfaceKHR           _surface            = VK_NULL_HANDLE;
+    VkPresentStageFlagsEXT _stageMask          = 0;
+    VkTimeDomainKHR        _timeDomain         = VK_TIME_DOMAIN_DEVICE_KHR;
+    uint64_t               _timeDomainId       = 0;
+    bool                   _stageLocal         = false;
+    VkPresentStageFlagsEXT _anchorStage        = 0u;
+    uint64_t               _timingPropsCounter = 0;
+    uint64_t               _timeDomainsCounter = 0;
+    uint64_t               _refreshDuration    = 0;
+    uint64_t               _refreshInterval    = 0;
+    bool                   _propsKnown         = false;
+    uint64_t               _nextPresentId      = 0;
+    bool                   _hasBaseline        = false;
+    uint64_t               _baselineId         = 0;
+    uint64_t               _baselineTime       = 0;
+    bool                   _hasMargin          = false;
+    uint64_t               _lastMarginNs       = 0;
+    uint64_t               _lastPresentId      = 0;
 
-    std::array<VkPastPresentationTimingEXT, kMaxTimings>              _results = {};
-    std::array<VkPresentStageTimeEXT, kMaxTimings * kMaxStages>       _stages  = {};
+    std::array<VkPastPresentationTimingEXT, kMaxTimings>        _results = {};
+    std::array<VkPresentStageTimeEXT, kMaxTimings * kMaxStages> _stages  = {};
 };
 
-}
+} // namespace ZHLN::Vk

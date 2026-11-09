@@ -4,7 +4,6 @@
 #pragma once
 
 #include "vulkan/VulkanHeader.hpp"
-
 #include "vulkan/core/Device.hpp"
 #include "vulkan/core/Features.hpp"
 #include "vulkan/core/Instance.hpp"
@@ -20,9 +19,9 @@
 namespace ZHLN::Vk {
 
 enum class ContextError : uint8_t {
-    InvalidInstance ZHLN_ANNOTATION(ZHLN::Description<"No valid Vulkan instance was supplied"> {}) = 1,
+    InvalidInstance            ZHLN_ANNOTATION(ZHLN::Description<"No valid Vulkan instance was supplied"> {}) = 1,
     LoaderInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan loader initialization failed"> {}),
-    NoSuitableDeviceFound ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found"> {}),
+    NoSuitableDeviceFound      ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found"> {}),
 };
 
 class GPUAddressTracker;
@@ -89,9 +88,9 @@ class Context {
         return _device.MeshShaderEnabled();
     }
     [[nodiscard]] auto PipelineBinariesSupported() const noexcept -> bool {
-        return HasFeature<VkPhysicalDevicePipelineBinaryFeaturesKHR>(
-            [](const VkPhysicalDevicePipelineBinaryFeaturesKHR& f) { return f.pipelineBinaries == VK_TRUE; }
-        );
+        return HasFeature<VkPhysicalDevicePipelineBinaryFeaturesKHR>([](const VkPhysicalDevicePipelineBinaryFeaturesKHR& f) {
+            return f.pipelineBinaries == VK_TRUE;
+        });
     }
     [[nodiscard]] auto MeshShaderLimits() const noexcept -> Vk::MeshShaderLimits {
         return QueryMeshShaderLimits(_physical.handle);
@@ -108,7 +107,7 @@ class Context {
     void SetAddressTracker(GPUAddressTracker* tracker) noexcept {
         _addressTracker = tracker;
     }
-    [[nodiscard]] auto PresentSupport() const noexcept -> const DevicePresentSupport& {
+    [[nodiscard]] auto PresentSupport() const noexcept -> DevicePresentSupport {
         return _present;
     }
 
@@ -119,7 +118,7 @@ class Context {
 
     template <typename FeatureStruct, typename Predicate>
     [[nodiscard]] auto HasFeature(Predicate&& predicate) const noexcept -> bool {
-        const FeatureStruct* enabled = GetFeature<FeatureStruct>();
+        const auto* enabled = GetFeature<FeatureStruct>();
         return enabled != nullptr && predicate(*enabled);
     }
 
@@ -135,14 +134,14 @@ class Context {
     friend class ContextBuilder;
 
     std::optional<Vk::Instance> _ownedInstance;
-    InstanceView               _instance;
-    VkSurfaceKHR               _surface = VK_NULL_HANDLE;
-    PhysicalDeviceInfo         _physical {};
-    LogicalDevice              _device;
-    DevicePresentSupport       _present {};
-    EnabledFeatureSet          _enabledFeatures;
-    GPUAddressTracker*         _addressTracker              = nullptr;
-    bool                       _addressBindingReportEnabled = false;
+    InstanceView                _instance;
+    VkSurfaceKHR                _surface = VK_NULL_HANDLE;
+    PhysicalDeviceInfo          _physical {};
+    LogicalDevice               _device;
+    DevicePresentSupport        _present {};
+    EnabledFeatureSet           _enabledFeatures;
+    GPUAddressTracker*          _addressTracker              = nullptr;
+    bool                        _addressBindingReportEnabled = false;
 };
 
 class ContextBuilder {
@@ -194,16 +193,16 @@ class ContextBuilder {
     [[nodiscard]] auto Build() noexcept -> std::expected<Context, ErrorCode>;
 
   private:
-    std::optional<Vk::Instance>        _ownedInstance;
-    InstanceView                       _instance;
-    VkSurfaceKHR                       _surface = VK_NULL_HANDLE;
-    PhysicalDeviceInfo                 _physical {};
-    Vk::ValidationMode                 _validationMode = Vk::ValidationMode::On;
-    std::vector<const char*>           _deviceExtensions;
-    const VkPhysicalDeviceFeatures2*    _features = nullptr;
-    EnabledFeatureSet                  _enabledFeatures;
-    DeviceScoreFunction               _scoreFn       = nullptr;
-    const void*                        _scoreUserdata = nullptr;
+    std::optional<Vk::Instance>      _ownedInstance;
+    InstanceView                     _instance;
+    VkSurfaceKHR                     _surface = VK_NULL_HANDLE;
+    PhysicalDeviceInfo               _physical {};
+    Vk::ValidationMode               _validationMode = Vk::ValidationMode::On;
+    std::vector<const char*>         _deviceExtensions;
+    const VkPhysicalDeviceFeatures2* _features = nullptr;
+    EnabledFeatureSet                _enabledFeatures;
+    DeviceScoreFunction              _scoreFn       = nullptr;
+    const void*                      _scoreUserdata = nullptr;
 };
 
 } // namespace ZHLN::Vk
