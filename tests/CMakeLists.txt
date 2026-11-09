@@ -31,6 +31,7 @@ set(ZHLN_CPU_TEST_SOURCES
     assets/TestPackaging.cpp
     audio/TestsAudio.cpp
     core/TestCOM.cpp
+    core/TestCOMApp.cpp
     core/TestCOMBoundary.cpp
     core/TestClock.cpp
     core/TestCommandLine.cpp

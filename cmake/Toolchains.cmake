@@ -233,6 +233,10 @@ zhln_toolchain_package(CommandLine TARGETS zahlen_command_line HEADERS extension
 zhln_toolchain_package(Signal TARGETS zahlen_signal DEPENDS Engine HEADERS extensions/Signal)
 zhln_toolchain_package(HostRunner TARGETS zahlen_host_runner DEPENDS Engine CommandLine Signal)
 zhln_toolchain_package(Application TARGETS zahlen_application DEPENDS Engine CommandLine HostRunner)
+# Consumer-side header only: install independently of the in-tree Application
+# package so COM clients need not link its static libraries.
+install(FILES app/include/Zahlen/COM/App.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen/COM COMPONENT ZahlenCOMApp)
 install(FILES app/include/Zahlen/HostRunner.hpp app/include/Zahlen/KernelApp.hpp
     app/include/Zahlen/AppOutcome.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen
     COMPONENT ZahlenHostRunner)
