@@ -203,30 +203,30 @@ inline auto PackUV(float u, float v) -> PackedHalf2 {
     return {static_cast<uint32_t>(FloatToHalf(v) << 16) | FloatToHalf(u)};
 }
 
-[[nodiscard]] inline auto Fract(ZHLN::Float3 p) noexcept -> JPH::Float3 {
+[[nodiscard]] inline auto Fract(ZHLN::Float3 p) noexcept -> ZHLN::Float3 {
     return {Fract(p.x), Fract(p.y), Fract(p.z)};
 }
 
-[[nodiscard]] inline auto Floor(ZHLN::Float3 p) noexcept -> JPH::Float3 {
+[[nodiscard]] inline auto Floor(ZHLN::Float3 p) noexcept -> ZHLN::Float3 {
     return {Floor(p.x), Floor(p.y), Floor(p.z)};
 }
 
-[[nodiscard]] inline auto Wrap(ZHLN::Float3 p, ZHLN::Float3 period) noexcept -> JPH::Float3 {
+[[nodiscard]] inline auto Wrap(ZHLN::Float3 p, ZHLN::Float3 period) noexcept -> ZHLN::Float3 {
     auto wrap1 = [](float v, float cell) noexcept -> float { return std::fmod(std::fmod(v, cell) + cell, cell); };
     return {wrap1(p.x, period.x), wrap1(p.y, period.y), wrap1(p.z, period.z)};
 }
 
 [[nodiscard]] inline auto TileableHash3(ZHLN::Float3 p, ZHLN::Float3 period) noexcept -> float {
-    const JPH::Float3 wrapped = Wrap(p, period);
+    const ZHLN::Float3 wrapped = Wrap(p, period);
     p                         = Fract({wrapped.x * 0.1031f, wrapped.y * 0.1031f, wrapped.z * 0.1031f});
     p                         = {p.x + p.y + 33.33f, p.y + p.z + 33.33f, p.z + p.x + 33.33f};
     return Fract((p.x + p.y) * p.z);
 }
 
 [[nodiscard]] inline auto TileableNoise3(ZHLN::Float3 p, ZHLN::Float3 period) noexcept -> float {
-    const JPH::Float3 ip = Floor(p);
-    const JPH::Float3 fp = Fract(p);
-    const JPH::Float3 u  = {Smoothstep(0.0f, 1.0f, fp.x), Smoothstep(0.0f, 1.0f, fp.y), Smoothstep(0.0f, 1.0f, fp.z)};
+    const ZHLN::Float3 ip = Floor(p);
+    const ZHLN::Float3 fp = Fract(p);
+    const ZHLN::Float3 u  = {Smoothstep(0.0f, 1.0f, fp.x), Smoothstep(0.0f, 1.0f, fp.y), Smoothstep(0.0f, 1.0f, fp.z)};
 
     const auto  at   = [&](float ox, float oy, float oz) noexcept -> float { return TileableHash3({ip.x + ox, ip.y + oy, ip.z + oz}, period); };
     const float n000 = at(0.0f, 0.0f, 0.0f);

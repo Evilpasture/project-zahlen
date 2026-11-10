@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
+#include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/Render/Types.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -51,9 +51,9 @@ struct ModelPart {
     // -> InstanceData; one spelling for the four lanes end to end.
     ZHLN::Float4 defaultMorphWeights = {0.0f, 0.0f, 0.0f, 0.0f};
 
-    float       boundingRadius = 1.0f;
-    JPH::Float3 localMin       = {0.0f, 0.0f, 0.0f};
-    JPH::Float3 localMax       = {0.0f, 0.0f, 0.0f};
+    float        boundingRadius = 1.0f;
+    ZHLN::Float3 localMin       = {0.0f, 0.0f, 0.0f};
+    ZHLN::Float3 localMax       = {0.0f, 0.0f, 0.0f};
 
     JPH::ShapeRefC meshCollider = nullptr;
     JPH::ShapeRefC boxCollider  = nullptr;
@@ -67,14 +67,14 @@ struct ModelPart {
 };
 
 struct ModelLight {
-    String64  name;
-    int32_t   nodeIndex      = -1;
-    LightType type           = LightType::Point;
+    String64     name;
+    int32_t      nodeIndex = -1;
+    LightType    type      = LightType::Point;
     ZHLN::Float3 color {1.0f, 1.0f, 1.0f};
-    float     intensity      = 1.0f;                // Candela (lm/sr) for point/spot, lux (lm/m^2) for directional
-    float     range          = 0.0f;                // 0.0f = infinite / default inverse-square falloff
-    float     innerConeAngle = 0.0f;                // For spot lights (radians)
-    float     outerConeAngle = JPH::JPH_PI * 0.25f; // For spot lights (radians)
+    float        intensity      = 1.0f;                     // Candela (lm/sr) for point/spot, lux (lm/m^2) for directional
+    float        range          = 0.0f;                     // 0.0f = infinite / default inverse-square falloff
+    float        innerConeAngle = 0.0f;                     // For spot lights (radians)
+    float        outerConeAngle = std::numbers::pi * 0.25f; // For spot lights (radians)
 };
 
 struct ModelPrefab {
