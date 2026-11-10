@@ -4,6 +4,7 @@
 #include "render/features/ShadowAtlas.hpp"
 #include <Jolt/Math/Float2.h>
 #include <Zahlen/Core/Hash.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <algorithm>
 #include <cmath>
@@ -22,21 +23,21 @@ struct FaceBasis {
     JPH::Vec3 z;
 };
 
-constexpr std::array<std::array<float, 9>, ShadowAtlas::kPointFaces> kFaceAxes = {{
-    {{0.0f, 0.0f, -1.0f, 0.0f, 1.0f, 0.0f, -1.0f, 0.0f, 0.0f}},
-    {{0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f}},
-    {{1.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, -1.0f, 0.0f}},
-    {{1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f}},
-    {{1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f}},
-    {{-1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f}},
+constexpr std::array<Mat3, ShadowAtlas::kPointFaces> kFaceAxes = {{
+    Mat3::FromCols({0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}),
+    Mat3::FromCols({0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}),
+    Mat3::FromCols({1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, -1.0f, 0.0f}),
+    Mat3::FromCols({1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}),
+    Mat3::FromCols({1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}),
+    Mat3::FromCols({-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}),
 }};
 
 [[nodiscard]] auto FaceBasisAt(uint32_t face) noexcept -> FaceBasis {
-    std::span<const float> a = kFaceAxes[face];
+    auto m = kFaceAxes[face];
     return FaceBasis {
-        .x = {a[0], a[1], a[2]},
-        .y = {a[3], a[4], a[5]},
-        .z = {a[6], a[7], a[8]},
+        .x = m.Column(0),
+        .y = m.Column(1),
+        .z = m.Column(2),
     };
 }
 
