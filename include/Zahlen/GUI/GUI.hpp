@@ -3,9 +3,6 @@
 
 #pragma once
 
-#include <Jolt/Jolt.h>
-#include <Jolt/Math/Float4.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/GUI/Font.hpp>
@@ -36,26 +33,26 @@ struct Sizing {
 };
 
 struct BoxConfig {
-    Sizing    width        = {};
-    Sizing    height       = {};
+    Sizing       width  = {};
+    Sizing       height = {};
     ZHLN::Float4 color {0.0f, 0.0f, 0.0f, 0.0f};
     ZHLN::Float4 cornerRadius {0.0f, 0.0f, 0.0f, 0.0f};
-    float     padding      = 0.0f;
-    float     gap          = 0.0f;
-    Direction direction    = Direction::Column;
-    Alignment alignMain    = Alignment::Start;
-    Alignment alignCross   = Alignment::Start;
-    float     offsetX      = 0.0f;
-    float     offsetY      = 0.0f;
-    bool      clipVertical = false;
+    float        padding      = 0.0f;
+    float        gap          = 0.0f;
+    Direction    direction    = Direction::Column;
+    Alignment    alignMain    = Alignment::Start;
+    Alignment    alignCross   = Alignment::Start;
+    float        offsetX      = 0.0f;
+    float        offsetY      = 0.0f;
+    bool         clipVertical = false;
 };
 
 // Appearance of the bar drawn by Frame::BeginScrollArea. Widths and heights
 // are in pixels, matching the units Clay lays out in.
 struct ScrollBarStyle {
-    float     width           = 6.0f;
-    float     minThumb        = 20.0f;
-    float     margin          = 2.0f;
+    float        width    = 6.0f;
+    float        minThumb = 20.0f;
+    float        margin   = 2.0f;
     ZHLN::Float4 trackColor {1.0f, 1.0f, 1.0f, 0.06f};
     ZHLN::Float4 thumbColor {1.0f, 1.0f, 1.0f, 0.30f};
     ZHLN::Float4 thumbHoverColor {1.0f, 1.0f, 1.0f, 0.55f};
@@ -99,11 +96,11 @@ struct TextBounds {
 // Per-frame input snapshot consumed by Context::BeginFrame.
 // Spans are copied internally during BeginFrame and do not need to outlive the call.
 struct UIInput {
-    Extent2D     viewport    = {.width = 1920, .height = 1080};
-    float        dt          = 1.0f / 60.0f;
-    float        mouseX      = -1.0f;
-    float        mouseY      = -1.0f;
-    float        mouseScroll = 0.0f;
+    Extent2D viewport    = {.width = 1920, .height = 1080};
+    float    dt          = 1.0f / 60.0f;
+    float    mouseX      = -1.0f;
+    float    mouseY      = -1.0f;
+    float    mouseScroll = 0.0f;
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
     bool         mouseDown[3] = {false, false, false};
     KeyModifiers modifiers    = KeyModifiers::None;
@@ -164,8 +161,8 @@ class ZHLN_API Frame {
   public:
     using ElementRect = GUI::ElementRect;
 
-    Frame(const Frame&)                        = delete;
-    auto operator=(const Frame&) -> Frame&     = delete;
+    Frame(const Frame&)                    = delete;
+    auto operator=(const Frame&) -> Frame& = delete;
     Frame(Frame&& other) noexcept;
     auto operator=(Frame&&) noexcept -> Frame& = delete;
     ~Frame() noexcept;

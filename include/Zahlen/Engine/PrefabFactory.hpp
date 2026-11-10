@@ -1,19 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
-// clang-format off
-#include <Jolt/Jolt.h>
-#include <Jolt/Math/Float3.h>
-#include <Jolt/Math/Float4.h>
-// clang-format on
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Error.hpp>
@@ -21,7 +15,6 @@
 #include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <Zahlen/Render/Types.hpp>
-#include <span>
 #include <string_view>
 
 namespace ZHLN {
@@ -32,7 +25,7 @@ class ArticulationSystem;
 namespace ECS {
 class Registry;
 }
-}
+} // namespace ZHLN
 
 namespace ZHLN::PrefabFactory {
 
@@ -69,7 +62,7 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
 auto CreateBox(Engine& engine, ZHLN::Float3 halfExtents, const SpawnParams& params = {}) -> Entity;
 
 auto CreatePlane(
-    GraphicsDevice                   gfx,
+    GraphicsDevice                  gfx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           extent = 10.0f,
@@ -80,16 +73,18 @@ auto CreatePlane(Engine& engine, float extent = 10.0f, ZHLN::Float4 color = {0.6
 
 auto CreateSphere(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params = {}) -> Entity;
 auto CreateSphere(Engine& engine, float radius, const SpawnParams& params = {}) -> Entity;
-auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
+auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params = {})
+    -> Entity;
 auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
-auto CreateCone(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
+auto CreateCone(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params = {})
+    -> Entity;
 auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
 
 auto LoadModelPrefab(GraphicsDevice gfx, AssetManager& assetMgr, std::string_view path) -> ZHLN::Optional<ModelPrefab&>;
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&>;
 
 auto InstantiatePrefab(
-    GraphicsDevice     gfx,
+    GraphicsDevice      gfx,
     ECS::Registry&      reg,
     PhysicsContext&     pc,
     ArticulationSystem& art,
@@ -104,4 +99,4 @@ auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams&
 
 void RebuildVulkanResources(GraphicsDevice gfx, ECS::Registry& reg);
 
-}
+} // namespace ZHLN::PrefabFactory

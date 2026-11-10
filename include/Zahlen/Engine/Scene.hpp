@@ -3,16 +3,11 @@
 
 #pragma once
 
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
-#include <Jolt/Math/Float3.h>
-#include <Jolt/Math/Float4.h>
-#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <cstdint>
 #include <expected>
@@ -56,10 +51,10 @@ struct SceneEntity {
 
     ZHLN::Float3 halfExtents = {0.5f, 0.5f, 0.5f};
     float        extent      = 10.0f;
-    std::string source;
+    std::string  source;
 
-    Transform     transform;
-    BodyKind      body = BodyKind::None;
+    Transform transform;
+    BodyKind  body = BodyKind::None;
     // Dynamic bodies start dormant: the body exists and collides, but does
     // not simulate until a force or an active body disturbs it. Mirrors the
     // Source prop_physics "Start Asleep" behaviour.
@@ -67,10 +62,10 @@ struct SceneEntity {
     SceneMaterial material;
     // Draw layer for the spawned mesh parts (see DrawFlags::Background): the
     // BSP scene routes skybox entities here so they composite behind the world.
-    DrawFlags     drawFlags = DrawFlags::None;
+    DrawFlags drawFlags = DrawFlags::None;
     // Optional ambient cube (+X,-X,+Y,-Y,+Z,-Z linear radiance) sampled from the
     // BSP leaf. Used by props that have no lightmap of their own.
-    bool                       hasAmbientCube = false;
+    bool                        hasAmbientCube = false;
     std::array<ZHLN::Float4, 6> ambientCube {};
 };
 
@@ -106,7 +101,7 @@ static_assert(
 );
 
 struct SceneLight {
-    std::string name;
+    std::string  name;
     std::string  type        = "Point";
     ZHLN::Float3 position    = {0.0f, 3.0f, 0.0f};
     ZHLN::Float3 rotation    = {0.0f, 0.0f, 0.0f};
@@ -124,7 +119,7 @@ struct SceneLight {
     // entity light, so they cannot be truncated away by the renderer's
     // scene-light budget -- which is what used to happen to every lamp panel,
     // screen and sign in a Source map.
-    bool  pinned           = false;
+    bool pinned = false;
     // Who owns this light's shading, when a map compiler has already baked it
     // into the world's lightmaps (kBakeOwnsNone / kBakeOwnsDiffuse /
     // kBakeOwnsAll above). A baked light still runs live -- props, entities and
@@ -133,7 +128,7 @@ struct SceneLight {
     // fixture is not lit twice. See SceneLight::pinned for the other authoring
     // flag: this one is about who owns the shading, that one about which lights
     // survive the renderer's budget.
-    uint32_t baked          = 0;
+    uint32_t baked = 0;
 };
 
 struct SceneCamera {
@@ -155,8 +150,8 @@ struct SceneEnvironment {
     float aoBias    = 0.05f;
     float aoPower   = 1.8f;
     int   giSamples = 8;
-    bool enableSSR = true;
-    bool enableRTR = false;
+    bool  enableSSR = true;
+    bool  enableRTR = false;
 
     ZHLN::Float3 probeMin = {-22.0f, 0.0f, -22.0f};
     ZHLN::Float3 probeMax = {22.0f, 12.0f, 22.0f};
@@ -200,8 +195,7 @@ struct MaterialLookup {
 // The registry answers for scene content -- entities, transforms, lights. It no
 // longer answers for the environment, which belongs to whoever owns the
 // pipeline, so that half is passed in rather than scraped out.
-[[nodiscard]] auto Extract(const Camera& camera, const GraphicsSettings& gfx, const ECS::Registry& registry, MaterialLookup materials = {})
-    -> Scene;
+[[nodiscard]] auto Extract(const Camera& camera, const GraphicsSettings& gfx, const ECS::Registry& registry, MaterialLookup materials = {}) -> Scene;
 
 } // namespace Scene
 } // namespace ZHLN

@@ -1,31 +1,31 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <optional>
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
-#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/GUI/FontLoader.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <optional>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+// TODO(Evilpasture): REMOVE SYSTEM LEAK
 #include "ArticulationSystem.hpp"
-#include "LightingSystem.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/ScaledShape.h>
@@ -237,12 +237,7 @@ struct PreparedPart {
     JPH::ShapeRefC shape    = nullptr;
 };
 
-auto PreparePrefabPhysics(
-    const ModelPrefab& prefab,
-    const JPH::Mat44&  baseTransform,
-    bool               createPhysics,
-    bool               useBoxColliders
-) -> std::vector<PreparedPart> {
+auto PreparePrefabPhysics(const ModelPrefab& prefab, const JPH::Mat44& baseTransform, bool createPhysics, bool useBoxColliders) -> std::vector<PreparedPart> {
     std::vector<PreparedPart> outPrepared(prefab.parts.size());
 
     TaskSystem::ParallelFor(prefab.parts.size(), 16, [&](uint32_t start, uint32_t end, uint32_t) -> void {
@@ -272,7 +267,7 @@ auto PreparePrefabPhysics(
 }
 
 auto InstantiateMeshPart(
-    GraphicsDevice                        gfx,
+    GraphicsDevice                         gfx,
     ECS::Registry&                         reg,
     PhysicsContext&                        pc,
     ArticulationSystem&                    art,
@@ -287,7 +282,7 @@ auto InstantiateMeshPart(
 
     AssetID    meshAsset = part.meshAsset;
     MaterialID matAsset  = params.materialOverride.pipeline != PipelineID::Invalid ? static_cast<uint64_t>(params.materialOverride.pipeline) :
-                                                                                         part.materialAsset;
+                                                                                     part.materialAsset;
 
     Material activeMat = params.materialOverride.pipeline != PipelineID::Invalid ? params.materialOverride : part.defaultMaterial;
 
@@ -395,9 +390,9 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
         return std::nullopt; // KHR_materials_unlit ignores emissive factors.
     // Virtual lights approximate authored emission, not the presentation
     // boost chosen by the importer. Fidelity captures never opt into them.
-    const float        invImportScale = 1.0f / emissiveFactorScale;
+    const float         invImportScale = 1.0f / emissiveFactorScale;
     const ZHLN::Float4& raw            = part.defaultMaterial.emissiveFactor;
-    const float        ef[3] {raw.x * invImportScale, raw.y * invImportScale, raw.z * invImportScale};
+    const float         ef[3] {raw.x * invImportScale, raw.y * invImportScale, raw.z * invImportScale};
 
     float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
@@ -416,14 +411,14 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
 
     reg.Add(
         glowEnt, Components::LightComponent {
-                     .type        = LightType::Point,
-                     .color       = JPH::Vec3(ef[0], ef[1], ef[2]),
-                     .intensity   = lum * 35.0f,
-                     .radius      = std::max(partExtent * scaleMult * 0.15f, 0.05f),
-                     .direction   = JPH::Vec3(0, -1, 0),
-                     .range       = std::max(partExtent * scaleMult * 2.5f, 3.0f),
-                     .points      = {},
-                     .twoSided    = 0
+                     .type      = LightType::Point,
+                     .color     = JPH::Vec3(ef[0], ef[1], ef[2]),
+                     .intensity = lum * 35.0f,
+                     .radius    = std::max(partExtent * scaleMult * 0.15f, 0.05f),
+                     .direction = JPH::Vec3(0, -1, 0),
+                     .range     = std::max(partExtent * scaleMult * 2.5f, 3.0f),
+                     .points    = {},
+                     .twoSided  = 0
                  }
     );
     return glowEnt;
@@ -500,7 +495,7 @@ auto CreateBox(Engine& engine, ZHLN::Float3 halfExtents, const SpawnParams& para
 namespace {
 
 auto SpawnPrimitive(
-    GraphicsDevice                       gfx,
+    GraphicsDevice                        gfx,
     ECS::Registry&                        reg,
     ZHLN::Optional<PhysicsContext&>       pc,
     std::string_view                      shapeName,
@@ -715,9 +710,8 @@ auto InstantiatePrefab(
         }
         spawnedCount++;
 
-        const auto glowEnt = params.emissiveVirtualLights ?
-                                 SpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult, prefab.emissiveFactorScale) :
-                                 std::optional<Entity> {};
+        const auto glowEnt = params.emissiveVirtualLights ? SpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult, prefab.emissiveFactorScale) :
+                                                            std::optional<Entity> {};
         if (glowEnt) {
             if (outBuffer != nullptr && spawnedCount < maxCount) {
                 outBuffer[spawnedCount] = *glowEnt;
@@ -787,12 +781,12 @@ auto InstantiatePrefab(
 
             reg.Add(
                 lightEnt, Components::LightComponent {
-                              .type        = light.type,
-                              .color       = light.color,
-                              .intensity   = light.intensity,
-                              .radius      = (light.type == LightType::Spot) ? light.outerConeAngle : 0.0f,
-                              .direction   = worldDir,
-                              .range       = (light.range > 0.0f) ? light.range * scaleMult : 1000.0f,
+                              .type             = light.type,
+                              .color            = light.color,
+                              .intensity        = light.intensity,
+                              .radius           = (light.type == LightType::Spot) ? light.outerConeAngle : 0.0f,
+                              .direction        = worldDir,
+                              .range            = (light.range > 0.0f) ? light.range * scaleMult : 1000.0f,
                               .innerConeRadians = light.innerConeAngle,
                               .outerConeRadians = light.outerConeAngle
                           }
@@ -873,7 +867,8 @@ auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<Mo
 
 auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
     return InstantiatePrefab(
-        engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), ZHLN::EngineAccess::ArticulationOf(engine), prefab, params, outBuffer, maxCount
+        engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), ZHLN::EngineAccess::ArticulationOf(engine), prefab,
+        params, outBuffer, maxCount
     );
 }
 
