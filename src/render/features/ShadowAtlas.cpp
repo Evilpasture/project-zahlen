@@ -22,21 +22,21 @@ struct FaceBasis {
     JPH::Vec3 z;
 };
 
-constexpr float kFaceAxes[ShadowAtlas::kPointFaces][9] = {
-    {0.0f, 0.0f, -1.0f, 0.0f, 1.0f, 0.0f, -1.0f, 0.0f, 0.0f},
-    {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f},
-    {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, -1.0f, 0.0f},
-    {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f},
-    {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f},
-    {-1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f},
-};
+constexpr std::array<std::array<float, 9>, ShadowAtlas::kPointFaces> kFaceAxes = {{
+    {{0.0f, 0.0f, -1.0f, 0.0f, 1.0f, 0.0f, -1.0f, 0.0f, 0.0f}},
+    {{0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f}},
+    {{1.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, -1.0f, 0.0f}},
+    {{1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f}},
+    {{1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f}},
+    {{-1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f}},
+}};
 
 [[nodiscard]] auto FaceBasisAt(uint32_t face) noexcept -> FaceBasis {
-    const float* a = kFaceAxes[face];
+    std::span<const float> a = kFaceAxes[face];
     return FaceBasis {
-        JPH::Vec3 {a[0], a[1], a[2]},
-        JPH::Vec3 {a[3], a[4], a[5]},
-        JPH::Vec3 {a[6], a[7], a[8]},
+        .x = {a[0], a[1], a[2]},
+        .y = {a[3], a[4], a[5]},
+        .z = {a[6], a[7], a[8]},
     };
 }
 
@@ -57,7 +57,7 @@ constexpr float kFaceAxes[ShadowAtlas::kPointFaces][9] = {
     const JPH::Vec3 forward = direction.LengthSq() > 1e-8f ? direction.Normalized() : JPH::Vec3 {0.0f, 0.0f, -1.0f};
     const JPH::Vec3 hint    = (std::abs(forward.GetY()) > 0.99f) ? JPH::Vec3::sAxisZ() : JPH::Vec3::sAxisY();
     const JPH::Vec3 right   = hint.Cross(forward).NormalizedOr(JPH::Vec3::sAxisX());
-    const FaceBasis basis {right, forward.Cross(right), -forward};
+    const FaceBasis basis {.x = right, .y = forward.Cross(right), .z = -forward};
     return BasisToView(basis, origin);
 }
 
@@ -68,15 +68,20 @@ auto ShadowAtlas::FaceCount(bool isPoint, float outerConeRadians) noexcept -> ui
 }
 
 auto ShadowAtlas::MakeFaceMatrices(
-    const JPH::Vec3& position, const JPH::Vec3& direction, float range, bool isPoint, float outerConeRadians, JPH::Mat44* out
+    const JPH::Vec3& position,
+    const JPH::Vec3& direction,
+    float            range,
+    bool             isPoint,
+    float            outerConeRadians,
+    JPH::Mat44*      out
 ) noexcept -> uint32_t {
     const float    farPlane  = std::max(range, kAtlasNearPlane * 2.0f);
     const uint32_t faceCount = FaceCount(isPoint, outerConeRadians);
 
     if (faceCount == 1) {
-        const float outer   = std::clamp(outerConeRadians, 0.01f, JPH::JPH_PI * 0.45f);
+        const float      outer      = std::clamp(outerConeRadians, 0.01f, JPH::JPH_PI * 0.45f);
         const JPH::Mat44 projection = Math::CreatePerspective(outer * 2.0f, 1.0f, kAtlasNearPlane, farPlane);
-        out[0]                        = projection * ConeToView(direction, position);
+        out[0]                      = projection * ConeToView(direction, position);
         return 1;
     }
 
@@ -88,23 +93,29 @@ auto ShadowAtlas::MakeFaceMatrices(
 }
 
 auto ShadowAtlas::MakeLightKey(LightType type, const JPH::Vec3& position, float intensity, float range) noexcept -> uint64_t {
-    const float    parts[] = {position.GetX(), position.GetY(), position.GetZ(), intensity, range};
-    uint64_t       hash    = Hash64(reinterpret_cast<const char*>(parts), sizeof(parts));
-    const uint32_t kind    = static_cast<uint32_t>(type);
+    const float parts[] = {position.GetX(), position.GetY(), position.GetZ(), intensity, range};
+    uint64_t    hash    = Hash64(reinterpret_cast<const char*>(parts), sizeof(parts));
+    const auto  kind    = static_cast<uint32_t>(type);
     hash ^= Hash64(reinterpret_cast<const char*>(&kind), sizeof(kind)) + kGolden64 + (hash << 6) + (hash >> 2);
     return hash == 0 ? 1 : hash;
 }
 
 auto ShadowAtlas::TileForDistance(float distance) noexcept -> uint32_t {
-    if (distance < 8.0f) return kMaxTile;
-    if (distance < 20.0f) return 512;
-    if (distance < 60.0f) return 256;
+    if (distance < 8.0f) {
+        return kMaxTile;
+    }
+    if (distance < 20.0f) {
+        return 512;
+    }
+    if (distance < 60.0f) {
+        return 256;
+    }
     return kMinTile;
 }
 
 auto ShadowAtlas::TileRectOf(const ShadowTile& tile) noexcept -> TileRect {
-    const float   atlas = static_cast<float>(kSize);
-    const uint32_t size = static_cast<uint32_t>(std::lround(static_cast<float>(tile.uvScale) * atlas));
+    const auto atlas = static_cast<float>(kSize);
+    const auto size  = static_cast<uint32_t>(std::lround(static_cast<float>(tile.uvScale) * atlas));
     return TileRect {
         .x    = static_cast<uint32_t>(std::lround(tile.uvOrigin.x * atlas)),
         .y    = static_cast<uint32_t>(std::lround(tile.uvOrigin.y * atlas)),
@@ -178,20 +189,19 @@ auto ShadowAtlas::Acquire(const Request& req) noexcept -> Grant {
             break;
         }
     }
-    bool reuse = cached != nullptr && cached->seen == false && cached->x == x && cached->y == y && cached->tile == tile &&
-                 cached->faceCount == faceCount;
+    bool reuse = cached != nullptr && !cached->seen && cached->x == x && cached->y == y && cached->tile == tile && cached->faceCount == faceCount;
     if (reuse) {
         for (uint32_t face = 0; face < faceCount && reuse; ++face) {
-            reuse = std::memcmp(&cached->faces[face], &req.faces[face], sizeof(JPH::Mat44)) == 0;
+            reuse = cached->faces[face] == req.faces[face];
         }
     }
 
-    const int32_t tileBase = static_cast<int32_t>(_tiles.size());
-    const float   invAtlas = 1.0f / static_cast<float>(kSize);
+    const auto  tileBase = static_cast<int32_t>(_tiles.size());
+    const float invAtlas = 1.0f / static_cast<float>(kSize);
     for (uint32_t face = 0; face < faceCount; ++face) {
         ShadowTile tileEntry {};
         tileEntry.viewProj = req.faces[face];
-        tileEntry.uvOrigin = JPH::Float2 {static_cast<float>(x + face * tile) * invAtlas, static_cast<float>(y) * invAtlas};
+        tileEntry.uvOrigin = ZHLN::Float2 {static_cast<float>(x + face * tile) * invAtlas, static_cast<float>(y) * invAtlas};
         tileEntry.uvScale  = static_cast<float>(tile) * invAtlas;
         _tiles.push_back(tileEntry);
     }
@@ -210,14 +220,12 @@ auto ShadowAtlas::Acquire(const Request& req) noexcept -> Grant {
         cached->faces[face] = req.faces[face];
     }
 
-    _placements.push_back(
-        Placement {.lightIndex = req.lightIndex, .tileBase = tileBase, .faceCount = faceCount, .cached = reuse}
-    );
+    _placements.push_back(Placement {.lightIndex = req.lightIndex, .tileBase = tileBase, .faceCount = faceCount, .cached = reuse});
     return Grant {.tileBase = tileBase, .reuse = reuse};
 }
 
 void ShadowAtlas::EndFrame() noexcept {
-    for (auto it = _cache.begin(); it != _cache.end();) {
+    for (auto* it = _cache.begin(); it != _cache.end();) {
         it = it->seen ? std::next(it) : _cache.erase(it);
     }
 }

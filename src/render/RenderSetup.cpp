@@ -1,10 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "render/RenderInternal.hpp"
-#include "render/GpuPack.hpp"
 #include "Zahlen/Math/Camera.hpp"
 #include "Zahlen/Math/Math3D.hpp"
+#include "render/GpuPack.hpp"
+#include "render/RenderInternal.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -19,7 +19,11 @@ void RenderContext::ClearDrawQueues() noexcept {
 }
 
 void RenderContext::SetFrameData(
-    const Camera& cam, const FrameData& frame, const ZHLN::Mat44& shadowProjView, std::span<const LightDesc> lights, float dt
+    const Camera&              cam,
+    const FrameData&           frame,
+    const ZHLN::Mat44&         shadowProjView,
+    std::span<const LightDesc> lights,
+    float                      dt
 ) noexcept {
     _impl->shadowProjView       = shadowProjView;
     _impl->view_matrix          = cam.GetViewMatrix();
@@ -31,19 +35,18 @@ void RenderContext::SetFrameData(
     _impl->submittedLights.assign(lights.begin(), lights.first(std::min(lights.size(), size_t {kMaxSceneLights})).end());
     _impl->UploadSubmittedLights(cam);
 
-    VkExtent2D res    = _impl->graphResources.sceneColor.extent;
-    float      aspect = (res.height > 0) ? static_cast<float>(res.width) / res.height : 1.777f;
+    VkExtent2D  res      = _impl->graphResources.sceneColor.extent;
+    float       aspect   = (res.height > 0) ? static_cast<float>(res.width) / static_cast<float>(res.height) : 1.777f;
     const auto  sceneVp  = _impl->EffectiveViewport();
     const float vpAspect = (sceneVp.height > 0.0F) ? sceneVp.width / sceneVp.height : aspect;
 
-    std::array<float, 4> cascadeSplits {};
-    cascadeSplits[0] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.08f;
-    cascadeSplits[1] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.22f;
-    cascadeSplits[2] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.55f;
-    cascadeSplits[3] = cam.nearZ + (cam.farZ - cam.nearZ) * 1.0f;
+    Float4 cascadeSplits {
+        cam.nearZ + (cam.farZ - cam.nearZ) * 0.08f, cam.nearZ + (cam.farZ - cam.nearZ) * 0.22f, cam.nearZ + (cam.farZ - cam.nearZ) * 0.55f,
+        cam.nearZ + (cam.farZ - cam.nearZ) * 1.0f
+    };
 
     FrameUniforms gpuUniforms    = _impl->currentUniforms;
-    gpuUniforms.screenResolution = JPH::Float2 {static_cast<float>(res.width), static_cast<float>(res.height)};
+    gpuUniforms.screenResolution = {static_cast<float>(res.width), static_cast<float>(res.height)};
 
     gpuUniforms.lightCount = _impl->packedLightCount;
 
@@ -51,12 +54,14 @@ void RenderContext::SetFrameData(
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
     gpuUniforms.invProj           = cam.GetProjectionMatrix(vpAspect).Inversed();
 
-    gpuUniforms.cascadeSplits = ZHLN::Float4 {cascadeSplits[0], cascadeSplits[1], cascadeSplits[2], cascadeSplits[3]};
-    std::memcpy(gpuUniforms.sh.data(), _impl->iblPayload.shCoeffs.data(), sizeof(ZHLN::Float4) * 9);
+    gpuUniforms.cascadeSplits   = {cascadeSplits[0], cascadeSplits[1], cascadeSplits[2], cascadeSplits[3]};
+    gpuUniforms.sh              = _impl->iblPayload.shCoeffs;
     gpuUniforms.environmentMode = _impl->iblPayload.environmentMode;
 
-    JPH::Vec3  sunDir    = frame.sunDirection;
-    if (sunDir.LengthSq() > 1e-6f) sunDir = sunDir.Normalized();
+    JPH::Vec3 sunDir = frame.sunDirection;
+    if (sunDir.LengthSq() > 1e-6f) {
+        sunDir = sunDir.Normalized();
+    }
     JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
 
     float tanHalfFov = std::tan(JPH::DegreesToRadians(cam.fov * 0.5f));
@@ -66,9 +71,7 @@ void RenderContext::SetFrameData(
         float farDist  = cascadeSplits[i];
 
         gpuUniforms.lightSpaceMatrices[i] =
-            ShadowRenderer::ComputeCascadeLightSpaceMatrix(
-                cam, lightView, sunDir, nearDist, farDist, vpAspect, tanHalfFov, frame.shadowResolution
-            );
+            ShadowRenderer::ComputeCascadeLightSpaceMatrix(cam, lightView, sunDir, nearDist, farDist, vpAspect, tanHalfFov, frame.shadowResolution);
     }
 
     gpuUniforms.nearZ = cam.nearZ;
@@ -79,7 +82,9 @@ void RenderContext::SetFrameData(
     }
 
     auto mappedUniforms = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
-    if (!mappedUniforms) return;
+    if (!mappedUniforms) {
+        return;
+    }
     std::memcpy(mappedUniforms->Data(), &gpuUniforms, sizeof(FrameUniforms));
 
     if (vpAspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov || cam.nearZ != _impl->lastNearZ || cam.farZ != _impl->lastFarZ) {
@@ -102,16 +107,14 @@ void RenderContext::Impl::AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept
     for (size_t index = 0; index < submittedLights.size(); ++index) {
         const LightDesc& desc          = submittedLights[index];
         const JPH::Vec3  lightPosition = desc.position;
-        const bool isPoint    = desc.type == LightType::Point;
-        const bool isSpot     = desc.type == LightType::Spot;
+        const bool       isPoint       = desc.type == LightType::Point;
+        const bool       isSpot        = desc.type == LightType::Spot;
         if (!desc.castsShadow || (!isPoint && !isSpot)) {
             lightTileBases.push_back(-1);
             continue;
         }
 
-        const uint32_t faceCount = ShadowAtlas::MakeFaceMatrices(
-            desc.position, desc.direction, desc.range, isPoint, desc.outerConeRadians, faces.data()
-        );
+        const uint32_t       faceCount = ShadowAtlas::MakeFaceMatrices(desc.position, desc.direction, desc.range, isPoint, desc.outerConeRadians, faces.data());
         ShadowAtlas::Request req {};
         req.key        = ShadowAtlas::MakeLightKey(desc.type, desc.position, desc.intensity, desc.range);
         req.lightIndex = static_cast<int32_t>(index);
@@ -126,6 +129,7 @@ void RenderContext::Impl::AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept
     shadowAtlas.EndFrame();
 }
 
+// TODO(Evilpasture): side effects galore.
 void RenderContext::Impl::UploadSubmittedLights(const Camera& cam) noexcept {
     if (submittedLights.empty()) {
         mappedLights.clear();
@@ -161,4 +165,4 @@ void RenderContext::Impl::UploadSubmittedLights(const Camera& cam) noexcept {
     }
 }
 
-}
+} // namespace ZHLN
