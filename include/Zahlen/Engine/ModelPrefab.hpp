@@ -49,7 +49,7 @@ struct ModelPart {
     uint32_t activeMorphCount = 0;
     // The morph weights travel ModelPart -> MorphTargetComponent -> DrawParams
     // -> InstanceData; one spelling for the four lanes end to end.
-    JPH::Float4 defaultMorphWeights = {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::Float4 defaultMorphWeights = {0.0f, 0.0f, 0.0f, 0.0f};
 
     float       boundingRadius = 1.0f;
     JPH::Float3 localMin       = {0.0f, 0.0f, 0.0f};

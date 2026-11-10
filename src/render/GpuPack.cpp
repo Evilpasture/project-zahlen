@@ -144,13 +144,13 @@ auto PackFrameData(const FrameData& frame) noexcept -> FrameUniforms {
     packed.prevUnjitteredViewProj = frame.prevUnjitteredViewProj;
     packed.invViewProj            = frame.invViewProj;
 
-    packed.camPos      = JPH::Float4 {frame.camPosition.x, frame.camPosition.y, frame.camPosition.z, frame.frameClock};
-    packed.lightDir    = JPH::Float4 {frame.sunDirection.x, frame.sunDirection.y, frame.sunDirection.z, frame.sunIntensity};
-    packed.sunRadiance = JPH::Float4 {frame.sunRadiance.x, frame.sunRadiance.y, frame.sunRadiance.z, 0.0f};
+    packed.camPos      = ZHLN::Float4 {frame.camPosition.x, frame.camPosition.y, frame.camPosition.z, frame.frameClock};
+    packed.lightDir    = ZHLN::Float4 {frame.sunDirection.x, frame.sunDirection.y, frame.sunDirection.z, frame.sunIntensity};
+    packed.sunRadiance = ZHLN::Float4 {frame.sunRadiance.x, frame.sunRadiance.y, frame.sunRadiance.z, 0.0f};
 
-    packed.probeMin = JPH::Float4 {frame.probeMin.x, frame.probeMin.y, frame.probeMin.z, static_cast<float>(frame.useLocalProbe)};
-    packed.probeMax = JPH::Float4 {frame.probeMax.x, frame.probeMax.y, frame.probeMax.z, 0.0f};
-    packed.probePos = JPH::Float4 {frame.probePos.x, frame.probePos.y, frame.probePos.z, 0.0f};
+    packed.probeMin = ZHLN::Float4 {frame.probeMin.x, frame.probeMin.y, frame.probeMin.z, static_cast<float>(frame.useLocalProbe)};
+    packed.probeMax = ZHLN::Float4 {frame.probeMax.x, frame.probeMax.y, frame.probeMax.z, 0.0f};
+    packed.probePos = ZHLN::Float4 {frame.probePos.x, frame.probePos.y, frame.probePos.z, 0.0f};
 
     packed.enableRTR        = frame.enableRTR;
     packed.fullBright       = frame.fullBright;

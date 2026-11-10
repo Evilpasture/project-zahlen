@@ -135,7 +135,7 @@ class IBLProcessor {
 
         // 4. Descriptor Heap Setups
         const JPH::Vec3   sunDir3  = JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized();
-        const JPH::Float4 sunDir4 {sunDir3.GetX(), sunDir3.GetY(), sunDir3.GetZ(), 0.0f};
+        const ZHLN::Float4 sunDir4 {sunDir3.GetX(), sunDir3.GetY(), sunDir3.GetZ(), 0.0f};
         const IBLBakePush basePush {
             .outAddr     = hasPreparedSH ? 0 : impl.ctx.BufferAddress(shBuffer.Handle()),
             .sampleCount = 16384,

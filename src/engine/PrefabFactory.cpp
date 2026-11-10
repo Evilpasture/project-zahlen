@@ -396,7 +396,7 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
     // Virtual lights approximate authored emission, not the presentation
     // boost chosen by the importer. Fidelity captures never opt into them.
     const float        invImportScale = 1.0f / emissiveFactorScale;
-    const JPH::Float4& raw            = part.defaultMaterial.emissiveFactor;
+    const ZHLN::Float4& raw            = part.defaultMaterial.emissiveFactor;
     const float        ef[3] {raw.x * invImportScale, raw.y * invImportScale, raw.z * invImportScale};
 
     float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
@@ -447,7 +447,7 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     } else {
         auto mat_res        = gfx.CreateMaterial(MaterialDesc::Basic());
         mat                 = mat_res.value_or(Material {});
-        mat.baseColorFactor = JPH::Float4 {boxColor.GetX(), boxColor.GetY(), boxColor.GetZ(), boxColor.GetW()};
+        mat.baseColorFactor = ZHLN::Float4 {boxColor.GetX(), boxColor.GetY(), boxColor.GetZ(), boxColor.GetW()};
         mat.roughnessFactor = 0.3f;
         mat.metallicFactor  = 0.1f;
     }
@@ -521,7 +521,7 @@ auto SpawnPrimitive(
     } else {
         auto mat_res        = gfx.CreateMaterial(MaterialDesc::Basic());
         mat                 = mat_res.value_or(Material {});
-        mat.baseColorFactor = JPH::Float4 {shapeColor.GetX(), shapeColor.GetY(), shapeColor.GetZ(), shapeColor.GetW()};
+        mat.baseColorFactor = ZHLN::Float4 {shapeColor.GetX(), shapeColor.GetY(), shapeColor.GetZ(), shapeColor.GetW()};
         mat.roughnessFactor = params.roughness;
         mat.metallicFactor  = params.metallic;
     }

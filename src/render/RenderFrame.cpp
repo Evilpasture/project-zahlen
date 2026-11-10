@@ -277,7 +277,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     currentUniforms.viewProj           = view.viewProjMatrix;
     currentUniforms.unjitteredViewProj = unjittered;
     currentUniforms.invViewProj        = unjittered.Inversed();
-    currentUniforms.camPos             = JPH::Float4 {view.worldPosition.x, view.worldPosition.y, view.worldPosition.z, view.time};
+    currentUniforms.camPos             = ZHLN::Float4 {view.worldPosition.x, view.worldPosition.y, view.worldPosition.z, view.time};
     if (view.frameIndex != 0) {
         currentUniforms.frameIndex = view.frameIndex;
     }

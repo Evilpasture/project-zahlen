@@ -129,9 +129,9 @@ struct InstanceDataDesc {
     float alphaCutoff     = 0.0f;
 
     JPH::Float3 localCenter {0.0f, 0.0f, 0.0f};
-    JPH::Float4 morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
-    JPH::Float4 baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
-    JPH::Float4 emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::Float4 morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::Float4 baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::Float4 emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
 
     float                     transmissionFactor       = 0.0f;
     float                     iridescenceFactor        = 0.0f;
@@ -203,7 +203,7 @@ struct InstanceDataDesc {
 
     const uint32_t isMirrored = desc.world.GetDeterminant3x3() < 0.0f ? 1u : 0u;
 
-    JPH::Float4 emissive       = desc.emissiveFactor;
+    ZHLN::Float4 emissive       = desc.emissiveFactor;
     uint32_t    paddingCenter  = 0;
     uint32_t    paddingMeshlet = 0;
     if (hasTransmission != 0) {
@@ -225,8 +225,8 @@ struct InstanceDataDesc {
         const auto& transform = desc.textureTransforms[slot];
         const float c         = transform.rotation == 0.0f ? 1.0f : std::cos(transform.rotation);
         const float s         = transform.rotation == 0.0f ? 0.0f : std::sin(transform.rotation);
-        uvRow0[slot]          = JPH::Float4 {c * transform.scale.x, s * transform.scale.y, transform.offset.x, 0.0f};
-        uvRow1[slot]          = JPH::Float4 {-s * transform.scale.x, c * transform.scale.y, transform.offset.y, static_cast<float>(transform.texCoord)};
+        uvRow0[slot]          = ZHLN::Float4 {c * transform.scale.x, s * transform.scale.y, transform.offset.x, 0.0f};
+        uvRow1[slot]          = ZHLN::Float4 {-s * transform.scale.x, c * transform.scale.y, transform.offset.y, static_cast<float>(transform.texCoord)};
     }
 
     return InstanceData {

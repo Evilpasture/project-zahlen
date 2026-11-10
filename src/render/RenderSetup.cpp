@@ -51,8 +51,8 @@ void RenderContext::SetFrameData(
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
     gpuUniforms.invProj           = cam.GetProjectionMatrix(vpAspect).Inversed();
 
-    gpuUniforms.cascadeSplits = JPH::Float4 {cascadeSplits[0], cascadeSplits[1], cascadeSplits[2], cascadeSplits[3]};
-    std::memcpy(gpuUniforms.sh.data(), _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Float4) * 9);
+    gpuUniforms.cascadeSplits = ZHLN::Float4 {cascadeSplits[0], cascadeSplits[1], cascadeSplits[2], cascadeSplits[3]};
+    std::memcpy(gpuUniforms.sh.data(), _impl->iblPayload.shCoeffs.data(), sizeof(ZHLN::Float4) * 9);
     gpuUniforms.environmentMode = _impl->iblPayload.environmentMode;
 
     JPH::Vec3  sunDir    = frame.sunDirection;
