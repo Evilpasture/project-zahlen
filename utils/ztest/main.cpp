@@ -1172,7 +1172,6 @@ struct WorkItem {
     // Set on a shard that carries exactly one ZHLN::Test::WaitIdle case: the
     // scheduler holds it back until nothing else is running.
     bool                     waitIdle       = false;
-    std::string              waitIdleCase; // node id, for the [ WAIT-IDLE ] line
     // True on an ordinary shard that happens to cover files containing WaitIdle
     // cases: those cases are excluded there and run in their own shard instead.
     bool                     suppressWaitIdle = false;
@@ -2207,7 +2206,6 @@ auto BuildShardedExecutionQueue(
             solo.sourceFiles   = {dc.relFile};
             solo.exactCases    = {dc.nodeId};
             solo.waitIdle      = true;
-            solo.waitIdleCase  = dc.nodeId;
             queue.push_back(std::move(solo));
             continue;
         }
@@ -2269,10 +2267,10 @@ auto BuildShardedExecutionQueue(
     return queue;
 }
 
-void AppendGlyphForStatus(std::string& glyphs, CaseStatus st) {
+void AppendGlyphForStatus(std::string& glyphs, CaseStatus st, bool waitIdle = false) {
     switch (st) {
         case CaseStatus::Pass:
-            glyphs.append(std::format("{}.{}", ZHLN::Color::Green, ZHLN::Color::Reset));
+            glyphs.append(std::format("{}.{}", waitIdle ? ZHLN::Color::Cyan : ZHLN::Color::Green, ZHLN::Color::Reset));
             break;
         case CaseStatus::QuarantinePass:
             glyphs.append(std::format("{}Q{}", ZHLN::Color::Yellow, ZHLN::Color::Reset));
@@ -2471,7 +2469,40 @@ auto main(int argc, char** argv) -> int {
         }
     };
 
+    // WaitIdle cases must still be isolated workers, but consecutive cases
+    // from the same file share one streaming progress line. Never leave it
+    // open while printing diagnostics, changing files, or drawing the ticker.
+    const TargetSpec* idleProgressTarget = nullptr;
+    std::string idleProgressLabel;
+    int64_t idleProgressMs = 0;
+    std::size_t idleProgressCompleted = 0;
+    auto flushIdleProgress = [&] {
+        if (!idleProgressTarget) return;
+        ZHLN::Println(" {}[{:>3}/{:<3}] ({} ms){}", ZHLN::Color::Gray,
+                      idleProgressCompleted, totalExpected, idleProgressMs, ZHLN::Color::Reset);
+        idleProgressTarget = nullptr;
+        idleProgressLabel.clear();
+        idleProgressMs = 0;
+    };
+    auto appendIdleProgress = [&](const WorkItem& item, std::string_view glyphs, int64_t elapsedMs) {
+        if (idleProgressTarget && (idleProgressTarget != item.target || idleProgressLabel != item.shardLabel)) {
+            flushIdleProgress();
+        }
+        if (!idleProgressTarget) {
+            statusLine.Clear();
+            idleProgressTarget = item.target;
+            idleProgressLabel = item.shardLabel;
+            ZHLN::Print("  {:<44} ", idleProgressLabel);
+        }
+        ZHLN::Print("{}", glyphs);
+        idleProgressMs += elapsedMs;
+        idleProgressCompleted = completedSoFar;
+    };
+
     auto recordOutcome = [&](CaseOutcome outcome) {
+        // Diagnostics must start on their own line, even when an earlier
+        // measurement left a streaming progress line open.
+        if (outcome.status != CaseStatus::Pass && outcome.status != CaseStatus::Skip) flushIdleProgress();
         ++completedSoFar;
         const bool isHardFail = outcome.status == CaseStatus::Fail || outcome.status == CaseStatus::Timeout
                              || outcome.status == CaseStatus::Crash;
@@ -2482,21 +2513,16 @@ auto main(int argc, char** argv) -> int {
         const double ms = static_cast<double>(outcome.durationUs) / 1000.0;
         switch (outcome.status) {
             case CaseStatus::Pass:
-                if (outcome.quiesced) {
-                    // A measurement always reports itself, even non-verbose: the
-                    // number is only comparable across runs if the reader can
-                    // tell it was taken on an idle machine.
+                if (outcome.quiesced && opts.verbose && !opts.quiet) {
                     statusLine.Clear();
-                    if (!opts.quiet) {
-                        ZHLN::Println(
-                            "  {}[ PASS ]{} {} ({:.2f} ms, exclusive: machine idle for {:.2f} ms before start)",
-                            ZHLN::Color::Green,
-                            ZHLN::Color::Reset,
-                            outcome.nodeId,
-                            ms,
-                            static_cast<double>(outcome.quiesceUs) / 1000.0
-                        );
-                    }
+                    ZHLN::Println(
+                        "  {}[ PASS ]{} {} ({:.2f} ms, exclusive: machine idle for {:.2f} ms before start)",
+                        ZHLN::Color::Green,
+                        ZHLN::Color::Reset,
+                        outcome.nodeId,
+                        ms,
+                        static_cast<double>(outcome.quiesceUs) / 1000.0
+                    );
                 } else if (opts.verbose && !opts.quiet) {
                     statusLine.Clear();
                     ZHLN::Println(
@@ -2661,7 +2687,7 @@ auto main(int argc, char** argv) -> int {
                 }
 
                 ++w.localTotal;
-                AppendGlyphForStatus(w.progressGlyphs, st);
+                AppendGlyphForStatus(w.progressGlyphs, st, w.item.waitIdle);
 
                 recordOutcome(CaseOutcome {
                     .target      = w.item.target->name,
@@ -2728,7 +2754,7 @@ auto main(int argc, char** argv) -> int {
     std::optional<std::chrono::steady_clock::time_point> lastIdleStamp = std::chrono::steady_clock::now();
 
     auto refreshRunStatus = [&](bool force) {
-        if (!statusLine.Enabled() || opts.verbose || active.empty()) {
+        if (!statusLine.Enabled() || opts.verbose || active.empty() || idleProgressTarget) {
             return;
         }
         const auto now = std::chrono::steady_clock::now();
@@ -2752,6 +2778,7 @@ auto main(int argc, char** argv) -> int {
     while (!pending.empty() || !active.empty()) {
         if (IsStopRequested()) {
             TerminateAndReapWorkers(active);
+            flushIdleProgress();
             statusLine.Clear();
             ZHLN::Println(
                 stderr,
@@ -2806,23 +2833,7 @@ auto main(int argc, char** argv) -> int {
             // worker still owns its pages, file descriptors and (for a GPU
             // case) its device context.
             if (pending[idx].waitIdle) {
-                if (active.empty() && !runningSerial) {
-                    const std::string_view label =
-                        pending[idx].waitIdleCase.empty() ? std::string_view {pending[idx].shardLabel} : std::string_view {pending[idx].waitIdleCase};
-                    // Printed under -v too: a drained run is the moment a
-                    // perf problem is usually being diagnosed, so hiding the
-                    // barrier there hides the explanation for a long pause.
-                    // --quiet still suppresses it.
-                    if (!opts.quiet) {
-                        statusLine.Clear();
-                        ZHLN::Println(
-                            "  {}[ WAIT-IDLE ]{} Machine quiesced for {} -- no other worker is running.",
-                            ZHLN::Color::Cyan,
-                            ZHLN::Color::Reset,
-                            label
-                        );
-                    }
-                } else {
+                if (!active.empty() || runningSerial) {
                     // Do not step over it. `++idx` here is what made a measured
                     // case wait for the whole suite: every sibling spawned ahead
                     // of it drags the pool to exhaust time with it, so a run that
@@ -2847,11 +2858,19 @@ auto main(int argc, char** argv) -> int {
                 continue;
             }
 
+            if (idleProgressTarget && (!pending[idx].waitIdle || pending[idx].target != idleProgressTarget ||
+                                       pending[idx].shardLabel != idleProgressLabel)) {
+                flushIdleProgress();
+            }
             WorkItem nextItem = std::move(pending[idx]);
             pending.erase(pending.begin() + static_cast<std::ptrdiff_t>(idx));
 
             // Stamped before the fork so the number describes the window the
             // measurement actually starts in, not the cost of spawning it.
+            if (idleProgressTarget) {
+                std::error_code ec;
+                if (!fs::exists(nextItem.target->binaryPath, ec)) flushIdleProgress();
+            }
             const bool                   isMeasurement = nextItem.waitIdle;
             const auto                   quiesceStart  = lastIdleStamp;
             auto                         spawned       = SpawnWorkerPosix(mf, nextItem, opts, false, false, statusLine);
@@ -3031,17 +3050,17 @@ auto main(int argc, char** argv) -> int {
                         .diagnostics = std::move(unattributed),
                     });
                 } else if (!opts.verbose && !opts.quiet && w.localTotal > 0) {
-                    statusLine.Clear();
-                    ZHLN::Println(
-                        "  {:<44} {} {}[{:>3}/{:<3}] ({} ms){}",
-                        w.item.shardLabel,
-                        w.progressGlyphs,
-                        ZHLN::Color::Gray,
-                        completedSoFar,
-                        totalExpected,
-                        workerMs,
-                        ZHLN::Color::Reset
-                    );
+                    if (w.item.waitIdle) {
+                        appendIdleProgress(w.item, w.progressGlyphs, workerMs);
+                    } else {
+                        flushIdleProgress();
+                        statusLine.Clear();
+                        ZHLN::Println(
+                            "  {:<44} {} {}[{:>3}/{:<3}] ({} ms){}",
+                            w.item.shardLabel, w.progressGlyphs, ZHLN::Color::Gray,
+                            completedSoFar, totalExpected, workerMs, ZHLN::Color::Reset
+                        );
+                    }
                 }
 
                 active.erase(active.begin() + static_cast<std::ptrdiff_t>(i));
@@ -3061,6 +3080,7 @@ auto main(int argc, char** argv) -> int {
 #else
     while (!pending.empty()) {
         if (IsStopRequested()) {
+            flushIdleProgress();
             statusLine.Clear();
             ZHLN::Println(
                 stderr,
@@ -3076,13 +3096,19 @@ auto main(int argc, char** argv) -> int {
         }
         WorkItem item = std::move(pending.front());
         pending.erase(pending.begin());
+        if (idleProgressTarget && (!item.waitIdle || item.target != idleProgressTarget || item.shardLabel != idleProgressLabel)) {
+            flushIdleProgress();
+        }
 
-        statusLine.Update(
+        if (!idleProgressTarget) statusLine.Update(
             std::format("  running [{}/{}] ", completedSoFar, totalExpected),
             item.shardLabel,
             "..."
         );
+        const auto workerStart = std::chrono::steady_clock::now();
         const ProcessResult res = RunWorkerSyncWin32(mf, item, opts, false);
+        const auto workerMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - workerStart).count();
         std::string         inFile;
         std::string         inNodeId;
         std::string         curLog;
@@ -3147,7 +3173,7 @@ auto main(int argc, char** argv) -> int {
                         crashReport.clear();
                     }
                     ++localTotal;
-                    AppendGlyphForStatus(glyphs, st);
+                    AppendGlyphForStatus(glyphs, st, item.waitIdle);
                     recordOutcome(CaseOutcome {
                         .target      = item.target->name,
                         .relFile     = cols[1].empty() ? item.shardLabel : cols[1],
@@ -3209,20 +3235,21 @@ auto main(int argc, char** argv) -> int {
                 .diagnostics = crashReport.empty() ? res.rawOutput : std::format("{}\n{}", res.rawOutput, crashReport),
             });
         } else if (!opts.verbose && !opts.quiet && localTotal > 0) {
-            statusLine.Clear();
-            ZHLN::Println(
-                "  {:<44} {} {}[{:>3}/{:<3}]{}",
-                item.shardLabel,
-                glyphs,
-                ZHLN::Color::Gray,
-                completedSoFar,
-                totalExpected,
-                ZHLN::Color::Reset
-            );
+            if (item.waitIdle) {
+                appendIdleProgress(item, glyphs, workerMs);
+            } else {
+                flushIdleProgress();
+                statusLine.Clear();
+                ZHLN::Println(
+                    "  {:<44} {} {}[{:>3}/{:<3}]{}", item.shardLabel, glyphs,
+                    ZHLN::Color::Gray, completedSoFar, totalExpected, ZHLN::Color::Reset
+                );
+            }
         }
     }
 #endif
 
+    flushIdleProgress();
     statusLine.Clear();
     SaveLastFailedCache(mf.buildDir, outcomes, wasFiltered);
 

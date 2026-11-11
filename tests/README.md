@@ -233,12 +233,15 @@ every `test_*` function in that namespace.
   been reaped, so nothing of the suite is competing for CPU, the GPU queue, or
   the page cache while the case is timed; ordinary parallelism resumes the
   moment it returns. A running measurement also blocks new spawns, so a shard
-  that was queued behind it cannot start in the middle of the window. When it
-  runs, the isolation is reported rather than assumed:
+  queued behind it cannot start in the middle of the window. In normal progress,
+  a passing measurement is a cyan dot (an ordinary pass is green). Consecutive
+  measurements from the same file stream dots on one line; its elapsed time is
+  the sum of their worker wall times, including startup and teardown. Failures,
+  skips, and quarantines retain their usual status glyphs. With `-v`, the pass
+  line also reports the idle duration:
 
   ```
-    [ WAIT-IDLE ] Machine quiesced for tests/perf/TestPerf.cpp::PerfSuite::upload_throughput -- no other worker is running.
-    [ PASS ] tests/perf/TestPerf.cpp::PerfSuite::upload_throughput (41.20 ms, exclusive: machine idle for 812.40 ms before start)
+    [ PASS ] tests/perf/TestPerf.cpp::PerfSuite::upload_throughput (41.20 ms, exclusive: machine idle for 0.14 ms before start)
   ```
 
   "idle for N ms before start" is measured from the moment the run last became
