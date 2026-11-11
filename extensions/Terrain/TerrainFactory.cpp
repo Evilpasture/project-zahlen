@@ -42,7 +42,7 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
         float hR = get_height(x + 1, z);
         float hD = get_height(x, z - 1);
         float hU = get_height(x, z + 1);
-        return FVec3(hL - hR, 2.0f * dx, hD - hU).Normalized();
+        return FVec3{hL - hR, 2.0f * dx, hD - hU}.Normalized();
     };
 
     std::vector<VertexPosition>     positions;
@@ -226,7 +226,7 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         float     hR   = (x < sampleCount - 1) ? outHeights[(x + 1) + z * sampleCount] : get_height(posX + dx, posZ);
         float     hD   = (z > 0) ? outHeights[x + (z - 1) * sampleCount] : get_height(posX, posZ - dz);
         float     hU   = (z < sampleCount - 1) ? outHeights[x + (z + 1) * sampleCount] : get_height(posX, posZ + dz);
-        FVec3 normal(hL - hR, 2.0f * dx, hD - hU);
+        FVec3 normal{hL - hR, 2.0f * dx, hD - hU};
         return normal.Normalized();
     };
 

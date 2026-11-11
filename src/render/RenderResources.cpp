@@ -316,13 +316,13 @@ void RenderContext::DrawBillboards(TextureID texture, std::span<const BillboardQ
                 continue;
             }
             const FVec3 position = quad.position;
-            const FVec3 velocity = (quad.facing == ParticleAlignment::VelocityStretched) ? FVec3(quad.velocity) : FVec3::Zero();
+            const FVec3 velocity = (quad.facing == ParticleAlignment::VelocityStretched) ? FVec3{quad.velocity} : FVec3::Zero();
 
             Particle packed {};
-            packed.position = ZHLN::FVec4(FVec4(position, 1.0f));
-            packed.velocity = ZHLN::FVec4(FVec4(velocity, 0.0f));
+            packed.position = ZHLN::FVec4{FVec4{position, 1.0f}};
+            packed.velocity = ZHLN::FVec4{FVec4{velocity, 0.0f}};
             packed.color    = quad.color;
-            packed.params   = ZHLN::FVec4(0.0f, 0.0f, quad.size, quad.rotation);
+            packed.params = {0.0f, 0.0f, quad.size, quad.rotation};
             _impl->billboardStaging.push_back(packed);
         }
 

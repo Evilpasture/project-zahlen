@@ -134,11 +134,11 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
 
     const auto invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
 
-    FVec4 nearWorld = invVP * FVec4(ndcX, ndcY, 0.0f, 1.0f);
-    FVec4 farWorld  = invVP * FVec4(ndcX, ndcY, 1.0f, 1.0f);
+    FVec4 nearWorld = invVP * FVec4{ndcX, ndcY, 0.0f, 1.0f};
+    FVec4 farWorld  = invVP * FVec4{ndcX, ndcY, 1.0f, 1.0f};
 
-    FVec3 pNear = FVec3(nearWorld.x / nearWorld.w, nearWorld.y / nearWorld.w, nearWorld.z / nearWorld.w);
-    FVec3 pFar  = FVec3(farWorld.x / farWorld.w, farWorld.y / farWorld.w, farWorld.z / farWorld.w);
+    FVec3 pNear = {nearWorld.x / nearWorld.w, nearWorld.y / nearWorld.w, nearWorld.z / nearWorld.w};
+    FVec3 pFar  = {farWorld.x / farWorld.w, farWorld.y / farWorld.w, farWorld.z / farWorld.w};
     FVec3 dir   = (pFar - pNear).Normalized();
 
     return engine.Physics().Raycast(pNear.Cast<double>(), dir, 1000.0f);
@@ -238,8 +238,8 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
     ZHLN::Camera& cam = cameraComp->camera;
 
     cam.position = {0.0f, 20.0f, 40.0f};
-    cam.yaw      = -90.0f;
-    cam.pitch    = -20.0f;
+    cam.yaw      = ZHLN::DegF{-90.0f};
+    cam.pitch    = ZHLN::DegF{-20.0f};
 
     const uint32_t maxFramesPerSecond = engine.MaxFramesPerSecond();
     const double   targetFrameTime =
@@ -392,9 +392,9 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
             const int kind                     = s_NativeEditorState.requestedSpawn;
             s_NativeEditorState.requestedSpawn = -1;
 
-            const auto yawRad = ZHLN::DegF(cam.yaw).ToRadians();
-            const auto pitchRad = ZHLN::DegF(cam.pitch).ToRadians();
-            const FVec3 forward  = FVec3(ZHLN::Cos(yawRad) * ZHLN::Cos(pitchRad), ZHLN::Sin(pitchRad), ZHLN::Sin(yawRad) * ZHLN::Cos(pitchRad)).Normalized();
+            const auto yawRad = cam.yaw.ToRadians();
+            const auto pitchRad = cam.pitch.ToRadians();
+            const FVec3 forward  = FVec3{ZHLN::Cos(yawRad) * ZHLN::Cos(pitchRad), ZHLN::Sin(pitchRad), ZHLN::Sin(yawRad) * ZHLN::Cos(pitchRad)}.Normalized();
 
             ZHLN::PrefabFactory::SpawnParams sp;
             sp.position = (cam.position + forward * 8.0f).Cast<double>();

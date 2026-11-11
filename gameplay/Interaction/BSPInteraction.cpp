@@ -12,6 +12,7 @@
 // geometry of how far a door travels.
 
 #include "BSPInteraction.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <BSP/BSPInteraction.hpp>
@@ -261,7 +262,7 @@ constexpr float kMinLinearTravel      = 0.5f;   // metres, so a zero-extent brus
 
 [[nodiscard]] auto HalfExtentsOf(ECS::Registry& registry, Entity e) -> FVec3 {
     const auto source = registry.Get<Components::SceneSourceComponent>(e);
-    return source ? FVec3(source->halfExtents) : FVec3::Zero();
+    return source ? FVec3{source->halfExtents} : FVec3::Zero();
 }
 
 void AttachOutputs(ECS::Registry& registry, Entity e, const std::vector<BSP::EntityOutput>& outputs) {
@@ -316,7 +317,7 @@ void AttachDoor(
         }
         const FVec3 sourceAxis = record.door->axisX ? FVec3::UnitX() : (record.door->axisY ? FVec3::UnitY() : FVec3::UnitZ());
         rotAxis                    = BSP::ConvertDirection(options, sourceAxis);
-        openRot                    = closedRot * Quat::FromAxisAngle(rotAxis, (rotAngle * std::numbers::pi_v<float> / 180.0f));
+        openRot                    = closedRot * Quat::FromAxisAngle(rotAxis, DegF{rotAngle}.ToRadians());
         speedNorm                  = std::abs(speed / std::max(std::abs(rotAngle), 1.0f));
     } else {
         // Travel is the brush's own extent along the direction it moves, minus

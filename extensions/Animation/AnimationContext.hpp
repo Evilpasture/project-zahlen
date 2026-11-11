@@ -61,7 +61,7 @@ struct IKChain {
     int32_t   endNodeIndex      = -1;
     FVec3 targetPosition    = FVec3::Zero();
     Quat  targetRotation = Quat::Identity();
-    FVec3 poleVector        = FVec3(0.0f, -1.0f, 0.0f);
+    FVec3 poleVector        = {0.0f, -1.0f, 0.0f};
     float     weight            = 1.0f;
     bool      orientEndEffector = true;
 };

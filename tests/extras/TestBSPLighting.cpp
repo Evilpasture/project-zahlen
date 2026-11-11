@@ -416,8 +416,8 @@ struct BSPLightingTestSuite {
             surface.faceCount          = 1;
             surface.strength           = 0.5f;
             // All eight faces share a centroid: one cluster.
-            surface.position           = FVec3(2.0f, 1.0f, 0.0f);
-            surface.normal             = FVec3(0.0f, 1.0f, 0.0f);
+            surface.position = {2.0f, 1.0f, 0.0f};
+            surface.normal = {0.0f, 1.0f, 0.0f};
             in.push_back(surface);
         }
         for (int i = 0; i < 4; ++i) {
@@ -429,8 +429,8 @@ struct BSPLightingTestSuite {
             // Far from the first group, and from each other: four more
             // clusters. (The +1 keeps them off the coincident group's own
             // cell, which the clusterer would otherwise merge them into.)
-            surface.position         = FVec3(40.0f + 20.0f * static_cast<float>(i), 1.0f, 0.0f);
-            surface.normal           = FVec3(0.0f, 1.0f, 0.0f);
+            surface.position = {40.0f + 20.0f * static_cast<float>(i), 1.0f, 0.0f};
+            surface.normal = {0.0f, 1.0f, 0.0f};
             in.push_back(surface);
         }
 
@@ -458,8 +458,8 @@ struct BSPLightingTestSuite {
             surface.areaSquareMetres = 1.0f;
             surface.faceCount        = 1;
             surface.strength         = 0.5f;
-            surface.position         = FVec3(2.0f + 20.0f * static_cast<float>(i), 1.0f, 0.0f);
-            surface.normal           = FVec3(0.0f, 1.0f, 0.0f);
+            surface.position = {2.0f + 20.0f * static_cast<float>(i), 1.0f, 0.0f};
+            surface.normal = {0.0f, 1.0f, 0.0f};
             many.push_back(surface);
         }
         const std::vector<EmissiveSurface> capped = ZHLN::BSP::FinalizeEmissiveSurfaces(many, {}, 1.0f / 39.37f, 8u);
@@ -485,8 +485,8 @@ struct BSPLightingTestSuite {
             surface.areaSquareInches = 1024.0f;
             surface.faceCount        = 1;
             surface.strength         = 0.5f;
-            surface.position         = FVec3(0.5f + pitchMetres * static_cast<float>(i), 1.0f, 0.0f);
-            surface.normal           = FVec3(0.0f, 1.0f, 0.0f);
+            surface.position = {0.5f + pitchMetres * static_cast<float>(i), 1.0f, 0.0f};
+            surface.normal = {0.0f, 1.0f, 0.0f};
             in.push_back(surface);
         }
 
@@ -511,7 +511,7 @@ struct BSPLightingTestSuite {
     [[nodiscard]] auto finalize_emissive_surfaces_damps_nearby_entity_lights() const -> std::expected<void, ZHLN::ErrorCode> {
         ZHLN::BSP::BspPointLight entity;
         entity.type     = ZHLN::LightType::Point;
-        entity.position = FVec3(0.0f, 0.0f, 0.0f);
+        entity.position = {0.0f, 0.0f, 0.0f};
 
         std::vector<EmissiveSurface> in;
         EmissiveSurface nearSurface;
@@ -521,8 +521,8 @@ struct BSPLightingTestSuite {
         nearSurface.strength         = 0.5f;
         // 24 inches from the entity light: inside the 60-inch (1.52 m) fixture
         // radius, and far enough away in X to be its own cluster.
-        nearSurface.position         = FVec3(0.0f, 0.61f, 0.0f);
-        nearSurface.normal           = FVec3(0.0f, 1.0f, 0.0f);
+        nearSurface.position = {0.0f, 0.61f, 0.0f};
+        nearSurface.normal = {0.0f, 1.0f, 0.0f};
         in.push_back(nearSurface);
 
         EmissiveSurface farSurface;
@@ -530,8 +530,8 @@ struct BSPLightingTestSuite {
         farSurface.areaSquareMetres = 1.0f;
         farSurface.faceCount        = 1;
         farSurface.strength         = 0.5f;
-        farSurface.position         = FVec3(30.0f, 0.61f, 0.0f);
-        farSurface.normal           = FVec3(0.0f, 1.0f, 0.0f);
+        farSurface.position = {30.0f, 0.61f, 0.0f};
+        farSurface.normal = {0.0f, 1.0f, 0.0f};
         in.push_back(farSurface);
 
         // 80 inches out -- the next fixture's panel on the map's 96-inch pitch.
@@ -543,8 +543,8 @@ struct BSPLightingTestSuite {
         neighbourSurface.areaSquareMetres = 1.0f;
         neighbourSurface.faceCount        = 1;
         neighbourSurface.strength         = 0.5f;
-        neighbourSurface.position         = FVec3(80.0f / 39.37f, 0.61f, 0.0f);
-        neighbourSurface.normal           = FVec3(0.0f, 1.0f, 0.0f);
+        neighbourSurface.position = {80.0f / 39.37f, 0.61f, 0.0f};
+        neighbourSurface.normal = {0.0f, 1.0f, 0.0f};
         in.push_back(neighbourSurface);
 
         const std::array<ZHLN::BSP::BspPointLight, 1> entityLights {entity};
@@ -575,8 +575,8 @@ struct BSPLightingTestSuite {
         small.materialName     = "effects/combinedisplay002a";
         small.areaSquareMetres = 0.05f;
         small.strength         = 0.9f;
-        small.position         = FVec3(1.0f, 2.0f, 3.0f);
-        small.normal           = FVec3(0.0f, 1.0f, 0.0f);
+        small.position = {1.0f, 2.0f, 3.0f};
+        small.normal = {0.0f, 1.0f, 0.0f};
 
         EmissiveSurface large = small;
         large.areaSquareMetres = 5.0f;
@@ -640,12 +640,12 @@ struct BSPLightingTestSuite {
         ImportedMapData lit;
         ZHLN::BSP::BspPointLight light;
         light.type      = ZHLN::LightType::Point;
-        light.position  = FVec3(0.0f, 2.0f, 0.0f);
+        light.position = {0.0f, 2.0f, 0.0f};
         light.intensity = 5.0f;
         light.range     = 8.0f;
         lit.lights.push_back(light);
         lit.ambient.authored  = true;
-        lit.ambient.color     = FVec3(0.1f, 0.1f, 0.1f);
+        lit.ambient.color = {0.1f, 0.1f, 0.1f};
         // Above the ambient floor: irradiance = luma * brightness/30 must
         // exceed kAmbientFloorRadiance, so a brightness of 10 is the minimum.
         lit.ambient.intensity = 10.0f;
@@ -808,7 +808,7 @@ struct BSPLightingTestSuite {
             FVec3 centre;
             float     half;
         };
-        const Quad quads[2] = {{FVec3(0.0f, 0.0f, 0.0f), 152.0f}, {FVec3(400.0f, 0.0f, 0.0f), 10.0f}};
+        const Quad quads[2] = {{FVec3{0.0f, 0.0f, 0.0f}, 152.0f}, {FVec3{400.0f, 0.0f, 0.0f}, 10.0f}};
 
         BSPMap map;
         map.version = 20;
@@ -816,10 +816,10 @@ struct BSPLightingTestSuite {
         for (const Quad& q: quads) {
             const uint16_t base = static_cast<uint16_t>(map.vertices.size());
             const FVec3 corners[4] = {
-                FVec3(q.centre.x - q.half, q.centre.y - q.half, q.centre.z),
-                FVec3(q.centre.x + q.half, q.centre.y - q.half, q.centre.z),
-                FVec3(q.centre.x + q.half, q.centre.y + q.half, q.centre.z),
-                FVec3(q.centre.x - q.half, q.centre.y + q.half, q.centre.z)
+                FVec3{q.centre.x - q.half, q.centre.y - q.half, q.centre.z},
+                FVec3{q.centre.x + q.half, q.centre.y - q.half, q.centre.z},
+                FVec3{q.centre.x + q.half, q.centre.y + q.half, q.centre.z},
+                FVec3{q.centre.x - q.half, q.centre.y + q.half, q.centre.z}
             };
             for (const FVec3& c: corners) {
                 ZHLN::BSP::DVertex v;

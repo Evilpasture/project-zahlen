@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -105,13 +106,13 @@ struct PBRTestSuite {
             reg.Add(
                 sunEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = ZHLN::FVec3(0.0f, 10.0f, 10.0f), .rotation = ZHLN::Quat::FromEulerDegrees({20.0f, 0.0f, 0.0f})
+                    .position = ZHLN::FVec3{0.0f, 10.0f, 10.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{20.0f, 0.0f, 0.0f}})
                 },
                 ZHLN::Components::LightComponent {
                     .type      = ZHLN::LightType::Sun,
-                    .color     = ZHLN::FVec3(1.0f, 1.0f, 1.0f),
+                    .color     = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
                     .intensity = 40.0f,
-                    .direction = ZHLN::FVec3(0.0f, 0.35f, 0.93f).Normalized() // Direction TO the sun
+                    .direction = ZHLN::FVec3{0.0f, 0.35f, 0.93f}.Normalized() // Direction TO the sun
                 }
             );
 
@@ -121,10 +122,10 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = ZHLN::FVec3(0.0f, 1.0f, 4.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
+            cam.position = {0.0f, 1.0f, 4.0f};
+            cam.yaw      = ZHLN::DegF{-90.0f};
+            cam.pitch    = ZHLN::DegF{0.0f};
+            cam.fov      = ZHLN::DegF{60.0f};
 
             // 3. Construct PBR Gold Metallic Material (metallic = 1.0, roughness = 0.25)
             auto goldMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.25f, .baseColor = {1.0f, 0.84f, 0.0f, 1.0f}});
@@ -250,16 +251,16 @@ struct PBRTestSuite {
             reg.Add(
                 sunEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = ZHLN::FVec3(0.0f, 10.0f, 10.0f), .rotation = ZHLN::Quat::FromEulerDegrees({0.0f, 0.0f, 0.0f})
+                    .position = ZHLN::FVec3{0.0f, 10.0f, 10.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{0.0f, 0.0f, 0.0f}})
                 },
                 ZHLN::Components::LightComponent {
                     .type      = ZHLN::LightType::Sun,
-                    .color     = ZHLN::FVec3(1.0f, 1.0f, 1.0f),
+                    .color     = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
                     .intensity = 220.0f,
                     // Exactly behind the camera: N=V=L on the +Z face so the
                     // GGX peak is on-screen. A few degrees of elevation puts
                     // r=0.05's lobe between texels (maxL≈15, warm=0).
-                    .direction = ZHLN::FVec3(0.0f, 0.0f, 1.0f)
+                    .direction = ZHLN::FVec3{0.0f, 0.0f, 1.0f}
                 }
             );
 
@@ -268,10 +269,10 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = ZHLN::FVec3(0.0f, 1.0f, 4.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
+            cam.position = {0.0f, 1.0f, 4.0f};
+            cam.yaw      = ZHLN::DegF{-90.0f};
+            cam.pitch    = ZHLN::DegF{0.0f};
+            cam.fov      = ZHLN::DegF{60.0f};
 
             // Metals keep a visible highlight after the screenshot's ACES×0.015
             // mapping; a gray dielectric lands below L=80 and the warm-pixel
@@ -444,9 +445,9 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = ZHLN::FVec3(0.0f, 1.0f, 4.0f);
-            cam.yaw = -90.0f;
-            cam.pitch = 0.0f;
+            cam.position = {0.0f, 1.0f, 4.0f};
+            cam.yaw = ZHLN::DegF{-90.0f};
+            cam.pitch = ZHLN::DegF{0.0f};
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {1.5f, 1.5f, 0.2f},
                 ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *material}
@@ -534,8 +535,8 @@ struct PBRTestSuite {
             // light. Keeping the conditioned IBL removes the HDR disk from
             // both specular and diffuse; it is NOT added as a second sun.
             const ZHLN::Entity authored = reg.Create(ZHLN::Components::LightComponent {
-                .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3(1.0f, 1.0f, 1.0f),
-                .intensity = 0.0f, .direction = ZHLN::FVec3(0.0f, 0.0f, 1.0f)
+                .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
+                .intensity = 0.0f, .direction = ZHLN::FVec3{0.0f, 0.0f, 1.0f}
             });
             ZHLN::Test::Headless::TickFrames(*engine, 3, 1.0f / 60.0f);
             if (!reg.GetEntitiesWith<ZHLN::Components::EnvironmentSunTagComponent>().empty())
@@ -586,9 +587,9 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = ZHLN::FVec3(0.0f, 1.0f, 4.0f);
-            cam.yaw = -90.0f;
-            cam.pitch = 0.0f;
+            cam.position = {0.0f, 1.0f, 4.0f};
+            cam.yaw = ZHLN::DegF{-90.0f};
+            cam.pitch = ZHLN::DegF{0.0f};
 
             auto mat = rc.CreateMaterial(ZHLN::MaterialDesc {
                 .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}
@@ -674,9 +675,9 @@ struct PBRTestSuite {
                 gfx.post.bloomStrength           = 0.0f;
                 gfx.post.glowIntensity           = 0.0f;
                 gfx.post.vignetteIntensity       = 0.0f;
-                gfx.environment.skyZenith        = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
-                gfx.environment.skyHorizon       = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
-                gfx.environment.skyGround        = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+                gfx.environment.skyZenith = {0.0f, 0.0f, 0.0f, 1.0f};
+                gfx.environment.skyHorizon = {0.0f, 0.0f, 0.0f, 1.0f};
+                gfx.environment.skyGround = {0.0f, 0.0f, 0.0f, 1.0f};
             });
             ZHLN::EnvironmentImage env {.width = 64, .height = 32};
             env.rgba.resize(64u * 32u * 4u);
@@ -708,10 +709,10 @@ struct PBRTestSuite {
             const auto camComp = reg.GetSingleton<ZHLN::Components::CameraComponent>();
             if (!camComp) return std::unexpected(PBRTestError::EngineInitFailed);
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = ZHLN::FVec3(0.0f, 1.0f, 4.0f);
-            cam.yaw = -90.0f;
-            cam.pitch = 0.0f;
-            cam.fov = 60.0f;
+            cam.position = {0.0f, 1.0f, 4.0f};
+            cam.yaw = ZHLN::DegF{-90.0f};
+            cam.pitch = ZHLN::DegF{0.0f};
+            cam.fov = ZHLN::DegF{60.0f};
             ZHLN::PrefabFactory::CreateBox(*engine, {1.0f, 1.0f, 1.0f}, {.position = {-0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *control});
             ZHLN::PrefabFactory::CreateBox(*engine, {1.0f, 1.0f, 1.0f}, {.position = {0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *mapped});
             ZHLN::Test::Headless::TickFrames(*engine, 8);
@@ -754,9 +755,9 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = ZHLN::FVec3(0.0f, 1.0f, 3.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
+            cam.position = {0.0f, 1.0f, 3.0f};
+            cam.yaw      = ZHLN::DegF{-90.0f};
+            cam.pitch    = ZHLN::DegF{0.0f};
 
             ZHLN::PrefabFactory::CreateBox(
                 *engine, {2.0f, 2.0f, 0.1f},

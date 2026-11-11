@@ -11,6 +11,7 @@
 // BSPLighting.hpp for the lighting rules.
 
 #include "BSPGeometry.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 
 #include "BSPBakeField.hpp"
@@ -60,10 +61,10 @@ void UpdateBounds(JPH::Float3& boundsMin, JPH::Float3& boundsMax, bool& first, F
 // Source angle triples are (pitch, yaw, roll) degrees, pitch positive down,
 // around a Z-up world. Pitch/yaw -> unit direction in source space.
 [[nodiscard]] auto AngleDirection(FVec3 angles) -> FVec3 {
-    const float pitch = angles.x * (3.14159265358979323846f / 180.0f);
-    const float yaw   = angles.y * (3.14159265358979323846f / 180.0f);
-    const float cp    = std::cos(pitch);
-    return FVec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+    const auto pitch = DegF{angles.x}.ToRadians();
+    const auto yaw = DegF{angles.y}.ToRadians();
+    const float cp    = Cos(pitch);
+    return {cp * Cos(yaw), cp * Sin(yaw), -Sin(pitch)};
 }
 
 // The closed vertex loop of one face, in face winding order, source space.
@@ -128,9 +129,9 @@ struct FaceProjection {
     }
     const DTexData& texData = map.texDatas[static_cast<size_t>(texInfo.texdata)];
     FaceProjection  out;
-    out.sDir    = FVec3(texInfo.textureVecs[0][0], texInfo.textureVecs[0][1], texInfo.textureVecs[0][2]);
+    out.sDir = {texInfo.textureVecs[0][0], texInfo.textureVecs[0][1], texInfo.textureVecs[0][2]};
     out.sOffset = texInfo.textureVecs[0][3];
-    out.tDir    = FVec3(texInfo.textureVecs[1][0], texInfo.textureVecs[1][1], texInfo.textureVecs[1][2]);
+    out.tDir = {texInfo.textureVecs[1][0], texInfo.textureVecs[1][1], texInfo.textureVecs[1][2]};
     out.tOffset = texInfo.textureVecs[1][3];
     out.width   = (texData.width > 0) ? static_cast<float>(texData.width) : 512.0f;
     out.height  = (texData.height > 0) ? static_cast<float>(texData.height) : 512.0f;
@@ -379,7 +380,7 @@ void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::span<const 
             // Open air behind the face (centroid and a few edge midpoints,
             // sampled close and far)? Without it nobody can ever see or touch
             // the back side, so the twin-less sheets is fine single-sided.
-            const FVec3 n(rec.ownN[0], rec.ownN[1], rec.ownN[2]);
+            const auto n = DVec3{rec.ownN[0], rec.ownN[1], rec.ownN[2]}.Cast<float>();
             FVec3       centre = FVec3::Zero();
             for (const FVec3& corner: rec.winding) {
                 centre += corner;
@@ -533,14 +534,14 @@ auto ConvertPosition(const ImportOptions& options, FVec3 in) noexcept -> FVec3 {
     }
     // Z-up right-handed -> Y-up right-handed: rotate -90 degrees about X,
     // then scale. (x, y, z) -> (x, z, -y).
-    return FVec3(in.x * s, in.z * s, -in.y * s);
+    return {in.x * s, in.z * s, -in.y * s};
 }
 
 auto ConvertDirection(const ImportOptions& options, FVec3 in) noexcept -> FVec3 {
     if (!options.convertCoordinates) {
         return in;
     }
-    return FVec3(in.x, in.z, -in.y);
+    return {in.x, in.z, -in.y};
 }
 
 namespace {
@@ -548,10 +549,12 @@ namespace {
 // Source AngleMatrix (SDK convention): columns are forward/left/up from
 // pitch=x, yaw=y, roll=z in degrees. Stored row-major for TransformSkybox*.
 void SkyboxRotation(float pitchDeg, float yawDeg, float rollDeg, float out[9]) {
-    const float degToRad = 0.017453292519943295f;
-    const float sp = std::sin(pitchDeg * degToRad), cp = std::cos(pitchDeg * degToRad);
-    const float sy = std::sin(yawDeg * degToRad),   cy = std::cos(yawDeg * degToRad);
-    const float sr = std::sin(rollDeg * degToRad),  cr = std::cos(rollDeg * degToRad);
+    const auto pitch = DegF{pitchDeg}.ToRadians();
+    const auto yaw = DegF{yawDeg}.ToRadians();
+    const auto roll = DegF{rollDeg}.ToRadians();
+    const float sp = Sin(pitch), cp = Cos(pitch);
+    const float sy = Sin(yaw), cy = Cos(yaw);
+    const float sr = Sin(roll), cr = Cos(roll);
     out[0] = cp * cy;
     out[3] = cp * sy;
     out[6] = -sp;
@@ -830,11 +833,11 @@ auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options
         sub.rotating   = (className == "func_door_rotating" || className == "func_rot_button" || className == "momentary_rot_button");
 
         const DModel&   bspModel = map.models[static_cast<size_t>(modelIndex)];
-        const FVec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
-        const FVec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
+        const FVec3 mins{bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]};
+        const FVec3 maxs{bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]};
         FVec3       pivot = (mins + maxs) * 0.5f;
         if (const auto originKey = entity.FindVector("origin")) {
-            pivot = FVec3((*originKey)[0], (*originKey)[1], (*originKey)[2]);
+            pivot = {(*originKey)[0], (*originKey)[1], (*originKey)[2]};
         }
         sub.pivot = ConvertPosition(options, pivot);
 
@@ -917,7 +920,7 @@ auto GatherEmissiveAreaLights(
             FVec3 faceNormal = FVec3::UnitZ();
             if (static_cast<size_t>(face.planenum) < map.planes.size()) {
                 const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
-                faceNormal          = FVec3(plane.normal[0], plane.normal[1], plane.normal[2]);
+                faceNormal = {plane.normal[0], plane.normal[1], plane.normal[2]};
             }
             surface.normal           = ConvertDirection(options, faceNormal);
             surface.areaSquareInches = static_cast<float>(areaInches);
@@ -1023,7 +1026,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                         const float p[3] = {corner.x, corner.y, corner.z};
                         float       out[3];
                         TransformSkyboxPoint(sky, p, out);
-                        corner = FVec3(out[0], out[1], out[2]);
+                        corner = {out[0], out[1], out[2]};
                     }
                 }
             }
@@ -1050,23 +1053,21 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             FVec3 faceNormal = FVec3::UnitZ();
             if (static_cast<size_t>(face.planenum) < map.planes.size()) {
                 const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
-                faceNormal          = FVec3(plane.normal[0], plane.normal[1], plane.normal[2]);
+                faceNormal = {plane.normal[0], plane.normal[1], plane.normal[2]};
             }
             if (skyFace) {
                 const float n[3] = {faceNormal.x, faceNormal.y, faceNormal.z};
                 float       out[3];
                 TransformSkyboxVector(sky, n, out);
-                faceNormal = FVec3(out[0], out[1], out[2]);
+                faceNormal = {out[0], out[1], out[2]};
             }
             {
                 FVec3 windingNormal = FVec3::Zero();
                 for (size_t i = 0; i < winding->size(); ++i) {
                     const FVec3& a = (*winding)[i];
                     const FVec3& b = (*winding)[(i + 1) % winding->size()];
-                    windingNormal += FVec3(
-                        (a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x),
-                        (a.x - b.x) * (a.y + b.y)
-                    );
+                    windingNormal += FVec3{(a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x),
+                    (a.x - b.x) * (a.y + b.y)};
                 }
                 if (Dot(windingNormal, faceNormal) < 0.0f) {
                     std::reverse(winding->begin(), winding->end());
@@ -1181,7 +1182,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 const uint32_t gridSize = 1u << static_cast<uint32_t>(power);
                 const uint32_t side     = gridSize + 1;
 
-                const FVec3 dispStartPos(dispInfo.startPosition[0], dispInfo.startPosition[1], dispInfo.startPosition[2]);
+                const FVec3 dispStartPos{dispInfo.startPosition[0], dispInfo.startPosition[1], dispInfo.startPosition[2]};
                 // Rotate the base quad so corner 0 is the displacement's start
                 // position, keeping winding order. Skybox windings were already
                 // moved into placed space above (scaled by sky.scale around the
@@ -1194,7 +1195,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                     const float s[3] = {dispStartPos.x, dispStartPos.y, dispStartPos.z};
                     float       out[3];
                     TransformSkyboxPoint(sky, s, out);
-                    matchStartPos = FVec3(out[0], out[1], out[2]);
+                    matchStartPos = {out[0], out[1], out[2]};
                 }
                 size_t startIndex = 0;
                 float  bestDistSq = 1e30f;
@@ -1228,7 +1229,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                         const FVec3 base = row0 + (row1 - row0) * fv;
 
                         const DDispVert& dispVert = map.dispVerts[vertBase + static_cast<size_t>(j) * side + i];
-                        const FVec3  dispVec(dispVert.vec[0], dispVert.vec[1], dispVert.vec[2]);
+                        const FVec3  dispVec{dispVert.vec[0], dispVert.vec[1], dispVert.vec[2]};
                         FVec3        offset = dispVec * dispVert.dist;
                         if (skyFace) {
                             // The base quad already carries sky.scale (the
@@ -1240,7 +1241,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                             const float d[3] = {offset.x, offset.y, offset.z};
                             float       out[3];
                             TransformSkyboxVector(sky, d, out);
-                            offset = FVec3(out[0], out[1], out[2]) * sky.scale;
+                            offset = FVec3{out[0], out[1], out[2]} * sky.scale;
                         }
                         grid[static_cast<size_t>(j) * side + i] = base + offset;
                     }

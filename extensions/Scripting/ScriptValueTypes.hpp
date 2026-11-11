@@ -45,6 +45,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -114,6 +115,24 @@ auto ReadNumbers(const ScriptVal& sval, std::string_view scriptName, Unbox unbox
 
 } // namespace
 
+// Camera degree fields remain numbers on the scripting boundary, rather than
+// becoming boxed objects just because their native storage has a unit.
+template <>
+struct ScriptValueTrait<DegF> {
+    static constexpr bool specialized = true;
+
+    static auto To(DegF angle) -> ScriptVal {
+        return static_cast<double>(angle.value);
+    }
+
+    static auto From(const ScriptVal& sval) -> std::expected<DegF, ErrorCode> {
+        if (const auto* d = std::get_if<double>(&sval)) {
+            return DegF{static_cast<float>(*d)};
+        }
+        return std::unexpected(ScriptError::TypeMismatch);
+    }
+};
+
 // ---------------------------------------------------------------------------
 // Entity <-> packed id
 // ---------------------------------------------------------------------------
@@ -155,7 +174,7 @@ struct ScriptValueTrait<FVec3> {
         if (!nums) {
             return std::unexpected(nums.error());
         }
-        return FVec3(static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2]));
+        return FVec3{static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2])};
     }
 };
 
@@ -175,7 +194,7 @@ struct ScriptValueTrait<DVec3> {
         if (!nums) {
             return std::unexpected(nums.error());
         }
-        return DVec3((*nums)[0], (*nums)[1], (*nums)[2]);
+        return DVec3{(*nums)[0], (*nums)[1], (*nums)[2]};
     }
 };
 
@@ -199,7 +218,7 @@ struct ScriptValueTrait<ZHLN::Quat> {
         if (!nums) {
             return std::unexpected(nums.error());
         }
-        return ZHLN::Quat(static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2]), static_cast<float>((*nums)[3]));
+        return ZHLN::Quat{static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2]), static_cast<float>((*nums)[3])};
     }
 };
 
@@ -226,7 +245,7 @@ struct ScriptValueTrait<FVec4> {
         if (!nums) {
             return std::unexpected(nums.error());
         }
-        return FVec4(static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2]), static_cast<float>((*nums)[3]));
+        return FVec4{static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2]), static_cast<float>((*nums)[3])};
     }
 };
 

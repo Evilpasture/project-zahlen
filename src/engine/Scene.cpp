@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -89,7 +90,7 @@ consteval auto SharesEveryField() -> bool {
     return PrefabFactory::SpawnParams {
         .position           = {static_cast<double>(entity.transform.position.x), static_cast<double>(entity.transform.position.y),
                                static_cast<double>(entity.transform.position.z)},
-        .rotation           = Quat::FromEulerDegrees(entity.transform.rotation),
+        .rotation           = Quat::FromEulerDegrees({entity.transform.rotation}),
         .scale              = entity.transform.scale,
         .createPhysics      = entity.body != BodyKind::None,
         .isStaticPhysics    = entity.body != BodyKind::Dynamic,
@@ -160,9 +161,9 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
     const auto cameraEntity = sceneReg.SingletonEntity<Components::MainCameraTagComponent>();
     sceneReg.Patch<Components::CameraComponent>(cameraEntity, [&](Components::CameraComponent& c) {
         c.camera.position = FVec3 {description.camera.position};
-        c.camera.yaw      = description.camera.yaw;
-        c.camera.pitch    = description.camera.pitch;
-        c.camera.fov      = description.camera.fov;
+        c.camera.yaw      = DegF{description.camera.yaw};
+        c.camera.pitch    = DegF{description.camera.pitch};
+        c.camera.fov      = DegF{description.camera.fov};
     });
 
     // The scene description is a source of settings, not their owner: it hands
@@ -289,7 +290,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 // Logic-only entity (trigger volumes): transform + source stamp,
                 // no rendered geometry and no physics.
                 const auto position = entity.transform.position;
-                const auto rotation = Quat::FromEulerDegrees(entity.transform.rotation);
+                const auto rotation = Quat::FromEulerDegrees({entity.transform.rotation});
                 const auto scale = entity.transform.scale;
                 const auto world = ComposeTransform(position, rotation, scale);
 
@@ -313,7 +314,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         }
 
         const auto position = light.position;
-        const auto rotation = Quat::FromEulerDegrees(light.rotation);
+        const auto rotation = Quat::FromEulerDegrees({light.rotation});
         const auto world = ComposeTransform(position, rotation, {1.0f, 1.0f, 1.0f});
 
         const auto rawDirection = light.direction;
@@ -363,13 +364,13 @@ namespace {
 [[nodiscard]] auto ToDescriptionTransform(const Components::TransformComponent& transform) noexcept -> Transform {
     return Transform {
         .position = ToDescriptionFloat3(transform.position),
-        .rotation = ToDescriptionFloat3(transform.rotation.EulerAnglesDegrees()),
+        .rotation = ToDescriptionFloat3(transform.rotation.EulerAnglesDegrees().value),
         .scale    = ToDescriptionFloat3(transform.scale)
     };
 }
 
 [[nodiscard]] auto ToDescriptionCamera(const Camera& camera) noexcept -> SceneCamera {
-    return SceneCamera {.position = ToDescriptionFloat3(camera.position), .yaw = camera.yaw, .pitch = camera.pitch, .fov = camera.fov};
+    return SceneCamera {.position = ToDescriptionFloat3(camera.position), .yaw = camera.yaw.value, .pitch = camera.pitch.value, .fov = camera.fov.value};
 }
 
 [[nodiscard]] auto ExtractEnvironment(const GraphicsSettings& gfx) -> SceneEnvironment {
@@ -469,7 +470,7 @@ namespace {
                 .name        = name ? std::string {std::string_view {name->name}} : std::string {},
                 .type        = std::string {ZHLN::Reflect::EnumToString(light.type)},
                 .position    = transform ? ToDescriptionFloat3(transform->position) : defaults.position,
-                .rotation    = transform ? ToDescriptionFloat3(transform->rotation.EulerAnglesDegrees()) : defaults.rotation,
+                .rotation    = transform ? ToDescriptionFloat3(transform->rotation.EulerAnglesDegrees().value) : defaults.rotation,
                 .direction   = ToDescriptionFloat3(light.direction),
                 .color       = ToDescriptionFloat3(light.color),
                 .intensity   = light.intensity,

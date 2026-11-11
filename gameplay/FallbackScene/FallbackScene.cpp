@@ -210,15 +210,15 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     // 1. Animate 3D Emblem & Orbit Light
     if (s_AnimateScene) {
         reg.Patch<Components::TransformComponent>(s_CubeEntity, [&](auto& trans) -> auto {
-            FVec3 euler(s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f);
-            trans.rotation = Quat::FromEulerDegrees(euler);
+            FVec3 euler{s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f};
+            trans.rotation = Quat::FromEulerDegrees({euler});
             trans.position.y = 2.0f + std::sin(s_AccumTime * 2.0f) * 0.25f;
         });
 
         reg.Patch<Components::TransformComponent>(s_PointLight, [&](auto& trans) -> auto {
             float orbitX   = std::cos(s_AccumTime * 1.5f) * 3.5f;
             float orbitZ   = std::sin(s_AccumTime * 1.5f) * 3.5f;
-            trans.position = FVec3(orbitX, 2.5f + std::sin(s_AccumTime * 3.0f) * 0.5f, orbitZ);
+            trans.position = {orbitX, 2.5f + std::sin(s_AccumTime * 3.0f) * 0.5f, orbitZ};
         });
     }
 

@@ -584,7 +584,7 @@ auto CreateSphere(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<Physics
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
-        gfx, reg, pc, "Sphere", CreateSphereMesh(gfx, radius, resolved.color), Components::OwnedMeshComponent::Shape::Sphere, FVec3(radius, 0.0f, 0.0f),
+        gfx, reg, pc, "Sphere", CreateSphereMesh(gfx, radius, resolved.color), Components::OwnedMeshComponent::Shape::Sphere, FVec3{radius, 0.0f, 0.0f},
         radius * maxScale * 2.0f, Physics::ShapeType::Sphere, radius * maxScale, 0.0f, resolved
     );
 }
@@ -602,7 +602,7 @@ auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<Physi
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
         gfx, reg, pc, "Cylinder", CreateCylinderMesh(gfx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cylinder,
-        FVec3(radius, height, 0.0f), std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * maxScale,
+        FVec3{radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * maxScale,
         height * 0.5f * maxScale, resolved
     );
 }
@@ -618,7 +618,7 @@ auto CreateCone(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCo
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
-        gfx, reg, pc, "Cone", CreateConeMesh(gfx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cone, FVec3(radius, height, 0.0f),
+        gfx, reg, pc, "Cone", CreateConeMesh(gfx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cone, FVec3{radius, height, 0.0f},
         std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * 0.5f * maxScale, height * 0.5f * maxScale, resolved
     );
 }

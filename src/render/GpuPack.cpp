@@ -128,7 +128,7 @@ auto PackLight(const LightDesc& desc, const Mat4x4& worldToView, int32_t shadowT
     }
 
     const FVec3 position     = desc.position;
-    const FVec4 positionView = FVec4((worldToView * FVec4(position, 1.0f)).XYZ(), 1.0f);
+    const FVec4 positionView = FVec4{(worldToView * FVec4{position, 1.0f}).XYZ(), 1.0f};
     packed.positionView          = positionView;
 
     if (desc.type == LightType::Area) {

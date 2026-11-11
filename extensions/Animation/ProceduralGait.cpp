@@ -85,7 +85,7 @@ void TranslateSubtree(const RigBoneMap& map, Mat4x4* transforms, RigNodeIndex ro
 }
 
 [[nodiscard]] FVec3 MatrixScale(const Mat4x4& matrix) noexcept {
-    return FVec3(ProceduralMath::Column3(matrix, 0).Length(), ProceduralMath::Column3(matrix, 1).Length(), ProceduralMath::Column3(matrix, 2).Length());
+    return {ProceduralMath::Column3(matrix, 0).Length(), ProceduralMath::Column3(matrix, 1).Length(), ProceduralMath::Column3(matrix, 2).Length()};
 }
 
 [[nodiscard]] Quat MatrixRotation(const Mat4x4& matrix) noexcept {
@@ -93,7 +93,7 @@ void TranslateSubtree(const RigBoneMap& map, Mat4x4* transforms, RigNodeIndex ro
     const FVec3 x     = scale.x > 1.0e-6f ? ProceduralMath::Column3(matrix, 0) / scale.x : FVec3::UnitX();
     const FVec3 y     = scale.y > 1.0e-6f ? ProceduralMath::Column3(matrix, 1) / scale.y : FVec3::UnitY();
     const FVec3 z     = scale.z > 1.0e-6f ? ProceduralMath::Column3(matrix, 2) / scale.z : FVec3::UnitZ();
-    return ProceduralMath::Rotation(Mat4x4::FromCols(FVec4(x, 0.0f), FVec4(y, 0.0f), FVec4(z, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f)));
+    return ProceduralMath::Rotation(Mat4x4::FromCols(FVec4{x, 0.0f}, FVec4{y, 0.0f}, FVec4{z, 0.0f}, FVec4{0.0f, 0.0f, 0.0f, 1.0f}));
 }
 
 [[nodiscard]] Mat4x4 BlendTransform(const Mat4x4& authored, const Mat4x4& solved, float weight) noexcept {
@@ -136,7 +136,7 @@ void RotateSubtree(const RigBoneMap& map, Mat4x4* transforms, RigNodeIndex rootN
 }
 
 [[nodiscard]] FVec3 SafeNormalized(FVec3 value, FVec3 fallback) noexcept {
-    return value.LengthSquared() > 1.0e-8f ? value.Normalized() : FVec3(fallback);
+    return value.LengthSquared() > 1.0e-8f ? value.Normalized() : fallback;
 }
 
 } // namespace
@@ -303,13 +303,13 @@ void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, Mat4x4* nodeTran
 
     const FVec3 hipsPosition  = ProceduralMath::Translation(nodeTransforms[hipsNode]);
     const FVec3 chestPosition = IsValidRigNode(chestNode, map.nodeCount) ? ProceduralMath::Translation(nodeTransforms[chestNode]) :
-                                                                               hipsPosition + FVec3(0.0f, 0.35f, 0.0f);
+                                                                               hipsPosition + FVec3{0.0f, 0.35f, 0.0f};
     // Approximate the humanoid COM from pelvis and torso masses. This is a
     // physical weighted center, not an animation interpolation.
     gait.centerOfMassModel = (hipsPosition * 0.68f + chestPosition * 0.32f);
 
-    const Quat pitch = Quat::FromAxisAngle(FVec3::UnitX(), gait.forwardLean);
-    const Quat roll  = Quat::FromAxisAngle(FVec3::UnitZ(), gait.lateralBank);
+    const Quat pitch = Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{gait.forwardLean});
+    const Quat roll  = Quat::FromAxisAngle(FVec3::UnitZ(), ZHLN::RadF{gait.lateralBank});
     // Rotate from spine so legs are not displaced.
     const RigNodeIndex tiltRoot = IsValidRigNode(spineNode, map.nodeCount) ? spineNode : hipsNode;
     RotateSubtreeAroundPivot(map, nodeTransforms, tiltRoot, gait.centerOfMassModel, (pitch * roll).Normalized());
@@ -322,20 +322,20 @@ Mat4x4 CorrectBoneDirection(
     FVec3      solvedPosition
 ) noexcept {
     const Quat correction =
-        FromTo(SafeNormalized(currentDirection, FVec3(0.0f, -1.0f, 0.0f)), SafeNormalized(solvedDirection, FVec3(0.0f, -1.0f, 0.0f)));
+        FromTo(SafeNormalized(currentDirection, FVec3{0.0f, -1.0f, 0.0f}), SafeNormalized(solvedDirection, FVec3{0.0f, -1.0f, 0.0f}));
     const Quat rotation = (correction * MatrixRotation(authoredTransform)).Normalized();
     return ProceduralMath::Transform(rotation, solvedPosition, MatrixScale(authoredTransform));
 }
 
-FVec3 LimitGroundNormal(FVec3 modelNormal, float maxSidewaysRadians, float maxForwardRadians) noexcept {
+FVec3 LimitGroundNormal(FVec3 modelNormal, RadF maxSidewaysRadians, RadF maxForwardRadians) noexcept {
     const FVec3 normal = SafeNormalized(modelNormal, FVec3::UnitY());
     // Decompose the normal into forward ankle pitch (around X) and sideways
     // ankle roll (around Z). Reconstructing after independent clamps avoids the
     // unrestricted sFromTo correction folding a foot sharply onto its side.
-    const float     pitch         = std::clamp(std::asin(std::clamp(normal.z, -1.0f, 1.0f)), -std::abs(maxForwardRadians), std::abs(maxForwardRadians));
-    const float     roll          = std::clamp(std::atan2(-normal.x, normal.y), -std::abs(maxSidewaysRadians), std::abs(maxSidewaysRadians));
-    const Quat pitchRotation = Quat::FromAxisAngle(FVec3::UnitX(), pitch);
-    const Quat rollRotation  = Quat::FromAxisAngle(FVec3::UnitZ(), roll);
+    const float     pitch         = std::clamp(std::asin(std::clamp(normal.z, -1.0f, 1.0f)), -std::abs(maxForwardRadians.value), std::abs(maxForwardRadians.value));
+    const float     roll          = std::clamp(std::atan2(-normal.x, normal.y), -std::abs(maxSidewaysRadians.value), std::abs(maxSidewaysRadians.value));
+    const Quat pitchRotation = Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{pitch});
+    const Quat rollRotation  = Quat::FromAxisAngle(FVec3::UnitZ(), ZHLN::RadF{roll});
     return SafeNormalized((rollRotation * pitchRotation) * FVec3::UnitY(), FVec3::UnitY());
 }
 
@@ -343,8 +343,8 @@ Mat4x4 AlignFootToGround(
     const Mat4x4& authoredFoot,
     FVec3      target,
     FVec3      modelNormal,
-    float             maxSidewaysRadians,
-    float             maxForwardRadians
+    RadF             maxSidewaysRadians,
+    RadF             maxForwardRadians
 ) noexcept {
     const FVec3 limitedNormal = LimitGroundNormal(modelNormal, maxSidewaysRadians, maxForwardRadians);
     const Quat correction    = FromTo(FVec3::UnitY(), limitedNormal);
@@ -380,7 +380,7 @@ void ApplyIKReachTilt(
     float                          weightL,
     float                          weightR,
     float                          maxLegExtension,
-    float                          maxBodyTiltRadians,
+    RadF                          maxBodyTiltRadians,
     float                          dt
 ) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
@@ -428,10 +428,10 @@ void ApplyIKReachTilt(
         supportPivot /= supportWeight;
         requestedShift /= supportWeight;
     } else {
-        supportPivot = ProceduralMath::Translation(nodeTransforms[hipsNode]) - FVec3(0.0f, 1.0f, 0.0f);
+        supportPivot = ProceduralMath::Translation(nodeTransforms[hipsNode]) - FVec3{0.0f, 1.0f, 0.0f};
     }
 
-    const float maxTilt     = std::max(maxBodyTiltRadians, 0.0f);
+    const float maxTilt     = std::max(maxBodyTiltRadians.value, 0.0f);
     float       targetPitch = 0.0f;
     float       targetRoll  = 0.0f;
     if (requestedShift.LengthSquared() > 1.0e-8f && maxTilt > 0.0f) {
@@ -461,8 +461,8 @@ void ApplyIKReachTilt(
     // IK reach and causes planted feet to slide — violating the IK contract.
     const RigNodeIndex spineNode = Node(map, CharacterBone::Spine);
     const RigNodeIndex tiltRoot  = IsValidRigNode(spineNode, map.nodeCount) ? spineNode : hipsNode;
-    const Quat    pitch     = Quat::FromAxisAngle(FVec3::UnitX(), gait.ikBodyTiltPitch);
-    const Quat    roll      = Quat::FromAxisAngle(FVec3::UnitZ(), gait.ikBodyTiltRoll);
+    const Quat    pitch     = Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{gait.ikBodyTiltPitch});
+    const Quat    roll      = Quat::FromAxisAngle(FVec3::UnitZ(), ZHLN::RadF{gait.ikBodyTiltRoll});
     RotateSubtreeAroundPivot(map, nodeTransforms, tiltRoot, ProceduralMath::Translation(nodeTransforms[hipsNode]), (roll * pitch).Normalized());
 }
 
@@ -479,13 +479,13 @@ void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, Mat4x4* no
     const RigNodeIndex hipsNode = Node(map, CharacterBone::Hips);
     if (IsValidRigNode(hipsNode, map.nodeCount)) {
         const float drop = includeDrop ? gait.pelvisDrop : 0.0f;
-        TranslateSubtree(map, nodeTransforms, hipsNode, FVec3(0.0f, gait.pelvisBob + drop, 0.0f));
+        TranslateSubtree(map, nodeTransforms, hipsNode, FVec3{0.0f, gait.pelvisBob + drop, 0.0f});
     }
     // Lateral: sway on spine only — avoids displacing thighs sideways.
     if (gait.pelvisSway != 0.0f) {
         const RigNodeIndex spineNode = Node(map, CharacterBone::Spine);
         if (IsValidRigNode(spineNode, map.nodeCount)) {
-            TranslateSubtree(map, nodeTransforms, spineNode, FVec3(gait.pelvisSway, 0.0f, 0.0f));
+            TranslateSubtree(map, nodeTransforms, spineNode, FVec3{gait.pelvisSway, 0.0f, 0.0f});
         }
     }
 }
@@ -506,17 +506,17 @@ void SolveLegGrounding(
     float                          dt,
     float                          pelvisDropWeight,
     float                          maxLegExtension,
-    float                          maxBodyTiltRadians,
-    float                          maxAnkleSidewaysRadians,
-    float                          maxAnkleForwardRadians
+    RadF                          maxBodyTiltRadians,
+    RadF                          maxAnkleSidewaysRadians,
+    RadF                          maxAnkleForwardRadians
 ) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
         return;
     }
 
     const Quat inverseRootRot = rootRotation.Inversed();
-    const auto      toWorld        = [&](FVec3 local) { return FVec3(rootPosition) + rootRotation * local; };
-    const auto      toModel        = [&](FVec3 world) { return inverseRootRot * (world - FVec3(rootPosition)); };
+    const auto      toWorld        = [&](FVec3 local) { return rootPosition + rootRotation * local; };
+    const auto      toModel        = [&](FVec3 world) { return inverseRootRot * (world - rootPosition); };
 
     struct FootContact {
         FVec3 position;
@@ -528,7 +528,7 @@ void SolveLegGrounding(
         FVec3 probeWorld   = (planted && lockValid && !enteringPlant) ? lockedWorld : desiredWorld;
         probeWorld.y = desiredWorld.y;
 
-        const auto hit = physics.Raycast((probeWorld + FVec3(0.0f, 0.75f, 0.0f)).Cast<double>(), {0.0f, -1.0f, 0.0f}, 1.80f, ignoredPhysicsID);
+        const auto hit = physics.Raycast((probeWorld + FVec3{0.0f, 0.75f, 0.0f}).Cast<double>(), {0.0f, -1.0f, 0.0f}, 1.80f, ignoredPhysicsID);
 
         FootContact contact {.position = desiredWorld, .normal = hit.hasHit ? SafeNormalized(hit.normal, FVec3::UnitY()) : FVec3::UnitY()};
         if (hit.hasHit) {
@@ -555,10 +555,10 @@ void SolveLegGrounding(
 
     auto footProbe = [&](CharacterBone footBone, FVec3 proceduralTarget) {
         if (!preserveAuthoredFootXZ) {
-            return FVec3(proceduralTarget);
+            return proceduralTarget;
         }
         const RigNodeIndex footNode = Node(map, footBone);
-        return IsValidRigNode(footNode, map.nodeCount) ? ProceduralMath::Translation(nodeTransforms[footNode]) : FVec3(proceduralTarget);
+        return IsValidRigNode(footNode, map.nodeCount) ? ProceduralMath::Translation(nodeTransforms[footNode]) : proceduralTarget;
     };
 
     const FVec3 probeL = footProbe(CharacterBone::FootL, gait.localFootTargetL);
@@ -635,11 +635,11 @@ void SolveLegGrounding(
         // Preserve the authored knee plane. The IK correction should bend from
         // the keyframed shin direction rather than resetting every plant to a
         // hard-coded character-forward pole.
-        const FVec3 targetAxis   = SafeNormalized(target - thighPosition, FVec3(0.0f, -1.0f, 0.0f));
+        const FVec3 targetAxis   = SafeNormalized(target - thighPosition, FVec3{0.0f, -1.0f, 0.0f});
         FVec3       authoredPole = (shinPosition - thighPosition) - targetAxis * Dot((shinPosition - thighPosition), targetAxis);
         if (authoredPole.LengthSquared() < 1.0e-6f) {
             const float     poleX = thighBone == CharacterBone::ThighL ? 0.08f : -0.08f;
-            const FVec3 fallbackPole(poleX, 0.0f, 1.0f);
+            const FVec3 fallbackPole{poleX, 0.0f, 1.0f};
             authoredPole = fallbackPole - targetAxis * Dot(fallbackPole, targetAxis);
         }
         const FVec3 pole = SafeNormalized(authoredPole, FVec3::UnitZ());
@@ -675,8 +675,8 @@ void SolveLegGrounding(
 
         // Derive correction axes from the evaluated model-space pose rather
         // than assuming that imported bones use a particular local axis.
-        const FVec3 currentUpperDir = SafeNormalized(shinPosition - thighPosition, FVec3(0.0f, -1.0f, 0.0f));
-        const FVec3 currentLowerDir = SafeNormalized(footPosition - shinPosition, FVec3(0.0f, -1.0f, 0.0f));
+        const FVec3 currentUpperDir = SafeNormalized(shinPosition - thighPosition, FVec3{0.0f, -1.0f, 0.0f});
+        const FVec3 currentLowerDir = SafeNormalized(footPosition - shinPosition, FVec3{0.0f, -1.0f, 0.0f});
 
         const Mat4x4 authoredThigh = nodeTransforms[thighNode];
         const Mat4x4 authoredShin  = nodeTransforms[shinNode];
@@ -728,10 +728,10 @@ void SolveUpperBody(
         const RigNodeIndex armL        = Node(map, CharacterBone::UpperArmL);
         const RigNodeIndex armR        = Node(map, CharacterBone::UpperArmR);
         if (IsValidRigNode(armL, map.nodeCount)) {
-            RotateSubtree(map, nodeTransforms, armL, Quat::FromAxisAngle(FVec3::UnitX(), -armAngle));
+            RotateSubtree(map, nodeTransforms, armL, Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{-armAngle}));
         }
         if (IsValidRigNode(armR, map.nodeCount)) {
-            RotateSubtree(map, nodeTransforms, armR, Quat::FromAxisAngle(FVec3::UnitX(), armAngle));
+            RotateSubtree(map, nodeTransforms, armR, Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{armAngle}));
         }
     }
 
@@ -745,7 +745,7 @@ void SolveUpperBody(
     }
 
     const Quat inverseRootRot = rootRotation.Inversed();
-    const FVec3 targetModel    = inverseRootRot * (FVec3(lookAt->targetWorldPos) - FVec3(rootPosition));
+    const FVec3 targetModel    = inverseRootRot * (lookAt->targetWorldPos - rootPosition);
     const FVec3 headPosition   = ProceduralMath::Translation(nodeTransforms[headNode]);
     FVec3       targetDir      = targetModel - headPosition;
     if (targetDir.LengthSquared() < 1.0e-8f) {
@@ -755,7 +755,7 @@ void SolveUpperBody(
 
     const FVec3 currentForward = SafeNormalized(ProceduralMath::Direction(nodeTransforms[headNode], FVec3::UnitZ()), FVec3::UnitZ());
     const float     aimAngle       = std::acos(std::clamp(Dot(currentForward, targetDir), -1.0f, 1.0f));
-    const float     maxAngle       = std::clamp(ZHLN::DegF(lookAt->maxAngleDeg).ToRadians().value, 0.0f, std::numbers::pi_v<float>);
+    const float     maxAngle       = std::clamp(ZHLN::DegF{lookAt->maxAngleDeg}.ToRadians().value, 0.0f, std::numbers::pi_v<float>);
     Quat       fullAim        = FromTo(currentForward, targetDir);
     if (aimAngle > maxAngle && aimAngle > 1.0e-5f) {
         fullAim = Slerp(Quat::Identity(), fullAim, maxAngle / aimAngle).Normalized();

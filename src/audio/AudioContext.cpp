@@ -758,7 +758,7 @@ struct VoiceSlot {
     float                reverbSend      = 0.0f;
     FVec3            position        = FVec3::Zero();
     FVec3            velocity        = FVec3::Zero();
-    FVec3            direction       = FVec3(0.0f, 0.0f, -1.0f);
+    FVec3            direction       = {0.0f, 0.0f, -1.0f};
     AudioAttenuationDesc attenuation {};
     AudioOcclusionDesc   occlusion {};
 };

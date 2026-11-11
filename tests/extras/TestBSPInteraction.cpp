@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 
@@ -294,7 +295,7 @@ struct BSPInteractionTestSuite {
                 reg.Add<ZHLN::Components::TransformComponent>(
                     e,
                     ZHLN::Components::TransformComponent {
-                        .position = FVec3(sceneEnt.transform.position), .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)
+                        .position = FVec3{sceneEnt.transform.position}, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)
                     }
                 );
                 reg.Add<ZHLN::Components::SceneSourceComponent>(
@@ -453,7 +454,7 @@ struct BSPInteractionTestSuite {
                 reg.Add<ZHLN::Components::TransformComponent>(
                     e,
                     ZHLN::Components::TransformComponent {
-                        .position = FVec3(sceneEnt.transform.position),
+                        .position = FVec3{sceneEnt.transform.position},
                         .rotation = ZHLN::Quat::Identity(),
                         .scale    = FVec3::Splat(1.0f),
                     }
@@ -529,7 +530,7 @@ struct BSPInteractionTestSuite {
             reg.Add<ZHLN::Components::TransformComponent>(
                 doorEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = FVec3(0.0f, 0.0f, 0.0f), .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)
+                    .position = FVec3{0.0f, 0.0f, 0.0f}, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)
                 }
             );
             reg.Add<ZHLN::Interaction::DoorComponent>(
@@ -537,8 +538,8 @@ struct BSPInteractionTestSuite {
                 ZHLN::Interaction::DoorComponent {
                     .state          = ZHLN::Interaction::DoorState::Closed,
                     .flags          = ZHLN::Interaction::DoorFlags::None,
-                    .closedPosition = FVec3(0.0f, 0.0f, 0.0f),
-                    .openPosition   = FVec3(0.0f, 2.0f, 0.0f),
+                    .closedPosition = FVec3{0.0f, 0.0f, 0.0f},
+                    .openPosition   = FVec3{0.0f, 2.0f, 0.0f},
                     .speed          = 2.0f, // 0.5s to open
                     .progress       = 0.0f,
                     .wait           = 1.0f, // 1s wait before auto-closing
@@ -606,7 +607,7 @@ struct BSPInteractionTestSuite {
             );
 
             const auto closedQ = ZHLN::Quat::Identity();
-            const auto openQ = ZHLN::Quat::FromAxisAngle(FVec3::UnitY(), std::numbers::pi_v<float> * 0.5f);
+            const auto openQ = ZHLN::Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{std::numbers::pi_v<float> * 0.5f});
 
             reg.Add<ZHLN::Interaction::DoorComponent>(
                 rotDoorEnt,
@@ -638,7 +639,7 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectLt(std::abs(door->progress - 0.5f), 1e-3f);
 
             // Quat length remains 1.0
-            const ZHLN::Quat doorRot(trans->rotation);
+            const ZHLN::Quat doorRot{trans->rotation};
             ZHLN::Test::ExpectLt(std::abs(doorRot.Length() - 1.0f), 1e-3f);
 
             // Complete open
@@ -670,7 +671,7 @@ struct BSPInteractionTestSuite {
                     .state          = ZHLN::Interaction::DoorState::Closed,
                     .flags          = ZHLN::Interaction::DoorFlags::Toggle,
                     .closedPosition = FVec3::Zero(),
-                    .openPosition   = FVec3(0.0f, 3.0f, 0.0f),
+                    .openPosition   = FVec3{0.0f, 3.0f, 0.0f},
                     .speed          = 2.0f,
                     .wait           = -1.0f,
                     .targetname     = ZHLN::String64("secure_vault"),
@@ -739,7 +740,7 @@ struct BSPInteractionTestSuite {
             reg.Add<ZHLN::Components::TransformComponent>(
                 playerEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = FVec3(0.0f, 0.0f, 0.0f), .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)
+                    .position = FVec3{0.0f, 0.0f, 0.0f}, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)
                 }
             );
 
@@ -751,7 +752,7 @@ struct BSPInteractionTestSuite {
                 ZHLN::Interaction::TriggerComponent {
                     .radius      = 2.0f,
                     .flags       = ZHLN::Interaction::TriggerFlags::Active | ZHLN::Interaction::TriggerFlags::TriggerOnce,
-                    .halfExtents = FVec3(2.0f, 2.0f, 2.0f),
+                    .halfExtents = FVec3{2.0f, 2.0f, 2.0f},
                 }
             );
 
@@ -803,14 +804,14 @@ struct BSPInteractionTestSuite {
             // Create unlocked door near player
             const auto doorEnt = reg.Create();
             reg.Add(doorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("interact_door")});
-            reg.Add<ZHLN::Components::TransformComponent>(doorEnt, ZHLN::Components::TransformComponent {.position = FVec3(1.0f, 0.0f, 0.0f)});
+            reg.Add<ZHLN::Components::TransformComponent>(doorEnt, ZHLN::Components::TransformComponent {.position = FVec3{1.0f, 0.0f, 0.0f}});
             reg.Add<ZHLN::Interaction::DoorComponent>(
                 doorEnt,
                 ZHLN::Interaction::DoorComponent {
                     .state          = ZHLN::Interaction::DoorState::Closed,
                     .flags          = ZHLN::Interaction::DoorFlags::UseOpens | ZHLN::Interaction::DoorFlags::Toggle,
-                    .closedPosition = FVec3(1.0f, 0.0f, 0.0f),
-                    .openPosition   = FVec3(1.0f, 2.0f, 0.0f),
+                    .closedPosition = FVec3{1.0f, 0.0f, 0.0f},
+                    .openPosition   = FVec3{1.0f, 2.0f, 0.0f},
                     .targetname     = ZHLN::String64("interact_door"),
                 }
             );

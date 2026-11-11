@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Animation/ProceduralMath.hpp>
@@ -26,6 +27,7 @@
 #include <numbers>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -43,7 +45,10 @@ using ZHLN::Dot;
 
 static_assert(ZHLN::Rig::GetBindPosition(ZHLN::Rig::Joint::Hips) == FVec3 {0.0f, 1.0f, 0.0f});
 static_assert(ZHLN::Rig::GetBindRotation(ZHLN::Rig::Joint::Hips) == Quat::Identity());
-
+static_assert(std::is_invocable_v<decltype(&ZHLN::Animation::LimitGroundNormal), FVec3, ZHLN::RadF, ZHLN::RadF>);
+static_assert(!std::is_invocable_v<decltype(&ZHLN::Animation::LimitGroundNormal), FVec3, float, float>);
+static_assert(std::is_invocable_v<decltype(&ZHLN::Animation::ConstrainWristRotation), Quat, Quat, FVec3, ZHLN::RadF, ZHLN::RadF>);
+static_assert(!std::is_invocable_v<decltype(&ZHLN::Animation::ConstrainWristRotation), Quat, Quat, FVec3, float, float>);
 
 enum class ProceduralAnimationTestError : uint32_t {
     RigMappingFailed ZHLN_ANNOTATION(ZHLN::Description<"The generated procedural rig did not map all core and secondary controls."> {}) = 1,
@@ -90,7 +95,7 @@ inline void BuildFixture(const cgltf_data& data, ZHLN::ModelPrefab& outPrefab) {
         outPrefab.nodes[node].name           = source.name != nullptr ? ZHLN::String64(source.name) : ZHLN::String64("Unnamed");
         outPrefab.nodes[node].parentIndex    = source.parent != nullptr ? static_cast<int32_t>(source.parent - data.nodes) : -1;
         outPrefab.nodes[node].hasMesh        = source.mesh != nullptr;
-        outPrefab.nodes[node].localTransform = ToPrefabMatrix(Mat4x4::FromCols(FVec4(matrix[0], matrix[1], matrix[2], matrix[3]), FVec4(matrix[4], matrix[5], matrix[6], matrix[7]), FVec4(matrix[8], matrix[9], matrix[10], matrix[11]), FVec4(matrix[12], matrix[13], matrix[14], matrix[15])));
+        outPrefab.nodes[node].localTransform = ToPrefabMatrix(Mat4x4::FromCols(FVec4{matrix[0], matrix[1], matrix[2], matrix[3]}, FVec4{matrix[4], matrix[5], matrix[6], matrix[7]}, FVec4{matrix[8], matrix[9], matrix[10], matrix[11]}, FVec4{matrix[12], matrix[13], matrix[14], matrix[15]}));
     }
 
     outPrefab.skeletons.reserve(data.skins_count);
@@ -113,7 +118,7 @@ inline void BuildFixture(const cgltf_data& data, ZHLN::ModelPrefab& outPrefab) {
             if (skin.inverse_bind_matrices != nullptr) {
                 float raw[16] {};
                 cgltf_accessor_read_float(skin.inverse_bind_matrices, jointIndex, raw, 16);
-                inverseBind = Mat4x4::FromCols(FVec4(raw[0], raw[1], raw[2], raw[3]), FVec4(raw[4], raw[5], raw[6], raw[7]), FVec4(raw[8], raw[9], raw[10], raw[11]), FVec4(raw[12], raw[13], raw[14], raw[15]));
+                inverseBind = Mat4x4::FromCols(FVec4{raw[0], raw[1], raw[2], raw[3]}, FVec4{raw[4], raw[5], raw[6], raw[7]}, FVec4{raw[8], raw[9], raw[10], raw[11]}, FVec4{raw[12], raw[13], raw[14], raw[15]});
             }
 
             skeleton.joints.push_back({
@@ -136,7 +141,7 @@ inline void BuildFixture(const cgltf_data& data, ZHLN::ModelPrefab& outPrefab) {
 [[nodiscard]] inline Mat4x4 SourceWorld(const cgltf_node& node) noexcept {
     float matrix[16] {};
     cgltf_node_transform_world(&node, matrix);
-    return Mat4x4::FromCols(FVec4(matrix[0], matrix[1], matrix[2], matrix[3]), FVec4(matrix[4], matrix[5], matrix[6], matrix[7]), FVec4(matrix[8], matrix[9], matrix[10], matrix[11]), FVec4(matrix[12], matrix[13], matrix[14], matrix[15]));
+    return Mat4x4::FromCols(FVec4{matrix[0], matrix[1], matrix[2], matrix[3]}, FVec4{matrix[4], matrix[5], matrix[6], matrix[7]}, FVec4{matrix[8], matrix[9], matrix[10], matrix[11]}, FVec4{matrix[12], matrix[13], matrix[14], matrix[15]});
 }
 
 } // namespace RigFixture
@@ -171,23 +176,23 @@ struct ProceduralAnimationTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> imported_bounds_fit_virtual_character_hull() {
             ZHLN::ModelPrefab prefab;
-            prefab.nodes.push_back({.name = ZHLN::String64("Root"), .localTransform = ToPrefabMatrix(CreateTranslation(FVec3(0.0f, 1.0f, 0.0f)))});
+            prefab.nodes.push_back({.name = ZHLN::String64("Root"), .localTransform = ToPrefabMatrix(CreateTranslation(FVec3{0.0f, 1.0f, 0.0f}))});
             prefab.nodes.push_back(
-                {.name = ZHLN::String64("Nested"), .parentIndex = 0, .localTransform = ToPrefabMatrix(CreateTranslation(FVec3(1.0f, 2.0f, -1.0f)))}
+                {.name = ZHLN::String64("Nested"), .parentIndex = 0, .localTransform = ToPrefabMatrix(CreateTranslation(FVec3{1.0f, 2.0f, -1.0f}))}
             );
 
             ZHLN::ModelPart nested;
             nested.nodeIndex      = 1;
-            nested.localTransform = ToPrefabMatrix(CreateTranslation(FVec3(0.5f, 0.0f, 0.25f)));
+            nested.localTransform = ToPrefabMatrix(CreateTranslation(FVec3{0.5f, 0.0f, 0.25f}));
             // Bounds use native vectors.
-            nested.localMin      = FVec3 {-1.0f, -2.0f, -0.5f};
-            nested.localMax      = FVec3 {1.0f, 2.0f, 0.5f};
+            nested.localMin = {-1.0f, -2.0f, -0.5f};
+            nested.localMax = {1.0f, 2.0f, 0.5f};
             prefab.parts.push_back(std::move(nested));
 
             ZHLN::ModelPart rootPart;
             rootPart.nodeIndex   = 0;
-            rootPart.localMin = FVec3 {-2.0f, 0.0f, -1.0f};
-            rootPart.localMax = FVec3 {-1.0f, 1.0f, 1.0f};
+            rootPart.localMin = {-2.0f, 0.0f, -1.0f};
+            rootPart.localMax = {-1.0f, 1.0f, 1.0f};
             prefab.parts.push_back(std::move(rootPart));
 
             const ZHLN::Locomotion::CharacterBoundsEstimate bounds = ZHLN::Locomotion::EstimateCharacterBounds(prefab);
@@ -195,8 +200,8 @@ struct ProceduralAnimationTestSuite {
             const ZHLN::Physics::DualShapeConfig            hull = ZHLN::Locomotion::FitDualShapeToBounds(bounds, ZHLN::Physics::DualShapeConfig {}, options);
             const float                                     horizontalExtent = std::max(2.5f * options.lateralCoverage, 1.25f) * options.horizontalPadding;
             const float                                     hullTop          = hull.GetBumperOffsetY() + hull.bumperRadiusY;
-            if (!bounds.valid || !Close(FVec3(bounds.min), FVec3(-2.0f, 1.0f, -1.25f), 0.0001f) ||
-                !Close(FVec3(bounds.max), FVec3(2.5f, 5.0f, 1.0f), 0.0001f) || std::abs(hull.bumperRadiusXZ - horizontalExtent) > 0.0001f ||
+            if (!bounds.valid || !Close(FVec3{bounds.min}, FVec3{-2.0f, 1.0f, -1.25f}, 0.0001f) ||
+                !Close(FVec3{bounds.max}, FVec3{2.5f, 5.0f, 1.0f}, 0.0001f) || std::abs(hull.bumperRadiusXZ - horizontalExtent) > 0.0001f ||
                 hull.lifterRadius >= hull.bumperRadiusXZ || hull.bumperRadiusY <= hull.bumperRadiusXZ || hullTop < 5.0f * options.verticalPadding - 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
@@ -211,14 +216,14 @@ struct ProceduralAnimationTestSuite {
                 return index;
             };
             const size_t root = addNode("Root", -1, FVec3::Zero());
-            static_cast<void>(addNode("CTR-Hand.L", static_cast<int32_t>(root), FVec3(0.2f, 1.0f, 0.0f)));
-            const size_t hand = addNode("DEF-Hand.L", static_cast<int32_t>(root), FVec3(0.3f, 1.0f, 0.0f));
-            static_cast<void>(addNode("CTR-Index_1.L", static_cast<int32_t>(hand), FVec3(0.04f, 0.0f, 0.0f)));
-            const size_t finger1 = addNode("DEF-Index_1.L", static_cast<int32_t>(hand), FVec3(0.05f, 0.0f, 0.0f));
-            static_cast<void>(addNode("CTR-Index_2.L", static_cast<int32_t>(finger1), FVec3(0.03f, 0.0f, 0.0f)));
-            const size_t finger2 = addNode("DEF-Index_2.L", static_cast<int32_t>(finger1), FVec3(0.03f, 0.0f, 0.0f));
-            const size_t finger3 = addNode("DEF-Index_3.L", static_cast<int32_t>(finger2), FVec3(0.02f, 0.0f, 0.0f));
-            const size_t hair24  = addNode("DEF-Hair_S24_04", static_cast<int32_t>(root), FVec3(0.0f, 1.5f, 0.0f));
+            static_cast<void>(addNode("CTR-Hand.L", static_cast<int32_t>(root), FVec3{0.2f, 1.0f, 0.0f}));
+            const size_t hand = addNode("DEF-Hand.L", static_cast<int32_t>(root), FVec3{0.3f, 1.0f, 0.0f});
+            static_cast<void>(addNode("CTR-Index_1.L", static_cast<int32_t>(hand), FVec3{0.04f, 0.0f, 0.0f}));
+            const size_t finger1 = addNode("DEF-Index_1.L", static_cast<int32_t>(hand), FVec3{0.05f, 0.0f, 0.0f});
+            static_cast<void>(addNode("CTR-Index_2.L", static_cast<int32_t>(finger1), FVec3{0.03f, 0.0f, 0.0f}));
+            const size_t finger2 = addNode("DEF-Index_2.L", static_cast<int32_t>(finger1), FVec3{0.03f, 0.0f, 0.0f});
+            const size_t finger3 = addNode("DEF-Index_3.L", static_cast<int32_t>(finger2), FVec3{0.02f, 0.0f, 0.0f});
+            const size_t hair24  = addNode("DEF-Hair_S24_04", static_cast<int32_t>(root), FVec3{0.0f, 1.5f, 0.0f});
 
             ZHLN::Skeleton skeleton;
             for (size_t node = 0; node < prefab.nodes.size(); ++node) {
@@ -243,7 +248,7 @@ struct ProceduralAnimationTestSuite {
         std::expected<void, ZHLN::ErrorCode> standard_rig_maps_every_control() {
             ZHLN::RigBoneMap map;
             map.nodeCount          = 7;
-            map.modelTransforms[0] = CreateTranslation(FVec3(1.0f, 2.0f, 3.0f));
+            map.modelTransforms[0] = CreateTranslation(FVec3{1.0f, 2.0f, 3.0f});
             map.Reset();
             if (map.nodeCount != 0 || map.nodeIndices[0] != ZHLN::InvalidRigNode || !Close(map.modelTransforms[0], Mat4x4::Identity(), 0.0001f) ||
                 !Close(map.poseRotations[0], Quat::Identity(), 0.0001f) || !Close(map.poseScales[0], FVec3::Splat(1.0f), 0.0001f)) {
@@ -271,7 +276,7 @@ struct ProceduralAnimationTestSuite {
             const FVec3 headPosition  = ZHLN::ProceduralMath::Translation(map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)]]);
             const FVec3 hairRoot = ZHLN::ProceduralMath::Translation(map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart)]]) - headPosition;
             if (!(shinPosition.z > thighPosition.z && shinPosition.z > footPosition.z) || hairRoot.y < 0.15f ||
-                FVec3(hairRoot.x, 0.0f, hairRoot.z).Length() < 0.08f) {
+                FVec3{hairRoot.x, 0.0f, hairRoot.z}.Length() < 0.08f) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
 
@@ -356,7 +361,7 @@ struct ProceduralAnimationTestSuite {
             auto addRigidFootPart = [&](ZHLN::CharacterBone footBone, std::string_view opaqueName, bool skinned = false, float extentScale = 1.0f,
                                         bool detachedContainer = true) {
                 const ZHLN::RigNodeIndex footNode     = map.nodeIndices[ZHLN::BoneSlot(footBone)];
-                const Mat4x4         targetModel  = map.modelTransforms[footNode] * CreateTranslation(FVec3(0.0f, -0.035f, 0.065f));
+                const Mat4x4         targetModel  = map.modelTransforms[footNode] * CreateTranslation(FVec3{0.0f, -0.035f, 0.065f});
                 const size_t             shoeRootNode = prefab.nodes.size();
                 prefab.nodes.push_back({
                     .name           = ZHLN::String64(opaqueName),
@@ -380,8 +385,8 @@ struct ProceduralAnimationTestSuite {
                 part.name        = ZHLN::String64("OpaquePart");
                 part.isSkinned   = skinned;
                 part.nodeIndex   = static_cast<int32_t>(meshNode);
-                part.localMin = FVec3 {-0.12f * extentScale, -0.06f * extentScale, -0.18f * extentScale};
-                part.localMax = FVec3 {0.12f * extentScale, 0.10f * extentScale, 0.22f * extentScale};
+                part.localMin = {-0.12f * extentScale, -0.06f * extentScale, -0.18f * extentScale};
+                part.localMax = {0.12f * extentScale, 0.10f * extentScale, 0.22f * extentScale};
                 prefab.parts.push_back(std::move(part));
                 return FootPartNodes {.root = shoeRootNode, .part = meshNode};
             };
@@ -456,11 +461,11 @@ struct ProceduralAnimationTestSuite {
             const Mat4x4 secondaryFootLBefore     = importedMap.modelTransforms[secondaryFootLNode];
             const Mat4x4 secondaryFootRBefore     = importedMap.modelTransforms[secondaryFootRNode];
             importedMap.localTransforms[forearmL]     = importedMap.localTransforms[forearmL] *
-                                                        ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitY(), 0.45f), FVec3::Zero());
+                                                        ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{0.45f}), FVec3::Zero());
             importedMap.localTransforms[supSpine]     = importedMap.localTransforms[supSpine] *
-                                                        ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitZ(), 0.25f), FVec3::Zero());
-            importedMap.localTransforms[footL] = importedMap.localTransforms[footL] * ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitX(), 0.30f), FVec3::Zero());
-            importedMap.localTransforms[footR] = importedMap.localTransforms[footR] * ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitX(), -0.25f), FVec3::Zero());
+                                                        ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitZ(), ZHLN::RadF{0.25f}), FVec3::Zero());
+            importedMap.localTransforms[footL] = importedMap.localTransforms[footL] * ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{0.30f}), FVec3::Zero());
+            importedMap.localTransforms[footR] = importedMap.localTransforms[footR] * ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{-0.25f}), FVec3::Zero());
             ZHLN::ProceduralAnimation::CaptureChildOfPoseDeltas(importedMap);
 
             // Applying an upstream correction after a leaf correction detaches
@@ -501,8 +506,8 @@ struct ProceduralAnimationTestSuite {
                 ZHLN::ProceduralMath::SetTranslation(authored, ZHLN::ProceduralMath::Translation(authored) + offset);
                 ZHLN::Animation::SetModelTransformAndCarrySubtree(importedMap.modelTransforms.data(), importedMap, shin, authored);
             };
-            offsetAuthoredShin(shinL, FVec3(0.025f, 0.010f, 0.0f));
-            offsetAuthoredShin(shinR, FVec3(-0.025f, 0.010f, 0.0f));
+            offsetAuthoredShin(shinL, FVec3{0.025f, 0.010f, 0.0f});
+            offsetAuthoredShin(shinR, FVec3{-0.025f, 0.010f, 0.0f});
             ZHLN::ProceduralAnimation::CaptureAuthoredConstraintPoseDeltas(importedMap);
 
             // Simulate a model-space procedural thigh correction after the
@@ -511,7 +516,7 @@ struct ProceduralAnimationTestSuite {
             // close without discarding the captured authored knee relation.
             auto rotateDetachedThigh = [&](ZHLN::RigNodeIndex thigh, float angle) {
                 const Mat4x4 current = importedMap.modelTransforms[thigh];
-                const Mat4x4 target  = ZHLN::ProceduralMath::Transform((Quat::FromAxisAngle(FVec3::UnitZ(), angle) * ZHLN::ProceduralMath::Rotation(current)).Normalized(), ZHLN::ProceduralMath::Translation(current));
+                const Mat4x4 target  = ZHLN::ProceduralMath::Transform((Quat::FromAxisAngle(FVec3::UnitZ(), ZHLN::RadF{angle}) * ZHLN::ProceduralMath::Rotation(current)).Normalized(), ZHLN::ProceduralMath::Translation(current));
                 ZHLN::Animation::SetModelTransformAndCarrySubtree(importedMap.modelTransforms.data(), importedMap, thigh, target);
             };
             rotateDetachedThigh(thighL, 0.35f);
@@ -596,7 +601,7 @@ struct ProceduralAnimationTestSuite {
             ZHLN::ProceduralLocomotionComponent gait;
             gait.strideLength = 1.60f;
 
-            ZHLN::Animation::EvaluateGait(gait, FVec3(0.0f, 0.0f, 4.0f), 0.25f);
+            ZHLN::Animation::EvaluateGait(gait, FVec3{0.0f, 0.0f, 4.0f}, 0.25f);
             const bool phaseIsDistanceDriven  = std::abs(gait.phase - 0.625f) < 0.0001f;
             const bool feetAreOpposed         = gait.plantWeightL != gait.plantWeightR;
             const bool authoredSwingPreserved = gait.plantWeightR < 0.001f && gait.plantWeightL > 0.99f;
@@ -649,25 +654,25 @@ struct ProceduralAnimationTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> model_space_ik_and_ankle_alignment() {
-            const FVec3  down(0.0f, -1.0f, 0.0f);
-            const FVec3  solvedDirection = FVec3(0.18f, -0.97f, 0.12f).Normalized();
+            const FVec3  down{0.0f, -1.0f, 0.0f};
+            const FVec3  solvedDirection = FVec3{0.18f, -0.97f, 0.12f}.Normalized();
             const Mat4x4 authoredBone    = Mat4x4::Identity();
-            const FVec3  solvedPosition(0.1f, 0.7f, -0.2f);
+            const FVec3  solvedPosition{0.1f, 0.7f, -0.2f};
             const Mat4x4 corrected = ZHLN::Animation::CorrectBoneDirection(authoredBone, down, solvedDirection, solvedPosition);
             if (!Close(ZHLN::ProceduralMath::Direction(corrected, down).Normalized(), solvedDirection, 0.0001f) || !Close(ZHLN::ProceduralMath::Translation(corrected), solvedPosition, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
-            const Quat  authoredYaw  = Quat::FromAxisAngle(FVec3::UnitY(), 0.4f);
+            const Quat  authoredYaw  = Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{0.4f});
             const Mat4x4 authoredFoot = ZHLN::ProceduralMath::Transform(authoredYaw, FVec3::Zero());
-            const FVec3  footTarget(0.2f, 0.05f, 0.3f);
+            const FVec3  footTarget{0.2f, 0.05f, 0.3f};
             const Mat4x4 flatFoot = ZHLN::Animation::AlignFootToGround(authoredFoot, footTarget, FVec3::UnitY());
             if (!Close(ZHLN::ProceduralMath::Translation(flatFoot), footTarget, 0.0001f) ||
                 !Close(ZHLN::ProceduralMath::Direction(flatFoot, FVec3::UnitZ()).Normalized(), ZHLN::ProceduralMath::Direction(authoredFoot, FVec3::UnitZ()).Normalized(), 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
-            const FVec3  slopeNormal = FVec3(0.25f, 0.95f, 0.18f).Normalized();
+            const FVec3  slopeNormal = FVec3{0.25f, 0.95f, 0.18f}.Normalized();
             const Mat4x4 slopeFoot   = ZHLN::Animation::AlignFootToGround(authoredFoot, footTarget, slopeNormal);
             if (!Close(ZHLN::ProceduralMath::Direction(slopeFoot, FVec3::UnitY()).Normalized(), slopeNormal, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
@@ -675,8 +680,8 @@ struct ProceduralAnimationTestSuite {
 
             constexpr float maxSideways     = 0.20f;
             constexpr float maxForward      = 0.50f;
-            const FVec3 extremeNormal   = FVec3(0.82f, 0.45f, 0.35f).Normalized();
-            const FVec3 limitedNormal   = ZHLN::Animation::LimitGroundNormal(extremeNormal, maxSideways, maxForward);
+            const FVec3 extremeNormal   = FVec3{0.82f, 0.45f, 0.35f}.Normalized();
+            const FVec3 limitedNormal   = ZHLN::Animation::LimitGroundNormal(extremeNormal, ZHLN::RadF{maxSideways}, ZHLN::RadF{maxForward});
             const float     limitedSideways = std::abs(std::atan2(-limitedNormal.x, limitedNormal.y));
             const float     limitedForward  = std::abs(std::asin(std::clamp(limitedNormal.z, -1.0f, 1.0f)));
             if (limitedSideways > maxSideways + 0.0001f || limitedForward > maxForward + 0.0001f) {
@@ -689,11 +694,11 @@ struct ProceduralAnimationTestSuite {
             const ZHLN::RigNodeIndex toeNode         = subtreeMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ToeL)];
             const ZHLN::RigNodeIndex meshPartNode    = subtreeMap.nodeCount++;
             subtreeMap.parentIndices[meshPartNode]   = footNode;
-            subtreeMap.modelTransforms[meshPartNode] = subtreeMap.modelTransforms[footNode] * CreateTranslation(FVec3(0.04f, -0.02f, 0.08f));
+            subtreeMap.modelTransforms[meshPartNode] = subtreeMap.modelTransforms[footNode] * CreateTranslation(FVec3{0.04f, -0.02f, 0.08f});
             const Mat4x4 oldFoot                 = subtreeMap.modelTransforms[footNode];
             const Mat4x4 oldToe                  = subtreeMap.modelTransforms[toeNode];
             const Mat4x4 oldMeshPart             = subtreeMap.modelTransforms[meshPartNode];
-            const Mat4x4 carriedFoot             = ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitX(), 0.35f) * ZHLN::ProceduralMath::Rotation(oldFoot), ZHLN::ProceduralMath::Translation(oldFoot) + FVec3(0.0f, 0.04f, 0.0f));
+            const Mat4x4 carriedFoot             = ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{0.35f}) * ZHLN::ProceduralMath::Rotation(oldFoot), ZHLN::ProceduralMath::Translation(oldFoot) + FVec3{0.0f, 0.04f, 0.0f});
             const Mat4x4 correction = carriedFoot * Inverse(oldFoot);
             if (ZHLN::Animation::SetModelTransformAndCarrySubtree(subtreeMap.modelTransforms.data(), subtreeMap, footNode, carriedFoot) < 3 ||
                 !Close(subtreeMap.modelTransforms[footNode], carriedFoot, 0.0001f) ||
@@ -708,13 +713,13 @@ struct ProceduralAnimationTestSuite {
             const ZHLN::RigNodeIndex            tiltThigh         = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ThighL)];
             const ZHLN::RigNodeIndex            tiltHips          = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Hips)];
             const ZHLN::RigNodeIndex            tiltHead          = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
-            const FVec3                     unreachableTarget = ZHLN::ProceduralMath::Translation(tiltMap.modelTransforms[tiltThigh]) + FVec3(1.5f, -0.35f, 0.0f);
+            const FVec3                     unreachableTarget = ZHLN::ProceduralMath::Translation(tiltMap.modelTransforms[tiltThigh]) + FVec3{1.5f, -0.35f, 0.0f};
             constexpr float                     maxBodyTilt       = 0.14f;
             ZHLN::ProceduralLocomotionComponent tiltGait;
             for (uint32_t frame = 0; frame < 120; ++frame) {
                 tiltMap.modelTransforms = baseTransforms;
                 ZHLN::Animation::ApplyIKReachTilt(
-                    tiltGait, tiltMap.modelTransforms.data(), tiltMap, unreachableTarget, FVec3::Zero(), 1.0f, 0.0f, 0.96f, maxBodyTilt, 1.0f / 60.0f
+                    tiltGait, tiltMap.modelTransforms.data(), tiltMap, unreachableTarget, FVec3::Zero(), 1.0f, 0.0f, 0.96f, ZHLN::RadF{maxBodyTilt}, 1.0f / 60.0f
                 );
             }
             const float appliedTilt = std::sqrt(tiltGait.ikBodyTiltPitch * tiltGait.ikBodyTiltPitch + tiltGait.ikBodyTiltRoll * tiltGait.ikBodyTiltRoll);
@@ -732,9 +737,9 @@ struct ProceduralAnimationTestSuite {
             ZHLN::Animation::ItemHandlingComponent handling;
             handling.driverMode           = ZHLN::Animation::ItemDriverMode::AimGuided;
             handling.aimProgress          = 1.0f;
-            const FVec3  aimDirection = FVec3(1.0f, 0.1f, 0.2f).Normalized();
+            const FVec3  aimDirection = FVec3{1.0f, 0.1f, 0.2f}.Normalized();
             const Mat4x4 aimPose      = ZHLN::Animation::SolveItemBasePose(
-                handling, Mat4x4::Identity(), Mat4x4::Identity(), Mat4x4::Identity(), FVec3(0.0f, 1.6f, 0.0f), aimDirection,
+                handling, Mat4x4::Identity(), Mat4x4::Identity(), Mat4x4::Identity(), FVec3{0.0f, 1.6f, 0.0f}, aimDirection,
                 Mat4x4::Identity()
             );
             if (!Close(ZHLN::ProceduralMath::Direction(aimPose, FVec3::UnitZ()).Normalized(), aimDirection, 0.0001f)) {
@@ -743,10 +748,10 @@ struct ProceduralAnimationTestSuite {
 
             handling.driverMode        = ZHLN::Animation::ItemDriverMode::WorldAnchored;
             const Mat4x4 worldPose = ZHLN::Animation::SolveItemBasePose(
-                handling, Mat4x4::Identity(), Mat4x4::Identity(), CreateTranslation(FVec3(-1.0f, 0.0f, 0.0f)), FVec3::Zero(),
-                FVec3::UnitZ(), CreateTranslation(FVec3(3.0f, 0.0f, 0.0f))
+                handling, Mat4x4::Identity(), Mat4x4::Identity(), CreateTranslation(FVec3{-1.0f, 0.0f, 0.0f}), FVec3::Zero(),
+                FVec3::UnitZ(), CreateTranslation(FVec3{3.0f, 0.0f, 0.0f})
             );
-            if (!Close(ZHLN::ProceduralMath::Translation(worldPose), FVec3(2.0f, 0.0f, 0.0f), 0.0001f)) {
+            if (!Close(ZHLN::ProceduralMath::Translation(worldPose), FVec3{2.0f, 0.0f, 0.0f}, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
@@ -763,11 +768,12 @@ struct ProceduralAnimationTestSuite {
             }
 
             const Quat limitedWrist = ZHLN::Animation::ConstrainWristRotation(
-                Quat::FromAxisAngle(FVec3::UnitZ(), 1.2f), Quat::Identity(), FVec3::UnitZ(), 0.30f, 0.45f
+                Quat::FromAxisAngle(FVec3::UnitZ(), ZHLN::RadF{1.2f}), Quat::Identity(), FVec3::UnitZ(), ZHLN::RadF{0.30f}, ZHLN::RadF{0.45f}
             );
             FVec3 wristAxis;
-            float     wristAngle = 0.0f;
-            limitedWrist.ToAxisAngle(wristAxis, wristAngle);
+            ZHLN::RadF wristAngleRadians{};
+            limitedWrist.ToAxisAngle(wristAxis, wristAngleRadians);
+            const auto wristAngle = wristAngleRadians.value;
             if (std::abs(wristAngle) > 0.3001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
@@ -780,7 +786,7 @@ struct ProceduralAnimationTestSuite {
             const float              upperLength = (ZHLN::ProceduralMath::Translation(map.modelTransforms[fore]) - ZHLN::ProceduralMath::Translation(map.modelTransforms[upper])).Length();
             const float              lowerLength = (ZHLN::ProceduralMath::Translation(map.modelTransforms[hand]) - ZHLN::ProceduralMath::Translation(map.modelTransforms[fore])).Length();
             const Quat rightBindPalmFrame   = (ZHLN::ProceduralMath::Rotation(map.modelTransforms[hand]).Normalized() * map.handBoneToPalmRotations[1]).Normalized();
-            const FVec3 gripPosition         = ZHLN::ProceduralMath::Translation(map.modelTransforms[upper]) + FVec3(-0.38f, -0.05f, 0.12f);
+            const FVec3 gripPosition         = ZHLN::ProceduralMath::Translation(map.modelTransforms[upper]) + FVec3{-0.38f, -0.05f, 0.12f};
             ZHLN::Animation::GripPoint grip;
             grip.assignedLimb      = ZHLN::CharacterBone::HandR;
             grip.evaluatedIKWeight = 1.0f;
@@ -810,7 +816,7 @@ struct ProceduralAnimationTestSuite {
             ZHLN::Animation::GripPoint leftGrip;
             leftGrip.assignedLimb            = ZHLN::CharacterBone::HandL;
             leftGrip.evaluatedIKWeight       = 1.0f;
-            const FVec3 leftGripPosition = ZHLN::ProceduralMath::Translation(leftGripMap.modelTransforms[leftUpper]) + FVec3(0.38f, -0.05f, 0.12f);
+            const FVec3 leftGripPosition = ZHLN::ProceduralMath::Translation(leftGripMap.modelTransforms[leftUpper]) + FVec3{0.38f, -0.05f, 0.12f};
             ZHLN::Animation::SolveLimbIK(
                 leftGripMap.modelTransforms.data(), leftGripMap, ZHLN::CharacterBone::UpperArmL, ZHLN::CharacterBone::ForearmL, ZHLN::CharacterBone::HandL,
                 CreateTranslation(leftGripPosition), leftGrip
@@ -835,13 +841,13 @@ struct ProceduralAnimationTestSuite {
             ZHLN::BuildStandardProceduralRig(reachMap);
             ZHLN::Animation::ItemHandlingComponent reachHandling;
             reachHandling.driverMode                 = ZHLN::Animation::ItemDriverMode::AimGuided;
-            reachHandling.itemModelTransform         = CreateTranslation(FVec3(0.0f, 1.4f, 4.0f));
+            reachHandling.itemModelTransform         = CreateTranslation(FVec3{0.0f, 1.4f, 4.0f});
             reachHandling.grips[0].assignedLimb      = ZHLN::CharacterBone::HandR;
-            reachHandling.grips[0].localTransform    = CreateTranslation(FVec3(-0.05f, 0.0f, 0.0f));
+            reachHandling.grips[0].localTransform    = CreateTranslation(FVec3{-0.05f, 0.0f, 0.0f});
             reachHandling.grips[0].evaluatedIKWeight = 1.0f;
             reachHandling.grips[0].maxArmExtension   = 0.96f;
             reachHandling.grips[1].assignedLimb      = ZHLN::CharacterBone::HandL;
-            reachHandling.grips[1].localTransform    = CreateTranslation(FVec3(0.05f, 0.0f, 0.0f));
+            reachHandling.grips[1].localTransform    = CreateTranslation(FVec3{0.05f, 0.0f, 0.0f});
             reachHandling.grips[1].evaluatedIKWeight = 1.0f;
             reachHandling.grips[1].maxArmExtension   = 0.96f;
             reachHandling.gripCount                  = 2;
@@ -873,9 +879,9 @@ struct ProceduralAnimationTestSuite {
             fingerMap.nodeCount                                               = 4;
             fingerMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)] = 0;
             fingerMap.modelTransforms[0]                                      = Mat4x4::Identity();
-            fingerMap.modelTransforms[1]                                      = CreateTranslation(FVec3(0.10f, 0.0f, 0.0f));
-            fingerMap.modelTransforms[2]                                      = CreateTranslation(FVec3(0.18f, 0.0f, 0.0f));
-            fingerMap.modelTransforms[3]                                      = CreateTranslation(FVec3(0.24f, 0.0f, 0.0f));
+            fingerMap.modelTransforms[1]                                      = CreateTranslation(FVec3{0.10f, 0.0f, 0.0f});
+            fingerMap.modelTransforms[2]                                      = CreateTranslation(FVec3{0.18f, 0.0f, 0.0f});
+            fingerMap.modelTransforms[3]                                      = CreateTranslation(FVec3{0.24f, 0.0f, 0.0f});
             fingerMap.fingerJointConstraintCount                              = 3;
             for (size_t segment = 0; segment < 3; ++segment) {
                 auto& constraint          = fingerMap.fingerJointConstraints[segment];
@@ -887,26 +893,28 @@ struct ProceduralAnimationTestSuite {
                 constraint.repairRelation = true;
                 constraint.bindRelative   = Inverse(fingerMap.modelTransforms[segment]) * fingerMap.modelTransforms[segment + 1];
             }
-            fingerMap.modelTransforms[0] = ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitZ(), 0.4f), FVec3(0.3f, 1.0f, -0.2f));
+            fingerMap.modelTransforms[0] = ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitZ(), ZHLN::RadF{0.4f}), FVec3{0.3f, 1.0f, -0.2f});
             if (ZHLN::ProceduralAnimation::ApplyFingerRelationConstraints(fingerMap) != 3 ||
                 !Close(fingerMap.modelTransforms[3], fingerMap.modelTransforms[2] * fingerMap.fingerJointConstraints[2].bindRelative, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
-            const Quat hingeTarget = (Quat::FromAxisAngle(FVec3::UnitY(), 0.5f) * Quat::FromAxisAngle(FVec3::UnitX(), 1.2f)).Normalized();
-            const Quat hinge = ZHLN::Animation::ConstrainFingerHingeRotation(Quat::Identity(), hingeTarget, FVec3::UnitX(), 1.0f, 0.70f, 0.10f);
+            const Quat hingeTarget = (Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{0.5f}) * Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{1.2f})).Normalized();
+            const Quat hinge = ZHLN::Animation::ConstrainFingerHingeRotation(Quat::Identity(), hingeTarget, FVec3::UnitX(), 1.0f, ZHLN::RadF{0.70f}, ZHLN::RadF{0.10f});
             FVec3       hingeAxis;
-            float           hingeAngle = 0.0f;
-            hinge.ToAxisAngle(hingeAxis, hingeAngle);
+            ZHLN::RadF hingeAngleRadians{};
+            hinge.ToAxisAngle(hingeAxis, hingeAngleRadians);
+            const auto hingeAngle = hingeAngleRadians.value;
             if (std::abs(hingeAngle - 0.70f) > 0.001f || std::abs(std::abs(Dot(hingeAxis, FVec3::UnitX())) - 1.0f) > 0.001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             const Quat backwards = ZHLN::Animation::ConstrainFingerHingeRotation(
-                Quat::Identity(), Quat::FromAxisAngle(FVec3::UnitX(), -0.5f), FVec3::UnitX(), 1.0f, 0.70f, 0.0f
+                Quat::Identity(), Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{-0.5f}), FVec3::UnitX(), 1.0f, ZHLN::RadF{0.70f}, ZHLN::RadF{0.0f}
             );
             FVec3 backwardsAxis;
-            float     backwardsAngle = 0.0f;
-            backwards.ToAxisAngle(backwardsAxis, backwardsAngle);
+            ZHLN::RadF backwardsAngleRadians{};
+            backwards.ToAxisAngle(backwardsAxis, backwardsAngleRadians);
+            const auto backwardsAngle = backwardsAngleRadians.value;
             if (std::abs(backwardsAngle) > 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
@@ -921,24 +929,24 @@ struct ProceduralAnimationTestSuite {
                 ZHLN::Components::TransformComponent {}, ZHLN::Components::MeshComponent {.nodeIndex = 2}, ZHLN::Components::HierarchyComponent {.parent = root}
             );
             const ZHLN::Entity skinned = registry.Create(
-                ZHLN::Components::TransformComponent {.position = FVec3(9.0f, 9.0f, 9.0f)}, ZHLN::Components::MeshComponent {.nodeIndex = 2},
+                ZHLN::Components::TransformComponent {.position = FVec3{9.0f, 9.0f, 9.0f}}, ZHLN::Components::MeshComponent {.nodeIndex = 2},
                 ZHLN::Components::SkeletalMeshComponent {.skeletonIndex = 0}, ZHLN::Components::HierarchyComponent {.parent = root}
             );
 
             ZHLN::RigBoneMap map;
             map.nodeCount = 3;
-            const FVec3 expectedPosition(0.3f, 1.4f, -0.2f);
-            const FVec3 expectedScale(1.2f, 0.8f, 1.1f);
-            const Quat expectedRotation = Quat::FromAxisAngle(FVec3::UnitY(), 0.35f);
+            const FVec3 expectedPosition{0.3f, 1.4f, -0.2f};
+            const FVec3 expectedScale{1.2f, 0.8f, 1.1f};
+            const Quat expectedRotation = Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{0.35f});
             map.modelTransforms[2]           = ZHLN::ProceduralMath::Transform(expectedRotation, expectedPosition, expectedScale);
 
             const size_t synchronizedCount   = ZHLN::ProceduralAnimation::SyncNonSkinnedAttachments(registry, root, map);
             const auto   attachmentTransform = registry.Get<ZHLN::Components::TransformComponent>(attachment);
             const auto   skinnedTransform    = registry.Get<ZHLN::Components::TransformComponent>(skinned);
-            if (synchronizedCount != 1 || !attachmentTransform || !Close(FVec3(attachmentTransform->position), expectedPosition, 0.0001f) ||
-                !Close(FVec3(attachmentTransform->scale), expectedScale, 0.0001f) ||
-                !Close((Quat(attachmentTransform->rotation) * FVec3::UnitZ()), expectedRotation * FVec3::UnitZ(), 0.0001f) ||
-                !skinnedTransform || !Close(FVec3(skinnedTransform->position), FVec3(9.0f, 9.0f, 9.0f), 0.0001f)) {
+            if (synchronizedCount != 1 || !attachmentTransform || !Close(FVec3{attachmentTransform->position}, expectedPosition, 0.0001f) ||
+                !Close(FVec3{attachmentTransform->scale}, expectedScale, 0.0001f) ||
+                !Close((Quat{attachmentTransform->rotation} * FVec3::UnitZ()), expectedRotation * FVec3::UnitZ(), 0.0001f) ||
+                !skinnedTransform || !Close(FVec3{skinnedTransform->position}, FVec3{9.0f, 9.0f, 9.0f}, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};
@@ -1108,7 +1116,7 @@ struct ProceduralAnimationTestSuite {
                 cgltf_node_transform_local(&data->nodes[node], matrix);
                 prefab.nodes[node].name           = data->nodes[node].name != nullptr ? ZHLN::String64(data->nodes[node].name) : ZHLN::String64("Node");
                 prefab.nodes[node].parentIndex    = data->nodes[node].parent != nullptr ? static_cast<int32_t>(data->nodes[node].parent - data->nodes) : -1;
-                prefab.nodes[node].localTransform = ToPrefabMatrix(Mat4x4::FromCols(FVec4(matrix[0], matrix[1], matrix[2], matrix[3]), FVec4(matrix[4], matrix[5], matrix[6], matrix[7]), FVec4(matrix[8], matrix[9], matrix[10], matrix[11]), FVec4(matrix[12], matrix[13], matrix[14], matrix[15])));
+                prefab.nodes[node].localTransform = ToPrefabMatrix(Mat4x4::FromCols(FVec4{matrix[0], matrix[1], matrix[2], matrix[3]}, FVec4{matrix[4], matrix[5], matrix[6], matrix[7]}, FVec4{matrix[8], matrix[9], matrix[10], matrix[11]}, FVec4{matrix[12], matrix[13], matrix[14], matrix[15]}));
             }
 
             std::vector<ZHLN::Skeleton> importedSkeletons;
@@ -1217,7 +1225,7 @@ struct ProceduralAnimationTestSuite {
             }
 
             for (ZHLN::RigNodeIndex footNode: footNodes) {
-                map.localTransforms[footNode] = map.localTransforms[footNode] * ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitX(), 0.3f), FVec3::Zero());
+                map.localTransforms[footNode] = map.localTransforms[footNode] * ZHLN::ProceduralMath::Transform(Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{0.3f}), FVec3::Zero());
             }
             ZHLN::ProceduralAnimation::ResolveModelTransforms(map);
             for (const SkinPaletteCheck& check: paletteChecks) {
@@ -1246,7 +1254,7 @@ struct ProceduralAnimationTestSuite {
             }
             for (const Descendant& descendant: descendants) {
                 const auto transform = registry.Get<ZHLN::Components::TransformComponent>(descendant.entity);
-                if (!transform || !Close(FVec3(transform->position), ZHLN::ProceduralMath::Translation(map.modelTransforms[descendant.node]), 0.0001f)) {
+                if (!transform || !Close(FVec3{transform->position}, ZHLN::ProceduralMath::Translation(map.modelTransforms[descendant.node]), 0.0001f)) {
                     return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                 }
             }
@@ -1263,9 +1271,9 @@ struct ProceduralAnimationTestSuite {
 
             ZHLN::ProceduralLocomotionComponent gait;
             gait.phase            = 0.25f;
-            gait.previousVelocity = FVec3(0.0f, 0.0f, 2.0f);
+            gait.previousVelocity = {0.0f, 0.0f, 2.0f};
             ZHLN::ProceduralLookAtComponent lookAt {
-                .targetWorldPos = ZHLN::ProceduralMath::Translation(headBefore) + FVec3(1.0f, 0.2f, 2.0f),
+                .targetWorldPos = ZHLN::ProceduralMath::Translation(headBefore) + FVec3{1.0f, 0.2f, 2.0f},
                 .weight         = 1.0f,
             };
 
@@ -1303,7 +1311,7 @@ struct ProceduralAnimationTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> xpbd_hair_preserves_segment_lengths() {
             ZHLN::HairStrandsComponent hair;
-            ZHLN::Animation::StepHairSimulation(hair, FVec3(0.0f, 2.0f, 0.0f), Quat::Identity(), FVec3(3.0f, 0.0f, 0.0f), 1.0f / 60.0f);
+            ZHLN::Animation::StepHairSimulation(hair, FVec3{0.0f, 2.0f, 0.0f}, Quat::Identity(), FVec3{3.0f, 0.0f, 0.0f}, 1.0f / 60.0f);
 
             if (!hair.initialized) {
                 return std::unexpected(ProceduralAnimationTestError::HairConstraintFailed);
@@ -1332,7 +1340,7 @@ struct ProceduralAnimationTestSuite {
             for (size_t link = 0; link < ZHLN::HairStrandsComponent::kLinksPerStrand; ++link) {
                 const size_t             semantic = ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart) + link;
                 const ZHLN::RigNodeIndex node     = map.nodeIndices[semantic];
-                map.modelTransforms[node]         = CreateTranslation(headPosition + FVec3(0.15f + static_cast<float>(link) * 0.08f, 0.08f, 0.0f));
+                map.modelTransforms[node]         = CreateTranslation(headPosition + FVec3{0.15f + static_cast<float>(link) * 0.08f, 0.08f, 0.0f});
             }
 
             ZHLN::HairStrandsComponent hair;

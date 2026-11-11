@@ -253,9 +253,8 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
     // AmbientTerm convention (BSPLighting ladder): irradiance =
     // luma(color) * intensity / kAmbientBrightnessLadder. Carry the fit's
     // irradiance exactly, hue in color at the authored luma of 0.34.
-    field.ambient.color     = FVec3 {fillRadiance[0] / fillLuma * kAmbientReferenceLuma,
-                                     fillRadiance[1] / fillLuma * kAmbientReferenceLuma,
-                                     fillRadiance[2] / fillLuma * kAmbientReferenceLuma};
+    field.ambient.color = {fillRadiance[0] / fillLuma * kAmbientReferenceLuma, fillRadiance[1] / fillLuma * kAmbientReferenceLuma,
+    fillRadiance[2] / fillLuma * kAmbientReferenceLuma};
     field.ambient.intensity = fillLuma * kAmbientBrightnessLadder / kAmbientReferenceLuma;
     field.ambient.authored  = false;
 
@@ -324,7 +323,7 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
         out.light.name       = "bake_vpl";
         out.light.className  = "bake_vpl";
         out.light.position   = position;
-        out.light.direction  = FVec3 {0.0F, -1.0F, 0.0F};
+        out.light.direction = {0.0F, -1.0F, 0.0F};
         out.light.color      = (level > 1e-4F) ? FVec3 {radiance.x / level, radiance.y / level, radiance.z / level}
                                                : FVec3 {1.0F, 1.0F, 1.0F};
         out.light.fromEmissive = false; // fitted from the bake, not an emissive surface

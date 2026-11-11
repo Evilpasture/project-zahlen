@@ -846,9 +846,9 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
 
     ReadMorphTargets(job, prim, vertexCount);
 
-    const FVec3 localCenter(
+    const FVec3 localCenter{
         (job.localMax[0] + job.localMin[0]) * 0.5f, (job.localMax[1] + job.localMin[1]) * 0.5f, (job.localMax[2] + job.localMin[2]) * 0.5f
-    );
+    };
     float maxD2    = 0.0f;
     auto  Consider = [&](float x, float y, float z) {
         const float dx = x - localCenter.x;
@@ -1283,8 +1283,8 @@ auto BuildModelPrefab(
                 float ibmRaw[16];
                 cgltf_accessor_read_float(skin->inverse_bind_matrices, j, ibmRaw, 16);
                 ibm = Mat4x4::FromCols(
-                    FVec4(ibmRaw[0], ibmRaw[1], ibmRaw[2], ibmRaw[3]), FVec4(ibmRaw[4], ibmRaw[5], ibmRaw[6], ibmRaw[7]),
-                    FVec4(ibmRaw[8], ibmRaw[9], ibmRaw[10], ibmRaw[11]), FVec4(ibmRaw[12], ibmRaw[13], ibmRaw[14], ibmRaw[15])
+                    FVec4{ibmRaw[0], ibmRaw[1], ibmRaw[2], ibmRaw[3]}, FVec4{ibmRaw[4], ibmRaw[5], ibmRaw[6], ibmRaw[7]},
+                    FVec4{ibmRaw[8], ibmRaw[9], ibmRaw[10], ibmRaw[11]}, FVec4{ibmRaw[12], ibmRaw[13], ibmRaw[14], ibmRaw[15]}
                 );
             }
 

@@ -136,7 +136,7 @@ class IBLProcessor {
         defer cleanupStaging([&] { stagedInput->Destroy(impl.allocator); });
 
         // 4. Descriptor Heap Setups
-        const FVec3   sunDir3  = FVec3(0.5f, 1.0f, 0.2f).Normalized();
+        const FVec3   sunDir3  = FVec3{0.5f, 1.0f, 0.2f}.Normalized();
         const ZHLN::FVec4 sunDir4 {sunDir3.x, sunDir3.y, sunDir3.z, 0.0f};
         const IBLBakePush basePush {
             .outAddr     = hasPreparedSH ? 0 : impl.ctx.BufferAddress(shBuffer.Handle()),
@@ -232,7 +232,7 @@ class IBLProcessor {
         } else {
             for (size_t c = 0; c < payload.shCoeffs.size(); ++c) {
                 const auto& rgb     = radiance.diffuseSH[c];
-                payload.shCoeffs[c] = FVec4(rgb[0], rgb[1], rgb[2], 0.0f);
+                payload.shCoeffs[c] = {rgb[0], rgb[1], rgb[2], 0.0f};
             }
         }
 

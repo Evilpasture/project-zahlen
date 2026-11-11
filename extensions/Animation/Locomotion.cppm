@@ -280,7 +280,7 @@ auto SpawnCharacter(
                 .targetDistance    = 5.50f,
                 .yaw               = 90.0f,
                 .pitch             = -14.0f,
-                .targetOffset      = FVec3(0.0f, 0.80f, 0.0f),
+                .targetOffset      = FVec3{0.0f, 0.80f, 0.0f},
                 .stiffness         = 24.0f,
                 .vignetteIntensity = 1.10f,
                 .vignettePower     = 1.50f,
@@ -312,8 +312,8 @@ auto
     }
 
     const FVec3 pos               = trans->position;
-    const FVec3 finalLifterCenter = pos + FVec3(0.0f, config.GetLifterOffsetY(), 0.0f);
-    const FVec3 finalBumperCenter = pos + FVec3(0.0f, config.GetBumperOffsetY(), 0.0f);
+    const FVec3 finalLifterCenter = pos + FVec3{0.0f, config.GetLifterOffsetY(), 0.0f};
+    const FVec3 finalBumperCenter = pos + FVec3{0.0f, config.GetBumperOffsetY(), 0.0f};
 
     // 1. Draw Upper Bumper Oval (Green)
     DrawWireframeEllipsoid(scene, finalBumperCenter, {.radiusXZ = config.bumperRadiusXZ, .radiusY = config.bumperRadiusY}, palette.colorBumper);

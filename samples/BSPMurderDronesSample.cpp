@@ -26,6 +26,7 @@
 //   ./build/p2996/samples/BSPMurderDronesSample import/engine_assets/maps/gm_murder_drones.bsp
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
@@ -244,9 +245,9 @@ void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
 // Camera::GetViewMatrix builds its direction inline and exposes no accessor.
 // Same formula, so the ray and the view can never disagree about "forward".
 [[nodiscard]] auto CameraForward(const ZHLN::Camera& cam) -> FVec3 {
-    const float yawRad   = JPH::DegreesToRadians(cam.yaw);
-    const float pitchRad = JPH::DegreesToRadians(cam.pitch);
-    return FVec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
+    const float yawRad   = cam.yaw.ToRadians().value;
+    const float pitchRad = cam.pitch.ToRadians().value;
+    return FVec3{JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)}.Normalized();
 }
 
 // A readable label for whatever the crosshair is over. Prefers the Source
@@ -1035,8 +1036,8 @@ void ApplyProceduralView(ZHLN::Engine& engine, bool firstPerson) {
         // so the switch never snaps the view. The rig's yaw/pitch are what the
         // Camera component resolves to, which is why the camera is the source.
         const auto                                   camera    = registry.Get<ZHLN::Components::CameraComponent>(camEnt);
-        const float                                  seedYaw   = camera ? camera->camera.yaw : g_view.yaw;
-        const float                                  seedPitch = camera ? camera->camera.pitch : kOrbitPitch;
+        const float                                  seedYaw   = camera ? camera->camera.yaw.value : g_view.yaw;
+        const float                                  seedPitch = camera ? camera->camera.pitch.value : kOrbitPitch;
         const ZHLN::CameraRig::TargetCameraComponent orbit {
             .target         = g_player,
             .distance       = kOrbitDistance,
@@ -1086,10 +1087,10 @@ void ApplyProceduralView(ZHLN::Engine& engine, bool firstPerson) {
 /** Adopts whatever is currently driving the camera as the sample's own look. */
 void SyncViewLookFromCamera(ZHLN::ECS::Registry& registry, ZHLN::Entity camEnt) {
     if (const auto camera = registry.Get<ZHLN::Components::CameraComponent>(camEnt); camera) {
-        g_view.yaw = camera->camera.yaw;
+        g_view.yaw = camera->camera.yaw.value;
         // The first-person clamp is far wider than anything the sample can
         // produce on its own, so a clamped fly-cam pose is adopted as-is.
-        g_view.pitch = std::clamp(camera->camera.pitch, -89.0f, 89.0f);
+        g_view.pitch = std::clamp(camera->camera.pitch.value, -89.0f, 89.0f);
     }
     g_freeCamOwnedLook = false;
 }
@@ -1204,8 +1205,8 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
             g_view.yaw += input->GetMouseDeltaX() * kLookSensitivity;
             g_view.pitch = std::clamp(g_view.pitch - (input->GetMouseDeltaY() * kLookSensitivity), -89.0f, 89.0f);
         }
-        cc.camera.yaw      = g_view.yaw;
-        cc.camera.pitch    = g_view.pitch;
+        cc.camera.yaw      = ZHLN::DegF{g_view.yaw};
+        cc.camera.pitch    = ZHLN::DegF{g_view.pitch};
         cc.camera.position = eyePos;
     });
 }
@@ -1762,9 +1763,9 @@ auto main(int argc, char* argv[]) -> int {
             reg.Patch<ZHLN::Components::CameraComponent>(camEnt, [](auto& cc) -> auto {
                 // g_view is file-static, so the sample's own look state can be
                 // seeded right here instead of round-tripping through a capture.
-                g_view.yaw      = cc.camera.yaw;
-                g_view.pitch    = cc.camera.pitch;
-                cc.camera.fov   = 75.0f;
+                g_view.yaw      = cc.camera.yaw.value;
+                g_view.pitch    = cc.camera.pitch.value;
+                cc.camera.fov   = ZHLN::DegF{75.0f};
                 cc.camera.nearZ = 0.03f;
             });
         }

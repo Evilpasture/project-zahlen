@@ -20,6 +20,7 @@
 // colour test and every background/tone-map concern cancels out.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -183,8 +184,8 @@ struct ViewportSubregionTestSuite {
             }
             ZHLN::Camera& cam = camComp->camera;
             cam.position = {0.0f, 0.0f, 4.0f};
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
+            cam.yaw      = ZHLN::DegF{-90.0f};
+            cam.pitch    = ZHLN::DegF{0.0f};
 
             auto matRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}});
             if (!matRes) {

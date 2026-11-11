@@ -3,12 +3,13 @@
 
 #pragma once
 
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/EulerAngles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <numbers>
 
 namespace ZHLN {
 
@@ -23,30 +24,30 @@ struct alignas(16) Quat {
 
     [[nodiscard]] static constexpr auto Identity() noexcept -> Quat { return {0.0f, 0.0f, 0.0f, 1.0f}; }
     // Axis must be unit length; the angle is in radians.
-    [[nodiscard]] static auto FromAxisAngle(FVec3 axis, float radians) noexcept -> Quat {
+    [[nodiscard]] static auto FromAxisAngle(FVec3 axis, RadF radians) noexcept -> Quat {
         const auto half = radians * 0.5f;
-        const auto s = std::sin(half);
-        return {axis.x * s, axis.y * s, axis.z * s, std::cos(half)};
+        const auto s = Sin(half);
+        return {axis.x * s, axis.y * s, axis.z * s, Cos(half)};
     }
     // XYZ angles in radians; rotation order is Z * Y * X.
-    [[nodiscard]] static auto FromEuler(FVec3 radians) noexcept -> Quat {
-        const auto sx = std::sin(radians.x * 0.5f), cx = std::cos(radians.x * 0.5f);
-        const auto sy = std::sin(radians.y * 0.5f), cy = std::cos(radians.y * 0.5f);
-        const auto sz = std::sin(radians.z * 0.5f), cz = std::cos(radians.z * 0.5f);
+    [[nodiscard]] static auto FromEuler(EulerRadians radians) noexcept -> Quat {
+        const auto sx = std::sin(radians.value.x * 0.5f), cx = std::cos(radians.value.x * 0.5f);
+        const auto sy = std::sin(radians.value.y * 0.5f), cy = std::cos(radians.value.y * 0.5f);
+        const auto sz = std::sin(radians.value.z * 0.5f), cz = std::cos(radians.value.z * 0.5f);
         return {cz * sx * cy - sz * cx * sy, cz * cx * sy + sz * sx * cy,
                 sz * cx * cy - cz * sx * sy, cz * cx * cy + sz * sx * sy};
     }
-    [[nodiscard]] static auto FromEulerDegrees(FVec3 degrees) noexcept -> Quat {
-        return FromEuler(degrees * (std::numbers::pi_v<float> / 180.0f));
+    [[nodiscard]] static auto FromEulerDegrees(EulerDegrees degrees) noexcept -> Quat {
+        return FromEuler(degrees.ToRadians());
     }
     [[nodiscard]] constexpr auto AsVec4() const noexcept -> FVec4 { return {x, y, z, w}; }
     [[nodiscard]] constexpr auto XYZ() const noexcept -> FVec3 { return {x, y, z}; }
     // Shortest-axis representation of a unit quaternion; q and -q agree.
-    void ToAxisAngle(FVec3& axis, float& angle) const noexcept {
+    void ToAxisAngle(FVec3& axis, RadF& angle) const noexcept {
         const auto q = w < 0.0f ? -*this : *this;
-        if (q.w >= 1.0f) { axis = FVec3::Zero(); angle = 0.0f; return; }
+        if (q.w >= 1.0f) { axis = FVec3::Zero(); angle = RadF{}; return; }
         axis = q.XYZ().Normalized();
-        angle = 2.0f * std::acos(std::clamp(q.w, 0.0f, 1.0f));
+        angle = Acos(std::clamp(q.w, 0.0f, 1.0f)) * 2.0f;
     }
     [[nodiscard]] constexpr auto operator[](std::size_t i) noexcept -> float& { return i == 0 ? x : (i == 1 ? y : (i == 2 ? z : w)); }
     [[nodiscard]] constexpr auto operator[](std::size_t i) const noexcept -> const float& { return i == 0 ? x : (i == 1 ? y : (i == 2 ? z : w)); }
@@ -59,14 +60,14 @@ struct alignas(16) Quat {
         return length == 0.0f ? Identity() : Quat {x / length, y / length, z / length, w / length};
     }
     // Returns XYZ radians in the same Z * Y * X convention as FromEuler.
-    [[nodiscard]] auto EulerAngles() const noexcept -> FVec3 {
-        return {std::atan2(2.0f * (w*x + y*z), 1.0f - 2.0f * (x*x + y*y)),
-                std::asin(std::clamp(2.0f * (w*y - z*x), -1.0f, 1.0f)),
-                std::atan2(2.0f * (w*z + x*y), 1.0f - 2.0f * (y*y + z*z))};
+    [[nodiscard]] auto EulerAngles() const noexcept -> EulerRadians {
+        return {{std::atan2(2.0f * (w*x + y*z), 1.0f - 2.0f * (x*x + y*y)),
+                 std::asin(std::clamp(2.0f * (w*y - z*x), -1.0f, 1.0f)),
+                 std::atan2(2.0f * (w*z + x*y), 1.0f - 2.0f * (y*y + z*z))}};
     }
     // Same convention as EulerAngles(), returned in degrees.
-    [[nodiscard]] auto EulerAnglesDegrees() const noexcept -> FVec3 {
-        return EulerAngles() * (180.0f / std::numbers::pi_v<float>);
+    [[nodiscard]] auto EulerAnglesDegrees() const noexcept -> EulerDegrees {
+        return EulerAngles().ToDegrees();
     }
     [[nodiscard]] constexpr auto Conjugated() const noexcept -> Quat { return {-x, -y, -z, w}; }
     [[nodiscard]] constexpr auto Inversed() const noexcept -> Quat {

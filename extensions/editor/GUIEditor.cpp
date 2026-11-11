@@ -177,7 +177,7 @@ constexpr auto kComponentKinds = MakeComponentKinds<Comp::NameComponent, Comp::T
                 auto                  axisLabel = ZHLN::FormatTo(axisIdBuf, "{} {}", name, "XYZ"[axis]);
                 gui.Slider(axisLabel, v[axis], -10000.0f, 10000.0f);
             }
-            field = FVec3(v[0], v[1], v[2]);
+            field = {v[0], v[1], v[2]};
         } else if constexpr (std::is_same_v<FT, JPH::Quat>) {
             const auto euler = field.GetEulerAngles() * (180.0f / JPH::JPH_PI);
             float           deg[3]  = {euler.GetX(), euler.GetY(), euler.GetZ()};
@@ -290,9 +290,9 @@ auto ReadTransformInput(ZHLN::Optional<const Comp::InputStateComponent&> input) 
 }
 
 auto CameraForward(const Camera& camera) noexcept -> FVec3 {
-    const float yaw   = JPH::DegreesToRadians(camera.yaw);
-    const float pitch = JPH::DegreesToRadians(camera.pitch);
-    return FVec3(JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)).Normalized();
+    const float yaw   = camera.yaw.ToRadians().value;
+    const float pitch = camera.pitch.ToRadians().value;
+    return FVec3{JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)}.Normalized();
 }
 
 // Unprojects the mouse exactly like the host's picking ray: same NDC
@@ -313,13 +313,13 @@ auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp,
     const float aspect = w / h;
 
     const auto invVP = Inverse(camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix());
-    const FVec4  nearW = invVP * FVec4(ndcX, ndcY, 0.0f, 1.0f);
-    const FVec4  farW  = invVP * FVec4(ndcX, ndcY, 1.0f, 1.0f);
+    const FVec4  nearW = invVP * FVec4{ndcX, ndcY, 0.0f, 1.0f};
+    const FVec4  farW  = invVP * FVec4{ndcX, ndcY, 1.0f, 1.0f};
     if (nearW.w <= 0.0f || farW.w <= 0.0f) {
         return false;
     }
-    origin               = FVec3(nearW.x / nearW.w, nearW.y / nearW.w, nearW.z / nearW.w);
-    const FVec3 farP = FVec3(farW.x / farW.w, farW.y / farW.w, farW.z / farW.w);
+    origin = {nearW.x / nearW.w, nearW.y / nearW.w, nearW.z / nearW.w};
+    const FVec3 farP = {farW.x / farW.w, farW.y / farW.w, farW.z / farW.w};
     dir                  = (farP - origin).Normalized();
     return true;
 }
@@ -342,7 +342,7 @@ auto WorldToScreen(const Camera& camera, const SceneViewport& r, const FVec3& wo
     }
     const float      aspect = w / h;
     const auto vp = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix();
-    const FVec4  clip   = vp * FVec4(world.x, world.y, world.z, 1.0f);
+    const FVec4  clip   = vp * FVec4{world.x, world.y, world.z, 1.0f};
     if (clip.w <= 0.0f) {
         return false;
     }
@@ -498,17 +498,17 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
                                                  (state.transformAxis == EditorState::TransformAxis::Y) ? start.y * factor :
                                                                                                           start.z * factor;
                             if (state.transformAxis == EditorState::TransformAxis::X) {
-                                next = FVec3(scaled, start.y, start.z);
+                                next = {scaled, start.y, start.z};
                             } else if (state.transformAxis == EditorState::TransformAxis::Y) {
-                                next = FVec3(start.x, scaled, start.z);
+                                next = {start.x, scaled, start.z};
                             } else {
-                                next = FVec3(start.x, start.y, scaled);
+                                next = {start.x, start.y, scaled};
                             }
                         }
                         // A flipped or zero scale would turn the mesh inside
                         // out or collapse it; the mouse can get arbitrarily
                         // close to the projected center.
-                        next = FVec3(std::max(next.x, 1e-4f), std::max(next.y, 1e-4f), std::max(next.z, 1e-4f));
+                        next = {std::max(next.x, 1e-4f), std::max(next.y, 1e-4f), std::max(next.z, 1e-4f)};
                         reg.Patch<Comp::TransformComponent>(e, [&next](Comp::TransformComponent& t) -> void { t.scale = next; });
                     }
                     break;
@@ -610,7 +610,7 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
         }
 
         bool      isSelected = (state.selectedEntity == row.entity);
-        FVec4 color      = isSelected ? FVec4(0.20f, 0.35f, 0.55f, 0.9f) : FVec4(0.10f, 0.12f, 0.16f, 0.7f);
+        FVec4 color      = isSelected ? FVec4{0.20f, 0.35f, 0.55f, 0.9f} : FVec4{0.10f, 0.12f, 0.16f, 0.7f};
 
         // Indent by depth
         if (row.depth > 0) {

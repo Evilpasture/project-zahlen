@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include "helpers/CommonFixtures.hpp"
 
@@ -99,8 +100,8 @@ struct CPUPipelineHarness {
         pc.OptimizeBroadphase();
 
         cam.position = spawnPos.Cast<float>() + ZHLN::FVec3(0.0f, 1.5f, -5.0f);
-        cam.yaw      = -90.0f;
-        cam.pitch    = 0.0f;
+        cam.yaw      = ZHLN::DegF{-90.0f};
+        cam.pitch    = ZHLN::DegF{0.0f};
     }
 
     ~CPUPipelineHarness() {
@@ -415,7 +416,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
 
-            const auto rampRot = ZHLN::Quat::FromEulerDegrees({-25.0f, 0.0f, 0.0f});
+            const auto rampRot = ZHLN::Quat::FromEulerDegrees({{-25.0f, 0.0f, 0.0f}});
             auto      rampShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.2f, 5.0f);
             harness.pc.CreateRigidBody(rampShape, {0, 1.0, 4.0}, rampRot.AsVec4(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();

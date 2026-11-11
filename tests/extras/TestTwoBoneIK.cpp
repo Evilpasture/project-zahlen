@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -109,19 +110,19 @@ struct ServiceProbeSystem {
         .name              = ZHLN::String64("Shoulder"),
         .parentIndex       = -1,
         .nodeIndex         = 0,
-        .inverseBindMatrix = ZHLN::CreateTranslation(FVec3(0.0f, -2.0f, 0.0f)),
+        .inverseBindMatrix = ZHLN::CreateTranslation(FVec3{0.0f, -2.0f, 0.0f}),
     };
     skel.joints[1] = ZHLN::Joint {
         .name              = ZHLN::String64("Elbow"),
         .parentIndex       = 0,
         .nodeIndex         = 1,
-        .inverseBindMatrix = ZHLN::CreateTranslation(FVec3(0.0f, -2.0f, -2.0f)),
+        .inverseBindMatrix = ZHLN::CreateTranslation(FVec3{0.0f, -2.0f, -2.0f}),
     };
     skel.joints[2] = ZHLN::Joint {
         .name              = ZHLN::String64("Hand"),
         .parentIndex       = 1,
         .nodeIndex         = 2,
-        .inverseBindMatrix = ZHLN::CreateTranslation(FVec3(0.0f, -2.0f, -4.0f)),
+        .inverseBindMatrix = ZHLN::CreateTranslation(FVec3{0.0f, -2.0f, -4.0f}),
     };
     prefab->skeletons.push_back(std::move(skel));
 
@@ -183,9 +184,9 @@ struct TwoBoneIKTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> two_bone_ik_solver() {
             ZHLN::IK::TwoBoneIKSolverInput input {
-                .upperPosition  = FVec3(0.0f, 2.0f, 0.0f),
-                .targetPosition = FVec3(0.0f, 2.0f, 2.8284f),
-                .poleVector     = FVec3(0.0f, 1.0f, 0.0f),
+                .upperPosition  = FVec3{0.0f, 2.0f, 0.0f},
+                .targetPosition = FVec3{0.0f, 2.0f, 2.8284f},
+                .poleVector     = FVec3{0.0f, 1.0f, 0.0f},
                 .upperLength    = 2.0f,
                 .lowerLength    = 2.0f,
             };
@@ -201,7 +202,7 @@ struct TwoBoneIKTestSuite {
                 return std::unexpected(TwoBoneIKTestError::IKSolverFailed);
             }
 
-            input.targetPosition = FVec3(0.0f, 2.0f, 10.0f);
+            input.targetPosition = {0.0f, 2.0f, 10.0f};
             input.maxExtension   = 0.98f;
             output               = ZHLN::IK::SolveTwoBoneIK(input);
             if (!ZHLN::Test::ExpectTrue(output.valid) || !ZHLN::Test::ExpectTrue(output.reachClamped) ||
@@ -324,8 +325,8 @@ struct TwoBoneIKTestSuite {
                    }
             );
 
-            const FVec3 targetPos(0.0f, 2.0f, 2.8284f);
-            const auto targetRot = ZHLN::Quat::FromAxisAngle(FVec3::UnitY(), 0.35f);
+            const FVec3 targetPos{0.0f, 2.0f, 2.8284f};
+            const auto targetRot = ZHLN::Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{0.35f});
             const std::array chain {
                 ZHLN::Animation::IKChain {
                     .upperNodeIndex    = 0,
@@ -333,7 +334,7 @@ struct TwoBoneIKTestSuite {
                     .endNodeIndex      = 2,
                     .targetPosition    = targetPos,
                     .targetRotation    = targetRot,
-                    .poleVector        = FVec3(0.0f, 1.0f, 0.0f),
+                    .poleVector        = FVec3{0.0f, 1.0f, 0.0f},
                     .weight            = 1.0f,
                     .orientEndEffector = true,
                 }
@@ -371,7 +372,7 @@ struct TwoBoneIKTestSuite {
             // Dropping IK chains on the next frame restores the un-bent bind/clip reach (Hand at z = 4.0).
             ctx.Step(1.0f / 60.0f, assets, uploads);
             const auto restoredModel = ctx.ModelPose(h);
-            if (!ZHLN::Test::ExpectTrue(Near(restoredModel[2].Column(3).XYZ(), FVec3(0.0f, 2.0f, 4.0f), 1.0e-4f))) {
+            if (!ZHLN::Test::ExpectTrue(Near(restoredModel[2].Column(3).XYZ(), FVec3{0.0f, 2.0f, 4.0f}, 1.0e-4f))) {
                 return std::unexpected(TwoBoneIKTestError::RestingIKDrift);
             }
             return {};
@@ -408,7 +409,7 @@ struct TwoBoneIKTestSuite {
             );
             const ZHLN::Entity skinnedChild = registry.Create(
                 ZHLN::Components::HierarchyComponent {.parent = root},
-                ZHLN::Components::TransformComponent {.position = FVec3(7.0f, 8.0f, 9.0f)},
+                ZHLN::Components::TransformComponent {.position = FVec3{7.0f, 8.0f, 9.0f}},
                 ZHLN::Components::SkeletalMeshComponent {.jointOffset = 32, .skeletonIndex = 0},
                 ZHLN::Components::MeshComponent {.nodeIndex = 2}
             );
@@ -456,8 +457,8 @@ struct TwoBoneIKTestSuite {
             if (!ZHLN::Test::ExpectTrue(animAfter.has_value()) || !ZHLN::Test::ExpectTrue(animAfter->isFinished) ||
                 !ZHLN::Test::ExpectEq(idleMorph->weights[0], 1.0f) || !ZHLN::Test::ExpectEq(idleMorph->weights[1], 0.75f) ||
                 !ZHLN::Test::ExpectTrue(rigidTr.has_value()) ||
-                !ZHLN::Test::ExpectTrue(Near(rigidTr->position, FVec3(0.0f, 2.0f, 4.5f), 1.0e-4f)) ||
-                !ZHLN::Test::ExpectTrue(Near(skinnedTr->position, FVec3(7.0f, 8.0f, 9.0f), 1.0e-4f))) {
+                !ZHLN::Test::ExpectTrue(Near(rigidTr->position, FVec3{0.0f, 2.0f, 4.5f}, 1.0e-4f)) ||
+                !ZHLN::Test::ExpectTrue(Near(skinnedTr->position, FVec3{7.0f, 8.0f, 9.0f}, 1.0e-4f))) {
                 return std::unexpected(TwoBoneIKTestError::ECSBridgeFailed);
             }
             return {};
@@ -490,7 +491,7 @@ struct TwoBoneIKTestSuite {
             // Place the character root at world (10, 0, 5) and a world target entity at (10, 2, 7.6) with local targetOffset (0, 0, 0.2),
             // yielding a model-space IK target of (0, 2, 2.8).
             const ZHLN::Entity targetEntity = registry.Create(
-                ZHLN::Components::TransformComponent {.position = FVec3(10.0f, 2.0f, 7.6f)}
+                ZHLN::Components::TransformComponent {.position = FVec3{10.0f, 2.0f, 7.6f}}
             );
 
             ZHLN::IK::TwoBoneIKComponent ikComp {};
@@ -499,9 +500,9 @@ struct TwoBoneIKTestSuite {
                     .upperNodeIndex    = 0,
                     .lowerNodeIndex    = 1,
                     .endNodeIndex      = 2,
-                    .poleVector        = FVec3(0.0f, 1.0f, 0.0f),
+                    .poleVector        = FVec3{0.0f, 1.0f, 0.0f},
                     .targetEntity      = targetEntity,
-                    .targetOffset      = FVec3(0.0f, 0.0f, 0.2f),
+                    .targetOffset      = FVec3{0.0f, 0.0f, 0.2f},
                     .weight            = 1.0f,
                     .orientEndEffector = true,
                 }
@@ -511,7 +512,7 @@ struct TwoBoneIKTestSuite {
             }
 
             const ZHLN::Entity root = registry.Create(
-                ZHLN::Components::TransformComponent {.position = FVec3(10.0f, 0.0f, 5.0f)},
+                ZHLN::Components::TransformComponent {.position = FVec3{10.0f, 0.0f, 5.0f}},
                 ZHLN::Components::AnimatorComponent {
                     .prefabAsset     = id,
                     .currentTrackIdx = 0,
@@ -540,8 +541,8 @@ struct TwoBoneIKTestSuite {
 
             const auto modelPose = animCtx.ModelPose(animComp->animationID);
             if (!ZHLN::Test::ExpectEq(modelPose.size(), static_cast<size_t>(4)) ||
-                !ZHLN::Test::ExpectTrue(Near(modelPose[2].Column(3).XYZ(), FVec3(0.0f, 2.0f, 2.8f), 1.0e-3f)) ||
-                !ZHLN::Test::ExpectTrue(Near(fingerTr->position, FVec3(0.0f, 2.0f, 3.3f), 1.0e-3f))) {
+                !ZHLN::Test::ExpectTrue(Near(modelPose[2].Column(3).XYZ(), FVec3{0.0f, 2.0f, 2.8f}, 1.0e-3f)) ||
+                !ZHLN::Test::ExpectTrue(Near(fingerTr->position, FVec3{0.0f, 2.0f, 3.3f}, 1.0e-3f))) {
                 return std::unexpected(TwoBoneIKTestError::ECSBridgeFailed);
             }
             return {};

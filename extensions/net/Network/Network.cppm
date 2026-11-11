@@ -242,10 +242,10 @@ struct ZHLN::Wire::Codec<ZHLN::FVec3> {
                 return res;
             }
         }
-        value = FVec3(
+        value = FVec3{
             static_cast<float>(quantized[0]) * ZHLN::Net::INV_POSITION_SCALE, static_cast<float>(quantized[1]) * ZHLN::Net::INV_POSITION_SCALE,
             static_cast<float>(quantized[2]) * ZHLN::Net::INV_POSITION_SCALE
-        );
+        };
         return {};
     }
 };
@@ -290,10 +290,10 @@ struct ZHLN::Wire::Codec<ZHLN::Quat> {
                 return res;
             }
         }
-        value = ZHLN::Quat(
+        value = ZHLN::Quat{
                     static_cast<float>(quantized[0]) * ZHLN::Net::INV_QUAT_SCALE, static_cast<float>(quantized[1]) * ZHLN::Net::INV_QUAT_SCALE,
                     static_cast<float>(quantized[2]) * ZHLN::Net::INV_QUAT_SCALE, static_cast<float>(quantized[3]) * ZHLN::Net::INV_QUAT_SCALE
-        )
+        }
                     .Normalized();
         return {};
     }

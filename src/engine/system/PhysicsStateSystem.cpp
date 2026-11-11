@@ -107,7 +107,7 @@ void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsCompo
 
         const auto& snap = snapshots[j];
         trans->position = Lerp(snap.previousPosition, snap.currentPosition, clampedAlpha);
-        trans->rotation = Slerp(Quat(snap.previousRotation), Quat(snap.currentRotation), clampedAlpha);
+        trans->rotation = Slerp(Quat{snap.previousRotation}, Quat{snap.currentRotation}, clampedAlpha);
     }
 
     if constexpr (isDev) {

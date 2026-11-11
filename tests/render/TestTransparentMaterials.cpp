@@ -16,6 +16,7 @@
 // so a static scene stays static. Mesh shading is left alone (Hybrid).
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -83,18 +84,18 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
         gfx.post.enableSSR               = 0;
         gfx.rayTracing.enableReflections = false;
         gfx.post.mode                    = 0;
-        gfx.environment.skyZenith        = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
-        gfx.environment.skyHorizon       = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
-        gfx.environment.skyGround        = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyZenith = {0.0f, 0.0f, 0.0f, 1.0f};
+        gfx.environment.skyHorizon = {0.0f, 0.0f, 0.0f, 1.0f};
+        gfx.environment.skyGround = {0.0f, 0.0f, 0.0f, 1.0f};
     });
 
     // ForwardPass still shades; a sun on the camera-facing +Z faces keeps the
     // glass from compositing as an unlit black film on top of the wall albedo.
     const ZHLN::Entity sun = registry.Create();
     registry.Add(
-        sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3(0.0f, 0.0f, 8.0f)},
+        sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 8.0f}},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3(1.0f, 1.0f, 1.0f), .intensity = 220.0f, .direction = ZHLN::FVec3(0.0f, 0.0f, 1.0f)
+            .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 1.0f, 1.0f}, .intensity = 220.0f, .direction = ZHLN::FVec3{0.0f, 0.0f, 1.0f}
         }
     );
 
@@ -139,10 +140,10 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
         return SceneBuild::Camera;
     }
     ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = ZHLN::FVec3(0.0f, 0.0f, 5.0f);
-    camera.yaw      = -90.0f;
-    camera.pitch    = 0.0f;
-    camera.fov      = 60.0f;
+    camera.position = {0.0f, 0.0f, 5.0f};
+    camera.yaw      = ZHLN::DegF{-90.0f};
+    camera.pitch    = ZHLN::DegF{0.0f};
+    camera.fov      = ZHLN::DegF{60.0f};
     return SceneBuild::Ok;
 }
 
@@ -291,10 +292,10 @@ struct TransparentMaterialsTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& camera = cameraComp->camera;
-            camera.position = ZHLN::FVec3(0.0f, 0.0f, 5.0f);
-            camera.yaw = -90.0f;
-            camera.pitch = 0.0f;
-            camera.fov = 60.0f;
+            camera.position = {0.0f, 0.0f, 5.0f};
+            camera.yaw = ZHLN::DegF{-90.0f};
+            camera.pitch = ZHLN::DegF{0.0f};
+            camera.fov = ZHLN::DegF{60.0f};
 
             constexpr uint32_t side = 64;
             std::vector<uint8_t> maskPixels(side * side * 4u, 255u);

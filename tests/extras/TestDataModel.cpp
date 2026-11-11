@@ -279,9 +279,9 @@ struct TestDataModelSuite {
             size_t propertyChangedCount = 0;
             auto propertyConnection = (*rootPart)->PropertyChanged.Connect([&](std::string) { ++propertyChangedCount; });
 
-            (*rootPart)->SetPosition(FVec3(1.0f, 2.0f, 3.0f));
-            (*rootPart)->SetSize(FVec3(2.0f, 3.0f, 4.0f));
-            (*rootPart)->SetRotation(FVec3(0.0f, 90.0f, 0.0f));
+            (*rootPart)->SetPosition(FVec3{1.0f, 2.0f, 3.0f});
+            (*rootPart)->SetSize(FVec3{2.0f, 3.0f, 4.0f});
+            (*rootPart)->SetRotation(FVec3{0.0f, 90.0f, 0.0f});
             (*rootPart)->SetAnchored(true);
             ZHLN::Test::ExpectTrue((*rootPart)->SetNetworkOwner(*player).has_value());
             ZHLN::Test::ExpectTrue(!(*rootPart)->SetParent(*foreignPart).has_value());

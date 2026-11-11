@@ -280,17 +280,15 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
             ++n;
         }
 
-        const FVec4 centersX(batchCenters[0].x, batchCenters[1].x, batchCenters[2].x, batchCenters[3].x);
-        const FVec4 centersY(batchCenters[0].y, batchCenters[1].y, batchCenters[2].y, batchCenters[3].y);
-        const FVec4 centersZ(batchCenters[0].z, batchCenters[1].z, batchCenters[2].z, batchCenters[3].z);
-        const FVec4 negScaled = FVec4(
-            -(batchScaledRadii[0] + 0.5f), -(batchScaledRadii[1] + 0.5f), -(batchScaledRadii[2] + 0.5f), -(batchScaledRadii[3] + 0.5f)
-        );
+        const FVec4 centersX{batchCenters[0].x, batchCenters[1].x, batchCenters[2].x, batchCenters[3].x};
+        const FVec4 centersY{batchCenters[0].y, batchCenters[1].y, batchCenters[2].y, batchCenters[3].y};
+        const FVec4 centersZ{batchCenters[0].z, batchCenters[1].z, batchCenters[2].z, batchCenters[3].z};
+        const FVec4 negScaled = {-(batchScaledRadii[0] + 0.5f), -(batchScaledRadii[1] + 0.5f), -(batchScaledRadii[2] + 0.5f), -(batchScaledRadii[3] + 0.5f)};
 
         mainPlanes.Test4(centersX, centersY, centersZ, negScaled, mainVisible.data());
 
         if (!isFullBright) {
-            const FVec4 negPlain = FVec4(-(batchRadii[0] + 0.5f), -(batchRadii[1] + 0.5f), -(batchRadii[2] + 0.5f), -(batchRadii[3] + 0.5f));
+            const FVec4 negPlain = {-(batchRadii[0] + 0.5f), -(batchRadii[1] + 0.5f), -(batchRadii[2] + 0.5f), -(batchRadii[3] + 0.5f)};
             shadowPlanes.Test4(centersX, centersY, centersZ, negPlain, shadowVisible.data());
         }
 
@@ -352,7 +350,7 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
          {.start = 3, .end = 7}}
     };
 
-    FVec4 cyanColor(0.0f, 1.0f, 1.0f, 1.0f);
+    FVec4 cyanColor{0.0f, 1.0f, 1.0f, 1.0f};
     for (auto edge: frustumEdges) {
         scene.AddLine(corners[edge.start], corners[edge.end], cyanColor, cyanColor);
     }
@@ -380,7 +378,7 @@ std::array<FVec3, 8> FrustumCornersFromViewProj(const Mat4x4& viewProj) noexcept
         const FVec4 worldPos = invViewProj * kClipCorners[i];
         const float     w        = worldPos.w;
         if (std::abs(w) > 1e-6f) {
-            corners[i] = FVec3(worldPos.x / w, worldPos.y / w, worldPos.z / w);
+            corners[i] = {worldPos.x / w, worldPos.y / w, worldPos.z / w};
         }
     }
     return corners;

@@ -259,7 +259,7 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
 
     static thread_local std::mt19937 s_rng(std::random_device {}());
 
-    const FVec3 cloudOrigin(static_cast<float>(groundPos.x), static_cast<float>(cloudPos.y), static_cast<float>(groundPos.z));
+    const FVec3 cloudOrigin{static_cast<float>(groundPos.x), static_cast<float>(cloudPos.y), static_cast<float>(groundPos.z)};
     const FVec3 groundTarget {static_cast<float>(groundPos.x), static_cast<float>(groundPos.y), static_cast<float>(groundPos.z)};
 
     // The ribbon faces the view, and the flash is placed relative to it: a world
@@ -293,17 +293,17 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
         rc.RegisterMaterial(matAssetId, *matRes);
     }
 
-    const FVec3 flashPos  = cameraPosition + FVec3(0.0f, 25.0f, 0.0f);
-    const FVec3 impactPos = groundTarget + FVec3(0.0f, 20.0f, 0.0f);
+    const FVec3 flashPos  = cameraPosition + FVec3{0.0f, 25.0f, 0.0f};
+    const FVec3 impactPos = groundTarget + FVec3{0.0f, 20.0f, 0.0f};
 
     const Entity flashLight = reg.Create(
         Components::TransformComponent {.position = flashPos}, Components::HierarchyComponent {.parent = boltEntity},
         Components::LightComponent {
             .type        = LightType::Point,
-            .color       = FVec3(0.88f, 0.95f, 1.0f),
+            .color       = FVec3{0.88f, 0.95f, 1.0f},
             .intensity   = 0.0f,
             .radius      = 12.0f,
-            .direction   = FVec3(0.0f, -1.0f, 0.0f),
+            .direction   = FVec3{0.0f, -1.0f, 0.0f},
             .range       = 2000.0f
         }
     );
@@ -312,10 +312,10 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
         Components::TransformComponent {.position = impactPos}, Components::HierarchyComponent {.parent = boltEntity},
         Components::LightComponent {
             .type        = LightType::Point,
-            .color       = FVec3(1.0f, 1.0f, 1.0f),
+            .color       = FVec3{1.0f, 1.0f, 1.0f},
             .intensity   = 0.0f,
             .radius      = 8.0f,
-            .direction   = FVec3(0.0f, 1.0f, 0.0f),
+            .direction   = FVec3{0.0f, 1.0f, 0.0f},
             .range       = 500.0f
         }
     );

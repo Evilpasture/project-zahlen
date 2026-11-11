@@ -14,6 +14,7 @@
 module;
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
@@ -73,7 +74,7 @@ struct InspectorState {
     std::vector<ZHLN::Entity>     instances {};
     std::optional<ZHLN::FileDrop> pendingDrop {};
 
-    FVec3 target   = FVec3(0.0f, 0.0f, 0.0f);
+    FVec3 target   = {0.0f, 0.0f, 0.0f};
     float     distance = 5.0f;
     float     yaw      = -90.0f;
     float     pitch    = -15.0f;
@@ -90,16 +91,16 @@ struct InspectorState {
 };
 
 [[nodiscard]] FVec4 ThemeText() noexcept {
-    return FVec4(0.86f, 0.90f, 0.96f, 1.0f);
+    return FVec4{0.86f, 0.90f, 0.96f, 1.0f};
 }
 [[nodiscard]] FVec4 ThemeTextDim() noexcept {
-    return FVec4(0.55f, 0.62f, 0.72f, 1.0f);
+    return FVec4{0.55f, 0.62f, 0.72f, 1.0f};
 }
 [[nodiscard]] FVec4 ThemeAccent() noexcept {
-    return FVec4(0.30f, 0.85f, 1.0f, 1.0f);
+    return FVec4{0.30f, 0.85f, 1.0f, 1.0f};
 }
 [[nodiscard]] FVec4 ThemePlaying() noexcept {
-    return FVec4(0.45f, 0.95f, 0.55f, 1.0f);
+    return FVec4{0.45f, 0.95f, 0.55f, 1.0f};
 }
 
 // ============================================================================
@@ -109,25 +110,25 @@ struct InspectorState {
 [[nodiscard]] FVec3 OrbitDirection(float yawDeg, float pitchDeg) noexcept {
     const float yaw   = JPH::DegreesToRadians(yawDeg);
     const float pitch = JPH::DegreesToRadians(pitchDeg);
-    return FVec3(std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch));
+    return FVec3{std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch)};
 }
 
 [[nodiscard]] FVec3 Cross(FVec3 a, FVec3 b) noexcept {
-    return FVec3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+    return FVec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
 }
 
 void AddInspectorLighting(ZHLN::Engine& engine) {
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
-    const FVec3  sunPos   = FVec3(15.0f, 30.0f, 15.0f);
-    const auto sunRot = ZHLN::Quat::FromEulerDegrees({50.0f, -35.0f, 0.0f});
+    const FVec3  sunPos   = {15.0f, 30.0f, 15.0f};
+    const auto sunRot = ZHLN::Quat::FromEulerDegrees({{50.0f, -35.0f, 0.0f}});
     const auto sunWorld = ZHLN::ComposeTransform(sunPos, sunRot, FVec3::One());
     reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("glTFInspectorSun")},
         ZHLN::Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = FVec3::Splat(1.0f)},
         ZHLN::Components::WorldTransformComponent {.world = sunWorld, .previous = sunWorld},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 0.97f, 0.91f), .intensity = 120.0f, .direction = FVec3(0.4f, 1.0f, 0.3f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = FVec3{1.0f, 0.97f, 0.91f}, .intensity = 120.0f, .direction = FVec3{0.4f, 1.0f, 0.3f}.Normalized()
         }
     );
 
@@ -140,8 +141,8 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
 }
 
 void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outCenter, float& outDistance) {
-    FVec3 min(1e9f, 1e9f, 1e9f);
-    FVec3 max(-1e9f, -1e9f, -1e9f);
+    FVec3 min{1e9f, 1e9f, 1e9f};
+    FVec3 max{-1e9f, -1e9f, -1e9f};
     bool      any = false;
     for (const ZHLN::ModelPart& part: prefab.parts) {
         min.x = std::min(min.x, part.localMin[0]);
@@ -239,8 +240,8 @@ void TreeRow(
     text += expandable ? (expanded ? "v " : "> ") : "  ";
     text += label;
 
-    FVec4 btnColor = selected ? FVec4(0.18f, 0.36f, 0.56f, 0.98f) :
-                                    (playing ? FVec4(0.15f, 0.30f, 0.20f, 0.85f) : FVec4(0.10f, 0.12f, 0.16f, 0.60f));
+    FVec4 btnColor = selected ? FVec4{0.18f, 0.36f, 0.56f, 0.98f} :
+                                    (playing ? FVec4{0.15f, 0.30f, 0.20f, 0.85f} : FVec4{0.10f, 0.12f, 0.16f, 0.60f});
 
     if (ui.Button(text, btnColor)) {
         if (expandable) {
@@ -744,8 +745,8 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
     }
     ZHLN::Camera& cam = cameraComp->camera;
     cam.position      = state.target - dir * state.distance;
-    cam.yaw           = state.yaw;
-    cam.pitch         = state.pitch;
+    cam.yaw           = ZHLN::DegF{state.yaw};
+    cam.pitch         = ZHLN::DegF{state.pitch};
 }
 
 void DrawDropPrompt(ZHLN::GUI::Frame& ui) {

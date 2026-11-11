@@ -886,8 +886,8 @@ struct TestNetworkWireSuite {
             ZHLN::Net::InitialSnapshotMessage snapshot;
             snapshot.serverTick = 1234;
             snapshot.objects    = {
-                {1, FVec3(-100.5f, 0.0f, 88.25f), FVec3(2.0f, 3.0f, 4.0f)},
-                {2, FVec3(0.0f, 0.0f, 0.0f), FVec3(1.0f, 1.0f, 1.0f)}
+                {1, FVec3{-100.5f, 0.0f, 88.25f}, FVec3{2.0f, 3.0f, 4.0f}},
+                {2, FVec3{0.0f, 0.0f, 0.0f}, FVec3{1.0f, 1.0f, 1.0f}}
             };
             auto encoded = ZHLN::Net::EncodeInitialSnapshot(snapshot);
             ZHLN::Test::ExpectTrue(encoded.has_value());
@@ -912,7 +912,7 @@ struct TestNetworkWireSuite {
             ZHLN::Net::PhysicsBatchMessage batch;
             batch.serverTick = 4321;
             batch.bodies     = {
-                {10, FVec3(5.5f, -6.25f, 7.75f), ZHLN::Quat(0.5f, 0.5f, 0.5f, 0.5f), FVec3(1.0f, -2.0f, 3.0f)}
+                {10, FVec3{5.5f, -6.25f, 7.75f}, ZHLN::Quat{0.5f, 0.5f, 0.5f, 0.5f}, FVec3{1.0f, -2.0f, 3.0f}}
             };
             auto physicsBytes = ZHLN::Net::EncodePhysicsBatch(batch);
             ZHLN::Test::ExpectTrue(physicsBytes.has_value());
@@ -934,10 +934,10 @@ struct TestNetworkWireSuite {
         std::expected<void, ZHLN::ErrorCode> quaternion_sign_canonicalization() {
             ZHLN::Net::PhysicsBatchMessage positive;
             positive.serverTick = 4321;
-            positive.bodies     = {{1, FVec3(0, 0, 0), ZHLN::Quat(0.1f, 0.2f, 0.3f, 0.9f), FVec3(0, 0, 0)}};
+            positive.bodies     = {{1, FVec3{0, 0, 0}, ZHLN::Quat{0.1f, 0.2f, 0.3f, 0.9f}, FVec3{0, 0, 0}}};
 
             ZHLN::Net::PhysicsBatchMessage negative = positive;
-            negative.bodies[0].rotation            = ZHLN::Quat(-0.1f, -0.2f, -0.3f, -0.9f);
+            negative.bodies[0].rotation = {-0.1f, -0.2f, -0.3f, -0.9f};
 
             auto a = ZHLN::Net::EncodePhysicsBatch(positive);
             auto b = ZHLN::Net::EncodePhysicsBatch(negative);
@@ -952,7 +952,7 @@ struct TestNetworkWireSuite {
 
         std::expected<void, ZHLN::ErrorCode> nonfinite_positions_are_rejected() {
             ZHLN::Net::InitialSnapshotMessage snapshot;
-            snapshot.objects = {{1, FVec3(std::numeric_limits<float>::infinity(), 0.0f, 0.0f), FVec3(1, 1, 1)}};
+            snapshot.objects = {{1, FVec3{std::numeric_limits<float>::infinity(), 0.0f, 0.0f}, FVec3{1, 1, 1}}};
             auto result = ZHLN::Net::EncodeInitialSnapshot(snapshot);
             ZHLN::Test::ExpectTrue(Is(result, WireError::ValueOutOfRange));
             ZHLN::Test::ExpectTrue(Contains(result.error().path, "position"));

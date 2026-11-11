@@ -4,22 +4,22 @@ These are remaining candidates, not a mandate to mechanically replace physics
 math or change serialized, GPU, or network layouts. Preserve coordinate
 conventions, units, precision and wire/ABI compatibility when addressing them.
 
-- **Angle units at API boundaries:** `include/Zahlen/Math/Quat.hpp` still takes
-  raw radians in `FromAxisAngle`/`FromEuler` and returns them in
-  `ToAxisAngle`/`EulerAngles`; the Euler-vector degree helpers also convert
-  component values internally. Consider typed angle APIs without introducing
-  implicit math conversions, and check call sites and rotation order.
-- **Raw scalar degree/radian conversions:** examples remain in
-  `extensions/Animation/ProceduralAnimation.cpp` (camera yaw/pitch),
-  `extensions/VFX/Explosion.cppm`, `gameplay/Interaction/BSPInteraction.cpp`,
-  `gameplay/Interaction/InteractionSystem.cpp`,
-  `gameplay/ProjectLight/ProjectLightClient/SceneMirror.cpp` (sun direction),
-  and `plugins/BSP/BSPScene.cpp`, `BSPInteraction.cpp`, `BSPLighting.cpp`,
-  and `BSPGeometry.cpp`. Replace with explicit `DegF`/`RadF` conversions where
-  useful, preserving Source and ProjectLight coordinate/unit conventions.
-  `extensions/editor/GUIEditor.cpp` and `include/Zahlen/Math/Math3D.hpp` also
-  have Jolt-based degree conversions; review those in their actual boundary
-  contexts rather than sweeping through physics.
+- **Remaining angle representation:** quaternion axis-angle and Euler APIs,
+  matrix rotations, and perspective now accept typed angles. The older Euler
+  helpers in `include/Zahlen/Math/Transform.hpp` also carry typed angles but
+  still expose quaternion lanes as `FVec4`; audit their remaining consumers
+  before retiring them. Scene descriptions retain
+  their existing serialized degree vectors at the conversion boundary. Camera
+  yaw, pitch and FOV now use `DegF`; scene descriptions and network messages
+  retain float degrees, with explicit conversions. The target-camera rig and
+  procedural-animation tuning still store float degrees; the rig is an
+  FFI-visible component, so audit generated bindings and consumers before
+  changing its representation. The procedural IK, ankle, wrist and finger
+  limit APIs carry radians as `RadF`; their authored tuning fields still cross
+  a float-degrees boundary.
+- **Legacy math boundaries:** `include/Zahlen/Math/Math3D.hpp` still has
+  Jolt-based degree conversions; review them in their actual boundary contexts
+  rather than sweeping through physics.
 - **Rotation representation:** `include/Zahlen/Math/Transform.hpp` retains
   older `FVec4` quaternion helpers alongside `Quat`, including
   `ComposeTransform` and the Euler/product/interpolation helpers. Audit their

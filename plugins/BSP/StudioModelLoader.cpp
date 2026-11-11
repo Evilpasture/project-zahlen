@@ -101,8 +101,8 @@ auto ParseStudioModel(
     modelData.version  = hdr.version;
     modelData.checksum = hdr.checksum;
 
-    const FVec3 minEngine = ConvertPosition(options, FVec3(hdr.hull_min[0], hdr.hull_min[1], hdr.hull_min[2]));
-    const FVec3 maxEngine = ConvertPosition(options, FVec3(hdr.hull_max[0], hdr.hull_max[1], hdr.hull_max[2]));
+    const FVec3 minEngine = ConvertPosition(options, FVec3{hdr.hull_min[0], hdr.hull_min[1], hdr.hull_min[2]});
+    const FVec3 maxEngine = ConvertPosition(options, FVec3{hdr.hull_max[0], hdr.hull_max[1], hdr.hull_max[2]});
     modelData.hullMin = {std::min(minEngine.x, maxEngine.x), std::min(minEngine.y, maxEngine.y), std::min(minEngine.z, maxEngine.z)};
     modelData.hullMax = {std::max(minEngine.x, maxEngine.x), std::max(minEngine.y, maxEngine.y), std::max(minEngine.z, maxEngine.z)};
 
@@ -251,8 +251,8 @@ auto ParseStudioModel(
                                 sv = lod0Vertices[globalVvdIdx];
                             }
 
-                            const FVec3 rawPos(sv.pos[0], sv.pos[1], sv.pos[2]);
-                            const FVec3 rawNorm(sv.normal[0], sv.normal[1], sv.normal[2]);
+                            const FVec3 rawPos{sv.pos[0], sv.pos[1], sv.pos[2]};
+                            const FVec3 rawNorm{sv.normal[0], sv.normal[1], sv.normal[2]};
 
                             const FVec3 engPos  = ConvertPosition(options, rawPos);
                             const FVec3 engNorm = ConvertDirection(options, rawNorm);
@@ -377,8 +377,8 @@ auto ParseStudioModel(
 
                     // If compact surface has vertices, transform them
                     // Fallback to bounding box corners for this solid
-                    hull.vertices.push_back(FVec3(modelData.hullMin.x, modelData.hullMin.y, modelData.hullMin.z));
-                    hull.vertices.push_back(FVec3(modelData.hullMax.x, modelData.hullMax.y, modelData.hullMax.z));
+                    hull.vertices.push_back(FVec3{modelData.hullMin.x, modelData.hullMin.y, modelData.hullMin.z});
+                    hull.vertices.push_back(FVec3{modelData.hullMax.x, modelData.hullMax.y, modelData.hullMax.z});
 
                     solid.convexHulls.push_back(std::move(hull));
                     modelData.physicsSolids.push_back(std::move(solid));
@@ -394,14 +394,14 @@ auto ParseStudioModel(
     if (modelData.physicsSolids.empty()) {
         StudioPhysicsSolid  solid;
         StudioPhysicsConvex hull;
-        hull.vertices.push_back(FVec3(modelData.hullMin.x, modelData.hullMin.y, modelData.hullMin.z));
-        hull.vertices.push_back(FVec3(modelData.hullMax.x, modelData.hullMin.y, modelData.hullMin.z));
-        hull.vertices.push_back(FVec3(modelData.hullMax.x, modelData.hullMax.y, modelData.hullMin.z));
-        hull.vertices.push_back(FVec3(modelData.hullMin.x, modelData.hullMax.y, modelData.hullMin.z));
-        hull.vertices.push_back(FVec3(modelData.hullMin.x, modelData.hullMin.y, modelData.hullMax.z));
-        hull.vertices.push_back(FVec3(modelData.hullMax.x, modelData.hullMin.y, modelData.hullMax.z));
-        hull.vertices.push_back(FVec3(modelData.hullMax.x, modelData.hullMax.y, modelData.hullMax.z));
-        hull.vertices.push_back(FVec3(modelData.hullMin.x, modelData.hullMax.y, modelData.hullMax.z));
+        hull.vertices.push_back(FVec3{modelData.hullMin.x, modelData.hullMin.y, modelData.hullMin.z});
+        hull.vertices.push_back(FVec3{modelData.hullMax.x, modelData.hullMin.y, modelData.hullMin.z});
+        hull.vertices.push_back(FVec3{modelData.hullMax.x, modelData.hullMax.y, modelData.hullMin.z});
+        hull.vertices.push_back(FVec3{modelData.hullMin.x, modelData.hullMax.y, modelData.hullMin.z});
+        hull.vertices.push_back(FVec3{modelData.hullMin.x, modelData.hullMin.y, modelData.hullMax.z});
+        hull.vertices.push_back(FVec3{modelData.hullMax.x, modelData.hullMin.y, modelData.hullMax.z});
+        hull.vertices.push_back(FVec3{modelData.hullMax.x, modelData.hullMax.y, modelData.hullMax.z});
+        hull.vertices.push_back(FVec3{modelData.hullMin.x, modelData.hullMax.y, modelData.hullMax.z});
         solid.convexHulls.push_back(std::move(hull));
         modelData.physicsSolids.push_back(std::move(solid));
     }

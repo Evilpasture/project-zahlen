@@ -668,7 +668,7 @@ void ClientSession::ApplyProperties(ReplicatedObject& object, const MsgPackValue
             object.hasPhysicsSample = false;
             object.transformDirty = true;
         } else if (property == "Rotation") {
-            object.rotationEulerDeg = value.AsVec3(VEC3_SCALE, object.rotationEulerDeg);
+            object.rotationEulerDeg.value = value.AsVec3(VEC3_SCALE, object.rotationEulerDeg.value);
             object.rotationQuat     = Quat::FromEulerDegrees(object.rotationEulerDeg).Normalized();
             object.physicsHistory.Clear();
             object.hasPhysicsSample = false;
@@ -827,12 +827,12 @@ void ClientSession::ApplyPhysicsUpdates(const MsgPackValue& physicsUpdates) {
         const auto& data = value.arrayVal;
         auto scaled = [](const MsgPackValue& component) { return component.AsFloat() / VEC3_SCALE; };
         const FVec3 position(scaled(data[0]), scaled(data[1]), scaled(data[2]));
-        const Quat rotation = Quat(scaled(data[3]), scaled(data[4]), scaled(data[5]), scaled(data[6])).Normalized();
+        const Quat rotation = Quat{scaled(data[3]), scaled(data[4]), scaled(data[5]), scaled(data[6])}.Normalized();
         object->physicsHistory.Push(NetworkTransformSample {.position = position, .rotation = rotation, .receivedAt = receivedAt});
         object->position = position;
         object->rotationQuat = rotation;
         object->rotationEulerDeg = object->rotationQuat.EulerAnglesDegrees();
-        object->linearVelocity   = FVec3(scaled(data[7]), scaled(data[8]), scaled(data[9]));
+        object->linearVelocity = {scaled(data[7]), scaled(data[8]), scaled(data[9])};
         object->hasPhysicsSample = true;
         object->transformDirty = true;
     }
@@ -846,10 +846,8 @@ void ClientSession::ApplyControllerState(const MsgPackValue& packet) {
 
     NetworkTransformHistory& history = m_playerControllerStates[userId];
     history.Push(NetworkTransformSample {
-        .position = FVec3(state.arrayVal[0].AsFloat(), state.arrayVal[1].AsFloat(), state.arrayVal[2].AsFloat()),
-        .rotation = Quat(
-            state.arrayVal[3].AsFloat(), state.arrayVal[4].AsFloat(), state.arrayVal[5].AsFloat(), state.arrayVal[6].AsFloat()
-        ).Normalized(),
+        .position = FVec3{state.arrayVal[0].AsFloat(), state.arrayVal[1].AsFloat(), state.arrayVal[2].AsFloat()},
+        .rotation = Quat{state.arrayVal[3].AsFloat(), state.arrayVal[4].AsFloat(), state.arrayVal[5].AsFloat(), state.arrayVal[6].AsFloat()}.Normalized(),
         .receivedAt = std::chrono::steady_clock::now()
     });
 }
@@ -1254,7 +1252,7 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
     m_lastControls = {};
     // No main camera entity means no view to report; the zeroed controls above stand.
     if (const auto cameraComp = registry.GetSingleton<Components::CameraComponent>()) {
-        m_lastControls.yaw = cameraComp->camera.yaw;
+        m_lastControls.yaw = cameraComp->camera.yaw.value;
     }
     if (input) {
         m_lastControls.forward  = input->IsKeyDown(static_cast<uint8_t>(KeyCode::W));
@@ -1279,7 +1277,7 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         const auto movement = registry.Get<Character::MovementComponent>(m_localController);
         if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState && bodyState->valid) {
             const auto& state = *bodyState;
-            const Quat rotation = (movement ? movement->orientation : Quat(state.currentRotation)).Normalized();
+            const Quat rotation = (movement ? movement->orientation : Quat{state.currentRotation}).Normalized();
             const auto velocity = Physics::FromJoltVector(physics.GetCharacterVelocity(m_localControllerBody));
             owned.Set("controllerState", FloatArray({
                 state.currentPosition.x, state.currentPosition.y, state.currentPosition.z,
@@ -1309,7 +1307,7 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
                 if (const auto bodyState = physics.BodyState(body->physicsID); bodyState && bodyState->valid) {
                     const auto& snapshot = *bodyState;
                     transform.position = snapshot.currentPosition;
-                    transform.rotation = Quat(snapshot.currentRotation);
+                    transform.rotation = Quat{snapshot.currentRotation};
                     const JPH::BodyID bodyID = Physics::GetBodyID(physics.GetInternalWorld(), body->physicsID);
                     if (!bodyID.IsInvalid()) transform.linearVelocity = Physics::FromJoltVector(physics.GetInternalSystem().GetBodyInterface().GetLinearVelocity(bodyID));
                     haveState = true;

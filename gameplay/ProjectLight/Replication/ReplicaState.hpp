@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/EulerAngles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 // The wire side of the replication bridge: what the server last said about an
 // instance, and the short history that is sampled to smooth it.
@@ -138,15 +139,15 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
     uint64_t    parentUid = 0u;
 
     FVec3               position         = FVec3::Zero();
-    FVec3               rotationEulerDeg = FVec3::Zero();
+    EulerDegrees       rotationEulerDeg{};
     Quat               rotationQuat     = Quat::Identity();
     FVec3               linearVelocity   = FVec3::Zero();
     FVec3               renderPosition   = FVec3::Zero();
     Quat               renderRotation   = Quat::Identity();
     NetworkTransformHistory physicsHistory {};
     bool                    hasPhysicsSample = false;
-    FVec3               size             = FVec3(4.0f, 1.0f, 2.0f);
-    FVec3               color            = FVec3(0.75f, 0.75f, 0.75f);
+    FVec3               size             = {4.0f, 1.0f, 2.0f};
+    FVec3               color            = {0.75f, 0.75f, 0.75f};
     float                   transparency     = 0.0f;
     float                   metallic         = 0.0f;
     float                   roughness        = 0.5f;
@@ -184,8 +185,8 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
     float sourceRadius = 0.0f;
     // ProjectLight directional vectors describe ray travel; the renderer-facing
     // conversion to a toward-source vector is done at the ECS boundary.
-    FVec3 direction       = FVec3(0.0f, -1.0f, 0.0f);
-    FVec3 nightColor      = FVec3(0.45f, 0.55f, 0.8f);
+    FVec3 direction       = {0.0f, -1.0f, 0.0f};
+    FVec3 nightColor      = {0.45f, 0.55f, 0.8f};
     float     nightIntensity  = 0.35f;
     bool      isMain          = false;
     float     range           = 16.0f;

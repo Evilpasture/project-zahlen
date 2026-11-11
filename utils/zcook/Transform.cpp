@@ -155,9 +155,9 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
         auto& v1 = rawVerts[i1];
         auto& v2 = rawVerts[i2];
 
-        FVec3 p0(v0.px, v0.py, v0.pz);
-        FVec3 p1(v1.px, v1.py, v1.pz);
-        FVec3 p2(v2.px, v2.py, v2.pz);
+        FVec3 p0{v0.px, v0.py, v0.pz};
+        FVec3 p1{v1.px, v1.py, v1.pz};
+        FVec3 p2{v2.px, v2.py, v2.pz};
 
         const auto e1 = p1 - p0;
         const auto e2 = p2 - p0;
@@ -195,7 +195,7 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
         result.positions[i] = {.position = {rv.px, rv.py, rv.pz}};
 
         // 2. Compute and pack the tangent frame and surface streams
-        FVec3 n(rv.nx, rv.ny, rv.nz);
+        FVec3 n{rv.nx, rv.ny, rv.nz};
         const auto t = tangents[i];
         FVec3 tangentVec;
         float     sign = 1.0f;
@@ -204,8 +204,8 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
             tangentVec = (t - n * Dot(n, t)).Normalized();
             sign       = Dot(Cross(n, t), bitangents[i]) < 0.0f ? -1.0f : 1.0f;
         } else {
-            FVec3 absN(std::abs(n.x), std::abs(n.y), std::abs(n.z));
-            FVec3 fallbackT = (absN.x < 0.999f) ? FVec3(1.0f, 0.0f, 0.0f) : FVec3(0.0f, 1.0f, 0.0f);
+            FVec3 absN{std::abs(n.x), std::abs(n.y), std::abs(n.z)};
+            FVec3 fallbackT = (absN.x < 0.999f) ? FVec3{1.0f, 0.0f, 0.0f} : FVec3{0.0f, 1.0f, 0.0f};
             tangentVec          = (fallbackT - n * Dot(n, fallbackT)).Normalized();
         }
 

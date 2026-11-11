@@ -4,6 +4,7 @@
 // The default executable is a statically linked C++ game, not a DLL host.
 // App owns platform setup, modules, input polling, frame pacing and teardown.
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
@@ -40,9 +41,9 @@ struct SandboxGame {
         }
         auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         if (auto camera = reg.GetSingleton<ZHLN::Components::CameraComponent>()) {
-            camera->camera.position = FVec3(0.0f, 3.0f, 11.0f);
-            camera->camera.yaw      = -90.0f;
-            camera->camera.pitch    = -10.0f;
+            camera->camera.position = {0.0f, 3.0f, 11.0f};
+            camera->camera.yaw      = ZHLN::DegF{-90.0f};
+            camera->camera.pitch    = ZHLN::DegF{-10.0f};
         }
 
         ZHLN::GraphicsSettings gfx      = engine.Graphics().Settings();
@@ -72,23 +73,23 @@ struct SandboxGame {
                 {.position        = {x, 2.5f + stripe * 0.35f, z},
                  .createPhysics   = true,
                  .isStaticPhysics = false,
-                 .color           = FVec4(0.35f + stripe * 0.10f, 0.6f, 0.9f - stripe * 0.10f, 1.0f)}
+                 .color           = FVec4{0.35f + stripe * 0.10f, 0.6f, 0.9f - stripe * 0.10f, 1.0f}}
             );
         }
 
         reg.Create(
             ZHLN::Components::SunTagComponent {}, ZHLN::Components::LightComponent {
                                                       .type        = ZHLN::LightType::Sun,
-                                                      .color       = FVec3(1.0f, 0.95f, 0.85f),
+                                                      .color       = FVec3{1.0f, 0.95f, 0.85f},
                                                       .intensity   = 32.0f,
-                                                      .direction   = FVec3(0.45f, 1.0f, 0.30f).Normalized(),
+                                                      .direction   = FVec3{0.45f, 1.0f, 0.30f}.Normalized(),
                                                       .castsShadow = true,
                                                   }
         );
         lamp = reg.Create(
-            ZHLN::Components::TransformComponent {.position = FVec3(3.0f, 4.0f, 0.0f)}, ZHLN::Components::LightComponent {
+            ZHLN::Components::TransformComponent {.position = FVec3{3.0f, 4.0f, 0.0f}}, ZHLN::Components::LightComponent {
                                                                                                 .type      = ZHLN::LightType::Point,
-                                                                                                .color     = FVec3(0.30f, 0.65f, 1.0f),
+                                                                                                .color     = FVec3{0.30f, 0.65f, 1.0f},
                                                                                                 .intensity = 180.0f,
                                                                                                 .radius    = 0.35f,
                                                                                                 .range     = 18.0f,
@@ -102,7 +103,7 @@ struct SandboxGame {
         elapsed += dt;
         if (lamp != ZHLN::Entity::Null() && reg.IsAlive(lamp)) {
             reg.Patch<ZHLN::Components::TransformComponent>(lamp, [&](auto& transform) {
-                transform.position = FVec3(3.0f * JPH::Cos(elapsed), 4.0f, 3.0f * JPH::Sin(elapsed));
+                transform.position = {3.0f * JPH::Cos(elapsed), 4.0f, 3.0f * JPH::Sin(elapsed)};
             });
         }
 
@@ -119,9 +120,9 @@ struct SandboxGame {
             return;
         }
         if (input->IsKeyPressed(ZHLN::KeyCode::R)) {
-            camera->camera.position = FVec3(0.0f, 3.0f, 11.0f);
-            camera->camera.yaw      = -90.0f;
-            camera->camera.pitch    = -10.0f;
+            camera->camera.position = {0.0f, 3.0f, 11.0f};
+            camera->camera.yaw      = ZHLN::DegF{-90.0f};
+            camera->camera.pitch    = ZHLN::DegF{-10.0f};
         }
         // F rather than E: the optional FreeCam already uses E to fly up.
         if (!input->IsKeyPressed(ZHLN::KeyCode::F)) {
@@ -129,12 +130,12 @@ struct SandboxGame {
         }
 
         const auto&        cam     = camera->camera;
-        const float        yaw     = JPH::DegreesToRadians(cam.yaw);
-        const float        pitch   = JPH::DegreesToRadians(cam.pitch);
-        const FVec3    forward = FVec3(JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)).Normalized();
+        const float        yaw     = cam.yaw.ToRadians().value;
+        const float        pitch   = cam.pitch.ToRadians().value;
+        const FVec3    forward = FVec3{JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)}.Normalized();
         const ZHLN::Entity cube    = ZHLN::PrefabFactory::CreateBox(
             engine, {0.30f, 0.30f, 0.30f},
-            {.position = (cam.position + forward * 2.0f).Cast<double>(), .createPhysics = true, .isStaticPhysics = false, .color = FVec4(1.0f, 0.75f, 0.28f, 1.0f)}
+            {.position = (cam.position + forward * 2.0f).Cast<double>(), .createPhysics = true, .isStaticPhysics = false, .color = FVec4{1.0f, 0.75f, 0.28f, 1.0f}}
         );
         if (cube != ZHLN::Entity::Null()) {
             if (auto body = reg.Get<ZHLN::Components::PhysicsComponent>(cube)) {

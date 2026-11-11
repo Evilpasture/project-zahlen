@@ -8,6 +8,7 @@
 // lights, which is what makes the diagnostics trustworthy.
 
 #include "BSPLighting.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <array>
@@ -116,10 +117,10 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
 // Source's angle triple -> unit direction, in Source's Z-up space with pitch
 // positive down.
 [[nodiscard]] auto AngleDirection(std::array<float, 3> angles) noexcept -> FVec3 {
-    const float pitch = angles[0] * (kPi / 180.0f);
-    const float yaw   = angles[1] * (kPi / 180.0f);
-    const float cp    = std::cos(pitch);
-    return FVec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+    const auto pitch = DegF{angles[0]}.ToRadians();
+    const auto yaw = DegF{angles[1]}.ToRadians();
+    const float cp    = Cos(pitch);
+    return {cp * Cos(yaw), cp * Sin(yaw), -Sin(pitch)};
 }
 
 // The pitch/yaw pair, honouring `pitch` as an override for `angles`' X lane
@@ -346,7 +347,7 @@ auto ReadEnvironmentAmbient(const BSPMap& map) noexcept -> AmbientTerm {
             (void) ParseFloats(text, rgba);
         }
         const float scale = std::max(entity.FindFloat("_AmbientScaleHDR").value_or(1.0f), 0.0f);
-        out.color     = FVec3(std::clamp(rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[2] / 255.0f, 0.0f, 1.0f));
+        out.color = {std::clamp(rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[2] / 255.0f, 0.0f, 1.0f)};
         out.intensity = std::max(rgba[3], 0.0f) * scale;
         return out; // one light_environment per map; the first one wins
     }
@@ -363,7 +364,7 @@ auto EnvironmentSunDirection(const BSPMap& map) noexcept -> FVec3 {
     // No light_environment at all: fall back to a 45-degree elevation sun from
     // the +X/+Y quadrant rather than returning a zero vector, which the engine
     // would normalise into NaN and silently delete the directional term.
-    return FVec3(0.5f, 0.5f, 1.0f).Normalized();
+    return FVec3{0.5f, 0.5f, 1.0f}.Normalized();
 }
 
 // ---------------------------------------------------------------------------
@@ -424,7 +425,7 @@ auto VmtTint(const VMTMaterial& vmt) noexcept -> FVec3 {
         std::array<float, 4> rgb {1.0f, 1.0f, 1.0f, 1.0f};
         if (ParseFloats(*found, rgb) == 3) {
             const float divisor = (found->front() == '{') ? 255.0f : 1.0f;
-            return FVec3(std::clamp(rgb[0] / divisor, 0.0f, 4.0f), std::clamp(rgb[1] / divisor, 0.0f, 4.0f), std::clamp(rgb[2] / divisor, 0.0f, 4.0f));
+            return FVec3{std::clamp(rgb[0] / divisor, 0.0f, 4.0f), std::clamp(rgb[1] / divisor, 0.0f, 4.0f), std::clamp(rgb[2] / divisor, 0.0f, 4.0f)};
         }
     }
     return FVec3::Splat(1.0f);
@@ -526,12 +527,10 @@ auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEnti
     }
 
     const auto originArr = entity.FindVector("origin").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
-    light.position       = ConvertPosition(options, FVec3(originArr[0], originArr[1], originArr[2]));
+    light.position       = ConvertPosition(options, FVec3{originArr[0], originArr[1], originArr[2]});
 
     // Colour: Source stores 0-255 bytes; the engine wants linear 0-1.
-    light.color = FVec3(
-        std::clamp(value.rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[2] / 255.0f, 0.0f, 1.0f)
-    );
+    light.color = {std::clamp(value.rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[2] / 255.0f, 0.0f, 1.0f)};
 
     // Brightness: the point/spot constant, the sun constant for the
     // directional term. A light with no brightness lane at all (legacy
@@ -581,7 +580,7 @@ auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEnti
             // atan(width / 2 / length).
             const float width  = KeyFloat(entity, "spotlightwidth", kSpotlightDefaultWidthInches);
             const float length = std::max(KeyFloat(entity, "spotlightlength", kSpotlightDefaultLengthInches), 1.0f);
-            outerDegrees       = std::atan(std::max(width, 0.0f) * 0.5f / length) * (180.0f / kPi);
+            outerDegrees       = RadF{std::atan(std::max(width, 0.0f) * 0.5f / length)}.ToDegrees().value;
         } else if (light.className == "env_projectedtexture") {
             outerDegrees = KeyFloat(entity, "lightfov", KeyFloat(entity, "fov", kProjectedTextureDefaultFovDegrees));
         } else {
@@ -595,8 +594,8 @@ auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEnti
             innerDegrees = outerDegrees * (2.0f / 3.0f);
         }
         innerDegrees           = std::clamp(innerDegrees, 0.0f, outerDegrees);
-        light.outerConeRadians = std::clamp(outerDegrees, 1.0f, 179.0f) * (kPi / 180.0f);
-        light.innerConeRadians = std::clamp(innerDegrees, 0.0f, outerDegrees) * (kPi / 180.0f);
+        light.outerConeRadians = DegF{std::clamp(outerDegrees, 1.0f, 179.0f)}.ToRadians().value;
+        light.innerConeRadians = DegF{std::clamp(innerDegrees, 0.0f, outerDegrees)}.ToRadians().value;
     }
 
     // Range from Source's attenuation window.
@@ -928,7 +927,7 @@ auto EnforceLightingFloor(ImportedMapData& data, const BSPMap& map, const Import
     if (ambientIrradiance <= kAmbientFloorRadiance) {
         const float hueLuma    = Rec709Luma(data.ambient.color);
         const float hueScale   = (hueLuma > 1e-4f) ? (0.34f / hueLuma) : 0.0f;
-        data.ambient.color     = (hueLuma > 1e-4f) ? (data.ambient.color * hueScale) : FVec3(0.30f, 0.34f, 0.42f);
+        data.ambient.color     = (hueLuma > 1e-4f) ? (data.ambient.color * hueScale) : FVec3{0.30f, 0.34f, 0.42f};
         data.ambient.intensity = kAmbientFloorRadiance * kAmbientBrightnessLadder / 0.34f;
         data.ambient.authored  = true;
         intervened             = true;
@@ -945,15 +944,15 @@ auto EnforceLightingFloor(ImportedMapData& data, const BSPMap& map, const Import
         fill.className    = "info_fill_light";
         fill.fromEmissive = true;
         fill.type         = LightType::Point;
-        fill.color        = FVec3(0.85f, 0.88f, 1.0f);
+        fill.color = {0.85f, 0.88f, 1.0f};
         fill.intensity    = kFillLightIntensity;
         fill.range        = kFillLightRangeMetres;
         fill.startsOn     = true;
         if (!map.models.empty()) {
             const DModel&   world = map.models.front();
-            const FVec3 mins(world.mins[0], world.mins[1], world.mins[2]);
-            const FVec3 maxs(world.maxs[0], world.maxs[1], world.maxs[2]);
-            fill.position = ConvertPosition(options, (mins + maxs) * 0.5f + FVec3(0.0f, 0.0f, (maxs.z - mins.z) * 0.25f));
+            const FVec3 mins{world.mins[0], world.mins[1], world.mins[2]};
+            const FVec3 maxs{world.maxs[0], world.maxs[1], world.maxs[2]};
+            fill.position = ConvertPosition(options, (mins + maxs) * 0.5f + FVec3{0.0f, 0.0f, (maxs.z - mins.z) * 0.25f});
         }
         data.lights.push_back(std::move(fill));
         intervened = true;

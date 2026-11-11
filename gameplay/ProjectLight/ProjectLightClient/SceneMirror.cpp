@@ -8,6 +8,7 @@
 // member. See SceneMirror.hpp for the split and the per-frame ordering.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
@@ -53,31 +54,30 @@ auto SameVec3(FVec3 lhs, FVec3 rhs) noexcept -> bool {
     return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
 }
 struct ResolvedDirectionalLight {
-    FVec3 direction = FVec3(0.0f, 1.0f, 0.0f); // toward the source, as Zahlen expects
+    FVec3 direction = {0.0f, 1.0f, 0.0f}; // toward the source, as Zahlen expects
     FVec3 color = FVec3::Splat(1.0f);
     float intensity = 1.0f;
 };
 auto ProjectLightSunDirectionToSource(float timeOfDay, float latitude) noexcept -> FVec3 {
     // Match LightingService.GetSunDirection(yUp=true): X=east, Y=up, Z=north.
-    constexpr float kDegreesToRadians = 0.01745329251994329577f;
-    constexpr float kSolarDeclination = 23.44f * kDegreesToRadians;
-    if (!std::isfinite(timeOfDay) || !std::isfinite(latitude)) return FVec3(0.0f, 1.0f, 0.0f);
+    constexpr auto kSolarDeclination = DegF{23.44f}.ToRadians();
+    if (!std::isfinite(timeOfDay) || !std::isfinite(latitude)) return FVec3{0.0f, 1.0f, 0.0f};
 
-    const float lat = latitude * kDegreesToRadians;
-    const float hourAngle = (timeOfDay - 12.0f) * 15.0f * kDegreesToRadians;
-    const float sinLat = std::sin(lat);
-    const float cosLat = std::cos(lat);
-    const float sinDec = std::sin(kSolarDeclination);
-    const float cosDec = std::cos(kSolarDeclination);
-    const float sinHour = std::sin(hourAngle);
-    const float cosHour = std::cos(hourAngle);
+    const auto lat = DegF{latitude}.ToRadians();
+    const auto hourAngle = DegF{(timeOfDay - 12.0f) * 15.0f}.ToRadians();
+    const float sinLat = Sin(lat);
+    const float cosLat = Cos(lat);
+    const float sinDec = Sin(kSolarDeclination);
+    const float cosDec = Cos(kSolarDeclination);
+    const float sinHour = Sin(hourAngle);
+    const float cosHour = Cos(hourAngle);
 
-    const FVec3 towardSource(
+    const FVec3 towardSource{
         -cosDec * sinHour,
         sinLat * sinDec + cosLat * cosDec * cosHour,
         cosLat * sinDec - sinLat * cosDec * cosHour
-    );
-    return towardSource.LengthSquared() > 1.0e-8f ? towardSource.Normalized() : FVec3(0.0f, 1.0f, 0.0f);
+    };
+    return towardSource.LengthSquared() > 1.0e-8f ? towardSource.Normalized() : FVec3{0.0f, 1.0f, 0.0f};
 }
 auto ResolveDirectionalLight(const ReplicatedObject& light, const ReplicatedObject* lighting) noexcept -> ResolvedDirectionalLight {
     // ProjectLight's shaders use L = -sunDirection because that property is
@@ -87,7 +87,7 @@ auto ResolveDirectionalLight(const ReplicatedObject& light, const ReplicatedObje
     if (light.isMain && lighting != nullptr) {
         travelDirection = -ProjectLightSunDirectionToSource(lighting->timeOfDay, lighting->latitude);
     }
-    if (travelDirection.LengthSquared() <= 1.0e-8f) travelDirection = FVec3(0.0f, -1.0f, 0.0f);
+    if (travelDirection.LengthSquared() <= 1.0e-8f) travelDirection = {0.0f, -1.0f, 0.0f};
     travelDirection = travelDirection.Normalized();
 
     FVec3 color = light.color;
@@ -108,11 +108,11 @@ auto ResolveDirectionalLight(const ReplicatedObject& light, const ReplicatedObje
     };
 }
 auto CharacterOffsetForName(std::string_view name) noexcept -> FVec3 {
-    if (name == "Head") return FVec3(0.0f, 1.5f, 0.0f);
-    if (name == "Left Arm") return FVec3(-1.5f, 0.0f, 0.0f);
-    if (name == "Right Arm") return FVec3(1.5f, 0.0f, 0.0f);
-    if (name == "Left Leg") return FVec3(-0.5f, -2.0f, 0.0f);
-    if (name == "Right Leg") return FVec3(0.5f, -2.0f, 0.0f);
+    if (name == "Head") return FVec3{0.0f, 1.5f, 0.0f};
+    if (name == "Left Arm") return FVec3{-1.5f, 0.0f, 0.0f};
+    if (name == "Right Arm") return FVec3{1.5f, 0.0f, 0.0f};
+    if (name == "Left Leg") return FVec3{-0.5f, -2.0f, 0.0f};
+    if (name == "Right Leg") return FVec3{0.5f, -2.0f, 0.0f};
     return FVec3::Zero();
 }
 auto IsCharacterLimb(std::string_view name) noexcept -> bool {
@@ -197,11 +197,9 @@ auto ShouldCreatePhysics(const SceneMirrorState& state, const ReplicatedObject& 
 }
 void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, ReplicatedObject& object) {
     auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    const FVec3 size = FVec3(
-        std::clamp(std::abs(object.size.x), 0.001f, 100000.0f),
-        std::clamp(std::abs(object.size.y), 0.001f, 100000.0f),
-        std::clamp(std::abs(object.size.z), 0.001f, 100000.0f)
-    );
+    const FVec3 size = {std::clamp(std::abs(object.size.x), 0.001f, 100000.0f),
+    std::clamp(std::abs(object.size.y), 0.001f, 100000.0f),
+    std::clamp(std::abs(object.size.z), 0.001f, 100000.0f)};
     const bool createPhysics = ShouldCreatePhysics(state, object);
     const bool blendMaterial = object.transparency > 0.001f;
     Entity     entity        = state.index.Find(object.uid);
@@ -474,7 +472,7 @@ void UpdateRemoteCharacterParts(Engine& engine, SceneMirrorState& state, float d
             const FVec3 offset = CharacterOffsetForName(object.name);
             const FVec3 position = rootPosition + rootRotation * offset;
             const float poseAngle = IsCharacterLimb(object.name) ? LimbPoseAngle(object.name, stateValue, state.time, walkSpeed) : 0.0f;
-            const Quat limbRotation = poseAngle == 0.0f ? rootRotation : rootRotation * Quat::FromAxisAngle(FVec3::UnitX(), poseAngle);
+            const Quat limbRotation = poseAngle == 0.0f ? rootRotation : rootRotation * Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{poseAngle});
             WriteInterpolatedTransform(engine, object, state.index.Find(uid), position, limbRotation);
         }
     }
@@ -712,7 +710,7 @@ void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& st
         if (!IsPartClass(object.className) || !IsPartOfCharacter(state.objects, uid, state.localCharacterUid)) continue;
         const FVec3 position = rootPosition + rootRotation * CharacterOffsetForName(object.name);
         const float poseAngle = IsCharacterLimb(object.name) ? LimbPoseAngle(object.name, stateValue, state.time, walkSpeed) : 0.0f;
-        const Quat limbRotation = poseAngle == 0.0f ? rootRotation : rootRotation * Quat::FromAxisAngle(FVec3::UnitX(), poseAngle);
+        const Quat limbRotation = poseAngle == 0.0f ? rootRotation : rootRotation * Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::RadF{poseAngle});
         object.linearVelocity = velocity;
         object.humanoidState = stateValue;
         WriteTransform(engine, object, state.index.Find(uid), position, limbRotation);

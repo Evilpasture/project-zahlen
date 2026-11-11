@@ -217,8 +217,8 @@ auto main(int argc, char* argv[]) -> int {
             const float     pitch = JPH::RadiansToDegrees(std::asin(std::clamp(dir.y, -0.99f, 0.99f)));
             reg.Patch<ZHLN::Components::CameraComponent>(camera, [&](auto& cc) -> auto {
                 cc.camera.position = eye;
-                cc.camera.yaw      = yaw;
-                cc.camera.pitch    = pitch;
+                cc.camera.yaw      = ZHLN::DegF{yaw};
+                cc.camera.pitch    = ZHLN::DegF{pitch};
                 cc.camera.nearZ    = std::clamp(radius * 0.002f, 0.05f, 2.0f);
                 cc.camera.farZ     = std::max(radius * 12.0f, 200.0f);
             });

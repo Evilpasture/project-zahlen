@@ -933,9 +933,9 @@ void ApplyOrbit(ZHLN::Engine& engine, const OrbitCamera& orbit, const Subject& s
     }
     ZHLN::Camera& camera = cameraComp->camera;
     camera.position      = orbit.target - (OrbitDirection(orbit.yaw, orbit.pitch) * orbit.distance);
-    camera.yaw           = orbit.yaw;
-    camera.pitch         = orbit.pitch;
-    camera.fov           = orbit.fov;
+    camera.yaw           = ZHLN::DegF{orbit.yaw};
+    camera.pitch         = ZHLN::DegF{orbit.pitch};
+    camera.fov           = ZHLN::DegF{orbit.fov};
 
     // The cascade splits are fractions of [near, far], so a far plane that reaches
     // the horizon puts the subject in a cascade fitted to kilometres. Keeping it

@@ -310,11 +310,11 @@ auto LoadStudioModelPrefabFromMemory(
         modelPart.meshAsset        = HashAssetID(assetKey);
         modelPart.materialAsset    = HashAssetID(assetKey + "_mat");
 
-        const FVec3 halfExtents(
+        const FVec3 halfExtents{
             std::max(0.01f, (partData.boundsMax.x - partData.boundsMin.x) * 0.5f),
             std::max(0.01f, (partData.boundsMax.y - partData.boundsMin.y) * 0.5f),
             std::max(0.01f, (partData.boundsMax.z - partData.boundsMin.z) * 0.5f)
-        );
+        };
         modelPart.boundingRadius = halfExtents.Length();
 
         if (options.buildColliders) {

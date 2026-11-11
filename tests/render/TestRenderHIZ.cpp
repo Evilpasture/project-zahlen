@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -134,10 +135,10 @@ struct HiZTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = ZHLN::FVec3(0.0f, 4.0f, -10.0f);
-            cam.yaw      = 90.0f; // Look forward along +Z
-            cam.pitch    = -10.0f;
-            cam.fov      = 60.0f;
+            cam.position = {0.0f, 4.0f, -10.0f};
+            cam.yaw      = ZHLN::DegF{90.0f}; // Look forward along +Z
+            cam.pitch    = ZHLN::DegF{-10.0f};
+            cam.fov      = ZHLN::DegF{60.0f};
 
             constexpr float dt = 1.0f / 60.0f;
 
@@ -195,10 +196,10 @@ struct HiZTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = ZHLN::FVec3(0.0f, 4.0f, -5.0f);
-            cam.yaw      = 90.0f; // Point directly along +Z
-            cam.pitch    = 0.0f;
-            cam.fov      = 75.0f;
+            cam.position = {0.0f, 4.0f, -5.0f};
+            cam.yaw      = ZHLN::DegF{90.0f}; // Point directly along +Z
+            cam.pitch    = ZHLN::DegF{0.0f};
+            cam.fov      = ZHLN::DegF{75.0f};
 
             constexpr float dt = 1.0f / 60.0f;
 

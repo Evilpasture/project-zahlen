@@ -80,7 +80,7 @@ void TeleportPlayer(
     // The destination origin is at floor level while the character body origin
     // sits at the capsule centre, so lift by the shape's own ground offset.
     const FVec3 destPos = destTrans->position;
-    const FVec3 center  = destPos + FVec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsID) + 0.05f, 0.0f);
+    const FVec3 center  = destPos + FVec3{0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsID) + 0.05f, 0.0f};
     physics->SetCharacterPosition(playerPhys->physicsID, center.Cast<double>());
     physics->SetCharacterVelocity(playerPhys->physicsID, {0.0f, 0.0f, 0.0f});
 
@@ -95,8 +95,8 @@ void TeleportPlayer(
     const FVec3 forward = destRot * FVec3::UnitX();
     if (const Entity camEnt = registry.SingletonEntity<Components::MainCameraTagComponent>(); camEnt != Entity::Null()) {
         registry.Patch<Components::CameraComponent>(camEnt, [&](Components::CameraComponent& cc) {
-            cc.camera.yaw   = std::atan2(forward.z, forward.x) * 57.29577951308232f;
-            cc.camera.pitch = std::asin(std::clamp(forward.y, -1.0f, 1.0f)) * 57.29577951308232f;
+            cc.camera.yaw   = Atan2(forward.z, forward.x).ToDegrees();
+            cc.camera.pitch = Asin(std::clamp(forward.y, -1.0f, 1.0f)).ToDegrees();
         });
     }
 

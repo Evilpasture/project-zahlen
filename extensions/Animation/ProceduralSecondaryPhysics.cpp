@@ -29,7 +29,7 @@ namespace ZHLN::Animation {
 namespace {
 
 [[nodiscard]] FVec3 SafeNormalized(FVec3 value, FVec3 fallback) noexcept {
-    return value.LengthSquared() > 1.0e-10f ? value.Normalized() : FVec3(fallback);
+    return value.LengthSquared() > 1.0e-10f ? value.Normalized() : fallback;
 }
 
 [[nodiscard]] Quat ExtractRotation(const Mat4x4& matrix) noexcept {
@@ -39,7 +39,7 @@ namespace {
     const FVec3 x      = xScale > 1.0e-6f ? ProceduralMath::Column3(matrix, 0) / xScale : FVec3::UnitX();
     const FVec3 y      = yScale > 1.0e-6f ? ProceduralMath::Column3(matrix, 1) / yScale : FVec3::UnitY();
     const FVec3 z      = zScale > 1.0e-6f ? ProceduralMath::Column3(matrix, 2) / zScale : FVec3::UnitZ();
-    return ProceduralMath::Rotation(Mat4x4::FromCols(FVec4(x, 0.0f), FVec4(y, 0.0f), FVec4(z, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f)));
+    return ProceduralMath::Rotation(Mat4x4::FromCols(FVec4{x, 0.0f}, FVec4{y, 0.0f}, FVec4{z, 0.0f}, FVec4{0.0f, 0.0f, 0.0f, 1.0f}));
 }
 
 void ProjectSphere(FVec3& point, FVec3 center, float radius, FVec3 restPoint) noexcept {
@@ -56,21 +56,21 @@ void ProjectSphere(FVec3& point, FVec3 center, float radius, FVec3 restPoint) no
 void ProjectEllipsoid(FVec3& point, FVec3 center, Quat rotation, FVec3 radii, FVec3 restPoint) noexcept {
     const Quat invRotation = rotation.Inversed();
     const FVec3 local       = invRotation * (point - center);
-    FVec3       scaled(
+    FVec3       scaled{
         local.x / std::max(radii.x, 1.0e-4f), local.y / std::max(radii.y, 1.0e-4f), local.z / std::max(radii.z, 1.0e-4f)
-    );
+    };
     const FVec3 restLocal = invRotation * (restPoint - center);
-    const FVec3 restScaled(
+    const FVec3 restScaled{
         restLocal.x / std::max(radii.x, 1.0e-4f), restLocal.y / std::max(radii.y, 1.0e-4f),
         restLocal.z / std::max(radii.z, 1.0e-4f)
-    );
+    };
     const float effectiveBoundary = std::min(1.0f, restScaled.Length());
     if (scaled.Length() >= effectiveBoundary || effectiveBoundary <= 1.0e-6f) {
         return;
     }
 
     scaled = SafeNormalized(scaled, restScaled) * effectiveBoundary;
-    const FVec3 projected(scaled.x * radii.x, scaled.y * radii.y, scaled.z * radii.z);
+    const FVec3 projected{scaled.x * radii.x, scaled.y * radii.y, scaled.z * radii.z};
     point = center + rotation * projected;
 }
 
@@ -134,7 +134,7 @@ void FinalizeRestConstraints(HairStrandsComponent& hair) noexcept {
             } else {
                 direction = hair.restLocalPositions[index] - hair.restLocalPositions[index - 1];
             }
-            hair.restLocalDirections[index] = SafeNormalized(direction, FVec3(0.0f, -1.0f, 0.0f));
+            hair.restLocalDirections[index] = SafeNormalized(direction, FVec3{0.0f, -1.0f, 0.0f});
         }
     }
     hair.bindPoseInitialized = true;
@@ -147,12 +147,12 @@ void GenerateFallbackRestPose(HairStrandsComponent& hair) noexcept {
 
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
         const float     angle = kTwoPi * static_cast<float>(strand) / static_cast<float>(HairStrandsComponent::kStrandCount);
-        const FVec3 rootOffset(std::cos(angle) * 0.105f, 0.17f + 0.010f * std::sin(angle * 2.0f), std::sin(angle) * 0.105f);
-        const FVec3 outward(std::cos(angle), 0.0f, std::sin(angle));
+        const FVec3 rootOffset{std::cos(angle) * 0.105f, 0.17f + 0.010f * std::sin(angle * 2.0f), std::sin(angle) * 0.105f};
+        const FVec3 outward{std::cos(angle), 0.0f, std::sin(angle)};
         const size_t    base = strand * HairStrandsComponent::kLinksPerStrand;
         for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
             const size_t index             = base + link;
-            hair.restLocalPositions[index] = rootOffset + FVec3(0.0f, -kDefaultLength * static_cast<float>(link), 0.0f) +
+            hair.restLocalPositions[index] = rootOffset + FVec3{0.0f, -kDefaultLength * static_cast<float>(link), 0.0f} +
                                              outward * (0.012f * static_cast<float>(link));
             hair.restLocalRotations[index] = Quat::Identity();
         }
@@ -162,7 +162,7 @@ void GenerateFallbackRestPose(HairStrandsComponent& hair) noexcept {
     // Align fallback rotations to the generated strand directions. Imported
     // GLBs retain their authored bind rotations instead.
     for (size_t index = 0; index < HairStrandsComponent::kTotalParticles; ++index) {
-        hair.restLocalRotations[index] = FromTo(FVec3(0.0f, -1.0f, 0.0f), hair.restLocalDirections[index]);
+        hair.restLocalRotations[index] = FromTo(FVec3{0.0f, -1.0f, 0.0f}, hair.restLocalDirections[index]);
     }
 }
 
@@ -172,7 +172,7 @@ void InitializeParticles(HairStrandsComponent& hair, FVec3 headPosition, Quat he
     }
 
     for (size_t index = 0; index < HairStrandsComponent::kTotalParticles; ++index) {
-        const FVec3 position  = FVec3(headPosition) + headRotation * hair.restLocalPositions[index];
+        const FVec3 position  = headPosition + headRotation * hair.restLocalPositions[index];
         hair.positions[index]     = position;
         hair.prevPositions[index] = position;
     }
@@ -216,12 +216,12 @@ void ConfigureHairBindPose(HairStrandsComponent& hair, const Mat4x4* bindModelTr
             }
 
             if (link == 0) {
-                hair.restLocalPositions[particle] = FVec3(std::cos(angle) * 0.105f, 0.17f, std::sin(angle) * 0.105f);
+                hair.restLocalPositions[particle] = {std::cos(angle) * 0.105f, 0.17f, std::sin(angle) * 0.105f};
                 hair.restLocalRotations[particle] = Quat::Identity();
                 continue;
             }
 
-            FVec3 direction(0.0f, -1.0f, 0.0f);
+            FVec3 direction{0.0f, -1.0f, 0.0f};
             if (link >= 2) {
                 direction = SafeNormalized(hair.restLocalPositions[particle - 1] - hair.restLocalPositions[particle - 2], direction);
             }
@@ -252,18 +252,18 @@ void StepHairSimulation(
     const float     safeDt       = std::clamp(dt, 0.0001f, 1.0f / 30.0f);
     const float     dtSq         = safeDt * safeDt;
     const FVec3 inertialWind = characterVelocity * -0.035f;
-    const FVec3 acceleration = inertialWind + FVec3(0.0f, hair.gravity, 0.0f);
+    const FVec3 acceleration = inertialWind + FVec3{0.0f, hair.gravity, 0.0f};
 
-    const FVec3 torsoCenter = FVec3(headWorldPosition) + headWorldRotation * FVec3(0.0f, -0.48f, -0.015f);
-    const FVec3 shoulderL   = FVec3(headWorldPosition) + headWorldRotation * FVec3(0.24f, -0.31f, 0.0f);
-    const FVec3 shoulderR   = FVec3(headWorldPosition) + headWorldRotation * FVec3(-0.24f, -0.31f, 0.0f);
-    const FVec3 torsoRadii(hair.torsoColliderRadiusXZ, hair.torsoColliderRadiusY, hair.torsoColliderRadiusXZ * 0.75f);
-    const FVec3 shoulderRadii(hair.shoulderColliderRadius, hair.shoulderColliderRadius * 0.62f, hair.shoulderColliderRadius * 0.78f);
+    const FVec3 torsoCenter = headWorldPosition + headWorldRotation * FVec3{0.0f, -0.48f, -0.015f};
+    const FVec3 shoulderL   = headWorldPosition + headWorldRotation * FVec3{0.24f, -0.31f, 0.0f};
+    const FVec3 shoulderR   = headWorldPosition + headWorldRotation * FVec3{-0.24f, -0.31f, 0.0f};
+    const FVec3 torsoRadii{hair.torsoColliderRadiusXZ, hair.torsoColliderRadiusY, hair.torsoColliderRadiusXZ * 0.75f};
+    const FVec3 shoulderRadii{hair.shoulderColliderRadius, hair.shoulderColliderRadius * 0.62f, hair.shoulderColliderRadius * 0.78f};
 
     TaskSystem::ParallelFor(static_cast<uint32_t>(HairStrandsComponent::kStrandCount), 1, [&](uint32_t first, uint32_t last, uint32_t) {
         for (uint32_t strand = first; strand < last; ++strand) {
             const size_t    base = static_cast<size_t>(strand) * HairStrandsComponent::kLinksPerStrand;
-            const FVec3 root = FVec3(headWorldPosition) + headWorldRotation * hair.restLocalPositions[base];
+            const FVec3 root = headWorldPosition + headWorldRotation * hair.restLocalPositions[base];
 
             hair.positions[base]     = root;
             hair.prevPositions[base] = root;
@@ -300,13 +300,13 @@ void StepHairSimulation(
 
                 for (size_t link = 1; link < HairStrandsComponent::kLinksPerStrand; ++link) {
                     const size_t    current    = base + link;
-                    const FVec3 restTarget = FVec3(headWorldPosition) + headWorldRotation * hair.restLocalPositions[current];
+                    const FVec3 restTarget = headWorldPosition + headWorldRotation * hair.restLocalPositions[current];
                     SolveShapeConstraint(hair.positions[current], restTarget, hair.shapeCompliance, dtSq, shapeLambdas[link]);
                 }
 
                 for (size_t link = 1; link < HairStrandsComponent::kLinksPerStrand; ++link) {
                     const size_t    current    = base + link;
-                    const FVec3 restTarget = FVec3(headWorldPosition) + headWorldRotation * hair.restLocalPositions[current];
+                    const FVec3 restTarget = headWorldPosition + headWorldRotation * hair.restLocalPositions[current];
                     ProjectSphere(hair.positions[current], headWorldPosition, hair.headColliderRadius, restTarget);
                     ProjectEllipsoid(hair.positions[current], torsoCenter, headWorldRotation, torsoRadii, restTarget);
                     ProjectEllipsoid(hair.positions[current], shoulderL, headWorldRotation, shoulderRadii, restTarget);
@@ -345,10 +345,10 @@ void ExtractHairBoneTransforms(const HairStrandsComponent& hair, Quat headWorldR
             const Quat deformation        = FromTo(restDirectionWorld, direction);
             const Quat bindWorldRotation  = (headWorldRotation * hair.restLocalRotations[particleIndex]).Normalized();
             const Quat rotation           = (deformation * bindWorldRotation).Normalized();
-            const FVec3 scale(
+            const FVec3 scale{
                 ProceduralMath::Column3(nodeTransforms[nodeIndex], 0).Length(), ProceduralMath::Column3(nodeTransforms[nodeIndex], 1).Length(),
                 ProceduralMath::Column3(nodeTransforms[nodeIndex], 2).Length()
-            );
+            };
             nodeTransforms[nodeIndex] = ProceduralMath::Transform(rotation, hair.positions[particleIndex], scale);
         }
     }

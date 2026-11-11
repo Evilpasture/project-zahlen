@@ -47,6 +47,7 @@
 // extract -> shader path with a predictable authored base pose.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -499,9 +500,9 @@ struct MorphPosePassSuite {
             }
             auto& cam = camComp->camera;
             cam.position = {0.0f, 1.0f, 4.0f};
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
+            cam.yaw      = ZHLN::DegF{-90.0f};
+            cam.pitch    = ZHLN::DegF{0.0f};
+            cam.fov      = ZHLN::DegF{60.0f};
             ZHLN::Test::Headless::DisableAA(*engine);
 
             auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());

@@ -491,13 +491,13 @@ void AssemblePrefabParts(
         if (options.buildColliders && !part.skyboxLayer) {
             modelPart.meshCollider = physics.CreateMeshShape(part.positions.data(), part.VertexCount(), part.indices.data(), part.IndexCount());
 
-            const FVec3 localCenter(
+            const FVec3 localCenter{
                 (part.boundsMin.x + part.boundsMax.x) * 0.5f, (part.boundsMin.y + part.boundsMax.y) * 0.5f, (part.boundsMin.z + part.boundsMax.z) * 0.5f
-            );
-            const FVec3 halfExtents(
+            };
+            const FVec3 halfExtents{
                 std::max((part.boundsMax.x - part.boundsMin.x) * 0.5f, 0.01f), std::max((part.boundsMax.y - part.boundsMin.y) * 0.5f, 0.01f),
                 std::max((part.boundsMax.z - part.boundsMin.z) * 0.5f, 0.01f)
-            );
+            };
             const auto baseBox = physics.GetOrCreateShape(Physics::ShapeType::Box, halfExtents.x, halfExtents.y, halfExtents.z);
             modelPart.boxCollider = physics.CreateTranslatedShape(baseBox, localCenter);
 
@@ -739,11 +739,11 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext
         // leave them in world space. Re-base only the latter: unconditionally
         // subtracting the entity pivot sends already-local render geometry back
         // to the map origin, while the fallback collider remains at the door.
-        const FVec3 geometryCenter(
+        const FVec3 geometryCenter{
             (subImported.boundsMin.x + subImported.boundsMax.x) * 0.5f,
             (subImported.boundsMin.y + subImported.boundsMax.y) * 0.5f,
             (subImported.boundsMin.z + subImported.boundsMax.z) * 0.5f
-        );
+        };
         if ((geometryCenter - sub.pivot).LengthSquared() < geometryCenter.LengthSquared()) {
             ShiftImportedGeometry(subImported, -sub.pivot);
         }
@@ -818,9 +818,9 @@ auto ResolveVmtEmission(const SourceVFS& vfs, const VMTMaterial& vmt) -> VmtEmis
 
     // Keep the term at the material's own chromaticity and let its luminance
     // set the magnitude: a red neon sign emits red, not a grey scaled by red.
-    emission.tint = FVec3(vmt.baseColor.x, vmt.baseColor.y, vmt.baseColor.z);
+    emission.tint = {vmt.baseColor.x, vmt.baseColor.y, vmt.baseColor.z};
     if (Rec709Luma(emission.tint) < 1e-4f) {
-        emission.tint = FVec3(1.0f, 1.0f, 1.0f); // a black albedo is "no tint", not "black light"
+        emission.tint = {1.0f, 1.0f, 1.0f}; // a black albedo is "no tint", not "black light"
     }
     return emission;
 }

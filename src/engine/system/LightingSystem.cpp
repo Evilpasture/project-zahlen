@@ -20,7 +20,7 @@ namespace ZHLN {
 
 auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
     SunLight sun {
-        .direction = FVec3(0.5f, 1.0f, 0.2f),
+        .direction = FVec3{0.5f, 1.0f, 0.2f},
         .color = FVec3::Splat(1.0f),
         .intensity = 180.0f,
         .fromEnvironment = false,
@@ -66,7 +66,7 @@ auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
         }
     }
 
-    sun.direction = sun.direction.LengthSquared() > 1e-8f ? sun.direction.Normalized() : FVec3(0.5f, 1.0f, 0.2f).Normalized();
+    sun.direction = sun.direction.LengthSquared() > 1e-8f ? sun.direction.Normalized() : FVec3{0.5f, 1.0f, 0.2f}.Normalized();
     return sun;
 }
 

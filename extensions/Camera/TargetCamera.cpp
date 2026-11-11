@@ -36,11 +36,11 @@ static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
             cam.position.x, cam.position.y, cam.position.z
         );
     }
-    if (cam.fov < 1.0f || cam.fov > 180.0f) {
-        ZHLN::Log("[Test Fail] Camera Interpolation: FOV out of range: {:.2f}", cam.fov);
+    if (cam.fov < DegF{1.0f} || cam.fov > DegF{180.0f}) {
+        ZHLN::Log("[Test Fail] Camera Interpolation: FOV out of range: {:.2f}", cam.fov.value);
     }
-    if (cam.pitch < -90.0f || cam.pitch > 90.0f) {
-        ZHLN::Log("[Test Fail] Camera Interpolation: Pitch out of range: {:.2f}", cam.pitch);
+    if (cam.pitch < DegF{-90.0f} || cam.pitch > DegF{90.0f}) {
+        ZHLN::Log("[Test Fail] Camera Interpolation: Pitch out of range: {:.2f}", cam.pitch.value);
     }
     if (alpha < 0.0f || alpha > 1.0f) {
         ZHLN::Log("[Test Fail] Camera Interpolation: Alpha out of bounds [0,1]: {:.4f}", alpha);
@@ -104,14 +104,14 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
             camComp.pitch = std::clamp(camComp.pitch - (inputState->GetMouseDeltaY() * sensitivity), -89.0f, 89.0f);
         }
 
-        cam.yaw   = camComp.yaw;
-        cam.pitch = camComp.pitch;
-        cam.fov   = camComp.fov;
+        cam.yaw   = DegF{camComp.yaw};
+        cam.pitch = DegF{camComp.pitch};
+        cam.fov   = DegF{camComp.fov};
 
         // 5. EXPONENTIAL SMOOTHING & FINAL POSITION
-        float     yawRad   = DegF(camComp.yaw).ToRadians().value;
-        float     pitchRad = DegF(camComp.pitch).ToRadians().value;
-        FVec3 offsetDir(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad));
+        float     yawRad   = DegF{camComp.yaw}.ToRadians().value;
+        float     pitchRad = DegF{camComp.pitch}.ToRadians().value;
+        FVec3 offsetDir{std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)};
 
         if (camComp.hasInitSmoothTarget == 0) {
             camComp.smoothTargetPos     = targetPos;

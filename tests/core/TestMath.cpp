@@ -6,6 +6,7 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/EulerAngles.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -16,7 +17,9 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 namespace ZHLN::Test {
 namespace {
@@ -26,10 +29,10 @@ struct ZHLN_ANNOTATION(SuiteFixture {}) DefaultCameraFrustum {
 
     DefaultCameraFrustum() {
         ZHLN::Camera cam;
-        cam.position = FVec3(0.0f, 0.0f, 10.0f);
-        cam.yaw      = -90.0f; // Look towards -Z
-        cam.pitch    = 0.0f;
-        cam.fov      = 60.0f;
+        cam.position = {0.0f, 0.0f, 10.0f};
+        cam.yaw      = ZHLN::DegF{-90.0f}; // Look towards -Z
+        cam.pitch    = ZHLN::DegF{0.0f};
+        cam.fov      = ZHLN::DegF{60.0f};
         cam.nearZ    = 0.1f;
         cam.farZ     = 100.0f;
 
@@ -38,8 +41,49 @@ struct ZHLN_ANNOTATION(SuiteFixture {}) DefaultCameraFrustum {
     }
 };
 
+template <typename T>
+concept PerspectiveAngle = requires(T angle) { CreatePerspective(angle, 1.0f, 0.1f, 100.0f); };
+template <typename T>
+concept RotationAngle = requires(T angle) { CreateRotationY(angle); };
+static_assert(PerspectiveAngle<RadF> && !PerspectiveAngle<DegF> && !PerspectiveAngle<float>);
+static_assert(RotationAngle<RadF> && !RotationAngle<DegF> && !RotationAngle<float>);
+static_assert(std::is_invocable_v<decltype(&Quat::FromAxisAngle), FVec3, RadF>);
+static_assert(!std::is_invocable_v<decltype(&Quat::FromAxisAngle), FVec3, float>);
+static_assert(!std::is_invocable_v<decltype(&Quat::FromAxisAngle), FVec3, DegF>);
+static_assert(!std::is_convertible_v<DegF, RadF> && !std::is_convertible_v<RadF, float>);
+static_assert(std::is_same_v<decltype(Camera::yaw), DegF> && std::is_same_v<decltype(Camera::pitch), DegF> &&
+              std::is_same_v<decltype(Camera::fov), DegF>);
+static_assert(!std::is_assignable_v<DegF&, float> && !std::is_convertible_v<DegF, float>);
+static_assert(sizeof(DegF) == sizeof(float) && alignof(DegF) == alignof(float));
+static_assert(std::is_standard_layout_v<DegF> && std::is_trivially_copyable_v<DegF>);
+struct LegacyCameraLayout {
+    FVec3 position;
+    float yaw, pitch, fov, nearZ, farZ;
+};
+static_assert(std::is_standard_layout_v<Camera> && std::is_trivially_copyable_v<Camera>);
+static_assert(sizeof(Camera) == sizeof(LegacyCameraLayout) && alignof(Camera) == alignof(LegacyCameraLayout));
+static_assert(offsetof(Camera, yaw) == offsetof(LegacyCameraLayout, yaw) && offsetof(Camera, pitch) == offsetof(LegacyCameraLayout, pitch) &&
+              offsetof(Camera, fov) == offsetof(LegacyCameraLayout, fov) && offsetof(Camera, nearZ) == offsetof(LegacyCameraLayout, nearZ) &&
+              offsetof(Camera, farZ) == offsetof(LegacyCameraLayout, farZ));
+static_assert((DegF{10.0f} + DegF{5.0f} - DegF{2.0f}).value == 13.0f);
+static_assert(DegF{-89.0f} < DegF{0.0f} && DegF{89.0f} > DegF{0.0f});
+static_assert(std::is_aggregate_v<EulerDegrees> && std::is_aggregate_v<EulerRadians>);
+static_assert(std::is_invocable_v<decltype(&Quat::FromEuler), EulerRadians>);
+static_assert(std::is_invocable_v<decltype(&Quat::FromEulerDegrees), EulerDegrees>);
+static_assert(!std::is_invocable_v<decltype(&Quat::FromEuler), FVec3>);
+static_assert(!std::is_invocable_v<decltype(&Quat::FromEulerDegrees), EulerRadians>);
+static_assert(!std::is_convertible_v<EulerDegrees, EulerRadians> && !std::is_convertible_v<EulerDegrees, FVec3>);
+static_assert(std::is_same_v<decltype(Quat::Identity().EulerAngles()), EulerRadians>);
+static_assert(std::is_same_v<decltype(Quat::Identity().EulerAnglesDegrees()), EulerDegrees>);
+
 // --- 1. Freestanding Scalar Math ---
 void test_scalar_math() {
+    constexpr auto rightAngle = DegF{90.0f}.ToRadians();
+    static_assert((DegF{45.0f} * 2.0f).value == 90.0f);
+    static_assert((2.0f * rightAngle).value > 3.1414f);
+    static_assert(rightAngle.value > 1.5707f && rightAngle.value < 1.5709f);
+    static_assert(rightAngle.ToDegrees().value > 89.99f && rightAngle.ToDegrees().value < 90.01f);
+    Expect(std::abs(Sin(rightAngle) - 1.0f) < 1e-6f) == true;
     static_assert(ZHLN::Abs(-3.5f) == 3.5f && ZHLN::Abs(2.5) == 2.5);
     static_assert(ZHLN::Abs(-7) == 7 && ZHLN::Abs(7u) == 7u);
     static_assert(ZHLN::Abs(static_cast<signed char>(-4)) == 4);
@@ -179,7 +223,7 @@ void test_matrix_inversed_method() {
     const auto identity3 = matrix3 * matrix3.Inversed();
     for (size_t r = 0; r < 3; ++r) for (size_t c = 0; c < 3; ++c)
         Expect(std::abs(identity3[r, c] - (r == c ? 1.0f : 0.0f)) < 1e-5f) == true;
-    const auto matrix4 = CreateTranslation(FVec3 {3.0f, -2.0f, 1.0f}) * CreateRotationY(0.7f) * CreateScale(FVec3 {2.0f, 3.0f, 4.0f});
+    const auto matrix4 = CreateTranslation(FVec3 {3.0f, -2.0f, 1.0f}) * CreateRotationY(RadF{0.7f}) * CreateScale(FVec3 {2.0f, 3.0f, 4.0f});
     Expect(matrix4.Inversed() == Inverse(matrix4)) == true;
     const auto identity4 = matrix4 * matrix4.Inversed();
     for (size_t r = 0; r < 4; ++r) for (size_t c = 0; c < 4; ++c)
@@ -198,18 +242,18 @@ void test_matrix_inversed_method() {
 void test_picking_unprojection_parity() {
     Camera camera;
     camera.position = {3.0f, -2.0f, 7.0f};
-    camera.yaw = -70.0f;
-    camera.pitch = 20.0f;
-    camera.fov = 63.0f;
+    camera.yaw = ZHLN::DegF{-70.0f};
+    camera.pitch = ZHLN::DegF{20.0f};
+    camera.fov = ZHLN::DegF{63.0f};
     camera.nearZ = 0.1f;
     camera.farZ = 200.0f;
     constexpr float aspect = 1.6f;
     const auto inverseViewProjection = (camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix()).Inversed();
-    const auto yaw = DegF(camera.yaw).ToRadians();
-    const auto pitch = DegF(camera.pitch).ToRadians();
+    const auto yaw = camera.yaw.ToRadians();
+    const auto pitch = camera.pitch.ToRadians();
     const FVec3 forward {Cos(yaw) * Cos(pitch), Sin(pitch), Sin(yaw) * Cos(pitch)};
     const auto oldView = Math::CreateLookAt(camera.position, camera.position + forward, FVec3::UnitY());
-    const auto oldProjection = Math::CreatePerspective(DegF(camera.fov).ToRadians().value, aspect, camera.nearZ, camera.farZ);
+    const auto oldProjection = Math::CreatePerspective(camera.fov.ToRadians().value, aspect, camera.nearZ, camera.farZ);
     const auto oldInverse = (oldProjection * oldView).Inversed();
     // The editor's viewport has a nonzero offset, so mouse coordinates are
     // relative to the viewport before mapping to Vulkan's Y-down NDC.
@@ -236,20 +280,20 @@ void test_picking_unprojection_parity() {
 void test_native_camera_matrix_parity() {
     Camera cam;
     cam.position = {3.0f, -2.0f, 7.0f};
-    cam.fov = 63.0f;
+    cam.fov = ZHLN::DegF{63.0f};
     cam.nearZ = 0.1f;
     cam.farZ = 200.0f;
     for (const float yaw: {-170.0f, -90.0f, 0.0f, 45.0f, 120.0f}) {
         for (const float pitch: {-60.0f, 0.0f, 50.0f}) {
-            cam.yaw = yaw;
-            cam.pitch = pitch;
+            cam.yaw = ZHLN::DegF{yaw};
+            cam.pitch = ZHLN::DegF{pitch};
             const auto view = cam.GetViewMatrix();
             const auto projection = cam.GetProjectionMatrix(1.6f);
-            const RadF yawRad = DegF(cam.yaw).ToRadians();
-            const RadF pitchRad = DegF(cam.pitch).ToRadians();
+            const RadF yawRad = cam.yaw.ToRadians();
+            const RadF pitchRad = cam.pitch.ToRadians();
             const FVec3 direction {Cos(yawRad) * Cos(pitchRad), Sin(pitchRad), Sin(yawRad) * Cos(pitchRad)};
             const auto oldView = Math::CreateLookAt(cam.position, cam.position + direction.Normalized(), FVec3::UnitY());
-            const auto oldProjection = Math::CreatePerspective(DegF(cam.fov).ToRadians().value, 1.6f, cam.nearZ, cam.farZ);
+            const auto oldProjection = Math::CreatePerspective(cam.fov.ToRadians().value, 1.6f, cam.nearZ, cam.farZ);
             for (int column = 0; column < 4; ++column) {
                 for (int row = 0; row < 4; ++row) {
                     const auto r = static_cast<size_t>(row);
@@ -335,19 +379,19 @@ void test_native_rotation_parity() {
     for (const float x: {-135.0f, -20.0f, 0.0f, 75.0f, 170.0f}) {
         for (const float y: {-70.0f, 0.0f, 60.0f}) {
             const FVec3 angles {x, y, 38.0f};
-            const auto native = RotationFromEulerDegrees(angles);
+            const auto native = RotationFromEulerDegrees({angles});
             const auto legacy = Math::EulerDegreesToQuat(angles);
             Expect(std::abs(native.x - legacy.GetX()) < 1e-5f) == true;
             Expect(std::abs(native.y - legacy.GetY()) < 1e-5f) == true;
             Expect(std::abs(native.z - legacy.GetZ()) < 1e-5f) == true;
             Expect(std::abs(native.w - legacy.GetW()) < 1e-5f) == true;
-            const auto nativeEuler = EulerDegreesFromRotation(native);
+            const auto nativeEuler = EulerDegreesFromRotation(native).value;
             const auto legacyEuler = legacy.GetEulerAngles() * (180.0f / JPH::JPH_PI);
             Expect(std::abs(nativeEuler.x - legacyEuler.GetX()) < 1e-3f) == true;
             Expect(std::abs(nativeEuler.y - legacyEuler.GetY()) < 1e-3f) == true;
             Expect(std::abs(nativeEuler.z - legacyEuler.GetZ()) < 1e-3f) == true;
 
-            const auto other = RotationFromEulerDegrees({-x, 15.0f, -80.0f});
+            const auto other = RotationFromEulerDegrees({{-x, 15.0f, -80.0f}});
             const auto otherLegacy = JPH::Quat(other.x, other.y, other.z, other.w);
             const auto product = MultiplyRotations(native, other);
             const auto referenceProduct = legacy * otherLegacy;
@@ -390,7 +434,7 @@ void test_transform_component_uses_quaternion() {
     static_assert(std::is_same_v<decltype(transform.rotation), Quat>);
     Expect(transform.rotation == Quat::Identity()) == true;
     transform.position = {3.0f, -2.0f, 1.0f};
-    transform.rotation = Quat::FromAxisAngle(FVec3::UnitY(), std::numbers::pi_v<float> * 0.5f);
+    transform.rotation = Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{std::numbers::pi_v<float> * 0.5f});
     transform.scale = {2.0f, 1.0f, 1.0f};
     const auto matrix = transform.GetLocalMatrix();
     const auto transformed = (matrix * FVec4 {1.0f, 0.0f, 0.0f, 1.0f}).XYZ();
@@ -404,19 +448,19 @@ void test_quaternion_math() {
     static_assert(identity == Quat {0.0f, 0.0f, 0.0f, 1.0f});
     static_assert(Dot(identity, identity) == 1.0f);
     static_assert(Rotate(identity, FVec3::UnitX()) == FVec3::UnitX());
-    const auto quarterTurn = Quat::FromAxisAngle(FVec3::UnitY(), std::numbers::pi_v<float> * 0.5f);
+    const auto quarterTurn = Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{std::numbers::pi_v<float> * 0.5f});
     const auto rotated = Rotate(quarterTurn, FVec3::UnitX());
     Expect((quarterTurn * FVec3::UnitX() - rotated).Length() < 1e-6f) == true;
     FVec3 axis;
-    float angle = 0.0f;
+    RadF angle{};
     quarterTurn.ToAxisAngle(axis, angle);
-    Expect((axis - FVec3::UnitY()).Length() < 1e-6f && std::abs(angle - std::numbers::pi_v<float> * 0.5f) < 1e-6f) == true;
+    Expect((axis - FVec3::UnitY()).Length() < 1e-6f && std::abs(angle.value - std::numbers::pi_v<float> * 0.5f) < 1e-6f) == true;
     FVec3 negativeAxis;
-    float negativeAngle = 0.0f;
+    RadF negativeAngle{};
     (-quarterTurn).ToAxisAngle(negativeAxis, negativeAngle);
-    Expect((negativeAxis - axis).Length() < 1e-6f && std::abs(negativeAngle - angle) < 1e-6f) == true;
+    Expect((negativeAxis - axis).Length() < 1e-6f && std::abs(negativeAngle.value - angle.value) < 1e-6f) == true;
     identity.ToAxisAngle(axis, angle);
-    Expect(axis == FVec3::Zero() && angle == 0.0f) == true;
+    Expect(axis == FVec3::Zero() && angle.value == 0.0f) == true;
     Expect(std::abs(rotated.x) < 1e-5f && std::abs(rotated.z + 1.0f) < 1e-5f) == true;
     const auto undone = Rotate(quarterTurn.Inversed(), rotated);
     Expect((undone - FVec3::UnitX()).Length() < 1e-5f) == true;
@@ -427,9 +471,14 @@ void test_quaternion_math() {
     const auto half = Slerp(identity, quarterTurn, 0.5f);
     const auto same = Slerp(identity, -quarterTurn, 0.5f);
     Expect(std::abs(std::abs(Dot(half, same)) - 1.0f) < 1e-5f) == true;
-    const auto euler = Quat::FromEulerDegrees({20.0f, 30.0f, -45.0f});
-    const auto degrees = euler.EulerAnglesDegrees();
-    Expect((degrees - FVec3 {20.0f, 30.0f, -45.0f}).Length() < 1e-4f) == true;
+    constexpr EulerDegrees authored {{20.0f, 30.0f, -45.0f}};
+    constexpr auto radians = authored.ToRadians();
+    static_assert(radians.value.x > 0.3490f && radians.value.x < 0.3492f);
+    static_assert(radians.ToDegrees().value.z < -44.999f && radians.ToDegrees().value.z > -45.001f);
+    const auto euler = Quat::FromEulerDegrees(authored);
+    const auto fromRadians = Quat::FromEuler(radians);
+    Expect(std::abs(Dot(euler, fromRadians) - 1.0f) < 1e-5f) == true;
+    Expect((euler.EulerAnglesDegrees().value - authored.value).Length() < 1e-4f) == true;
     static_assert(std::is_same_v<decltype(TransformParts{}.rotation), Quat>);
     const auto reference = Math::EulerDegreesToQuat({20.0f, 30.0f, -45.0f});
     Expect(std::abs(euler.x - reference.GetX()) < 1e-5f && std::abs(euler.y - reference.GetY()) < 1e-5f &&

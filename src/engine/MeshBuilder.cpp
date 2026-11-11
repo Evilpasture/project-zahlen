@@ -306,10 +306,10 @@ auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FV
     for (int ix = 0; ix <= kSegments; ++ix) {
         const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
         const float     theta = u * 2.0f * JPH::JPH_PI;
-        const FVec3 n(JPH::Cos(theta), 0.0f, JPH::Sin(theta));
-        const FVec3 t(-JPH::Sin(theta), 0.0f, JPH::Cos(theta));
-        pushVert(FVec3(n.x * r, -hy, n.z * r), n, t, u, 0.0f);
-        pushVert(FVec3(n.x * r, hy, n.z * r), n, t, u, 1.0f);
+        const FVec3 n{JPH::Cos(theta), 0.0f, JPH::Sin(theta)};
+        const FVec3 t{-JPH::Sin(theta), 0.0f, JPH::Cos(theta)};
+        pushVert(FVec3{n.x * r, -hy, n.z * r}, n, t, u, 0.0f);
+        pushVert(FVec3{n.x * r, hy, n.z * r}, n, t, u, 1.0f);
     }
     for (int ix = 0; ix < kSegments; ++ix) {
         const uint32_t a = static_cast<uint32_t>(ix * 2);
@@ -319,12 +319,12 @@ auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FV
 
     for (int sign = 0; sign < 2; ++sign) {
         const float     y     = (sign == 0) ? hy : -hy;
-        const FVec3 n     = (sign == 0) ? FVec3(0, 1, 0) : FVec3(0, -1, 0);
-        const uint32_t  ct    = pushVert(FVec3(0, y, 0), n, FVec3(1, 0, 0), 0.5f, 0.5f);
+        const FVec3 n     = (sign == 0) ? FVec3{0, 1, 0} : FVec3{0, -1, 0};
+        const uint32_t  ct    = pushVert(FVec3{0, y, 0}, n, FVec3{1, 0, 0}, 0.5f, 0.5f);
         const uint32_t  first = static_cast<uint32_t>(positions.size());
         for (int ix = 0; ix <= kSegments; ++ix) {
             const float theta = static_cast<float>(ix) / static_cast<float>(kSegments) * 2.0f * JPH::JPH_PI;
-            pushVert(FVec3(JPH::Cos(theta) * r, y, JPH::Sin(theta) * r), n, FVec3(1, 0, 0), 0.0f, 0.0f);
+            pushVert(FVec3{JPH::Cos(theta) * r, y, JPH::Sin(theta) * r}, n, FVec3{1, 0, 0}, 0.0f, 0.0f);
         }
         for (int ix = 0; ix < kSegments; ++ix) {
             if (sign == 0) {
@@ -384,23 +384,23 @@ auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 
         return static_cast<uint32_t>(positions.size() - 1);
     };
 
-    const uint32_t apex = pushVert(FVec3(0, hy, 0), FVec3(0, 1, 0), 0.5f, 1.0f);
+    const uint32_t apex = pushVert(FVec3{0, hy, 0}, FVec3{0, 1, 0}, 0.5f, 1.0f);
     for (int ix = 0; ix <= kSegments; ++ix) {
         const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
         const float     theta = u * 2.0f * JPH::JPH_PI;
-        const FVec3 dir(JPH::Cos(theta), 0.0f, JPH::Sin(theta));
-        const FVec3 n(dir.x * nr, ny, dir.z * nr);
-        pushVert(FVec3(dir.x * r, -hy, dir.z * r), n, u, 0.0f);
+        const FVec3 dir{JPH::Cos(theta), 0.0f, JPH::Sin(theta)};
+        const FVec3 n{dir.x * nr, ny, dir.z * nr};
+        pushVert(FVec3{dir.x * r, -hy, dir.z * r}, n, u, 0.0f);
     }
     for (int ix = 0; ix < kSegments; ++ix) {
         indices.insert(indices.end(), {apex, static_cast<uint32_t>(ix + 2), static_cast<uint32_t>(ix + 1)});
     }
 
-    const uint32_t ct    = pushVert(FVec3(0, -hy, 0), FVec3(0, -1, 0), 0.5f, 0.5f);
+    const uint32_t ct    = pushVert(FVec3{0, -hy, 0}, FVec3{0, -1, 0}, 0.5f, 0.5f);
     const uint32_t first = static_cast<uint32_t>(positions.size());
     for (int ix = 0; ix <= kSegments; ++ix) {
         const float theta = static_cast<float>(ix) / static_cast<float>(kSegments) * 2.0f * JPH::JPH_PI;
-        pushVert(FVec3(JPH::Cos(theta) * r, -hy, JPH::Sin(theta) * r), FVec3(0, -1, 0), 0.0f, 0.0f);
+        pushVert(FVec3{JPH::Cos(theta) * r, -hy, JPH::Sin(theta) * r}, FVec3{0, -1, 0}, 0.0f, 0.0f);
     }
     for (int ix = 0; ix < kSegments; ++ix) {
         indices.insert(indices.end(), {ct, first + static_cast<uint32_t>(ix), first + static_cast<uint32_t>(ix) + 1});

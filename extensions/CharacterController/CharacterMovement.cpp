@@ -166,7 +166,7 @@ void MovementSystem(Engine& engine, float dt) {
                 }
             }
 
-            FVec3 flatVel(move.currentVelX, 0.0f, move.currentVelZ);
+            FVec3 flatVel{move.currentVelX, 0.0f, move.currentVelZ};
             if (flatVel.LengthSquared() > 0.1f) {
                 const auto targetAngleRad = std::atan2(-move.currentVelZ, move.currentVelX) + std::numbers::pi_v<float> * 0.5f;
                 const auto halfAngle = targetAngleRad * 0.5f;

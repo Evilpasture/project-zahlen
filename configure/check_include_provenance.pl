@@ -89,6 +89,8 @@ my %FIRST_PARTY = (
     DegD => ['include/Zahlen/Math/Angles.hpp'],
     RadF => ['include/Zahlen/Math/Angles.hpp'],
     RadD => ['include/Zahlen/Math/Angles.hpp'],
+    EulerDegrees => ['include/Zahlen/Math/EulerAngles.hpp'],
+    EulerRadians => ['include/Zahlen/Math/EulerAngles.hpp'],
     # Geometry
     Extent2D         => ['include/Zahlen/Math/Geometry2D.hpp'],
     Offset2D         => ['include/Zahlen/Math/Geometry2D.hpp'],
@@ -420,7 +422,7 @@ my $HEADER_LAYOUT = Digest::SHA::sha1_hex(join("\n", sort grep {
     my ($suffix) = /(\.[^.]*)$/;
     defined $suffix && $HEADER_SUFFIXES{lc $suffix};
 } keys %tree_files));
-my $CACHE_SCHEMA = 3;
+my $CACHE_SCHEMA = 4;
 
 my %resolvable = map { $tree_files{$_} => 1 } keys %tree_files;
 

@@ -16,6 +16,7 @@
 // frame can only have come from the emissive term.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -146,9 +147,9 @@ constexpr float kHaloBloomStrength = 0.003f;
         gfx.post.giIntensity     = 0.0f;
         gfx.post.enableSSR       = 0;
         gfx.rayTracing.enableReflections       = false;
-        gfx.environment.skyZenith       = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
-        gfx.environment.skyHorizon      = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
-        gfx.environment.skyGround       = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyZenith = {0.0f, 0.0f, 0.0f, 1.0f};
+        gfx.environment.skyHorizon = {0.0f, 0.0f, 0.0f, 1.0f};
+        gfx.environment.skyGround = {0.0f, 0.0f, 0.0f, 1.0f};
     });
 
     const auto material =
@@ -166,10 +167,10 @@ constexpr float kHaloBloomStrength = 0.003f;
         return false;
     }
     ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = ZHLN::FVec3(0.0f, 0.0f, 6.0f);
-    camera.yaw      = -90.0f;
-    camera.pitch    = 0.0f;
-    camera.fov      = 60.0f;
+    camera.position = {0.0f, 0.0f, 6.0f};
+    camera.yaw      = ZHLN::DegF{-90.0f};
+    camera.pitch    = ZHLN::DegF{0.0f};
+    camera.fov      = ZHLN::DegF{60.0f};
     return true;
 }
 

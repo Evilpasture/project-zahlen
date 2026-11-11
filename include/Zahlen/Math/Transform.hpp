@@ -3,13 +3,14 @@
 
 #pragma once
 
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/EulerAngles.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 
 namespace ZHLN {
 
@@ -39,22 +40,21 @@ namespace ZHLN {
 
 // Euler angles use XYZ components and the same Z * Y * X rotation order as
 // authored scene transforms. Angles in this interface are degrees.
-[[nodiscard]] inline auto RotationFromEulerDegrees(FVec3 degrees) noexcept -> FVec4 {
-    constexpr auto halfRadians = std::numbers::pi_v<float> / 360.0f;
-    const auto sx = std::sin(degrees.x * halfRadians), cx = std::cos(degrees.x * halfRadians);
-    const auto sy = std::sin(degrees.y * halfRadians), cy = std::cos(degrees.y * halfRadians);
-    const auto sz = std::sin(degrees.z * halfRadians), cz = std::cos(degrees.z * halfRadians);
+[[nodiscard]] inline auto RotationFromEulerDegrees(EulerDegrees degrees) noexcept -> FVec4 {
+    constexpr auto halfRadians = DegF{0.5f}.ToRadians().value;
+    const auto sx = std::sin(degrees.value.x * halfRadians), cx = std::cos(degrees.value.x * halfRadians);
+    const auto sy = std::sin(degrees.value.y * halfRadians), cy = std::cos(degrees.value.y * halfRadians);
+    const auto sz = std::sin(degrees.value.z * halfRadians), cz = std::cos(degrees.value.z * halfRadians);
     return {cz * sx * cy - sz * cx * sy, cz * cx * sy + sz * sx * cy,
             sz * cx * cy - cz * sx * sy, cz * cx * cy + sz * sx * sy};
 }
 
-[[nodiscard]] inline auto EulerDegreesFromRotation(FVec4 rotation) noexcept -> FVec3 {
+[[nodiscard]] inline auto EulerDegreesFromRotation(FVec4 rotation) noexcept -> EulerDegrees {
     const auto x = rotation.x, y = rotation.y, z = rotation.z, w = rotation.w;
     const auto y2 = y * y;
-    constexpr auto degrees = 180.0f / std::numbers::pi_v<float>;
-    return {std::atan2(2.0f * (w * x + y * z), 1.0f - 2.0f * (x * x + y2)) * degrees,
-            std::asin(std::clamp(2.0f * (w * y - z * x), -1.0f, 1.0f)) * degrees,
-            std::atan2(2.0f * (w * z + x * y), 1.0f - 2.0f * (y2 + z * z)) * degrees};
+    return EulerRadians{{std::atan2(2.0f * (w * x + y * z), 1.0f - 2.0f * (x * x + y2)),
+                         std::asin(std::clamp(2.0f * (w * y - z * x), -1.0f, 1.0f)),
+                         std::atan2(2.0f * (w * z + x * y), 1.0f - 2.0f * (y2 + z * z))}}.ToDegrees();
 }
 
 // Hamilton product for xyzw rotations; the right-hand rotation is applied first.

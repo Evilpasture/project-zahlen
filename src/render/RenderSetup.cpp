@@ -53,7 +53,7 @@ void RenderContext::SetFrameData(
 
     gpuUniforms.lightCount = _impl->packedLightCount;
 
-    Mat4x4 viewmodelProj      = CreatePerspective(DegF(58.0f).ToRadians().value, aspect, cam.nearZ, cam.farZ);
+    Mat4x4 viewmodelProj      = CreatePerspective(DegF{58.0f}.ToRadians(), aspect, cam.nearZ, cam.farZ);
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
     gpuUniforms.invProj           = Inverse(cam.GetProjectionMatrix(vpAspect));
 
@@ -67,7 +67,7 @@ void RenderContext::SetFrameData(
     }
     Mat4x4 lightView = CreateLookAt(sunDir * 100.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
 
-    float tanHalfFov = std::tan(DegF(cam.fov * 0.5f).ToRadians().value);
+    float tanHalfFov = std::tan((cam.fov * 0.5f).ToRadians().value);
 
     for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
         float nearDist = (i == 0) ? cam.nearZ : cascadeSplits[i - 1];

@@ -284,7 +284,7 @@ struct HairAddress {
 }
 
 [[nodiscard]] FVec3 ExtractScale(const Mat4x4& matrix) noexcept {
-    return FVec3(ProceduralMath::Column3(matrix, 0).Length(), ProceduralMath::Column3(matrix, 1).Length(), ProceduralMath::Column3(matrix, 2).Length());
+    return {ProceduralMath::Column3(matrix, 0).Length(), ProceduralMath::Column3(matrix, 1).Length(), ProceduralMath::Column3(matrix, 2).Length()};
 }
 
 [[nodiscard]] Quat ExtractRotation(const Mat4x4& matrix) noexcept {
@@ -292,7 +292,7 @@ struct HairAddress {
     const FVec3 x     = scale.x > 1.0e-6f ? ProceduralMath::Column3(matrix, 0) / scale.x : FVec3::UnitX();
     const FVec3 y     = scale.y > 1.0e-6f ? ProceduralMath::Column3(matrix, 1) / scale.y : FVec3::UnitY();
     const FVec3 z     = scale.z > 1.0e-6f ? ProceduralMath::Column3(matrix, 2) / scale.z : FVec3::UnitZ();
-    return ProceduralMath::Rotation(Mat4x4::FromCols(FVec4(x, 0.0f), FVec4(y, 0.0f), FVec4(z, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f)));
+    return ProceduralMath::Rotation(Mat4x4::FromCols(FVec4{x, 0.0f}, FVec4{y, 0.0f}, FVec4{z, 0.0f}, FVec4{0.0f, 0.0f, 0.0f, 1.0f}));
 }
 
 [[nodiscard]] float SmootherStep(float value) noexcept {
@@ -309,8 +309,8 @@ void SpringVector(FVec3& value, FVec3& velocity, FVec3 target, float dt, float s
     const float     hhoo               = safeDt * hoo;
     const float     invDet             = 1.0f / (f + hhoo);
     const FVec3 oldValue           = value;
-    value                              = (value * f + velocity * safeDt + FVec3(target) * hhoo) * invDet;
-    velocity                           = (velocity + (FVec3(target) - oldValue) * hoo) * invDet;
+    value                              = (value * f + velocity * safeDt + target * hhoo) * invDet;
+    velocity                           = (velocity + (target - oldValue) * hoo) * invDet;
 }
 
 void SpringRotation(Quat& value, FVec3& angularVelocity, Quat target, float dt, float stiffness, float dampingFactor) noexcept {
@@ -319,8 +319,9 @@ void SpringRotation(Quat& value, FVec3& angularVelocity, Quat target, float dt, 
     const float dampingCoefficient = 2.0f * std::sqrt(safeStiffness) * std::max(dampingFactor, 0.0f);
     Quat   error              = (target * value.Inversed()).Normalized();
     FVec3   axis;
-    float       angle = 0.0f;
-    error.ToAxisAngle(axis, angle);
+    ZHLN::RadF angleRadians{};
+    error.ToAxisAngle(axis, angleRadians);
+    auto angle = angleRadians.value;
     const FVec3 errorVector = axis * angle;
     const float     denominator = 1.0f + dampingCoefficient * safeDt + safeStiffness * safeDt * safeDt;
     angularVelocity             = (angularVelocity + errorVector * (safeStiffness * safeDt)) / denominator;
@@ -328,7 +329,7 @@ void SpringRotation(Quat& value, FVec3& angularVelocity, Quat target, float dt, 
     const FVec3 rotationStep = angularVelocity * safeDt;
     const float     stepAngle    = rotationStep.Length();
     if (stepAngle > 1.0e-7f) {
-        value = (Quat::FromAxisAngle(rotationStep / stepAngle, std::min(stepAngle, std::numbers::pi_v<float>)) * value).Normalized();
+        value = (Quat::FromAxisAngle(rotationStep / stepAngle, ZHLN::RadF{std::min(stepAngle, std::numbers::pi_v<float>)}) * value).Normalized();
     }
 }
 
@@ -367,7 +368,7 @@ void SpringRotation(Quat& value, FVec3& angularVelocity, Quat target, float dt, 
     const float t3           = t2 * phase;
     const float w            = p1.w * (2.0f * t3 - 3.0f * t2 + 1.0f) + tangent1 * (t3 - 2.0f * t2 + phase) + p2.w * (-2.0f * t3 + 3.0f * t2) +
                                tangent2 * (t3 - t2);
-    return Quat(xyz.x, xyz.y, xyz.z, w).Normalized();
+    return Quat{xyz.x, xyz.y, xyz.z, w}.Normalized();
 }
 
 void SamplePoseChannel(
@@ -854,7 +855,7 @@ void ConfigureHandPalmFrames(const ModelPrefab* prefab, RigBoneMap& map) noexcep
         const FVec3 palmNormal = Cross(thumbDirection, fingerDirection).Normalized();
         const FVec3 palmThumb  = Cross(fingerDirection, palmNormal).Normalized();
         const Quat palmRotation =
-            ProceduralMath::Rotation(Mat4x4::FromCols(FVec4(palmNormal, 0.0f), FVec4(palmThumb, 0.0f), FVec4(fingerDirection, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f)));
+            ProceduralMath::Rotation(Mat4x4::FromCols(FVec4{palmNormal, 0.0f}, FVec4{palmThumb, 0.0f}, FVec4{fingerDirection, 0.0f}, FVec4{0.0f, 0.0f, 0.0f, 1.0f}));
         map.handBoneToPalmRotations[side] = (ExtractRotation(map.modelTransforms[handNode]).Inversed() * palmRotation).Normalized();
         map.handPalmFramesValid[side]     = true;
     }
@@ -1016,8 +1017,8 @@ void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noex
         FVec3 hingeAxis        = ProceduralMath::Direction(map.modelTransforms[joint.child], FVec3::UnitX());
         hingeAxis                  = hingeAxis.LengthSquared() > 1.0e-8f ? hingeAxis.Normalized() : palmRotation * FVec3::UnitY();
         constexpr float probeAngle = 0.20f;
-        const float     plusScore  = Dot((Quat::FromAxisAngle(hingeAxis, probeAngle) * distalDirection), palmNormal);
-        const float     minusScore = Dot((Quat::FromAxisAngle(hingeAxis, -probeAngle) * distalDirection), palmNormal);
+        const float     plusScore  = Dot((Quat::FromAxisAngle(hingeAxis, ZHLN::RadF{probeAngle}) * distalDirection), palmNormal);
+        const float     minusScore = Dot((Quat::FromAxisAngle(hingeAxis, ZHLN::RadF{-probeAngle}) * distalDirection), palmNormal);
         joint.hingeFlexSign        = plusScore >= minusScore ? 1.0f : -1.0f;
     }
 }
@@ -1223,27 +1224,23 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
         }
 
         const Mat4x4 meshBind = map.modelTransforms[meshNode] * PrefabMatrixToNative(part.localTransform);
-        const FVec3  boundsMin(part.localMin[0], part.localMin[1], part.localMin[2]);
-        const FVec3  boundsMax(part.localMax[0], part.localMax[1], part.localMax[2]);
+        const FVec3  boundsMin{part.localMin[0], part.localMin[1], part.localMin[2]};
+        const FVec3  boundsMax{part.localMax[0], part.localMax[1], part.localMax[2]};
         for (uint32_t corner = 0; corner < 8; ++corner) {
-            const FVec3 localPoint(
+            const FVec3 localPoint{
                 (corner & 1u) != 0u ? boundsMax.x : boundsMin.x, (corner & 2u) != 0u ? boundsMax.y : boundsMin.y,
                 (corner & 4u) != 0u ? boundsMax.z : boundsMin.z
-            );
+            };
             const FVec3 point = ProceduralMath::Direction(meshBind, localPoint) + ProceduralMath::Translation(meshBind);
             if (!candidateRoots[root]) {
                 candidateRoots[root] = true;
                 candidateMin[root]   = point;
                 candidateMax[root]   = point;
             } else {
-                candidateMin[root] = FVec3(
-                    std::min(candidateMin[root].x, point.x), std::min(candidateMin[root].y, point.y),
-                    std::min(candidateMin[root].z, point.z)
-                );
-                candidateMax[root] = FVec3(
-                    std::max(candidateMax[root].x, point.x), std::max(candidateMax[root].y, point.y),
-                    std::max(candidateMax[root].z, point.z)
-                );
+                candidateMin[root] = {std::min(candidateMin[root].x, point.x), std::min(candidateMin[root].y, point.y),
+                std::min(candidateMin[root].z, point.z)};
+                candidateMax[root] = {std::max(candidateMax[root].x, point.x), std::max(candidateMax[root].y, point.y),
+                std::max(candidateMax[root].z, point.z)};
             }
         }
     }
@@ -1368,7 +1365,7 @@ struct SkinBinding {
 }
 
 [[nodiscard]] FVec3 ModelToWorld(FVec3 rootPosition, Quat rootRotation, FVec3 modelPosition) noexcept {
-    return FVec3(rootPosition) + rootRotation * modelPosition;
+    return rootPosition + rootRotation * modelPosition;
 }
 
 } // namespace
@@ -1611,28 +1608,28 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
     };
 
     addBone(CharacterBone::Root, InvalidRigNode, FVec3::Zero());
-    addBone(CharacterBone::Hips, BoneSlot(CharacterBone::Root), FVec3(0.0f, 1.0f, 0.0f));
-    addBone(CharacterBone::Spine, BoneSlot(CharacterBone::Hips), FVec3(0.0f, 0.15f, 0.0f));
-    addBone(CharacterBone::SupSpine, BoneSlot(CharacterBone::Spine), FVec3(0.0f, 0.16f, 0.0f));
-    addBone(CharacterBone::Chest, BoneSlot(CharacterBone::SupSpine), FVec3(0.0f, 0.17f, 0.0f));
-    addBone(CharacterBone::Neck, BoneSlot(CharacterBone::Chest), FVec3(0.0f, 0.16f, 0.0f));
-    addBone(CharacterBone::Head, BoneSlot(CharacterBone::Neck), FVec3(0.0f, 0.12f, 0.0f));
+    addBone(CharacterBone::Hips, BoneSlot(CharacterBone::Root), FVec3{0.0f, 1.0f, 0.0f});
+    addBone(CharacterBone::Spine, BoneSlot(CharacterBone::Hips), FVec3{0.0f, 0.15f, 0.0f});
+    addBone(CharacterBone::SupSpine, BoneSlot(CharacterBone::Spine), FVec3{0.0f, 0.16f, 0.0f});
+    addBone(CharacterBone::Chest, BoneSlot(CharacterBone::SupSpine), FVec3{0.0f, 0.17f, 0.0f});
+    addBone(CharacterBone::Neck, BoneSlot(CharacterBone::Chest), FVec3{0.0f, 0.16f, 0.0f});
+    addBone(CharacterBone::Head, BoneSlot(CharacterBone::Neck), FVec3{0.0f, 0.12f, 0.0f});
 
-    addBone(CharacterBone::UpperArmL, BoneSlot(CharacterBone::Chest), FVec3(0.21f, 0.10f, 0.0f));
-    addBone(CharacterBone::ForearmL, BoneSlot(CharacterBone::UpperArmL), FVec3(0.28f, 0.0f, 0.0f));
-    addBone(CharacterBone::HandL, BoneSlot(CharacterBone::ForearmL), FVec3(0.24f, 0.0f, 0.0f));
-    addBone(CharacterBone::UpperArmR, BoneSlot(CharacterBone::Chest), FVec3(-0.21f, 0.10f, 0.0f));
-    addBone(CharacterBone::ForearmR, BoneSlot(CharacterBone::UpperArmR), FVec3(-0.28f, 0.0f, 0.0f));
-    addBone(CharacterBone::HandR, BoneSlot(CharacterBone::ForearmR), FVec3(-0.24f, 0.0f, 0.0f));
+    addBone(CharacterBone::UpperArmL, BoneSlot(CharacterBone::Chest), FVec3{0.21f, 0.10f, 0.0f});
+    addBone(CharacterBone::ForearmL, BoneSlot(CharacterBone::UpperArmL), FVec3{0.28f, 0.0f, 0.0f});
+    addBone(CharacterBone::HandL, BoneSlot(CharacterBone::ForearmL), FVec3{0.24f, 0.0f, 0.0f});
+    addBone(CharacterBone::UpperArmR, BoneSlot(CharacterBone::Chest), FVec3{-0.21f, 0.10f, 0.0f});
+    addBone(CharacterBone::ForearmR, BoneSlot(CharacterBone::UpperArmR), FVec3{-0.28f, 0.0f, 0.0f});
+    addBone(CharacterBone::HandR, BoneSlot(CharacterBone::ForearmR), FVec3{-0.24f, 0.0f, 0.0f});
 
-    addBone(CharacterBone::ThighL, BoneSlot(CharacterBone::Hips), FVec3(0.12f, -0.06f, 0.0f));
-    addBone(CharacterBone::ShinL, BoneSlot(CharacterBone::ThighL), FVec3(0.0f, -0.43f, 0.06f));
-    addBone(CharacterBone::FootL, BoneSlot(CharacterBone::ShinL), FVec3(0.0f, -0.42f, -0.06f));
-    addBone(CharacterBone::ToeL, BoneSlot(CharacterBone::FootL), FVec3(0.0f, -0.045f, 0.18f));
-    addBone(CharacterBone::ThighR, BoneSlot(CharacterBone::Hips), FVec3(-0.12f, -0.06f, 0.0f));
-    addBone(CharacterBone::ShinR, BoneSlot(CharacterBone::ThighR), FVec3(0.0f, -0.43f, 0.06f));
-    addBone(CharacterBone::FootR, BoneSlot(CharacterBone::ShinR), FVec3(0.0f, -0.42f, -0.06f));
-    addBone(CharacterBone::ToeR, BoneSlot(CharacterBone::FootR), FVec3(0.0f, -0.045f, 0.18f));
+    addBone(CharacterBone::ThighL, BoneSlot(CharacterBone::Hips), FVec3{0.12f, -0.06f, 0.0f});
+    addBone(CharacterBone::ShinL, BoneSlot(CharacterBone::ThighL), FVec3{0.0f, -0.43f, 0.06f});
+    addBone(CharacterBone::FootL, BoneSlot(CharacterBone::ShinL), FVec3{0.0f, -0.42f, -0.06f});
+    addBone(CharacterBone::ToeL, BoneSlot(CharacterBone::FootL), FVec3{0.0f, -0.045f, 0.18f});
+    addBone(CharacterBone::ThighR, BoneSlot(CharacterBone::Hips), FVec3{-0.12f, -0.06f, 0.0f});
+    addBone(CharacterBone::ShinR, BoneSlot(CharacterBone::ThighR), FVec3{0.0f, -0.43f, 0.06f});
+    addBone(CharacterBone::FootR, BoneSlot(CharacterBone::ShinR), FVec3{0.0f, -0.42f, -0.06f});
+    addBone(CharacterBone::ToeR, BoneSlot(CharacterBone::FootR), FVec3{0.0f, -0.045f, 0.18f});
 
     constexpr float kTwoPi = 2.0f * std::numbers::pi_v<float>;
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
@@ -1642,7 +1639,7 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
             const size_t semantic          = BoneSlot(CharacterBone::HairStart) + particle;
             outMap.nodeIndices[semantic]   = semantic;
             outMap.parentIndices[semantic] = (link == 0) ? BoneSlot(CharacterBone::Head) : semantic - 1;
-            const FVec3 translation = (link == 0) ? FVec3(std::cos(angle) * 0.105f, 0.17f, std::sin(angle) * 0.105f) : FVec3(0.0f, -0.105f, 0.0f);
+            const FVec3 translation = (link == 0) ? FVec3{std::cos(angle) * 0.105f, 0.17f, std::sin(angle) * 0.105f} : FVec3{0.0f, -0.105f, 0.0f};
             outMap.bindLocalTransforms[semantic] = CreateTranslation(translation);
             outMap.localTransforms[semantic]     = outMap.bindLocalTransforms[semantic];
         }
@@ -2191,9 +2188,9 @@ void ProceduralAnimationSystem(
             const float           pelvisDropWeight       = config ? config->pelvisDropWeight : 1.0f;
             const float           maxHeightCorrection    = config ? config->maxFootHeightCorrection : 0.18f;
             const float           maxLegExtension        = config ? config->maxLegExtension : 0.98f;
-            const float           maxBodyTilt            = ZHLN::DegF(config ? config->maxIKBodyTiltDegrees : 10.0f).ToRadians().value;
-            const float           maxAnkleSideways       = ZHLN::DegF(config ? config->maxAnkleSidewaysDegrees : 15.0f).ToRadians().value;
-            const float           maxAnkleForward        = ZHLN::DegF(config ? config->maxAnkleForwardDegrees : 35.0f).ToRadians().value;
+            const auto           maxBodyTilt            = ZHLN::DegF{config ? config->maxIKBodyTiltDegrees : 10.0f}.ToRadians();
+            const auto           maxAnkleSideways       = ZHLN::DegF{config ? config->maxAnkleSidewaysDegrees : 15.0f}.ToRadians();
+            const auto           maxAnkleForward        = ZHLN::DegF{config ? config->maxAnkleForwardDegrees : 35.0f}.ToRadians();
             const bool            preserveAuthoredFootXZ = !config || config->preserveAuthoredFootXZ;
             const bool            worldLockFeet          = config && config->worldLockFeet;
             Animation::SolveLegGrounding(
@@ -2241,7 +2238,7 @@ void ProceduralAnimationSystem(
                                                                                                         Mat4x4::Identity();
             const Mat4x4    chest           = IsValidRigNode(chestNode, boneMap->nodeCount) ? boneMap->modelTransforms[chestNode] : Mat4x4::Identity();
             const FVec3     headPosition    = IsValidRigNode(headNode, boneMap->nodeCount) ? ProceduralMath::Translation(boneMap->modelTransforms[headNode]) :
-                                                                                                 FVec3(0.0f, 1.6f, 0.0f);
+                                                                                                 FVec3{0.0f, 1.6f, 0.0f};
             FVec3           aimDirection    = FVec3::UnitZ();
             if (const auto lookAt = registry.Get<ProceduralLookAtComponent>(entity)) {
                 const FVec3 entityPosition = transform->position;
@@ -2355,7 +2352,7 @@ void ProceduralAnimationSystem(
             ZHLN::ScopedTimer  stageTimer("PA Stage: Secondary motion");
             const RigNodeIndex headNode          = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
             const bool         hasHead           = IsValidRigNode(headNode, boneMap->nodeCount);
-            const FVec3    headModelPosition = hasHead ? ProceduralMath::Translation(boneMap->modelTransforms[headNode]) : FVec3(0.0f, 1.60f, 0.0f);
+            const FVec3    headModelPosition = hasHead ? ProceduralMath::Translation(boneMap->modelTransforms[headNode]) : FVec3{0.0f, 1.60f, 0.0f};
             const Quat    headModelRotation = hasHead ? ExtractRotation(boneMap->modelTransforms[headNode]) : Quat::Identity();
             const FVec3    headWorldPosition = ModelToWorld(transform->position, rootRotation, headModelPosition);
             const Quat    headWorldRotation = (rootRotation * headModelRotation).Normalized();
@@ -2379,7 +2376,7 @@ void ProceduralAnimationSystem(
                 const FVec3  entityPosition = transform->position;
                 const FVec3  modelPosition  = inverseRoot * (ProceduralMath::Translation(world) - entityPosition);
                 const Quat  modelRotation  = (inverseRoot * ExtractRotation(world)).Normalized();
-                const FVec3  worldScale(ProceduralMath::Column3(world, 0).Length(), ProceduralMath::Column3(world, 1).Length(), ProceduralMath::Column3(world, 2).Length());
+                const FVec3  worldScale{ProceduralMath::Column3(world, 0).Length(), ProceduralMath::Column3(world, 1).Length(), ProceduralMath::Column3(world, 2).Length()};
                 boneMap->modelTransforms[node] = ProceduralMath::Transform(modelRotation, modelPosition, worldScale);
             }
         } else if (hair) {
@@ -2461,9 +2458,9 @@ void ProceduralAnimationSystem(
                 const Quat   headRotation   = ExtractRotation(headModel);
                 const FVec3   targetEyeModel = ProceduralMath::Translation(headModel) + headRotation * firstPerson->eyeOffsetModel;
                 const Quat   lookYaw =
-                    Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::DegF(std::clamp(firstPerson->lookYawDegrees, -80.0f, 80.0f)).ToRadians().value);
+                    Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::DegF{std::clamp(firstPerson->lookYawDegrees, -80.0f, 80.0f)}.ToRadians());
                 const Quat lookPitch =
-                    Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::DegF(std::clamp(firstPerson->lookPitchDegrees, -70.0f, 70.0f)).ToRadians().value);
+                    Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::DegF{std::clamp(firstPerson->lookPitchDegrees, -70.0f, 70.0f)}.ToRadians());
                 const Quat targetViewModel = (headRotation * lookYaw * lookPitch).Normalized();
                 if (!firstPerson->cameraInitialized) {
                     firstPerson->smoothedEyeModel    = targetEyeModel;
@@ -2495,9 +2492,9 @@ void ProceduralAnimationSystem(
                     const Quat worldView      = (rootRotation * firstPerson->smoothedViewModel).Normalized();
                     FVec3       forward        = worldView * FVec3::UnitZ();
                     forward                        = forward.LengthSquared() > 1.0e-8f ? forward.Normalized() : rootRotation * FVec3::UnitZ();
-                    camera.yaw                     = std::atan2(forward.z, forward.x) * (180.0f / std::numbers::pi_v<float>);
-                    camera.pitch                   = std::asin(std::clamp(forward.y, -1.0f, 1.0f)) * (180.0f / std::numbers::pi_v<float>);
-                    camera.fov                     = firstPerson->fov;
+                    camera.yaw                     = Atan2(forward.z, forward.x).ToDegrees();
+                    camera.pitch                   = Asin(std::clamp(forward.y, -1.0f, 1.0f)).ToDegrees();
+                    camera.fov                     = DegF{firstPerson->fov};
                     camera.nearZ                   = firstPerson->nearPlane;
                 }
             }
@@ -2608,16 +2605,16 @@ void DrawProceduralDebugRig(
 
     const auto worldPosition = [&](RigNodeIndex node) { return ModelToWorld(rootPosition, rootRotation, ProceduralMath::Translation(boneMap.modelTransforms[node])); };
     const auto drawCross     = [&](FVec3 point, float radius, FVec4 color) {
-        scene.AddLine(point - FVec3(radius, 0.0f, 0.0f), point + FVec3(radius, 0.0f, 0.0f), color);
-        scene.AddLine(point - FVec3(0.0f, radius, 0.0f), point + FVec3(0.0f, radius, 0.0f), color);
-        scene.AddLine(point - FVec3(0.0f, 0.0f, radius), point + FVec3(0.0f, 0.0f, radius), color);
+        scene.AddLine(point - FVec3{radius, 0.0f, 0.0f}, point + FVec3{radius, 0.0f, 0.0f}, color);
+        scene.AddLine(point - FVec3{0.0f, radius, 0.0f}, point + FVec3{0.0f, radius, 0.0f}, color);
+        scene.AddLine(point - FVec3{0.0f, 0.0f, radius}, point + FVec3{0.0f, 0.0f, radius}, color);
     };
 
-    const FVec4 torsoColor(0.15f, 0.85f, 1.00f, 1.0f);
-    const FVec4 armColor(1.00f, 0.60f, 0.12f, 1.0f);
-    const FVec4 legColor(0.20f, 1.00f, 0.35f, 1.0f);
-    const FVec4 hairColor(0.90f, 0.25f, 1.00f, 1.0f);
-    const FVec4 constraintColor(1.00f, 0.00f, 1.00f, 1.0f); // Magenta for constraints
+    const FVec4 torsoColor{0.15f, 0.85f, 1.00f, 1.0f};
+    const FVec4 armColor{1.00f, 0.60f, 0.12f, 1.0f};
+    const FVec4 legColor{0.20f, 1.00f, 0.35f, 1.0f};
+    const FVec4 hairColor{0.90f, 0.25f, 1.00f, 1.0f};
+    const FVec4 constraintColor{1.00f, 0.00f, 1.00f, 1.0f}; // Magenta for constraints
 
     for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
         const RigNodeIndex node = boneMap.nodeIndices[semantic];
@@ -2660,19 +2657,19 @@ void DrawProceduralDebugRig(
     }
 
     if (gait != nullptr) {
-        const FVec4 normalColor(1.0f, 0.95f, 0.12f, 1.0f);
+        const FVec4 normalColor{1.0f, 0.95f, 0.12f, 1.0f};
         const FVec3 footL = ModelToWorld(rootPosition, rootRotation, gait->localFootTargetL);
         const FVec3 footR = ModelToWorld(rootPosition, rootRotation, gait->localFootTargetR);
-        scene.AddLine(footL, footL + FVec3(gait->footNormalL) * 0.22f, normalColor);
-        scene.AddLine(footR, footR + FVec3(gait->footNormalR) * 0.22f, normalColor);
+        scene.AddLine(footL, footL + FVec3{gait->footNormalL} * 0.22f, normalColor);
+        scene.AddLine(footR, footR + FVec3{gait->footNormalR} * 0.22f, normalColor);
 
         // Sagittal stride wheel: cyan ticks are pass poses, orange ticks are
         // reach poses, and the spoke follows the distance-driven gait phase.
         constexpr float wheelRadius      = 0.24f;
-        const FVec3 wheelCenterModel = FVec3(gait->centerOfMassModel) + FVec3(-0.48f, 0.0f, 0.0f);
-        const FVec4 wheelColor(0.40f, 0.45f, 0.55f, 0.85f);
-        const FVec4 passColor(0.10f, 0.95f, 1.00f, 1.0f);
-        const FVec4 reachColor(1.00f, 0.42f, 0.08f, 1.0f);
+        const FVec3 wheelCenterModel = FVec3{gait->centerOfMassModel} + FVec3{-0.48f, 0.0f, 0.0f};
+        const FVec4 wheelColor{0.40f, 0.45f, 0.55f, 0.85f};
+        const FVec4 passColor{0.10f, 0.95f, 1.00f, 1.0f};
+        const FVec4 reachColor{1.00f, 0.42f, 0.08f, 1.0f};
         drawCross(ModelToWorld(rootPosition, rootRotation, gait->centerOfMassModel), 0.032f, normalColor);
         // +Z is forward and +Y is up. Forward rolling therefore rotates around
         // +X, which maps an initial +Z spoke toward -Y (clockwise when viewed
@@ -2680,19 +2677,19 @@ void DrawProceduralDebugRig(
         for (uint32_t segment = 0; segment < 24; ++segment) {
             const float     angle0 = 2.0f * std::numbers::pi_v<float> * static_cast<float>(segment) / 24.0f;
             const float     angle1 = 2.0f * std::numbers::pi_v<float> * static_cast<float>(segment + 1) / 24.0f;
-            const FVec3 p0     = wheelCenterModel + FVec3(0.0f, -std::sin(angle0) * wheelRadius, std::cos(angle0) * wheelRadius);
-            const FVec3 p1     = wheelCenterModel + FVec3(0.0f, -std::sin(angle1) * wheelRadius, std::cos(angle1) * wheelRadius);
+            const FVec3 p0     = wheelCenterModel + FVec3{0.0f, -std::sin(angle0) * wheelRadius, std::cos(angle0) * wheelRadius};
+            const FVec3 p1     = wheelCenterModel + FVec3{0.0f, -std::sin(angle1) * wheelRadius, std::cos(angle1) * wheelRadius};
             scene.AddLine(ModelToWorld(rootPosition, rootRotation, p0), ModelToWorld(rootPosition, rootRotation, p1), wheelColor);
         }
         const FVec3 wheelMarkerModel = wheelCenterModel +
-                                           FVec3(0.0f, -std::sin(gait->strideWheelAngle) * wheelRadius, std::cos(gait->strideWheelAngle) * wheelRadius);
+                                           FVec3{0.0f, -std::sin(gait->strideWheelAngle) * wheelRadius, std::cos(gait->strideWheelAngle) * wheelRadius};
         const FVec4 markerColor      = gait->passWeightL > gait->reachWeightL ? passColor : reachColor;
         scene.AddLine(ModelToWorld(rootPosition, rootRotation, wheelCenterModel), ModelToWorld(rootPosition, rootRotation, wheelMarkerModel), markerColor);
         drawCross(ModelToWorld(rootPosition, rootRotation, wheelMarkerModel), 0.025f, markerColor);
-        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel + FVec3(0.0f, wheelRadius, 0.0f)), 0.018f, passColor);
-        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel - FVec3(0.0f, wheelRadius, 0.0f)), 0.018f, passColor);
-        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel + FVec3(0.0f, 0.0f, wheelRadius)), 0.018f, reachColor);
-        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel - FVec3(0.0f, 0.0f, wheelRadius)), 0.018f, reachColor);
+        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel + FVec3{0.0f, wheelRadius, 0.0f}), 0.018f, passColor);
+        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel - FVec3{0.0f, wheelRadius, 0.0f}), 0.018f, passColor);
+        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel + FVec3{0.0f, 0.0f, wheelRadius}), 0.018f, reachColor);
+        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel - FVec3{0.0f, 0.0f, wheelRadius}), 0.018f, reachColor);
     }
 }
 

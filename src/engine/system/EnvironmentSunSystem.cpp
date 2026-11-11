@@ -64,9 +64,9 @@ void EnvironmentSunSystem::Update(SunEnvQuery query, ECS::EntityCommandBuffer& e
     const auto& energy = sun->irradiance;
     const Components::LightComponent baked {
         .type = LightType::Sun,
-        .color = FVec3(energy[0], energy[1], energy[2]) * std::numbers::pi_v<float>,
+        .color = FVec3{energy[0], energy[1], energy[2]} * std::numbers::pi_v<float>,
         .intensity = 1.0f,
-        .direction = FVec3(dir[0], dir[1], dir[2]).Normalized(),
+        .direction = FVec3{dir[0], dir[1], dir[2]}.Normalized(),
     };
     if (owned == Entity::Null()) {
         ecb.CreateEntity(EnvironmentSunTagComponent {}, baked);

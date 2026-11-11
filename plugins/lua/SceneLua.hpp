@@ -105,13 +105,13 @@ struct LuaValueTrait<FVec3> {
             if (auto res = TemplatedDetail::ReadInto(comps, reader); !res) {
                 return std::unexpected(res.error());
             }
-            return FVec3(comps[0], comps[1], comps[2]);
+            return FVec3{comps[0], comps[1], comps[2]};
         }
         TemplatedDetail::Vec3TablePatch<float> named {};
         if (auto res = TemplatedDetail::PatchObject(named, reader); !res) {
             return std::unexpected(res.error());
         }
-        return FVec3(named.x, named.y, named.z);
+        return FVec3{named.x, named.y, named.z};
     }
 
     static void Push(Builder& builder, const FVec3& v) {
@@ -139,13 +139,13 @@ struct LuaValueTrait<FVec4> {
             if (auto res = TemplatedDetail::ReadInto(comps, reader); !res) {
                 return std::unexpected(res.error());
             }
-            return FVec4(comps[0], comps[1], comps[2], comps[3]);
+            return FVec4{comps[0], comps[1], comps[2], comps[3]};
         }
         TemplatedDetail::Vec4TablePatch<float> named {};
         if (auto res = TemplatedDetail::PatchObject(named, reader); !res) {
             return std::unexpected(res.error());
         }
-        return FVec4(named.x, named.y, named.z, named.w);
+        return FVec4{named.x, named.y, named.z, named.w};
     }
 
     static void Push(Builder& builder, const FVec4& v) {
@@ -175,13 +175,13 @@ struct LuaValueTrait<ZHLN::Quat> {
             if (auto res = TemplatedDetail::ReadInto(comps, reader); !res) {
                 return std::unexpected(res.error());
             }
-            return ZHLN::Quat(comps[0], comps[1], comps[2], comps[3]);
+            return ZHLN::Quat{comps[0], comps[1], comps[2], comps[3]};
         }
         TemplatedDetail::Vec4TablePatch<float> named {};
         if (auto res = TemplatedDetail::PatchObject(named, reader); !res) {
             return std::unexpected(res.error());
         }
-        return ZHLN::Quat(named.x, named.y, named.z, named.w);
+        return ZHLN::Quat{named.x, named.y, named.z, named.w};
     }
 
     static void Push(Builder& builder, const ZHLN::Quat& q) {

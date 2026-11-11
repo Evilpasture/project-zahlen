@@ -9,6 +9,7 @@
 // lit anisotropy never aliases the reserved unlit code.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -95,10 +96,10 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
         return;
     }
     ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = ZHLN::FVec3(0.0f, 0.0f, 7.0f); // Same orbit the retired Khronos sample used, so the face windows below hold.
-    camera.yaw      = -90.0f;
-    camera.pitch    = 0.0f;
-    camera.fov      = 45.0f;
+    camera.position = {0.0f, 0.0f, 7.0f}; // Same orbit the retired Khronos sample used, so the face windows below hold.
+    camera.yaw      = ZHLN::DegF{-90.0f};
+    camera.pitch    = ZHLN::DegF{0.0f};
+    camera.fov      = ZHLN::DegF{45.0f};
 }
 
 // Uploads the authored chamfered solid with white vertex colors, so the
@@ -194,7 +195,7 @@ auto SpawnUnlitChamfer(ZHLN::Engine& engine, float x, const ZHLN::Material& mate
     rc.RegisterMesh(meshAsset, mesh);
     rc.RegisterMaterial(matAsset, material);
 
-    const ZHLN::FVec3  position = ZHLN::FVec3(x, 0.0f, 0.0f);
+    const ZHLN::FVec3  position = {x, 0.0f, 0.0f};
     const auto worldMat = ZHLN::ComposeTransform(position, ZHLN::Quat::Identity(), {1.0f, 1.0f, 1.0f});
     reg.Add(e, ZHLN::Components::NameComponent {.name = ZHLN::String64("UnlitChamfer_" + tag)});
     reg.Add(e, ZHLN::Components::TransformComponent {.position = position, .rotation = ZHLN::Quat::Identity(), .scale = ZHLN::FVec3::Splat(1.0f)});
@@ -205,7 +206,7 @@ auto SpawnUnlitChamfer(ZHLN::Engine& engine, float x, const ZHLN::Material& mate
                                                  .mesh      = mesh,
                                                  .shape     = ZHLN::Components::OwnedMeshComponent::Shape::None,
                                                  .dimensions = ZHLN::FVec3::Zero(),
-                                                 .color      = ZHLN::FVec4(1.0f, 1.0f, 1.0f, 1.0f)}
+                                                 .color      = ZHLN::FVec4{1.0f, 1.0f, 1.0f, 1.0f}}
     );
     reg.Add(e, ZHLN::Components::PBRComponent {.roughness = material.roughnessFactor, .metallic = material.metallicFactor});
     return e;
@@ -252,9 +253,9 @@ struct UnlitMaterialsTestSuite {
 
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             const ZHLN::Entity sun = reg.Create();
-            reg.Add(sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3(0.0f, 0.0f, 8.0f)},
-                    ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = ZHLN::FVec3(1.0f, 1.0f, 1.0f),
-                                                      .intensity = 0.0f, .direction = ZHLN::FVec3(0.0f, 0.0f, 1.0f)});
+            reg.Add(sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 8.0f}},
+                    ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
+                                                      .intensity = 0.0f, .direction = ZHLN::FVec3{0.0f, 0.0f, 1.0f}});
             const auto controlMaterial = engine->Graphics().CreateMaterial(
                 ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.5f, 0.5f, 0.5f, 1.0f}, .anisotropyStrength = 1.0f}
             );
@@ -311,8 +312,8 @@ struct UnlitMaterialsTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& camera = cameraComp->camera;
-            camera.position = ZHLN::FVec3(0.0f, 0.0f, 5.0f);
-            camera.fov = 60.0f;
+            camera.position = {0.0f, 0.0f, 5.0f};
+            camera.fov = ZHLN::DegF{60.0f};
             auto rc = engine->Graphics();
 
             constexpr uint32_t side = 64;

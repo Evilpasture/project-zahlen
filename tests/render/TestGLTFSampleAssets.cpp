@@ -16,6 +16,7 @@
 // absolute counts: a fidelity improvement must not fail this suite.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -111,10 +112,10 @@ void FitCameraToPrefab(ZHLN::Camera& camera, const ZHLN::ModelPrefab& prefab, fl
     const double halfFov  = std::max(0.1, static_cast<double>(JPH::DegreesToRadians(fovDegrees)) * 0.5);
     double       distance = radius / std::tan(halfFov) * 1.25;
     distance              = std::clamp(distance, radius * 1.2 + 1.0, 80.0);
-    camera.position       = FVec3(0.0f, static_cast<float>(radius * 0.35), static_cast<float>(distance));
-    camera.yaw            = -90.0f;
-    camera.pitch          = static_cast<float>(-JPH::RadiansToDegrees(std::atan(radius * 0.35 / distance)));
-    camera.fov            = fovDegrees;
+    camera.position = {0.0f, static_cast<float>(radius * 0.35), static_cast<float>(distance)};
+    camera.yaw            = ZHLN::DegF{-90.0f};
+    camera.pitch          = ZHLN::DegF{static_cast<float>(-JPH::RadiansToDegrees(std::atan(radius * 0.35 / distance)))};
+    camera.fov            = ZHLN::DegF{fovDegrees};
     camera.nearZ          = 0.05f;
     camera.farZ           = std::max(100.0f, static_cast<float>(distance * 4.0));
 }

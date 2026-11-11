@@ -625,7 +625,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 float g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
                 float b = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
                 float a = static_cast<float>((packed >> 24) & 0xFF) / 255.0f;
-                return FVec4(r, g, b, a);
+                return FVec4{r, g, b, a};
             };
 
             for (size_t i = 0; i + 1 < debugData.lineCount; i += 2) {

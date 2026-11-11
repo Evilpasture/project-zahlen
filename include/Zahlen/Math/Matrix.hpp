@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Scalar.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -345,10 +346,10 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] auto CreateRotationX(T angleRad) noexcept -> Matrix<T, 4, 4> {
+[[nodiscard]] auto CreateRotationX(Radians<T> angleRad) noexcept -> Matrix<T, 4, 4> {
     auto    m = Matrix<T, 4, 4>::Identity();
-    const T c = std::cos(angleRad);
-    const T s = std::sin(angleRad);
+    const T c = Cos(angleRad);
+    const T s = Sin(angleRad);
     m[1, 1]   = c;
     m[1, 2]   = -s;
     m[2, 1]   = s;
@@ -357,10 +358,10 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] auto CreateRotationY(T angleRad) noexcept -> Matrix<T, 4, 4> {
+[[nodiscard]] auto CreateRotationY(Radians<T> angleRad) noexcept -> Matrix<T, 4, 4> {
     auto    m = Matrix<T, 4, 4>::Identity();
-    const T c = std::cos(angleRad);
-    const T s = std::sin(angleRad);
+    const T c = Cos(angleRad);
+    const T s = Sin(angleRad);
     m[0, 0]   = c;
     m[0, 2]   = s;
     m[2, 0]   = -s;
@@ -369,10 +370,10 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] auto CreateRotationZ(T angleRad) noexcept -> Matrix<T, 4, 4> {
+[[nodiscard]] auto CreateRotationZ(Radians<T> angleRad) noexcept -> Matrix<T, 4, 4> {
     auto    m = Matrix<T, 4, 4>::Identity();
-    const T c = std::cos(angleRad);
-    const T s = std::sin(angleRad);
+    const T c = Cos(angleRad);
+    const T s = Sin(angleRad);
     m[0, 0]   = c;
     m[0, 1]   = -s;
     m[1, 0]   = s;
@@ -404,8 +405,8 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] auto CreatePerspective(T fovRadians, T aspect, T nearZ, T farZ) noexcept -> Matrix<T, 4, 4> {
-    const T         f = T {1} / std::tan(fovRadians * T {0.5});
+[[nodiscard]] auto CreatePerspective(Radians<T> fovRadians, T aspect, T nearZ, T farZ) noexcept -> Matrix<T, 4, 4> {
+    const T         f = T {1} / Tan(fovRadians * T {0.5});
     Matrix<T, 4, 4> m {};
     m[0, 0] = f / aspect;
     m[1, 1] = -f; // Vulkan Y-down flip

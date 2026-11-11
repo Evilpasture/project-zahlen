@@ -36,7 +36,7 @@ struct TargetCameraComponent {
     float     targetDistance = 4.5f;
     float     yaw            = -90.0f;
     float     pitch          = -10.0f;
-    FVec3 targetOffset   = FVec3(0.0f, 1.3f, 0.0f);
+    FVec3 targetOffset   = {0.0f, 1.3f, 0.0f};
     float     stiffness      = 15.0f;
 
     // The renderer's vignette reads PostProcessSettingsComponent; these two

@@ -20,6 +20,7 @@
 // compiler's reflection support is off.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -70,6 +71,26 @@ auto BoxOf(T* ptr) -> ZHLN::ScriptVal {
 }
 
 struct ScriptValueTypesTestSuite {
+    std::expected<void, ZHLN::ErrorCode> degrees_cross_as_numbers() {
+        const auto val = ZHLN::ToScriptVal(ZHLN::DegF{-42.5f});
+        const auto* number = std::get_if<double>(&val);
+        if (!ZHLN::Test::ExpectTrue(number != nullptr)) {
+            return std::unexpected(ScriptValueTypeTestError::WrongRepresentation);
+        }
+        ZHLN::Test::ExpectEq(*number, -42.5);
+        const auto back = ZHLN::FromScriptVal<ZHLN::DegF>(val);
+        if (!ZHLN::Test::ExpectTrue(back.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
+        }
+        ZHLN::Test::ExpectEq(back->value, -42.5f);
+        const auto bad = ZHLN::FromScriptVal<ZHLN::DegF>(ZHLN::ScriptVal{std::string{"degrees"}});
+        if (!ZHLN::Test::ExpectTrue(!bad.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
+        }
+        ZHLN::Test::ExpectTrue(bad.error().Is(ZHLN::ScriptError::TypeMismatch));
+        return {};
+    }
+
     // An Entity crosses as its packed 64-bit id, which is how the Fennel
     // sources already spell entities everywhere.
     std::expected<void, ZHLN::ErrorCode> entity_crosses_as_packed_id() {
@@ -102,7 +123,7 @@ struct ScriptValueTypesTestSuite {
     }
 
     std::expected<void, ZHLN::ErrorCode> vec3_crosses_as_three_numbers() {
-        const FVec3 v(1.5f, -2.25f, 3.0f);
+        const FVec3 v{1.5f, -2.25f, 3.0f};
 
         ZHLN::ScriptVal val = ZHLN::ToScriptVal(v);
 
@@ -135,7 +156,7 @@ struct ScriptValueTypesTestSuite {
         // Physics origins are DVec3, which is DVec3 under JPH_DOUBLE_PRECISION.
         // A round-trip through double must not truncate the way FVec3's float
         // path would -- these magnitudes are ordinary world coordinates.
-        const DVec3 v(123456.789012, -987654.321098, 0.000001);
+        const DVec3 v{123456.789012, -987654.321098, 0.000001};
 
         ZHLN::ScriptVal val  = ZHLN::ToScriptVal(v);
         auto            back = ZHLN::FromScriptVal<DVec3>(val);
@@ -151,7 +172,7 @@ struct ScriptValueTypesTestSuite {
     }
 
     std::expected<void, ZHLN::ErrorCode> quat_crosses_as_four_numbers() {
-        const ZHLN::Quat q(0.1f, 0.2f, 0.3f, 0.9f);
+        const ZHLN::Quat q{0.1f, 0.2f, 0.3f, 0.9f};
 
         ZHLN::ScriptVal val = ZHLN::ToScriptVal(q);
 
@@ -175,7 +196,7 @@ struct ScriptValueTypesTestSuite {
 
     std::expected<void, ZHLN::ErrorCode> vec4_crosses_as_four_numbers() {
         // Colours reach scripts this way: DrawLine's endpoints, Material.baseColorFactor.
-        const FVec4 c(0.25f, 0.5f, 0.75f, 1.0f);
+        const FVec4 c{0.25f, 0.5f, 0.75f, 1.0f};
 
         ZHLN::ScriptVal val  = ZHLN::ToScriptVal(c);
         auto            back = ZHLN::FromScriptVal<FVec4>(val);
@@ -192,7 +213,7 @@ struct ScriptValueTypesTestSuite {
     // A vector read off a component arrives boxed; a script should be able to
     // pass it straight back without unpacking it into a literal.
     std::expected<void, ZHLN::ErrorCode> vectors_accept_boxed_instances() {
-        FVec3       source(4.0f, 5.0f, 6.0f);
+        FVec3       source{4.0f, 5.0f, 6.0f};
         ZHLN::ScriptVal boxed = BoxOf(&source);
 
         auto back = ZHLN::FromScriptVal<FVec3>(boxed);
@@ -210,7 +231,7 @@ struct ScriptValueTypesTestSuite {
     // type name is the only guard. Reinterpreting one as the other would read
     // four floats out of a three-float object.
     std::expected<void, ZHLN::ErrorCode> boxed_type_mismatch_is_rejected() {
-        ZHLN::Quat       quat(1.0f, 0.0f, 0.0f, 0.0f);
+        ZHLN::Quat       quat{1.0f, 0.0f, 0.0f, 0.0f};
         ZHLN::ScriptVal boxedQuat = BoxOf(&quat);
 
         auto res = ZHLN::FromScriptVal<FVec3>(boxedQuat);

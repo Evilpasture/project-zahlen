@@ -33,13 +33,13 @@ void Drive(Components::CameraComponent& cc, const Components::InputStateComponen
     const float look = knobs.lookSensitivity;
     const bool  lookButton = knobs.lookRequiresButton ? input.IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton)) : true;
     if (lookButton) {
-        cam.yaw += input.GetMouseDeltaX() * look;
-        cam.pitch = std::clamp(cam.pitch - (input.GetMouseDeltaY() * look), -89.0f, 89.0f);
+        cam.yaw += DegF{input.GetMouseDeltaX() * look};
+        cam.pitch = std::clamp(cam.pitch - DegF{input.GetMouseDeltaY() * look}, DegF{-89.0f}, DegF{89.0f});
     }
 
-    const float yawRad   = DegF(cam.yaw).ToRadians().value;
-    const float pitchRad = DegF(cam.pitch).ToRadians().value;
-    FVec3   forward(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad));
+    const float yawRad   = cam.yaw.ToRadians().value;
+    const float pitchRad = cam.pitch.ToRadians().value;
+    FVec3   forward{std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)};
     forward         = forward.Normalized();
     FVec3 right = Cross(forward, FVec3::UnitY());
     if (right.LengthSquared() > 1e-8f) {

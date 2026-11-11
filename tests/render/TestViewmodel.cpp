@@ -75,7 +75,7 @@ struct ViewmodelTestSuite {
             const float aspect = 1280.0f / 720.0f;
 
             // Compute expected fixed 58-degree viewmodel projection
-            const auto expectedVMProj = ZHLN::CreatePerspective(ZHLN::DegF(58.0f).ToRadians().value, aspect, cam.nearZ, cam.farZ);
+            const auto expectedVMProj = ZHLN::CreatePerspective(ZHLN::DegF{58.0f}.ToRadians(), aspect, cam.nearZ, cam.farZ);
             const auto isClose = [](const auto& a, const auto& b) {
                 for (size_t column = 0; column < 4; ++column) {
                     for (size_t row = 0; row < 4; ++row) {
@@ -86,22 +86,22 @@ struct ViewmodelTestSuite {
             };
 
             // Test A: Normal Camera FOV (45.0 deg)
-            cam.fov                = 45.0f;
+            cam.fov                = ZHLN::DegF{45.0f};
             auto worldProj45 = cam.GetProjectionMatrix(aspect);
             ZHLN::Test::ExpectFalse(isClose(worldProj45, expectedVMProj));
 
             // Test B: Sniper Scope / Zoomed-in Camera FOV (15.0 deg)
-            cam.fov                = 15.0f;
+            cam.fov                = ZHLN::DegF{15.0f};
             auto worldProj15 = cam.GetProjectionMatrix(aspect);
             ZHLN::Test::ExpectFalse(isClose(worldProj15, expectedVMProj));
 
             // Test C: Ultra-Wide Camera FOV (110.0 deg)
-            cam.fov                 = 110.0f;
+            cam.fov                 = ZHLN::DegF{110.0f};
             auto worldProj110 = cam.GetProjectionMatrix(aspect);
             ZHLN::Test::ExpectFalse(isClose(worldProj110, expectedVMProj));
 
             // Test D: When camera FOV is exactly 58.0 deg, both projections match
-            cam.fov                = 58.0f;
+            cam.fov                = ZHLN::DegF{58.0f};
             auto worldProj58 = cam.GetProjectionMatrix(aspect);
             ZHLN::Test::ExpectTrue(isClose(worldProj58, expectedVMProj));
 
@@ -177,9 +177,9 @@ struct ViewmodelTestSuite {
             }
             ZHLN::Camera& cam = camComp->camera;
             cam.position = {0.0f, 1.5f, 2.0f};
-            cam.yaw      = -90.0f; // Look directly along -Z
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
+            cam.yaw      = ZHLN::DegF{-90.0f}; // Look directly along -Z
+            cam.pitch    = ZHLN::DegF{0.0f};
+            cam.fov      = ZHLN::DegF{60.0f};
 
             // The test drives the main camera through the registry. If the extras
             // target camera rig is present on this pooled engine (a sibling

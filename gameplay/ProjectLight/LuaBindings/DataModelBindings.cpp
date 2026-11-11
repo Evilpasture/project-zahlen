@@ -242,7 +242,7 @@ void PushConnection(lua_State* state, std::shared_ptr<LuaConnectionRecord> conne
 
 auto ReadVector3(lua_State* state, int index, FVec3& out) -> bool {
     if (const auto* value = TestVector3(state, index)) {
-        out = FVec3(value->x, value->y, value->z);
+        out = {value->x, value->y, value->z};
         return true;
     }
     if (lua_type(state, index) != LUA_TTABLE) return false;
@@ -261,13 +261,13 @@ auto ReadVector3(lua_State* state, int index, FVec3& out) -> bool {
     const float z = static_cast<float>(lua_tonumber(state, -1));
     lua_pop(state, 1);
     if (!hasX || !hasY || !hasZ) return false;
-    out = FVec3(x, y, z);
+    out = {x, y, z};
     return true;
 }
 
 auto ReadColor3(lua_State* state, int index, FVec3& out) -> bool {
     if (const auto* value = TestColor3(state, index)) {
-        out = FVec3(value->r, value->g, value->b);
+        out = {value->r, value->g, value->b};
         return true;
     }
     return ReadVector3(state, index, out);

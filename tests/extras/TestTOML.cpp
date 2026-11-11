@@ -19,6 +19,7 @@
 // tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -615,9 +616,9 @@ onClickAction = "editor.save_scene"
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedBox"}},
                 ZHLN::Components::TransformComponent {
-                    .position = FVec3(1.0f, 2.0f, 3.0f),
-                    .rotation = ZHLN::Quat::FromEulerDegrees({0.0f, 45.0f, 0.0f}),
-                    .scale    = FVec3(2.0f, 2.0f, 2.0f)
+                    .position = FVec3{1.0f, 2.0f, 3.0f},
+                    .rotation = ZHLN::Quat::FromEulerDegrees({{0.0f, 45.0f, 0.0f}}),
+                    .scale    = FVec3{2.0f, 2.0f, 2.0f}
                 },
                 ZHLN::Components::MeshComponent {.meshAsset = 1, .materialAsset = 2, .cullRadius = 2.0f},
                 ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f}, ZHLN::Components::PhysicsComponent {.isStatic = false},
@@ -645,14 +646,14 @@ onClickAction = "editor.save_scene"
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedSun"}},
                 ZHLN::Components::TransformComponent {
-                    .position = FVec3(4.0f, 5.0f, 6.0f), .rotation = ZHLN::Quat::FromEulerDegrees({50.0f, -35.0f, 0.0f})
+                    .position = FVec3{4.0f, 5.0f, 6.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{50.0f, -35.0f, 0.0f}})
                 },
                 ZHLN::Components::LightComponent {
                     .type        = ZHLN::LightType::Sun,
-                    .color       = FVec3(1.0f, 0.5f, 0.25f),
+                    .color       = FVec3{1.0f, 0.5f, 0.25f},
                     .intensity   = 180.0f,
                     .radius      = 0.0f,
-                    .direction   = FVec3(0.4f, 1.0f, 0.3f),
+                    .direction   = FVec3{0.4f, 1.0f, 0.3f},
                     .range       = 0.0f,
                     .castsShadow = true
                 },
@@ -664,17 +665,17 @@ onClickAction = "editor.save_scene"
             registry.Create(ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point});
 
             ZHLN::Camera camera;
-            camera.position = FVec3(0.0f, 3.8f, 7.5f);
-            camera.yaw      = -90.0f;
-            camera.pitch    = -14.0f;
-            camera.fov      = 52.0f;
+            camera.position = {0.0f, 3.8f, 7.5f};
+            camera.yaw      = ZHLN::DegF{-90.0f};
+            camera.pitch    = ZHLN::DegF{-14.0f};
+            camera.fov      = ZHLN::DegF{52.0f};
 
             // The one thing a registry cannot answer is a material's colour:
             // that lives in the material table. Extract asks for a lookup rather
             // than a RenderContext, so this supplies one directly -- no device.
             std::unordered_map<ZHLN::MaterialID, ZHLN::Material> materials;
             ZHLN::Material                                       boxMaterial {};
-            boxMaterial.baseColorFactor    = ZHLN::FVec4 {0.1f, 0.6f, 0.95f, 1.0f};
+            boxMaterial.baseColorFactor = {0.1f, 0.6f, 0.95f, 1.0f};
             boxMaterial.emissiveFactor.x   = 80.0f;
             materials[2]                   = boxMaterial;
 

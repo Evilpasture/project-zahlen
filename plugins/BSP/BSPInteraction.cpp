@@ -8,6 +8,7 @@
 // about this door", and the caller answers "what does a door do".
 
 #include "BSPInteraction.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 
 #include "BSPScene.hpp" // ConvertDirection / ConvertPosition / EngineEulerAnglesFromSourceAngles
@@ -19,8 +20,6 @@
 
 namespace ZHLN::BSP {
 namespace {
-
-constexpr float kDegreesToRadians = 3.14159265358979323846f / 180.0f;
 
 // Source's sentinels for the first movedir component: not angles, directions.
 constexpr float kMoveDirSentinelUp   = -1.0f;
@@ -38,7 +37,7 @@ constexpr float kSentinelEpsilon     = 0.01f;
     if (!arr) {
         return std::nullopt;
     }
-    return FVec3((*arr)[0], (*arr)[1], (*arr)[2]);
+    return FVec3{(*arr)[0], (*arr)[1], (*arr)[2]};
 }
 
 } // namespace
@@ -165,18 +164,18 @@ auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -
     // The sentinels are checked before the angle reading: reading -1 as a pitch
     // would aim the mover at 359 degrees instead of straight up.
     if (IsSentinel(v, kMoveDirSentinelUp)) {
-        return ConvertDirection(options, FVec3(0.0f, 0.0f, 1.0f));
+        return ConvertDirection(options, FVec3{0.0f, 0.0f, 1.0f});
     }
     if (IsSentinel(v, kMoveDirSentinelDown)) {
-        return ConvertDirection(options, FVec3(0.0f, 0.0f, -1.0f));
+        return ConvertDirection(options, FVec3{0.0f, 0.0f, -1.0f});
     }
 
-    const float     pitch = v[0] * kDegreesToRadians;
-    const float     yaw   = v[1] * kDegreesToRadians;
-    const float     cp    = std::cos(pitch);
-    const FVec3 sourceDir(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+    const auto pitch = DegF{v[0]}.ToRadians();
+    const auto yaw = DegF{v[1]}.ToRadians();
+    const float     cp    = Cos(pitch);
+    const FVec3 sourceDir{cp * Cos(yaw), cp * Sin(yaw), -Sin(pitch)};
     if (sourceDir.LengthSquared() < 1e-4f) {
-        return ConvertDirection(options, FVec3(1.0f, 0.0f, 0.0f));
+        return ConvertDirection(options, FVec3{1.0f, 0.0f, 0.0f});
     }
     return ConvertDirection(options, sourceDir.Normalized());
 }
@@ -333,7 +332,7 @@ auto DescribeInteractiveEntities(ECS::Registry& registry, const BSPMap& map, con
             // The exact conjugated Source rotation: TeleportPlayer recovers the
             // post-teleport view direction from this transform's +X axis.
             const FVec3 angles = OptionalVec3(entity, "angles").value_or(FVec3::Zero());
-            record.orientation     = Quat::FromEulerDegrees(EngineEulerAnglesFromSourceAngles(angles, options));
+            record.orientation     = Quat::FromEulerDegrees({EngineEulerAnglesFromSourceAngles(angles, options)});
             records.push_back(std::move(record));
             continue;
         }

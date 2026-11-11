@@ -487,7 +487,7 @@ void test_ecs_audio_components_and_scene_resource_release() {
     audio.PlayVoice(handle);
 
     const Entity srcEntity = registry.Create(
-        Components::TransformComponent {.position = FVec3(3.0f, 1.0f, -2.0f)},
+        Components::TransformComponent {.position = FVec3{3.0f, 1.0f, -2.0f}},
         Components::AudioSourceComponent {
             .filepath      = "audio/ambient_wind.wav",
             .volume        = 0.8f,

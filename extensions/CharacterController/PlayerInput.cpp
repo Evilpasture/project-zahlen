@@ -145,7 +145,7 @@ void PlayerInputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) 
             continue;
         }
 
-        float yawRad    = JPH::DegreesToRadians(cam.yaw);
+        float yawRad    = cam.yaw.ToRadians().value;
         float forward_x = std::cos(yawRad);
         float forward_z = std::sin(yawRad);
         float right_x   = -std::sin(yawRad);

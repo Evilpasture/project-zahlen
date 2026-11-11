@@ -431,8 +431,8 @@ struct ItemHandlingComponent {
     ItemDriverMode driverMode = ItemDriverMode::HandAnchored;
     Entity         itemEntity {};
 
-    ZHLN::Mat4x4 hipLocalOffset = ZHLN::CreateTranslation(FVec3(0.20f, -0.16f, 0.40f));
-    ZHLN::Mat4x4 aimLocalOffset = ZHLN::CreateTranslation(FVec3(0.00f, -0.05f, 0.22f));
+    ZHLN::Mat4x4 hipLocalOffset = ZHLN::CreateTranslation(FVec3{0.20f, -0.16f, 0.40f});
+    ZHLN::Mat4x4 aimLocalOffset = ZHLN::CreateTranslation(FVec3{0.00f, -0.05f, 0.22f});
     ZHLN::Mat4x4 worldAnchor    = ZHLN::Mat4x4::Identity();
     float       aimProgress    = 0.0f;
     float       aimVelocity    = 0.0f;
@@ -536,13 +536,13 @@ Mat4x4 CorrectBoneDirection(
     FVec3      solvedDirection,
     FVec3      solvedPosition
 ) noexcept;
-FVec3  LimitGroundNormal(FVec3 modelNormal, float maxSidewaysRadians, float maxForwardRadians) noexcept;
+FVec3  LimitGroundNormal(FVec3 modelNormal, RadF maxSidewaysRadians, RadF maxForwardRadians) noexcept;
 Mat4x4 AlignFootToGround(
     const Mat4x4& authoredFoot,
     FVec3      target,
     FVec3      modelNormal,
-    float             maxSidewaysRadians = ZHLN::DegF(15.0f).ToRadians().value,
-    float             maxForwardRadians  = ZHLN::DegF(35.0f).ToRadians().value
+    RadF             maxSidewaysRadians = ZHLN::DegF{15.0f}.ToRadians(),
+    RadF             maxForwardRadians  = ZHLN::DegF{35.0f}.ToRadians()
 ) noexcept;
 size_t SetModelTransformAndCarrySubtree(Mat4x4* nodeTransforms, const RigBoneMap& map, RigNodeIndex rootNode, const Mat4x4& target) noexcept;
 void   ApplyIKReachTilt(
@@ -554,7 +554,7 @@ void   ApplyIKReachTilt(
     float                          weightL,
     float                          weightR,
     float                          maxLegExtension,
-    float                          maxBodyTiltRadians,
+    RadF                          maxBodyTiltRadians,
     float                          dt
 ) noexcept;
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, Mat4x4* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
@@ -573,9 +573,9 @@ void SolveLegGrounding(
     float                          dt                      = 1.0f / 60.0f,
     float                          pelvisDropWeight        = 1.0f,
     float                          maxLegExtension         = 0.98f,
-    float                          maxBodyTiltRadians      = ZHLN::DegF(10.0f).ToRadians().value,
-    float                          maxAnkleSidewaysRadians = ZHLN::DegF(15.0f).ToRadians().value,
-    float                          maxAnkleForwardRadians  = ZHLN::DegF(35.0f).ToRadians().value
+    RadF                          maxBodyTiltRadians      = ZHLN::DegF{10.0f}.ToRadians(),
+    RadF                          maxAnkleSidewaysRadians = ZHLN::DegF{15.0f}.ToRadians(),
+    RadF                          maxAnkleForwardRadians  = ZHLN::DegF{35.0f}.ToRadians()
 ) noexcept;
 void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,
@@ -628,8 +628,8 @@ void ApplyTorsoReachCompensation(
     Quat targetRotation,
     Quat authoredRotation,
     FVec3 twistAxis,
-    float        maxTwistRadians,
-    float        maxSwingRadians
+    RadF        maxTwistRadians,
+    RadF        maxSwingRadians
 ) noexcept;
 void SolveLimbIK(
     Mat4x4*       nodeTransforms,
@@ -646,8 +646,8 @@ void SolveLimbIK(
     Quat desiredRotation,
     FVec3 hingeAxis,
     float        flexSign,
-    float        maxFlexRadians,
-    float        maxExtensionRadians
+    RadF        maxFlexRadians,
+    RadF        maxExtensionRadians
 ) noexcept;
 void ApplyKinematicFingers(
     Mat4x4*           nodeTransforms,

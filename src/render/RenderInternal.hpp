@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include "vulkan/VulkanHeader.hpp"
 
 #include "render/ComputePassResources.hpp"
@@ -314,7 +315,7 @@ struct RenderContext::Impl: Renderer {
     uint32_t nextMorphDeltaIndex = 0;
 
     float lastAspectRatio = 0.0f;
-    float lastFov         = 0.0f;
+    DegF lastFov {0.0f};
     float lastNearZ       = 0.0f;
     float lastFarZ        = 0.0f;
 

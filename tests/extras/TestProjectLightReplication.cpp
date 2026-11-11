@@ -11,6 +11,7 @@
 // "needs a server to reproduce".
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 
@@ -211,7 +212,8 @@ struct TestProjectLightReplicationSuite {
                 ZHLN::Test::ExpectEq(torso->className, std::string("Part"));
                 ZHLN::Test::ExpectEq(torso->name, std::string("Torso"));
                 ZHLN::Test::ExpectEq(torso->parentUid, uint64_t {kCharacterUid});
-                const auto expectedRotation = Quat::FromEulerDegrees({15.0f, 75.0f, 20.0f});
+                const auto expectedRotation = Quat::FromEulerDegrees({{15.0f, 75.0f, 20.0f}});
+                ZHLN::Test::ExpectTrue(torso->rotationEulerDeg.value == FVec3{15.0f, 75.0f, 20.0f});
                 ZHLN::Test::ExpectLt(std::abs(std::abs(ZHLN::Dot(torso->rotationQuat, expectedRotation)) - 1.0f), 1e-5f);
             }
 
@@ -329,12 +331,12 @@ struct TestProjectLightReplicationSuite {
             ZHLN::Test::ExpectFalse(history.Sample(std::chrono::steady_clock::now(), sampledPosition, sampledRotation));
 
             const auto base = std::chrono::steady_clock::now();
-            history.Push({.position = FVec3(0.0f, 0.0f, 0.0f), .rotation = Quat::Identity(), .receivedAt = base});
-            history.Push({.position = FVec3(10.0f, 0.0f, 0.0f), .rotation = -Quat::FromAxisAngle(FVec3::UnitY(), 1.5f), .receivedAt = base + std::chrono::milliseconds(10)});
+            history.Push({.position = FVec3{0.0f, 0.0f, 0.0f}, .rotation = Quat::Identity(), .receivedAt = base});
+            history.Push({.position = FVec3{10.0f, 0.0f, 0.0f}, .rotation = -Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{1.5f}), .receivedAt = base + std::chrono::milliseconds(10)});
 
             ZHLN::Test::ExpectTrue(history.Sample(base + std::chrono::milliseconds(5), sampledPosition, sampledRotation));
             ZHLN::Test::ExpectTrue(sampledPosition.x > 4.0f && sampledPosition.x < 6.0f);
-            const auto expected = Quat::FromAxisAngle(FVec3::UnitY(), 0.75f);
+            const auto expected = Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{0.75f});
             ZHLN::Test::ExpectLt(std::abs(std::abs(ZHLN::Dot(sampledRotation, expected)) - 1.0f), 1e-5f);
             ZHLN::Test::ExpectLt(std::abs(sampledRotation.Length() - 1.0f), 1e-5f);
 

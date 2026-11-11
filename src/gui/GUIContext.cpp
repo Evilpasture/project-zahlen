@@ -527,7 +527,7 @@ auto Frame::End() && noexcept -> UIDrawData {
         switch (cmd->commandType) {
             case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
                 const auto      c = cmd->renderData.rectangle.backgroundColor;
-                const FVec4 color(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f);
+                const FVec4 color{c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f};
 
                 const auto startIdx = static_cast<uint32_t>(positions.size());
                 EmitQuad(bb.x, bb.y, bb.x + bb.width, bb.y + bb.height, color);
@@ -544,7 +544,7 @@ auto Frame::End() && noexcept -> UIDrawData {
             }
             case CLAY_RENDER_COMMAND_TYPE_TEXT: {
                 const auto      tc = cmd->renderData.text.textColor;
-                const FVec4 color(tc.r / 255.0f, tc.g / 255.0f, tc.b / 255.0f, tc.a / 255.0f);
+                const FVec4 color{tc.r / 255.0f, tc.g / 255.0f, tc.b / 255.0f, tc.a / 255.0f};
                 const float     scale = font.ScaleFor(static_cast<float>(cmd->renderData.text.fontSize));
 
                 const std::string_view text(cmd->renderData.text.stringContents.chars, static_cast<size_t>(cmd->renderData.text.stringContents.length));

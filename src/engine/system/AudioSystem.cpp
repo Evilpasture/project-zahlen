@@ -61,8 +61,8 @@ ZHLN_API void AudioSystem(
     if (!listenerFound) {
         if (const auto camComp = cameraQuery.GetSingleton<Components::CameraComponent>(); camComp) {
             const auto& cam      = camComp->camera;
-            const auto yaw = DegF(cam.yaw).ToRadians();
-            const auto pitch = DegF(cam.pitch).ToRadians();
+            const auto yaw = cam.yaw.ToRadians();
+            const auto pitch = cam.pitch.ToRadians();
             const FVec3 dir {Cos(yaw) * Cos(pitch), Sin(pitch), Sin(yaw) * Cos(pitch)};
             device.UpdateListener(cam.position, dir.Normalized(), {0.0f, 1.0f, 0.0f});
         }

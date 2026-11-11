@@ -437,8 +437,8 @@ class BasePart: public Instance {
     FVec3 m_position = FVec3::Zero();
     // Protocol-facing Euler degrees; convert only in the physics/ECS adapter.
     FVec3             m_rotationEuler = FVec3::Zero();
-    FVec3             m_size          = FVec3(4.0f, 1.0f, 2.0f);
-    FVec3             m_color         = FVec3(0.75f, 0.75f, 0.75f);
+    FVec3             m_size          = {4.0f, 1.0f, 2.0f};
+    FVec3             m_color         = {0.75f, 0.75f, 0.75f};
     InstanceId           m_networkOwnerId = 0;
     bool                  m_anchored     = false;
     bool                  m_canCollide   = true;
@@ -574,7 +574,7 @@ class Decal final: public Instance {
     friend class DataModel;
     Decal(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     std::string   m_textureId;
-    FVec3     m_color        = FVec3(1.0f, 1.0f, 1.0f);
+    FVec3     m_color        = {1.0f, 1.0f, 1.0f};
     DecalFace     m_face         = DecalFace::Front;
     DecalWrapMode m_wrapMode     = DecalWrapMode::Stretch;
     float         m_scale        = 1.0f;

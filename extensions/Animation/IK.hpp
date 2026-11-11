@@ -46,7 +46,7 @@ struct TwoBoneIKChain {
 
     FVec3 targetPosition = FVec3::Zero();
     Quat  targetRotation = Quat::Identity();
-    FVec3 poleVector     = FVec3(0.0f, -1.0f, 0.0f);
+    FVec3 poleVector     = {0.0f, -1.0f, 0.0f};
 
     Entity    targetEntity = Entity::Null();
     FVec3 targetOffset = FVec3::Zero();

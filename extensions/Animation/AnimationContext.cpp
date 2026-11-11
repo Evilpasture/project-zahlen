@@ -74,7 +74,7 @@ void SampleTRSChannel(const AnimationChannel& channel, float time, SampledTRS& t
         }
         const float* v0    = &channel.keyValues[idx0 * 3];
         const float* v1    = &channel.keyValues[idx1 * 3];
-        target.translation = FVec3(v0[0] + factor * (v1[0] - v0[0]), v0[1] + factor * (v1[1] - v0[1]), v0[2] + factor * (v1[2] - v0[2]));
+        target.translation = {v0[0] + factor * (v1[0] - v0[0]), v0[1] + factor * (v1[1] - v0[1]), v0[2] + factor * (v1[2] - v0[2])};
     } else if (channel.path == AnimationPathType::Rotation) {
         if (channel.keyValues.size() < (idx1 + 1) * 4) {
             return;
@@ -90,7 +90,7 @@ void SampleTRSChannel(const AnimationChannel& channel, float time, SampledTRS& t
         }
         const float* s0 = &channel.keyValues[idx0 * 3];
         const float* s1 = &channel.keyValues[idx1 * 3];
-        target.scale    = FVec3(s0[0] + factor * (s1[0] - s0[0]), s0[1] + factor * (s1[1] - s0[1]), s0[2] + factor * (s1[2] - s0[2]));
+        target.scale = {s0[0] + factor * (s1[0] - s0[0]), s0[1] + factor * (s1[1] - s0[1]), s0[2] + factor * (s1[2] - s0[2])};
     }
 }
 

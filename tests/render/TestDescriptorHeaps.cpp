@@ -13,6 +13,7 @@
 //      addresses re-pushed via vkCmdPushDataEXT are actually consumed.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -153,10 +154,10 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = ZHLN::FVec3(0.0f, 4.45f, 11.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
+            cam.position = {0.0f, 4.45f, 11.0f};
+            cam.yaw      = ZHLN::DegF{-90.0f};
+            cam.pitch    = ZHLN::DegF{0.0f};
+            cam.fov      = ZHLN::DegF{60.0f};
 
             // Palette: 64 well-separated HSV hues -> solid RGBA textures.
             std::array<std::array<uint8_t, 3>, kTextureCount> palette {};
@@ -195,7 +196,7 @@ struct DescriptorHeapsSuite {
 
                 const uint32_t  col = i % kGridCols;
                 const uint32_t  row = i / kGridCols;
-                const ZHLN::FVec3 pos(firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f);
+                const ZHLN::FVec3 pos{firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f};
 
                 ZHLN::PrefabFactory::CreateBox(
                     *engine, {halfExtent, halfExtent, halfExtent},
@@ -437,17 +438,17 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = ZHLN::FVec3(0.0f, 1.5f, 6.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
+            cam.position = {0.0f, 1.5f, 6.0f};
+            cam.yaw      = ZHLN::DegF{-90.0f};
+            cam.pitch    = ZHLN::DegF{0.0f};
+            cam.fov      = ZHLN::DegF{60.0f};
 
             // Pin the main-camera entity to our values so the camera system
             // does not overwrite the mid-test pan. The rig component is an
             // extras component (extensions/Camera), authored here rather than
             // patched: the frame step only re-seeds it when missing.
             const auto applyCameraPose = [&](float yaw) {
-                cam.yaw = yaw;
+                cam.yaw = ZHLN::DegF{yaw};
                 // The engine renders from the registry's copy: the pan is written back
                 // every time the pose changes, not once at setup.
                 auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();

@@ -205,7 +205,7 @@ class System {
             FVec3 xAxis = Cross(up, zAxis).Normalized();
             FVec3 yAxis = Cross(zAxis, xAxis).Normalized();
 
-            const auto rotMat = Mat4x4::FromCols(FVec4(xAxis, 0.0f), FVec4(yAxis, 0.0f), FVec4(zAxis, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f));
+            const auto rotMat = Mat4x4::FromCols(FVec4{xAxis, 0.0f}, FVec4{yAxis, 0.0f}, FVec4{zAxis, 0.0f}, FVec4{0.0f, 0.0f, 0.0f, 1.0f});
             const auto decalRot = DecomposeTransform(rotMat).rotation;
 
             FVec3  decalScale(cfg.decalSize, cfg.decalSize, 0.40f);

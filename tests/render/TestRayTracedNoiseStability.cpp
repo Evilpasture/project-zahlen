@@ -23,6 +23,7 @@
 //      the first frame without temporal history ghost trails.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -100,9 +101,9 @@ struct RayTracedNoiseStabilityTestSuite {
             gfx.post.giIntensity             = 0.0f;
             gfx.post.vignetteIntensity       = 0.0f;
             gfx.environment.ambientExposure  = 3.0f;
-            gfx.environment.skyZenith        = ZHLN::FVec4(0.001f, 0.002f, 0.006f, 1.0f);
-            gfx.environment.skyHorizon       = ZHLN::FVec4(0.004f, 0.006f, 0.012f, 1.0f);
-            gfx.environment.skyGround        = ZHLN::FVec4(0.001f, 0.001f, 0.002f, 1.0f);
+            gfx.environment.skyZenith = {0.001f, 0.002f, 0.006f, 1.0f};
+            gfx.environment.skyHorizon = {0.004f, 0.006f, 0.012f, 1.0f};
+            gfx.environment.skyGround = {0.001f, 0.001f, 0.002f, 1.0f};
         });
     }
 
@@ -129,12 +130,12 @@ struct RayTracedNoiseStabilityTestSuite {
         const ZHLN::Entity sunEnt = reg.Create();
         reg.Add(
             sunEnt,
-            ZHLN::Components::TransformComponent {.position = ZHLN::FVec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Quat::FromEulerDegrees({40.0f, 0.0f, 0.0f})},
+            ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 50.0f, 40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{40.0f, 0.0f, 0.0f}})},
             ZHLN::Components::LightComponent {
                 .type      = ZHLN::LightType::Sun,
-                .color     = ZHLN::FVec3(1.0f, 1.0f, 1.0f),
+                .color     = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
                 .intensity = 120.0f,
-                .direction = ZHLN::FVec3(0.0f, 0.45f, 0.89f).Normalized()
+                .direction = ZHLN::FVec3{0.0f, 0.45f, 0.89f}.Normalized()
             }
         );
 
@@ -143,10 +144,10 @@ struct RayTracedNoiseStabilityTestSuite {
             return false;
         }
         ZHLN::Camera& cam = camComp->camera;
-        cam.position = ZHLN::FVec3(0.0f, 4.5f, 22.0f);
-        cam.yaw      = -90.0f;
-        cam.pitch    = -22.0f;
-        cam.fov      = 60.0f;
+        cam.position = {0.0f, 4.5f, 22.0f};
+        cam.yaw      = ZHLN::DegF{-90.0f};
+        cam.pitch    = ZHLN::DegF{-22.0f};
+        cam.fov      = ZHLN::DegF{60.0f};
         return true;
     }
 
@@ -249,8 +250,8 @@ struct RayTracedNoiseStabilityTestSuite {
             // floor along L_sun is ~20m >> 3.0m), projecting onto z ~ -6..+4 in view.
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             if (const auto camComp = reg.GetSingleton<ZHLN::Components::CameraComponent>(); camComp.has_value()) {
-                camComp->camera.position = ZHLN::FVec3(0.0f, 10.0f, 30.0f);
-                camComp->camera.pitch    = -18.0f;
+                camComp->camera.position = {0.0f, 10.0f, 30.0f};
+                camComp->camera.pitch    = ZHLN::DegF{-18.0f};
             }
             const ZHLN::Entity highCaster = ZHLN::PrefabFactory::CreateBox(
                 *engine, {3.0f, 3.0f, 3.0f},
@@ -340,7 +341,7 @@ struct RayTracedNoiseStabilityTestSuite {
             // Teleport the contact curb sideways (+4.0m) and capture the VERY NEXT
             // rendered frame vs a settled frame 3 ticks later: without temporal
             // shadow history, frame 1 at the new position must already be settled.
-            ZHLN::EngineAccess::RegistryOf(*engine).Patch<ZHLN::Components::TransformComponent>(curb, [](auto& tr) { tr.position = ZHLN::FVec3(2.0f, 0.06f, 15.0f); });
+            ZHLN::EngineAccess::RegistryOf(*engine).Patch<ZHLN::Components::TransformComponent>(curb, [](auto& tr) { tr.position = {2.0f, 0.06f, 15.0f}; });
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
             RgbImage movedImmediate = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_contact_moved_immediate.ppm");
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 3);

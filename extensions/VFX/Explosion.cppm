@@ -25,6 +25,7 @@ module;
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
@@ -105,30 +106,30 @@ export enum class OrdnanceType : uint8_t {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
     float                                 u     = dis(gen);
     float                                 v     = dis(gen);
-    float                                 theta = 2.0f * std::numbers::pi_v<float> * u;
+    const auto theta = RadF{2.0f * std::numbers::pi_v<float> * u};
     float                                 phi   = std::acos(2.0f * v - 1.0f);
     float                                 r     = std::cbrt(dis(gen));
-    return {r * std::sin(phi) * std::cos(theta), r * std::sin(phi) * std::sin(theta), r * std::cos(phi)};
+    return {r * std::sin(phi) * Cos(theta), r * std::sin(phi) * Sin(theta), r * std::cos(phi)};
 }
 
 [[nodiscard]] static FVec3 SampleConeDirection(std::mt19937& gen, float maxAngleDeg) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-    float                                 theta = dis(gen) * maxAngleDeg * (std::numbers::pi_v<float> / 180.0f);
+    const auto theta = DegF{dis(gen) * maxAngleDeg}.ToRadians();
     float                                 phi   = dis(gen) * 2.0f * std::numbers::pi_v<float>;
-    float                                 sinT  = std::sin(theta);
-    float                                 cosT  = std::cos(theta);
+    float                                 sinT  = Sin(theta);
+    float                                 cosT  = Cos(theta);
 
-    return FVec3(sinT * std::cos(phi), std::abs(cosT) + 0.06f, sinT * std::sin(phi)).Normalized();
+    return FVec3{sinT * std::cos(phi), std::abs(cosT) + 0.06f, sinT * std::sin(phi)}.Normalized();
 }
 
 [[nodiscard]] static FVec3 SampleRingDirection(std::mt19937& gen, float minAngleDeg, float maxAngleDeg) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-    float                                 theta = (minAngleDeg + dis(gen) * (maxAngleDeg - minAngleDeg)) * (std::numbers::pi_v<float> / 180.0f);
+    const auto theta = DegF{minAngleDeg + dis(gen) * (maxAngleDeg - minAngleDeg)}.ToRadians();
     float                                 phi   = dis(gen) * 2.0f * std::numbers::pi_v<float>;
-    float                                 sinT  = std::sin(theta);
-    float                                 cosT  = std::cos(theta);
+    float                                 sinT  = Sin(theta);
+    float                                 cosT  = Cos(theta);
 
-    return FVec3(sinT * std::cos(phi), std::abs(cosT) * 0.2f + 0.02f, sinT * std::sin(phi)).Normalized();
+    return FVec3{sinT * std::cos(phi), std::abs(cosT) * 0.2f + 0.02f, sinT * std::sin(phi)}.Normalized();
 }
 
 // ============================================================================
@@ -469,7 +470,7 @@ export class ExplosionSystem {
         initialExp.debrisEntity = debrisEntity;
 
         // Position light directly at origin with slight vertical offset
-        FVec3  lightWorldPos = origin + FVec3(0.0f, 1.8f * scale, 0.0f);
+        FVec3  lightWorldPos = origin + FVec3{0.0f, 1.8f * scale, 0.0f};
         const auto rootTransform = CreateTranslation(lightWorldPos);
 
         // Attach synchronously to root entity
@@ -477,7 +478,7 @@ export class ExplosionSystem {
             root, Components::NameComponent {.name = String64("ArtilleryExplosionRoot")}, Components::TransformComponent {.position = lightWorldPos},
             Components::WorldTransformComponent {.world = rootTransform, .previous = rootTransform},
             Components::LightComponent {
-                .type = LightType::Point, .color = FVec3(1.0f, 0.48f, 0.09f), .intensity = 2800.0f * scale * scale, .radius = 1.5f, .range = 60.0f * scale
+                .type = LightType::Point, .color = FVec3{1.0f, 0.48f, 0.09f}, .intensity = 2800.0f * scale * scale, .radius = 1.5f, .range = 60.0f * scale
             },
             std::move(initialExp)
         );
@@ -576,7 +577,7 @@ export class ExplosionSystem {
                     } else {
                         float flicker   = (0.92f + Hash31(exp.origin * exp.age) * 0.16f);
                         light.intensity = flashT * flicker * 2800.0f * exp.scale * exp.scale;
-                        light.color     = FVec3(1.0f, 0.48f * flashT + 0.1f, 0.09f * flashT);
+                        light.color     = FVec3{1.0f, 0.48f * flashT + 0.1f, 0.09f * flashT};
                     }
                 });
 
@@ -586,8 +587,8 @@ export class ExplosionSystem {
                     Entity crater     = reg.Create();
 
                     float     randomYaw = Hash31(exp.origin) * 6.2831853f;
-                    const auto yawRot = Quat::FromAxisAngle(FVec3::UnitY(), randomYaw);
-                    const auto baseRot = Quat::FromAxisAngle(FVec3::UnitX(), -std::numbers::pi_v<float> * 0.5f);
+                    const auto yawRot = Quat::FromAxisAngle(FVec3::UnitY(), RadF{randomYaw});
+                    const auto baseRot = Quat::FromAxisAngle(FVec3::UnitX(), RadF{-std::numbers::pi_v<float> * 0.5f});
                     const auto decalRot = (yawRot * baseRot).Normalized();
 
                     float     radius    = 3.4f * exp.scale;
@@ -684,9 +685,9 @@ export class ExplosionSystem {
                 .startSize  = (0.85f + Hash31(dir * 3.5f) * 0.95f) * exp.scale,
                 .drag       = 3.0f,
                 .gravity    = -4.2f,
-                .colorStart = FVec3(4.0f, 2.8f, 1.2f),
-                .colorMid   = FVec3(2.5f, 1.0f, 0.2f),
-                .colorEnd   = FVec3(0.23f, 0.10f, 0.04f)
+                .colorStart = FVec3{4.0f, 2.8f, 1.2f},
+                .colorMid   = FVec3{2.5f, 1.0f, 0.2f},
+                .colorEnd   = FVec3{0.23f, 0.10f, 0.04f}
             };
         }
 
@@ -695,7 +696,7 @@ export class ExplosionSystem {
             bool      isRing = (i < 24);
             FVec3 dir    = isRing ? SampleRingDirection(gen, 84.0f, 92.0f) : SampleConeDirection(gen, 40.0f);
             float     speed  = (isRing ? (7.0f + Hash31(dir * 1.5f) * 4.0f) : (8.0f + Hash31(dir * 1.5f) * 6.0f)) * exp.scale;
-            FVec3 sc     = (Hash31(dir * 6.5f) < 0.3f) ? FVec3(0.42f, 0.35f, 0.26f) : FVec3(0.54f, 0.48f, 0.38f);
+            FVec3 sc     = (Hash31(dir * 6.5f) < 0.3f) ? FVec3{0.42f, 0.35f, 0.26f} : FVec3{0.54f, 0.48f, 0.38f};
 
             exp.soilSmoke[i] = {
                 .position   = dir * (0.2f * exp.scale),
@@ -705,7 +706,7 @@ export class ExplosionSystem {
                 .startSize  = (1.55f + Hash31(dir * 3.5f) * 1.35f) * exp.scale,
                 .drag       = 1.8f,
                 .gravity    = -1.1f,
-                .colorStart = FVec3(1.2f, 0.7f, 0.25f),
+                .colorStart = FVec3{1.2f, 0.7f, 0.25f},
                 .colorMid   = sc * 1.2f,
                 .colorEnd   = sc * 0.7f
             };
@@ -764,9 +765,9 @@ export class ExplosionSystem {
                 .startSize  = (0.5f + Hash31(dir * 3.5f) * 0.8f) * exp.scale,
                 .drag       = 2.5f,
                 .gravity    = -1.0f,
-                .colorStart = FVec3(4.0f, 3.0f, 1.4f),
-                .colorMid   = FVec3(2.2f, 0.9f, 0.25f),
-                .colorEnd   = FVec3(0.4f, 0.06f, 0.02f)
+                .colorStart = FVec3{4.0f, 3.0f, 1.4f},
+                .colorMid   = FVec3{2.2f, 0.9f, 0.25f},
+                .colorEnd   = FVec3{0.4f, 0.06f, 0.02f}
             };
         }
 
@@ -778,15 +779,15 @@ export class ExplosionSystem {
 
             p = {
                 .position   = dir * (0.3f * exp.scale),
-                .velocity   = dir * ((1.5f + Hash31(dir * 1.5f) * 3.5f) * exp.scale) + FVec3(0.0f, 0.8f * exp.scale, 0.0f),
+                .velocity   = dir * ((1.5f + Hash31(dir * 1.5f) * 3.5f) * exp.scale) + FVec3{0.0f, 0.8f * exp.scale, 0.0f},
                 .life       = 0.0f,
                 .maxLife    = 2.5f + Hash31(dir * 2.5f) * 2.0f,
                 .startSize  = (1.0f + Hash31(dir * 4.5f) * 1.0f) * exp.scale,
                 .drag       = 1.2f,
                 .gravity    = 0.6f,
-                .colorStart = FVec3(1.4f, 0.6f, 0.15f),
-                .colorMid   = FVec3(0.35f, 0.25f, 0.2f),
-                .colorEnd   = FVec3(gray, gray, gray * 0.95f)
+                .colorStart = FVec3{1.4f, 0.6f, 0.15f},
+                .colorMid   = FVec3{0.35f, 0.25f, 0.2f},
+                .colorEnd   = FVec3{gray, gray, gray * 0.95f}
             };
         }
     }
@@ -831,7 +832,7 @@ export class ExplosionSystem {
                     {.position = exp.origin + p.position,
                      .size     = size,
                      .rotation = 0.0f,
-                     .color    = FVec4(color * (opacity * 3.5f), opacity),
+                     .color    = FVec4{color * (opacity * 3.5f), opacity},
                      .facing   = ParticleAlignment::CameraBillboard}
                 );
             }
@@ -859,7 +860,7 @@ export class ExplosionSystem {
                     {.position = exp.origin + p.position,
                      .size     = size,
                      .rotation = 0.0f,
-                     .color    = FVec4(color, opacity),
+                     .color    = FVec4{color, opacity},
                      .facing   = ParticleAlignment::CameraBillboard}
                 );
             }
@@ -890,7 +891,7 @@ export class ExplosionSystem {
                         {.position = exp.origin,
                          .size     = radius * 2.0f,
                          .rotation = 0.0f,
-                         .color    = FVec4(color * (opacity * 3.5f), opacity),
+                         .color    = FVec4{color * (opacity * 3.5f), opacity},
                          .facing   = ParticleAlignment::CameraBillboard}
                     );
                 }
@@ -914,10 +915,10 @@ export class ExplosionSystem {
                 }
 
                 const BillboardQuad quad {
-                    .position = exp.origin + FVec3(0.0f, 0.05f, 0.0f),
+                    .position = exp.origin + FVec3{0.0f, 0.05f, 0.0f},
                     .size     = radius * 2.0f,
                     .rotation = 0.0f,
-                    .color    = FVec4(color, opacity),
+                    .color    = FVec4{color, opacity},
                     .facing   = ParticleAlignment::GroundFlat,
                 };
                 scene.AddBillboards(s_GroundRingID, std::span {&quad, 1}, true);

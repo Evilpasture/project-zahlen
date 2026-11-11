@@ -15,7 +15,7 @@ constexpr void SetTranslation(Mat4x4& m, FVec3 value) noexcept {
     m[0, 3] = value.x; m[1, 3] = value.y; m[2, 3] = value.z;
 }
 [[nodiscard]] constexpr auto Column3(const Mat4x4& m, size_t column) noexcept -> FVec3 { return {m[0, column], m[1, column], m[2, column]}; }
-[[nodiscard]] constexpr auto Direction(const Mat4x4& m, FVec3 v) noexcept -> FVec3 { return (m * FVec4(v, 0.0f)).XYZ(); }
+[[nodiscard]] constexpr auto Direction(const Mat4x4& m, FVec3 v) noexcept -> FVec3 { return (m * FVec4{v, 0.0f}).XYZ(); }
 // Convert the matrix basis without changing its handedness. Callers that own
 // scale remove it first; this also preserves the old behavior for reflections.
 [[nodiscard]] inline auto Rotation(const Mat4x4& m) noexcept -> Quat {

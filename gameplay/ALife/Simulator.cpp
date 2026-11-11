@@ -152,7 +152,7 @@ void Simulator::Update(Engine& engine, float dt, DVec3 observer_pos) {
     // Fast O(N) re-indexing of all entities into the spatial grid
     _grid.Clear();
     for (auto entitie: entities) {
-        _grid.UpdateEntity(reg, entitie, DVec3(-1, -1, -1)); // -1 forces fresh insertion
+        _grid.UpdateEntity(reg, entitie, DVec3{-1, -1, -1}); // -1 forces fresh insertion
     }
 
     // --- PHASE 3: OFFLINE INTERACTIONS (Parallel) ---
@@ -307,7 +307,7 @@ auto Simulator::Load(ECS::Registry& reg, const char* filename) -> bool {
     _grid.Clear();
     auto entities = reg.GetEntitiesWith<ALifeComponent>();
     for (Entity e: entities) {
-        _grid.UpdateEntity(reg, e, DVec3(-1, -1, -1));
+        _grid.UpdateEntity(reg, e, DVec3{-1, -1, -1});
     }
 
     return true;

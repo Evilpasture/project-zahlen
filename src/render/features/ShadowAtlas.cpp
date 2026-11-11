@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/features/ShadowAtlas.hpp"
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -86,12 +87,12 @@ auto ShadowAtlas::MakeFaceMatrices(
 
     if (faceCount == 1) {
         const float      outer      = std::clamp(outerConeRadians, 0.01f, std::numbers::pi_v<float> * 0.45f);
-        const Mat4x4 projection = CreatePerspective(outer * 2.0f, 1.0f, kAtlasNearPlane, farPlane);
+        const Mat4x4 projection = CreatePerspective(RadF{outer * 2.0f}, 1.0f, kAtlasNearPlane, farPlane);
         out[0]                      = projection * ConeToView(direction, position);
         return 1;
     }
 
-    const Mat4x4 projection = CreatePerspective(std::numbers::pi_v<float> * 0.5f, 1.0f, kAtlasNearPlane, farPlane);
+    const Mat4x4 projection = CreatePerspective(RadF{std::numbers::pi_v<float> * 0.5f}, 1.0f, kAtlasNearPlane, farPlane);
     for (uint32_t face = 0; face < kPointFaces; ++face) {
         out[face] = projection * BasisToView(FaceBasisAt(face), position);
     }
@@ -207,7 +208,7 @@ auto ShadowAtlas::Acquire(const Request& req) noexcept -> Grant {
     for (uint32_t face = 0; face < faceCount; ++face) {
         ShadowTile tileEntry {};
         tileEntry.viewProj = req.faces[face];
-        tileEntry.uvOrigin = ZHLN::FVec2 {static_cast<float>(x + face * tile) * invAtlas, static_cast<float>(y) * invAtlas};
+        tileEntry.uvOrigin = {static_cast<float>(x + face * tile) * invAtlas, static_cast<float>(y) * invAtlas};
         tileEntry.uvScale  = static_cast<float>(tile) * invAtlas;
         _tiles.push_back(tileEntry);
     }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
@@ -72,9 +73,9 @@ struct RenderPipelinesTestSuite {
             if (!ZHLN::Test::ExpectTrue(boxMesh.has_value() && camera.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            camera->camera.position = ZHLN::FVec3(0.0f, 5.0f, 10.0f);
-            camera->camera.yaw      = -90.0f;
-            camera->camera.pitch    = -15.0f;
+            camera->camera.position = {0.0f, 5.0f, 10.0f};
+            camera->camera.yaw      = ZHLN::DegF{-90.0f};
+            camera->camera.pitch    = ZHLN::DegF{-15.0f};
 
             constexpr float dt = 1.0f / 60.0f;
             for (int frame = 0; frame < 3; ++frame) {
