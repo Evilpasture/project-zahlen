@@ -9,11 +9,12 @@ module;
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Mat4x4.h>
+#include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Camera/TargetCamera.hpp>
@@ -41,7 +42,7 @@ struct CharacterBoundsEstimate {
 
     [[nodiscard]] auto Size() const noexcept -> FVec3 {
         if (!valid) {
-            return FVec3::sZero();
+            return FVec3::Zero();
         }
         const FVec3 low  = min;
         const FVec3 high = max;
@@ -62,25 +63,24 @@ struct DualShapeFitOptions {
 // No Detail wrapper here: this file is a single `export namespace` block, so a
 // nested `namespace Detail` would be exported along with everything inside it.
 // It would hide nothing and only add a name claiming the opposite.
-[[nodiscard]] auto GetNodeModelTransform(const ModelPrefab& prefab, int32_t nodeIndex) noexcept -> JPH::Mat44 {
+[[nodiscard]] auto GetNodeModelTransform(const ModelPrefab& prefab, int32_t nodeIndex) noexcept -> Mat4x4 {
     if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-        return JPH::Mat44::sIdentity();
+        return Mat4x4::Identity();
     }
-
-    JPH::Mat44 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
-    int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
+    auto transform = PrefabMatrixToNative(prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform);
+    auto parent = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
     for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
-        parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
+        transform = PrefabMatrixToNative(prefab.nodes[static_cast<size_t>(parent)].localTransform) * transform;
+        parent = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
     }
     return transform;
 }
 
 /** Estimates the imported visual envelope from every transformed mesh AABB. */
 [[nodiscard]] auto
-    EstimateCharacterBounds(const ModelPrefab& prefab, FVec3 modelScale = FVec3::sReplicate(1.0f)) noexcept -> CharacterBoundsEstimate {
+    EstimateCharacterBounds(const ModelPrefab& prefab, FVec3 modelScale = FVec3::Splat(1.0f)) noexcept -> CharacterBoundsEstimate {
     CharacterBoundsEstimate estimate;
-    const JPH::Mat44        scaleTransform = JPH::Mat44::sScale(modelScale);
+    const auto scaleTransform = CreateScale(modelScale);
 
     auto expand = [&](FVec3 point) {
         if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) {
@@ -100,7 +100,7 @@ struct DualShapeFitOptions {
         if (part.nodeIndex < 0 || part.nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
             continue;
         }
-        const JPH::Mat44 transform = scaleTransform * GetNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+        const auto transform = scaleTransform * GetNodeModelTransform(prefab, part.nodeIndex) * PrefabMatrixToNative(part.localTransform);
         const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         for (uint32_t corner = 0; corner < 8; ++corner) {
@@ -108,7 +108,7 @@ struct DualShapeFitOptions {
                 (corner & 1u) != 0u ? localMax.x : localMin.x, (corner & 2u) != 0u ? localMax.y : localMin.y,
                 (corner & 4u) != 0u ? localMax.z : localMin.z
             );
-            expand(transform.Multiply3x3(localPoint) + transform.GetTranslation());
+            expand((transform * FVec4 {localPoint.x, localPoint.y, localPoint.z, 1.0f}).XYZ());
         }
     }
     return estimate;
@@ -159,7 +159,7 @@ struct DualShapeFitOptions {
 
 [[nodiscard]] auto EstimateDualShapeConfig(
     const ModelPrefab&              prefab,
-    FVec3                    modelScale = FVec3::sReplicate(1.0f),
+    FVec3                    modelScale = FVec3::Splat(1.0f),
     const Physics::DualShapeConfig& fallback   = {},
     const DualShapeFitOptions&      options    = {}
 ) noexcept -> Physics::DualShapeConfig {
@@ -174,7 +174,7 @@ struct EllipsoidDesc {
     int   segments = 36;
 };
 
-auto DrawWireframeEllipsoid(DebugDraw scene, const FVec3& center, const EllipsoidDesc& desc, const JPH::Vec4& color) noexcept -> void {
+auto DrawWireframeEllipsoid(DebugDraw scene, const FVec3& center, const EllipsoidDesc& desc, const FVec4& color) noexcept -> void {
     // 1. Latitudinal Parallel Rings
     for (int lat = 1; lat < desc.latRings; ++lat) {
         const auto phi        = -std::numbers::pi_v<float> * 0.5f + (static_cast<float>(lat) / static_cast<float>(desc.latRings)) * std::numbers::pi_v<float>;
@@ -219,7 +219,7 @@ auto DrawWireframeSphere(
     DebugDraw        scene,
     const FVec3& center,
     float            radius,
-    const JPH::Vec4& color,
+    const FVec4& color,
     int              latRings = 10,
     int              lonRings = 10,
     int              segments = 36
@@ -253,10 +253,10 @@ auto SpawnCharacter(
     // lifter sphere in contact with the ground.
     const Physics::CharacterParams characterParams {
         .shape            = Physics::CreateDualShape(config),
-        .supportingVolume = JPH::Plane(FVec3::sAxisY(), -config.GetLifterOffsetY())
+        .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -config.GetLifterOffsetY())
     };
-    const Physics::BodyID charPhys = pc.CreateCharacter(spawnPosition, characterParams);
-    const JPH::Mat44          world    = Math::CreateTransform(spawnPosition, {0.0f, 0.0f, 0.0f, 1.0f});
+    const Physics::BodyID charPhys = pc.CreateCharacter({static_cast<double>(spawnPosition.x), static_cast<double>(spawnPosition.y), static_cast<double>(spawnPosition.z)}, characterParams);
+    const auto world = ComposeTransform(spawnPosition, Quat::Identity(), FVec3::One());
     const Entity              player   = reg.Create(
         Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
         Components::TransformComponent {.position = spawnPosition}, Components::WorldTransformComponent {.world = world, .previous = world},

@@ -26,7 +26,8 @@ module;
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
@@ -53,6 +54,9 @@ module;
 module ZHLN.glTF;
 
 namespace {
+
+using ZHLN::FVec3;
+using ZHLN::FVec4;
 
 // ============================================================================
 // STATE & THEME
@@ -116,11 +120,11 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     const FVec3  sunPos   = FVec3(15.0f, 30.0f, 15.0f);
-    const JPH::Quat  sunRot   = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f});
-    const JPH::Mat44 sunWorld = ZHLN::Math::CreateTransform(sunPos, sunRot);
+    const auto sunRot = ZHLN::Quat::FromEulerDegrees({50.0f, -35.0f, 0.0f});
+    const auto sunWorld = ZHLN::ComposeTransform(sunPos, sunRot, FVec3::One());
     reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("glTFInspectorSun")},
-        ZHLN::Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = FVec3::sReplicate(1.0f)},
+        ZHLN::Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = FVec3::Splat(1.0f)},
         ZHLN::Components::WorldTransformComponent {.world = sunWorld, .previous = sunWorld},
         ZHLN::Components::LightComponent {
             .type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 0.97f, 0.91f), .intensity = 120.0f, .direction = FVec3(0.4f, 1.0f, 0.3f).Normalized()
@@ -140,16 +144,16 @@ void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outCenter, float& out
     FVec3 max(-1e9f, -1e9f, -1e9f);
     bool      any = false;
     for (const ZHLN::ModelPart& part: prefab.parts) {
-        min.SetX(std::min(min.x, part.localMin[0]));
-        min.SetY(std::min(min.y, part.localMin[1]));
-        min.SetZ(std::min(min.z, part.localMin[2]));
-        max.SetX(std::max(max.x, part.localMax[0]));
-        max.SetY(std::max(max.y, part.localMax[1]));
-        max.SetZ(std::max(max.z, part.localMax[2]));
+        min.x = std::min(min.x, part.localMin[0]);
+        min.y = std::min(min.y, part.localMin[1]);
+        min.z = std::min(min.z, part.localMin[2]);
+        max.x = std::max(max.x, part.localMax[0]);
+        max.y = std::max(max.y, part.localMax[1]);
+        max.z = std::max(max.z, part.localMax[2]);
         any = true;
     }
     if (!any) {
-        outCenter   = FVec3::sZero();
+        outCenter   = FVec3::Zero();
         outDistance = 5.0f;
         return;
     }
@@ -279,7 +283,8 @@ void DrawModelNodeRows(
         label += "  [mesh]";
     }
 
-    const FVec3 pos      = node.localTransform.GetTranslation();
+    const auto translation = node.localTransform.GetTranslation();
+    const FVec3 pos {translation.GetX(), translation.GetY(), translation.GetZ()};
     const bool      expanded = state.expanded.contains(path);
     TreeRow(
         ui, state, path, depth, label, hasChildren, std::format("Node: {}", label),
@@ -627,7 +632,7 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
     ClearInstances(state);
 
     auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
+        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
     );
     if (!prefab) {
         ZHLN::Log("[glTF Inspector] Failed to parse '{}' as glTF.", drop.fileName);
@@ -717,7 +722,7 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
         state.pitch = std::clamp(state.pitch, -89.0f, 89.0f);
     } else if (rmb) {
         const FVec3 forward  = OrbitDirection(state.yaw, state.pitch).Normalized();
-        FVec3       camRight = Cross(forward, FVec3::sAxisY());
+        FVec3       camRight = Cross(forward, FVec3::UnitY());
         if (camRight.LengthSquared() > 1e-6f) {
             camRight = camRight.Normalized();
         }

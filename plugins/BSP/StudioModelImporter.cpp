@@ -15,7 +15,6 @@
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <filesystem>
 #include <fstream>
@@ -84,7 +83,7 @@ auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string
     }
 
     const auto& vmt   = *vmtMatExp;
-    desc.baseColor   = vmt.baseColor;
+    desc.baseColor   = {vmt.baseColor.x, vmt.baseColor.y, vmt.baseColor.z, vmt.baseColor.w};
     desc.doubleSided = vmt.noCull;
     if (vmt.isTranslucent) {
         desc.alphaBlend = true;
@@ -130,6 +129,7 @@ auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string
 
 static auto CreateFallbackModelPrefab(
     AssetManager&        assetMgr,
+    PhysicsContext&      physics,
     std::string_view     virtualPath,
     const ImportOptions& options
 ) -> ZHLN::Optional<ModelPrefab&> {
@@ -162,7 +162,7 @@ static auto CreateFallbackModelPrefab(
     fallbackPart.materialAsset = HashAssetID(assetKey + "_mat");
 
     if (options.buildColliders) {
-        const JPH::ShapeRefC baseBox = new JPH::BoxShape(FVec3(0.25f, 0.25f, 0.25f));
+        const auto baseBox = physics.GetOrCreateShape(Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
         fallbackPart.boxCollider     = baseBox;
         fallbackPart.meshCollider    = baseBox;
     }
@@ -177,6 +177,7 @@ static auto CreateFallbackModelPrefab(
 auto LoadStudioModelPrefab(
     RenderContext&       ctx,
     AssetManager&        assetMgr,
+    PhysicsContext&      physics,
     const SourceVFS&     vfs,
     std::string_view     path,
     const ImportOptions& options
@@ -189,13 +190,13 @@ auto LoadStudioModelPrefab(
     const auto resolvedMdl = vfs.ResolveModel(path);
     if (!resolvedMdl.has_value()) {
         LogWarning("StudioModel: failed to resolve MDL path {}", path);
-        return CreateFallbackModelPrefab(assetMgr, path, options);
+        return CreateFallbackModelPrefab(assetMgr, physics, path, options);
     }
 
     const auto mdlBytes = vfs.ReadFile(*resolvedMdl);
     if (!mdlBytes.has_value()) {
         LogWarning("StudioModel: failed to read MDL {}", *resolvedMdl);
-        return CreateFallbackModelPrefab(assetMgr, path, options);
+        return CreateFallbackModelPrefab(assetMgr, physics, path, options);
     }
 
     std::string basePath = *resolvedMdl;
@@ -213,24 +214,25 @@ auto LoadStudioModelPrefab(
     const auto vvdBytes = vfs.ReadFile(vvdPath);
     if (!vvdBytes.has_value()) {
         LogWarning("StudioModel: missing VVD file for {}", *resolvedMdl);
-        return CreateFallbackModelPrefab(assetMgr, path, options);
+        return CreateFallbackModelPrefab(assetMgr, physics, path, options);
     }
 
     const auto vtxBytes = vfs.ReadFile(vtxPath);
     if (!vtxBytes.has_value()) {
         LogWarning("StudioModel: missing VTX file for {}", *resolvedMdl);
-        return CreateFallbackModelPrefab(assetMgr, path, options);
+        return CreateFallbackModelPrefab(assetMgr, physics, path, options);
     }
 
     const auto                       phyBytes = vfs.ReadFile(phyPath);
     const std::span<const std::byte> phySpan  = phyBytes.has_value() ? std::span<const std::byte>(*phyBytes) : std::span<const std::byte>();
 
-    return LoadStudioModelPrefabFromMemory(ctx, assetMgr, vfs, *mdlBytes, *vvdBytes, *vtxBytes, phySpan, path, options);
+    return LoadStudioModelPrefabFromMemory(ctx, assetMgr, physics, vfs, *mdlBytes, *vvdBytes, *vtxBytes, phySpan, path, options);
 }
 
 auto LoadStudioModelPrefabFromMemory(
     RenderContext&             ctx,
     AssetManager&              assetMgr,
+    PhysicsContext&            physics,
     const SourceVFS&           vfs,
     std::span<const std::byte> mdlBytes,
     std::span<const std::byte> vvdBytes,
@@ -247,7 +249,7 @@ auto LoadStudioModelPrefabFromMemory(
     const auto parsedExp = ParseStudioModel(mdlBytes, vvdBytes, vtxBytes, phyBytes, options);
     if (!parsedExp.has_value()) {
         LogWarning("StudioModel: failed to parse model {}: {}", virtualPath, parsedExp.error());
-        return CreateFallbackModelPrefab(assetMgr, virtualPath, options);
+        return CreateFallbackModelPrefab(assetMgr, physics, virtualPath, options);
     }
 
     const auto& data            = *parsedExp;
@@ -301,8 +303,8 @@ auto LoadStudioModelPrefabFromMemory(
         modelPart.defaultMaterial = subMaterial;
         modelPart.nodeIndex       = 0;
         modelPart.localTransform  = JPH::Mat44::sIdentity();
-        modelPart.localMin        = partData.boundsMin;
-        modelPart.localMax        = partData.boundsMax;
+        modelPart.localMin        = {partData.boundsMin.x, partData.boundsMin.y, partData.boundsMin.z};
+        modelPart.localMax        = {partData.boundsMax.x, partData.boundsMax.y, partData.boundsMax.z};
 
         const std::string assetKey = std::string(virtualPath) + "#part_" + std::to_string(prefab->parts.size());
         modelPart.meshAsset        = HashAssetID(assetKey);
@@ -316,11 +318,10 @@ auto LoadStudioModelPrefabFromMemory(
         modelPart.boundingRadius = halfExtents.Length();
 
         if (options.buildColliders) {
-            JPH::BoxShapeSettings boxSettings(halfExtents);
-            auto                  shapeResult = boxSettings.Create();
-            if (shapeResult.IsValid()) {
-                modelPart.boxCollider  = shapeResult.Get();
-                modelPart.meshCollider = modelPart.boxCollider;
+            const auto shape = physics.GetOrCreateShape(Physics::ShapeType::Box, halfExtents.x, halfExtents.y, halfExtents.z);
+            if (shape) {
+                modelPart.boxCollider  = shape;
+                modelPart.meshCollider = shape;
             }
         }
 

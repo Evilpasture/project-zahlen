@@ -3,10 +3,9 @@
 
 module;
 
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math/Quat.hpp>
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <string_view>
 export module ZHLN.Rig;
@@ -170,7 +169,7 @@ inline constexpr std::array<HitCapsule, 11> HIT_CAPSULES = {
 }
 
 /**
- * @brief Returns the default bind pose local position as a Jolt FVec3.
+ * @brief Returns the default bind pose local position as a native vector.
  */
 [[nodiscard]] FVec3 GetBindPosition(Joint joint) noexcept {
     const auto& pos = StandardHierarchy[static_cast<size_t>(joint)].bindPosition;
@@ -178,9 +177,9 @@ inline constexpr std::array<HitCapsule, 11> HIT_CAPSULES = {
 }
 
 /**
- * @brief Returns the default bind pose local rotation as a Jolt Quat.
+ * @brief Returns the default bind pose local rotation as a native quaternion.
  */
-[[nodiscard]] JPH::Quat GetBindRotation(Joint joint) noexcept {
+[[nodiscard]] Quat GetBindRotation(Joint joint) noexcept {
     const auto& rot = StandardHierarchy[static_cast<size_t>(joint)].bindRotation;
     return {rot[0], rot[1], rot[2], rot[3]};
 }

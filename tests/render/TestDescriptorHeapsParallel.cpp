@@ -98,14 +98,14 @@ struct DescriptorHeapsParallelSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = FVec3(0.0f, 6.0f, 13.0f);
+            cam.position = ZHLN::FVec3(0.0f, 6.0f, 13.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;
 
             // 4 strongly separated material colors.
             struct TestMaterial {
-                JPH::Float4            baseColor {};
+                ZHLN::FVec4            baseColor {};
                 std::array<uint8_t, 3> rgb {};
             };
             const std::array<TestMaterial, 4> materials {{
@@ -135,7 +135,7 @@ struct DescriptorHeapsParallelSuite {
             for (uint32_t row = 0; row < kGridRows; ++row) {
                 for (uint32_t col = 0; col < kGridCols; ++col) {
                     const uint32_t  matIdx = (row * kGridCols + col) % 4;
-                    const FVec3 pos(firstCol + static_cast<float>(col) * spacing, 0.6f + static_cast<float>(row) * spacing, 0.0f);
+                    const ZHLN::FVec3 pos(firstCol + static_cast<float>(col) * spacing, 0.6f + static_cast<float>(row) * spacing, 0.0f);
                     ZHLN::PrefabFactory::CreateBox(
                         *engine, {halfExtent, halfExtent, halfExtent},
                         ZHLN::PrefabFactory::SpawnParams {

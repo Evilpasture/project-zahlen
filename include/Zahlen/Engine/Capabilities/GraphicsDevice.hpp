@@ -12,6 +12,7 @@
 // setters on a borrowed object.
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
@@ -39,7 +40,6 @@ namespace ZHLN {
 
 class RenderContext;
 struct EnvironmentRadianceDesc;
-class Mat4x4;
 
 class ZHLN_API GraphicsDevice {
   public:

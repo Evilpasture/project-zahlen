@@ -3,6 +3,7 @@
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include "TestsFramework.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
@@ -74,7 +75,7 @@ struct ExplosionTestSuite {
             auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
 
             // Spawn omnidirectional fireball
-            const FVec3    origin(0.0f, 5.0f, 0.0f);
+            const ZHLN::FVec3    origin(0.0f, 5.0f, 0.0f);
             const ZHLN::Entity expRoot = ZHLN::ExplosionSystem::Spawn(*engine, origin, 1.0f, ZHLN::OrdnanceType::StandardFireball);
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(expRoot));
@@ -197,7 +198,7 @@ struct ExplosionTestSuite {
             // Spawn a test crater with initial scale (6.8, 6.8, 5.0)
             const ZHLN::Entity craterEnt = reg.Create();
             reg.Add(
-                craterEnt, ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 0.0f, 0.0f), .scale = FVec3(6.8f, 6.8f, 5.0f)},
+                craterEnt, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3(0.0f, 0.0f, 0.0f), .scale = ZHLN::FVec3(6.8f, 6.8f, 5.0f)},
                 ZHLN::Components::WorldTransformComponent {}, ZHLN::Components::DecalComponent {},
                 ZHLN::CraterDecalComponent {
                     .age          = 25.0f, // Starting close to expiration (lifetime: 28.0s, fade start: 22.0s)
@@ -205,8 +206,8 @@ struct ExplosionTestSuite {
                     .fadeDuration = 6.0f,
                     .baseRadius   = 3.4f,
                     .baseDepth    = 5.0f,
-                    .origin       = FVec3(0.0f, 0.0f, 0.0f),
-                    .rotation     = JPH::Quat::sIdentity()
+                    .origin       = ZHLN::FVec3(0.0f, 0.0f, 0.0f),
+                    .rotation     = ZHLN::Quat::Identity()
                 }
             );
 

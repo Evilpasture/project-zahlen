@@ -37,8 +37,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/ECS/ECS.hpp>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math/Quat.hpp>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -149,13 +148,13 @@ struct EntityRecord {
     // Engine space, sentinels resolved, and +X forward when the lump has no
     // movedir key -- the absent case is a format default, so it is decided here
     // rather than by every consumer.
-    FVec3 moveDirection = FVec3::sAxisX();
+    FVec3 moveDirection = FVec3::UnitX();
 
     // Only for TeleportDestination, and already in engine space: the landing
     // point and the facing. The degree convention and the axis remap are the
     // asset's, so they are resolved before the record exists.
     std::optional<FVec3> origin;
-    JPH::Quat               orientation = JPH::Quat::sIdentity();
+    Quat               orientation = Quat::Identity();
 
     std::optional<DoorFlags>   door;
     std::optional<ButtonFlags> button;

@@ -434,9 +434,9 @@ class BasePart: public Instance {
 
   private:
     friend class DataModel;
-    FVec3 m_position = FVec3::sZero();
+    FVec3 m_position = FVec3::Zero();
     // Protocol-facing Euler degrees; convert only in the physics/ECS adapter.
-    FVec3             m_rotationEuler = FVec3::sZero();
+    FVec3             m_rotationEuler = FVec3::Zero();
     FVec3             m_size          = FVec3(4.0f, 1.0f, 2.0f);
     FVec3             m_color         = FVec3(0.75f, 0.75f, 0.75f);
     InstanceId           m_networkOwnerId = 0;
@@ -535,9 +535,9 @@ class SpawnPoint final: public Instance {
   private:
     friend class DataModel;
     SpawnPoint(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
-    FVec3 m_position = FVec3::sZero();
+    FVec3 m_position = FVec3::Zero();
     // Protocol-facing Euler degrees; convert only in the physics/ECS adapter.
-    FVec3 m_rotation = FVec3::sZero();
+    FVec3 m_rotation = FVec3::Zero();
 };
 
 enum class DecalFace : uint8_t { Top, Bottom, Front, Back, Left, Right };
@@ -661,8 +661,8 @@ class Motor final: public Instance {
     Motor(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     InstanceId              m_part1Id = 0;
     InstanceId              m_part2Id = 0;
-    FVec3               m_offset1      = FVec3::sZero();
-    FVec3               m_offset2      = FVec3::sZero();
+    FVec3               m_offset1      = FVec3::Zero();
+    FVec3               m_offset2      = FVec3::Zero();
     float                   m_currentAngle = 0.0f;
     float                   m_desiredAngle = 0.0f;
     float                   m_maxVelocity  = 30.0f;

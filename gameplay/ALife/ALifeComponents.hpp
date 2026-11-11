@@ -21,7 +21,7 @@ struct ALifeComponent {
     using enum ALife::State;
     using enum ALife::TaskType;
 
-    DVec3   position     = DVec3::sZero();
+    DVec3   position     = DVec3::Zero();
     ALife::State state        = Offline;
     uint32_t     current_node = ALife::INVALID_GRAPH_NODE;
     uint32_t     target_node  = ALife::INVALID_GRAPH_NODE;

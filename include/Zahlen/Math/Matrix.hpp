@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Scalar.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <algorithm>
@@ -110,6 +111,10 @@ struct alignas(Alignment) Matrix {
     [[nodiscard]] constexpr auto MDSpan() noexcept {
         return std::mdspan<T, std::extents<size_t, Rows, Cols>, std::layout_left>(elements.data());
     }
+
+    // Same singular/near-singular identity fallback as Inverse().
+    [[nodiscard]] constexpr auto Inversed() const noexcept -> Matrix
+        requires(Rows == Cols && (Rows == 3 || Rows == 4) && std::is_floating_point_v<T>);
 
     constexpr auto operator==(const Matrix&) const noexcept -> bool = default;
 
@@ -230,7 +235,7 @@ template <typename T, size_t A>
 template <typename T, size_t A>
 [[nodiscard]] constexpr auto Inverse(const Matrix<T, 3, 3, A>& m) noexcept -> Matrix<T, 3, 3, A> {
     const T det = Determinant(m);
-    if (std::abs(det) <= T {1e-8})
+    if (ZHLN::Abs(det) <= T {1e-8})
         return Matrix<T, 3, 3, A>::Identity();
     const T invDet = T {1} / det;
 
@@ -285,7 +290,7 @@ template <typename T, size_t A>
     const T c0 = m[2, 0] * m[3, 1] - m[3, 0] * m[2, 1];
 
     const T det = s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0;
-    if (std::abs(det) <= T {1e-8})
+    if (ZHLN::Abs(det) <= T {1e-8})
         return Matrix<T, 4, 4, A>::Identity();
     const T invDet = T {1} / det;
 
@@ -311,6 +316,13 @@ template <typename T, size_t A>
     inv[3, 3] = (m[2, 0] * s3 - m[2, 1] * s1 + m[2, 2] * s0) * invDet;
 
     return inv;
+}
+
+template <typename T, size_t Rows, size_t Cols, size_t Alignment>
+[[nodiscard]] constexpr auto Matrix<T, Rows, Cols, Alignment>::Inversed() const noexcept -> Matrix
+    requires(Rows == Cols && (Rows == 3 || Rows == 4) && std::is_floating_point_v<T>)
+{
+    return Inverse(*this);
 }
 
 template <typename T>

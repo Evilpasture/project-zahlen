@@ -155,7 +155,7 @@ auto main(int argc, char* argv[]) -> int {
     }
     ZHLN::Log("[CDNMap] {} KiB", bytes->size() / 1024U);
 
-    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), std::span<const uint8_t>(*bytes), kAsset);
+    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), ZHLN::EngineAccess::PhysicsOf(*engine), std::span<const uint8_t>(*bytes), kAsset);
     if (!prefab) {
         ZHLN::LogError("[CDNMap] glTF import failed for '{}'", kAsset);
         return EXIT_FAILURE;

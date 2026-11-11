@@ -9,7 +9,6 @@
 #include "render/passes/SceneDraw.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 
 namespace ZHLN::Passes {
 
@@ -63,8 +62,8 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         }
 
         const uint32_t  vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
-        const JPH::Mat44 world      = drawCmd.instanceData.world;
-        const FVec3  meshPos    = world.GetTranslation();
+        const Mat4x4 world      = drawCmd.instanceData.world;
+        const FVec3  meshPos    = {world[0, 3], world[1, 3], world[2, 3]};
         const float     radius      = drawCmd.instanceData.cullRadius;
 
         bool inAnyCascade = false;

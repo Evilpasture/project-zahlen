@@ -9,12 +9,7 @@ module;
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Mat4x4.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Array.hpp>
@@ -22,6 +17,7 @@ module;
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -203,15 +199,15 @@ class System {
             auto& ecb = engine.Commands();
 
             FVec3 zAxis = -normal.Normalized();
-            FVec3 up    = (std::abs(zAxis.y) > 0.95f) ? FVec3::sAxisX() : FVec3::sAxisY();
+            FVec3 up    = (std::abs(zAxis.y) > 0.95f) ? FVec3::UnitX() : FVec3::UnitY();
             FVec3 xAxis = Cross(up, zAxis).Normalized();
             FVec3 yAxis = Cross(zAxis, xAxis).Normalized();
 
-            JPH::Mat44 rotMat(JPH::Vec4(xAxis, 0.0f), JPH::Vec4(yAxis, 0.0f), JPH::Vec4(zAxis, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
-            JPH::Quat  decalRot = rotMat.GetQuaternion().Normalized();
+            const auto rotMat = Mat4x4::FromCols(FVec4(xAxis, 0.0f), FVec4(yAxis, 0.0f), FVec4(zAxis, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f));
+            const auto decalRot = Quat(DecomposeTransform(rotMat).rotation);
 
             FVec3  decalScale(cfg.decalSize, cfg.decalSize, 0.40f);
-            JPH::Mat44 worldMat = Math::CreateTransform(point, decalRot, decalScale);
+            const auto worldMat = ComposeTransform(point, decalRot, decalScale);
 
             Entity decalEnt = reg.Create();
             ecb.AddComponent(
@@ -264,8 +260,8 @@ class System {
         const FVec3& to,
         float            speed      = 320.0f,
         float            length     = 2.2f,
-        const JPH::Vec4& colorStart = {1.0f, 0.95f, 0.65f, 1.0f},
-        const JPH::Vec4& colorEnd   = {1.0f, 0.45f, 0.10f, 0.0f}
+        const FVec4& colorStart = {1.0f, 0.95f, 0.65f, 1.0f},
+        const FVec4& colorEnd   = {1.0f, 0.45f, 0.10f, 0.0f}
     ) {
         FVec3 diff = to - from;
         float     dist = diff.Length();
@@ -295,7 +291,7 @@ class System {
         const FVec3& normal,
         float            maxRadius = 2.5f,
         float            duration  = 0.25f,
-        const JPH::Vec4& color     = {0.65f, 0.90f, 1.00f, 0.8f}
+        const FVec4& color     = {0.65f, 0.90f, 1.00f, 0.8f}
     ) {
         m_rings.push_back(
             EnergyRing {
@@ -317,7 +313,7 @@ class System {
             float tail = std::max(0.0f, tracer.traveled - tracer.length);
 
             if (head > tail) {
-                // Storage fields, Jolt algebra: load once, use twice.
+                // Load once, use twice.
                 const FVec3 tracerStart = tracer.start;
                 const FVec3 tracerDir   = tracer.direction;
                 FVec3       pTail       = tracerStart + (tracerDir * tail);
@@ -338,14 +334,14 @@ class System {
             // Approximate ring with 16-segment line loop
             constexpr int   kSegments  = 16;
             const FVec3 ringNormal = ring.normal;
-            const JPH::Vec4 ringColor  = ring.color;
+            const FVec4 ringColor  = ring.color;
             const FVec3 ringOrigin = ring.position;
-            FVec3       u          = (std::abs(ringNormal.y) > 0.95f) ? FVec3::sAxisX() : FVec3::sAxisY();
+            FVec3       u          = (std::abs(ringNormal.y) > 0.95f) ? FVec3::UnitX() : FVec3::UnitY();
             FVec3       v          = Cross(ringNormal, u).Normalized();
             u                          = Cross(v, ringNormal).Normalized();
 
-            float     alpha = (1.0f - t) * ringColor.GetW();
-            JPH::Vec4 col(ringColor.x, ringColor.y, ringColor.z, alpha);
+            float     alpha = (1.0f - t) * ringColor.w;
+            FVec4 col(ringColor.x, ringColor.y, ringColor.z, alpha);
 
             FVec3 prevP = ringOrigin + u * currentRadius;
             for (int i = 1; i <= kSegments; ++i) {
@@ -360,11 +356,10 @@ class System {
         // 3. Advance Impact Particles (Generalized drag + gravity without planar floor assumption)
         for (auto& p: m_particles) {
             p.age += dt;
-            // Integration is written on Jolt locals and stored back: the fields
-            // are storage, and a member converts on assignment, not on SetY or *=.
+            // Integrate in native vector space and write the updated state back.
             FVec3 velocity = p.velocity;
             FVec3 position = p.position;
-            velocity.SetY(velocity.y + (p.gravity * dt));
+            velocity.y += p.gravity * dt;
             velocity *= std::exp(-p.drag * dt);
             position += velocity * dt;
             p.velocity = velocity;
@@ -375,7 +370,7 @@ class System {
             if (speed > 0.05f) {
                 FVec3 streakTail = position - (velocity / speed) * (p.size * 1.5f);
                 float     alpha      = std::max(0.0f, 1.0f - (p.age / p.maxLife)) * p.color.w;
-                JPH::Vec4 col(p.color.x, p.color.y, p.color.z, alpha);
+                FVec4 col(p.color.x, p.color.y, p.color.z, alpha);
 
                 scene.AddLine(streakTail, position, col, col);
             }

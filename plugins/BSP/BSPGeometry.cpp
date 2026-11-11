@@ -166,9 +166,9 @@ struct FaceProjection {
 // Vertex centroid of a winding (unweighted -- the caller weights by area).
 [[nodiscard]] auto WindingCentroid(std::span<const FVec3> winding) noexcept -> FVec3 {
     if (winding.empty()) {
-        return FVec3::sZero();
+        return FVec3::Zero();
     }
-    FVec3 sum = FVec3::sZero();
+    FVec3 sum = FVec3::Zero();
     for (const FVec3& corner: winding) {
         sum += corner;
     }
@@ -380,7 +380,7 @@ void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::span<const 
             // sampled close and far)? Without it nobody can ever see or touch
             // the back side, so the twin-less sheets is fine single-sided.
             const FVec3 n(rec.ownN[0], rec.ownN[1], rec.ownN[2]);
-            FVec3       centre = FVec3::sZero();
+            FVec3       centre = FVec3::Zero();
             for (const FVec3& corner: rec.winding) {
                 centre += corner;
             }
@@ -466,8 +466,8 @@ void EmitVertex(
                  static_cast<float>(page.height);
     }
 
-    const FVec3 tangent = (projection.sDir.LengthSquared() > kEpsilon * kEpsilon) ? projection.sDir.Normalized() : FVec3::sAxisX();
-    const FVec3 normal  = (sourceNormal.LengthSquared() > kEpsilon * kEpsilon) ? sourceNormal.Normalized() : FVec3::sAxisZ();
+    const FVec3 tangent = (projection.sDir.LengthSquared() > kEpsilon * kEpsilon) ? projection.sDir.Normalized() : FVec3::UnitX();
+    const FVec3 normal  = (sourceNormal.LengthSquared() > kEpsilon * kEpsilon) ? sourceNormal.Normalized() : FVec3::UnitZ();
 
     // Handedness so that bitangent = cross(normal, tangent.xyz) * tangent.w,
     // which is the glTF convention the renderer's tangent frames assume.
@@ -914,7 +914,7 @@ auto GatherEmissiveAreaLights(
             surface.position         = ConvertPosition(options, WindingCentroid(*winding));
             // The face's plane normal, +N out of the solid (see the winding
             // orientation note in ImportMapGeometry).
-            FVec3 faceNormal = FVec3::sAxisZ();
+            FVec3 faceNormal = FVec3::UnitZ();
             if (static_cast<size_t>(face.planenum) < map.planes.size()) {
                 const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
                 faceNormal          = FVec3(plane.normal[0], plane.normal[1], plane.normal[2]);
@@ -1047,7 +1047,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             // inverted floor drops props straight through; the
             // CharacterVirtual walks anywhere only because it opts into
             // EBackFaceMode::CollideWithBackFaces).
-            FVec3 faceNormal = FVec3::sAxisZ();
+            FVec3 faceNormal = FVec3::UnitZ();
             if (static_cast<size_t>(face.planenum) < map.planes.size()) {
                 const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
                 faceNormal          = FVec3(plane.normal[0], plane.normal[1], plane.normal[2]);
@@ -1059,7 +1059,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 faceNormal = FVec3(out[0], out[1], out[2]);
             }
             {
-                FVec3 windingNormal = FVec3::sZero();
+                FVec3 windingNormal = FVec3::Zero();
                 for (size_t i = 0; i < winding->size(); ++i) {
                     const FVec3& a = (*winding)[i];
                     const FVec3& b = (*winding)[(i + 1) % winding->size()];
@@ -1246,13 +1246,13 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                     }
                 }
 
-                std::vector<FVec3> vertexNormals(static_cast<size_t>(side) * side, FVec3::sZero());
+                std::vector<FVec3> vertexNormals(static_cast<size_t>(side) * side, FVec3::Zero());
                 for (uint32_t j = 0; j < gridSize; ++j) {
                     for (uint32_t i = 0; i < gridSize; ++i) {
                         const FVec3& p00 = grid[static_cast<size_t>(j) * side + i];
                         const FVec3& p10 = grid[static_cast<size_t>(j) * side + i + 1];
                         const FVec3& p01 = grid[static_cast<size_t>(j + 1) * side + i];
-                        const FVec3 cell = (p10 - p00).Cross(p01 - p00);
+                        const FVec3 cell = Cross(p10 - p00, p01 - p00);
                         for (uint32_t corner = 0; corner < 4; ++corner) {
                             const uint32_t ci = i + (corner & 1u);
                             const uint32_t cj = j + ((corner >> 1) & 1u);

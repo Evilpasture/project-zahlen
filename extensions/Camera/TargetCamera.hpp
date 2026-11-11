@@ -13,10 +13,6 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Vec3.h>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
 #include <optional>
@@ -51,7 +47,7 @@ struct TargetCameraComponent {
     float fov               = 45.0f;
     float targetFov         = 45.0f;
 
-    FVec3 smoothTargetPos     = FVec3::sZero();
+    FVec3 smoothTargetPos     = FVec3::Zero();
     uint32_t  hasInitSmoothTarget = 0;
 };
 

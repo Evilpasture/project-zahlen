@@ -7,6 +7,9 @@
 // paths must agree without making mirrored materials double-sided.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
@@ -27,6 +30,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numbers>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -99,9 +103,9 @@ struct CaptureResult {
 }
 
 constexpr float kCameraDistance = 5.0f;
-const std::array<FVec3, 5> kCenters {
-    FVec3(-1.45f, 0.85f, 0.0f), FVec3(0.0f, 0.85f, 0.0f), FVec3(1.45f, 0.85f, 0.0f),
-    FVec3(-0.75f, -0.85f, 0.0f), FVec3(0.75f, -0.85f, 0.0f),
+const std::array<ZHLN::FVec3, 5> kCenters {
+    ZHLN::FVec3(-1.45f, 0.85f, 0.0f), ZHLN::FVec3(0.0f, 0.85f, 0.0f), ZHLN::FVec3(1.45f, 0.85f, 0.0f),
+    ZHLN::FVec3(-0.75f, -0.85f, 0.0f), ZHLN::FVec3(0.75f, -0.85f, 0.0f),
 };
 
 [[nodiscard]] auto CaptureParity(bool meshShading) -> std::expected<CaptureResult, ZHLN::ErrorCode> {
@@ -130,24 +134,24 @@ const std::array<FVec3, 5> kCenters {
         gfx.post.vignetteIntensity       = 0.0f;
         gfx.post.glowIntensity           = 0.0f;
         gfx.post.bloomStrength           = 0.0f;
-        gfx.environment.skyZenith        = FVec4(0, 0, 0, 1);
-        gfx.environment.skyHorizon       = FVec4(0, 0, 0, 1);
-        gfx.environment.skyGround        = FVec4(0, 0, 0, 1);
+        gfx.environment.skyZenith        = ZHLN::FVec4(0, 0, 0, 1);
+        gfx.environment.skyHorizon       = ZHLN::FVec4(0, 0, 0, 1);
+        gfx.environment.skyGround        = ZHLN::FVec4(0, 0, 0, 1);
     });
     const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
     ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = FVec3(0.0f, 0.0f, kCameraDistance);
+    camera.position = ZHLN::FVec3(0.0f, 0.0f, kCameraDistance);
     camera.yaw      = -90.0f;
     camera.pitch    = 0.0f;
     camera.fov      = 45.0f;
 
     const ZHLN::Entity sun = reg.Create();
-    reg.Add(sun, ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 0.0f, 8.0f)},
-            ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = FVec3(1, 1, 1),
-                                               .intensity = 220.0f, .direction = FVec3(0, 0, 1)});
+    reg.Add(sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3(0.0f, 0.0f, 8.0f)},
+            ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = ZHLN::FVec3(1, 1, 1),
+                                               .intensity = 220.0f, .direction = ZHLN::FVec3(0, 0, 1)});
 
     constexpr auto meshID = ZHLN::HashAssetID("negative_scale_shared_panel");
     constexpr auto oneSidedID = ZHLN::HashAssetID("negative_scale_one_sided");
@@ -182,9 +186,9 @@ const std::array<FVec3, 5> kCenters {
         // adding the reflection makes its world winding CCW before the fix,
         // exactly the red-X back-face failure in the Khronos model.
         const bool mirrored = i == 1 || i == 2 || i == 4;
-        const auto rotation = i == 2 ? JPH::Quat::sRotation(FVec3::sAxisY(), JPH::JPH_PI) : JPH::Quat::sIdentity();
-        const FVec3 scale(mirrored ? -1.0f : 1.0f, 1.0f, 1.0f);
-        const JPH::Mat44   world = ZHLN::Math::CreateTransform(kCenters[i], rotation, scale);
+        const auto rotation = i == 2 ? ZHLN::Quat::FromAxisAngle(ZHLN::FVec3::UnitY(), std::numbers::pi_v<float>) : ZHLN::Quat::Identity();
+        const ZHLN::FVec3 scale(mirrored ? -1.0f : 1.0f, 1.0f, 1.0f);
+        const auto world = ZHLN::ComposeTransform(kCenters[i], rotation, scale);
         const ZHLN::Entity e     = reg.Create();
         reg.Add(e, ZHLN::Components::TransformComponent {.position = kCenters[i], .rotation = rotation, .scale = scale});
         reg.Add(e, ZHLN::Components::WorldTransformComponent {.world = world, .previous = world});
@@ -203,7 +207,7 @@ const std::array<FVec3, 5> kCenters {
     if (!image.Valid()) return std::unexpected(NegativeScaleError::CaptureFailed);
 
     CaptureResult result {.meshShadingSupported = info.meshShadingSupported};
-    const double halfHeight = kCameraDistance * std::tan(JPH::DegreesToRadians(camera.fov) * 0.5);
+    const double halfHeight = kCameraDistance * std::tan(ZHLN::DegF(camera.fov).ToRadians().value * 0.5);
     const double halfWidth = halfHeight * image.width / image.height;
     for (size_t i = 0; i < kCenters.size(); ++i) {
         const double u = 0.5 + kCenters[i].x / (2.0 * halfWidth);

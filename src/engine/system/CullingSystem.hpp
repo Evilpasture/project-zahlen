@@ -4,9 +4,6 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/ECS/Components.hpp>
@@ -63,6 +60,6 @@ class ZHLN_API CullingSystem {
 // The eight world-space corners of a view-projection, in the order the debug
 // edges expect. Shared by the freeze path (which stores them) and the debug draw
 // (which draws them).
-[[nodiscard]] ZHLN_API std::array<FVec3, 8> FrustumCornersFromViewProj(const JPH::Mat44& viewProj) noexcept;
+[[nodiscard]] ZHLN_API std::array<FVec3, 8> FrustumCornersFromViewProj(const Mat4x4& viewProj) noexcept;
 
 } // namespace ZHLN

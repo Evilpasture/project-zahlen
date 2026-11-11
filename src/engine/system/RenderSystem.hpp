@@ -3,6 +3,7 @@
 
 #pragma once
 #include <Zahlen/Common.h>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <expected>
 
@@ -14,7 +15,7 @@ class ZHLN_API RenderSystem {
     static std::expected<void, ErrorCode> Update(Engine& engine, float dt);
 
   private:
-    static FrameOutcome<FrameSkipped> RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt);
+    static FrameOutcome<FrameSkipped> RenderMain(Engine& engine, int& outPhysicsDrawMode, Mat4x4& outShadowProjView, float dt);
 
     static void RenderDebug(Engine& engine, int physicsDrawMode);
 };

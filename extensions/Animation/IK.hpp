@@ -9,12 +9,7 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Mat4x4.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
@@ -46,12 +41,12 @@ struct TwoBoneIKChain {
     int32_t lowerNodeIndex = -1;
     int32_t endNodeIndex   = -1;
 
-    FVec3 targetPosition = FVec3::sZero();
-    JPH::Quat targetRotation = JPH::Quat::sIdentity();
+    FVec3 targetPosition = FVec3::Zero();
+    FVec4 targetRotation = {0.0f, 0.0f, 0.0f, 1.0f};
     FVec3 poleVector     = FVec3(0.0f, -1.0f, 0.0f);
 
     Entity    targetEntity = Entity::Null();
-    FVec3 targetOffset = FVec3::sZero();
+    FVec3 targetOffset = FVec3::Zero();
 
     float weight            = 1.0f;
     bool  orientEndEffector = true;
@@ -145,9 +140,9 @@ inline TwoBoneIKSolverOutput SolveTwoBoneIK(const TwoBoneIKSolverInput& input) n
     float angleUpper = std::acos(cosUpper);
 
     // Project pole vector onto plane orthogonal to target direction axis
-    FVec3 perp = input.poleVector - normAxis * input.Dot(poleVector, normAxis);
+    FVec3 perp = input.poleVector - normAxis * Dot(input.poleVector, normAxis);
     if (perp.LengthSquared() < 1e-6f) {
-        perp = normAxis.GetNormalizedPerpendicular();
+        perp = (std::abs(normAxis.x) > std::abs(normAxis.y) ? FVec3 {normAxis.z, 0.0f, -normAxis.x} : FVec3 {0.0f, normAxis.z, -normAxis.y}).Normalized();
     } else {
         perp = perp.Normalized();
     }
@@ -170,20 +165,25 @@ inline TwoBoneIKSolverOutput SolveTwoBoneIK(const TwoBoneIKSolverInput& input) n
 /**
  * @brief Orients a node matrix so its local forward vector aligns with worldTargetDir.
  */
-inline JPH::Mat44 AlignNodeToDirection(const JPH::Mat44& currentWorldMat, FVec3 localBindDir, FVec3 worldTargetDir) noexcept {
-    FVec3 currentWorldDir = currentWorldMat.Multiply3x3(localBindDir).Normalized();
-
+inline auto AlignNodeToDirection(const Mat4x4& currentWorldMat, FVec3 localBindDir, FVec3 worldTargetDir) noexcept -> Mat4x4 {
+    const auto currentWorldDir = (currentWorldMat * FVec4 {localBindDir.x, localBindDir.y, localBindDir.z, 0.0f}).XYZ().Normalized();
     if (Dot(currentWorldDir, worldTargetDir) > 0.9999f) {
         return currentWorldMat;
     }
-
-    JPH::Quat rotationAdjust = JPH::Quat::sFromTo(currentWorldDir, worldTargetDir);
-
-    FVec3 translation = currentWorldMat.GetTranslation();
-    JPH::Quat currentRot  = currentWorldMat.GetQuaternion().Normalized();
-
-    JPH::Quat newRot = (rotationAdjust * currentRot).Normalized();
-    return JPH::Mat44::sRotationTranslation(newRot, translation);
+    const auto lengthProduct = std::sqrt(currentWorldDir.LengthSquared() * worldTargetDir.LengthSquared());
+    const auto w = lengthProduct + Dot(currentWorldDir, worldTargetDir);
+    auto axis = Cross(currentWorldDir, worldTargetDir);
+    auto adjust = FVec4 {axis.x, axis.y, axis.z, w};
+    if (w == 0.0f) {
+        if (lengthProduct == 0.0f) return currentWorldMat;
+        axis = (std::abs(currentWorldDir.x) > std::abs(currentWorldDir.y) ?
+            FVec3 {currentWorldDir.z, 0.0f, -currentWorldDir.x} : FVec3 {0.0f, currentWorldDir.z, -currentWorldDir.y}).Normalized();
+        adjust = {axis.x, axis.y, axis.z, 0.0f};
+    } else {
+        adjust = adjust.Normalized();
+    }
+    const auto parts = DecomposeTransform(currentWorldMat);
+    return ComposeTransform(parts.translation, MultiplyRotations(adjust, parts.rotation).Normalized(), FVec3::One());
 }
 
 } // namespace IK

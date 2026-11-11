@@ -41,10 +41,10 @@ void LODSystem::GraphUpdate(LODQuery query) {
                 continue;
             }
 
-            FVec3 worldPos = FVec3::sZero();
+            FVec3 worldPos = FVec3::Zero();
             if (auto worldTrans = query.Get<Components::WorldTransformComponent>(e)) {
-                const JPH::Mat44 world = worldTrans->world;
-                worldPos               = world.GetTranslation();
+                const auto& world = worldTrans->world;
+                worldPos = {world[0, 3], world[1, 3], world[2, 3]};
             } else if (auto trans = query.Get<Components::TransformComponent>(e)) {
                 worldPos = trans->position;
             }

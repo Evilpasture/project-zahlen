@@ -305,6 +305,20 @@ struct ReflectLuaSuite {
         return {};
     }
 
+    auto TestNativeMatrixSequence() -> std::expected<void, ZHLN::ErrorCode> {
+        auto matrix = ZHLN::ReflectLua::EvaluateString<ZHLN::Mat4x4>(
+            "return { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }");
+        if (!matrix || (*matrix)[0, 1] != 5.0f || (*matrix)[2, 3] != 15.0f)
+            return std::unexpected(LuaSuiteFail::WrongValue);
+        auto roundTrip = ZHLN::ReflectLua::EvaluateCallString<ZHLN::Mat4x4>(
+            "return function(m) return m end", "matrix_roundtrip", ZHLN::LuaBudget {}, *matrix);
+        if (!roundTrip || roundTrip->elements != matrix->elements) return std::unexpected(LuaSuiteFail::WrongValue);
+        auto bad = ZHLN::ReflectLua::ApplyPatchString(*matrix, "return { 1, 2 }");
+        if (bad || !bad.error().Is(ZHLN::LuaError::OutOfRange) || (*matrix)[0, 1] != 5.0f)
+            return std::unexpected(LuaSuiteFail::WrongErrorCode);
+        return {};
+    }
+
     auto TestHermeticSandboxAndResourceBudgets() -> std::expected<void, ZHLN::ErrorCode> {
         // 1. Forbidden libraries and globals must all be nil in the sandbox.
         constexpr std::string_view kSandboxProbe = R"lua(

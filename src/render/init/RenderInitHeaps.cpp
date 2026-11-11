@@ -11,6 +11,7 @@
 #include <array>
 #include <cstring>
 #include <format>
+#include <vector>
 
 namespace ZHLN {
 
@@ -266,10 +267,10 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
         }
         allocator.DestroyBuffer(morphDeltasBuffer);
     });
-    JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
+    std::vector<Mat4x4> identities(8192, Mat4x4::Identity());
     for (uint32_t i = 0; i < FrameResources::kJointBufferRingSize; ++i) {
         auto jb_res = Vk::Buffer::Create(
-            allocator, sizeof(JPH::Mat44) * 8192, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
+            allocator, sizeof(Mat4x4) * 8192, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
         );
         if (!jb_res) {
             return std::unexpected(ErrorCode(jb_res.error()));
@@ -281,7 +282,7 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
         if (!mapped) {
             return std::unexpected(mapped.error());
         }
-        std::memcpy(mapped->Data(), identities.data(), identities.size() * sizeof(JPH::Mat44));
+        std::memcpy(mapped->Data(), identities.data(), identities.size() * sizeof(Mat4x4));
     }
 
     auto mdb_res =

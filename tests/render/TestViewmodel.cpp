@@ -75,27 +75,35 @@ struct ViewmodelTestSuite {
             const float aspect = 1280.0f / 720.0f;
 
             // Compute expected fixed 58-degree viewmodel projection
-            const JPH::Mat44 expectedVMProj = ZHLN::Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
+            const auto expectedVMProj = ZHLN::CreatePerspective(ZHLN::DegF(58.0f).ToRadians().value, aspect, cam.nearZ, cam.farZ);
+            const auto isClose = [](const auto& a, const auto& b) {
+                for (size_t column = 0; column < 4; ++column) {
+                    for (size_t row = 0; row < 4; ++row) {
+                        if (std::abs(a[row, column] - b[row, column]) > 1e-4f) return false;
+                    }
+                }
+                return true;
+            };
 
             // Test A: Normal Camera FOV (45.0 deg)
             cam.fov                = 45.0f;
-            JPH::Mat44 worldProj45 = cam.GetProjectionMatrix(aspect);
-            ZHLN::Test::ExpectFalse(worldProj45.IsClose(expectedVMProj, 1e-4f));
+            auto worldProj45 = cam.GetProjectionMatrix(aspect);
+            ZHLN::Test::ExpectFalse(isClose(worldProj45, expectedVMProj));
 
             // Test B: Sniper Scope / Zoomed-in Camera FOV (15.0 deg)
             cam.fov                = 15.0f;
-            JPH::Mat44 worldProj15 = cam.GetProjectionMatrix(aspect);
-            ZHLN::Test::ExpectFalse(worldProj15.IsClose(expectedVMProj, 1e-4f));
+            auto worldProj15 = cam.GetProjectionMatrix(aspect);
+            ZHLN::Test::ExpectFalse(isClose(worldProj15, expectedVMProj));
 
             // Test C: Ultra-Wide Camera FOV (110.0 deg)
             cam.fov                 = 110.0f;
-            JPH::Mat44 worldProj110 = cam.GetProjectionMatrix(aspect);
-            ZHLN::Test::ExpectFalse(worldProj110.IsClose(expectedVMProj, 1e-4f));
+            auto worldProj110 = cam.GetProjectionMatrix(aspect);
+            ZHLN::Test::ExpectFalse(isClose(worldProj110, expectedVMProj));
 
             // Test D: When camera FOV is exactly 58.0 deg, both projections match
             cam.fov                = 58.0f;
-            JPH::Mat44 worldProj58 = cam.GetProjectionMatrix(aspect);
-            ZHLN::Test::ExpectTrue(worldProj58.IsClose(expectedVMProj, 1e-4f));
+            auto worldProj58 = cam.GetProjectionMatrix(aspect);
+            ZHLN::Test::ExpectTrue(isClose(worldProj58, expectedVMProj));
 
             return {};
         }
@@ -114,13 +122,13 @@ struct ViewmodelTestSuite {
             // 1. Sun light
             const ZHLN::Entity sunEnt = reg.Create();
             reg.Add(
-                sunEnt, ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 10.0f, 0.0f)},
-                ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 1.0f, 1.0f), .intensity = 150.0f}
+                sunEnt, ZHLN::Components::TransformComponent {.position = {0.0f, 10.0f, 0.0f}},
+                ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = {1.0f, 1.0f, 1.0f}, .intensity = 150.0f}
             );
 
             // 2. Spawn viewmodel weapon box in front of camera (-Z direction)
             ZHLN::Material vmMat;
-            vmMat.baseColorFactor    = JPH::Float4 {0.0f, 1.0f, 0.5f, 1.0f};
+            vmMat.baseColorFactor    = {0.0f, 1.0f, 0.5f, 1.0f};
 
             const ZHLN::Entity vmGun = ZHLN::PrefabFactory::CreateBox(
                 *engine, {0.08f, 0.08f, 0.35f},
@@ -168,7 +176,7 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = FVec3(0.0f, 1.5f, 2.0f);
+            cam.position = {0.0f, 1.5f, 2.0f};
             cam.yaw      = -90.0f; // Look directly along -Z
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;
@@ -181,7 +189,7 @@ struct ViewmodelTestSuite {
 
             // 2. Solid Dark Wall directly in front of camera (at Z = -2.0m, dimensions 8x8m)
             ZHLN::Material wallMat;
-            wallMat.baseColorFactor    = JPH::Float4 {0.15f, 0.15f, 0.15f, 1.0f};
+            wallMat.baseColorFactor    = {0.15f, 0.15f, 0.15f, 1.0f};
 
             const ZHLN::Entity darkWall = ZHLN::PrefabFactory::CreateBox(
                 *engine, {4.0f, 4.0f, 0.2f},
@@ -191,7 +199,7 @@ struct ViewmodelTestSuite {
 
             // 3. Vibrant Cyan Viewmodel Object placed in front of camera (Z = +1.2m in world, 0.8m from camera)
             ZHLN::Material vmMat;
-            vmMat.baseColorFactor    = JPH::Float4 {0.0f, 1.0f, 1.0f, 1.0f};
+            vmMat.baseColorFactor    = {0.0f, 1.0f, 1.0f, 1.0f};
 
             const ZHLN::Entity vmObject = ZHLN::PrefabFactory::CreateBox(
                 *engine, {0.3f, 0.3f, 0.3f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, 1.2}, .createPhysics = false, .materialOverride = vmMat}

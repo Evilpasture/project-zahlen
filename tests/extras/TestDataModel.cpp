@@ -20,6 +20,7 @@
 namespace {
 
 using namespace ZHLN::ProjectLight;
+using ZHLN::FVec3;
 
 } // namespace
 

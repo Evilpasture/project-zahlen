@@ -13,12 +13,7 @@ module;
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Mat4x4.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Common.h>
@@ -90,8 +85,8 @@ auto GenerateFractalSegments(FVec3 start, FVec3 end, float startWidth, const Lig
             }
             const FVec3 dirNorm = dir / len;
 
-            FVec3 side     = dirNorm.Cross(FVec3::sAxisY());
-            side               = (side.LengthSquared() < 1e-4f) ? FVec3::sAxisX() : side.Normalized();
+            FVec3 side     = Cross(dirNorm, FVec3::UnitY());
+            side               = (side.LengthSquared() < 1e-4f) ? FVec3::UnitX() : side.Normalized();
             const FVec3 up = Cross(dirNorm, side).Normalized();
 
             const FVec3 offset      = (side * dist(rng) + up * dist(rng)) * scale;
@@ -140,10 +135,10 @@ auto BuildCameraFacingRibbon(std::span<const LightningSegment> segments, FVec3 c
         const FVec3 dirNorm = dir / len;
 
         const FVec3 toCamDiff = cameraPos - p0;
-        const FVec3 toCam     = (toCamDiff.LengthSquared() < 1e-4f) ? FVec3::sAxisZ() : toCamDiff.Normalized();
+        const FVec3 toCam     = (toCamDiff.LengthSquared() < 1e-4f) ? FVec3::UnitZ() : toCamDiff.Normalized();
 
         FVec3 side = Cross(dirNorm, toCam);
-        side           = (side.LengthSquared() < 1e-4f) ? FVec3::sAxisX() : side.Normalized();
+        side           = (side.LengthSquared() < 1e-4f) ? FVec3::UnitX() : side.Normalized();
 
         const float     width = seg.width;
         const FVec3 v0    = p0 - side * width;
@@ -268,7 +263,7 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
     static thread_local std::mt19937 s_rng(std::random_device {}());
 
     const FVec3 cloudOrigin(static_cast<float>(groundPos.x), static_cast<float>(cloudPos.y), static_cast<float>(groundPos.z));
-    const FVec3 groundTarget(JPH::RVec3(groundPos.x, groundPos.y, groundPos.z));
+    const FVec3 groundTarget {static_cast<float>(groundPos.x), static_cast<float>(groundPos.y), static_cast<float>(groundPos.z)};
 
     // The ribbon faces the view, and the flash is placed relative to it: a world
     // with no main camera has no view to face and nothing to flash, so there is no

@@ -77,7 +77,7 @@ module;
 #include <Jolt/Core/UnorderedMap.h>
 #include <Jolt/Geometry/AABox.h>
 #include <Jolt/Math/DVec3.h>
-#include <Jolt/Math/Mat4x4.h>
+#include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Math.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Real.h>
@@ -171,6 +171,7 @@ module;
 #include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Physics/Physics.hpp>
@@ -206,23 +207,33 @@ using JPH::AABox;
 using JPH::BodyID;
 using JPH::Cos;
 using JPH::DegreesToRadians;
-using DVec3;
+using JPH::DVec3;
 using JPH::EMotionType;
 using JPH::Mat44;
 using JPH::ObjectLayer;
 using JPH::Quat;
 using JPH::RadiansToDegrees;
 using JPH::Ref;
-using DVec3;
 using JPH::Shape;
 using JPH::ShapeRefC;
 using JPH::Sin;
 using JPH::Tan;
-using FVec3;
+using JPH::Vec3;
 using JPH::Vec4;
 } // namespace JPH
 
 export namespace ZHLN {
+using ZHLN::Quat;
+using ZHLN::Dot;
+using ZHLN::Rotate;
+using ZHLN::FromTo;
+using ZHLN::Slerp;
+using ZHLN::operator==;
+using ZHLN::operator+;
+using ZHLN::operator-;
+using ZHLN::operator*;
+using ZHLN::operator/;
+using ZHLN::operator*=;
 using ZHLN::Array;
 using ZHLN::Assert;
 using ZHLN::Atomic;

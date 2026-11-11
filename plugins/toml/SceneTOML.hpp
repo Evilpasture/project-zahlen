@@ -33,7 +33,7 @@
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Vec2.h>
+#include <Jolt/Math/Float2.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Math/Vec2.hpp>

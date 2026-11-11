@@ -183,22 +183,37 @@ struct SoATestSuite {
             constexpr size_t MatrixCount = 1200;
             ZHLN::PoseUploadQueue queue;
             std::vector<JPH::Mat44> producerMatrices(MatrixCount, JPH::Mat44::sIdentity());
-            producerMatrices.front() = JPH::Mat44::sTranslation(FVec3(1.0f, 2.0f, 3.0f));
+            producerMatrices.front() = JPH::Mat44::sTranslation(JPH::Vec3(1.0f, 2.0f, 3.0f));
             queue.Push(4, producerMatrices);
 
             // A later producer write must not change the already queued palette;
             // the second push also forces the queue to extend beyond its first
             // arena segment on platforms with 64-byte Mat4x4 values.
-            producerMatrices.front() = JPH::Mat44::sTranslation(FVec3(9.0f, 8.0f, 7.0f));
+            producerMatrices.front() = JPH::Mat44::sTranslation(JPH::Vec3(9.0f, 8.0f, 7.0f));
             queue.Push(12, producerMatrices);
             if (queue.Size() != 2) return std::unexpected(SoATestError::PoseUploadLifetimeFailed);
+
+            // A non-symmetric matrix catches row/column transposition as well
+            // as a dropped translation. Exercise the kinematic path too.
+            JPH::Mat44 arbitrary {JPH::Vec4(1, 2, 3, 4), JPH::Vec4(5, 6, 7, 8),
+                                  JPH::Vec4(9, 10, 11, 12), JPH::Vec4(13, 14, 15, 16)};
+            queue.PushKinematic(20, std::span<const JPH::Mat44> {&arbitrary, 1});
+            const auto stored = queue.KinematicPose(20);
+            if (stored.size() != 1) return std::unexpected(SoATestError::PoseUploadLifetimeFailed);
+            for (int col = 0; col < 4; ++col) {
+                for (int row = 0; row < 4; ++row) {
+                    if (stored[0][static_cast<size_t>(row), static_cast<size_t>(col)] != arbitrary(row, col)) {
+                        return std::unexpected(SoATestError::PoseUploadLifetimeFailed);
+                    }
+                }
+            }
 
             size_t consumed = 0;
             bool   valid    = true;
             queue.Drain([&](const ZHLN::PoseUpload& upload) {
                 const float expectedX = upload.jointOffset == 4 ? 1.0f : 9.0f;
                 valid = valid && upload.matrices.size() == MatrixCount &&
-                        JPH::Mat44(upload.matrices.front()).GetTranslation().x == expectedX;
+                        upload.matrices.front()[0, 3] == expectedX;
                 ++consumed;
             });
             if (!valid || consumed != 2 || queue.Size() != 0) {

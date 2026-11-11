@@ -33,7 +33,7 @@
 // ===========================================================================
 
 #include <Zahlen/GUI/GUI.hpp> // the context, its boxes, and the layout a strip is
-#include <Jolt/Math/Vec4.h>    // drawn in; Jolt.h comes with it, which Vec4.h needs
+#include <Zahlen/Math/Vec4.hpp> // the native colour value
 #include <cstddef>
 #include <cstdint>
 #include <span>

@@ -45,6 +45,8 @@
 // PNG twin; a failing run leaves the whole series on disk for inspection.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -418,7 +420,7 @@ template <typename SceneFn>
 // Horizontal half-tangent of the projection; with a fixed vertical FOV and
 // 16:9 the horizontal FOV is ~91.8 degrees (half-tan ~1.026).
 [[nodiscard]] float HorizontalHalfTan() noexcept {
-    const float tanV = std::tan(JPH::DegreesToRadians(kVerticalFovDeg) * 0.5f);
+    const float tanV = std::tan(ZHLN::DegF(kVerticalFovDeg).ToRadians().value * 0.5f);
     return tanV * (static_cast<float>(kWidth) / static_cast<float>(kHeight));
 }
 
@@ -544,7 +546,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 *engine, 140.0f, {0.90f, 0.10f, 0.08f, 1.0f},
                 ZHLN::PrefabFactory::SpawnParams {
                     .position      = {0.0, 0.05, 250.0},
-                    .rotation      = ZHLN::Math::EulerDegreesToQuat({-24.0f, 0.0f, 0.0f}),
+                    .rotation      = ZHLN::Quat::FromEulerDegrees({-24.0f, 0.0f, 0.0f}),
                     .scale         = {0.34f, 1.0f, 1.0f},
                     .createPhysics = false,
                     .roughness     = 0.65f
@@ -609,30 +611,30 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             reg.Add(
                 sunEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = FVec3(0.0f, 60.0f, -40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({50.0f, 0.0f, 180.0f})
+                    .position = ZHLN::FVec3(0.0f, 60.0f, -40.0f), .rotation = ZHLN::Quat::FromEulerDegrees({50.0f, 0.0f, 180.0f})
                 },
                 ZHLN::Components::LightComponent {
                     .type      = ZHLN::LightType::Sun,
-                    .color     = FVec3(1.0f, 1.0f, 1.0f),
+                    .color     = ZHLN::FVec3(1.0f, 1.0f, 1.0f),
                     .intensity = 220.0f,
-                    .direction = FVec3(0.0f, 0.6f, -0.8f).Normalized()
+                    .direction = ZHLN::FVec3(0.0f, 0.6f, -0.8f).Normalized()
                 }
             );
 
-            auto addPointLight = [&](const FVec3& pos, const FVec3& color, float intensity, float range) {
+            auto addPointLight = [&](const ZHLN::FVec3& pos, const ZHLN::FVec3& color, float intensity, float range) {
                 const ZHLN::Entity e = reg.Create();
                 reg.Add(e, ZHLN::Components::TransformComponent {.position = pos}, ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point, .color = color, .intensity = intensity, .range = range});
             };
-            addPointLight(FVec3(rings[1].x, 3.0f, rings[1].distance - 3.5f), FVec3(1.0f, 1.0f, 1.0f), 700.0f, 25.0f);
-            addPointLight(FVec3(rings[3].x, 4.0f, rings[3].distance - 6.0f), FVec3(1.0f, 0.9f, 0.7f), 1200.0f, 60.0f);
-            addPointLight(FVec3(rings[5].x, 5.0f, rings[5].distance - 6.0f), FVec3(0.7f, 0.85f, 1.0f), 2000.0f, 80.0f);
+            addPointLight(ZHLN::FVec3(rings[1].x, 3.0f, rings[1].distance - 3.5f), ZHLN::FVec3(1.0f, 1.0f, 1.0f), 700.0f, 25.0f);
+            addPointLight(ZHLN::FVec3(rings[3].x, 4.0f, rings[3].distance - 6.0f), ZHLN::FVec3(1.0f, 0.9f, 0.7f), 1200.0f, 60.0f);
+            addPointLight(ZHLN::FVec3(rings[5].x, 5.0f, rings[5].distance - 6.0f), ZHLN::FVec3(0.7f, 0.85f, 1.0f), 2000.0f, 80.0f);
 
             const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = FVec3(0.0f, kEyeHeight, 0.0f);
+            cam.position = ZHLN::FVec3(0.0f, kEyeHeight, 0.0f);
             cam.yaw      = 90.0f; // forward = +Z
             cam.pitch    = 0.0f;
             cam.fov      = kVerticalFovDeg;
@@ -650,7 +652,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 // Re-establish the camera pose used to calibrate the coverage.
                 const auto camComp = ZHLN::EngineAccess::RegistryOf(eng).GetSingleton<ZHLN::Components::CameraComponent>();
                 if (camComp) {
-                    camComp->camera.position = FVec3(0.0f, kEyeHeight, 0.0f);
+                    camComp->camera.position = ZHLN::FVec3(0.0f, kEyeHeight, 0.0f);
                 }
 
                 // ---------------- Phase A: coverage at every distance -------
@@ -899,7 +901,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 ZHLN::Camera& cam = sweepCamComp->camera;
                 bool         popped = false;
                 for (uint32_t f = 0; f < kSweepFrames; ++f) {
-                    cam.position = FVec3(kSweepAmplitude * std::sin(2.0f * std::numbers::pi_v<float> * static_cast<float>(f) / static_cast<float>(kSweepFrames)), kEyeHeight, 0.0f);
+                    cam.position = ZHLN::FVec3(kSweepAmplitude * std::sin(2.0f * std::numbers::pi_v<float> * static_cast<float>(f) / static_cast<float>(kSweepFrames)), kEyeHeight, 0.0f);
                     // The sweep moves the camera every frame, and the borrow is the
                     // registry's component: the pose written here is the pose the
                     // engine renders from.
@@ -925,7 +927,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                     for (uint32_t i = 0; i < kRingCount; ++i) {
                         // Rings are at z = distance > 0, camera at z = 0, so the
                         // view-space depth is the ring distance itself.
-                        const float angleDeg = JPH::RadiansToDegrees(std::atan2(rings[i].x - camX, rings[i].distance));
+                        const float angleDeg = ZHLN::RadF(std::atan2(rings[i].x - camX, rings[i].distance)).ToDegrees().value;
                         inCone[i]   = std::abs(angleDeg) <= kSweepConeDeg;
                         windows[i]  = RingColumnWindow(rings[i], camX, tanH, frame.width, mirrorSign);
                         ambiguous[i] = false;
@@ -1017,7 +1019,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 // leaves the camera about 2.35 m from home. Return to the baseline
                 // position before measuring post-sweep parity: cam borrows the
                 // registry's camera, so this is the pose Phase D measures from.
-                cam.position = FVec3(0.0f, kEyeHeight, 0.0f);
+                cam.position = ZHLN::FVec3(0.0f, kEyeHeight, 0.0f);
 
                 // ---------------- Phase D: post-sweep parity ---------------
                 failedPhase = "parity";

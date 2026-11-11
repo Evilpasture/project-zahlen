@@ -48,9 +48,9 @@ constexpr size_t kMaxIKChains       = 4;
 }
 
 struct SampledTRS {
-    FVec3 translation = FVec3::sZero();
-    JPH::Quat rotation    = JPH::Quat::sIdentity();
-    FVec3 scale       = FVec3::sReplicate(1.0f);
+    FVec3 translation = FVec3::Zero();
+    FVec4 rotation = {0.0f, 0.0f, 0.0f, 1.0f};
+    FVec3 scale       = FVec3::Splat(1.0f);
 };
 
 void SampleTRSChannel(const AnimationChannel& channel, float time, SampledTRS& target) noexcept {
@@ -79,9 +79,9 @@ void SampleTRSChannel(const AnimationChannel& channel, float time, SampledTRS& t
         }
         const float*    q0 = &channel.keyValues[idx0 * 4];
         const float*    q1 = &channel.keyValues[idx1 * 4];
-        const JPH::Quat rot0(q0[0], q0[1], q0[2], q0[3]);
-        const JPH::Quat rot1(q1[0], q1[1], q1[2], q1[3]);
-        target.rotation = rot0.SLERP(rot1, factor).Normalized();
+        const auto rot0 = FVec4 {q0[0], q0[1], q0[2], q0[3]};
+        const auto rot1 = FVec4 {q1[0], q1[1], q1[2], q1[3]};
+        target.rotation = SlerpRotation(rot0, rot1, factor);
     } else if (channel.path == AnimationPathType::Scale) {
         if (channel.keyValues.size() < (idx1 + 1) * 3) {
             return;
@@ -119,7 +119,7 @@ void SampleTRSChannel(const AnimationChannel& channel, float time, SampledTRS& t
     }
     return MorphSample {
         .activeCount = count,
-        .weights     = ZHLN::FVec4 {lanes[0], lanes[1], lanes[2], lanes[3]},
+        .weights     = {lanes[0], lanes[1], lanes[2], lanes[3]},
     };
 }
 
@@ -132,7 +132,7 @@ struct NodeEvalScratch {
 };
 
 struct RigidNodeSlot {
-    Math::TransformTRS trs {};
+    TransformParts trs {};
     bool               valid = false;
 };
 
@@ -163,9 +163,9 @@ class PosePool {
 
         const auto offset  = static_cast<uint32_t>(_local.size());
         const auto newSize = static_cast<size_t>(offset) + static_cast<size_t>(count);
-        _clipLocal.resize(newSize, JPH::Mat44::sIdentity());
-        _local.resize(newSize, JPH::Mat44::sIdentity());
-        _model.resize(newSize, JPH::Mat44::sIdentity());
+        _clipLocal.resize(newSize, Mat4x4::Identity());
+        _local.resize(newSize, Mat4x4::Identity());
+        _model.resize(newSize, Mat4x4::Identity());
         _morphs.resize(newSize);
         _rigidNodes.resize(newSize);
         _scratch.resize(newSize);
@@ -203,20 +203,20 @@ class PosePool {
         _free.clear();
     }
 
-    [[nodiscard]] auto ClipLocal(uint32_t offset, uint32_t count) noexcept -> std::span<JPH::Mat44> {
-        return std::span<JPH::Mat44> {_clipLocal.data() + offset, count};
+    [[nodiscard]] auto ClipLocal(uint32_t offset, uint32_t count) noexcept -> std::span<Mat4x4> {
+        return std::span<Mat4x4> {_clipLocal.data() + offset, count};
     }
-    [[nodiscard]] auto Local(uint32_t offset, uint32_t count) noexcept -> std::span<JPH::Mat44> {
-        return std::span<JPH::Mat44> {_local.data() + offset, count};
+    [[nodiscard]] auto Local(uint32_t offset, uint32_t count) noexcept -> std::span<Mat4x4> {
+        return std::span<Mat4x4> {_local.data() + offset, count};
     }
-    [[nodiscard]] auto Local(uint32_t offset, uint32_t count) const noexcept -> std::span<const JPH::Mat44> {
-        return std::span<const JPH::Mat44> {_local.data() + offset, count};
+    [[nodiscard]] auto Local(uint32_t offset, uint32_t count) const noexcept -> std::span<const Mat4x4> {
+        return std::span<const Mat4x4> {_local.data() + offset, count};
     }
-    [[nodiscard]] auto Model(uint32_t offset, uint32_t count) noexcept -> std::span<JPH::Mat44> {
-        return std::span<JPH::Mat44> {_model.data() + offset, count};
+    [[nodiscard]] auto Model(uint32_t offset, uint32_t count) noexcept -> std::span<Mat4x4> {
+        return std::span<Mat4x4> {_model.data() + offset, count};
     }
-    [[nodiscard]] auto Model(uint32_t offset, uint32_t count) const noexcept -> std::span<const JPH::Mat44> {
-        return std::span<const JPH::Mat44> {_model.data() + offset, count};
+    [[nodiscard]] auto Model(uint32_t offset, uint32_t count) const noexcept -> std::span<const Mat4x4> {
+        return std::span<const Mat4x4> {_model.data() + offset, count};
     }
     [[nodiscard]] auto Morphs(uint32_t offset, uint32_t count) noexcept -> std::span<MorphSample> {
         return std::span<MorphSample> {_morphs.data() + offset, count};
@@ -236,17 +236,17 @@ class PosePool {
 
   private:
     void ResetRange(uint32_t offset, uint32_t count) noexcept {
-        std::fill_n(_clipLocal.begin() + offset, count, JPH::Mat44::sIdentity());
-        std::fill_n(_local.begin() + offset, count, JPH::Mat44::sIdentity());
-        std::fill_n(_model.begin() + offset, count, JPH::Mat44::sIdentity());
+        std::fill_n(_clipLocal.begin() + offset, count, Mat4x4::Identity());
+        std::fill_n(_local.begin() + offset, count, Mat4x4::Identity());
+        std::fill_n(_model.begin() + offset, count, Mat4x4::Identity());
         std::fill_n(_morphs.begin() + offset, count, MorphSample {});
         std::fill_n(_rigidNodes.begin() + offset, count, RigidNodeSlot {});
         std::fill_n(_scratch.begin() + offset, count, NodeEvalScratch {});
     }
 
-    std::vector<JPH::Mat44>      _clipLocal;
-    std::vector<JPH::Mat44>      _local;
-    std::vector<JPH::Mat44>      _model;
+    std::vector<Mat4x4>      _clipLocal;
+    std::vector<Mat4x4>      _local;
+    std::vector<Mat4x4>      _model;
     std::vector<MorphSample>     _morphs;
     std::vector<RigidNodeSlot>   _rigidNodes;
     std::vector<NodeEvalScratch> _scratch;
@@ -299,7 +299,7 @@ struct InstanceState {
     bool                                        suppressPaletteUpload = false;
 };
 
-void ResolveBaseFK(const ModelPrefab& prefab, std::span<const JPH::Mat44> local, std::span<JPH::Mat44> model, std::span<NodeEvalScratch> scratch) noexcept {
+void ResolveBaseFK(const ModelPrefab& prefab, std::span<const Mat4x4> local, std::span<Mat4x4> model, std::span<NodeEvalScratch> scratch) noexcept {
     const size_t nodeCount = local.size();
     for (size_t n = 0; n < nodeCount; ++n) {
         scratch[n].fkState        = 0;
@@ -340,8 +340,8 @@ void ResolveBaseFK(const ModelPrefab& prefab, std::span<const JPH::Mat44> local,
 void ApplyIKAndPropagateDescendantFK(
     const ModelPrefab&     prefab,
     std::span<const IKChain> chains,
-    std::span<JPH::Mat44>  local,
-    std::span<JPH::Mat44>  model,
+    std::span<Mat4x4>  local,
+    std::span<Mat4x4>  model,
     std::span<NodeEvalScratch> scratch
 ) noexcept {
     const size_t nodeCount = local.size();
@@ -359,13 +359,13 @@ void ApplyIKAndPropagateDescendantFK(
         const auto       upperIdx   = static_cast<size_t>(chain.upperNodeIndex);
         const auto       lowerIdx   = static_cast<size_t>(chain.lowerNodeIndex);
         const auto       endIdx     = static_cast<size_t>(chain.endNodeIndex);
-        const JPH::Mat44 upperModel = model[upperIdx];
-        const JPH::Mat44 lowerModel = model[lowerIdx];
-        const JPH::Mat44 endModel   = model[endIdx];
+        const auto upperModel = model[upperIdx];
+        const auto lowerModel = model[lowerIdx];
+        const auto endModel   = model[endIdx];
 
-        const FVec3 pUpper = upperModel.GetTranslation();
-        const FVec3 pLower = lowerModel.GetTranslation();
-        const FVec3 pEnd   = endModel.GetTranslation();
+        const FVec3 pUpper = upperModel.Column(3).XYZ();
+        const FVec3 pLower = lowerModel.Column(3).XYZ();
+        const FVec3 pEnd   = endModel.Column(3).XYZ();
 
         const IK::TwoBoneIKSolverOutput solved = IK::SolveTwoBoneIK(
             IK::TwoBoneIKSolverInput {
@@ -380,29 +380,30 @@ void ApplyIKAndPropagateDescendantFK(
             continue;
         }
 
-        const FVec3 localUpperVec = local[lowerIdx].GetTranslation();
-        const FVec3 localLowerVec = local[endIdx].GetTranslation();
+        const FVec3 localUpperVec = local[lowerIdx].Column(3).XYZ();
+        const FVec3 localLowerVec = local[endIdx].Column(3).XYZ();
         if (localUpperVec.LengthSquared() <= 1.0e-10f || localLowerVec.LengthSquared() <= 1.0e-10f) {
             continue;
         }
 
-        const JPH::Mat44 newUpper = IK::AlignNodeToDirection(upperModel, localUpperVec.Normalized(), solved.upperDirection);
-        JPH::Mat44       newLower = JPH::Mat44::sRotationTranslation(lowerModel.GetQuaternion().Normalized(), solved.midPosition);
-        newLower                  = IK::AlignNodeToDirection(newLower, localLowerVec.Normalized(), solved.lowerDirection);
+        const auto newUpper = IK::AlignNodeToDirection(upperModel, localUpperVec.Normalized(), solved.upperDirection);
+        auto newLower = ComposeTransform(solved.midPosition, DecomposeTransform(lowerModel).rotation, FVec3::One());
+        newLower = IK::AlignNodeToDirection(newLower, localLowerVec.Normalized(), solved.lowerDirection);
 
-        JPH::Mat44 newEnd = endModel;
-        newEnd.SetTranslation(solved.endPosition);
+        auto newEnd = endModel;
+        newEnd[0, 3] = solved.endPosition.x;
+        newEnd[1, 3] = solved.endPosition.y;
+        newEnd[2, 3] = solved.endPosition.z;
         if (chain.orientEndEffector) {
-            newEnd = JPH::Mat44::sRotationTranslation(chain.targetRotation.Normalized(), solved.endPosition);
+            newEnd = ComposeTransform(solved.endPosition, chain.targetRotation.Normalized(), FVec3::One());
         }
 
-        const float w     = std::clamp(chain.weight, 0.0f, 1.0f);
-        auto        blend = [](const JPH::Mat44& a, const JPH::Mat44& b, float t) noexcept -> JPH::Mat44 {
-            const FVec3 tA = a.GetTranslation();
-            const FVec3 tB = b.GetTranslation();
-            const JPH::Quat rA = a.GetQuaternion().Normalized();
-            const JPH::Quat rB = b.GetQuaternion().Normalized();
-            return JPH::Mat44::sRotationTranslation(rA.SLERP(rB, t).Normalized(), tA + t * (tB - tA));
+        const auto w = std::clamp(chain.weight, 0.0f, 1.0f);
+        const auto blend = [](const Mat4x4& a, const Mat4x4& b, float t) noexcept {
+            const auto aParts = DecomposeTransform(a);
+            const auto bParts = DecomposeTransform(b);
+            return ComposeTransform(Lerp(aParts.translation, bParts.translation, t),
+                                    SlerpRotation(aParts.rotation, bParts.rotation, t), FVec3::One());
         };
 
         model[upperIdx] = blend(upperModel, newUpper, w);
@@ -461,7 +462,7 @@ void ApplyIKAndPropagateDescendantFK(
         }
         const int32_t parent = prefab.nodes[n].parentIndex;
         local[n]             = (parent >= 0 && static_cast<size_t>(parent) < nodeCount) ?
-                                   model[static_cast<size_t>(parent)].Inversed() * model[n] :
+                                   Inverse(model[static_cast<size_t>(parent)]) * model[n] :
                                    model[n];
     }
 }
@@ -476,8 +477,8 @@ struct AnimationContext::Impl {
     PosePool                     poses;
 
     std::vector<const ModelPrefab*> stepPrefabs;
-    std::vector<JPH::Mat44>         paletteScratch;
-    std::vector<JPH::Mat44>         kinematicScratch;
+    std::vector<Mat4x4>         paletteScratch;
+    std::vector<Mat4x4>         kinematicScratch;
 
     [[nodiscard]] auto ResolveDense(AnimationID handle) const noexcept -> ZHLN::Optional<uint32_t> {
         if (!handle.IsValid()) {
@@ -725,8 +726,8 @@ void AnimationContext::Step(float dt, const AssetManager& assets, PoseUploadQueu
         }
     }
 
-    _impl->paletteScratch.resize(totalPaletteJoints, JPH::Mat44::sIdentity());
-    _impl->kinematicScratch.resize(totalKinematicJoints, JPH::Mat44::sIdentity());
+    _impl->paletteScratch.resize(totalPaletteJoints, Mat4x4::Identity());
+    _impl->kinematicScratch.resize(totalKinematicJoints, Mat4x4::Identity());
 
     TaskSystem::ParallelFor(static_cast<uint32_t>(activeCount), 1, [&](uint32_t start, uint32_t end, uint32_t) {
         for (uint32_t i = start; i < end; ++i) {
@@ -750,7 +751,7 @@ void AnimationContext::Step(float dt, const AssetManager& assets, PoseUploadQueu
 
             if (!restingClip && nodeCount > 0) {
                 for (uint32_t n = 0; n < nodeCount; ++n) {
-                    const Math::TransformTRS bindTRS = Math::Decompose(prefab->nodes[n].localTransform);
+                    const auto bindTRS = DecomposeTransform(PrefabMatrixToNative(prefab->nodes[n].localTransform));
                     scratch[n].prev                  = SampledTRS {.translation = bindTRS.translation, .rotation = bindTRS.rotation, .scale = bindTRS.scale};
                     scratch[n].curr                  = scratch[n].prev;
                     morphs[n]                        = MorphSample {};
@@ -806,11 +807,11 @@ void AnimationContext::Step(float dt, const AssetManager& assets, PoseUploadQueu
                     if (inst.prevTrack >= 0 && inst.blendFactor < 1.0f) {
                         const float     t        = inst.blendFactor;
                         const FVec3 blendedT = state.prev.translation + t * (state.curr.translation - state.prev.translation);
-                        const JPH::Quat blendedR = state.prev.rotation.SLERP(state.curr.rotation, t).Normalized();
+                        const auto blendedR = SlerpRotation(state.prev.rotation, state.curr.rotation, t);
                         const FVec3 blendedS = state.prev.scale + t * (state.curr.scale - state.prev.scale);
-                        clipLocal[n]             = JPH::Mat44::sRotationTranslation(blendedR, blendedT).PreScaled(blendedS);
+                        clipLocal[n]             = ComposeTransform(blendedT, blendedR, blendedS);
                     } else {
-                        clipLocal[n] = JPH::Mat44::sRotationTranslation(state.curr.rotation, state.curr.translation).PreScaled(state.curr.scale);
+                        clipLocal[n] = ComposeTransform(state.curr.translation, state.curr.rotation, state.curr.scale);
                     }
                 }
 
@@ -843,7 +844,7 @@ void AnimationContext::Step(float dt, const AssetManager& assets, PoseUploadQueu
 
                 for (uint32_t n = 0; n < nodeCount; ++n) {
                     if (prefab->nodes[n].hasMesh) {
-                        rigids[n] = RigidNodeSlot {.trs = Math::Decompose(model[n]), .valid = true};
+                        rigids[n] = RigidNodeSlot {.trs = DecomposeTransform(model[n]), .valid = true};
                     } else {
                         rigids[n] = RigidNodeSlot {};
                     }
@@ -859,9 +860,9 @@ void AnimationContext::Step(float dt, const AssetManager& assets, PoseUploadQueu
                 const Skeleton&    skeleton = prefab->skeletons[slice.skeletonIndex];
                 for (uint32_t j = 0; j < slice.jointCount; ++j) {
                     const Joint&     joint      = skeleton.joints[j];
-                    const JPH::Mat44 jointModel = (joint.nodeIndex >= 0 && static_cast<uint32_t>(joint.nodeIndex) < nodeCount) ?
+                    const auto jointModel = (joint.nodeIndex >= 0 && static_cast<uint32_t>(joint.nodeIndex) < nodeCount) ?
                                                       model[static_cast<size_t>(joint.nodeIndex)] :
-                                                      JPH::Mat44::sIdentity();
+                                                      Mat4x4::Identity();
                     _impl->paletteScratch[slice.paletteOffset + j] = jointModel * joint.inverseBindMatrix;
                     if (slice.hasRagdoll) {
                         _impl->kinematicScratch[slice.kinematicOffset + j] = jointModel;
@@ -877,12 +878,12 @@ void AnimationContext::Step(float dt, const AssetManager& assets, PoseUploadQueu
             const UploadSlice& slice = inst.uploadSlices[s];
             poseUploads.Push(
                 slice.jointOffset,
-                std::span<const JPH::Mat44> {_impl->paletteScratch.data() + slice.paletteOffset, slice.jointCount}
+                std::span<const Mat4x4> {_impl->paletteScratch.data() + slice.paletteOffset, slice.jointCount}
             );
             if (slice.hasRagdoll) {
                 poseUploads.PushKinematic(
                     slice.jointOffset,
-                    std::span<const JPH::Mat44> {_impl->kinematicScratch.data() + slice.kinematicOffset, slice.jointCount}
+                    std::span<const Mat4x4> {_impl->kinematicScratch.data() + slice.kinematicOffset, slice.jointCount}
                 );
             }
         }
@@ -912,8 +913,8 @@ auto AnimationContext::Morph(AnimationID handle, uint32_t nodeIndex) const noexc
     });
 }
 
-auto AnimationContext::RigidNode(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<Math::TransformTRS> {
-    return _impl->ResolveDense(handle).and_then([this, nodeIndex](uint32_t denseIdx) -> ZHLN::Optional<Math::TransformTRS> {
+auto AnimationContext::RigidNode(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<TransformParts> {
+    return _impl->ResolveDense(handle).and_then([this, nodeIndex](uint32_t denseIdx) -> ZHLN::Optional<TransformParts> {
         const InstanceState& inst = _impl->instances[denseIdx];
         if (nodeIndex >= inst.nodeCount) {
             return std::nullopt;
@@ -926,7 +927,7 @@ auto AnimationContext::RigidNode(AnimationID handle, uint32_t nodeIndex) const n
     });
 }
 
-auto AnimationContext::LocalPose(AnimationID handle) const noexcept -> std::span<const JPH::Mat44> {
+auto AnimationContext::LocalPose(AnimationID handle) const noexcept -> std::span<const Mat4x4> {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return {};
@@ -935,7 +936,7 @@ auto AnimationContext::LocalPose(AnimationID handle) const noexcept -> std::span
     return _impl->poses.Local(inst.poseOffset, inst.nodeCount);
 }
 
-auto AnimationContext::ModelPose(AnimationID handle) const noexcept -> std::span<const JPH::Mat44> {
+auto AnimationContext::ModelPose(AnimationID handle) const noexcept -> std::span<const Mat4x4> {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return {};

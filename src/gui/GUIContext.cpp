@@ -201,11 +201,8 @@ auto ToClayColor(const ZHLN::FVec4& c) noexcept -> Clay_Color {
     return {(c.x * 255.0f), (c.y * 255.0f), (c.z * 255.0f), (c.w * 255.0f)};
 }
 
-// The container holds the lanes; the addition is Jolt's. Callers keep writing
-// colours as ZHLN::FVec4 and this puts the maths where maths lives.
 auto Brighten(const ZHLN::FVec4& color, float amount) noexcept -> ZHLN::FVec4 {
-    const FVec4 lifted = JPH::Vec4(color.x, color.y, color.z, color.w) + FVec4(amount, amount, amount, 0.0f);
-    return ZHLN::FVec4(lifted);
+    return {color.x + amount, color.y + amount, color.z + amount, color.w};
 }
 
 auto ToClayAlignX(Alignment align) noexcept -> Clay_LayoutAlignmentX {
@@ -1346,7 +1343,8 @@ auto Frame::Dropdown(std::string_view label, std::span<const std::string_view> o
                 .backgroundColor = hot ? Clay_Color {70, 100, 140, 255} : Clay_Color {0, 0, 0, 0}
             };
             Clay__ConfigureOpenElement(rowDecl);
-            Text(options[static_cast<size_t>(i)], 14.0f, (i == selected) ? ZHLN::FVec4 {1.0f, 1.0f, 1.0f, 1.0f} : ZHLN::FVec4 {0.8f, 0.8f, 0.8f, 1.0f});
+            const auto shade = (i == selected) ? 1.0f : 0.8f;
+            Text(options[static_cast<size_t>(i)], 14.0f, {shade, shade, shade, 1.0f});
             Clay__CloseElement();
         }
 

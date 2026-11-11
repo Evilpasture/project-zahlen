@@ -15,6 +15,7 @@
 // is a failure, not a retry.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -191,9 +192,9 @@ struct RTRPBRReflectionTestSuite {
             gfx.rayTracing.enableReflections = enableRTR != 0;
             gfx.post.mode                    = 0;
             gfx.post.giIntensity             = 0.0f;
-            gfx.environment.skyZenith        = FVec4(0.001f, 0.002f, 0.006f, 1.0f);
-            gfx.environment.skyHorizon       = FVec4(0.004f, 0.006f, 0.012f, 1.0f);
-            gfx.environment.skyGround        = FVec4(0.001f, 0.001f, 0.002f, 1.0f);
+            gfx.environment.skyZenith        = ZHLN::FVec4(0.001f, 0.002f, 0.006f, 1.0f);
+            gfx.environment.skyHorizon       = ZHLN::FVec4(0.004f, 0.006f, 0.012f, 1.0f);
+            gfx.environment.skyGround        = ZHLN::FVec4(0.001f, 0.001f, 0.002f, 1.0f);
         });
     }
 
@@ -204,9 +205,9 @@ struct RTRPBRReflectionTestSuite {
         // no Sun exists, which floods dielectric albedo and hides F0 tint.
         reg.Add(
             sunEnt,
-            ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})},
+            ZHLN::Components::TransformComponent {.position = ZHLN::FVec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Quat::FromEulerDegrees({40.0f, 0.0f, 0.0f})},
             ZHLN::Components::LightComponent {
-                .type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 1.0f, 1.0f), .intensity = 0.0f, .direction = FVec3(0.0f, 0.75f, 0.66f).Normalized()
+                .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3(1.0f, 1.0f, 1.0f), .intensity = 0.0f, .direction = ZHLN::FVec3(0.0f, 0.75f, 0.66f).Normalized()
             }
         );
 
@@ -215,13 +216,13 @@ struct RTRPBRReflectionTestSuite {
             return;
         }
         ZHLN::Camera& cam = camComp->camera;
-        cam.position = FVec3(0.0f, 5.5f, 11.0f);
+        cam.position = ZHLN::FVec3(0.0f, 5.5f, 11.0f);
         cam.yaw      = -90.0f;
         cam.pitch    = -28.0f;
         cam.fov      = 55.0f;
     }
 
-    static auto MakeMat(ZHLN::Engine& engine, float metallic, float roughness, ZHLN::FVec4 base, ZHLN::FVec4 emissive = JPH::Float4 {0.0f, 0.0f, 0.0f, 1.0f})
+    static auto MakeMat(ZHLN::Engine& engine, float metallic, float roughness, ZHLN::FVec4 base, ZHLN::FVec4 emissive = ZHLN::FVec4 {0.0f, 0.0f, 0.0f, 1.0f})
         -> std::expected<ZHLN::Material, ZHLN::ErrorCode> {
         return engine.Graphics().CreateMaterial(
             ZHLN::MaterialDesc {.metallic = metallic, .roughness = roughness, .baseColor = base, .emissive = emissive}

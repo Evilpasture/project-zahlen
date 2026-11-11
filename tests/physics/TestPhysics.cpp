@@ -16,6 +16,7 @@
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <atomic>
 #include <cmath>
 #include <expected>
@@ -32,6 +33,31 @@ enum class PhysicsTestError : uint32_t {
 
 namespace ZHLN::Test {
 namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
+
+        std::expected<void, ZHLN::ErrorCode> test_explicit_physics_math_conversions(Fixture::TaskSystemAndJoltScope&) {
+            constexpr FVec3 velocity {1.25f, -2.5f, 3.75f};
+            constexpr DVec3 position {123456789.25, -7654321.75, 0.125};
+            const auto roundTrip = Physics::FromJoltPosition(Physics::ToJoltPosition(position));
+            ExpectTrue(Physics::FromJoltVector(Physics::ToJoltVector(velocity)) == velocity);
+            ExpectTrue(roundTrip.x == static_cast<double>(static_cast<JPH::Real>(position.x)));
+            ExpectTrue(roundTrip.y == static_cast<double>(static_cast<JPH::Real>(position.y)));
+            ExpectTrue(roundTrip.z == static_cast<double>(static_cast<JPH::Real>(position.z)));
+
+            // An asymmetric matrix checks column and row ordering, including translation.
+            auto matrix = Mat4x4::Zero();
+            for (size_t row = 0; row < 4; ++row) {
+                for (size_t column = 0; column < 4; ++column) {
+                    matrix[row, column] = static_cast<float>(row * 4 + column + 1);
+                }
+            }
+            const auto joltMatrix = Physics::ToJoltMatrix(matrix);
+            for (size_t row = 0; row < 4; ++row) {
+                for (size_t column = 0; column < 4; ++column) {
+                    ExpectTrue(joltMatrix(static_cast<int>(row), static_cast<int>(column)) == matrix[row, column]);
+                }
+            }
+            return {};
+        }
 
         // The explicit fixture parameter guarantees workers and Jolt types
         // even when an unnamed namespace's ambient mark is not reflected.
@@ -56,10 +82,48 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::Test::Expect(hit.position.y) == ZHLN::Test::Approx(1.0f, 0.05f);
             ZHLN::Test::Expect(hit.normal.y) > 0.9f;
 
+            // The multi-hit path must preserve all position and normal lanes
+            // when crossing from Jolt into the public query result.
+            const auto hits = pc.RaycastAll({2.5, 10.0, 3.0}, {0.0f, -1.0f, 0.0f}, 20.0f);
+            ZHLN::Test::ExpectTrue(!hits.empty());
+            if (!hits.empty()) {
+                const auto& first = hits.front();
+                ZHLN::Test::Expect(first.bodyID.Pack()) == ground.Pack();
+                ZHLN::Test::Expect(first.position.x) == ZHLN::Test::Approx(2.5, 0.05);
+                ZHLN::Test::Expect(first.position.y) == ZHLN::Test::Approx(1.0, 0.05);
+                ZHLN::Test::Expect(first.position.z) == ZHLN::Test::Approx(3.0, 0.05);
+                ZHLN::Test::Expect(first.normal.x) == ZHLN::Test::Approx(0.0f, 0.05f);
+                ZHLN::Test::Expect(first.normal.y) > 0.9f;
+                ZHLN::Test::Expect(first.normal.z) == ZHLN::Test::Approx(0.0f, 0.05f);
+            }
+
             // 2. Sphere overlap at (0, 0, 0)
             const std::vector<ZHLN::Physics::BodyID> overlapResults = pc.OverlapSphere({0, 0, 0}, 5.0f);
             ZHLN::Test::ExpectGe(overlapResults.size(), 1);
 
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> test_shape_factory_offset_and_compound(Fixture::TaskSystemAndJoltScope&) {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
+            ZHLN::PhysicsContext pc(cfg);
+            const auto box = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.01f, 0.2f, 0.3f);
+            ZHLN::Test::ExpectTrue(box != nullptr);
+            if (box == nullptr) return {};
+            const auto shifted = pc.CreateTranslatedShape(box, {2.0f, 0.0f, 0.0f});
+            const auto compound = pc.CreateCompoundShape(box, shifted);
+            ZHLN::Test::ExpectTrue(shifted != nullptr);
+            ZHLN::Test::ExpectTrue(compound != nullptr);
+            if (shifted != nullptr && compound != nullptr) {
+                const auto shiftedBounds = shifted->GetLocalBounds();
+                const auto compoundBounds = compound->GetLocalBounds();
+                const auto shiftedCenter = shifted->GetCenterOfMass();
+                const auto compoundCenter = compound->GetCenterOfMass();
+                ZHLN::Test::Expect(shiftedBounds.mMin.GetX() + shiftedCenter.GetX()) == ZHLN::Test::Approx(1.99f, 0.001f);
+                ZHLN::Test::Expect(shiftedBounds.mMax.GetX() + shiftedCenter.GetX()) == ZHLN::Test::Approx(2.01f, 0.001f);
+                ZHLN::Test::Expect(compoundBounds.mMin.GetX() + compoundCenter.GetX()) == ZHLN::Test::Approx(-0.01f, 0.001f);
+                ZHLN::Test::Expect(compoundBounds.mMax.GetX() + compoundCenter.GetX()) == ZHLN::Test::Approx(2.01f, 0.001f);
+            }
             return {};
         }
 
@@ -73,6 +137,12 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::Physics::BodyID sphere =
                 pc.CreateRigidBody(sphereShape, {0, 10, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             ZHLN::Test::ExpectTrue(sphere != ZHLN::Physics::BodyID::Null());
+
+            const auto pendingPosition = pc.BodyPosition(sphere);
+            ZHLN::Test::ExpectTrue(pendingPosition.has_value());
+            if (pendingPosition) {
+                ZHLN::Test::ExpectTrue(*pendingPosition == ZHLN::DVec3 {0.0, 10.0, 0.0});
+            }
 
             pc.OptimizeBroadphase();
 
@@ -91,7 +161,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             // leaking PhysicsWorld's slot-to-dense mapping or SoA storage.
             const auto synchronizedPosition = pc.BodyPosition(sphere);
             ZHLN::Test::ExpectTrue(synchronizedPosition.has_value());
-            ZHLN::Test::ExpectLt(synchronizedPosition->GetY(), 9.0);
+            ZHLN::Test::ExpectLt(synchronizedPosition->y, 9.0);
 
             const auto bodyState = pc.BodyState(sphere);
             ZHLN::Test::ExpectTrue(bodyState.has_value());
@@ -336,7 +406,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                     }
 
                     const auto charPos = pc.BodyPosition(character);
-                    if (!charPos.has_value() || !std::isfinite(static_cast<double>(charPos->GetY()))) {
+                    if (!charPos.has_value() || !std::isfinite(static_cast<double>(charPos->y))) {
                         workerFailed.store(true, std::memory_order::release);
                         return;
                     }

@@ -31,6 +31,7 @@
 
 namespace {
 
+using ZHLN::FVec3;
 using ZHLN::BSP::AmbientTerm;
 using ZHLN::BSP::BSPEntity;
 using ZHLN::BSP::BSPMap;

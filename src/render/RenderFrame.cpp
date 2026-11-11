@@ -226,7 +226,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
                 VkTransformMatrixKHR m;
                 for (int row = 0; row < 3; ++row) {
                     for (int col = 0; col < 4; ++col) {
-                        m.matrix[row][col] = t.column[col][row];
+                        m.matrix[row][col] = t[static_cast<size_t>(row), static_cast<size_t>(col)];
                     }
                 }
                 return m;
@@ -267,17 +267,17 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
 }
 
 void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
-    const JPH::Mat44 proj       = view.projMatrix;
-    const JPH::Mat44 viewMatrix = view.viewMatrix;
-    const JPH::Mat44 unjittered = proj * viewMatrix;
+    const Mat4x4 proj       = view.projMatrix;
+    const Mat4x4 viewMatrix = view.viewMatrix;
+    const Mat4x4 unjittered = proj * viewMatrix;
 
     current_view_proj    = view.viewProjMatrix;
     unjittered_view_proj = unjittered;
 
     currentUniforms.viewProj           = view.viewProjMatrix;
     currentUniforms.unjitteredViewProj = unjittered;
-    currentUniforms.invViewProj        = unjittered.Inversed();
-    currentUniforms.camPos             = ZHLN::FVec4 {view.worldPosition.x, view.worldPosition.y, view.worldPosition.z, view.time};
+    currentUniforms.invViewProj        = Inverse(unjittered);
+    currentUniforms.camPos             = {view.worldPosition.x, view.worldPosition.y, view.worldPosition.z, view.time};
     if (view.frameIndex != 0) {
         currentUniforms.frameIndex = view.frameIndex;
     }
@@ -289,8 +289,8 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     auto* gpu               = mapped->As<FrameUniforms>();
     gpu->viewProj           = view.viewProjMatrix;
     gpu->unjitteredViewProj = unjittered;
-    gpu->invViewProj        = unjittered.Inversed();
-    gpu->invProj            = proj.Inversed();
+    gpu->invViewProj        = Inverse(unjittered);
+    gpu->invProj            = Inverse(proj);
     gpu->camPos             = currentUniforms.camPos;
     gpu->frameIndex         = currentUniforms.frameIndex;
 }

@@ -267,7 +267,7 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
     // authored 2048px shoe/cloth normal and color textures in fidelity stills;
     // the renderer's trilinear/aniso samplers select the right mip at a distance.
     auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), bytes, virtualPath, virtualPath,
+        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), bytes, virtualPath, virtualPath,
         ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048}
     );
     if (!prefab) {

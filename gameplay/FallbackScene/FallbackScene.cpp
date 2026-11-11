@@ -14,7 +14,7 @@
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Engine/Scene.hpp>
@@ -211,7 +211,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     if (s_AnimateScene) {
         reg.Patch<Components::TransformComponent>(s_CubeEntity, [&](auto& trans) -> auto {
             FVec3 euler(s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f);
-            trans.rotation = Math::EulerDegreesToQuat(euler);
+            trans.rotation = Quat::FromEulerDegrees(euler);
             trans.position.y = 2.0f + std::sin(s_AccumTime * 2.0f) * 0.25f;
         });
 

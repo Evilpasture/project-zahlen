@@ -237,7 +237,7 @@ float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float wo
         }
 
         const auto trans    = reg.Get<Components::TransformComponent>(e);
-        FVec3  pos      = FVec3::sZero();
+        FVec3  pos      = FVec3::Zero();
         if (trans) {
             pos = trans->position;
         }

@@ -17,7 +17,7 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include <Jolt/Math/Mat4x4.h>
+#include <Jolt/Math/Mat44.h>
 #include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -79,7 +79,9 @@ class PoseUploadQueue {
         upload.jointOffset = jointOffset;
         if (!matrices.empty()) {
             auto* destination = static_cast<ZHLN::Mat4x4*>(Allocate(matrices.size() * sizeof(ZHLN::Mat4x4), alignof(ZHLN::Mat4x4)));
-            std::uninitialized_copy(matrices.begin(), matrices.end(), destination);
+            for (size_t i = 0; i < matrices.size(); ++i) {
+                std::construct_at(destination + i, FromJolt(matrices[i]));
+            }
             upload.matrices = {destination, matrices.size()};
         }
         _uploads.push_back(upload);
@@ -112,7 +114,11 @@ class PoseUploadQueue {
     }
 
     void PushKinematic(uint32_t jointOffset, std::span<const JPH::Mat44> modelJoints) {
-        std::vector<ZHLN::Mat4x4> converted(modelJoints.begin(), modelJoints.end());
+        std::vector<ZHLN::Mat4x4> converted;
+        converted.reserve(modelJoints.size());
+        for (const JPH::Mat44& matrix: modelJoints) {
+            converted.push_back(FromJolt(matrix));
+        }
         PushKinematic(jointOffset, std::span<const ZHLN::Mat4x4> {converted.data(), converted.size()});
     }
 
@@ -147,6 +153,18 @@ class PoseUploadQueue {
     }
 
   private:
+    // Copy by element instead of aliasing two unrelated matrix types. Both
+    // expose row/column indexing and store translation in column three.
+    [[nodiscard]] static auto FromJolt(const JPH::Mat44& matrix) noexcept -> ZHLN::Mat4x4 {
+        ZHLN::Mat4x4 result {};
+        for (int column = 0; column < 4; ++column) {
+            for (int row = 0; row < 4; ++row) {
+                result[static_cast<size_t>(row), static_cast<size_t>(column)] = matrix(row, column);
+            }
+        }
+        return result;
+    }
+
     static constexpr size_t kInitialArenaBytes = 64 * 1024;
     static constexpr size_t kInitialUploadCount = 16;
 

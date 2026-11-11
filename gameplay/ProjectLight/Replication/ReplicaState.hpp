@@ -19,7 +19,7 @@
 #include <Replication/ReplicationComponents.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -31,14 +31,14 @@
 namespace ZHLN::ProjectLight {
 
 struct TransformState {
-    FVec3 position       = FVec3::sZero();
-    JPH::Quat rotation       = JPH::Quat::sIdentity();
-    FVec3 linearVelocity = FVec3::sZero();
+    FVec3 position       = FVec3::Zero();
+    Quat rotation       = Quat::Identity();
+    FVec3 linearVelocity = FVec3::Zero();
 };
 
 struct NetworkTransformSample {
-    FVec3                             position = FVec3::sZero();
-    JPH::Quat                             rotation = JPH::Quat::sIdentity();
+    FVec3                             position = FVec3::Zero();
+    Quat                             rotation = Quat::Identity();
     std::chrono::steady_clock::time_point receivedAt;
 };
 
@@ -65,7 +65,7 @@ struct NetworkTransformHistory {
     // Position and rotation at `renderTime`, interpolated between the two
     // samples that straddle it. Returns false only when there is nothing to
     // sample; the caller decides whether to fall back to the authoritative pose.
-    [[nodiscard]] auto Sample(std::chrono::steady_clock::time_point renderTime, FVec3& position, JPH::Quat& rotation) const noexcept -> bool {
+    [[nodiscard]] auto Sample(std::chrono::steady_clock::time_point renderTime, FVec3& position, Quat& rotation) const noexcept -> bool {
         if (Empty()) return false;
 
         const std::size_t oldest = (m_next + Capacity - m_count) % Capacity;
@@ -98,7 +98,7 @@ struct NetworkTransformHistory {
             }
             alpha    = std::clamp(alpha, 0.0f, 1.0f);
             position = previous.position + (current.position - previous.position) * alpha;
-            rotation = previous.rotation.SLERP(current.rotation, alpha).Normalized();
+            rotation = Slerp(previous.rotation, current.rotation, alpha).Normalized();
             return true;
         }
 
@@ -137,12 +137,12 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
     std::string name      = "Instance";
     uint64_t    parentUid = 0u;
 
-    FVec3               position         = FVec3::sZero();
-    FVec3               rotationEulerDeg = FVec3::sZero();
-    JPH::Quat               rotationQuat     = JPH::Quat::sIdentity();
-    FVec3               linearVelocity   = FVec3::sZero();
-    FVec3               renderPosition   = FVec3::sZero();
-    JPH::Quat               renderRotation   = JPH::Quat::sIdentity();
+    FVec3               position         = FVec3::Zero();
+    FVec3               rotationEulerDeg = FVec3::Zero();
+    Quat               rotationQuat     = Quat::Identity();
+    FVec3               linearVelocity   = FVec3::Zero();
+    FVec3               renderPosition   = FVec3::Zero();
+    Quat               renderRotation   = Quat::Identity();
     NetworkTransformHistory physicsHistory {};
     bool                    hasPhysicsSample = false;
     FVec3               size             = FVec3(4.0f, 1.0f, 2.0f);
@@ -156,7 +156,7 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
     uint64_t                networkOwnerUid  = 0u;
     PartShape               shape            = PartShape::Cube;
     std::string             meshId;
-    FVec3               meshScale = FVec3::sReplicate(1.0f);
+    FVec3               meshScale = FVec3::Splat(1.0f);
 
     uint64_t      primaryPartUid = 0u;
     uint64_t      rootPartUid    = 0u;
@@ -170,10 +170,10 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
 
     uint64_t  part1Uid        = 0u;
     uint64_t  part2Uid        = 0u;
-    FVec3 offset1         = FVec3::sZero();
-    FVec3 offset2         = FVec3::sZero();
-    FVec3 rotationOffset1 = FVec3::sZero();
-    FVec3 rotationOffset2 = FVec3::sZero();
+    FVec3 offset1         = FVec3::Zero();
+    FVec3 offset2         = FVec3::Zero();
+    FVec3 rotationOffset1 = FVec3::Zero();
+    FVec3 rotationOffset2 = FVec3::Zero();
     float     currentAngle    = 0.0f;
     float     desiredAngle    = 0.0f;
     float     maxVelocity     = 30.0f;
@@ -205,7 +205,7 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
     // changed something that needs a rebuild" from "nothing to do", and they are
     // refreshed from the entity on every spawn.
     MaterialID  materialId        = InvalidMaterialID;
-    FVec3   spawnedSize       = FVec3::sZero();
+    FVec3   spawnedSize       = FVec3::Zero();
     PartShape   spawnedShape      = PartShape::Cube;
     uint64_t    spawnedOwnerUid   = 0u;
     bool        hasPhysicsBody    = false;

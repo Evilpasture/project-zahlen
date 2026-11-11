@@ -17,9 +17,6 @@
 #include "StudioModelImporter.hpp"
 #include "VMTParser.hpp"
 #include "VTFDecoder.hpp"
-#include <Jolt/Physics/Collision/Shape/BoxShape.h>
-#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
-#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
@@ -241,7 +238,7 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
     }
 
     const VMTMaterial& material = *vmt;
-    desc.baseColor              = material.baseColor;
+    desc.baseColor              = {material.baseColor.x, material.baseColor.y, material.baseColor.z, material.baseColor.w};
     // $nocull from the VMT, or the importer's single-sheet wall audit marking
     // this part: Source draws undercovered faces from their back side (the
     // vbsp leaffaces of the room include them), so honours match by rendering
@@ -404,6 +401,7 @@ auto UploadVradLightmaps(RenderContext& ctx, const VradLightmapAtlas& atlas, std
 // Shared by the world prefab and the interactive submodel prefabs.
 void AssemblePrefabParts(
     RenderContext&         ctx,
+    PhysicsContext&        physics,
     const SourceVFS&       vfs,
     const ImportedMapData& data,
     std::string_view       prefabPath,
@@ -471,8 +469,8 @@ void AssemblePrefabParts(
         modelPart.defaultMaterial = subMaterial;
         modelPart.nodeIndex       = 0;
         modelPart.localTransform  = JPH::Mat44::sIdentity();
-        modelPart.localMin        = part.boundsMin;
-        modelPart.localMax        = part.boundsMax;
+        modelPart.localMin        = {part.boundsMin.x, part.boundsMin.y, part.boundsMin.z};
+        modelPart.localMax        = {part.boundsMax.x, part.boundsMax.y, part.boundsMax.z};
 
         const std::string assetKey = std::string(prefabPath) + "#part_" + std::to_string(prefab.parts.size());
         modelPart.meshAsset        = HashAssetID(assetKey);
@@ -492,7 +490,7 @@ void AssemblePrefabParts(
         }
 
         if (options.buildColliders && !part.skyboxLayer) {
-            modelPart.meshCollider = Physics::CreateMeshShape(part.positions.data(), part.VertexCount(), part.indices.data(), part.IndexCount());
+            modelPart.meshCollider = physics.CreateMeshShape(part.positions.data(), part.VertexCount(), part.indices.data(), part.IndexCount());
 
             const FVec3 localCenter(
                 (part.boundsMin.x + part.boundsMax.x) * 0.5f, (part.boundsMin.y + part.boundsMax.y) * 0.5f, (part.boundsMin.z + part.boundsMax.z) * 0.5f
@@ -501,8 +499,8 @@ void AssemblePrefabParts(
                 std::max((part.boundsMax.x - part.boundsMin.x) * 0.5f, 0.01f), std::max((part.boundsMax.y - part.boundsMin.y) * 0.5f, 0.01f),
                 std::max((part.boundsMax.z - part.boundsMin.z) * 0.5f, 0.01f)
             );
-            const JPH::ShapeRefC baseBox = new JPH::BoxShape(halfExtents);
-            modelPart.boxCollider        = new JPH::RotatedTranslatedShape(localCenter, JPH::Quat::sIdentity(), baseBox);
+            const auto baseBox = physics.GetOrCreateShape(Physics::ShapeType::Box, halfExtents.x, halfExtents.y, halfExtents.z);
+            modelPart.boxCollider = physics.CreateTranslatedShape(baseBox, localCenter);
 
             if (modelPart.meshCollider == nullptr) {
                 modelPart.meshCollider = modelPart.boxCollider;
@@ -519,7 +517,7 @@ void AssemblePrefabParts(
     // compound of {part mesh, collision-only mesh} keeps both hulls intact
     // for mesh queries and CharacterVirtual alike.
     if (options.buildColliders && data.collisionOnly.IndexCount() > 0) {
-        if (JPH::ShapeRefC collisionShape = Physics::CreateMeshShape(
+        if (auto collisionShape = physics.CreateMeshShape(
                 data.collisionOnly.positions.data(), data.collisionOnly.VertexCount(), data.collisionOnly.indices.data(), data.collisionOnly.IndexCount()
             )) {
             bool folded = false;
@@ -527,14 +525,11 @@ void AssemblePrefabParts(
                 if (part.meshCollider == nullptr) {
                     continue;
                 }
-                JPH::StaticCompoundShapeSettings compoundSettings;
-                compoundSettings.AddShape(FVec3::sZero(), JPH::Quat::sIdentity(), part.meshCollider);
-                compoundSettings.AddShape(FVec3::sZero(), JPH::Quat::sIdentity(), collisionShape);
-                const auto compound = compoundSettings.Create();
-                if (!compound.IsValid()) {
+                const auto compound = physics.CreateCompoundShape(part.meshCollider, collisionShape);
+                if (!compound) {
                     continue;
                 }
-                part.meshCollider = compound.Get();
+                part.meshCollider = compound;
                 folded            = true;
                 break;
             }
@@ -577,7 +572,7 @@ void ShiftImportedGeometry(ImportedMapData& data, FVec3 offset) {
     data.boundsMax.z += offset.z;
 }
 
-auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& map, std::string_view virtualPath, const ImportOptions& options)
+auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& physics, const BSPMap& map, std::string_view virtualPath, const ImportOptions& options)
     -> ZHLN::Optional<ModelPrefab&> {
     // Interactive brush submodels (doors, buttons) get their own prefabs
     // below; excluding them here keeps their faces out of the static world
@@ -679,13 +674,13 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     // resolves position through its node chain.
     prefab->nodes.push_back(ModelNode {.name = String64("bsp_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false});
 
-    AssemblePrefabParts(ctx, vfs, imported, virtualPath, options, *prefab);
+    AssemblePrefabParts(ctx, physics, vfs, imported, virtualPath, options, *prefab);
 
     for (const BspPointLight& light: imported.lights) {
         ModelNode node;
         node.name           = String64(light.name.c_str());
         node.parentIndex    = 0;
-        node.localTransform = JPH::Mat44::sTranslation(light.position);
+        node.localTransform = JPH::Mat44::sTranslation(JPH::Vec3(light.position.x, light.position.y, light.position.z));
         node.hasMesh        = false;
         prefab->nodes.push_back(node);
 
@@ -761,7 +756,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         subPrefab->nodes.push_back(
             ModelNode {.name = String64("bsp_submodel_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false}
         );
-        AssemblePrefabParts(ctx, vfs, subImported, subPath, options, *subPrefab);
+        AssemblePrefabParts(ctx, physics, vfs, subImported, subPath, options, *subPrefab);
         assetMgr.CachePrefab(HashAssetPath(subPath), std::move(subPrefab));
         Log("BSP Importer: {} -> interactive submodel prefab ({}, {} parts)", subPath, sub.rotating ? "rotating" : "sliding", subImported.parts.size());
     }
@@ -892,7 +887,7 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
     // a lamp reads the same whichever shader class the mapper reached for.
     const float luma  = std::max(Rec709Luma(emission.tint), kEmissiveStrengthEpsilon);
     const float scale = emission.strength * kSourceEmissionHdrScale / luma;
-    desc.emissive     = JPH::Float4(emission.tint.x * scale, emission.tint.y * scale, emission.tint.z * scale, 1.0f);
+    desc.emissive     = {emission.tint.x * scale, emission.tint.y * scale, emission.tint.z * scale, 1.0f};
 
     // The additive term carries the surface's own art whenever the material
     // builder did not already say so: a screen glows with its picture, not
@@ -907,11 +902,11 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
     // already dimmed to the missing-texture grey, and that is all it should
     // read as.
     if (unlitByConstruction && !vmt.baseTexture.empty() && !vfs.ResolveTexture(vmt.baseTexture).has_value()) {
-        desc.emissive = JPH::Float4(0.0f, 0.0f, 0.0f, 1.0f);
+        desc.emissive = {0.0f, 0.0f, 0.0f, 1.0f};
     }
 }
 
-auto LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, const ImportOptions& options) -> ZHLN::Optional<ModelPrefab&> {
+auto LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& physics, std::string_view path, const ImportOptions& options) -> ZHLN::Optional<ModelPrefab&> {
     const uint64_t hash   = HashAssetPath(path);
     const auto     cached = assetMgr.GetCachedPrefab(hash);
     if (cached) {
@@ -923,12 +918,13 @@ auto LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view 
         LogWarning("BSP Importer: failed to read {}", path);
         return std::nullopt;
     }
-    return LoadBSPPrefabFromMemory(ctx, assetMgr, *bytes, path, options);
+    return LoadBSPPrefabFromMemory(ctx, assetMgr, physics, *bytes, path, options);
 }
 
 auto LoadBSPPrefabFromMemory(
     RenderContext&             ctx,
     AssetManager&              assetMgr,
+    PhysicsContext&            physics,
     std::span<const std::byte> bytes,
     std::string_view           virtualPath,
     const ImportOptions&       options
@@ -944,10 +940,10 @@ auto LoadBSPPrefabFromMemory(
         LogWarning("BSP Importer: {}: {}", virtualPath, parsed.error());
         return std::nullopt;
     }
-    return BuildModelPrefab(ctx, assetMgr, *parsed, virtualPath, options);
+    return BuildModelPrefab(ctx, assetMgr, physics, *parsed, virtualPath, options);
 }
 
-auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& map, const ImportOptions& options) -> size_t {
+auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& physics, const BSPMap& map, const ImportOptions& options) -> size_t {
     SourceVFS vfs;
     if (!options.assetRoot.empty()) {
         vfs.AddSearchPath(options.assetRoot);
@@ -956,7 +952,7 @@ auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, const BSPMap
     size_t loaded = 0;
     for (const auto& sp: map.staticProps) {
         if (!sp.modelName.empty()) {
-            if (const auto model = LoadStudioModelPrefab(ctx, assetMgr, vfs, sp.modelName, options); model.has_value()) {
+            if (const auto model = LoadStudioModelPrefab(ctx, assetMgr, physics, vfs, sp.modelName, options); model.has_value()) {
                 ++loaded;
             }
         }
@@ -965,7 +961,7 @@ auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, const BSPMap
     for (const auto& ent: map.entities) {
         const std::string_view model = ent.Find("model");
         if (model.ends_with(".mdl")) {
-            if (const auto m = LoadStudioModelPrefab(ctx, assetMgr, vfs, model, options); m.has_value()) {
+            if (const auto m = LoadStudioModelPrefab(ctx, assetMgr, physics, vfs, model, options); m.has_value()) {
                 ++loaded;
             }
         }

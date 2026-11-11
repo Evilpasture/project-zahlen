@@ -4,14 +4,10 @@
 module;
 
 // clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Animation/ProceduralMath.hpp>
 // clang-format on
-#include <Jolt/Math/Mat4x4.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Animation/IK.hpp>
@@ -43,16 +39,16 @@ namespace {
     return value.LengthSquared() > 1.0e-8f ? value.Normalized() : FVec3(fallback);
 }
 
-[[nodiscard]] FVec3 MatrixScale(const JPH::Mat44& matrix) noexcept {
-    return FVec3(matrix.GetColumn3(0).Length(), matrix.GetColumn3(1).Length(), matrix.GetColumn3(2).Length());
+[[nodiscard]] FVec3 MatrixScale(const Mat4x4& matrix) noexcept {
+    return FVec3(ProceduralMath::Column3(matrix, 0).Length(), ProceduralMath::Column3(matrix, 1).Length(), ProceduralMath::Column3(matrix, 2).Length());
 }
 
-[[nodiscard]] JPH::Quat MatrixRotation(const JPH::Mat44& matrix) noexcept {
+[[nodiscard]] Quat MatrixRotation(const Mat4x4& matrix) noexcept {
     const FVec3 scale = MatrixScale(matrix);
-    const FVec3 x     = scale.x > 1.0e-6f ? matrix.GetColumn3(0) / scale.x : FVec3::sAxisX();
-    const FVec3 y     = scale.y > 1.0e-6f ? matrix.GetColumn3(1) / scale.y : FVec3::sAxisY();
-    const FVec3 z     = scale.z > 1.0e-6f ? matrix.GetColumn3(2) / scale.z : FVec3::sAxisZ();
-    return JPH::Mat44(FVec4(x, 0.0f), FVec4(y, 0.0f), FVec4(z, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f)).GetQuaternion().Normalized();
+    const FVec3 x     = scale.x > 1.0e-6f ? ProceduralMath::Column3(matrix, 0) / scale.x : FVec3::UnitX();
+    const FVec3 y     = scale.y > 1.0e-6f ? ProceduralMath::Column3(matrix, 1) / scale.y : FVec3::UnitY();
+    const FVec3 z     = scale.z > 1.0e-6f ? ProceduralMath::Column3(matrix, 2) / scale.z : FVec3::UnitZ();
+    return ProceduralMath::Rotation(Mat4x4::FromCols(FVec4(x, 0.0f), FVec4(y, 0.0f), FVec4(z, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f)));
 }
 
 [[nodiscard]] bool IsDescendant(const RigBoneMap& map, RigNodeIndex node, RigNodeIndex ancestor) noexcept {
@@ -66,7 +62,7 @@ namespace {
     return false;
 }
 
-void RotateSubtreeAroundPivot(const RigBoneMap& map, JPH::Mat44* transforms, RigNodeIndex rootNode, FVec3 pivot, JPH::QuatArg rotation) noexcept {
+void RotateSubtreeAroundPivot(const RigBoneMap& map, Mat4x4* transforms, RigNodeIndex rootNode, FVec3 pivot, Quat rotation) noexcept {
     if (transforms == nullptr || !IsValidRigNode(rootNode, map.nodeCount)) {
         return;
     }
@@ -74,9 +70,9 @@ void RotateSubtreeAroundPivot(const RigBoneMap& map, JPH::Mat44* transforms, Rig
         if (!IsDescendant(map, node, rootNode)) {
             continue;
         }
-        const FVec3 position    = pivot + rotation * (transforms[node].GetTranslation() - pivot);
-        const JPH::Quat orientation = (rotation * MatrixRotation(transforms[node])).Normalized();
-        transforms[node]            = JPH::Mat44::sRotationTranslation(orientation, position).PreScaled(MatrixScale(transforms[node]));
+        const FVec3 position    = pivot + rotation * (ProceduralMath::Translation(transforms[node]) - pivot);
+        const Quat orientation = (rotation * MatrixRotation(transforms[node])).Normalized();
+        transforms[node]            = ProceduralMath::Transform(orientation, position, MatrixScale(transforms[node]));
     }
 }
 
@@ -93,23 +89,23 @@ void SpringVector(FVec3& value, FVec3& velocity, FVec3 target, float dt, float s
     velocity                           = (velocity + (FVec3(target) - old) * hoo) * inverse;
 }
 
-void SpringRotation(JPH::Quat& value, FVec3& velocity, JPH::QuatArg target, float dt, float stiffness, float damping) noexcept {
+void SpringRotation(Quat& value, FVec3& velocity, Quat target, float dt, float stiffness, float damping) noexcept {
     const float safeDt             = std::clamp(dt, 0.0f, 0.05f);
     const float safeStiffness      = std::max(stiffness, 0.0f);
     const float dampingCoefficient = 2.0f * std::sqrt(safeStiffness) * std::max(damping, 0.0f);
-    JPH::Quat   error              = (target * value.Inversed()).Normalized();
+    Quat   error              = (target * value.Inversed()).Normalized();
     if (error.w < 0.0f) {
-        error = JPH::Quat(-error.x, -error.y, -error.z, -error.w);
+        error = Quat(-error.x, -error.y, -error.z, -error.w);
     }
     FVec3 axis;
     float     angle = 0.0f;
-    error.GetAxisAngle(axis, angle);
+    error.ToAxisAngle(axis, angle);
     const float denominator   = 1.0f + dampingCoefficient * safeDt + safeStiffness * safeDt * safeDt;
     velocity                  = (velocity + axis * (angle * safeStiffness * safeDt)) / denominator;
     const FVec3 step      = velocity * safeDt;
     const float     stepAngle = step.Length();
     if (stepAngle > 1.0e-7f) {
-        value = (JPH::Quat::sRotation(step / stepAngle, std::min(stepAngle, std::numbers::pi_v<float>)) * value).Normalized();
+        value = (Quat::FromAxisAngle(step / stepAngle, std::min(stepAngle, std::numbers::pi_v<float>)) * value).Normalized();
     }
 }
 
@@ -131,31 +127,31 @@ void SpringRotation(JPH::Quat& value, FVec3& velocity, JPH::QuatArg target, floa
 
 } // namespace
 
-JPH::Mat44 SolveItemBasePose(
+Mat4x4 SolveItemBasePose(
     const ItemHandlingComponent& handling,
-    const JPH::Mat44&            primaryHandModel,
-    const JPH::Mat44&            chestModel,
-    const JPH::Mat44&            worldToModel,
+    const Mat4x4&            primaryHandModel,
+    const Mat4x4&            chestModel,
+    const Mat4x4&            worldToModel,
     FVec3                 headPosModel,
     FVec3                 aimDirModel,
-    const JPH::Mat44&            worldAnchor
+    const Mat4x4&            worldAnchor
 ) noexcept {
     switch (handling.driverMode) {
         case ItemDriverMode::HandAnchored:
             return primaryHandModel;
         case ItemDriverMode::AimGuided: {
-            const JPH::Quat aimRotation = JPH::Quat::sFromTo(FVec3::sAxisZ(), SafeNormalized(aimDirModel, FVec3::sAxisZ()));
-            const FVec3 hipPosition = FVec3(headPosModel) + aimRotation * JPH::Mat44(handling.hipLocalOffset).GetTranslation();
-            const FVec3 aimPosition = FVec3(headPosModel) + aimRotation * JPH::Mat44(handling.aimLocalOffset).GetTranslation();
+            const Quat aimRotation = FromTo(FVec3::UnitZ(), SafeNormalized(aimDirModel, FVec3::UnitZ()));
+            const FVec3 hipPosition = FVec3(headPosModel) + aimRotation * ProceduralMath::Translation(Mat4x4(handling.hipLocalOffset));
+            const FVec3 aimPosition = FVec3(headPosModel) + aimRotation * ProceduralMath::Translation(Mat4x4(handling.aimLocalOffset));
             const float     blend       = SmoothStep(handling.aimProgress);
-            return JPH::Mat44::sRotationTranslation(aimRotation, hipPosition + (aimPosition - hipPosition) * blend);
+            return ProceduralMath::Transform(aimRotation, hipPosition + (aimPosition - hipPosition) * blend);
         }
         case ItemDriverMode::BodyMounted:
             return chestModel * handling.hipLocalOffset;
         case ItemDriverMode::WorldAnchored:
             return worldToModel * worldAnchor;
     }
-    return JPH::Mat44::sIdentity();
+    return Mat4x4::Identity();
 }
 
 float UpdateGripWeight(GripPoint& grip, float dt) noexcept {
@@ -173,52 +169,52 @@ void UpdateItemDynamics(
     Entity                 characterEntity,
     ItemHandlingComponent& handling,
     FVec3           rootPosition,
-    JPH::QuatArg           rootRotation,
+    Quat           rootRotation,
     float                  dt
 ) noexcept {
-    const JPH::Mat44 rootWorld      = JPH::Mat44::sRotationTranslation(rootRotation, rootPosition);
-    const JPH::Mat44 driverWorld    = rootWorld * handling.itemModelTransform;
-    const FVec3  driverPosition = driverWorld.GetTranslation();
-    const JPH::Quat  driverRotation = MatrixRotation(driverWorld);
+    const Mat4x4 rootWorld      = ProceduralMath::Transform(rootRotation, rootPosition);
+    const Mat4x4 driverWorld    = rootWorld * handling.itemModelTransform;
+    const FVec3  driverPosition = ProceduralMath::Translation(driverWorld);
+    const Quat  driverRotation = MatrixRotation(driverWorld);
     const float      inertia        = std::clamp(handling.sway.massKg * 0.035f, 0.01f, 0.35f);
     if (handling.sway.driverInitialized) {
         const FVec3 localDriverDelta = driverRotation.Inversed() * (driverPosition - handling.sway.previousDriverPosition);
         handling.sway.positionOffset           = FVec3(handling.sway.positionOffset) - localDriverDelta * inertia;
-        const JPH::Quat previousDriverRotation = handling.sway.previousDriverRotation;
-        JPH::Quat       delta                  = (driverRotation * previousDriverRotation.Inversed()).Normalized();
+        const Quat previousDriverRotation = handling.sway.previousDriverRotation;
+        Quat       delta                  = (driverRotation * previousDriverRotation.Inversed()).Normalized();
         if (delta.w < 0.0f) {
-            delta = JPH::Quat(-delta.x, -delta.y, -delta.z, -delta.w);
+            delta = Quat(-delta.x, -delta.y, -delta.z, -delta.w);
         }
         FVec3 axis;
         float     angle = 0.0f;
-        delta.GetAxisAngle(axis, angle);
+        delta.ToAxisAngle(axis, angle);
         if (angle > 1.0e-6f) {
-            const FVec3 localAxis = driverRotation.Inversed() * SafeNormalized(axis, FVec3::sAxisY());
+            const FVec3 localAxis = driverRotation.Inversed() * SafeNormalized(axis, FVec3::UnitY());
             handling.sway.rotationOffset =
-                (JPH::Quat::sRotation(SafeNormalized(localAxis, FVec3::sAxisY()), -angle * inertia) * handling.sway.rotationOffset).Normalized();
+                (Quat::FromAxisAngle(SafeNormalized(localAxis, FVec3::UnitY()), -angle * inertia) * handling.sway.rotationOffset).Normalized();
         }
     }
     handling.sway.previousDriverPosition = driverPosition;
     handling.sway.previousDriverRotation = driverRotation;
     handling.sway.driverInitialized      = true;
 
-    FVec3 obstaclePositionTarget = FVec3::sZero();
-    JPH::Quat obstacleRotationTarget = JPH::Quat::sIdentity();
+    FVec3 obstaclePositionTarget = FVec3::Zero();
+    Quat obstacleRotationTarget = Quat::Identity();
     if (handling.avoidance.probeDistance > 0.01f) {
-        const JPH::Mat44 worldItem = rootWorld * handling.itemModelTransform;
-        const FVec3  origin    = worldItem.GetTranslation();
-        const FVec3  forward   = SafeNormalized(worldItem.Multiply3x3(FVec3::sAxisZ()), rootRotation * FVec3::sAxisZ());
+        const Mat4x4 worldItem = rootWorld * handling.itemModelTransform;
+        const FVec3  origin    = ProceduralMath::Translation(worldItem);
+        const FVec3  forward   = SafeNormalized(ProceduralMath::Direction(worldItem, FVec3::UnitZ()), rootRotation * FVec3::UnitZ());
         Physics::BodyID ignoredPhysics {};
         if (const auto physicsComponent = registry.Get<Components::PhysicsComponent>(characterEntity)) {
             ignoredPhysics = physicsComponent->physicsID;
         }
-        const auto hit = physics.Raycast(origin, forward, handling.avoidance.probeDistance, ignoredPhysics);
+        const auto hit = physics.Raycast(origin.Cast<double>(), forward, handling.avoidance.probeDistance, ignoredPhysics);
         if (hit.hasHit && std::isfinite(hit.fraction)) {
             const float penetration = handling.avoidance.probeDistance * (1.0f - std::clamp(hit.fraction, 0.0f, 1.0f));
             const float pushback    = std::clamp(penetration * std::max(handling.avoidance.pushbackScale, 0.0f), 0.0f, handling.avoidance.probeDistance);
-            const float tilt        = std::clamp(penetration * handling.avoidance.tiltScale, -JPH::DegreesToRadians(35.0f), JPH::DegreesToRadians(35.0f));
+            const float tilt        = std::clamp(penetration * handling.avoidance.tiltScale, -ProceduralMath::Radians(35.0f), ProceduralMath::Radians(35.0f));
             obstaclePositionTarget  = FVec3(0.0f, 0.0f, -pushback);
-            obstacleRotationTarget  = JPH::Quat::sRotation(FVec3::sAxisX(), tilt);
+            obstacleRotationTarget  = Quat::FromAxisAngle(FVec3::UnitX(), tilt);
         }
     }
 
@@ -230,7 +226,7 @@ void UpdateItemDynamics(
     // and stored: a member converts on assignment, never to a FVec3&.
     FVec3 swayOffset          = handling.sway.positionOffset;
     FVec3 swayVelocity        = handling.sway.positionVelocity;
-    JPH::Quat swayRotation        = handling.sway.rotationOffset;
+    Quat swayRotation        = handling.sway.rotationOffset;
     FVec3 swayAngularVelocity = handling.sway.angularVelocity;
     SpringVector(swayOffset, swayVelocity, obstaclePositionTarget, dt, effectiveStiffness, handling.sway.damping);
     SpringRotation(swayRotation, swayAngularVelocity, obstacleRotationTarget, dt, effectiveStiffness, handling.sway.damping);
@@ -245,9 +241,9 @@ void UpdateItemDynamics(
                                 std::isfinite(handling.sway.rotationOffset.z) && std::isfinite(handling.sway.rotationOffset.w);
     if (!finitePosition || !finiteRotation) {
         handling.sway.positionOffset   = obstaclePositionTarget;
-        handling.sway.positionVelocity = FVec3::sZero();
+        handling.sway.positionVelocity = FVec3::Zero();
         handling.sway.rotationOffset   = obstacleRotationTarget;
-        handling.sway.angularVelocity  = FVec3::sZero();
+        handling.sway.angularVelocity  = FVec3::Zero();
     }
     // Clamp against the stored values: the NaN guard above may have replaced them.
     const float maximumOffset = std::max(handling.avoidance.probeDistance * 1.25f, 0.25f);
@@ -257,13 +253,13 @@ void UpdateItemDynamics(
         handling.sway.positionOffset   = swayOffset;
         handling.sway.positionVelocity = FVec3(handling.sway.positionVelocity) * 0.25f;
     }
-    swayRotation                 = JPH::Quat(handling.sway.rotationOffset).Normalized();
-    const JPH::Mat44 itemModel   = handling.itemModelTransform;
+    swayRotation                 = Quat(handling.sway.rotationOffset).Normalized();
+    const Mat4x4 itemModel   = handling.itemModelTransform;
     handling.sway.rotationOffset = swayRotation;
-    handling.itemModelTransform  = itemModel * JPH::Mat44::sRotationTranslation(swayRotation, handling.sway.positionOffset);
+    handling.itemModelTransform  = itemModel * ProceduralMath::Transform(swayRotation, handling.sway.positionOffset);
 }
 
-void ConstrainItemToGripReach(ItemHandlingComponent& handling, const JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
+void ConstrainItemToGripReach(ItemHandlingComponent& handling, const Mat4x4* nodeTransforms, const RigBoneMap& map) noexcept {
     if (nodeTransforms == nullptr || handling.driverMode == ItemDriverMode::WorldAnchored || handling.driverMode == ItemDriverMode::HandAnchored) {
         return;
     }
@@ -276,7 +272,7 @@ void ConstrainItemToGripReach(ItemHandlingComponent& handling, const JPH::Mat44*
     for (size_t pass = 0; pass < correctionPasses; ++pass) {
         float     greatestExcess   = 0.0f;
         float     correctionWeight = 0.0f;
-        FVec3 correction       = FVec3::sZero();
+        FVec3 correction       = FVec3::Zero();
         for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
             const GripPoint& grip   = handling.grips[gripIndex];
             const float      weight = std::clamp(grip.evaluatedIKWeight, 0.0f, 1.0f);
@@ -290,11 +286,11 @@ void ConstrainItemToGripReach(ItemHandlingComponent& handling, const JPH::Mat44*
             if (!IsValidRigNode(upperNode, map.nodeCount) || !IsValidRigNode(foreNode, map.nodeCount) || !IsValidRigNode(handNode, map.nodeCount)) {
                 continue;
             }
-            const FVec3 upperPosition = nodeTransforms[upperNode].GetTranslation();
-            const float     armLength     = (nodeTransforms[foreNode].GetTranslation() - upperPosition).Length() +
-                                            (nodeTransforms[handNode].GetTranslation() - nodeTransforms[foreNode].GetTranslation()).Length();
-            const JPH::Mat44 itemModel     = handling.itemModelTransform;
-            const FVec3  gripTarget    = (itemModel * grip.localTransform).GetTranslation();
+            const FVec3 upperPosition = ProceduralMath::Translation(nodeTransforms[upperNode]);
+            const float     armLength     = (ProceduralMath::Translation(nodeTransforms[foreNode]) - upperPosition).Length() +
+                                            (ProceduralMath::Translation(nodeTransforms[handNode]) - ProceduralMath::Translation(nodeTransforms[foreNode])).Length();
+            const Mat4x4 itemModel     = handling.itemModelTransform;
+            const FVec3  gripTarget    = ProceduralMath::Translation((itemModel * grip.localTransform));
             const FVec3 reachVector   = gripTarget - upperPosition;
             const float     distance      = reachVector.Length();
             const float     maximumReach  = armLength * std::clamp(grip.maxArmExtension, 0.50f, 0.9999f);
@@ -308,13 +304,13 @@ void ConstrainItemToGripReach(ItemHandlingComponent& handling, const JPH::Mat44*
         if (greatestExcess <= 1.0e-5f || correctionWeight <= 1.0e-5f) {
             break;
         }
-        JPH::Mat44 itemModel = handling.itemModelTransform;
-        itemModel.SetTranslation(itemModel.GetTranslation() + correction / correctionWeight);
+        Mat4x4 itemModel = handling.itemModelTransform;
+        ProceduralMath::SetTranslation(itemModel, ProceduralMath::Translation(itemModel) + correction / correctionWeight);
         handling.itemModelTransform = itemModel;
     }
 }
 
-void ApplyClavicleLead(JPH::Mat44* nodeTransforms, const RigBoneMap& map, CharacterBone upperArmBone, FVec3 targetGripPos, float weight) noexcept {
+void ApplyClavicleLead(Mat4x4* nodeTransforms, const RigBoneMap& map, CharacterBone upperArmBone, FVec3 targetGripPos, float weight) noexcept {
     if (nodeTransforms == nullptr || weight <= 0.001f) {
         return;
     }
@@ -327,15 +323,15 @@ void ApplyClavicleLead(JPH::Mat44* nodeTransforms, const RigBoneMap& map, Charac
         clavicleNode == map.nodeIndices[BoneSlot(CharacterBone::SupSpine)] || clavicleNode == map.nodeIndices[BoneSlot(CharacterBone::Spine)]) {
         return;
     }
-    const FVec3 claviclePosition = nodeTransforms[clavicleNode].GetTranslation();
-    const FVec3 currentDirection = SafeNormalized(nodeTransforms[armNode].GetTranslation() - claviclePosition, FVec3::sAxisX());
+    const FVec3 claviclePosition = ProceduralMath::Translation(nodeTransforms[clavicleNode]);
+    const FVec3 currentDirection = SafeNormalized(ProceduralMath::Translation(nodeTransforms[armNode]) - claviclePosition, FVec3::UnitX());
     const FVec3 targetDirection  = SafeNormalized(targetGripPos - claviclePosition, currentDirection);
-    const JPH::Quat rotation = JPH::Quat::sIdentity().SLERP(JPH::Quat::sFromTo(currentDirection, targetDirection), std::clamp(weight, 0.0f, 1.0f)).Normalized();
+    const Quat rotation = Slerp(Quat::Identity(), FromTo(currentDirection, targetDirection), std::clamp(weight, 0.0f, 1.0f)).Normalized();
     RotateSubtreeAroundPivot(map, nodeTransforms, clavicleNode, claviclePosition, rotation);
 }
 
 void ApplyTorsoReachCompensation(
-    JPH::Mat44*       nodeTransforms,
+    Mat4x4*       nodeTransforms,
     const RigBoneMap& map,
     CharacterBone     upperArmBone,
     CharacterBone     forearmBone,
@@ -355,66 +351,66 @@ void ApplyTorsoReachCompensation(
         !IsValidRigNode(spineNode, map.nodeCount) || !IsValidRigNode(hipsNode, map.nodeCount)) {
         return;
     }
-    const FVec3 upperPosition = nodeTransforms[upperNode].GetTranslation();
-    const float     armLength     = (nodeTransforms[foreNode].GetTranslation() - upperPosition).Length() +
-                                    (nodeTransforms[handNode].GetTranslation() - nodeTransforms[foreNode].GetTranslation()).Length();
+    const FVec3 upperPosition = ProceduralMath::Translation(nodeTransforms[upperNode]);
+    const float     armLength     = (ProceduralMath::Translation(nodeTransforms[foreNode]) - upperPosition).Length() +
+                                    (ProceduralMath::Translation(nodeTransforms[handNode]) - ProceduralMath::Translation(nodeTransforms[foreNode])).Length();
     const float     excess        = std::max((targetGripPos - upperPosition).Length() - armLength * 0.90f, 0.0f);
     FVec3       horizontal    = targetGripPos - upperPosition;
     horizontal.y = 0.0f;
     if (excess <= 0.0f || horizontal.LengthSquared() <= 1.0e-6f) {
         return;
     }
-    const FVec3 pivot     = nodeTransforms[hipsNode].GetTranslation();
-    const float     lever     = std::max((nodeTransforms[spineNode].GetTranslation() - pivot).Length(), 0.20f);
-    const float     angle     = std::min(std::atan2(excess, lever) * std::clamp(weight, 0.0f, 1.0f), JPH::DegreesToRadians(12.0f));
+    const FVec3 pivot     = ProceduralMath::Translation(nodeTransforms[hipsNode]);
+    const float     lever     = std::max((ProceduralMath::Translation(nodeTransforms[spineNode]) - pivot).Length(), 0.20f);
+    const float     angle     = std::min(std::atan2(excess, lever) * std::clamp(weight, 0.0f, 1.0f), ProceduralMath::Radians(12.0f));
     const FVec3 direction = horizontal.Normalized();
-    const JPH::Quat pitch     = JPH::Quat::sRotation(FVec3::sAxisX(), direction.z * angle);
-    const JPH::Quat roll      = JPH::Quat::sRotation(FVec3::sAxisZ(), -direction.x * angle);
+    const Quat pitch     = Quat::FromAxisAngle(FVec3::UnitX(), direction.z * angle);
+    const Quat roll      = Quat::FromAxisAngle(FVec3::UnitZ(), -direction.x * angle);
     RotateSubtreeAroundPivot(map, nodeTransforms, spineNode, pivot, (roll * pitch).Normalized());
 }
 
-JPH::Quat ConstrainWristRotation(
-    JPH::QuatArg targetRotation,
-    JPH::QuatArg authoredRotation,
+Quat ConstrainWristRotation(
+    Quat targetRotation,
+    Quat authoredRotation,
     FVec3 twistAxis,
     float        maxTwistRadians,
     float        maxSwingRadians
 ) noexcept {
-    const FVec3 axis  = SafeNormalized(twistAxis, FVec3::sAxisZ());
-    JPH::Quat       delta = (targetRotation * authoredRotation.Inversed()).Normalized();
+    const FVec3 axis  = SafeNormalized(twistAxis, FVec3::UnitZ());
+    Quat       delta = (targetRotation * authoredRotation.Inversed()).Normalized();
     if (delta.w < 0.0f) {
-        delta = JPH::Quat(-delta.x, -delta.y, -delta.z, -delta.w);
+        delta = Quat(-delta.x, -delta.y, -delta.z, -delta.w);
     }
     const FVec3 vector(delta.x, delta.y, delta.z);
     const FVec3 projected = axis * Dot(vector, axis);
-    JPH::Quat       twist(projected.x, projected.y, projected.z, delta.w);
+    Quat       twist(projected.x, projected.y, projected.z, delta.w);
     const float     twistLengthSq = projected.LengthSquared() + delta.w * delta.w;
-    twist                         = twistLengthSq > 1.0e-8f ? twist.Normalized() : JPH::Quat::sIdentity();
-    JPH::Quat swing               = (delta * twist.Inversed()).Normalized();
+    twist                         = twistLengthSq > 1.0e-8f ? twist.Normalized() : Quat::Identity();
+    Quat swing               = (delta * twist.Inversed()).Normalized();
 
-    auto clampRotation = [](JPH::QuatArg value, FVec3 fallbackAxis, float maximum) {
+    auto clampRotation = [](Quat value, FVec3 fallbackAxis, float maximum) {
         FVec3 rotationAxis;
         float     angle = 0.0f;
-        JPH::Quat(value).GetAxisAngle(rotationAxis, angle);
+        Quat(value).ToAxisAngle(rotationAxis, angle);
         if (angle > std::numbers::pi_v<float>) {
             angle -= 2.0f * std::numbers::pi_v<float>;
         }
         const float clamped = std::clamp(angle, -std::abs(maximum), std::abs(maximum));
-        return std::abs(clamped) > 1.0e-6f ? JPH::Quat::sRotation(SafeNormalized(rotationAxis, fallbackAxis), clamped) : JPH::Quat::sIdentity();
+        return std::abs(clamped) > 1.0e-6f ? Quat::FromAxisAngle(SafeNormalized(rotationAxis, fallbackAxis), clamped) : Quat::Identity();
     };
 
-    const JPH::Quat limitedTwist = clampRotation(twist, axis, maxTwistRadians);
-    const JPH::Quat limitedSwing = clampRotation(swing, FVec3::sAxisY(), maxSwingRadians);
+    const Quat limitedTwist = clampRotation(twist, axis, maxTwistRadians);
+    const Quat limitedSwing = clampRotation(swing, FVec3::UnitY(), maxSwingRadians);
     return (limitedSwing * limitedTwist * authoredRotation).Normalized();
 }
 
 void SolveLimbIK(
-    JPH::Mat44*       nodeTransforms,
+    Mat4x4*       nodeTransforms,
     const RigBoneMap& map,
     CharacterBone     upperBone,
     CharacterBone     foreBone,
     CharacterBone     handBone,
-    const JPH::Mat44& targetGripTransform,
+    const Mat4x4& targetGripTransform,
     const GripPoint&  grip
 ) noexcept {
     const float solveWeight = std::clamp(grip.evaluatedIKWeight, 0.0f, 1.0f);
@@ -428,18 +424,18 @@ void SolveLimbIK(
         return;
     }
 
-    const FVec3 upperPosition  = nodeTransforms[upperNode].GetTranslation();
-    const FVec3 forePosition   = nodeTransforms[foreNode].GetTranslation();
-    const FVec3 handPosition   = nodeTransforms[handNode].GetTranslation();
+    const FVec3 upperPosition  = ProceduralMath::Translation(nodeTransforms[upperNode]);
+    const FVec3 forePosition   = ProceduralMath::Translation(nodeTransforms[foreNode]);
+    const FVec3 handPosition   = ProceduralMath::Translation(nodeTransforms[handNode]);
     const float     upperLength    = std::max((forePosition - upperPosition).Length(), 0.001f);
     const float     lowerLength    = std::max((handPosition - forePosition).Length(), 0.001f);
-    const FVec3 rawTarget      = targetGripTransform.GetTranslation();
+    const FVec3 rawTarget      = ProceduralMath::Translation(targetGripTransform);
     const FVec3 targetPosition = handPosition + (rawTarget - handPosition) * SmoothStep(solveWeight);
 
     const FVec3 aimAxis       = SafeNormalized(targetPosition - upperPosition, FVec3(0.0f, -1.0f, 0.0f));
-    const FVec3 authoredPlane = (forePosition - upperPosition) - aimAxis * (forePosition - upperPosition).Dot(aimAxis);
-    const FVec3 authoredPole  = SafeNormalized(authoredPlane, FVec3::sAxisZ());
-    const FVec3 hintPole      = SafeNormalized(targetGripTransform.Multiply3x3(grip.poleHintOffset), authoredPole);
+    const FVec3 authoredPlane = (forePosition - upperPosition) - aimAxis * Dot((forePosition - upperPosition), aimAxis);
+    const FVec3 authoredPole  = SafeNormalized(authoredPlane, FVec3::UnitZ());
+    const FVec3 hintPole      = SafeNormalized(ProceduralMath::Direction(targetGripTransform, grip.poleHintOffset), authoredPole);
     const FVec3 pole          = SafeNormalized(authoredPole * 0.4f + hintPole * 0.6f, authoredPole);
 
     const auto ik = IK::SolveTwoBoneIK({
@@ -456,49 +452,48 @@ void SolveLimbIK(
 
     const FVec3  currentUpperDirection = SafeNormalized(forePosition - upperPosition, FVec3(0.0f, -1.0f, 0.0f));
     const FVec3  currentLowerDirection = SafeNormalized(handPosition - forePosition, FVec3(0.0f, -1.0f, 0.0f));
-    const JPH::Mat44 solvedUpper           = CorrectBoneDirection(nodeTransforms[upperNode], currentUpperDirection, ik.upperDirection, upperPosition);
-    JPH::Mat44       solvedFore            = CorrectBoneDirection(nodeTransforms[foreNode], currentLowerDirection, ik.lowerDirection, ik.midPosition);
+    const Mat4x4 solvedUpper           = CorrectBoneDirection(nodeTransforms[upperNode], currentUpperDirection, ik.upperDirection, upperPosition);
+    Mat4x4       solvedFore            = CorrectBoneDirection(nodeTransforms[foreNode], currentLowerDirection, ik.lowerDirection, ik.midPosition);
 
-    JPH::Quat targetPalmRotation = MatrixRotation(targetGripTransform);
+    Quat targetPalmRotation = MatrixRotation(targetGripTransform);
     if (grip.orientationMode == GripOrientationMode::AutomaticHanded && handBone == CharacterBone::HandL) {
         // Preserve grip-local +Z as hand/finger forward while mirroring +X so
         // the left palm faces inward instead of copying the right-hand side.
-        targetPalmRotation = (targetPalmRotation * JPH::Quat::sRotation(FVec3::sAxisZ(), std::numbers::pi_v<float>)).Normalized();
+        targetPalmRotation = (targetPalmRotation * Quat::FromAxisAngle(FVec3::UnitZ(), std::numbers::pi_v<float>)).Normalized();
     }
     const size_t    palmSide = handBone == CharacterBone::HandL ? 0u : 1u;
-    const JPH::Quat targetHandRotation =
+    const Quat targetHandRotation =
         map.handPalmFramesValid[palmSide] ? (targetPalmRotation * map.handBoneToPalmRotations[palmSide].Inversed()).Normalized() : targetPalmRotation;
-    const JPH::Quat authoredHandRotation = MatrixRotation(nodeTransforms[handNode]);
+    const Quat authoredHandRotation = MatrixRotation(nodeTransforms[handNode]);
 
     // Share palm-facing roll with the forearm before applying the tighter wrist
     // cone. This lets a palm turn toward the item instead of remaining ground-
     // facing merely because the required roll exceeds the wrist swing limit.
     const FVec3 rollAxis          = SafeNormalized(ik.lowerDirection, currentLowerDirection);
-    const JPH::Quat authoredPalmFrame = map.handPalmFramesValid[palmSide] ? (authoredHandRotation * map.handBoneToPalmRotations[palmSide]).Normalized() :
+    const Quat authoredPalmFrame = map.handPalmFramesValid[palmSide] ? (authoredHandRotation * map.handBoneToPalmRotations[palmSide]).Normalized() :
                                                                             authoredHandRotation;
-    FVec3       currentPalmNormal = authoredPalmFrame * FVec3::sAxisX();
-    FVec3       targetPalmNormal  = targetPalmRotation * FVec3::sAxisX();
+    FVec3       currentPalmNormal = authoredPalmFrame * FVec3::UnitX();
+    FVec3       targetPalmNormal  = targetPalmRotation * FVec3::UnitX();
     currentPalmNormal -= rollAxis * Dot(currentPalmNormal, rollAxis);
     targetPalmNormal -= rollAxis * Dot(targetPalmNormal, rollAxis);
-    JPH::Quat forearmRoll = JPH::Quat::sIdentity();
+    Quat forearmRoll = Quat::Identity();
     if (currentPalmNormal.LengthSquared() > 1.0e-8f && targetPalmNormal.LengthSquared() > 1.0e-8f) {
         currentPalmNormal      = currentPalmNormal.Normalized();
         targetPalmNormal       = targetPalmNormal.Normalized();
-        const float signedRoll = std::atan2(rollAxis.Dot(Cross(currentPalmNormal, targetPalmNormal)), Dot(currentPalmNormal, targetPalmNormal));
-        const float rollLimit  = JPH::DegreesToRadians(std::abs(grip.maxForearmTwistDeg));
+        const float signedRoll = std::atan2(Dot(rollAxis, Cross(currentPalmNormal, targetPalmNormal)), Dot(currentPalmNormal, targetPalmNormal));
+        const float rollLimit  = ProceduralMath::Radians(std::abs(grip.maxForearmTwistDeg));
         const float rollAngle  = std::clamp(signedRoll * std::clamp(grip.forearmTwistWeight * solveWeight, 0.0f, 1.0f), -rollLimit, rollLimit);
-        forearmRoll            = JPH::Quat::sRotation(rollAxis, rollAngle);
-        solvedFore             = JPH::Mat44::sRotationTranslation((forearmRoll * MatrixRotation(solvedFore)).Normalized(), solvedFore.GetTranslation())
-                                     .PreScaled(MatrixScale(solvedFore));
+        forearmRoll            = Quat::FromAxisAngle(rollAxis, rollAngle);
+        solvedFore             = ProceduralMath::Transform((forearmRoll * MatrixRotation(solvedFore)).Normalized(), ProceduralMath::Translation(solvedFore), MatrixScale(solvedFore));
     }
 
-    const JPH::Quat carriedHandRotation = (forearmRoll * authoredHandRotation).Normalized();
-    const JPH::Quat constrainedRotation = ConstrainWristRotation(
-        targetHandRotation, carriedHandRotation, ik.lowerDirection, JPH::DegreesToRadians(grip.maxWristTwistDeg), JPH::DegreesToRadians(grip.maxWristSwingDeg)
+    const Quat carriedHandRotation = (forearmRoll * authoredHandRotation).Normalized();
+    const Quat constrainedRotation = ConstrainWristRotation(
+        targetHandRotation, carriedHandRotation, ik.lowerDirection, ProceduralMath::Radians(grip.maxWristTwistDeg), ProceduralMath::Radians(grip.maxWristSwingDeg)
     );
     const float      rotationBlend = std::clamp(grip.rotationWeight * solveWeight, 0.0f, 1.0f);
-    const JPH::Quat  handRotation  = carriedHandRotation.SLERP(constrainedRotation, rotationBlend).Normalized();
-    const JPH::Mat44 solvedHand    = JPH::Mat44::sRotationTranslation(handRotation, ik.endPosition).PreScaled(MatrixScale(nodeTransforms[handNode]));
+    const Quat  handRotation  = Slerp(carriedHandRotation, constrainedRotation, rotationBlend).Normalized();
+    const Mat4x4 solvedHand    = ProceduralMath::Transform(handRotation, ik.endPosition, MatrixScale(nodeTransforms[handNode]));
 
     SetModelTransformAndCarrySubtree(nodeTransforms, map, upperNode, solvedUpper);
     SetModelTransformAndCarrySubtree(nodeTransforms, map, foreNode, solvedFore);
@@ -531,26 +526,26 @@ FingerCurlDesc EvaluateFingerCurl(const GraspDesc& grasp) noexcept {
     return curl;
 }
 
-JPH::Quat ConstrainFingerHingeRotation(
-    JPH::QuatArg authoredRotation,
-    JPH::QuatArg desiredRotation,
+Quat ConstrainFingerHingeRotation(
+    Quat authoredRotation,
+    Quat desiredRotation,
     FVec3 hingeAxis,
     float        flexSign,
     float        maxFlexRadians,
     float        maxExtensionRadians
 ) noexcept {
-    const FVec3 axis  = SafeNormalized(hingeAxis, FVec3::sAxisX());
-    JPH::Quat       delta = (desiredRotation * authoredRotation.Inversed()).Normalized();
+    const FVec3 axis  = SafeNormalized(hingeAxis, FVec3::UnitX());
+    Quat       delta = (desiredRotation * authoredRotation.Inversed()).Normalized();
     if (delta.w < 0.0f) {
-        delta = JPH::Quat(-delta.x, -delta.y, -delta.z, -delta.w);
+        delta = Quat(-delta.x, -delta.y, -delta.z, -delta.w);
     }
     const FVec3 vector(delta.x, delta.y, delta.z);
     const FVec3 projected = axis * Dot(vector, axis);
     const float     lengthSq  = projected.LengthSquared() + delta.w * delta.w;
-    JPH::Quat twist = lengthSq > 1.0e-8f ? JPH::Quat(projected.x, projected.y, projected.z, delta.w).Normalized() : JPH::Quat::sIdentity();
+    Quat twist = lengthSq > 1.0e-8f ? Quat(projected.x, projected.y, projected.z, delta.w).Normalized() : Quat::Identity();
     FVec3 twistAxis;
     float     angle = 0.0f;
-    twist.GetAxisAngle(twistAxis, angle);
+    twist.ToAxisAngle(twistAxis, angle);
     if (angle > std::numbers::pi_v<float>) {
         angle -= 2.0f * std::numbers::pi_v<float>;
     }
@@ -560,11 +555,11 @@ JPH::Quat ConstrainFingerHingeRotation(
     const float flex      = std::abs(maxFlexRadians);
     const float extension = std::abs(maxExtensionRadians);
     const float clamped   = flexSign >= 0.0f ? std::clamp(angle, -extension, flex) : std::clamp(angle, -flex, extension);
-    return (JPH::Quat::sRotation(axis, clamped) * authoredRotation).Normalized();
+    return (Quat::FromAxisAngle(axis, clamped) * authoredRotation).Normalized();
 }
 
 void ApplyKinematicFingers(
-    JPH::Mat44*           nodeTransforms,
+    Mat4x4*           nodeTransforms,
     const RigBoneMap&     map,
     CharacterBone         handBone,
     const FingerCurlDesc& curl,
@@ -586,10 +581,10 @@ void ApplyKinematicFingers(
             continue;
         }
         const float      fingerCurl   = CurlForDigit(joint.digit, curl);
-        const JPH::Mat44 current      = nodeTransforms[joint.child];
-        const FVec3  axis         = SafeNormalized(current.Multiply3x3(FVec3::sAxisX()), FVec3::sAxisX());
+        const Mat4x4 current      = nodeTransforms[joint.child];
+        const FVec3  axis         = SafeNormalized(ProceduralMath::Direction(current, FVec3::UnitX()), FVec3::UnitX());
         const bool       isThumb      = joint.digit == FingerDigit::Thumb;
-        const float      maximumAngle = isThumb ? JPH::DegreesToRadians(50.0f) : JPH::DegreesToRadians(62.0f);
+        const float      maximumAngle = isThumb ? ProceduralMath::Radians(50.0f) : ProceduralMath::Radians(62.0f);
         float            curlSign     = -1.0f;
         if (axisMode == FingerCurlAxisMode::MirroredLocalX && handBone == CharacterBone::HandL) {
             curlSign = 1.0f;
@@ -598,10 +593,10 @@ void ApplyKinematicFingers(
         }
 
         const float      desiredAngle        = curlSign * maximumAngle * std::clamp(fingerCurl * weight, 0.0f, 1.0f);
-        const JPH::Quat  authoredRotation    = MatrixRotation(current);
-        const JPH::Quat  desiredRotation     = (JPH::Quat::sRotation(axis, desiredAngle) * authoredRotation).Normalized();
-        const JPH::Quat  constrainedRotation = ConstrainFingerHingeRotation(authoredRotation, desiredRotation, axis, curlSign, maximumAngle, 0.0f);
-        const JPH::Mat44 target              = JPH::Mat44::sRotationTranslation(constrainedRotation, current.GetTranslation()).PreScaled(MatrixScale(current));
+        const Quat  authoredRotation    = MatrixRotation(current);
+        const Quat  desiredRotation     = (Quat::FromAxisAngle(axis, desiredAngle) * authoredRotation).Normalized();
+        const Quat  constrainedRotation = ConstrainFingerHingeRotation(authoredRotation, desiredRotation, axis, curlSign, maximumAngle, 0.0f);
+        const Mat4x4 target              = ProceduralMath::Transform(constrainedRotation, ProceduralMath::Translation(current), MatrixScale(current));
         SetModelTransformAndCarrySubtree(nodeTransforms, map, joint.child, target);
     }
 }

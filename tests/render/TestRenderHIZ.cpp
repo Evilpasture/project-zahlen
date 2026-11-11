@@ -134,7 +134,7 @@ struct HiZTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = FVec3(0.0f, 4.0f, -10.0f);
+            cam.position = ZHLN::FVec3(0.0f, 4.0f, -10.0f);
             cam.yaw      = 90.0f; // Look forward along +Z
             cam.pitch    = -10.0f;
             cam.fov      = 60.0f;
@@ -195,7 +195,7 @@ struct HiZTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = FVec3(0.0f, 4.0f, -5.0f);
+            cam.position = ZHLN::FVec3(0.0f, 4.0f, -5.0f);
             cam.yaw      = 90.0f; // Point directly along +Z
             cam.pitch    = 0.0f;
             cam.fov      = 75.0f;

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Core/Concepts.hpp>
+#include <Zahlen/Math/Scalar.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <cmath>
@@ -118,6 +119,15 @@ struct Vec4 {
         return *this = *this / scalar;
     }
 
+    // maxDistanceSquared is the squared Euclidean distance.
+    [[nodiscard]] constexpr auto IsClose(Vec4 other, T maxDistanceSquared = (sizeof(T) <= sizeof(float) ? T(1e-12) : T(1e-24))) const noexcept -> bool
+        requires std::is_floating_point_v<T> {
+        return (*this - other).LengthSquared() <= maxDistanceSquared;
+    }
+    // For signed integers, the absolute value must be representable in T.
+    [[nodiscard]] constexpr auto Abs() const noexcept -> Vec4 {
+        return {ZHLN::Abs(x), ZHLN::Abs(y), ZHLN::Abs(z), ZHLN::Abs(w)};
+    }
     [[nodiscard]] constexpr auto LengthSquared() const noexcept -> T {
         return x * x + y * y + z * z + w * w;
     }

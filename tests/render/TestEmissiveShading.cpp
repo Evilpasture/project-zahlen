@@ -85,18 +85,16 @@ constexpr NormalizedRect kHaloWindow {.x0 = 0.44, .y0 = 0.25, .x1 = 0.56, .y1 = 
 // 3.0 has always been at this exposure: 13/255, a dim lamp. Expressing the
 // emitter the way the importer does keeps the test measuring a neon material
 // rather than the accounting error that used to inflate one.
-// Not constexpr: Jolt's FVec4 constructor is not constexpr, so a lane
-// constant is `const` at namespace scope. It is still one object, not a
-// spelling that has to be converted at the crossing.
-const JPH::Float4 kEmissiveGreen {0.0f, 1.0f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
+// Native color vectors can be passed directly to the material APIs.
+const ZHLN::FVec4 kEmissiveGreen {0.0f, 1.0f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
 // Hue is asserted here, not at import scale: 6x is sibling-proven chromatic
 // (the multi-emissive direct boxes read their hues at 6x under worse wash),
 // while 100x through the default Khronos Neutral tonemap desaturates to
 // near-white BY DESIGN -- asserting hue there pins the test to the
 // tonemapper's highlight shoulder rather than to the emission path.
-const JPH::Float4 kHueGreen {0.0f, 6.0f, 0.0f, 1.0f};
-const JPH::Float4 kNoEmission {0.0f, 0.0f, 0.0f, 1.0f};
-const JPH::Float4 kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
+const ZHLN::FVec4 kHueGreen {0.0f, 6.0f, 0.0f, 1.0f};
+const ZHLN::FVec4 kNoEmission {0.0f, 0.0f, 0.0f, 1.0f};
+const ZHLN::FVec4 kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 
 // The ordinary glTF neon case, in the units the importer produces: a
 // spec-clamped emissiveFactor of 0.8 with no KHR_materials_emissive_strength,
@@ -108,7 +106,7 @@ const JPH::Float4 kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 // thing casting it. That dimness was the actual regression behind "the neon
 // look is gone"; the fix is the unit conversion at import, and this constant
 // tracks it so the test measures what an imported asset really does.
-const JPH::Float4 kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
+const ZHLN::FVec4 kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
 // The halo frames run the bloom composite here, not at the engine default
 // 0.0 (which multiplies the whole Kawase chain by zero at composite --
 // blit.slang -- and made the patch-2 explicit on/off match bit-for-bit).
@@ -131,7 +129,7 @@ constexpr float kHaloBloomStrength = 0.003f;
 // Returns false when material creation fails, which is a setup failure rather
 // than a rendering result.
 [[nodiscard]] bool BuildUnlitBoxScene(
-    ZHLN::Engine& engine, const JPH::Float4& emissiveFactor, std::optional<float> glowIntensity, std::optional<float> bloomStrength
+    ZHLN::Engine& engine, const ZHLN::FVec4& emissiveFactor, std::optional<float> glowIntensity, std::optional<float> bloomStrength
 ) {
     auto renderCtx = engine.Graphics();
 
@@ -148,9 +146,9 @@ constexpr float kHaloBloomStrength = 0.003f;
         gfx.post.giIntensity     = 0.0f;
         gfx.post.enableSSR       = 0;
         gfx.rayTracing.enableReflections       = false;
-        gfx.environment.skyZenith       = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
-        gfx.environment.skyHorizon      = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
-        gfx.environment.skyGround       = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyZenith       = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyHorizon      = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyGround       = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
     });
 
     const auto material =
@@ -168,7 +166,7 @@ constexpr float kHaloBloomStrength = 0.003f;
         return false;
     }
     ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = FVec3(0.0f, 0.0f, 6.0f);
+    camera.position = ZHLN::FVec3(0.0f, 0.0f, 6.0f);
     camera.yaw      = -90.0f;
     camera.pitch    = 0.0f;
     camera.fov      = 60.0f;
@@ -188,7 +186,7 @@ struct UnlitMeasurement {
 
 // Renders the unlit scene once and measures it.
 [[nodiscard]] auto MeasureUnlitBox(
-    const JPH::Float4& emissiveFactor, std::string_view ppmPath, std::optional<float> glowIntensity = std::nullopt,
+    const ZHLN::FVec4& emissiveFactor, std::string_view ppmPath, std::optional<float> glowIntensity = std::nullopt,
     std::optional<float> bloomStrength = std::nullopt
 )
     -> UnlitMeasurement {

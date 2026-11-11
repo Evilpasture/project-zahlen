@@ -3,10 +3,6 @@
 
 #pragma once
 
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
-
 namespace ZHLN {
 class Engine;
 namespace ECS {

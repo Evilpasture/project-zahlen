@@ -5,7 +5,6 @@
 
 #include <Zahlen/Math/Camera.hpp>
 #include <optional>
-#include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Core/Buffer.h>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -14,10 +13,10 @@
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
+#include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -200,6 +199,9 @@ class ZHLN_API PhysicsContext {
     void OptimizeBroadphase();
 
     auto GetOrCreateShape(Physics::ShapeType type, float p1, float p2 = 0.0f, float p3 = 0.0f, float p4 = 0.0f) -> JPH::ShapeRefC;
+    auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC;
+    auto CreateTranslatedShape(const JPH::ShapeRefC& shape, FVec3 offset) -> JPH::ShapeRefC;
+    auto CreateCompoundShape(const JPH::ShapeRefC& first, const JPH::ShapeRefC& second) -> JPH::ShapeRefC;
 
     auto CreateRigidBody(
         const JPH::ShapeRefC& shape,
@@ -241,7 +243,7 @@ class ZHLN_API PhysicsContext {
     void               AddRagdollImpulse(Physics::RagdollID handle, uint32_t jointIndex, ZHLN::FVec3 impulse) noexcept;
     // Generation-safe lookups: the optional ties the result to its proof of
     // validity; a stale handle simply has no value to hand back.
-    [[nodiscard]] auto BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<JPH::RVec3>;
+    [[nodiscard]] auto BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<DVec3>;
     [[nodiscard]] auto BodyState(Physics::BodyID handle) const noexcept -> std::optional<Physics::BodyStateSnapshot>;
     void FillBodyStates(std::span<const Physics::BodyID> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept;
     [[nodiscard]] bool GetRagdollPose(Physics::RagdollID handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;

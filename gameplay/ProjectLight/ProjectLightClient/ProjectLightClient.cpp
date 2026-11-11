@@ -15,11 +15,11 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 
@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <string>
 #include <string_view>
@@ -667,7 +668,7 @@ void ClientSession::ApplyProperties(ReplicatedObject& object, const MsgPackValue
             object.transformDirty = true;
         } else if (property == "Rotation") {
             object.rotationEulerDeg = value.AsVec3(VEC3_SCALE, object.rotationEulerDeg);
-            object.rotationQuat     = Math::EulerDegreesToQuat(object.rotationEulerDeg).Normalized();
+            object.rotationQuat     = Quat::FromEulerDegrees(object.rotationEulerDeg).Normalized();
             object.physicsHistory.Clear();
             object.hasPhysicsSample = false;
             object.transformDirty = true;
@@ -825,11 +826,11 @@ void ClientSession::ApplyPhysicsUpdates(const MsgPackValue& physicsUpdates) {
         const auto& data = value.arrayVal;
         auto scaled = [](const MsgPackValue& component) { return component.AsFloat() / VEC3_SCALE; };
         const FVec3 position(scaled(data[0]), scaled(data[1]), scaled(data[2]));
-        const JPH::Quat rotation = JPH::Quat(scaled(data[3]), scaled(data[4]), scaled(data[5]), scaled(data[6])).Normalized();
+        const Quat rotation = Quat(scaled(data[3]), scaled(data[4]), scaled(data[5]), scaled(data[6])).Normalized();
         object->physicsHistory.Push(NetworkTransformSample {.position = position, .rotation = rotation, .receivedAt = receivedAt});
         object->position = position;
         object->rotationQuat = rotation;
-        object->rotationEulerDeg = Math::QuatToEulerDegrees(object->rotationQuat);
+        object->rotationEulerDeg = object->rotationQuat.EulerAngles() * (180.0f / std::numbers::pi_v<float>);
         object->linearVelocity   = FVec3(scaled(data[7]), scaled(data[8]), scaled(data[9]));
         object->hasPhysicsSample = true;
         object->transformDirty = true;
@@ -845,7 +846,7 @@ void ClientSession::ApplyControllerState(const MsgPackValue& packet) {
     NetworkTransformHistory& history = m_playerControllerStates[userId];
     history.Push(NetworkTransformSample {
         .position = FVec3(state.arrayVal[0].AsFloat(), state.arrayVal[1].AsFloat(), state.arrayVal[2].AsFloat()),
-        .rotation = JPH::Quat(
+        .rotation = Quat(
             state.arrayVal[3].AsFloat(), state.arrayVal[4].AsFloat(), state.arrayVal[5].AsFloat(), state.arrayVal[6].AsFloat()
         ).Normalized(),
         .receivedAt = std::chrono::steady_clock::now()
@@ -1277,8 +1278,8 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         const auto movement = registry.Get<Character::MovementComponent>(m_localController);
         if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState && bodyState->valid) {
             const auto& state = *bodyState;
-            const JPH::Quat rotation = movement ? movement->orientation.Normalized() : JPH::Quat(state.currentRotation.x, state.currentRotation.y, state.currentRotation.z, state.currentRotation.w).Normalized();
-            const FVec3 velocity = physics.GetCharacterVelocity(m_localControllerBody);
+            const Quat rotation = (movement ? movement->orientation : Quat(state.currentRotation)).Normalized();
+            const auto velocity = Physics::FromJoltVector(physics.GetCharacterVelocity(m_localControllerBody));
             owned.Set("controllerState", FloatArray({
                 state.currentPosition.x, state.currentPosition.y, state.currentPosition.z,
                 rotation.x, rotation.y, rotation.z, rotation.w,
@@ -1307,9 +1308,9 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
                 if (const auto bodyState = physics.BodyState(body->physicsID); bodyState && bodyState->valid) {
                     const auto& snapshot = *bodyState;
                     transform.position = snapshot.currentPosition;
-                    transform.rotation = snapshot.currentRotation;
+                    transform.rotation = Quat(snapshot.currentRotation);
                     const JPH::BodyID bodyID = Physics::GetBodyID(physics.GetInternalWorld(), body->physicsID);
-                    if (!bodyID.IsInvalid()) transform.linearVelocity = physics.GetInternalSystem().GetBodyInterface().GetLinearVelocity(bodyID);
+                    if (!bodyID.IsInvalid()) transform.linearVelocity = Physics::FromJoltVector(physics.GetInternalSystem().GetBodyInterface().GetLinearVelocity(bodyID));
                     haveState = true;
                 }
             }
@@ -1321,7 +1322,7 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         // this pose instead of snapping back to an old remote sample.
         object.position = transform.position;
         object.rotationQuat = transform.rotation.Normalized();
-        object.rotationEulerDeg = Math::QuatToEulerDegrees(object.rotationQuat);
+        object.rotationEulerDeg = object.rotationQuat.EulerAngles() * (180.0f / std::numbers::pi_v<float>);
         object.linearVelocity   = transform.linearVelocity;
         object.renderPosition   = object.position;
         object.renderRotation   = object.rotationQuat;
@@ -1365,7 +1366,7 @@ void ClientSession::ResetSceneBindings(Engine& engine) noexcept {
         // definition; the mirror keeps its records and re-spawns from them.
         object.materialId = InvalidMaterialID;
         object.hasPhysicsBody = false;
-        object.spawnedSize = FVec3::sZero();
+        object.spawnedSize = FVec3::Zero();
         object.visualDirty = true;
         object.transformDirty = true;
     }

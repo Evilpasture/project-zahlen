@@ -14,6 +14,7 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <algorithm>
 
 namespace ZHLN::Physics {
 
@@ -43,7 +44,7 @@ auto ShapeCache::GetOrCreate(ShapeType type, float p1, float p2, float p3, float
     JPH::ShapeRefC newShape;
     switch (type) {
         case ShapeType::Box: {
-            JPH::BoxShapeSettings s(JPH::Vec3(np1, np2, np3), 0.05f);
+            JPH::BoxShapeSettings s(JPH::Vec3(np1, np2, np3), std::min({0.05f, np1, np2, np3}));
             newShape = s.Create().Get();
             break;
         }

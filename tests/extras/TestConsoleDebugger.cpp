@@ -56,6 +56,47 @@ struct ConsoleDebuggerTestSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> matrix_range_properties_round_trip() {
+            auto& classes = ZHLN::ScriptBinder::Get().classes;
+            const auto typeIt = classes.find("WorldTransformComponent");
+            ZHLN::Test::ExpectTrue(typeIt != classes.end());
+            if (typeIt == classes.end()) return {};
+            const auto propIt = typeIt->second.properties.find("world");
+            ZHLN::Test::ExpectTrue(propIt != typeIt->second.properties.end());
+            if (propIt == typeIt->second.properties.end()) return {};
+            const auto& prop = propIt->second;
+            ZHLN::Test::ExpectTrue(bool(prop.get_element_at) && bool(prop.set_element_at));
+            if (!prop.get_element_at || !prop.set_element_at) return {};
+
+            ZHLN::Components::WorldTransformComponent component;
+            const auto changed = prop.set_element_at(&component, 9, ZHLN::ScriptVal {4.5});
+            ZHLN::Test::ExpectTrue(changed.has_value());
+            ZHLN::Test::ExpectEq(component.world[1, 2], 4.5f);
+            const auto element = prop.get_element_at(&component, 9);
+            ZHLN::Test::ExpectTrue(element.has_value());
+            if (element) {
+                const auto* number = std::get_if<double>(&*element);
+                ZHLN::Test::ExpectTrue(number && *number == 4.5);
+            }
+            ZHLN::Test::ExpectTrue(!prop.get_element_at(&component, 16));
+            ZHLN::Test::ExpectTrue(!prop.set_element_at(&component, 16, ZHLN::ScriptVal {1.0}));
+
+            auto serialized = prop.get(&component);
+            ZHLN::Test::ExpectTrue(serialized.has_value());
+            if (serialized) {
+                component.world = ZHLN::Mat4x4::Zero();
+                ZHLN::Test::ExpectTrue(prop.set(&component, *serialized).has_value());
+                ZHLN::Test::ExpectEq(component.world[1, 2], 4.5f);
+                auto* array = std::get_if<ZHLN::ScriptArray>(&*serialized);
+                ZHLN::Test::ExpectTrue(array && array->elements.size() == 16);
+                if (array && !array->elements.empty()) {
+                    array->elements.pop_back();
+                    ZHLN::Test::ExpectTrue(!prop.set(&component, *serialized));
+                }
+            }
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> help_lists_commands() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    console;

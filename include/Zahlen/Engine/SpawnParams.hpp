@@ -10,12 +10,13 @@
 // Jolt shapes, ModelPrefab or font loader; PrefabFactory.hpp includes this
 // file, so every existing spelling still resolves.
 //
-// A fixed layout of scalars, which is what lets ZHLN::COM::IAssetLibrary take
+// A fixed layout of native values, which is what lets ZHLN::COM::IAssetLibrary take
 // it by const reference across the shared-library boundary.
 
 #include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <cstdint>
@@ -25,7 +26,7 @@ namespace ZHLN::PrefabFactory {
 
 struct SpawnParams {
     ZHLN::DVec3 position {};
-    ZHLN::FVec4  rotation {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::Quat   rotation = ZHLN::Quat::Identity();
     ZHLN::FVec3  scale {1.0f, 1.0f, 1.0f};
 
     bool     createPhysics   = false;

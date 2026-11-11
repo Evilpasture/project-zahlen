@@ -6,7 +6,7 @@
 #include "render/GpuLayout.hpp"
 #include "vulkan/Rendering.hpp"
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <cstdint>
 #include <span>
@@ -28,7 +28,7 @@ class ShadowAtlas {
         int32_t    lightIndex = -1;
         uint32_t   faceCount  = 1;
         uint32_t   tile       = kMinTile;
-        JPH::Mat44 faces[kPointFaces] {};
+        Mat4x4 faces[kPointFaces] {};
     };
 
     struct Grant {
@@ -69,7 +69,7 @@ class ShadowAtlas {
 
     [[nodiscard]] static auto FaceCount(bool isPoint, float outerConeRadians) noexcept -> uint32_t;
     [[nodiscard]] static auto
-        MakeFaceMatrices(const FVec3& position, const FVec3& direction, float range, bool isPoint, float outerConeRadians, JPH::Mat44* out) noexcept
+        MakeFaceMatrices(const FVec3& position, const FVec3& direction, float range, bool isPoint, float outerConeRadians, Mat4x4* out) noexcept
         -> uint32_t;
 
     [[nodiscard]] static auto MakeLightKey(LightType type, const FVec3& position, float intensity, float range) noexcept -> uint64_t;
@@ -88,7 +88,7 @@ class ShadowAtlas {
         uint32_t                            tile      = 0;
         uint32_t                            x         = 0;
         uint32_t                            y         = 0;
-        std::array<JPH::Mat44, kPointFaces> faces {};
+        std::array<Mat4x4, kPointFaces> faces {};
         bool                                seen = false;
     };
 

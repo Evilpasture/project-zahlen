@@ -23,17 +23,17 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>
-#include <Jolt/Physics/Body/BodyInterface.h>
-#include <Jolt/Physics/PhysicsSystem.h>
+#include <Zahlen/Physics/MathConversions.hpp>
+#include <Zahlen/Math/Transform.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <numbers>
 #include <cstdint>
 #include <format>
 #include <string_view>
@@ -53,7 +53,7 @@ auto SameVec3(FVec3 lhs, FVec3 rhs) noexcept -> bool {
 }
 struct ResolvedDirectionalLight {
     FVec3 direction = FVec3(0.0f, 1.0f, 0.0f); // toward the source, as Zahlen expects
-    FVec3 color = FVec3::sReplicate(1.0f);
+    FVec3 color = FVec3::Splat(1.0f);
     float intensity = 1.0f;
 };
 auto ProjectLightSunDirectionToSource(float timeOfDay, float latitude) noexcept -> FVec3 {
@@ -112,7 +112,7 @@ auto CharacterOffsetForName(std::string_view name) noexcept -> FVec3 {
     if (name == "Right Arm") return FVec3(1.5f, 0.0f, 0.0f);
     if (name == "Left Leg") return FVec3(-0.5f, -2.0f, 0.0f);
     if (name == "Right Leg") return FVec3(0.5f, -2.0f, 0.0f);
-    return FVec3::sZero();
+    return FVec3::Zero();
 }
 auto IsCharacterLimb(std::string_view name) noexcept -> bool {
     return name == "Right Arm" || name == "Left Arm" || name == "Right Leg" || name == "Left Leg";
@@ -120,7 +120,7 @@ auto IsCharacterLimb(std::string_view name) noexcept -> bool {
 auto LimbPoseAngle(std::string_view partName, HumanoidState state, float time, float walkSpeed) noexcept -> float {
     if (partName == "Head" || partName == "Torso") return 0.0f;
     if (state == HumanoidState::Jumping || state == HumanoidState::Freefall) {
-        return (partName == "Right Arm" || partName == "Left Arm") ? -JPH::JPH_PI : 0.0f;
+        return (partName == "Right Arm" || partName == "Left Arm") ? -std::numbers::pi_v<float> : 0.0f;
     }
     if (state == HumanoidState::FallingDown) {
         return (partName == "Right Arm" || partName == "Left Arm") ? -2.2f : 0.0f;
@@ -153,12 +153,12 @@ auto LimbPoseAngle(std::string_view partName, HumanoidState state, float time, f
 // One pose, one writer per entity. That is the invariant to keep when adding a
 // pass: if it has a body it belongs to the engine, and if it does not it belongs
 // to the mirror.
-void WriteTransform(Engine& engine, ReplicatedObject& object, Entity entity, FVec3 position, JPH::Quat rotation) {
+void WriteTransform(Engine& engine, ReplicatedObject& object, Entity entity, FVec3 position, Quat rotation) {
     object.position = position;
     object.rotationQuat = rotation.Normalized();
     object.renderPosition = object.position;
     object.renderRotation = object.rotationQuat;
-    object.rotationEulerDeg = Math::QuatToEulerDegrees(object.rotationQuat);
+    object.rotationEulerDeg = object.rotationQuat.EulerAngles() * (180.0f / std::numbers::pi_v<float>);
     object.transformDirty   = true;
     if (entity == Entity::Null())
         return;
@@ -169,7 +169,7 @@ void WriteTransform(Engine& engine, ReplicatedObject& object, Entity entity, FVe
     }
 }
 
-void WriteInterpolatedTransform(Engine& engine, ReplicatedObject& object, Entity entity, FVec3 position, JPH::Quat rotation) {
+void WriteInterpolatedTransform(Engine& engine, ReplicatedObject& object, Entity entity, FVec3 position, Quat rotation) {
     // Keep the authoritative network pose intact; only the render pose is
     // delayed/interpolated. Physics snapshots use object.position/rotationQuat.
     object.renderPosition = position;
@@ -228,8 +228,8 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
         PrefabFactory::SpawnParams params;
         // Physics bodies must start from the latest authoritative pose, not a
         // delayed render sample. This matters when NetworkOwner changes.
-        params.position         = createPhysics ? object.position : object.renderPosition;
-        params.rotation         = (createPhysics ? object.rotationQuat : object.renderRotation).Normalized();
+        params.position = (createPhysics ? object.position : object.renderPosition).Cast<double>();
+        params.rotation = (createPhysics ? object.rotationQuat : object.renderRotation).Normalized();
         params.scale            = size;
         params.createPhysics    = createPhysics;
         params.isStaticPhysics  = object.anchored;
@@ -248,7 +248,7 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
             Log("[ProjectLight] Could not create material for '{}': {}", object.name, material.error());
         }
 
-        const FVec3 halfExtents = FVec3::sReplicate(0.5f);
+        const FVec3 halfExtents = FVec3::Splat(0.5f);
         switch (object.shape) {
             case PartShape::Sphere:
             case PartShape::Head:
@@ -295,7 +295,7 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
             transform->scale    = size;
         }
         if (auto world = registry.Get<Components::WorldTransformComponent>(entity)) {
-            const JPH::Mat44 matrix = Math::CreateTransform(object.renderPosition, object.renderRotation.Normalized(), size);
+            const auto matrix = ComposeTransform(object.renderPosition, object.renderRotation.Normalized(), size);
             world->world            = matrix;
             world->previous         = matrix;
         }
@@ -356,11 +356,11 @@ void SpawnOrUpdateLightEntity(Engine& engine, SceneMirrorState& state, Replicate
     Entity      entity            = state.index.Find(object.uid);
     if (entity == Entity::Null() || !registry.IsAlive(entity) || registry.Get<Components::PendingDestroy>(entity).has_value()) {
         entity = registry.Create();
-        const JPH::Mat44 matrix = Math::CreateTransform(object.position, object.rotationQuat, {1.0f, 1.0f, 1.0f});
+        const auto matrix = ComposeTransform(object.position, object.rotationQuat, {1.0f, 1.0f, 1.0f});
         registry.Add(
             entity, ProjectLightInstanceComponent {.uid = object.uid}, ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid},
             ProjectLightReplicaTag {}, Components::NameComponent {.name = String64(object.name)},
-            Components::TransformComponent {.position = object.position, .rotation = object.rotationQuat, .scale = FVec3::sReplicate(1.0f)},
+            Components::TransformComponent {.position = object.position, .rotation = object.rotationQuat, .scale = FVec3::Splat(1.0f)},
             Components::WorldTransformComponent {.world = matrix, .previous = matrix},
             Components::LightComponent {
                 .type      = directional ? LightType::Sun : LightType::Point,
@@ -458,7 +458,7 @@ void UpdateRemoteCharacterParts(Engine& engine, SceneMirrorState& state, float d
         if (player == nullptr || player->characterUid == 0) continue;
 
         FVec3 rootPosition {};
-        JPH::Quat rootRotation {};
+        Quat rootRotation {};
         if (!history.Sample(renderTime, rootPosition, rootRotation)) continue;
         const ReplicatedObject* humanoid = nullptr;
         for (const auto& [uid, candidate]: state.objects) {
@@ -473,7 +473,7 @@ void UpdateRemoteCharacterParts(Engine& engine, SceneMirrorState& state, float d
             const FVec3 offset = CharacterOffsetForName(object.name);
             const FVec3 position = rootPosition + rootRotation * offset;
             const float poseAngle = IsCharacterLimb(object.name) ? LimbPoseAngle(object.name, stateValue, state.time, walkSpeed) : 0.0f;
-            const JPH::Quat limbRotation = poseAngle == 0.0f ? rootRotation : rootRotation * JPH::Quat::sRotation(FVec3::sAxisX(), poseAngle);
+            const Quat limbRotation = poseAngle == 0.0f ? rootRotation : rootRotation * Quat::FromAxisAngle(FVec3::UnitX(), poseAngle);
             WriteInterpolatedTransform(engine, object, state.index.Find(uid), position, limbRotation);
         }
     }
@@ -650,8 +650,8 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
     auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
     Physics::CharacterParams params;
     params.shape = physics.GetOrCreateShape(Physics::ShapeType::Capsule, 2.0f, 0.5f);
-    params.maxSlopeAngle = JPH::DegreesToRadians(45.0f);
-    state.localControllerBody = physics.CreateCharacter(rootPart->position, params);
+    params.maxSlopeAngle = (std::numbers::pi_v<float> / 4.0f);
+    state.localControllerBody = physics.CreateCharacter(rootPart->position.Cast<double>(), params);
     if (state.localControllerBody == Physics::BodyID::Null()) {
         Log("[ProjectLight] Could not create the local player CharacterVirtual body.");
         return;
@@ -660,10 +660,10 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
     registry.RegisterComponent<Character::MovementComponent>();
     registry.RegisterComponent<Character::InputComponent>();
     const Entity controller = registry.Create();
-    const JPH::Mat44 matrix     = Math::CreateTransform(rootPart->position, rootPart->rotationQuat, {1.0f, 1.0f, 1.0f});
+    const auto matrix = ComposeTransform(rootPart->position, rootPart->rotationQuat, {1.0f, 1.0f, 1.0f});
     registry.Add(
         controller, Components::NameComponent {.name = String64("ProjectLightLocalController")},
-        Components::TransformComponent {.position = rootPart->position, .rotation = rootPart->rotationQuat, .scale = FVec3::sReplicate(1.0f)},
+        Components::TransformComponent {.position = rootPart->position, .rotation = rootPart->rotationQuat, .scale = FVec3::Splat(1.0f)},
         Components::WorldTransformComponent {.world = matrix, .previous = matrix},
         Components::PhysicsComponent {.physicsID = state.localControllerBody, .isStatic = false},
         Character::MovementComponent {.orientation = rootPart->rotationQuat, .prevOrientation = rootPart->rotationQuat}, Character::InputComponent {}
@@ -691,8 +691,8 @@ void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& st
     if (!bodyStateResult || !bodyStateResult->valid) return;
     const auto& bodyState = *bodyStateResult;
     const FVec3 rootPosition = bodyState.currentPosition;
-    const JPH::Quat rootRotation = movement->orientation.Normalized();
-    const FVec3 velocity = physics.GetCharacterVelocity(state.localControllerBody);
+    const Quat rootRotation = movement->orientation.Normalized();
+    const auto velocity = Physics::FromJoltVector(physics.GetCharacterVelocity(state.localControllerBody));
     (void)dt;
 
     if (auto input = registry.GetSingleton<Components::InputStateComponent>()) {
@@ -711,7 +711,7 @@ void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& st
         if (!IsPartClass(object.className) || !IsPartOfCharacter(state.objects, uid, state.localCharacterUid)) continue;
         const FVec3 position = rootPosition + rootRotation * CharacterOffsetForName(object.name);
         const float poseAngle = IsCharacterLimb(object.name) ? LimbPoseAngle(object.name, stateValue, state.time, walkSpeed) : 0.0f;
-        const JPH::Quat limbRotation = poseAngle == 0.0f ? rootRotation : rootRotation * JPH::Quat::sRotation(FVec3::sAxisX(), poseAngle);
+        const Quat limbRotation = poseAngle == 0.0f ? rootRotation : rootRotation * Quat::FromAxisAngle(FVec3::UnitX(), poseAngle);
         object.linearVelocity = velocity;
         object.humanoidState = stateValue;
         WriteTransform(engine, object, state.index.Find(uid), position, limbRotation);

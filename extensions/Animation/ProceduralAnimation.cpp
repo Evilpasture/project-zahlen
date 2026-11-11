@@ -7,14 +7,11 @@ module;
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Animation/ProceduralMath.hpp>
 // clang-format on
 #include <Animation/AnimationContext.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <CharacterController/CharacterComponents.hpp>
-#include <Jolt/Math/Mat4x4.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -25,6 +22,7 @@ module;
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <algorithm>
@@ -282,16 +280,16 @@ struct HairAddress {
     return result.IsValid() ? result : HairAddress {};
 }
 
-[[nodiscard]] FVec3 ExtractScale(const JPH::Mat44& matrix) noexcept {
-    return FVec3(matrix.GetColumn3(0).Length(), matrix.GetColumn3(1).Length(), matrix.GetColumn3(2).Length());
+[[nodiscard]] FVec3 ExtractScale(const Mat4x4& matrix) noexcept {
+    return FVec3(ProceduralMath::Column3(matrix, 0).Length(), ProceduralMath::Column3(matrix, 1).Length(), ProceduralMath::Column3(matrix, 2).Length());
 }
 
-[[nodiscard]] JPH::Quat ExtractRotation(const JPH::Mat44& matrix) noexcept {
+[[nodiscard]] Quat ExtractRotation(const Mat4x4& matrix) noexcept {
     const FVec3 scale = ExtractScale(matrix);
-    const FVec3 x     = scale.x > 1.0e-6f ? matrix.GetColumn3(0) / scale.x : FVec3::sAxisX();
-    const FVec3 y     = scale.y > 1.0e-6f ? matrix.GetColumn3(1) / scale.y : FVec3::sAxisY();
-    const FVec3 z     = scale.z > 1.0e-6f ? matrix.GetColumn3(2) / scale.z : FVec3::sAxisZ();
-    return JPH::Mat44(FVec4(x, 0.0f), FVec4(y, 0.0f), FVec4(z, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f)).GetQuaternion().Normalized();
+    const FVec3 x     = scale.x > 1.0e-6f ? ProceduralMath::Column3(matrix, 0) / scale.x : FVec3::UnitX();
+    const FVec3 y     = scale.y > 1.0e-6f ? ProceduralMath::Column3(matrix, 1) / scale.y : FVec3::UnitY();
+    const FVec3 z     = scale.z > 1.0e-6f ? ProceduralMath::Column3(matrix, 2) / scale.z : FVec3::UnitZ();
+    return ProceduralMath::Rotation(Mat4x4::FromCols(FVec4(x, 0.0f), FVec4(y, 0.0f), FVec4(z, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f)));
 }
 
 [[nodiscard]] float SmootherStep(float value) noexcept {
@@ -312,14 +310,14 @@ void SpringVector(FVec3& value, FVec3& velocity, FVec3 target, float dt, float s
     velocity                           = (velocity + (FVec3(target) - oldValue) * hoo) * invDet;
 }
 
-void SpringRotation(JPH::Quat& value, FVec3& angularVelocity, JPH::QuatArg target, float dt, float stiffness, float dampingFactor) noexcept {
+void SpringRotation(Quat& value, FVec3& angularVelocity, Quat target, float dt, float stiffness, float dampingFactor) noexcept {
     const float safeDt             = std::clamp(dt, 0.0f, 0.05f);
     const float safeStiffness      = std::max(stiffness, 0.0f);
     const float dampingCoefficient = 2.0f * std::sqrt(safeStiffness) * std::max(dampingFactor, 0.0f);
-    JPH::Quat   error              = (target * value.Inversed()).Normalized();
+    Quat   error              = (target * value.Inversed()).Normalized();
     FVec3   axis;
     float       angle = 0.0f;
-    error.GetAxisAngle(axis, angle);
+    error.ToAxisAngle(axis, angle);
     const FVec3 errorVector = axis * angle;
     const float     denominator = 1.0f + dampingCoefficient * safeDt + safeStiffness * safeDt * safeDt;
     angularVelocity             = (angularVelocity + errorVector * (safeStiffness * safeDt)) / denominator;
@@ -327,7 +325,7 @@ void SpringRotation(JPH::Quat& value, FVec3& angularVelocity, JPH::QuatArg targe
     const FVec3 rotationStep = angularVelocity * safeDt;
     const float     stepAngle    = rotationStep.Length();
     if (stepAngle > 1.0e-7f) {
-        value = (JPH::Quat::sRotation(rotationStep / stepAngle, std::min(stepAngle, std::numbers::pi_v<float>)) * value).Normalized();
+        value = (Quat::FromAxisAngle(rotationStep / stepAngle, std::min(stepAngle, std::numbers::pi_v<float>)) * value).Normalized();
     }
 }
 
@@ -344,20 +342,20 @@ void SpringRotation(JPH::Quat& value, FVec3& angularVelocity, JPH::QuatArg targe
     return p1 * h00 + tangent1 * h10 + p2 * h01 + tangent2 * h11;
 }
 
-[[nodiscard]] float QuaternionDot(JPH::QuatArg a, JPH::QuatArg b) noexcept {
+[[nodiscard]] float QuaternionDot(Quat a, Quat b) noexcept {
     return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
 }
 
-[[nodiscard]] JPH::Quat AlignQuaternionHemisphere(JPH::QuatArg value, JPH::QuatArg reference) noexcept {
-    return QuaternionDot(value, reference) < 0.0f ? JPH::Quat(-value.x, -value.y, -value.z, -value.w) : JPH::Quat(value);
+[[nodiscard]] Quat AlignQuaternionHemisphere(Quat value, Quat reference) noexcept {
+    return QuaternionDot(value, reference) < 0.0f ? Quat(-value.x, -value.y, -value.z, -value.w) : Quat(value);
 }
 
-[[nodiscard]] JPH::Quat BicubicRotation(JPH::QuatArg q0, JPH::QuatArg q1, JPH::QuatArg q2, JPH::QuatArg q3, float phase, float tension) noexcept {
-    const JPH::Quat p1  = q1.Normalized();
-    const JPH::Quat p0  = AlignQuaternionHemisphere(q0.Normalized(), p1);
-    const JPH::Quat p2  = AlignQuaternionHemisphere(q2.Normalized(), p1);
-    const JPH::Quat p3  = AlignQuaternionHemisphere(q3.Normalized(), p1);
-    const FVec3 xyz = BicubicVector(p0.GetXYZ(), p1.GetXYZ(), p2.GetXYZ(), p3.GetXYZ(), phase, tension);
+[[nodiscard]] Quat BicubicRotation(Quat q0, Quat q1, Quat q2, Quat q3, float phase, float tension) noexcept {
+    const Quat p1  = q1.Normalized();
+    const Quat p0  = AlignQuaternionHemisphere(q0.Normalized(), p1);
+    const Quat p2  = AlignQuaternionHemisphere(q2.Normalized(), p1);
+    const Quat p3  = AlignQuaternionHemisphere(q3.Normalized(), p1);
+    const FVec3 xyz = BicubicVector(p0.XYZ(), p1.XYZ(), p2.XYZ(), p3.XYZ(), phase, tension);
 
     const float tangentScale = 0.5f * (1.0f - std::clamp(tension, -1.0f, 1.0f));
     const float tangent1     = (p2.w - p0.w) * tangentScale;
@@ -366,7 +364,7 @@ void SpringRotation(JPH::Quat& value, FVec3& angularVelocity, JPH::QuatArg targe
     const float t3           = t2 * phase;
     const float w            = p1.w * (2.0f * t3 - 3.0f * t2 + 1.0f) + tangent1 * (t3 - 2.0f * t2 + phase) + p2.w * (-2.0f * t3 + 3.0f * t2) +
                                tangent2 * (t3 - t2);
-    return JPH::Quat(xyz.x, xyz.y, xyz.z, w).Normalized();
+    return Quat(xyz.x, xyz.y, xyz.z, w).Normalized();
 }
 
 void SamplePoseChannel(
@@ -375,7 +373,7 @@ void SamplePoseChannel(
     PoseInterpolationMode   mode,
     float                   bicubicTension,
     FVec3&              translation,
-    JPH::Quat&              rotation,
+    Quat&              rotation,
     FVec3&              scale
 ) noexcept {
     if (channel.keyTimes.empty() || channel.keyValues.empty()) {
@@ -417,11 +415,11 @@ void SamplePoseChannel(
             scale = result;
         }
     } else if (channel.path == AnimationPathType::Rotation) {
-        const JPH::Quat q0(valuePrev[0], valuePrev[1], valuePrev[2], valuePrev[3]);
-        const JPH::Quat q1(value0[0], value0[1], value0[2], value0[3]);
-        const JPH::Quat q2(value1[0], value1[1], value1[2], value1[3]);
-        const JPH::Quat q3(valueNext[0], valueNext[1], valueNext[2], valueNext[3]);
-        rotation = useBicubic ? BicubicRotation(q0, q1, q2, q3, phase, bicubicTension) : q1.Normalized().SLERP(q2.Normalized(), phase).Normalized();
+        const Quat q0(valuePrev[0], valuePrev[1], valuePrev[2], valuePrev[3]);
+        const Quat q1(value0[0], value0[1], value0[2], value0[3]);
+        const Quat q2(value1[0], value1[1], value1[2], value1[3]);
+        const Quat q3(valueNext[0], valueNext[1], valueNext[2], valueNext[3]);
+        rotation = useBicubic ? BicubicRotation(q0, q1, q2, q3, phase, bicubicTension) : Slerp(q1.Normalized(), q2.Normalized(), phase).Normalized();
     }
 }
 
@@ -434,7 +432,7 @@ void ApplyAuthoredPose(
     float                                      dt
 ) noexcept {
     std::array<FVec3, kMaxRigNodes> targetTranslations {};
-    std::array<JPH::Quat, kMaxRigNodes> targetRotations {};
+    std::array<Quat, kMaxRigNodes> targetRotations {};
     std::array<FVec3, kMaxRigNodes> targetScales {};
 
     const PoseInterpolationMode requestedMode = config != nullptr ? config->poseInterpolation : PoseInterpolationMode::SpringDamper;
@@ -450,7 +448,7 @@ void ApplyAuthoredPose(
     const float                 bicubicTension      = config != nullptr ? config->bicubicTension : 0.0f;
 
     for (size_t node = 0; node < map.nodeCount; ++node) {
-        targetTranslations[node] = map.bindLocalTransforms[node].GetTranslation();
+        targetTranslations[node] = ProceduralMath::Translation(map.bindLocalTransforms[node]);
         targetRotations[node]    = ExtractRotation(map.bindLocalTransforms[node]);
         targetScales[node]       = ExtractScale(map.bindLocalTransforms[node]);
     }
@@ -472,10 +470,10 @@ void ApplyAuthoredPose(
         // blend is active on ProceduralLocomotionTracksComponent.
         if (tracks != nullptr && tracks->prevTrack >= 0 && tracks->blendFactor < 1.0f && tracks->prevTrack < static_cast<int32_t>(prefab->animations.size())) {
             std::array<FVec3, kMaxRigNodes> prevTranslations {};
-            std::array<JPH::Quat, kMaxRigNodes> prevRotations {};
+            std::array<Quat, kMaxRigNodes> prevRotations {};
             std::array<FVec3, kMaxRigNodes> prevScales {};
             for (size_t node = 0; node < map.nodeCount; ++node) {
-                prevTranslations[node] = map.bindLocalTransforms[node].GetTranslation();
+                prevTranslations[node] = ProceduralMath::Translation(map.bindLocalTransforms[node]);
                 prevRotations[node]    = ExtractRotation(map.bindLocalTransforms[node]);
                 prevScales[node]       = ExtractScale(map.bindLocalTransforms[node]);
             }
@@ -491,7 +489,7 @@ void ApplyAuthoredPose(
             const float t = SmootherStep(tracks->blendFactor);
             for (size_t node = 0; node < map.nodeCount; ++node) {
                 targetTranslations[node] = prevTranslations[node] + t * (targetTranslations[node] - prevTranslations[node]);
-                targetRotations[node]    = prevRotations[node].SLERP(targetRotations[node], t).Normalized();
+                targetRotations[node]    = Slerp(prevRotations[node], targetRotations[node], t).Normalized();
                 targetScales[node]       = prevScales[node] + t * (targetScales[node] - prevScales[node]);
             }
         }
@@ -502,7 +500,7 @@ void ApplyAuthoredPose(
     // use those samples as physical targets; bicubic mode drives all controls
     // directly from the four-key curve.
     for (size_t node = 0; node < map.nodeCount; ++node) {
-        map.localTransforms[node] = JPH::Mat44::sRotationTranslation(targetRotations[node], targetTranslations[node]).PreScaled(targetScales[node]);
+        map.localTransforms[node] = ProceduralMath::Transform(targetRotations[node], targetTranslations[node], targetScales[node]);
     }
 
     if (!map.springPoseInitialized || mode == PoseInterpolationMode::Bicubic) {
@@ -512,11 +510,11 @@ void ApplyAuthoredPose(
                 continue;
             }
             map.poseTranslations[semantic]          = targetTranslations[node];
-            map.poseTranslationVelocities[semantic] = FVec3::sZero();
+            map.poseTranslationVelocities[semantic] = FVec3::Zero();
             map.poseRotations[semantic]             = targetRotations[node];
-            map.poseAngularVelocities[semantic]     = FVec3::sZero();
+            map.poseAngularVelocities[semantic]     = FVec3::Zero();
             map.poseScales[semantic]                = targetScales[node];
-            map.poseScaleVelocities[semantic]       = FVec3::sZero();
+            map.poseScaleVelocities[semantic]       = FVec3::Zero();
         }
         map.springPoseInitialized = true;
     }
@@ -537,7 +535,7 @@ void ApplyAuthoredPose(
         SpringRotation(map.poseRotations[semantic], map.poseAngularVelocities[semantic], targetRotations[nodeIndex], dt, springStiffness, springDampingFactor);
         SpringVector(map.poseScales[semantic], map.poseScaleVelocities[semantic], targetScales[nodeIndex], dt, springStiffness, springDampingFactor);
         map.localTransforms[nodeIndex] =
-            JPH::Mat44::sRotationTranslation(map.poseRotations[semantic], map.poseTranslations[semantic]).PreScaled(map.poseScales[semantic]);
+            ProceduralMath::Transform(map.poseRotations[semantic], map.poseTranslations[semantic], map.poseScales[semantic]);
     }
     map.springPoseTrack = activeTrack;
 }
@@ -772,7 +770,7 @@ void ResolveForwardKinematics(RigBoneMap& map) noexcept {
 void CaptureLocalPose(RigBoneMap& map) noexcept {
     for (RigNodeIndex node = 0; node < map.nodeCount; ++node) {
         const RigNodeIndex parent = map.parentIndices[node];
-        map.localTransforms[node] = IsValidRigNode(parent, map.nodeCount) ? map.modelTransforms[parent].Inversed() * map.modelTransforms[node] :
+        map.localTransforms[node] = IsValidRigNode(parent, map.nodeCount) ? Inverse(map.modelTransforms[parent]) * map.modelTransforms[node] :
                                                                             map.modelTransforms[node];
     }
 }
@@ -799,9 +797,9 @@ void ConfigureHandPalmFrames(const ModelPrefab* prefab, RigBoneMap& map) noexcep
             continue;
         }
 
-        const FVec3 handPosition    = map.modelTransforms[handNode].GetTranslation();
-        FVec3       fingerDirection = FVec3::sZero();
-        FVec3       thumbDirection  = FVec3::sZero();
+        const FVec3 handPosition    = ProceduralMath::Translation(map.modelTransforms[handNode]);
+        FVec3       fingerDirection = FVec3::Zero();
+        FVec3       thumbDirection  = FVec3::Zero();
         size_t          fingerCount     = 0;
         size_t          thumbCount      = 0;
         if (prefab != nullptr) {
@@ -817,7 +815,7 @@ void ConfigureHandPalmFrames(const ModelPrefab* prefab, RigBoneMap& map) noexcep
                 if (name.contains("claw")) {
                     continue;
                 }
-                const FVec3 offset = map.modelTransforms[node].GetTranslation() - handPosition;
+                const FVec3 offset = ProceduralMath::Translation(map.modelTransforms[node]) - handPosition;
                 if (name.contains("thumb")) {
                     thumbDirection += offset;
                     ++thumbCount;
@@ -834,28 +832,26 @@ void ConfigureHandPalmFrames(const ModelPrefab* prefab, RigBoneMap& map) noexcep
         if (fingerCount > 0) {
             fingerDirection /= static_cast<float>(fingerCount);
         } else if (IsValidRigNode(forearmNode, map.nodeCount)) {
-            fingerDirection = handPosition - map.modelTransforms[forearmNode].GetTranslation();
+            fingerDirection = handPosition - ProceduralMath::Translation(map.modelTransforms[forearmNode]);
         }
-        fingerDirection = fingerDirection.LengthSquared() > 1.0e-8f ? fingerDirection.Normalized() : (side == 0 ? FVec3::sAxisX() : -FVec3::sAxisX());
+        fingerDirection = fingerDirection.LengthSquared() > 1.0e-8f ? fingerDirection.Normalized() : (side == 0 ? FVec3::UnitX() : -FVec3::UnitX());
 
         if (thumbCount > 0) {
             thumbDirection /= static_cast<float>(thumbCount);
         } else {
-            thumbDirection = side == 0 ? -FVec3::sAxisZ() : FVec3::sAxisZ();
+            thumbDirection = side == 0 ? -FVec3::UnitZ() : FVec3::UnitZ();
         }
         thumbDirection -= fingerDirection * Dot(thumbDirection, fingerDirection);
         if (thumbDirection.LengthSquared() < 1.0e-8f) {
-            const FVec3 fallback = side == 0 ? -FVec3::sAxisZ() : FVec3::sAxisZ();
+            const FVec3 fallback = side == 0 ? -FVec3::UnitZ() : FVec3::UnitZ();
             thumbDirection           = fallback - fingerDirection * Dot(fallback, fingerDirection);
         }
-        thumbDirection = thumbDirection.LengthSquared() > 1.0e-8f ? thumbDirection.Normalized() : fingerDirection.GetNormalizedPerpendicular();
+        thumbDirection = thumbDirection.LengthSquared() > 1.0e-8f ? thumbDirection.Normalized() : Cross(fingerDirection, std::abs(fingerDirection.x) < 0.9f ? FVec3::UnitX() : FVec3::UnitY()).Normalized();
 
         const FVec3 palmNormal = Cross(thumbDirection, fingerDirection).Normalized();
         const FVec3 palmThumb  = Cross(fingerDirection, palmNormal).Normalized();
-        const JPH::Quat palmRotation =
-            JPH::Mat44(FVec4(palmNormal, 0.0f), FVec4(palmThumb, 0.0f), FVec4(fingerDirection, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f))
-                .GetQuaternion()
-                .Normalized();
+        const Quat palmRotation =
+            ProceduralMath::Rotation(Mat4x4::FromCols(FVec4(palmNormal, 0.0f), FVec4(palmThumb, 0.0f), FVec4(fingerDirection, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f)));
         map.handBoneToPalmRotations[side] = (ExtractRotation(map.modelTransforms[handNode]).Inversed() * palmRotation).Normalized();
         map.handPalmFramesValid[side]     = true;
     }
@@ -927,7 +923,7 @@ void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noex
         }
         const RigNodeIndex handNode  = side == 0 ? handL : handR;
         const float        distance  = IsValidRigNode(handNode, map.nodeCount) ?
-                                           (map.modelTransforms[node].GetTranslation() - map.modelTransforms[handNode].GetTranslation()).Length() :
+                                           (ProceduralMath::Translation(map.modelTransforms[node]) - ProceduralMath::Translation(map.modelTransforms[handNode])).Length() :
                                            0.0f;
         candidates[candidateCount++] = {
             .node         = node,
@@ -984,8 +980,8 @@ void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noex
                     constraint.chain                     = chainValue;
                     constraint.segment                   = static_cast<uint8_t>(segment);
                     constraint.repairRelation            = !IsNodeDescendant(map, child, expectedParent);
-                    constraint.bindRelative              = map.modelTransforms[expectedParent].Inversed() * map.modelTransforms[child];
-                    constraint.localPoseDelta            = JPH::Mat44::sIdentity();
+                    constraint.bindRelative              = Inverse(map.modelTransforms[expectedParent]) * map.modelTransforms[child];
+                    constraint.localPoseDelta            = Mat4x4::Identity();
                     expectedParent                       = child;
                 }
             }
@@ -1000,25 +996,25 @@ void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noex
         if (!IsValidRigNode(handNode, map.nodeCount) || !IsValidRigNode(joint.child, map.nodeCount)) {
             continue;
         }
-        const JPH::Quat palmRotation    = (ExtractRotation(map.modelTransforms[handNode]) * map.handBoneToPalmRotations[joint.side]).Normalized();
-        const FVec3 palmNormal      = (palmRotation * FVec3::sAxisX()).Normalized();
-        FVec3       distalDirection = (palmRotation * FVec3::sAxisZ()).Normalized();
+        const Quat palmRotation    = (ExtractRotation(map.modelTransforms[handNode]) * map.handBoneToPalmRotations[joint.side]).Normalized();
+        const FVec3 palmNormal      = (palmRotation * FVec3::UnitX()).Normalized();
+        FVec3       distalDirection = (palmRotation * FVec3::UnitZ()).Normalized();
         for (size_t nextIndex = index + 1; nextIndex < map.fingerJointConstraintCount; ++nextIndex) {
             const RigFingerJointConstraint& next = map.fingerJointConstraints[nextIndex];
             if (next.side == joint.side && next.chain == joint.chain && next.digit == joint.digit && next.segment == joint.segment + 1 &&
                 IsValidRigNode(next.child, map.nodeCount)) {
-                const FVec3 candidateDirection = map.modelTransforms[next.child].GetTranslation() - map.modelTransforms[joint.child].GetTranslation();
+                const FVec3 candidateDirection = ProceduralMath::Translation(map.modelTransforms[next.child]) - ProceduralMath::Translation(map.modelTransforms[joint.child]);
                 if (candidateDirection.LengthSquared() > 1.0e-8f) {
                     distalDirection = candidateDirection.Normalized();
                 }
                 break;
             }
         }
-        FVec3 hingeAxis        = map.modelTransforms[joint.child].Multiply3x3(FVec3::sAxisX());
-        hingeAxis                  = hingeAxis.LengthSquared() > 1.0e-8f ? hingeAxis.Normalized() : palmRotation * FVec3::sAxisY();
+        FVec3 hingeAxis        = ProceduralMath::Direction(map.modelTransforms[joint.child], FVec3::UnitX());
+        hingeAxis                  = hingeAxis.LengthSquared() > 1.0e-8f ? hingeAxis.Normalized() : palmRotation * FVec3::UnitY();
         constexpr float probeAngle = 0.20f;
-        const float     plusScore  = (JPH::Quat::sRotation(hingeAxis, probeAngle) * distalDirection).Dot(palmNormal);
-        const float     minusScore = (JPH::Quat::sRotation(hingeAxis, -probeAngle) * distalDirection).Dot(palmNormal);
+        const float     plusScore  = Dot((Quat::FromAxisAngle(hingeAxis, probeAngle) * distalDirection), palmNormal);
+        const float     minusScore = Dot((Quat::FromAxisAngle(hingeAxis, -probeAngle) * distalDirection), palmNormal);
         joint.hingeFlexSign        = plusScore >= minusScore ? 1.0f : -1.0f;
     }
 }
@@ -1037,8 +1033,8 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
         constraint.parent                = parent;
         constraint.child                 = child;
         constraint.kind                  = kind;
-        constraint.bindRelative          = map.modelTransforms[parent].Inversed() * map.modelTransforms[child];
-        constraint.localPoseDelta        = JPH::Mat44::sIdentity();
+        constraint.bindRelative          = Inverse(map.modelTransforms[parent]) * map.modelTransforms[child];
+        constraint.localPoseDelta        = Mat4x4::Identity();
     };
 
     // 1. Pin knees to thighs
@@ -1110,8 +1106,8 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
         constraint.parent                = parent;
         constraint.child                 = child;
         constraint.kind                  = RigChildOfKind::FootAttachment;
-        constraint.bindRelative          = map.modelTransforms[parent].Inversed() * map.modelTransforms[child];
-        constraint.localPoseDelta        = JPH::Mat44::sIdentity();
+        constraint.bindRelative          = Inverse(map.modelTransforms[parent]) * map.modelTransforms[child];
+        constraint.localPoseDelta        = Mat4x4::Identity();
         constrainedNodes[child]          = true;
         return true;
     };
@@ -1139,7 +1135,7 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
 
     struct FootSite {
         RigNodeIndex node      = InvalidRigNode;
-        FVec3    position  = FVec3::sZero();
+        FVec3    position  = FVec3::Zero();
         float        reach     = 0.0f;
         float        maxRadius = 0.0f;
     };
@@ -1150,11 +1146,11 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
             return site;
         }
 
-        site.position                     = map.modelTransforms[site.node].GetTranslation();
+        site.position                     = ProceduralMath::Translation(map.modelTransforms[site.node]);
         const RigNodeIndex shin           = map.nodeIndices[BoneSlot(shinBone)];
         const RigNodeIndex toe            = map.nodeIndices[BoneSlot(toeBone)];
-        const float        lowerLegLength = IsValidRigNode(shin, map.nodeCount) ? (map.modelTransforms[shin].GetTranslation() - site.position).Length() : 0.0f;
-        const float        footLength     = IsValidRigNode(toe, map.nodeCount) ? (map.modelTransforms[toe].GetTranslation() - site.position).Length() : 0.0f;
+        const float        lowerLegLength = IsValidRigNode(shin, map.nodeCount) ? (ProceduralMath::Translation(map.modelTransforms[shin]) - site.position).Length() : 0.0f;
+        const float        footLength     = IsValidRigNode(toe, map.nodeCount) ? (ProceduralMath::Translation(map.modelTransforms[toe]) - site.position).Length() : 0.0f;
         const float        characterMeasure = std::max(lowerLegLength, footLength * 2.0f);
         site.reach                          = std::max(lowerLegLength * 0.35f, footLength * 1.25f);
         site.maxRadius                      = characterMeasure * 1.75f;
@@ -1223,7 +1219,7 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
             continue;
         }
 
-        const JPH::Mat44 meshBind = map.modelTransforms[meshNode] * part.localTransform;
+        const Mat4x4 meshBind = map.modelTransforms[meshNode] * PrefabMatrixToNative(part.localTransform);
         const FVec3  boundsMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const FVec3  boundsMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         for (uint32_t corner = 0; corner < 8; ++corner) {
@@ -1231,7 +1227,7 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
                 (corner & 1u) != 0u ? boundsMax.x : boundsMin.x, (corner & 2u) != 0u ? boundsMax.y : boundsMin.y,
                 (corner & 4u) != 0u ? boundsMax.z : boundsMin.z
             );
-            const FVec3 point = meshBind.Multiply3x3(localPoint) + meshBind.GetTranslation();
+            const FVec3 point = ProceduralMath::Direction(meshBind, localPoint) + ProceduralMath::Translation(meshBind);
             if (!candidateRoots[root]) {
                 candidateRoots[root] = true;
                 candidateMin[root]   = point;
@@ -1368,7 +1364,7 @@ struct SkinBinding {
     return best;
 }
 
-[[nodiscard]] FVec3 ModelToWorld(FVec3 rootPosition, JPH::QuatArg rootRotation, FVec3 modelPosition) noexcept {
+[[nodiscard]] FVec3 ModelToWorld(FVec3 rootPosition, Quat rootRotation, FVec3 modelPosition) noexcept {
     return FVec3(rootPosition) + rootRotation * modelPosition;
 }
 
@@ -1414,8 +1410,8 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
         const bool    parentIsValid      = importedParent >= 0 && static_cast<RigNodeIndex>(importedParent) < outMap.nodeCount &&
                                            static_cast<RigNodeIndex>(importedParent) != node;
         outMap.parentIndices[node]       = parentIsValid ? static_cast<RigNodeIndex>(importedParent) : InvalidRigNode;
-        outMap.bindLocalTransforms[node] = prefab.nodes[node].localTransform;
-        outMap.localTransforms[node]     = prefab.nodes[node].localTransform;
+        outMap.bindLocalTransforms[node] = PrefabMatrixToNative(prefab.nodes[node].localTransform);
+        outMap.localTransforms[node]     = PrefabMatrixToNative(prefab.nodes[node].localTransform);
     }
 
     const auto nodeWindow            = std::span(prefab.nodes.data(), outMap.nodeCount);
@@ -1607,11 +1603,11 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
         const size_t semantic                = BoneSlot(bone);
         outMap.nodeIndices[semantic]         = semantic;
         outMap.parentIndices[semantic]       = parentNode;
-        outMap.bindLocalTransforms[semantic] = JPH::Mat44::sTranslation(translation);
+        outMap.bindLocalTransforms[semantic] = CreateTranslation(translation);
         outMap.localTransforms[semantic]     = outMap.bindLocalTransforms[semantic];
     };
 
-    addBone(CharacterBone::Root, InvalidRigNode, FVec3::sZero());
+    addBone(CharacterBone::Root, InvalidRigNode, FVec3::Zero());
     addBone(CharacterBone::Hips, BoneSlot(CharacterBone::Root), FVec3(0.0f, 1.0f, 0.0f));
     addBone(CharacterBone::Spine, BoneSlot(CharacterBone::Hips), FVec3(0.0f, 0.15f, 0.0f));
     addBone(CharacterBone::SupSpine, BoneSlot(CharacterBone::Spine), FVec3(0.0f, 0.16f, 0.0f));
@@ -1644,7 +1640,7 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
             outMap.nodeIndices[semantic]   = semantic;
             outMap.parentIndices[semantic] = (link == 0) ? BoneSlot(CharacterBone::Head) : semantic - 1;
             const FVec3 translation = (link == 0) ? FVec3(std::cos(angle) * 0.105f, 0.17f, std::sin(angle) * 0.105f) : FVec3(0.0f, -0.105f, 0.0f);
-            outMap.bindLocalTransforms[semantic] = JPH::Mat44::sTranslation(translation);
+            outMap.bindLocalTransforms[semantic] = CreateTranslation(translation);
             outMap.localTransforms[semantic]     = outMap.bindLocalTransforms[semantic];
         }
     }
@@ -1654,7 +1650,7 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
     for (size_t semantic = 0; semantic < kBoneCount; ++semantic) {
         const RigNodeIndex node = outMap.nodeIndices[semantic];
         if (IsValidRigNode(node, outMap.nodeCount)) {
-            outMap.inverseBindMatrices[semantic] = outMap.modelTransforms[node].Inversed();
+            outMap.inverseBindMatrices[semantic] = Inverse(outMap.modelTransforms[node]);
         }
     }
     outMap.initialized = true;
@@ -1730,7 +1726,7 @@ void ProceduralAnimation::CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept
         if (constraint.kind == RigChildOfKind::Knee || constraint.kind == RigChildOfKind::Ankle || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
             continue;
         }
-        constraint.localPoseDelta = boneMap.bindLocalTransforms[constraint.child].Inversed() * boneMap.localTransforms[constraint.child];
+        constraint.localPoseDelta = Inverse(boneMap.bindLocalTransforms[constraint.child]) * boneMap.localTransforms[constraint.child];
     }
 }
 
@@ -1742,9 +1738,9 @@ void ProceduralAnimation::CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMa
         if (!captureModelRelation || !IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
             continue;
         }
-        const JPH::Mat44 authoredRelative = boneMap.modelTransforms[constraint.parent].Inversed() * boneMap.modelTransforms[constraint.child];
-        const JPH::Mat44 bindRelative     = constraint.bindRelative;
-        constraint.localPoseDelta         = bindRelative.Inversed() * authoredRelative;
+        const Mat4x4 authoredRelative = Inverse(boneMap.modelTransforms[constraint.parent]) * boneMap.modelTransforms[constraint.child];
+        const Mat4x4 bindRelative     = constraint.bindRelative;
+        constraint.localPoseDelta         = Inverse(bindRelative) * authoredRelative;
     }
 
     if (!boneMap.preserveAuthoredHierarchy) {
@@ -1755,9 +1751,9 @@ void ProceduralAnimation::CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMa
         if (!constraint.repairRelation || !IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
             continue;
         }
-        const JPH::Mat44 authoredRelative = boneMap.modelTransforms[constraint.parent].Inversed() * boneMap.modelTransforms[constraint.child];
-        const JPH::Mat44 bindRelative     = constraint.bindRelative;
-        constraint.localPoseDelta         = bindRelative.Inversed() * authoredRelative;
+        const Mat4x4 authoredRelative = Inverse(boneMap.modelTransforms[constraint.parent]) * boneMap.modelTransforms[constraint.child];
+        const Mat4x4 bindRelative     = constraint.bindRelative;
+        constraint.localPoseDelta         = Inverse(bindRelative) * authoredRelative;
     }
 }
 
@@ -1767,7 +1763,7 @@ void ProceduralAnimation::CaptureFingerPoseDeltas(RigBoneMap& boneMap) noexcept 
         if (!IsValidRigNode(constraint.child, boneMap.nodeCount)) {
             continue;
         }
-        constraint.localPoseDelta = boneMap.bindLocalTransforms[constraint.child].Inversed() * boneMap.localTransforms[constraint.child];
+        constraint.localPoseDelta = Inverse(boneMap.bindLocalTransforms[constraint.child]) * boneMap.localTransforms[constraint.child];
     }
 }
 
@@ -1778,9 +1774,9 @@ size_t ProceduralAnimation::ApplyFingerRelationConstraints(RigBoneMap& boneMap) 
         if (!constraint.repairRelation || !IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
             continue;
         }
-        const JPH::Mat44 previousChild    = boneMap.modelTransforms[constraint.child];
-        const JPH::Mat44 constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta;
-        const JPH::Mat44 correction       = constrainedChild * previousChild.Inversed();
+        const Mat4x4 previousChild    = boneMap.modelTransforms[constraint.child];
+        const Mat4x4 constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta;
+        const Mat4x4 correction       = constrainedChild * Inverse(previousChild);
         for (RigNodeIndex node = 0; node < boneMap.nodeCount; ++node) {
             if (IsNodeDescendant(boneMap, node, constraint.child)) {
                 boneMap.modelTransforms[node] = correction * boneMap.modelTransforms[node];
@@ -1820,14 +1816,14 @@ size_t ProceduralAnimation::ApplyChildOfConstraints(
                 continue;
             }
 
-            const JPH::Mat44 previousChild    = boneMap.modelTransforms[constraint.child];
-            JPH::Mat44       constrainedChild = previousChild;
+            const Mat4x4 previousChild    = boneMap.modelTransforms[constraint.child];
+            Mat4x4       constrainedChild = previousChild;
 
             if (kind == RigChildOfKind::Knee || kind == RigChildOfKind::Ankle) {
                 // Ball-joint constraint: pin origin to parent's authored endpoint, preserving rotation
                 const FVec3 jointPosition =
-                    (boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta).GetTranslation();
-                constrainedChild.SetTranslation(jointPosition);
+                    ProceduralMath::Translation((boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta));
+                ProceduralMath::SetTranslation(constrainedChild, jointPosition);
             } else if (kind == RigChildOfKind::Hand && !IsNodeDescendant(boneMap, constraint.child, constraint.parent)) {
                 // Detached hand: pin rigidly to forearm at bind-time offset.
                 // The cross-fade blends local transforms in the hand's actual
@@ -1839,7 +1835,7 @@ size_t ProceduralAnimation::ApplyChildOfConstraints(
                 constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta;
             }
 
-            const JPH::Mat44 modelCorrection = constrainedChild * previousChild.Inversed();
+            const Mat4x4 modelCorrection = constrainedChild * Inverse(previousChild);
             for (RigNodeIndex node = 0; node < boneMap.nodeCount; ++node) {
                 if (IsNodeDescendant(boneMap, node, constraint.child)) {
                     boneMap.modelTransforms[node] = modelCorrection * boneMap.modelTransforms[node];
@@ -1851,9 +1847,9 @@ size_t ProceduralAnimation::ApplyChildOfConstraints(
     return appliedCount;
 }
 
-size_t ProceduralAnimation::BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<JPH::Mat44> output) noexcept {
+size_t ProceduralAnimation::BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<Mat4x4> output) noexcept {
     const size_t count = std::min(skeleton.joints.size(), output.size());
-    std::fill_n(output.begin(), count, JPH::Mat44::sIdentity());
+    std::fill_n(output.begin(), count, Mat4x4::Identity());
     for (size_t jointIndex = 0; jointIndex < count; ++jointIndex) {
         const Joint&       joint = skeleton.joints[jointIndex];
         const RigNodeIndex node  = joint.nodeIndex >= 0 ? static_cast<RigNodeIndex>(joint.nodeIndex) : InvalidRigNode;
@@ -1867,15 +1863,15 @@ size_t ProceduralAnimation::BuildSkinningPalette(const Skeleton& skeleton, const
 size_t ProceduralAnimation::MaskFirstPersonPalette(
     const Skeleton&       skeleton,
     const RigBoneMap&     boneMap,
-    std::span<JPH::Mat44> palette,
+    std::span<Mat4x4> palette,
     bool                  hideHead,
     bool                  hideHair
 ) noexcept {
     const size_t       count           = std::min(skeleton.joints.size(), palette.size());
     const RigNodeIndex headNode        = boneMap.nodeIndices[BoneSlot(CharacterBone::Head)];
     size_t             masked          = 0;
-    const FVec3    collapsePoint   = IsValidRigNode(headNode, boneMap.nodeCount) ? boneMap.modelTransforms[headNode].GetTranslation() : FVec3::sZero();
-    const JPH::Mat44   hiddenTransform = JPH::Mat44::sRotationTranslation(JPH::Quat::sIdentity(), collapsePoint).PreScaled(FVec3::sZero());
+    const FVec3    collapsePoint   = IsValidRigNode(headNode, boneMap.nodeCount) ? ProceduralMath::Translation(boneMap.modelTransforms[headNode]) : FVec3::Zero();
+    const Mat4x4   hiddenTransform = ProceduralMath::Transform(Quat::Identity(), collapsePoint, FVec3::Zero());
     const size_t       hairOffset      = BoneSlot(CharacterBone::HairStart);
     const std::span<const RigNodeIndex> hairNodes(boneMap.nodeIndices.data() + hairOffset, kBoneCount - hairOffset);
 
@@ -1916,9 +1912,9 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
             continue;
         }
         if (auto childTransform = registry.Get<Components::TransformComponent>(childEntity)) {
-            const JPH::Mat44& modelTransform = boneMap.modelTransforms[node];
-            childTransform->position         = modelTransform.GetTranslation();
-            childTransform->rotation         = ExtractRotation(modelTransform);
+            const Mat4x4& modelTransform = boneMap.modelTransforms[node];
+            childTransform->position         = ProceduralMath::Translation(modelTransform);
+            childTransform->rotation = ExtractRotation(modelTransform);
             childTransform->scale            = ExtractScale(modelTransform);
             ++synchronizedCount;
         }
@@ -2116,17 +2112,17 @@ void ProceduralAnimationSystem(
                                            footAttachmentsEnabled;
         const bool locomotionSyncEnabled = animator && tracks && tracks->synchronizeToStrideWheel;
 
-        const FVec3 velocityWorld   = physicsComponent ? physics.GetCharacterVelocity(physicsComponent->physicsID) : FVec3::sZero();
-        const JPH::Quat entityRotation  = transform->rotation;
-        const JPH::Quat rootRotation    = entityRotation.Normalized();
+        const FVec3 velocityWorld   = physicsComponent ? Physics::FromJoltVector(physics.GetCharacterVelocity(physicsComponent->physicsID)) : FVec3::Zero();
+        const Quat entityRotation {transform->rotation};
+        const Quat rootRotation    = entityRotation.Normalized();
         const FVec3 velocityLocal   = rootRotation.Inversed() * velocityWorld;
         const float     horizontalSpeed = std::sqrt(velocityLocal.x * velocityLocal.x + velocityLocal.z * velocityLocal.z);
 
         float angularVelocity = 0.0f;
         if (gait->orientationInitialized) {
-            const JPH::Quat previousRootRotation = gait->previousRootRotation;
-            const FVec3 oldForward           = previousRootRotation * FVec3::sAxisZ();
-            const FVec3 newForward           = rootRotation * FVec3::sAxisZ();
+            const Quat previousRootRotation = gait->previousRootRotation;
+            const FVec3 oldForward           = previousRootRotation * FVec3::UnitZ();
+            const FVec3 newForward           = rootRotation * FVec3::UnitZ();
             const float     dot                  = std::clamp(Dot(oldForward, newForward), -1.0f, 1.0f);
             const float     sign                 = Cross(oldForward, newForward).y < 0.0f ? -1.0f : 1.0f;
             angularVelocity                      = sign * std::acos(dot) / std::max(dt, 0.0001f);
@@ -2192,9 +2188,9 @@ void ProceduralAnimationSystem(
             const float           pelvisDropWeight       = config ? config->pelvisDropWeight : 1.0f;
             const float           maxHeightCorrection    = config ? config->maxFootHeightCorrection : 0.18f;
             const float           maxLegExtension        = config ? config->maxLegExtension : 0.98f;
-            const float           maxBodyTilt            = JPH::DegreesToRadians(config ? config->maxIKBodyTiltDegrees : 10.0f);
-            const float           maxAnkleSideways       = JPH::DegreesToRadians(config ? config->maxAnkleSidewaysDegrees : 15.0f);
-            const float           maxAnkleForward        = JPH::DegreesToRadians(config ? config->maxAnkleForwardDegrees : 35.0f);
+            const float           maxBodyTilt            = ProceduralMath::Radians(config ? config->maxIKBodyTiltDegrees : 10.0f);
+            const float           maxAnkleSideways       = ProceduralMath::Radians(config ? config->maxAnkleSidewaysDegrees : 15.0f);
+            const float           maxAnkleForward        = ProceduralMath::Radians(config ? config->maxAnkleForwardDegrees : 35.0f);
             const bool            preserveAuthoredFootXZ = !config || config->preserveAuthoredFootXZ;
             const bool            worldLockFeet          = config && config->worldLockFeet;
             Animation::SolveLegGrounding(
@@ -2238,12 +2234,12 @@ void ProceduralAnimationSystem(
             const RigNodeIndex  primaryHandNode = boneMap->nodeIndices[BoneSlot(primaryHandBone)];
             const RigNodeIndex  chestNode       = boneMap->nodeIndices[BoneSlot(CharacterBone::Chest)];
             const RigNodeIndex  headNode        = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
-            const JPH::Mat44    primaryHand     = IsValidRigNode(primaryHandNode, boneMap->nodeCount) ? boneMap->modelTransforms[primaryHandNode] :
-                                                                                                        JPH::Mat44::sIdentity();
-            const JPH::Mat44    chest           = IsValidRigNode(chestNode, boneMap->nodeCount) ? boneMap->modelTransforms[chestNode] : JPH::Mat44::sIdentity();
-            const FVec3     headPosition    = IsValidRigNode(headNode, boneMap->nodeCount) ? boneMap->modelTransforms[headNode].GetTranslation() :
+            const Mat4x4    primaryHand     = IsValidRigNode(primaryHandNode, boneMap->nodeCount) ? boneMap->modelTransforms[primaryHandNode] :
+                                                                                                        Mat4x4::Identity();
+            const Mat4x4    chest           = IsValidRigNode(chestNode, boneMap->nodeCount) ? boneMap->modelTransforms[chestNode] : Mat4x4::Identity();
+            const FVec3     headPosition    = IsValidRigNode(headNode, boneMap->nodeCount) ? ProceduralMath::Translation(boneMap->modelTransforms[headNode]) :
                                                                                                  FVec3(0.0f, 1.6f, 0.0f);
-            FVec3           aimDirection    = FVec3::sAxisZ();
+            FVec3           aimDirection    = FVec3::UnitZ();
             if (const auto lookAt = registry.Get<ProceduralLookAtComponent>(entity)) {
                 const FVec3 entityPosition = transform->position;
                 const FVec3 lookAtTarget   = lookAt->targetWorldPos;
@@ -2254,8 +2250,8 @@ void ProceduralAnimationSystem(
                 }
             }
 
-            const JPH::Mat44 rootWorld    = JPH::Mat44::sRotationTranslation(rootRotation, transform->position);
-            const JPH::Mat44 worldToModel = rootWorld.Inversed();
+            const Mat4x4 rootWorld    = ProceduralMath::Transform(rootRotation, transform->position);
+            const Mat4x4 worldToModel = Inverse(rootWorld);
             itemHandling->itemModelTransform =
                 Animation::SolveItemBasePose(*itemHandling, primaryHand, chest, worldToModel, headPosition, aimDirection, itemHandling->worldAnchor);
             Animation::UpdateItemDynamics(registry, physics, entity, *itemHandling, transform->position, rootRotation, dt);
@@ -2281,11 +2277,11 @@ void ProceduralAnimationSystem(
                     !IsValidRigNode(handNode, boneMap->nodeCount)) {
                     continue;
                 }
-                const FVec3 upperPosition = boneMap->modelTransforms[upperNode].GetTranslation();
-                const float armLength = (boneMap->modelTransforms[foreNode].GetTranslation() - upperPosition).Length() +
-                                        (boneMap->modelTransforms[handNode].GetTranslation() - boneMap->modelTransforms[foreNode].GetTranslation()).Length();
-                const JPH::Mat44 itemModel   = itemHandling->itemModelTransform;
-                const FVec3  target      = (itemModel * grip.localTransform).GetTranslation();
+                const FVec3 upperPosition = ProceduralMath::Translation(boneMap->modelTransforms[upperNode]);
+                const float armLength = (ProceduralMath::Translation(boneMap->modelTransforms[foreNode]) - upperPosition).Length() +
+                                        (ProceduralMath::Translation(boneMap->modelTransforms[handNode]) - ProceduralMath::Translation(boneMap->modelTransforms[foreNode])).Length();
+                const Mat4x4 itemModel   = itemHandling->itemModelTransform;
+                const FVec3  target      = ProceduralMath::Translation((itemModel * grip.localTransform));
                 const float      reachExcess = std::max((target - upperPosition).Length() - armLength * 0.90f, 0.0f) * grip.evaluatedIKWeight;
                 if (primaryReachGrip == gripCount || reachExcess > greatestReachExcess) {
                     primaryReachGrip    = gripIndex;
@@ -2299,7 +2295,7 @@ void ProceduralAnimationSystem(
                 Animation::ApplyTorsoReachCompensation(
                     boneMap->modelTransforms.data(), *boneMap, left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR,
                     left ? CharacterBone::ForearmL : CharacterBone::ForearmR, left ? CharacterBone::HandL : CharacterBone::HandR,
-                    (JPH::Mat44(itemHandling->itemModelTransform) * grip.localTransform).GetTranslation(),
+                    ProceduralMath::Translation((Mat4x4(itemHandling->itemModelTransform) * grip.localTransform)),
                     itemHandling->torsoReachWeight * grip.evaluatedIKWeight
                 );
             }
@@ -2315,28 +2311,28 @@ void ProceduralAnimationSystem(
                 const CharacterBone upperBone  = left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR;
                 const CharacterBone foreBone   = left ? CharacterBone::ForearmL : CharacterBone::ForearmR;
                 const CharacterBone handBone   = left ? CharacterBone::HandL : CharacterBone::HandR;
-                const JPH::Mat44    gripTarget = JPH::Mat44(itemHandling->itemModelTransform) * grip.localTransform;
+                const Mat4x4    gripTarget = Mat4x4(itemHandling->itemModelTransform) * grip.localTransform;
 
                 Animation::ApplyClavicleLead(
-                    boneMap->modelTransforms.data(), *boneMap, upperBone, gripTarget.GetTranslation(), itemHandling->shoulderLeadWeight * gripWeight
+                    boneMap->modelTransforms.data(), *boneMap, upperBone, ProceduralMath::Translation(gripTarget), itemHandling->shoulderLeadWeight * gripWeight
                 );
                 Animation::SolveLimbIK(boneMap->modelTransforms.data(), *boneMap, upperBone, foreBone, handBone, gripTarget, grip);
             }
 
             if (registry.IsAlive(itemHandling->itemEntity)) {
-                const JPH::Mat44 worldItem = rootWorld * itemHandling->itemModelTransform;
-                JPH::Mat44       localItem = worldItem;
+                const Mat4x4 worldItem = rootWorld * itemHandling->itemModelTransform;
+                Mat4x4       localItem = worldItem;
                 if (const auto hierarchy = registry.Get<Components::HierarchyComponent>(itemHandling->itemEntity);
                     hierarchy && hierarchy->parent != Entity::Null() && registry.IsAlive(hierarchy->parent)) {
                     if (hierarchy->parent == entity) {
                         localItem = itemHandling->itemModelTransform;
                     } else if (const auto parentWorld = registry.Get<Components::WorldTransformComponent>(hierarchy->parent)) {
-                        const JPH::Mat44 parentMatrix = parentWorld->world;
-                        localItem                     = parentMatrix.Inversed() * worldItem;
+                        const Mat4x4 parentMatrix = parentWorld->world;
+                        localItem                     = Inverse(parentMatrix) * worldItem;
                     }
                 }
                 if (auto itemTransform = registry.Get<Components::TransformComponent>(itemHandling->itemEntity)) {
-                    itemTransform->position = localItem.GetTranslation();
+                    itemTransform->position = ProceduralMath::Translation(localItem);
                     itemTransform->rotation = ExtractRotation(localItem);
                     auto itemWorld          = registry.Get<Components::WorldTransformComponent>(itemHandling->itemEntity);
                     if (!itemWorld) {
@@ -2356,10 +2352,10 @@ void ProceduralAnimationSystem(
             ZHLN::ScopedTimer  stageTimer("PA Stage: Secondary motion");
             const RigNodeIndex headNode          = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
             const bool         hasHead           = IsValidRigNode(headNode, boneMap->nodeCount);
-            const FVec3    headModelPosition = hasHead ? boneMap->modelTransforms[headNode].GetTranslation() : FVec3(0.0f, 1.60f, 0.0f);
-            const JPH::Quat    headModelRotation = hasHead ? ExtractRotation(boneMap->modelTransforms[headNode]) : JPH::Quat::sIdentity();
+            const FVec3    headModelPosition = hasHead ? ProceduralMath::Translation(boneMap->modelTransforms[headNode]) : FVec3(0.0f, 1.60f, 0.0f);
+            const Quat    headModelRotation = hasHead ? ExtractRotation(boneMap->modelTransforms[headNode]) : Quat::Identity();
             const FVec3    headWorldPosition = ModelToWorld(transform->position, rootRotation, headModelPosition);
-            const JPH::Quat    headWorldRotation = (rootRotation * headModelRotation).Normalized();
+            const Quat    headWorldRotation = (rootRotation * headModelRotation).Normalized();
 
             {
                 ZHLN::ScopedTimer hairTimer("Procedural Animation: 18-Strand XPBD");
@@ -2369,19 +2365,19 @@ void ProceduralAnimationSystem(
 
             // The secondary solver works in world space for collision stability;
             // convert its output back into the character's model space.
-            const JPH::Quat inverseRoot = rootRotation.Inversed();
+            const Quat inverseRoot = rootRotation.Inversed();
             for (size_t particle = 0; particle < HairStrandsComponent::kTotalParticles; ++particle) {
                 const size_t       semantic = BoneSlot(CharacterBone::HairStart) + particle;
                 const RigNodeIndex node     = boneMap->nodeIndices[semantic];
                 if (!IsValidRigNode(node, boneMap->nodeCount)) {
                     continue;
                 }
-                const JPH::Mat44 world          = boneMap->modelTransforms[node];
+                const Mat4x4 world          = boneMap->modelTransforms[node];
                 const FVec3  entityPosition = transform->position;
-                const FVec3  modelPosition  = inverseRoot * (world.GetTranslation() - entityPosition);
-                const JPH::Quat  modelRotation  = (inverseRoot * ExtractRotation(world)).Normalized();
-                const FVec3  worldScale(world.GetColumn3(0).Length(), world.GetColumn3(1).Length(), world.GetColumn3(2).Length());
-                boneMap->modelTransforms[node] = JPH::Mat44::sRotationTranslation(modelRotation, modelPosition).PreScaled(worldScale);
+                const FVec3  modelPosition  = inverseRoot * (ProceduralMath::Translation(world) - entityPosition);
+                const Quat  modelRotation  = (inverseRoot * ExtractRotation(world)).Normalized();
+                const FVec3  worldScale(ProceduralMath::Column3(world, 0).Length(), ProceduralMath::Column3(world, 1).Length(), ProceduralMath::Column3(world, 2).Length());
+                boneMap->modelTransforms[node] = ProceduralMath::Transform(modelRotation, modelPosition, worldScale);
             }
         } else if (hair) {
             // Re-seed from the authored shape when secondary motion is enabled
@@ -2418,7 +2414,7 @@ void ProceduralAnimationSystem(
                 Animation::SolveLimbIK(
                     boneMap->modelTransforms.data(), *boneMap, left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR,
                     left ? CharacterBone::ForearmL : CharacterBone::ForearmR, left ? CharacterBone::HandL : CharacterBone::HandR,
-                    JPH::Mat44(itemHandling->itemModelTransform) * grip.localTransform, grip
+                    Mat4x4(itemHandling->itemModelTransform) * grip.localTransform, grip
                 );
             }
         }
@@ -2458,25 +2454,25 @@ void ProceduralAnimationSystem(
             ZHLN::ScopedTimer  stageTimer("PA Stage: First-person camera");
             const RigNodeIndex headNode = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
             if (IsValidRigNode(headNode, boneMap->nodeCount)) {
-                const JPH::Mat44& headModel      = boneMap->modelTransforms[headNode];
-                const JPH::Quat   headRotation   = ExtractRotation(headModel);
-                const FVec3   targetEyeModel = headModel.GetTranslation() + headRotation * firstPerson->eyeOffsetModel;
-                const JPH::Quat   lookYaw =
-                    JPH::Quat::sRotation(FVec3::sAxisY(), JPH::DegreesToRadians(std::clamp(firstPerson->lookYawDegrees, -80.0f, 80.0f)));
-                const JPH::Quat lookPitch =
-                    JPH::Quat::sRotation(FVec3::sAxisX(), JPH::DegreesToRadians(std::clamp(firstPerson->lookPitchDegrees, -70.0f, 70.0f)));
-                const JPH::Quat targetViewModel = (headRotation * lookYaw * lookPitch).Normalized();
+                const Mat4x4& headModel      = boneMap->modelTransforms[headNode];
+                const Quat   headRotation   = ExtractRotation(headModel);
+                const FVec3   targetEyeModel = ProceduralMath::Translation(headModel) + headRotation * firstPerson->eyeOffsetModel;
+                const Quat   lookYaw =
+                    Quat::FromAxisAngle(FVec3::UnitY(), ProceduralMath::Radians(std::clamp(firstPerson->lookYawDegrees, -80.0f, 80.0f)));
+                const Quat lookPitch =
+                    Quat::FromAxisAngle(FVec3::UnitX(), ProceduralMath::Radians(std::clamp(firstPerson->lookPitchDegrees, -70.0f, 70.0f)));
+                const Quat targetViewModel = (headRotation * lookYaw * lookPitch).Normalized();
                 if (!firstPerson->cameraInitialized) {
                     firstPerson->smoothedEyeModel    = targetEyeModel;
-                    firstPerson->eyeVelocity         = FVec3::sZero();
+                    firstPerson->eyeVelocity         = FVec3::Zero();
                     firstPerson->smoothedViewModel   = targetViewModel;
-                    firstPerson->viewAngularVelocity = FVec3::sZero();
+                    firstPerson->viewAngularVelocity = FVec3::Zero();
                     firstPerson->cameraInitialized   = true;
                 } else {
                     // The springs integrate their first two arguments in place.
                     FVec3 smoothedEye  = firstPerson->smoothedEyeModel;
                     FVec3 eyeVelocity  = firstPerson->eyeVelocity;
-                    JPH::Quat smoothedView = firstPerson->smoothedViewModel;
+                    Quat smoothedView = firstPerson->smoothedViewModel;
                     FVec3 viewAngular  = firstPerson->viewAngularVelocity;
                     SpringVector(smoothedEye, eyeVelocity, targetEyeModel, dt, firstPerson->positionStiffness, firstPerson->dampingFactor);
                     SpringRotation(smoothedView, viewAngular, targetViewModel, dt, firstPerson->rotationStiffness, firstPerson->dampingFactor);
@@ -2493,9 +2489,9 @@ void ProceduralAnimationSystem(
                     Camera&         camera         = cameraComp->camera;
                     const FVec3 entityPosition = transform->position;
                     camera.position                = entityPosition + rootRotation * firstPerson->smoothedEyeModel;
-                    const JPH::Quat worldView      = (rootRotation * firstPerson->smoothedViewModel).Normalized();
-                    FVec3       forward        = worldView * FVec3::sAxisZ();
-                    forward                        = forward.LengthSquared() > 1.0e-8f ? forward.Normalized() : rootRotation * FVec3::sAxisZ();
+                    const Quat worldView      = (rootRotation * firstPerson->smoothedViewModel).Normalized();
+                    FVec3       forward        = worldView * FVec3::UnitZ();
+                    forward                        = forward.LengthSquared() > 1.0e-8f ? forward.Normalized() : rootRotation * FVec3::UnitZ();
                     camera.yaw                     = std::atan2(forward.z, forward.x) * (180.0f / std::numbers::pi_v<float>);
                     camera.pitch                   = std::asin(std::clamp(forward.y, -1.0f, 1.0f)) * (180.0f / std::numbers::pi_v<float>);
                     camera.fov                     = firstPerson->fov;
@@ -2527,11 +2523,11 @@ void ProceduralAnimationSystem(
             }
 
             const Skeleton&                      skeleton = prefab->skeletons[static_cast<size_t>(skeletalMesh->skeletonIndex)];
-            std::array<JPH::Mat44, kMaxRigNodes> palette {};
+            std::array<Mat4x4, kMaxRigNodes> palette {};
             const size_t                         paletteCount = ProceduralAnimation::BuildSkinningPalette(skeleton, *boneMap, palette);
             if (firstPerson && firstPerson->enabled) {
                 ProceduralAnimation::MaskFirstPersonPalette(
-                    skeleton, *boneMap, std::span<JPH::Mat44>(palette.data(), paletteCount), firstPerson->hideHead, firstPerson->hideHair
+                    skeleton, *boneMap, std::span<Mat4x4>(palette.data(), paletteCount), firstPerson->hideHead, firstPerson->hideHair
                 );
             }
             poseUploads->Push(skeletalMesh->jointOffset, std::span {palette}.first(paletteCount));
@@ -2539,14 +2535,14 @@ void ProceduralAnimationSystem(
 
             if (skeletalMesh == skin.skeletalMesh) {
                 if (hasRagdoll) {
-                    std::array<JPH::Mat44, kMaxRigNodes> kinematicJoints {};
+                    std::array<Mat4x4, kMaxRigNodes> kinematicJoints {};
                     const size_t                         kinematicCount = std::min(paletteCount, kinematicJoints.size());
                     for (size_t jointIndex = 0; jointIndex < kinematicCount; ++jointIndex) {
                         const int32_t      importedNode = skeleton.joints[jointIndex].nodeIndex;
                         const RigNodeIndex node         = importedNode >= 0 ? static_cast<RigNodeIndex>(importedNode) : InvalidRigNode;
-                        kinematicJoints[jointIndex]     = IsValidRigNode(node, boneMap->nodeCount) ? boneMap->modelTransforms[node] : JPH::Mat44::sIdentity();
+                        kinematicJoints[jointIndex]     = IsValidRigNode(node, boneMap->nodeCount) ? boneMap->modelTransforms[node] : Mat4x4::Identity();
                     }
-                    poseUploads->PushKinematic(skeletalMesh->jointOffset, std::span<const JPH::Mat44> {kinematicJoints.data(), kinematicCount});
+                    poseUploads->PushKinematic(skeletalMesh->jointOffset, std::span<const Mat4x4> {kinematicJoints.data(), kinematicCount});
                 }
                 boneMap->jointOffset   = skeletalMesh->jointOffset;
                 boneMap->jointCount    = static_cast<uint32_t>(paletteCount);
@@ -2599,7 +2595,7 @@ void ProceduralAnimationSystem(
 void DrawProceduralDebugRig(
     SceneData&                           scene,
     FVec3                         rootPosition,
-    JPH::QuatArg                         rootRotation,
+    Quat                         rootRotation,
     const RigBoneMap&                    boneMap,
     const ProceduralLocomotionComponent* gait
 ) noexcept {
@@ -2607,7 +2603,7 @@ void DrawProceduralDebugRig(
         return;
     }
 
-    const auto worldPosition = [&](RigNodeIndex node) { return ModelToWorld(rootPosition, rootRotation, boneMap.modelTransforms[node].GetTranslation()); };
+    const auto worldPosition = [&](RigNodeIndex node) { return ModelToWorld(rootPosition, rootRotation, ProceduralMath::Translation(boneMap.modelTransforms[node])); };
     const auto drawCross     = [&](FVec3 point, float radius, FVec4 color) {
         scene.AddLine(point - FVec3(radius, 0.0f, 0.0f), point + FVec3(radius, 0.0f, 0.0f), color);
         scene.AddLine(point - FVec3(0.0f, radius, 0.0f), point + FVec3(0.0f, radius, 0.0f), color);
@@ -2700,7 +2696,7 @@ void DrawProceduralDebugRig(
 void ProceduralAnimation::DrawDebugRig(
     SceneData&                           scene,
     FVec3                         rootPosition,
-    JPH::QuatArg                         rootRotation,
+    Quat                         rootRotation,
     const RigBoneMap&                    boneMap,
     const ProceduralLocomotionComponent* gait
 ) noexcept {

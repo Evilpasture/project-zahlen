@@ -17,7 +17,7 @@
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <numbers>
 #include <cmath>
 #include <string>
 
@@ -260,7 +260,7 @@ constexpr float kMinLinearTravel      = 0.5f;   // metres, so a zero-extent brus
 
 [[nodiscard]] auto HalfExtentsOf(ECS::Registry& registry, Entity e) -> FVec3 {
     const auto source = registry.Get<Components::SceneSourceComponent>(e);
-    return source ? FVec3(source->halfExtents) : FVec3::sZero();
+    return source ? FVec3(source->halfExtents) : FVec3::Zero();
 }
 
 void AttachOutputs(ECS::Registry& registry, Entity e, const std::vector<BSP::EntityOutput>& outputs) {
@@ -297,15 +297,15 @@ void AttachDoor(
     const float wait     = record.wait.value_or(kDefaultDoorWait);
     const float lip      = record.lip.value_or(0.0f);
 
-    FVec3 closedPos = FVec3::sZero();
-    JPH::Quat closedRot = JPH::Quat::sIdentity();
+    FVec3 closedPos = FVec3::Zero();
+    Quat closedRot = Quat::Identity();
     if (transform) {
         closedPos = transform->position;
         closedRot = transform->rotation;
     }
     FVec3       openPos   = closedPos;
-    JPH::Quat       openRot   = closedRot;
-    FVec3       rotAxis   = FVec3::sAxisY();
+    Quat       openRot   = closedRot;
+    FVec3       rotAxis   = FVec3::UnitY();
     float           rotAngle  = record.distance.value_or(kDefaultDoorRotation);
     float           speedNorm = 1.0f;
 
@@ -313,9 +313,9 @@ void AttachDoor(
         if (record.door->rotateBack) {
             rotAngle = -rotAngle;
         }
-        const FVec3 sourceAxis = record.door->axisX ? FVec3::sAxisX() : (record.door->axisY ? FVec3::sAxisY() : FVec3::sAxisZ());
+        const FVec3 sourceAxis = record.door->axisX ? FVec3::UnitX() : (record.door->axisY ? FVec3::UnitY() : FVec3::UnitZ());
         rotAxis                    = BSP::ConvertDirection(options, sourceAxis);
-        openRot                    = closedRot * JPH::Quat::sRotation(rotAxis, JPH::DegreesToRadians(rotAngle));
+        openRot                    = closedRot * Quat::FromAxisAngle(rotAxis, (rotAngle * std::numbers::pi_v<float> / 180.0f));
         speedNorm                  = std::abs(speed / std::max(std::abs(rotAngle), 1.0f));
     } else {
         // Travel is the brush's own extent along the direction it moves, minus
@@ -376,7 +376,7 @@ void AttachButton(ECS::Registry& registry, const BSP::EntityRecord& record, cons
     const float wait  = record.wait.value_or(kDefaultButtonWait);
     const float lip   = record.lip.value_or(0.0f);
 
-    FVec3 unpressed = FVec3::sZero();
+    FVec3 unpressed = FVec3::Zero();
     if (transform) {
         unpressed = transform->position;
     }
@@ -438,9 +438,9 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
             registry.Create(
                 Components::NameComponent {.name = String64(record.targetName)},
                 Components::TransformComponent {
-                    .position = record.origin.value_or(FVec3::sZero()),
+                    .position = record.origin.value_or(FVec3::Zero()),
                     .rotation = record.orientation,
-                    .scale    = FVec3::sReplicate(1.0f)
+                    .scale    = FVec3::Splat(1.0f)
                 },
                 TeleportDestinationComponent {}
             );

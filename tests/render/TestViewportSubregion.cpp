@@ -191,8 +191,8 @@ struct ViewportSubregionTestSuite {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
             const ZHLN::Entity box = ZHLN::PrefabFactory::CreateBox(
-                *engine, FVec3::sReplicate(0.5f),
-                ZHLN::PrefabFactory::SpawnParams {.position = FVec3::sZero(), .createPhysics = false, .materialOverride = *matRes}
+                *engine, ZHLN::FVec3::Splat(0.5f),
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3::Zero(), .createPhysics = false, .materialOverride = *matRes}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(box));
 

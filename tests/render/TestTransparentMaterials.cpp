@@ -63,9 +63,9 @@ using ZHLN::Test::Image::SubRegionStats;
 constexpr NormalizedRect kThroughPane {.x0 = 0.42, .y0 = 0.42, .x1 = 0.58, .y1 = 0.58};
 constexpr NormalizedRect kWallOnly {.x0 = 0.12, .y0 = 0.42, .x1 = 0.24, .y1 = 0.58};
 
-const JPH::Float4 kWallRed {1.0f, 0.05f, 0.05f, 1.0f};
-const JPH::Float4 kPaneCyan {0.05f, 0.85f, 0.95f, 0.40f};
-const JPH::Float4 kPaneOpaqueCyan {0.05f, 0.85f, 0.95f, 1.0f};
+const ZHLN::FVec4 kWallRed {1.0f, 0.05f, 0.05f, 1.0f};
+const ZHLN::FVec4 kPaneCyan {0.05f, 0.85f, 0.95f, 0.40f};
+const ZHLN::FVec4 kPaneOpaqueCyan {0.05f, 0.85f, 0.95f, 1.0f};
 
 enum class PaneKind : uint8_t { None, Glass, Opaque };
 
@@ -83,18 +83,18 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
         gfx.post.enableSSR               = 0;
         gfx.rayTracing.enableReflections = false;
         gfx.post.mode                    = 0;
-        gfx.environment.skyZenith        = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
-        gfx.environment.skyHorizon       = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
-        gfx.environment.skyGround        = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyZenith        = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyHorizon       = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyGround        = ZHLN::FVec4(0.0f, 0.0f, 0.0f, 1.0f);
     });
 
     // ForwardPass still shades; a sun on the camera-facing +Z faces keeps the
     // glass from compositing as an unlit black film on top of the wall albedo.
     const ZHLN::Entity sun = registry.Create();
     registry.Add(
-        sun, ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 0.0f, 8.0f)},
+        sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3(0.0f, 0.0f, 8.0f)},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 1.0f, 1.0f), .intensity = 220.0f, .direction = FVec3(0.0f, 0.0f, 1.0f)
+            .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3(1.0f, 1.0f, 1.0f), .intensity = 220.0f, .direction = ZHLN::FVec3(0.0f, 0.0f, 1.0f)
         }
     );
 
@@ -139,7 +139,7 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
         return SceneBuild::Camera;
     }
     ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = FVec3(0.0f, 0.0f, 5.0f);
+    camera.position = ZHLN::FVec3(0.0f, 0.0f, 5.0f);
     camera.yaw      = -90.0f;
     camera.pitch    = 0.0f;
     camera.fov      = 60.0f;
@@ -291,7 +291,7 @@ struct TransparentMaterialsTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& camera = cameraComp->camera;
-            camera.position = FVec3(0.0f, 0.0f, 5.0f);
+            camera.position = ZHLN::FVec3(0.0f, 0.0f, 5.0f);
             camera.yaw = -90.0f;
             camera.pitch = 0.0f;
             camera.fov = 60.0f;

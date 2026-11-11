@@ -112,7 +112,7 @@ struct CameraLookAtTestSuite {
                     .targetDistance      = 5.0f,
                     .yaw                 = -90.0f,
                     .pitch               = 0.0f,
-                    .targetOffset        = FVec3::sZero(),
+                    .targetOffset        = ZHLN::FVec3::Zero(),
                     .stiffness           = 0.0f,
                     .vignetteIntensity   = 0.0f,
                     .fov                 = 45.0f,

@@ -33,6 +33,7 @@
 namespace ZHLN {
 class RenderContext;
 class AssetManager;
+class PhysicsContext;
 } // namespace ZHLN
 
 namespace ZHLN::BSP {
@@ -40,13 +41,14 @@ namespace ZHLN::BSP {
 // Reads path from disk and imports it. A cached prefab from an earlier call is
 // returned as-is (the cache key is the virtual path, like the glTF importer).
 [[nodiscard]] auto
-    LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, const ImportOptions& options = {}) -> ZHLN::Optional<ModelPrefab&>;
+    LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& physics, std::string_view path, const ImportOptions& options = {}) -> ZHLN::Optional<ModelPrefab&>;
 
 // Like LoadBSPPrefab, but consumes bytes already read by the caller. The
 // virtual path names the cache entry; geometry converts per options.
 [[nodiscard]] auto LoadBSPPrefabFromMemory(
     RenderContext&             ctx,
     AssetManager&              assetMgr,
+    PhysicsContext&            physics,
     std::span<const std::byte> bytes,
     std::string_view           virtualPath,
     const ImportOptions&       options = {}
@@ -57,6 +59,7 @@ namespace ZHLN::BSP {
 auto PreloadStaticProps(
     RenderContext&       ctx,
     AssetManager&        assetMgr,
+    PhysicsContext&      physics,
     const BSPMap&        map,
     const ImportOptions& options = {}
 ) -> size_t;

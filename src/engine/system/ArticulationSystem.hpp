@@ -3,12 +3,8 @@
 
 #pragma once
 
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
-#include <Jolt/Math/Mat4x4.h>
-#include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Engine/EngineServices.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Atomic.hpp>
@@ -35,7 +31,7 @@ struct alignas(64) JointStateBuffer {
     std::array<float, 8192>      jointBlendWeights;
     std::array<float, 8192>      jointStiffness;
     std::array<float, 8192>      jointBlendDecay;
-    std::array<JPH::Mat44, 8192> inverseBindMatrices;
+    std::array<Mat4x4, 8192> inverseBindMatrices;
 
     void ResetJoints(uint32_t offset, uint32_t count) noexcept {
         std::fill_n(jointBlendWeights.begin() + offset, count, 0.0f);

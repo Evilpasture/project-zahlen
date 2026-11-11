@@ -195,8 +195,8 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         auto morphComp  = reg.Get<Components::MorphTargetComponent>(e);
         auto worldTrans = reg.Get<Components::WorldTransformComponent>(e);
 
-        JPH::Mat44 worldMat = JPH::Mat44::sIdentity();
-        JPH::Mat44 prevMat  = JPH::Mat44::sIdentity();
+        auto worldMat = Mat4x4::Identity();
+        auto prevMat  = Mat4x4::Identity();
         if (worldTrans) {
             worldMat = worldTrans->world;
             prevMat  = worldTrans->previous;
@@ -207,7 +207,10 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 
         uint32_t                   morphOffset      = morphComp ? morphComp->offset : 0;
         uint32_t                   activeMorphCount = morphComp ? morphComp->activeCount : 0;
-        const ZHLN::FVec4         morphWeights     = morphComp ? morphComp->weights : ZHLN::FVec4 {};
+        auto morphWeights = Components::MorphTargetComponent {}.weights;
+        if (morphComp) {
+            morphWeights = morphComp->weights;
+        }
 
         BufferID scratchVbo = BufferID::Invalid;
         if (isSkinned) {
@@ -261,8 +264,8 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
                         if (cutGpuMeshOpt && cutGpuMatOpt) {
                             auto       cutSkelMesh   = reg.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
                             auto       cutWorldTrans = reg.Get<Components::WorldTransformComponent>(mod.operandEntity);
-                            JPH::Mat44 cutWorldMat   = JPH::Mat44::sIdentity();
-                            JPH::Mat44 cutPrevMat    = JPH::Mat44::sIdentity();
+                            auto cutWorldMat   = Mat4x4::Identity();
+                            auto cutPrevMat    = Mat4x4::Identity();
                             if (cutWorldTrans) {
                                 cutWorldMat = cutWorldTrans->world;
                                 cutPrevMat  = cutWorldTrans->previous;
@@ -330,8 +333,8 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         return extra;
     }
     if (auto world = reg.Get<Components::WorldTransformComponent>(cameraEnt)) {
-        const JPH::Mat44 worldMat = world->world;
-        extra.position            = worldMat.GetTranslation();
+        const Mat4x4& worldMat = world->world;
+        extra.position = {worldMat[0, 3], worldMat[1, 3], worldMat[2, 3]};
     }
     return extra;
 }
@@ -353,9 +356,9 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         return std::nullopt;
     }
     const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.Graphics().ViewportAspect();
-    const JPH::Mat44 view   = cam.GetViewMatrix();
-    const JPH::Mat44 proj   = cam.GetProjectionMatrix(aspect);
-    JPH::Mat44       viewProj = proj * view;
+    const auto view = cam.GetViewMatrix();
+    const auto proj = cam.GetProjectionMatrix(aspect);
+    auto viewProj = proj * view;
     if (cComp) {
         viewProj = cComp->viewProj;
     }
@@ -369,7 +372,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         .viewMatrix        = view,
         .projMatrix        = proj,
         .viewProjMatrix    = viewProj,
-        .invViewProjMatrix = viewProj.Inversed(),
+        .invViewProjMatrix = Inverse(viewProj),
         .worldPosition     = cam.position,
         .viewport          = viewport,
         .target            = target,
@@ -384,7 +387,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 
 std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
     int        physicsDrawMode = 0;
-    JPH::Mat44 shadowProjView  = JPH::Mat44::sIdentity();
+    auto shadowProjView = Mat4x4::Identity();
 
     auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView, dt);
     if (!mainResult) {
@@ -397,7 +400,7 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
     return {};
 }
 
-FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
+FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, Mat4x4& outShadowProjView, float dt) {
     auto rc = engine.Graphics();
     auto&       reg             = ZHLN::EngineAccess::RegistryOf(engine);
     // The frame's pose, and where "there is nothing to render from" is decided:
@@ -413,9 +416,9 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     const Camera cam            = camera->camera;
     const auto& visibleEntities = engine.GetVisibleEntities();
 
-    JPH::Mat44 vp {};
-    JPH::Mat44 unjitteredVp {};
-    JPH::Mat44 prevUnjitteredVp {};
+    Mat4x4 vp {};
+    Mat4x4 unjitteredVp {};
+    Mat4x4 prevUnjitteredVp {};
 
     // The getter above already proved a main camera entity exists; this is the
     // entity itself, for the viewport views built below.
@@ -476,15 +479,15 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     float textelSize = shadowWidth / static_cast<float>(shadowResolution);
 
     FVec3 shadowCenter = cam.position;
-    shadowCenter.SetX(std::round(shadowCenter.x / textelSize) * textelSize);
-    shadowCenter.SetY(std::round(shadowCenter.y / textelSize) * textelSize);
-    shadowCenter.SetZ(std::round(shadowCenter.z / textelSize) * textelSize);
+    shadowCenter.x = std::round(shadowCenter.x / textelSize) * textelSize;
+    shadowCenter.y = std::round(shadowCenter.y / textelSize) * textelSize;
+    shadowCenter.z = std::round(shadowCenter.z / textelSize) * textelSize;
 
     FVec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
-    JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
+    const auto lightView = CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
 
     float      halfWidth = shadowWidth * 0.5f;
-    JPH::Mat44 lightProj = Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
+    const auto lightProj = CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
     outShadowProjView    = lightProj * lightView;
 
     // The shadow planes are the culler's own: CullingSystem derives them from
@@ -500,7 +503,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     frame.viewProj               = vp;
     frame.unjitteredViewProj     = unjitteredVp;
     frame.prevUnjitteredViewProj = prevUnjitteredVp;
-    frame.invViewProj            = unjitteredVp.Inversed();
+    frame.invViewProj            = Inverse(unjitteredVp);
     frame.camPosition            = cam.position;
     frame.frameClock             = frameClock;
     frame.sunDirection           = sunDirection;

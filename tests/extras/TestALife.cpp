@@ -22,6 +22,8 @@ enum class ALifeTestError : uint8_t {
 
 namespace {
 
+using ZHLN::DVec3;
+
 struct ALifeTestSuite {
     struct Tests {
         // --- 1. GOAP Action Planner ---

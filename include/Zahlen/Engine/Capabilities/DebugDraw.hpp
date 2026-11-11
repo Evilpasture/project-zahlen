@@ -6,13 +6,13 @@
 // caller describes what to draw, it does not borrow a mutable scene container.
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <span>
 
 namespace ZHLN {
 
-class FVec3;
-class FVec4;
 struct SceneData;
 struct BillboardQuad;
 struct ParticleEmitterSubmission;

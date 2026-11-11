@@ -19,6 +19,9 @@
 
 namespace {
 
+using ZHLN::FVec3;
+using ZHLN::FVec4;
+
 struct GameLaunchConfig {
     uint32_t cubes ZHLN_ANNOTATION(ZHLN::Description<"Initial physics boxes (0-64)"> {}, = ZHLN::CliRange<0, 64> {}, = ZHLN::CliShort<'c'> {}) = 5;
     uint32_t seed ZHLN_ANNOTATION(ZHLN::Description<"Jitter the initial box grid reproducibly (default: 0)"> {}) = 0;
@@ -131,7 +134,7 @@ struct SandboxGame {
         const FVec3    forward = FVec3(JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)).Normalized();
         const ZHLN::Entity cube    = ZHLN::PrefabFactory::CreateBox(
             engine, {0.30f, 0.30f, 0.30f},
-            {.position = cam.position + forward * 2.0f, .createPhysics = true, .isStaticPhysics = false, .color = FVec4(1.0f, 0.75f, 0.28f, 1.0f)}
+            {.position = (cam.position + forward * 2.0f).Cast<double>(), .createPhysics = true, .isStaticPhysics = false, .color = FVec4(1.0f, 0.75f, 0.28f, 1.0f)}
         );
         if (cube != ZHLN::Entity::Null()) {
             if (auto body = reg.Get<ZHLN::Components::PhysicsComponent>(cube)) {

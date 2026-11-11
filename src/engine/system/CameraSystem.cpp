@@ -36,7 +36,7 @@ void CameraSystem::Update(ECS::Registry& reg, Extent2D res, float , float ) {
                 cComp->prevUnjitteredViewProj = cComp->unjitteredViewProj;
             }
 
-            JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix(static_cast<float>(res.width) / res.height);
+            auto unjitteredProj = cam.GetProjectionMatrix(static_cast<float>(res.width) / res.height);
             cComp->unjitteredViewProj = unjitteredProj * cam.GetViewMatrix();
 
             // Both remaining AA modes are spatial post-processes; the camera

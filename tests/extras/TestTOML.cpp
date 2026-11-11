@@ -45,6 +45,8 @@
 
 namespace {
 
+using ZHLN::FVec3;
+
 enum class Difficulty : uint8_t { Casual, Normal, Brutal };
 
 struct Window {
@@ -612,7 +614,7 @@ onClickAction = "editor.save_scene"
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedBox"}},
                 ZHLN::Components::TransformComponent {
                     .position = FVec3(1.0f, 2.0f, 3.0f),
-                    .rotation = ZHLN::Math::EulerDegreesToQuat({0.0f, 45.0f, 0.0f}),
+                    .rotation = ZHLN::Quat::FromEulerDegrees({0.0f, 45.0f, 0.0f}),
                     .scale    = FVec3(2.0f, 2.0f, 2.0f)
                 },
                 ZHLN::Components::MeshComponent {.meshAsset = 1, .materialAsset = 2, .cullRadius = 2.0f},
@@ -641,7 +643,7 @@ onClickAction = "editor.save_scene"
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedSun"}},
                 ZHLN::Components::TransformComponent {
-                    .position = FVec3(4.0f, 5.0f, 6.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f})
+                    .position = FVec3(4.0f, 5.0f, 6.0f), .rotation = ZHLN::Quat::FromEulerDegrees({50.0f, -35.0f, 0.0f})
                 },
                 ZHLN::Components::LightComponent {
                     .type        = ZHLN::LightType::Sun,
@@ -670,7 +672,7 @@ onClickAction = "editor.save_scene"
             // than a RenderContext, so this supplies one directly -- no device.
             std::unordered_map<ZHLN::MaterialID, ZHLN::Material> materials;
             ZHLN::Material                                       boxMaterial {};
-            boxMaterial.baseColorFactor    = JPH::Float4 {0.1f, 0.6f, 0.95f, 1.0f};
+            boxMaterial.baseColorFactor    = ZHLN::FVec4 {0.1f, 0.6f, 0.95f, 1.0f};
             boxMaterial.emissiveFactor.x   = 80.0f;
             materials[2]                   = boxMaterial;
 

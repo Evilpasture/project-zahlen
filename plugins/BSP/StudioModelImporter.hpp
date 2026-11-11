@@ -15,6 +15,7 @@
 namespace ZHLN {
 class RenderContext;
 class AssetManager;
+class PhysicsContext;
 } // namespace ZHLN
 
 namespace ZHLN::BSP {
@@ -24,6 +25,7 @@ namespace ZHLN::BSP {
 [[nodiscard]] auto LoadStudioModelPrefab(
     RenderContext&       ctx,
     AssetManager&        assetMgr,
+    PhysicsContext&      physics,
     const SourceVFS&     vfs,
     std::string_view     path,
     const ImportOptions& options = {}
@@ -33,6 +35,7 @@ namespace ZHLN::BSP {
 [[nodiscard]] auto LoadStudioModelPrefabFromMemory(
     RenderContext&             ctx,
     AssetManager&              assetMgr,
+    PhysicsContext&            physics,
     const SourceVFS&           vfs,
     std::span<const std::byte> mdlBytes,
     std::span<const std::byte> vvdBytes,

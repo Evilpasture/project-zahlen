@@ -15,6 +15,7 @@
 // expose mesh shading, so this binary stays green on lavapipe/older hardware.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -480,14 +481,14 @@ struct MeshShaderTestSuite {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
                 ZHLN::Camera& cam = camComp->camera;
-                cam.position = FVec3(0.0f, 1.0f, 4.0f);
+                cam.position = ZHLN::FVec3(0.0f, 1.0f, 4.0f);
                 cam.yaw      = -90.0f;
                 cam.pitch    = 0.0f;
                 cam.fov      = 60.0f;
 
                 // Boxes at different depths and offsets: covers front faces, faces
                 // rejected by the task shader's normal cone, and partial overlap.
-                const std::array<DVec3, 3> spawnPoints = {DVec3(-1.3, 1.0, 0.0), DVec3(0.0, 1.0, -1.0), DVec3(1.3, 1.2, 0.4)};
+                const std::array<ZHLN::DVec3, 3> spawnPoints = {ZHLN::DVec3(-1.3, 1.0, 0.0), ZHLN::DVec3(0.0, 1.0, -1.0), ZHLN::DVec3(1.3, 1.2, 0.4)};
                 for (const auto& p: spawnPoints) {
                     ZHLN::PrefabFactory::CreateBox(engine, {0.6f, 0.6f, 0.6f}, ZHLN::PrefabFactory::SpawnParams {.position = p, .createPhysics = false});
                 }
@@ -693,11 +694,11 @@ struct MeshShaderTestSuite {
                 const ZHLN::PrefabFactory::SpawnParams atOrigin {.position = {0, 0, 0}, .createPhysics = false};
                 if (subject.sphere) {
                     // Radius 0.5: surface at z = +0.5, camera 0.20 in front of it.
-                    cam.position = FVec3(0.0f, 0.0f, 0.70f);
+                    cam.position = ZHLN::FVec3(0.0f, 0.0f, 0.70f);
                     ZHLN::PrefabFactory::CreateSphere(engine, 0.5f, atOrigin);
                 } else {
                     // Half-extents 0.5: front face at z = +0.5, camera 0.10 in front of it.
-                    cam.position = FVec3(0.0f, 0.0f, 0.60f);
+                    cam.position = ZHLN::FVec3(0.0f, 0.0f, 0.60f);
                     ZHLN::PrefabFactory::CreateBox(engine, {0.5f, 0.5f, 0.5f}, atOrigin);
                 }
                 // The closeup pose is chosen by the branch above: the write-back belongs
@@ -840,9 +841,9 @@ struct MeshShaderTestSuite {
                     gfx.post.enableSSR               = 0;
                     gfx.rayTracing.enableReflections = false;
                     gfx.post.mode                    = 0;
-                    gfx.environment.skyZenith        = FVec4(0, 0, 0, 1);
-                    gfx.environment.skyHorizon       = FVec4(0, 0, 0, 1);
-                    gfx.environment.skyGround        = FVec4(0, 0, 0, 1);
+                    gfx.environment.skyZenith        = ZHLN::FVec4(0, 0, 0, 1);
+                    gfx.environment.skyHorizon       = ZHLN::FVec4(0, 0, 0, 1);
+                    gfx.environment.skyGround        = ZHLN::FVec4(0, 0, 0, 1);
                 });
 
                 auto rc = engine.Graphics();
@@ -858,7 +859,7 @@ struct MeshShaderTestSuite {
                     return false;
                 }
                 ZHLN::Camera& cam = camComp->camera;
-                cam.position = FVec3(0.0f, 0.0f, 4.0f);
+                cam.position = ZHLN::FVec3(0.0f, 0.0f, 4.0f);
                 cam.yaw = -90.0f;
                 cam.pitch = 0.0f;
                 cam.fov = 45.0f;
@@ -869,7 +870,7 @@ struct MeshShaderTestSuite {
                 const ZHLN::Entity plane = ZHLN::PrefabFactory::CreatePlane(
                     engine, 1.0f, {1, 1, 1, 1},
                     ZHLN::PrefabFactory::SpawnParams {
-                        .rotation = JPH::Quat::sRotation(FVec3::sAxisX(), -std::numbers::pi_v<float> * 0.5f), .materialOverride = *material
+                        .rotation = ZHLN::Quat::FromAxisAngle(ZHLN::FVec3::UnitX(), -std::numbers::pi_v<float> * 0.5f), .materialOverride = *material
                     }
                 );
                 const auto part = reg.Get<ZHLN::Components::MeshComponent>(plane);

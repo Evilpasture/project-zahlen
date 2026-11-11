@@ -48,7 +48,7 @@ class ZHLN_API TransformSystem {
         };
 
         struct Node {
-            JPH::Mat44 resolvedWorld    = JPH::Mat44::sIdentity();
+            Mat4x4 resolvedWorld    = Mat4x4::Identity();
             Entity     entity           = Entity::Null();
             Entity     parent           = Entity::Null();
             uint32_t   parentIndex      = NoNode;
@@ -87,7 +87,7 @@ class ZHLN_API TransformSystem {
 
   private:
     [[nodiscard]] static auto LocalTransformBits(const Components::TransformComponent& transform) noexcept -> std::array<uint32_t, 10>;
-    [[nodiscard]] static auto WorldMatrixBits(const JPH::Mat44& matrix) noexcept -> std::array<uint32_t, 16>;
+    [[nodiscard]] static auto WorldMatrixBits(const Mat4x4& matrix) noexcept -> std::array<uint32_t, 16>;
     static void               BreakTransformCycles(ScratchStorage& scratch);
     static void               BuildChildren(ScratchStorage& scratch);
 };

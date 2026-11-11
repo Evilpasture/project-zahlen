@@ -12,6 +12,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -407,10 +408,13 @@ auto CreateTerrainFromData(
         tData.colors.assign(colorsRGBA, colorsRGBA + (static_cast<ptrdiff_t>(sampleCount * sampleCount * 4)));
     }
     TerrainID tID  = TerrainSystem::RegisterTerrainData(std::move(tData));
-    JPH::Mat44    worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
+    // ECS render transforms use float positions; physics below retains the
+    // original double-precision spawn position.
+    const FVec3 position {static_cast<float>(params.position.x), static_cast<float>(params.position.y), static_cast<float>(params.position.z)};
+    const auto worldMat = ComposeTransform(position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("TerrainData_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::FVec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = position, .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
@@ -430,7 +434,7 @@ auto CreateTerrainFromData(
     if (params.createPhysics && pc != nullptr && heights != nullptr) {
         auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
         // FIXED: Used pc->CreateRigidBody
-        auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
+        auto body = pc->CreateRigidBody(shape, params.position, params.rotation.AsVec4(), JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
     }
 
@@ -485,10 +489,13 @@ auto CreateTerrain(
     ctx.RegisterGPUMaterial(matAsset, mat);
 
     TerrainID tID  = TerrainSystem::RegisterTerrainData(std::move(tData));
-    JPH::Mat44    worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
+    // ECS render transforms use float positions; physics below retains the
+    // original double-precision spawn position.
+    const FVec3 position {static_cast<float>(params.position.x), static_cast<float>(params.position.y), static_cast<float>(params.position.z)};
+    const auto worldMat = ComposeTransform(position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("Terrain_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::FVec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = position, .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
@@ -510,7 +517,7 @@ auto CreateTerrain(
         if (stored != nullptr && !stored->heights.empty()) {
             auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
             auto body =
-                pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
+                pc->CreateRigidBody(shape, params.position, params.rotation.AsVec4(), JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
             reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
         }
     }

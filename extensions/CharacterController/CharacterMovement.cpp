@@ -4,6 +4,8 @@
 // extensions/CharacterController/CharacterMovement.cpp
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <numbers>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "CharacterMovement.hpp"
 
@@ -14,6 +16,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <algorithm>
 #include <cmath>
 
@@ -165,15 +168,11 @@ void MovementSystem(Engine& engine, float dt) {
 
             FVec3 flatVel(move.currentVelX, 0.0f, move.currentVelZ);
             if (flatVel.LengthSquared() > 0.1f) {
-                float     targetAngleRad = std::atan2(-move.currentVelZ, move.currentVelX) + JPH::DegreesToRadians(90.0f);
-                JPH::Quat targetRotation = JPH::Quat::sRotation(FVec3::sAxisY(), targetAngleRad);
-
-                JPH::Quat currentRotation = move.orientation;
-
-                float     turnSpeed    = 10.0f;
-                JPH::Quat nextRotation = currentRotation.SLERP(targetRotation, JPH::Clamp(turnSpeed * dt, 0.0f, 1.0f));
-
-                move.orientation = nextRotation;
+                const auto targetAngleRad = std::atan2(-move.currentVelZ, move.currentVelX) + std::numbers::pi_v<float> * 0.5f;
+                const auto halfAngle = targetAngleRad * 0.5f;
+                const auto targetRotation = decltype(move.orientation) {0.0f, std::sin(halfAngle), 0.0f, std::cos(halfAngle)};
+                constexpr auto turnSpeed = 10.0f;
+                move.orientation = Slerp(move.orientation, targetRotation, std::clamp(turnSpeed * dt, 0.0f, 1.0f));
             }
         }
     });
@@ -227,8 +226,8 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
             continue;
         }
 
-        const DVec3& charPos = *charPosition;
-        const FVec3 charVel = pc.GetCharacterVelocity(phys->physicsID);
+        const auto& charPos = *charPosition;
+        const auto charVel = Physics::FromJoltVector(pc.GetCharacterVelocity(phys->physicsID));
         if (charVel.LengthSquared() < 0.01f) {
             continue; // Not moving: there is no momentum to impart.
         }
@@ -245,7 +244,7 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
                 continue;
             }
 
-            FVec3 delta = FVec3(charPos - *otherPosition);
+            const auto delta = (charPos - *otherPosition).Cast<float>();
             const float len = delta.Length();
             if (len < 1e-4f) {
                 continue;

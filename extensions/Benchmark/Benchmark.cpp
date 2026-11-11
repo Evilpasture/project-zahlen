@@ -167,7 +167,7 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
         }
 
         const FVec3 position = LatticePosition(m_spawnedCubes);
-        const auto      handle   = physics.CreateRigidBody(cube, position, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, Layers::ID::MOVING);
+        const auto      handle   = physics.CreateRigidBody(cube, position.Cast<double>(), {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, Layers::ID::MOVING);
 
         const Entity entity = registry.Create();
         registry.Add(entity, Components::TransformComponent {.position = position});
@@ -211,7 +211,7 @@ void LogicBenchmark::Step(float fixedDt) {
             continue;
         }
         if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
-            transform->position = JPH::Vec3(*position.x, *position.y, *position.z);
+            transform->position = position->Cast<float>();
         }
     }
 

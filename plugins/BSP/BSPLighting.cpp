@@ -427,7 +427,7 @@ auto VmtTint(const VMTMaterial& vmt) noexcept -> FVec3 {
             return FVec3(std::clamp(rgb[0] / divisor, 0.0f, 4.0f), std::clamp(rgb[1] / divisor, 0.0f, 4.0f), std::clamp(rgb[2] / divisor, 0.0f, 4.0f));
         }
     }
-    return FVec3::sReplicate(1.0f);
+    return FVec3::Splat(1.0f);
 }
 
 auto ProbeEmissiveMaterial(std::string_view materialName, float reflectivityLuma, const VMTMaterial* vmt, bool noLightFlag) noexcept -> EmissiveMaterialProbe {
@@ -504,7 +504,7 @@ auto ProbeEmissiveMaterial(std::string_view materialName, float reflectivityLuma
     out.isEmissive = strength > 0.01f;
     out.strength   = out.isEmissive ? std::clamp(strength, 0.0f, 1.0f) : 0.0f;
     if (Rec709Luma(out.tint) <= 0.0f) {
-        out.tint = FVec3::sReplicate(1.0f);
+        out.tint = FVec3::Splat(1.0f);
     }
     return out;
 }
@@ -737,7 +737,7 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
                 continue;
             }
             const FVec3 normal =
-                (existing.weightedNormal.LengthSquared() > 1e-8f) ? existing.weightedNormal.Normalized() : FVec3::sAxisY();
+                (existing.weightedNormal.LengthSquared() > 1e-8f) ? existing.weightedNormal.Normalized() : FVec3::UnitY();
             if (Dot(normal, surface.normal) < kEmissiveFixtureCoplanarCos) {
                 continue;
             }
@@ -775,7 +775,7 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
         surface.areaSquareMetres = bucket.areaSquareMetres;
         surface.areaSquareInches = bucket.areaSquareInches;
         surface.position         = bucket.weighted * invArea;
-        surface.normal           = (bucket.weightedNormal.LengthSquared() > 1e-8f) ? bucket.weightedNormal.Normalized() : FVec3::sAxisY();
+        surface.normal           = (bucket.weightedNormal.LengthSquared() > 1e-8f) ? bucket.weightedNormal.Normalized() : FVec3::UnitY();
         surface.color            = bucket.color * invArea;
         surface.reflectivityLuma = bucket.reflectivityLuma;
         surface.noLightFlag      = bucket.noLightFlag;

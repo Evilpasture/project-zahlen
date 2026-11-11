@@ -71,8 +71,8 @@ struct LightningTestSuite {
             engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.ambientExposure = kInitialBaselineExposure; });
 
             // 1. Spawn Lightning Strike
-            const DVec3 cloudPos(0.0, 180.0, 0.0);
-            const DVec3 groundPos(25.0, 0.0, -15.0);
+            const ZHLN::DVec3 cloudPos(0.0, 180.0, 0.0);
+            const ZHLN::DVec3 groundPos(25.0, 0.0, -15.0);
 
             const ZHLN::Entity boltEntity =
                 ZHLN::Lightning::Spawn(*engine, cloudPos, groundPos, ZHLN::LightningConfig {.eta = 2.0f, .timeDilation = 1.0f, .subdivisions = 4});

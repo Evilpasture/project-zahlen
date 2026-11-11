@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Zahlen/Math/Math3D.hpp"
 #include "render/RenderInternal.hpp"
 #include <Zahlen/Render/Render.hpp>
 #include <algorithm>
@@ -96,8 +95,8 @@ constexpr uint32_t kNoFilmTexture = 0xFFFFu;
 struct InstanceDataDesc {
     const ResolvedMeshMaterial* resolved = nullptr;
 
-    JPH::Mat44 world     = JPH::Mat44::sIdentity();
-    JPH::Mat44 prevWorld = JPH::Mat44::sIdentity();
+    Mat4x4 world     = Mat4x4::Identity();
+    Mat4x4 prevWorld = Mat4x4::Identity();
 
     uint64_t posAddress          = 0;
     uint64_t tangentFrameAddress = 0;
@@ -198,7 +197,10 @@ struct InstanceDataDesc {
     const uint32_t hasAmbientCube = desc.hasAmbientCube ? 1u : 0u;
     const uint32_t hasSpecular    = !desc.unlit && desc.specularEnabled ? 1u : 0u;
 
-    const uint32_t isMirrored = desc.world.GetDeterminant3x3() < 0.0f ? 1u : 0u;
+    const FVec3 basisX {desc.world[0, 0], desc.world[1, 0], desc.world[2, 0]};
+    const FVec3 basisY {desc.world[0, 1], desc.world[1, 1], desc.world[2, 1]};
+    const FVec3 basisZ {desc.world[0, 2], desc.world[1, 2], desc.world[2, 2]};
+    const uint32_t isMirrored = Dot(basisX, Cross(basisY, basisZ)) < 0.0f ? 1u : 0u;
 
     ZHLN::FVec4 emissive       = desc.emissiveFactor;
     uint32_t     paddingCenter  = 0;
@@ -222,8 +224,8 @@ struct InstanceDataDesc {
         const auto& transform = desc.textureTransforms[slot];
         const float c         = transform.rotation == 0.0f ? 1.0f : std::cos(transform.rotation);
         const float s         = transform.rotation == 0.0f ? 0.0f : std::sin(transform.rotation);
-        uvRow0[slot]          = ZHLN::FVec4 {c * transform.scale.x, s * transform.scale.y, transform.offset.x, 0.0f};
-        uvRow1[slot]          = ZHLN::FVec4 {-s * transform.scale.x, c * transform.scale.y, transform.offset.y, static_cast<float>(transform.texCoord)};
+        uvRow0[slot]          = {c * transform.scale.x, s * transform.scale.y, transform.offset.x, 0.0f};
+        uvRow1[slot]          = {-s * transform.scale.x, c * transform.scale.y, transform.offset.y, static_cast<float>(transform.texCoord)};
     }
 
     return InstanceData {
@@ -492,7 +494,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
 }
 
 void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept {
-    auto MakeCommand = [&](const Material& material, const Mesh& mesh, const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,
+    auto MakeCommand = [&](const Material& material, const Mesh& mesh, const Mat4x4& transform, const Mat4x4& prevTransform, float cullRadius,
                            uint32_t jointOffset, BufferID skinnedVertexBuffer, DrawFlags flags) -> std::optional<DrawCommand> {
         auto resolved = ResolveDrawInputs(_impl.get(), material, mesh, skinnedVertexBuffer);
         if (!resolved) {

@@ -14,7 +14,7 @@
 
 #include "BSPLighting.hpp"
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -41,7 +41,7 @@ constexpr float kAoBias    = 0.02f;
 constexpr float kAoPower   = 1.5f;
 constexpr int   kAoSamples = 24;
 // Analytic inverse of JPH::Quat::sEulerAngles, which Scene::Instantiate uses
-// to rebuild the transform (Math::EulerDegreesToQuat). sEulerAngles(x,y,z)
+// to rebuild the transform (RotationFromEulerDegrees). sEulerAngles(x,y,z)
 // composes Qz(z)*Qy(y)*Qx(x), so the triplet slots act as: x = roll about the
 // model forward (+X), y = tilt of the forward out of the horizontal XZ plane,
 // z = heading sweep of the forward inside that plane. NOTE: Jolt's own
@@ -58,13 +58,14 @@ constexpr int   kAoSamples = 24;
 // to one degree of freedom; roll is pinned to 0 and the heading recovered
 // from u's in-plane angle. Verified 120/120 angle triples (worst axis error
 // 3.5e-4) against a matrix-based ground truth.
-[[nodiscard]] auto EngineTripletFromQuat(JPH::Quat q) -> FVec3 {
-    const FVec3 f = q.RotateAxisX();
-    const FVec3 u = q.RotateAxisY();
-    const float     b = std::asin(std::clamp(-f.z, -1.0f, 1.0f));
-    float           c = std::atan2(f.y, f.x);
-    const float     cb = std::cos(b);
-    float           a;
+[[nodiscard]] auto EngineTripletFromQuat(FVec4 q) -> FVec3 {
+    const auto matrix = ComposeTransform(FVec3::Zero(), q, FVec3::One());
+    const auto f = matrix.Column(0).XYZ();
+    const auto u = matrix.Column(1).XYZ();
+    const float b = std::asin(std::clamp(-f.z, -1.0f, 1.0f));
+    float c = std::atan2(f.y, f.x);
+    const float cb = std::cos(b);
+    float a;
     if (cb > 1e-3f) {
         const float cc = std::cos(c);
         const float sc = std::sin(c);
@@ -80,12 +81,14 @@ constexpr int   kAoSamples = 24;
 // The sky_camera's own rotation as a quaternion (SkyboxTransform::rot is its
 // row-major AngleMatrix), so entity orientations can compose with it the way
 // Source parents skybox props to the sky_camera.
-[[nodiscard]] auto SkyboxRotationQuat(const SkyboxTransform& t) -> JPH::Quat {
-    const JPH::Mat44 basis(
-        FVec4(t.rot[0], t.rot[3], t.rot[6], 0.0f), FVec4(t.rot[1], t.rot[4], t.rot[7], 0.0f), FVec4(t.rot[2], t.rot[5], t.rot[8], 0.0f),
-        FVec4(0.0f, 0.0f, 0.0f, 1.0f)
-    );
-    return basis.GetQuaternion();
+[[nodiscard]] auto SkyboxRotationQuat(const SkyboxTransform& t) -> FVec4 {
+    auto basis = Mat4x4::Identity();
+    for (size_t row = 0; row < 3; ++row) {
+        for (size_t col = 0; col < 3; ++col) {
+            basis[row, col] = t.rot[row * 3 + col];
+        }
+    }
+    return DecomposeTransform(basis).rotation;
 }
 
 } // namespace
@@ -122,15 +125,11 @@ auto EngineEulerAnglesFromSourceAngles(FVec3 sourceAnglesDegrees, const ImportOp
     // (pitch=roll=0) this reduces to a pure +yaw
     // rotation about engine +Y -- bit-identical behaviour to the previously
     // verified yaw fix, whose -atan2 sign is preserved here.
-    const float     pitch = sourceAnglesDegrees.x * (3.14159265358979323846f / 180.0f);
-    const float     yaw   = sourceAnglesDegrees.y * (3.14159265358979323846f / 180.0f);
-    const float     roll  = sourceAnglesDegrees.z * (3.14159265358979323846f / 180.0f);
-    const JPH::Quat qSource = JPH::Quat::sRotation(FVec3::sAxisZ(), yaw) * JPH::Quat::sRotation(FVec3::sAxisY(), pitch) *
-                              JPH::Quat::sRotation(FVec3::sAxisX(), roll);
-    JPH::Quat qEngine = qSource;
+    const auto qSource = RotationFromEulerDegrees({sourceAnglesDegrees.z, sourceAnglesDegrees.x, sourceAnglesDegrees.y});
+    auto qEngine = qSource;
     if (options.convertCoordinates) {
-        const JPH::Quat qC = JPH::Quat::sRotation(FVec3::sAxisX(), -0.5f * 3.14159265358979323846f);
-        qEngine            = qC * qSource * qC.Conjugated();
+        const auto qC = RotationFromEulerDegrees({-90.0f, 0.0f, 0.0f});
+        qEngine = MultiplyRotations(MultiplyRotations(qC, qSource), ConjugateRotation(qC));
     }
     return EngineTripletFromQuat(qEngine);
 }
@@ -196,9 +195,10 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         // `_ambient "64 95 166 10"` lands at (0.0033, 0.0050, 0.0087), which is
         // the same irradiance VRAD baked its LDR lightmaps against.
         const float ladder = 1.0f / (kAmbientBrightnessNormalisation * kAmbientExposure);
-        JPH::Float3 sky = {ambient.color.x * ambient.intensity * ladder,
-                           ambient.color.y * ambient.intensity * ladder,
-                           ambient.color.z * ambient.intensity * ladder};
+        auto sky = scene.environment.skyZenith;
+        sky = {ambient.color.x * ambient.intensity * ladder,
+               ambient.color.y * ambient.intensity * ladder,
+               ambient.color.z * ambient.intensity * ladder};
 
         // VRAD's _ambient magnitude is irradiance for baked surfaces, not the
         // visible sky's radiance. Using it verbatim made authored night skies
@@ -415,8 +415,8 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // (cos p cos y, sin p, cos p sin y); take them from the exact
             // conjugated rotation's forward, not the Euler slots, because the
             // slots' yaw sign is the prop convention, not the camera's.
-            const JPH::Quat qView     = Math::EulerDegreesToQuat(EngineEulerAnglesFromSourceAngles(angles, options));
-            const FVec3 viewFwd   = qView.RotateAxisX();
+            const auto qView    = RotationFromEulerDegrees(EngineEulerAnglesFromSourceAngles(angles, options));
+            const auto viewFwd  = ComposeTransform(FVec3::Zero(), qView, FVec3::One()).Column(0).XYZ();
             scene.camera.pitch        = std::asin(std::clamp(viewFwd.y, -1.0f, 1.0f)) * kRadiansToDegrees;
             scene.camera.yaw          = std::atan2(viewFwd.z, viewFwd.x) * kRadiansToDegrees;
             cameraSet                 = true;
@@ -618,7 +618,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 prop.drawFlags    = DrawFlags::Background;
                 prop.body         = Scene::BodyKind::None;
                 prop.startsAsleep = false;
-                const FVec3 composed = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(prop.transform.rotation));
+                const FVec3 composed = EngineTripletFromQuat(MultiplyRotations(SkyboxRotationQuat(skybox), RotationFromEulerDegrees(prop.transform.rotation)));
                 prop.transform.rotation  = {composed.x, composed.y, composed.z};
             }
 
@@ -666,7 +666,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         propEntity.transform.rotation = {engineAngles.x, engineAngles.y, engineAngles.z};
         if (skyProp) {
             propEntity.drawFlags = DrawFlags::Background;
-            const FVec3 composed      = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(propEntity.transform.rotation));
+            const FVec3 composed      = EngineTripletFromQuat(MultiplyRotations(SkyboxRotationQuat(skybox), RotationFromEulerDegrees(propEntity.transform.rotation)));
             propEntity.transform.rotation = {composed.x, composed.y, composed.z};
         }
 
@@ -720,9 +720,9 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // EmissiveLightFor always builds a Point proxy; say so directly
             // rather than pulling the reflection header in for one enum name.
             light.type             = "Point";
-            light.position         = JPH::Float3(proxy.position.x, proxy.position.y, proxy.position.z);
-            light.direction        = JPH::Float3(proxy.direction.x, proxy.direction.y, proxy.direction.z);
-            light.color            = JPH::Float3(proxy.color.x, proxy.color.y, proxy.color.z);
+            light.position         = proxy.position;
+            light.direction        = proxy.direction;
+            light.color            = proxy.color;
             light.intensity        = proxy.intensity;
             light.radius           = proxy.radius;
             light.range            = proxy.range;
@@ -803,9 +803,9 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
     }
 
     if (cameraSet) {
-        const JPH::Float3 spawn = scene.camera.position;
-        scene.environment.probeMin = JPH::Float3 {spawn.x - kSceneProbeHalfSpanX, spawn.y - kSceneProbeHalfSpanY, spawn.z - kSceneProbeHalfSpanX};
-        scene.environment.probeMax = JPH::Float3 {spawn.x + kSceneProbeHalfSpanX, spawn.y + kSceneProbeHalfSpanY, spawn.z + kSceneProbeHalfSpanX};
+        const auto spawn = scene.camera.position;
+        scene.environment.probeMin = {spawn.x - kSceneProbeHalfSpanX, spawn.y - kSceneProbeHalfSpanY, spawn.z - kSceneProbeHalfSpanX};
+        scene.environment.probeMax = {spawn.x + kSceneProbeHalfSpanX, spawn.y + kSceneProbeHalfSpanY, spawn.z + kSceneProbeHalfSpanX};
     }
 
     return scene;

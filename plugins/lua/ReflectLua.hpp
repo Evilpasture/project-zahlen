@@ -86,7 +86,7 @@ template <typename T>
 struct LuaVector : std::false_type {};
 
 // Customization point for non-aggregate value types with private/SIMD storage
-// (e.g. FVec3, FVec4, JPH::Quat in SceneLua.hpp).
+// (e.g. FVec3, FVec4, Quat in SceneLua.hpp).
 template <typename T>
 struct LuaValueTrait {
     static constexpr bool specialized = false;

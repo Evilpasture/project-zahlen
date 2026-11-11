@@ -12,7 +12,7 @@
 
 #include "BSPScene.hpp" // ConvertDirection / ConvertPosition / EngineEulerAnglesFromSourceAngles
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -142,7 +142,7 @@ auto ParseEntityOutputs(const BSPEntity& entity) -> std::vector<EntityOutput> {
 auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -> FVec3 {
     const std::string_view movedirStr = entity.Find("movedir");
     if (movedirStr.empty()) {
-        return ConvertDirection(options, FVec3::sAxisX());
+        return ConvertDirection(options, FVec3::UnitX());
     }
 
     float       v[3] = {0.0f, 0.0f, 0.0f};
@@ -329,11 +329,11 @@ auto DescribeInteractiveEntities(ECS::Registry& registry, const BSPMap& map, con
             }
             // Source stores the origin at the feet; it stays there, and the
             // teleport lifts the character by its own ground offset.
-            record.origin = ConvertPosition(options, OptionalVec3(entity, "origin").value_or(FVec3::sZero()));
+            record.origin = ConvertPosition(options, OptionalVec3(entity, "origin").value_or(FVec3::Zero()));
             // The exact conjugated Source rotation: TeleportPlayer recovers the
             // post-teleport view direction from this transform's +X axis.
-            const FVec3 angles = OptionalVec3(entity, "angles").value_or(FVec3::sZero());
-            record.orientation     = Math::EulerDegreesToQuat(EngineEulerAnglesFromSourceAngles(angles, options));
+            const FVec3 angles = OptionalVec3(entity, "angles").value_or(FVec3::Zero());
+            record.orientation     = Quat::FromEulerDegrees(EngineEulerAnglesFromSourceAngles(angles, options));
             records.push_back(std::move(record));
             continue;
         }

@@ -22,6 +22,18 @@
 
 namespace ZHLN {
 
+// ModelPrefab local transforms are still stored in Jolt form. This explicit
+// bridge keeps animation calculations native until prefab storage is migrated.
+[[nodiscard]] inline auto PrefabMatrixToNative(const JPH::Mat44& source) noexcept -> Mat4x4 {
+    Mat4x4 result {};
+    for (int column = 0; column < 4; ++column) {
+        for (int row = 0; row < 4; ++row) {
+            result[static_cast<size_t>(row), static_cast<size_t>(column)] = source(row, column);
+        }
+    }
+    return result;
+}
+
 // Artistic boost for the engine's low-exposure scene preset, not a glTF
 // requirement. Conformance imports use an explicit scale of 1 instead.
 inline constexpr float    kGLTFEmissiveDisplayScale       = 100.0f;

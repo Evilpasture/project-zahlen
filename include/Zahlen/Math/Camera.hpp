@@ -4,27 +4,21 @@
 #pragma once
 
 #include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <array>
-
-// clang-format off
-#include <Jolt/Jolt.h>
-#include <Jolt/Math/Mat4x4.h>
-// clang-format on
 
 namespace ZHLN {
 
 struct Frustum {
     std::array<FVec4, 2> mX {}, mY {}, mZ {}, mW {};
 
-    void Update(const JPH::Mat44& vp) {
-        FVec4 r0(vp(0, 0), vp(0, 1), vp(0, 2), vp(0, 3));
-        FVec4 r1(vp(1, 0), vp(1, 1), vp(1, 2), vp(1, 3));
-        FVec4 r2(vp(2, 0), vp(2, 1), vp(2, 2), vp(2, 3));
-        FVec4 r3(vp(3, 0), vp(3, 1), vp(3, 2), vp(3, 3));
+    void Update(const Mat4x4& vp) {
+        FVec4 r0(vp[0, 0], vp[0, 1], vp[0, 2], vp[0, 3]);
+        FVec4 r1(vp[1, 0], vp[1, 1], vp[1, 2], vp[1, 3]);
+        FVec4 r2(vp[2, 0], vp[2, 1], vp[2, 2], vp[2, 3]);
+        FVec4 r3(vp[3, 0], vp[3, 1], vp[3, 2], vp[3, 3]);
 
         std::array<FVec4, 6> planes {};
         planes[0] = r3 + r0;
@@ -79,20 +73,15 @@ struct Camera {
     float nearZ = 0.1f;
     float farZ  = 1000.0f;
 
-    [[nodiscard]] auto GetViewMatrix() const -> JPH::Mat44 {
+    [[nodiscard]] auto GetViewMatrix() const -> Mat4x4 {
         const RadF pitchRad = DegF(pitch).ToRadians();
         const RadF yawRad   = DegF(yaw).ToRadians();
-
-        FVec3 direction {};
-        direction.x = Cos(yawRad) * Cos(pitchRad);
-        direction.y = Sin(pitchRad);
-        direction.z = Sin(yawRad) * Cos(pitchRad);
-
-        return Math::CreateLookAt(position, position + direction.Normalized(), {0.0f, 1.0f, 0.0f});
+        const FVec3 direction {Cos(yawRad) * Cos(pitchRad), Sin(pitchRad), Sin(yawRad) * Cos(pitchRad)};
+        return CreateLookAt(position, position + direction.Normalized(), FVec3::UnitY());
     }
 
-    [[nodiscard]] auto GetProjectionMatrix(float aspectRatio) const -> JPH::Mat44 {
-        return Math::CreatePerspective(DegF(fov).ToRadians().value, aspectRatio, nearZ, farZ);
+    [[nodiscard]] auto GetProjectionMatrix(float aspectRatio) const -> Mat4x4 {
+        return CreatePerspective(DegF(fov).ToRadians().value, aspectRatio, nearZ, farZ);
     }
 };
 

@@ -4,10 +4,6 @@
 // File: utils/zcook/Transform.cpp
 #include "Transform.hpp"
 #include <Zahlen/Math/Vec3.hpp>
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
-#include <Jolt/Math/Vec3.h>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
 #include <cmath>
@@ -144,8 +140,8 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
         result.primitives.push_back(outPrim);
     }
 
-    std::vector<FVec3> tangents(rawVerts.size(), FVec3::sZero());
-    std::vector<FVec3> bitangents(rawVerts.size(), FVec3::sZero());
+    auto tangents = std::vector(rawVerts.size(), FVec3::Zero());
+    auto bitangents = std::vector(rawVerts.size(), FVec3::Zero());
 
     for (size_t i = 0; i + 2 < result.indices.size(); i += 3) {
         uint32_t i0 = result.indices[i + 0];
@@ -163,8 +159,8 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
         FVec3 p1(v1.px, v1.py, v1.pz);
         FVec3 p2(v2.px, v2.py, v2.pz);
 
-        FVec3 e1 = p1 - p0;
-        FVec3 e2 = p2 - p0;
+        const auto e1 = p1 - p0;
+        const auto e2 = p2 - p0;
 
         float du1 = v1.u - v0.u;
         float dv1 = v1.v - v0.v;
@@ -174,8 +170,8 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
         float det = du1 * dv2 - dv1 * du2;
         float r   = (det != 0.0f) ? 1.0f / det : 0.0f;
 
-        FVec3 t = (e1 * dv2 - e2 * dv1) * r;
-        FVec3 b = (e2 * du1 - e1 * du2) * r;
+        const auto t = (e1 * dv2 - e2 * dv1) * r;
+        const auto b = (e2 * du1 - e1 * du2) * r;
 
         tangents[i0] += t;
         tangents[i1] += t;
@@ -200,13 +196,13 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
 
         // 2. Compute and pack the tangent frame and surface streams
         FVec3 n(rv.nx, rv.ny, rv.nz);
-        FVec3 t = tangents[i];
+        const auto t = tangents[i];
         FVec3 tangentVec;
         float     sign = 1.0f;
 
         if (t.LengthSquared() > 1e-6f) {
             tangentVec = (t - n * Dot(n, t)).Normalized();
-            sign       = Cross(n, t).Dot(bitangents[i]) < 0.0f ? -1.0f : 1.0f;
+            sign       = Dot(Cross(n, t), bitangents[i]) < 0.0f ? -1.0f : 1.0f;
         } else {
             FVec3 absN(std::abs(n.x), std::abs(n.y), std::abs(n.z));
             FVec3 fallbackT = (absN.x < 0.999f) ? FVec3(1.0f, 0.0f, 0.0f) : FVec3(0.0f, 1.0f, 0.0f);

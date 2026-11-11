@@ -6,7 +6,7 @@
 #include "render/RenderInternal.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -127,14 +127,14 @@ auto ShadowRenderer::CompileAtlasPipeline(RenderContext::Impl& impl, VkDevice de
 
 auto ShadowRenderer::ComputeCascadeLightSpaceMatrix(
     const Camera&     cam,
-    const JPH::Mat44& lightView,
+    const Mat4x4& lightView,
     const FVec3&  sunDir,
     float             nearDist,
     float             farDist,
     float             aspect,
     float             tanHalfFov,
     uint32_t          shadowResolution
-) noexcept -> JPH::Mat44 {
+) noexcept -> Mat4x4 {
     const float hNear = 2.0f * tanHalfFov * nearDist;
     const float wNear = hNear * aspect;
     const float hFar  = 2.0f * tanHalfFov * farDist;
@@ -151,13 +151,13 @@ auto ShadowRenderer::ComputeCascadeLightSpaceMatrix(
          {-wFar * 0.5f, -hFar * 0.5f, -farDist}}
     };
 
-    const JPH::Mat44 invCamView = cam.GetViewMatrix().Inversed();
+    const Mat4x4 invCamView = Inverse(cam.GetViewMatrix());
     for (auto& corner: corners) {
-        corner = invCamView * corner;
+        corner = TransformPoint(invCamView, corner);
     }
 
-    FVec3 nearCenter = FVec3::sZero();
-    FVec3 farCenter  = FVec3::sZero();
+    FVec3 nearCenter = FVec3::Zero();
+    FVec3 farCenter  = FVec3::Zero();
     for (int i = 0; i < 4; ++i) {
         nearCenter += corners[static_cast<size_t>(i)];
         farCenter += corners[4 + static_cast<size_t>(i)];
@@ -172,13 +172,13 @@ auto ShadowRenderer::ComputeCascadeLightSpaceMatrix(
     const float invTexels = 2.0f / static_cast<float>(shadowResolution);
     radius                = std::ceil(radius / invTexels) * invTexels;
 
-    FVec3 centerLight   = lightView * center;
+    FVec3 centerLight   = TransformPoint(lightView, center);
     const float texelsPerUnit = static_cast<float>(shadowResolution) / (radius * 2.0f);
 
-    centerLight.SetX(std::floor(centerLight.x * texelsPerUnit) / texelsPerUnit);
-    centerLight.SetY(std::floor(centerLight.y * texelsPerUnit) / texelsPerUnit);
+    centerLight.x = std::floor(centerLight.x * texelsPerUnit) / texelsPerUnit;
+    centerLight.y = std::floor(centerLight.y * texelsPerUnit) / texelsPerUnit;
 
-    center = lightView.Inversed() * centerLight;
+    center = TransformPoint(Inverse(lightView), centerLight);
 
     float offset  = Shadows::BaseOffset;
     float farClip = Shadows::BaseDepth;
@@ -189,8 +189,8 @@ auto ShadowRenderer::ComputeCascadeLightSpaceMatrix(
     }
 
     const FVec3  cascadeLightPos  = center + sunDir * offset;
-    const JPH::Mat44 cascadeLightView = Math::CreateLookAt(cascadeLightPos, center, {0.0f, 1.0f, 0.0f});
-    const JPH::Mat44 cascadeLightProj = Math::CreateOrtho(-radius, radius, -radius, radius, Shadows::NearClip, farClip);
+    const Mat4x4 cascadeLightView = CreateLookAt(cascadeLightPos, center, {0.0f, 1.0f, 0.0f});
+    const Mat4x4 cascadeLightProj = CreateOrtho(-radius, radius, -radius, radius, Shadows::NearClip, farClip);
 
     return cascadeLightProj * cascadeLightView;
 }

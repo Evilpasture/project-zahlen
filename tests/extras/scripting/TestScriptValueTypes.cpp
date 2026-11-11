@@ -21,11 +21,8 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Jolt/Math/DVec3.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <cstdint>
@@ -35,6 +32,9 @@
 #include <string>
 
 namespace {
+using ZHLN::FVec3;
+using ZHLN::DVec3;
+using ZHLN::FVec4;
 
 enum class ScriptValueTypeTestError : uint32_t {
     ValueConversionFailed ZHLN_ANNOTATION(ZHLN::Description<"A value type did not round-trip through ToScriptVal/FromScriptVal."> {}) = 1,
@@ -151,7 +151,7 @@ struct ScriptValueTypesTestSuite {
     }
 
     std::expected<void, ZHLN::ErrorCode> quat_crosses_as_four_numbers() {
-        const JPH::Quat q(0.1f, 0.2f, 0.3f, 0.9f);
+        const ZHLN::Quat q(0.1f, 0.2f, 0.3f, 0.9f);
 
         ZHLN::ScriptVal val = ZHLN::ToScriptVal(q);
 
@@ -161,7 +161,7 @@ struct ScriptValueTypesTestSuite {
         }
         ZHLN::Test::ExpectEq(arr->elements.size(), static_cast<size_t>(4));
 
-        auto back = ZHLN::FromScriptVal<JPH::Quat>(val);
+        auto back = ZHLN::FromScriptVal<ZHLN::Quat>(val);
         if (!ZHLN::Test::ExpectTrue(back.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
@@ -210,7 +210,7 @@ struct ScriptValueTypesTestSuite {
     // type name is the only guard. Reinterpreting one as the other would read
     // four floats out of a three-float object.
     std::expected<void, ZHLN::ErrorCode> boxed_type_mismatch_is_rejected() {
-        JPH::Quat       quat(1.0f, 0.0f, 0.0f, 0.0f);
+        ZHLN::Quat       quat(1.0f, 0.0f, 0.0f, 0.0f);
         ZHLN::ScriptVal boxedQuat = BoxOf(&quat);
 
         auto res = ZHLN::FromScriptVal<FVec3>(boxedQuat);
@@ -254,7 +254,7 @@ struct ScriptValueTypesTestSuite {
     // the case that decides whether PhysicsContext can be registered at all.
     std::expected<void, ZHLN::ErrorCode> arg_aliases_accept_the_underlying_type() {
         static_assert(std::is_same_v<std::decay_t<FVec3>, FVec3>, "FVec3 stopped being an alias for FVec3");
-        static_assert(std::is_same_v<std::decay_t<JPH::QuatArg>, JPH::Quat>, "QuatArg stopped being an alias for Quat");
+        static_assert(std::is_same_v<std::decay_t<const ZHLN::Quat&>, ZHLN::Quat>);
 
         auto res = ZHLN::FromScriptVal<FVec3>(Numbers({1.0, 2.0, 3.0}));
 

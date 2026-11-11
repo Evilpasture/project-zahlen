@@ -258,7 +258,7 @@ namespace {
 }
 
 void ApplySelectionTint(BoxConfig& cfg) {
-    cfg.color = JPH::Vec4(cfg.color.x, cfg.color.y, cfg.color.z, cfg.color.w) + FVec4(0.15f, 0.25f, 0.40f, 0.25f);
+    cfg.color = cfg.color + FVec4(0.15f, 0.25f, 0.40f, 0.25f);
 }
 
 void NoteDesignClick(Frame& gui, std::string_view id, TreeMode mode, RenderUITreeResult& result) {

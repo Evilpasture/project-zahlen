@@ -36,8 +36,8 @@ auto GenerateTangents(
     const size_t count = positions.size();
     if (normals.size() != count || texcoords.size() != count) return {};
 
-    std::vector<FVec3> tangents(count, FVec3::sZero());
-    std::vector<FVec3> bitangents(count, FVec3::sZero());
+    std::vector<FVec3> tangents(count, FVec3::Zero());
+    std::vector<FVec3> bitangents(count, FVec3::Zero());
     const auto position = [&](uint32_t index) -> FVec3 {
         const auto& p = positions[index].position;
         return {p[0], p[1], p[2]};
@@ -59,13 +59,13 @@ auto GenerateTangents(
 
         // Normalize before weighting: a UV island's texel density must not
         // outweigh its neighbours just because its UV gradient is small.
-        const FVec3 t = NormalizeOr((e1 * dv2 - e2 * dv1) / det, FVec3::sZero());
+        const FVec3 t = NormalizeOr((e1 * dv2 - e2 * dv1) / det, FVec3::Zero());
         // glTF images have top-left UV origin (V grows down), but their normal
         // maps use OpenGL's +Y-up convention. The shading bitangent is thus
         // -dP/dV. Using +dP/dV makes NormalTangentTest's mapped spheres look
         // concave or rotated; the authored tangents in NormalTangentMirrorTest
         // confirm the opposite handedness for the same UV orientation.
-        const FVec3 b = NormalizeOr((e1 * du2 - e2 * du1) / det, FVec3::sZero());
+        const FVec3 b = NormalizeOr((e1 * du2 - e2 * du1) / det, FVec3::Zero());
         if (t.LengthSquared() < 0.5f || b.LengthSquared() < 0.5f) continue;
 
         const float w0 = CornerAngle(e1, e2);
@@ -82,12 +82,12 @@ auto GenerateTangents(
     std::vector<std::array<float, 4>> result(count);
     for (size_t i = 0; i < count; ++i) {
         const auto& raw = normals[i];
-        const FVec3 n = NormalizeOr({raw[0], raw[1], raw[2]}, FVec3::sAxisY());
+        const FVec3 n = NormalizeOr({raw[0], raw[1], raw[2]}, FVec3::UnitY());
         const FVec3 projected = tangents[i] - n * Dot(n, tangents[i]);
-        const FVec3 axis = std::abs(n.x) < 0.95f ? FVec3::sAxisX() : FVec3::sAxisY();
-        const FVec3 fallback = NormalizeOr(axis - n * Dot(n, axis), FVec3::sAxisZ());
+        const FVec3 axis = std::abs(n.x) < 0.95f ? FVec3::UnitX() : FVec3::UnitY();
+        const FVec3 fallback = NormalizeOr(axis - n * Dot(n, axis), FVec3::UnitZ());
         const FVec3 t = NormalizeOr(projected, fallback);
-        const float sign = Cross(n, t).Dot(bitangents[i]) < 0.0f ? -1.0f : 1.0f;
+        const float sign = Dot(Cross(n, t), bitangents[i]) < 0.0f ? -1.0f : 1.0f;
         result[i] = {t.x, t.y, t.z, sign};
     }
     return result;

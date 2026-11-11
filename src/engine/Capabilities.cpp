@@ -19,6 +19,7 @@
 #include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/Render/SceneData.hpp>
 
@@ -193,17 +194,13 @@ auto Simulation::DebugDrawData(bool shapes, bool constraints, bool wireframe) co
     return _ctx->GetDebugDrawData(shapes, constraints, wireframe);
 }
 auto Simulation::BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<DVec3> {
-    const auto position = _ctx->BodyPosition(handle);
-    if (!position) {
-        return std::nullopt;
-    }
-    return DVec3 {*position};
+    return _ctx->BodyPosition(handle);
 }
 auto Simulation::BodyState(Physics::BodyID handle) const noexcept -> std::optional<Physics::BodyStateSnapshot> {
     return _ctx->BodyState(handle);
 }
 auto Simulation::CharacterVelocity(Physics::BodyID handle) const -> FVec3 {
-    return FVec3 {_ctx->GetCharacterVelocity(handle)};
+    return Physics::FromJoltVector(_ctx->GetCharacterVelocity(handle));
 }
 auto Simulation::IsCharacterOnGround(Physics::BodyID handle) const -> bool {
     return _ctx->IsCharacterOnGround(handle);

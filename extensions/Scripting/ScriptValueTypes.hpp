@@ -6,7 +6,7 @@
 // extensions/Scripting/ScriptValueTypes.hpp
 //
 // Teaches ScriptBinder the value types the engine's scripting surface actually
-// passes around: Entity, and Jolt's FVec3/DVec3/Quat/FVec4.
+// passes around: Entity and Zahlen's FVec3/DVec3/Quat/FVec4.
 //
 // Why these need teaching at all is at ScriptValueTrait in ScriptBinder.hpp. The
 // short version: left generic, a FVec3 crosses as an opaque BoxedObject, so a
@@ -46,12 +46,9 @@
 #pragma once
 
 #include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/DVec3.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/ECS/Entity.hpp>
 #include <array>
 #include <cstddef>
@@ -183,26 +180,26 @@ struct ScriptValueTrait<DVec3> {
 };
 
 // ---------------------------------------------------------------------------
-// JPH::Quat <-> {x, y, z, w}
+// ZHLN::Quat <-> {x, y, z, w}
 // ---------------------------------------------------------------------------
 
 template <>
-struct ScriptValueTrait<JPH::Quat> {
+struct ScriptValueTrait<ZHLN::Quat> {
     static constexpr bool             specialized = true;
     static constexpr std::string_view scriptName  = "Quat";
 
-    static auto To(const JPH::Quat& q) -> ScriptVal {
+    static auto To(const ZHLN::Quat& q) -> ScriptVal {
         return NumberArray({static_cast<double>(q.x), static_cast<double>(q.y), static_cast<double>(q.z), static_cast<double>(q.w)});
     }
 
-    static auto From(const ScriptVal& sval) -> std::expected<JPH::Quat, ErrorCode> {
-        auto nums = ReadNumbers<4, JPH::Quat>(sval, scriptName, [](const JPH::Quat& q) -> std::array<double, 4> {
+    static auto From(const ScriptVal& sval) -> std::expected<ZHLN::Quat, ErrorCode> {
+        auto nums = ReadNumbers<4, ZHLN::Quat>(sval, scriptName, [](const ZHLN::Quat& q) -> std::array<double, 4> {
             return {static_cast<double>(q.x), static_cast<double>(q.y), static_cast<double>(q.z), static_cast<double>(q.w)};
         });
         if (!nums) {
             return std::unexpected(nums.error());
         }
-        return JPH::Quat(static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2]), static_cast<float>((*nums)[3]));
+        return ZHLN::Quat(static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2]), static_cast<float>((*nums)[3]));
     }
 };
 

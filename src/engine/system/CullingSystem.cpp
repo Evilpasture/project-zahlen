@@ -13,7 +13,6 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 
@@ -35,13 +34,13 @@ void VerifyCullingResults(CullingSystem::CullingQuery query, std::span<const Ent
         }
 
         const auto worldTrans = query.Get<Components::WorldTransformComponent>(entities[i]);
-        JPH::Mat44 worldMat   = JPH::Mat44::sIdentity();
+        auto worldMat = Mat4x4::Identity();
         if (worldTrans) {
             worldMat = worldTrans->world;
         }
-        FVec3  pos        = worldMat * meshes[i].localCenter;
+        FVec3  pos        = TransformPoint(worldMat, meshes[i].localCenter);
 
-        float currentMaxScale = std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
+        float currentMaxScale = std::max({worldMat.Column(0).XYZ().Length(), worldMat.Column(1).XYZ().Length(), worldMat.Column(2).XYZ().Length()});
 
         if (frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
             expectedVisible++;
@@ -104,7 +103,9 @@ struct BatchedFrustum {
         for (uint32_t p = 0; p < kPlaneCount; ++p) {
             FVec4 dist = FVec4::Splat(nx[p]) * centersX + FVec4::Splat(ny[p]) * centersY + FVec4::Splat(nz[p]) * centersZ +
                              FVec4::Splat(pw[p]);
-            worstViolation = FVec4::sMax(worstViolation, negInflatedRadii - dist);
+            const FVec4 violation = negInflatedRadii - dist;
+            worstViolation = {std::max(worstViolation.x, violation.x), std::max(worstViolation.y, violation.y),
+                              std::max(worstViolation.z, violation.z), std::max(worstViolation.w, violation.w)};
         }
 
         for (uint32_t j = 0; j < 4; ++j) {
@@ -185,16 +186,16 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
 
         FVec3 shadowCenter = cam.position;
         float     texelSize    = shadowWidth / static_cast<float>(shadowResolution);
-        shadowCenter.SetX(std::round(shadowCenter.x / texelSize) * texelSize);
-        shadowCenter.SetY(std::round(shadowCenter.y / texelSize) * texelSize);
-        shadowCenter.SetZ(std::round(shadowCenter.z / texelSize) * texelSize);
+        shadowCenter.x = std::round(shadowCenter.x / texelSize) * texelSize;
+        shadowCenter.y = std::round(shadowCenter.y / texelSize) * texelSize;
+        shadowCenter.z = std::round(shadowCenter.z / texelSize) * texelSize;
 
         FVec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
-        JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
+        const auto lightView = CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
 
         float      halfWidth      = shadowWidth * 0.5f;
-        JPH::Mat44 lightProj      = Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
-        JPH::Mat44 shadowProjView = lightProj * lightView;
+        const auto lightProj = CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
+        const auto shadowProjView = lightProj * lightView;
 
         scratch.shadowFrustum.Update(shadowProjView);
     }
@@ -253,16 +254,16 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
             }
 
             const auto worldTrans = query.Get<Components::WorldTransformComponent>(e);
-            JPH::Mat44 worldMat   = JPH::Mat44::sIdentity();
+            auto worldMat = Mat4x4::Identity();
             if (worldTrans) {
                 worldMat = worldTrans->world;
             }
 
             batchEntities[n] = e;
-            batchCenters[n]  = worldMat * meshComp.localCenter;
+            batchCenters[n]  = TransformPoint(worldMat, meshComp.localCenter);
             batchRadii[n]    = meshComp.cullRadius;
             batchScaledRadii[n] =
-                meshComp.cullRadius * std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
+                meshComp.cullRadius * std::max({worldMat.Column(0).XYZ().Length(), worldMat.Column(1).XYZ().Length(), worldMat.Column(2).XYZ().Length()});
             batchTris[n]   = meshTris;
             batchHidden[n] = hidden;
             // Background scenery is culled like everything else now (it lives
@@ -356,7 +357,7 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
     }
 }
 
-std::array<FVec3, 8> FrustumCornersFromViewProj(const JPH::Mat44& viewProj) noexcept {
+std::array<FVec3, 8> FrustumCornersFromViewProj(const Mat4x4& viewProj) noexcept {
     // FVec4's constructor is not constexpr, so this is a constant of the pass
     // rather than a compile-time one.
     const std::array<FVec4, 8> kClipCorners = {
@@ -371,9 +372,9 @@ std::array<FVec3, 8> FrustumCornersFromViewProj(const JPH::Mat44& viewProj) noex
     };
 
     std::array<FVec3, 8> corners {};
-    corners.fill(FVec3::sZero());
+    corners.fill(FVec3::Zero());
 
-    const JPH::Mat44 invViewProj = viewProj.Inversed();
+    const auto invViewProj = Inverse(viewProj);
     for (size_t i = 0; i < kClipCorners.size(); ++i) {
         const FVec4 worldPos = invViewProj * kClipCorners[i];
         const float     w        = worldPos.w;

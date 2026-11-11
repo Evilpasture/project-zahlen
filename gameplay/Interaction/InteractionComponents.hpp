@@ -5,11 +5,7 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ECS/Entity.hpp>
@@ -77,7 +73,7 @@ enum class TriggerFlags : uint32_t {
 struct TriggerComponent {
     float        radius      = 2.0f;
     TriggerFlags flags       = TriggerFlags::Active;
-    FVec3    halfExtents = FVec3::sZero(); // If > 0, evaluated as an AABB trigger volume
+    FVec3    halfExtents = FVec3::Zero(); // If > 0, evaluated as an AABB trigger volume
     float        wait        = 0.2f;
     float        waitTimer   = 0.0f;
 
@@ -113,13 +109,13 @@ struct DoorComponent {
     DoorFlags flags = DoorFlags::None;
 
     // Linear motion (func_door)
-    FVec3 closedPosition = FVec3::sZero();
-    FVec3 openPosition   = FVec3::sZero();
+    FVec3 closedPosition = FVec3::Zero();
+    FVec3 openPosition   = FVec3::Zero();
 
     // Angular motion (func_door_rotating, prop_door_rotating)
-    JPH::Quat closedRotation = JPH::Quat::sIdentity();
-    JPH::Quat openRotation   = JPH::Quat::sIdentity();
-    FVec3 rotationAxis   = FVec3::sAxisY();
+    Quat closedRotation = Quat::Identity();
+    Quat openRotation   = Quat::Identity();
+    FVec3 rotationAxis   = FVec3::UnitY();
     float     rotationAngle  = 90.0f; // degrees
 
     float speed     = 2.0f; // travel progress speed (1.0 / duration)
@@ -151,8 +147,8 @@ struct ButtonComponent {
     ButtonState state = ButtonState::Off;
     ButtonFlags flags = ButtonFlags::UseActivates;
 
-    FVec3 unpressedPosition = FVec3::sZero();
-    FVec3 pressedPosition   = FVec3::sZero();
+    FVec3 unpressedPosition = FVec3::Zero();
+    FVec3 pressedPosition   = FVec3::Zero();
 
     float speed     = 2.0f;
     float progress  = 0.0f; // 0.0 (unpressed) -> 1.0 (pressed)

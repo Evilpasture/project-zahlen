@@ -3,20 +3,12 @@
 
 #pragma once
 
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec3.h>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Audio/AudioValues.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <memory>

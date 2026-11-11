@@ -25,6 +25,7 @@
 // LightingRTCommon.hpp.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
@@ -224,9 +225,9 @@ void BuildAoScene(ZHLN::Engine& engine) {
     const ZHLN::Entity sunEnt = reg.Create();
     reg.Add(
         sunEnt,
-        ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 40.0f, 30.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({45.0f, 0.0f, 0.0f})},
+        ZHLN::Components::TransformComponent {.position = ZHLN::FVec3(0.0f, 40.0f, 30.0f), .rotation = ZHLN::Quat::FromEulerDegrees({45.0f, 0.0f, 0.0f})},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 1.0f, 1.0f), .intensity = 220.0f, .direction = FVec3(0.0f, 0.6f, 0.8f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3(1.0f, 1.0f, 1.0f), .intensity = 220.0f, .direction = ZHLN::FVec3(0.0f, 0.6f, 0.8f).Normalized()
         }
     );
 
@@ -235,7 +236,7 @@ void BuildAoScene(ZHLN::Engine& engine) {
         return;
     }
     ZHLN::Camera& cam = camComp->camera;
-    cam.position      = FVec3(0.0f, 2.5f, 8.0f);
+    cam.position      = ZHLN::FVec3(0.0f, 2.5f, 8.0f);
     cam.yaw           = -90.0f;
     cam.pitch         = -12.0f;
     cam.fov           = 60.0f;

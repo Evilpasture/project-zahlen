@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Zahlen/Core/Concepts.hpp>
+#include <Zahlen/Math/Scalar.hpp>
 #include <cmath>
 #include <cstddef>
 #include <type_traits>
@@ -14,6 +15,12 @@ struct Vec3 {
     // --- Existing ---
     static constexpr auto Zero() -> Vec3 {
         return {T(0), T(0), T(0)};
+    }
+
+    // Explicit component conversion, e.g. position.Cast<float>() for rendering.
+    template <typename U>
+    [[nodiscard]] constexpr auto Cast() const noexcept -> Vec3<U> {
+        return {static_cast<U>(x), static_cast<U>(y), static_cast<U>(z)};
     }
 
     // --- Uniform Factories ---
@@ -98,6 +105,15 @@ struct Vec3 {
     constexpr auto operator*=(T scalar) noexcept -> Vec3& { return *this = *this * scalar; }
     constexpr auto operator/=(T scalar) noexcept -> Vec3& { return *this = *this / scalar; }
 
+    // maxDistanceSquared is the squared Euclidean distance, not a per-lane tolerance.
+    [[nodiscard]] constexpr auto IsClose(Vec3 other, T maxDistanceSquared = (sizeof(T) <= sizeof(float) ? T(1e-12) : T(1e-24))) const noexcept -> bool
+        requires std::is_floating_point_v<T> {
+        return (*this - other).LengthSquared() <= maxDistanceSquared;
+    }
+    // For signed integers, the absolute value must be representable in T.
+    [[nodiscard]] constexpr auto Abs() const noexcept -> Vec3 {
+        return {ZHLN::Abs(x), ZHLN::Abs(y), ZHLN::Abs(z)};
+    }
     [[nodiscard]] constexpr auto LengthSquared() const noexcept -> T { return x * x + y * y + z * z; }
     [[nodiscard]] auto Length() const noexcept -> T requires std::is_floating_point_v<T> {
         return std::hypot(x, y, z);

@@ -9,6 +9,7 @@
 
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include "render/GpuLayout.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/Types.hpp>
@@ -80,7 +81,9 @@ struct DrawCommand {
     DrawFlags            flags;
 };
 
-static_assert(std::is_trivially_copyable_v<DrawCommand> && std::is_trivially_constructible_v<DrawCommand>);
+// Matrix now value-initializes its storage, so default construction need not
+// be trivial. The queue still requires safe bytewise copying and destruction.
+static_assert(std::is_trivially_copyable_v<DrawCommand> && std::is_trivially_destructible_v<DrawCommand>);
 
 struct SkinnedBlasEntry {
     BufferID        scratch;
@@ -115,8 +118,8 @@ struct ParticleEmitterCommand {
 static_assert(std::is_trivially_copyable_v<ParticleEmitterCommand> && std::is_standard_layout_v<ParticleEmitterCommand>);
 
 struct DecalDrawCommand {
-    JPH::Mat44 transform;
-    JPH::Mat44 invTransform;
+    Mat4x4 transform;
+    Mat4x4 invTransform;
     uint32_t   albedoIndex;
     uint32_t   normalIndex;
     float      roughness;

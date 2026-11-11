@@ -3,7 +3,7 @@
 
 #include "Zahlen/Math/Camera.hpp"
 #include <Zahlen/Math/Vec3.hpp>
-#include "Zahlen/Math/Math3D.hpp"
+#include "Zahlen/Math/Matrix.hpp"
 #include "render/GpuPack.hpp"
 #include "render/RenderInternal.hpp"
 #include <algorithm>
@@ -51,9 +51,9 @@ void RenderContext::SetFrameData(
 
     gpuUniforms.lightCount = _impl->packedLightCount;
 
-    JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
+    Mat4x4 viewmodelProj      = CreatePerspective(DegF(58.0f).ToRadians().value, aspect, cam.nearZ, cam.farZ);
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
-    gpuUniforms.invProj           = cam.GetProjectionMatrix(vpAspect).Inversed();
+    gpuUniforms.invProj           = Inverse(cam.GetProjectionMatrix(vpAspect));
 
     gpuUniforms.cascadeSplits   = {cascadeSplits[0], cascadeSplits[1], cascadeSplits[2], cascadeSplits[3]};
     gpuUniforms.sh              = _impl->iblPayload.shCoeffs;
@@ -63,9 +63,9 @@ void RenderContext::SetFrameData(
     if (sunDir.LengthSquared() > 1e-6f) {
         sunDir = sunDir.Normalized();
     }
-    JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
+    Mat4x4 lightView = CreateLookAt(sunDir * 100.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
 
-    float tanHalfFov = std::tan(JPH::DegreesToRadians(cam.fov * 0.5f));
+    float tanHalfFov = std::tan(DegF(cam.fov * 0.5f).ToRadians().value);
 
     for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
         float nearDist = (i == 0) ? cam.nearZ : cascadeSplits[i - 1];
@@ -104,7 +104,7 @@ void RenderContext::SetGISettings(GISettings settings) noexcept {
 void RenderContext::Impl::AllocateShadowTiles(const FVec3& viewPos) noexcept {
     shadowAtlas.BeginFrame();
 
-    std::array<JPH::Mat44, ShadowAtlas::kPointFaces> faces {};
+    std::array<Mat4x4, ShadowAtlas::kPointFaces> faces {};
     for (size_t index = 0; index < submittedLights.size(); ++index) {
         const LightDesc& desc          = submittedLights[index];
         const FVec3  lightPosition = desc.position;

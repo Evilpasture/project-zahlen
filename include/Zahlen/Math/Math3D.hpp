@@ -15,11 +15,9 @@
 // clang-format on
 #include <Jolt/Geometry/AABox.h>
 #include <Jolt/Math/DVec3.h>
-#include <Jolt/Math/DVec3.h>
 #include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Mat4x4.h>
+#include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Render/Vertex.hpp>
 

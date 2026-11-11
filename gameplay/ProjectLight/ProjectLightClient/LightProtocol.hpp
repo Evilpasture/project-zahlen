@@ -101,7 +101,7 @@ struct MsgPackValue {
     [[nodiscard]] auto AsFloat(float fallback = 0.0f) const noexcept -> float;
     [[nodiscard]] auto AsString(std::string_view fallback = {}) const -> std::string;
     [[nodiscard]] auto AsUid() const noexcept -> uint64_t;
-    [[nodiscard]] auto AsVec3(float integerScale = 1.0f, FVec3 fallback = FVec3::sZero()) const noexcept -> FVec3;
+    [[nodiscard]] auto AsVec3(float integerScale = 1.0f, FVec3 fallback = FVec3::Zero()) const noexcept -> FVec3;
     [[nodiscard]] auto Find(std::string_view key) const noexcept -> const MsgPackValue*;
     [[nodiscard]] auto FindIntKey(int64_t key) const noexcept -> const MsgPackValue*;
     [[nodiscard]] auto FindProperty(uint16_t channel, std::string_view propertyName = {}) const noexcept -> const MsgPackValue*;

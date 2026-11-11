@@ -67,6 +67,8 @@
 
 namespace {
 
+using ZHLN::FVec4;
+
 namespace GUI = ZHLN::GUI;
 
 constexpr float            kLeftPanelWidth  = 260.0f;

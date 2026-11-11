@@ -72,7 +72,7 @@ struct RenderPipelinesTestSuite {
             if (!ZHLN::Test::ExpectTrue(boxMesh.has_value() && camera.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            camera->camera.position = FVec3(0.0f, 5.0f, 10.0f);
+            camera->camera.position = ZHLN::FVec3(0.0f, 5.0f, 10.0f);
             camera->camera.yaw      = -90.0f;
             camera->camera.pitch    = -15.0f;
 

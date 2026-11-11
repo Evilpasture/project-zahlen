@@ -10,12 +10,7 @@ module;
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Math/ValueTypes.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Mat4x4.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/Array.hpp>
@@ -26,6 +21,8 @@ module;
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
@@ -114,7 +111,7 @@ export enum class OrdnanceType : uint8_t {
 
 [[nodiscard]] static FVec3 SampleConeDirection(std::mt19937& gen, float maxAngleDeg) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-    float                                 theta = JPH::DegreesToRadians(dis(gen) * maxAngleDeg);
+    float                                 theta = dis(gen) * maxAngleDeg * (std::numbers::pi_v<float> / 180.0f);
     float                                 phi   = dis(gen) * 2.0f * std::numbers::pi_v<float>;
     float                                 sinT  = std::sin(theta);
     float                                 cosT  = std::cos(theta);
@@ -124,7 +121,7 @@ export enum class OrdnanceType : uint8_t {
 
 [[nodiscard]] static FVec3 SampleRingDirection(std::mt19937& gen, float minAngleDeg, float maxAngleDeg) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-    float                                 theta = JPH::DegreesToRadians(minAngleDeg + dis(gen) * (maxAngleDeg - minAngleDeg));
+    float                                 theta = (minAngleDeg + dis(gen) * (maxAngleDeg - minAngleDeg)) * (std::numbers::pi_v<float> / 180.0f);
     float                                 phi   = dis(gen) * 2.0f * std::numbers::pi_v<float>;
     float                                 sinT  = std::sin(theta);
     float                                 cosT  = std::cos(theta);
@@ -334,7 +331,7 @@ struct ExplosionParticle {
 
 export struct ExplosionComponent {
     OrdnanceType type     = OrdnanceType::ArtilleryMortar;
-    FVec3    origin   = FVec3::sZero();
+    FVec3    origin   = FVec3::Zero();
     float        scale    = 1.0f;
     float        age      = 0.0f;
     float        duration = 3.5f;
@@ -357,8 +354,8 @@ export struct CraterDecalComponent {
     float     fadeDuration = 6.0f;  // Dissolves smoothly over the final 6 seconds
     float     baseRadius   = 3.4f;
     float     baseDepth    = 5.0f;
-    FVec3 origin       = FVec3::sZero();
-    JPH::Quat rotation     = JPH::Quat::sIdentity();
+    FVec3 origin       = FVec3::Zero();
+    Quat rotation = Quat::Identity();
 };
 
 // ============================================================================
@@ -454,7 +451,7 @@ export class ExplosionSystem {
         Init(engine);
 
         ExplosionComponent initialExp {
-            .type = type, .origin = static_cast<FVec3>(origin), .scale = scale, .duration = (type == OrdnanceType::ArtilleryMortar) ? 3.5f : 2.5f
+            .type = type, .origin = origin, .scale = scale, .duration = (type == OrdnanceType::ArtilleryMortar) ? 3.5f : 2.5f
         };
 
         std::mt19937 gen(std::random_device {}());
@@ -470,8 +467,8 @@ export class ExplosionSystem {
         initialExp.debrisEntity = debrisEntity;
 
         // Position light directly at origin with slight vertical offset
-        FVec3  lightWorldPos = static_cast<FVec3>(origin) + FVec3(0.0f, 1.8f * scale, 0.0f);
-        JPH::Mat44 rootTransform = Math::CreateTransform(lightWorldPos, {0.0f, 0.0f, 0.0f, 1.0f});
+        FVec3  lightWorldPos = origin + FVec3(0.0f, 1.8f * scale, 0.0f);
+        const auto rootTransform = CreateTranslation(lightWorldPos);
 
         // Attach synchronously to root entity
         reg.Add(
@@ -486,7 +483,7 @@ export class ExplosionSystem {
         if (debrisEntity != Entity::Null()) {
             reg.Add(
                 debrisEntity, Components::NameComponent {.name = String64("Artillery3DDebris")},
-                Components::TransformComponent {.position = static_cast<FVec3>(origin)},
+                Components::TransformComponent {.position = origin},
                 Components::MeshParticleEmitterComponent {
                     .meshAsset     = s_DebrisMeshAsset,
                     .materialAsset = s_DebrisMatAsset,
@@ -495,7 +492,7 @@ export class ExplosionSystem {
                     .params =
                         {.gravity     = {0.0f, -18.0f * scale, 0.0f},
                          .drag        = 0.32f,
-                         .spawnOrigin = static_cast<FVec3>(origin),
+                         .spawnOrigin = origin,
                          .initVelMin  = {-12.0f * scale, 6.0f * scale, -12.0f * scale},
                          .lifetimeMin = 2.0f,
                          .initVelMax  = {12.0f * scale, 20.0f * scale, 12.0f * scale},
@@ -515,7 +512,7 @@ export class ExplosionSystem {
         auto audio = engine.Audio();
         audio.PostEvent(
             {.type       = AudioEventType::NoiseBurst3D,
-             .position   = static_cast<FVec3>(origin),
+             .position   = origin,
              .volume     = 1.0f,
              .param1     = 60.0f, // Low pass cutoff frequency
              .param2     = 3.5f,  // Q factor
@@ -526,7 +523,7 @@ export class ExplosionSystem {
 
         audio.PostEvent(
             {.type     = AudioEventType::ToneSweep3D,
-             .position = static_cast<FVec3>(origin),
+             .position = origin,
              .volume   = 0.85f,
              .param1   = 150.0f, // Start frequency
              .param2   = 30.0f,  // End frequency
@@ -536,7 +533,7 @@ export class ExplosionSystem {
 
         audio.PostEvent(
             {.type       = AudioEventType::NoiseBurst3D,
-             .position   = static_cast<FVec3>(origin),
+             .position   = origin,
              .volume     = 0.65f,
              .param1     = 320.0f, // Band pass center frequency
              .param2     = 1.4f,   // Q factor
@@ -587,15 +584,15 @@ export class ExplosionSystem {
                     Entity crater     = reg.Create();
 
                     float     randomYaw = Hash31(exp.origin) * 6.2831853f;
-                    JPH::Quat yawRot    = JPH::Quat::sRotation(FVec3::sAxisY(), randomYaw);
-                    JPH::Quat baseRot   = JPH::Quat::sRotation(FVec3::sAxisX(), JPH::DegreesToRadians(-90.0f));
-                    JPH::Quat decalRot  = (yawRot * baseRot).Normalized();
+                    const auto yawRot = Quat::FromAxisAngle(FVec3::UnitY(), randomYaw);
+                    const auto baseRot = Quat::FromAxisAngle(FVec3::UnitX(), -std::numbers::pi_v<float> * 0.5f);
+                    const auto decalRot = (yawRot * baseRot).Normalized();
 
                     float     radius    = 3.4f * exp.scale;
                     float     projDepth = 5.0f * exp.scale;
                     FVec3 decalScale(radius * 2.0f, radius * 2.0f, projDepth);
 
-                    JPH::Mat44 localMat = Math::CreateTransform(exp.origin, decalRot, decalScale);
+                    const auto localMat = ComposeTransform(exp.origin, decalRot, decalScale);
 
                     // Autonomous entity with CraterDecalComponent
                     ecb.AddComponent(
@@ -658,7 +655,7 @@ export class ExplosionSystem {
 
                     reg.Patch<Components::TransformComponent>(craterEnt, [&](auto& trans) { trans.scale = newScale; });
                     reg.Patch<Components::WorldTransformComponent>(craterEnt, [&](auto& wt) {
-                        wt.world = Math::CreateTransform(crater.origin, crater.rotation, newScale);
+                        wt.world = ComposeTransform(crater.origin, crater.rotation, newScale);
                     });
                 }
 
@@ -755,7 +752,7 @@ export class ExplosionSystem {
         exp.fireball.resize(120);
         for (auto& p: exp.fireball) {
             FVec3 dir = RandomInUnitSphere(gen);
-            dir.SetY(std::abs(dir.y) * 0.6f + dir.y * 0.4f);
+            dir.y = std::abs(dir.y) * 0.6f + dir.y * 0.4f;
 
             p = {
                 .position   = dir * (0.15f * exp.scale),
@@ -774,7 +771,7 @@ export class ExplosionSystem {
         exp.soilSmoke.resize(80);
         for (auto& p: exp.soilSmoke) {
             FVec3 dir = RandomInUnitSphere(gen);
-            dir.SetY(std::abs(dir.y) * 0.8f + dir.y * 0.2f);
+            dir.y = std::abs(dir.y) * 0.8f + dir.y * 0.2f;
             float gray = 0.05f + Hash31(dir * 6.5f) * 0.15f;
 
             p = {
@@ -832,7 +829,7 @@ export class ExplosionSystem {
                     {.position = exp.origin + p.position,
                      .size     = size,
                      .rotation = 0.0f,
-                     .color    = JPH::Vec4(color * (opacity * 3.5f), opacity),
+                     .color    = FVec4(color * (opacity * 3.5f), opacity),
                      .facing   = ParticleAlignment::CameraBillboard}
                 );
             }
@@ -860,7 +857,7 @@ export class ExplosionSystem {
                     {.position = exp.origin + p.position,
                      .size     = size,
                      .rotation = 0.0f,
-                     .color    = JPH::Vec4(color, opacity),
+                     .color    = FVec4(color, opacity),
                      .facing   = ParticleAlignment::CameraBillboard}
                 );
             }
@@ -891,7 +888,7 @@ export class ExplosionSystem {
                         {.position = exp.origin,
                          .size     = radius * 2.0f,
                          .rotation = 0.0f,
-                         .color    = JPH::Vec4(color * (opacity * 3.5f), opacity),
+                         .color    = FVec4(color * (opacity * 3.5f), opacity),
                          .facing   = ParticleAlignment::CameraBillboard}
                     );
                 }
@@ -918,7 +915,7 @@ export class ExplosionSystem {
                     .position = exp.origin + FVec3(0.0f, 0.05f, 0.0f),
                     .size     = radius * 2.0f,
                     .rotation = 0.0f,
-                    .color    = JPH::Vec4(color, opacity),
+                    .color    = FVec4(color, opacity),
                     .facing   = ParticleAlignment::GroundFlat,
                 };
                 scene.AddBillboards(s_GroundRingID, std::span {&quad, 1}, true);

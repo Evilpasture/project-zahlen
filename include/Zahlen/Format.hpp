@@ -3,6 +3,7 @@
 
 #pragma once
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -63,9 +64,16 @@ struct CustomFormatter<JPH::Double3> {
 };
 
 template <>
+struct CustomFormatter<ZHLN::Quat> {
+    static void format(const ZHLN::Quat& q, std::string& out) {
+        out += std::format("({}, {}, {}, {})", q.x, q.y, q.z, q.w);
+    }
+};
+
+template <>
 struct CustomFormatter<JPH::Quat> {
     static void format(const JPH::Quat& q, std::string& out) {
-        out += std::format("({}, {}, {}, {})", q.x, q.y, q.z, q.w);
+        out += std::format("({}, {}, {}, {})", q.GetX(), q.GetY(), q.GetZ(), q.GetW());
     }
 };
 

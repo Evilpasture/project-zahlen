@@ -11,6 +11,7 @@
 // and engine fixture live in LightingRTCommon.hpp.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
@@ -79,13 +80,13 @@ struct ReflectionsTestSuite {
                 reg.Add(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
-                        .position = FVec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})
+                        .position = ZHLN::FVec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Quat::FromEulerDegrees({40.0f, 0.0f, 0.0f})
                     },
                     ZHLN::Components::LightComponent {
                         .type      = ZHLN::LightType::Sun,
-                        .color     = FVec3(1.0f, 1.0f, 1.0f),
+                        .color     = ZHLN::FVec3(1.0f, 1.0f, 1.0f),
                         .intensity = 140.0f,
-                        .direction = FVec3(0.0f, 0.75f, 0.66f).Normalized()
+                        .direction = ZHLN::FVec3(0.0f, 0.75f, 0.66f).Normalized()
                     }
                 );
 
@@ -94,7 +95,7 @@ struct ReflectionsTestSuite {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
                 ZHLN::Camera& cam = camComp->camera;
-                cam.position = FVec3(0.0f, 5.0f, 14.0f);
+                cam.position = ZHLN::FVec3(0.0f, 5.0f, 14.0f);
                 cam.yaw      = -90.0f;
                 cam.pitch    = -22.0f;
                 cam.fov      = 60.0f;
@@ -222,13 +223,13 @@ struct ReflectionsTestSuite {
                 reg.Add(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
-                        .position = FVec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})
+                        .position = ZHLN::FVec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Quat::FromEulerDegrees({40.0f, 0.0f, 0.0f})
                     },
                     ZHLN::Components::LightComponent {
                         .type      = ZHLN::LightType::Sun,
-                        .color     = FVec3(1.0f, 1.0f, 1.0f),
+                        .color     = ZHLN::FVec3(1.0f, 1.0f, 1.0f),
                         .intensity = 100.0f,
-                        .direction = FVec3(0.0f, 0.75f, 0.66f).Normalized()
+                        .direction = ZHLN::FVec3(0.0f, 0.75f, 0.66f).Normalized()
                     }
                 );
 
@@ -283,7 +284,7 @@ struct ReflectionsTestSuite {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
                 ZHLN::Camera& cam = camComp->camera;
-                cam.position = FVec3(0.0f, 5.0f, 14.0f);
+                cam.position = ZHLN::FVec3(0.0f, 5.0f, 14.0f);
                 cam.yaw      = -90.0f;
                 cam.pitch    = -22.0f;
                 cam.fov      = 60.0f;
@@ -543,11 +544,11 @@ struct ReflectionsTestSuite {
                     float lz     = std::cos(angle) * radius;
                     float ly     = 1.0f + static_cast<float>(i % 4) * 0.8f;
 
-                    FVec3 lightCol(std::sin(angle) * 0.5f + 0.5f, std::cos(angle * 0.5f) * 0.5f + 0.5f, std::sin(angle * 1.5f + 1.0f) * 0.5f + 0.5f);
+                    ZHLN::FVec3 lightCol(std::sin(angle) * 0.5f + 0.5f, std::cos(angle * 0.5f) * 0.5f + 0.5f, std::sin(angle * 1.5f + 1.0f) * 0.5f + 0.5f);
 
                     const ZHLN::Entity lt = reg.Create();
                     reg.Add(
-                        lt, ZHLN::Components::TransformComponent {.position = FVec3(lx, ly, lz)},
+                        lt, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3(lx, ly, lz)},
                         ZHLN::Components::LightComponent {
                             .type      = ZHLN::LightType::Point,
                             .color     = lightCol,
@@ -562,7 +563,7 @@ struct ReflectionsTestSuite {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
                 ZHLN::Camera& cam = camComp->camera;
-                cam.position = FVec3(0.0f, 8.0f, -18.0f);
+                cam.position = ZHLN::FVec3(0.0f, 8.0f, -18.0f);
                 cam.yaw      = 90.0f;
                 cam.pitch    = -22.0f;
                 cam.fov      = 60.0f;

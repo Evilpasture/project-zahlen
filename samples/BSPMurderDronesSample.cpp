@@ -87,7 +87,7 @@ import ZHLN.ProceduralAnimation;
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Mat4x4.h>
+#include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 
 // clang-format off
@@ -1573,7 +1573,7 @@ auto main(int argc, char* argv[]) -> int {
     const std::string virtualPath = mapPath.string();
     ZHLN::Log("[BSPSample] Importing BSP geometry and resolving materials...");
     g_rigImportOpts = importOpts;
-    auto prefabOpt  = ZHLN::BSP::LoadBSPPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bspBytes, virtualPath, importOpts);
+    auto prefabOpt  = ZHLN::BSP::LoadBSPPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), ZHLN::EngineAccess::PhysicsOf(*engine), bspBytes, virtualPath, importOpts);
     if (!prefabOpt) {
         ZHLN::LogError("[BSPSample] Failed to import BSP prefab for '{}'", virtualPath);
         return EXIT_FAILURE;
@@ -1582,7 +1582,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[BSPSample] Imported prefab: {} part(s), {} node(s), {} light(s)", prefab.parts.size(), prefab.nodes.size(), prefab.lights.size());
 
     // 5b. Preload static prop models referenced by the map into AssetManager
-    const size_t preloadedProps = ZHLN::BSP::PreloadStaticProps(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bspMap, importOpts);
+    const size_t preloadedProps = ZHLN::BSP::PreloadStaticProps(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), ZHLN::EngineAccess::PhysicsOf(*engine), bspMap, importOpts);
     ZHLN::Log("[BSPSample] Preloaded {} static prop model prefab(s)", preloadedProps);
 
     // 6. Describe and Instantiate Scene
@@ -1677,14 +1677,14 @@ auto main(int argc, char* argv[]) -> int {
     // core knowing a parser exists.
     const char*                        rigOverride = std::getenv("ZHLN_PROCEDURAL_RIG");
     const std::string_view             rigName     = rigOverride != nullptr && rigOverride[0] != '\0' ? std::string_view(rigOverride) : kDefaultRigPath;
-    ZHLN::Optional<ZHLN::ModelPrefab&> rigPrefab   = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), rigName);
+    ZHLN::Optional<ZHLN::ModelPrefab&> rigPrefab   = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), ZHLN::EngineAccess::PhysicsOf(*engine), rigName);
     std::string_view                   rigPath     = rigName;
     if (!rigPrefab && rigName != kFallbackRigPath) {
         // UziProc.glb is an LFS object, so a checkout without the payload sees a
         // pointer file that cgltf refuses. The reference rig is committed
         // outright; try it before giving up on GLBs.
         ZHLN::LogWarning("[BSPSample] Could not load '{}' (an unpulled Git LFS pointer?). Trying '{}'.", rigName, kFallbackRigPath);
-        rigPrefab = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), kFallbackRigPath);
+        rigPrefab = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), ZHLN::EngineAccess::PhysicsOf(*engine), kFallbackRigPath);
         rigPath   = kFallbackRigPath;
     }
     if (rigPrefab) {

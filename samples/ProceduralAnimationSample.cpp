@@ -4,6 +4,7 @@
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Animation/ProceduralMath.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -41,6 +42,11 @@
 // Optional outer-layer modules
 import ZHLN.Locomotion;
 import ZHLN.ProceduralAnimation;
+
+using ZHLN::FVec3;
+using ZHLN::FVec4;
+using ZHLN::Mat4x4;
+using ZHLN::Quat;
 
 // Jolt Physics
 #include <Zahlen/Physics/Jolt.hpp>
@@ -122,14 +128,14 @@ struct FirstPersonViewState {
     return false;
 }
 
-[[nodiscard]] JPH::Mat44 GetPrefabNodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t node) {
+[[nodiscard]] Mat4x4 GetPrefabNodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t node) {
     if (node < 0 || node >= static_cast<int32_t>(prefab.nodes.size())) {
-        return JPH::Mat44::sIdentity();
+        return Mat4x4::Identity();
     }
-    JPH::Mat44 transform = prefab.nodes[static_cast<size_t>(node)].localTransform;
+    Mat4x4 transform = ZHLN::PrefabMatrixToNative(prefab.nodes[static_cast<size_t>(node)].localTransform);
     int32_t    parent    = prefab.nodes[static_cast<size_t>(node)].parentIndex;
     for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
+        transform = ZHLN::PrefabMatrixToNative(prefab.nodes[static_cast<size_t>(parent)].localTransform) * transform;
         parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
     }
     return transform;
@@ -187,8 +193,8 @@ void CollectFirstPersonHeadMeshes(
             neckNode = static_cast<int32_t>(node);
         }
     }
-    const FVec3 headPosition = GetPrefabNodeModelTransform(prefab, headNode).GetTranslation();
-    const FVec3 neckPosition = GetPrefabNodeModelTransform(prefab, neckNode).GetTranslation();
+    const FVec3 headPosition = ZHLN::ProceduralMath::Translation(GetPrefabNodeModelTransform(prefab, headNode));
+    const FVec3 neckPosition = ZHLN::ProceduralMath::Translation(GetPrefabNodeModelTransform(prefab, neckNode));
     const float     headScale    = headNode >= 0 && neckNode >= 0 ? std::max((headPosition - neckPosition).Length(), 0.06f) : 0.12f;
 
     state.headMeshes.clear();
@@ -205,13 +211,13 @@ void CollectFirstPersonHeadMeshes(
             if (part.nodeIndex != mesh->nodeIndex) {
                 continue;
             }
-            const JPH::Mat44 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+            const Mat4x4 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * ZHLN::PrefabMatrixToNative(part.localTransform);
             const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
             const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
             const FVec3  localCenter     = (localMin + localMax) * 0.5f;
             const FVec3  halfExtent      = (localMax - localMin) * 0.5f;
-            const FVec3  center          = model.Multiply3x3(localCenter) + model.GetTranslation();
-            const float      radius          = model.Multiply3x3(halfExtent).Length();
+            const FVec3  center          = ZHLN::ProceduralMath::Direction(model, localCenter) + ZHLN::ProceduralMath::Translation(model);
+            const float      radius          = ZHLN::ProceduralMath::Direction(model, halfExtent).Length();
             const float      surfaceDistance = std::max((center - headPosition).Length() - radius, 0.0f);
             compactNearHead                  = headNode >= 0 && radius <= headScale * 2.8f && surfaceDistance <= headScale * 1.8f &&
                                                center.y >= neckPosition.y - headScale * 0.15f;
@@ -346,7 +352,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
         engine, {4.5f, 0.18f, 2.2f},
         ZHLN::PrefabFactory::SpawnParams {
             .position        = {-14.0, 2.75, 5.0},
-            .rotation        = JPH::Quat::sRotation(FVec3::sAxisZ(), JPH::DegreesToRadians(30.0f)),
+            .rotation        = Quat::FromAxisAngle(FVec3::UnitZ(), ZHLN::ProceduralMath::Radians(30.0f)),
             .createPhysics   = true,
             .isStaticPhysics = true,
             .roughness       = 0.55f,
@@ -424,7 +430,7 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
         ZHLN::Components::WorldTransformComponent {}, ZHLN::Components::HierarchyComponent {.parent = player}
     );
 
-    auto addPart = [&](std::string_view name, FVec3 halfExtents, FVec3 localPosition, JPH::QuatArg localRotation, FVec4 color,
+    auto addPart = [&](std::string_view name, FVec3 halfExtents, FVec3 localPosition, Quat localRotation, FVec4 color,
                        float metallic) {
         ZHLN::MaterialDesc materialDesc;
         materialDesc.metallic         = metallic;
@@ -445,17 +451,17 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
 
     const FVec4 darkMetal(0.10f, 0.12f, 0.15f, 1.0f);
     const FVec4 gripColor(0.20f, 0.12f, 0.08f, 1.0f);
-    addPart("Handgun_Slide", FVec3(0.075f, 0.055f, 0.22f), FVec3(0.0f, 0.025f, 0.08f), JPH::Quat::sIdentity(), darkMetal, 0.90f);
+    addPart("Handgun_Slide", FVec3(0.075f, 0.055f, 0.22f), FVec3(0.0f, 0.025f, 0.08f), Quat::Identity(), darkMetal, 0.90f);
     addPart(
-        "Handgun_Barrel", FVec3(0.035f, 0.035f, 0.24f), FVec3(0.0f, 0.015f, 0.11f), JPH::Quat::sIdentity(), FVec4(0.05f, 0.06f, 0.07f, 1.0f), 1.0f
+        "Handgun_Barrel", FVec3(0.035f, 0.035f, 0.24f), FVec3(0.0f, 0.015f, 0.11f), Quat::Identity(), FVec4(0.05f, 0.06f, 0.07f, 1.0f), 1.0f
     );
     addPart(
         "Handgun_Grip", FVec3(0.060f, 0.135f, 0.055f), FVec3(0.0f, -0.145f, -0.065f),
-        JPH::Quat::sRotation(FVec3::sAxisX(), JPH::DegreesToRadians(-10.0f)), gripColor, 0.35f
+        Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::ProceduralMath::Radians(-10.0f)), gripColor, 0.35f
     );
-    addPart("Handgun_TriggerGuard", FVec3(0.045f, 0.035f, 0.055f), FVec3(0.0f, -0.070f, 0.015f), JPH::Quat::sIdentity(), darkMetal, 0.80f);
+    addPart("Handgun_TriggerGuard", FVec3(0.045f, 0.035f, 0.055f), FVec3(0.0f, -0.070f, 0.015f), Quat::Identity(), darkMetal, 0.80f);
     addPart(
-        "Handgun_Sight", FVec3(0.018f, 0.018f, 0.045f), FVec3(0.0f, 0.095f, 0.02f), JPH::Quat::sIdentity(), FVec4(0.75f, 0.18f, 0.08f, 1.0f), 0.20f
+        "Handgun_Sight", FVec3(0.018f, 0.018f, 0.045f), FVec3(0.0f, 0.095f, 0.02f), Quat::Identity(), FVec4(0.75f, 0.18f, 0.08f, 1.0f), 0.20f
     );
     return handgun;
 }
@@ -466,8 +472,8 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
     const auto                             scaled = [scale](FVec3 value) { return FVec3(value) * scale; };
     handling.driverMode                           = ZHLN::Animation::ItemDriverMode::BodyMounted;
     handling.itemEntity                           = handgun;
-    handling.hipLocalOffset                       = JPH::Mat44::sTranslation(scaled(FVec3(-0.24f, -0.32f, 0.08f)));
-    handling.aimLocalOffset                       = JPH::Mat44::sTranslation(scaled(FVec3(0.0f, -0.20f, 0.30f)));
+    handling.hipLocalOffset                       = ZHLN::CreateTranslation(scaled(FVec3(-0.24f, -0.32f, 0.08f)));
+    handling.aimLocalOffset                       = ZHLN::CreateTranslation(scaled(FVec3(0.0f, -0.20f, 0.30f)));
     handling.aimProgress                          = 1.0f;
     handling.sway.massKg                          = 1.1f;
     handling.sway.stiffness                       = 115.0f;
@@ -476,7 +482,7 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
     handling.grips[0]                             = {
         .assignedLimb      = ZHLN::CharacterBone::HandR,
         .orientationMode   = ZHLN::Animation::GripOrientationMode::AutomaticHanded,
-        .localTransform    = JPH::Mat44::sTranslation(scaled(FVec3(-0.055f, -0.13f, -0.055f))),
+        .localTransform    = ZHLN::CreateTranslation(scaled(FVec3(-0.055f, -0.13f, -0.055f))),
         .ikWeight          = 0.0f,
         .evaluatedIKWeight = 0.0f,
         .rotationWeight    = 0.90f,
@@ -491,7 +497,7 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
     handling.grips[1] = {
         .assignedLimb      = ZHLN::CharacterBone::HandL,
         .orientationMode   = ZHLN::Animation::GripOrientationMode::AutomaticHanded,
-        .localTransform    = JPH::Mat44::sTranslation(scaled(FVec3(0.060f, -0.070f, 0.015f))),
+        .localTransform    = ZHLN::CreateTranslation(scaled(FVec3(0.060f, -0.070f, 0.015f))),
         .ikWeight          = 0.0f,
         .evaluatedIKWeight = 0.0f,
         .rotationWeight    = 0.80f,
@@ -727,7 +733,7 @@ auto main(int argc, char* argv[]) -> int {
     // -- the path Scene::ShapeKind::Prefab and the scripting bindings use -- finds
     // it without core knowing a parser exists.
     ZHLN::GLTF::InstallDeviceLostHandler(*engine);
-    const auto prefab = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), rigPath);
+    const auto prefab = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), ZHLN::EngineAccess::PhysicsOf(*engine), rigPath);
 
     const ZHLN::Locomotion::CharacterBoundsEstimate bounds =
         prefab.transform([](const ZHLN::ModelPrefab& p) { return ZHLN::Locomotion::EstimateCharacterBounds(p); })
@@ -842,7 +848,7 @@ auto main(int argc, char* argv[]) -> int {
         // 2. Update Procedural Look-At Orbit via Multi-Component Patch
         const auto sampleTime = static_cast<float>(clock.UnscaledElapsedTime());
         registry.Patch<ZHLN::Components::TransformComponent, ZHLN::ProceduralLookAtComponent>(player, [&](const auto& trans, auto& lookAt) -> auto {
-            const JPH::Quat rotation = trans.rotation;
+            const Quat rotation {trans.rotation};
             lookAt.targetWorldPos    = FVec3(trans.position) + rotation * FVec3(std::sin(sampleTime * 0.65f) * 2.2f, 1.65f, 4.0f);
         });
 
@@ -859,7 +865,7 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Locomotion::RenderDebugRig(*engine, player, dualShapeConfig);
             registry.Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(player, [&](const auto& trans, const auto& rig) -> auto {
                 const auto gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
-                ZHLN::ProceduralAnimation::DrawDebugRig(ZHLN::EngineAccess::SceneOf(*engine), trans.position, trans.rotation, rig, gait ? &*gait : nullptr);
+                ZHLN::ProceduralAnimation::DrawDebugRig(ZHLN::EngineAccess::SceneOf(*engine), trans.position, Quat(trans.rotation), rig, gait ? &*gait : nullptr);
             });
         }
     }

@@ -113,11 +113,11 @@ struct Renderer {
     uint32_t viewportW = 0;
     uint32_t viewportH = 0;
 
-    JPH::Mat44 current_view_proj    = JPH::Mat44::sIdentity();
-    JPH::Mat44 unjittered_view_proj = JPH::Mat44::sIdentity();
+    Mat4x4 current_view_proj    = Mat4x4::Identity();
+    Mat4x4 unjittered_view_proj = Mat4x4::Identity();
 
-    JPH::Mat44    view_matrix    = JPH::Mat44::sIdentity();
-    JPH::Mat44    shadowProjView = JPH::Mat44::sIdentity();
+    Mat4x4    view_matrix    = Mat4x4::Identity();
+    Mat4x4    shadowProjView = Mat4x4::Identity();
     FrameUniforms currentUniforms {};
     float         currentDt = 0.0166f;
 

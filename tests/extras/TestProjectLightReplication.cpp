@@ -22,6 +22,7 @@
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -32,6 +33,8 @@ using ZHLN::ECS::BoxedName;
 using ZHLN::ECS::ComponentFamily;
 using ZHLN::ECS::Registry;
 using ZHLN::Entity;
+using ZHLN::FVec3;
+using ZHLN::Quat;
 using ZHLN::ProjectLight::ClientSession;
 using ZHLN::ProjectLight::InstanceId;
 using ZHLN::ProjectLight::IsLightClass;
@@ -77,7 +80,11 @@ MsgPackValue SyntheticSnapshot() {
     entry(kPlayerUid, Instance("Player", "LocalPlayer", kPlayersUid));
     entry(kCharacterUid, Instance("Character", "Character", kWorkspaceUid));
     entry(kHumanoidUid, Instance("Humanoid", "Humanoid", kCharacterUid));
-    entry(kTorsoUid, Instance("Part", "Torso", kCharacterUid));
+    MsgPackValue torso = Instance("Part", "Torso", kCharacterUid);
+    torso.Set("Rotation", MsgPackValue::Array({MsgPackValue::Float(15.0),
+                                              MsgPackValue::Float(75.0),
+                                              MsgPackValue::Float(20.0)}));
+    entry(kTorsoUid, std::move(torso));
 
     MsgPackValue head = Instance("MeshPart", "Head", kCharacterUid);
     head.Set("Shape", MsgPackValue::Int(static_cast<int64_t>(PartShape::Sphere)));
@@ -203,6 +210,8 @@ struct TestProjectLightReplicationSuite {
                 ZHLN::Test::ExpectEq(torso->className, std::string("Part"));
                 ZHLN::Test::ExpectEq(torso->name, std::string("Torso"));
                 ZHLN::Test::ExpectEq(torso->parentUid, uint64_t {kCharacterUid});
+                const auto expectedRotation = Quat::FromEulerDegrees({15.0f, 75.0f, 20.0f});
+                ZHLN::Test::ExpectLt(std::abs(std::abs(ZHLN::Dot(torso->rotationQuat, expectedRotation)) - 1.0f), 1e-5f);
             }
 
             const auto* head = session.FindObject(kHeadUid);
@@ -315,15 +324,18 @@ struct TestProjectLightReplicationSuite {
             ZHLN::Test::ExpectTrue(history.Empty());
 
             FVec3 sampledPosition {};
-            JPH::Quat sampledRotation {};
+            Quat sampledRotation {};
             ZHLN::Test::ExpectFalse(history.Sample(std::chrono::steady_clock::now(), sampledPosition, sampledRotation));
 
             const auto base = std::chrono::steady_clock::now();
-            history.Push({.position = FVec3(0.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .receivedAt = base});
-            history.Push({.position = FVec3(10.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .receivedAt = base + std::chrono::milliseconds(10)});
+            history.Push({.position = FVec3(0.0f, 0.0f, 0.0f), .rotation = Quat::Identity(), .receivedAt = base});
+            history.Push({.position = FVec3(10.0f, 0.0f, 0.0f), .rotation = -Quat::FromAxisAngle(FVec3::UnitY(), 1.5f), .receivedAt = base + std::chrono::milliseconds(10)});
 
             ZHLN::Test::ExpectTrue(history.Sample(base + std::chrono::milliseconds(5), sampledPosition, sampledRotation));
             ZHLN::Test::ExpectTrue(sampledPosition.x > 4.0f && sampledPosition.x < 6.0f);
+            const auto expected = Quat::FromAxisAngle(FVec3::UnitY(), 0.75f);
+            ZHLN::Test::ExpectLt(std::abs(std::abs(ZHLN::Dot(sampledRotation, expected)) - 1.0f), 1e-5f);
+            ZHLN::Test::ExpectLt(std::abs(sampledRotation.Length() - 1.0f), 1e-5f);
 
             ZHLN::Test::ExpectTrue(history.Sample(base + std::chrono::milliseconds(50), sampledPosition, sampledRotation));
             ZHLN::Test::ExpectEq(sampledPosition.x, 10.0f);

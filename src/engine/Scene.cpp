@@ -12,7 +12,7 @@
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -21,6 +21,7 @@
 #include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -46,9 +47,9 @@ void AssignConverted(Dst& dst, const Src& src) {
     // alpha is not part of the description and is restored as one when a scene
     // is instantiated.
     } else if constexpr (std::is_same_v<D, ZHLN::FVec3> && std::is_same_v<S, ZHLN::FVec4>) {
-        dst = ZHLN::FVec3 {src.x, src.y, src.z};
+        dst = {src.x, src.y, src.z};
     } else if constexpr (std::is_same_v<D, ZHLN::FVec4> && std::is_same_v<S, ZHLN::FVec3>) {
-        dst = ZHLN::FVec4 {src.x, src.y, src.z, 1.0f};
+        dst = {src.x, src.y, src.z, 1.0f};
     } else if constexpr (std::is_arithmetic_v<D> && std::is_arithmetic_v<S>) {
         dst = static_cast<D>(src);
     }
@@ -84,8 +85,9 @@ consteval auto SharesEveryField() -> bool {
 
 [[nodiscard]] auto MakeSpawnParams(const SceneEntity& entity) -> PrefabFactory::SpawnParams {
     return PrefabFactory::SpawnParams {
-        .position           = entity.transform.position,
-        .rotation           = Math::EulerDegreesToQuat(entity.transform.rotation),
+        .position           = {static_cast<double>(entity.transform.position.x), static_cast<double>(entity.transform.position.y),
+                               static_cast<double>(entity.transform.position.z)},
+        .rotation           = Quat::FromEulerDegrees(entity.transform.rotation),
         .scale              = entity.transform.scale,
         .createPhysics      = entity.body != BodyKind::None,
         .isStaticPhysics    = entity.body != BodyKind::Dynamic,
@@ -251,15 +253,15 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                     // props alike), otherwise the description's halfExtents.
                     FVec3 half {entity.halfExtents.x, entity.halfExtents.y, entity.halfExtents.z};
                     if (loadedPrefab && !loadedPrefab->parts.empty()) {
-                        FVec3 lo = FVec3::sReplicate(1e30f);
-                        FVec3 hi = FVec3::sReplicate(-1e30f);
+                        FVec3 lo = FVec3::Splat(1e30f);
+                        FVec3 hi = FVec3::Splat(-1e30f);
                         for (const ModelPart& part: loadedPrefab->parts) {
-                            lo = FVec3::sMin(lo, FVec3(part.localMin.x, part.localMin.y, part.localMin.z));
-                            hi = FVec3::sMax(hi, FVec3(part.localMax.x, part.localMax.y, part.localMax.z));
+                            lo = {std::min(lo.x, part.localMin.x), std::min(lo.y, part.localMin.y), std::min(lo.z, part.localMin.z)};
+                            hi = {std::max(hi.x, part.localMax.x), std::max(hi.y, part.localMax.y), std::max(hi.z, part.localMax.z)};
                         }
                         half = (hi - lo) * 0.5f * std::max({params.scale.x, params.scale.y, params.scale.z});
                     }
-                    half = FVec3::sMax(half, FVec3::sReplicate(0.05f));
+                    half = {std::max(half.x, 0.05f), std::max(half.y, 0.05f), std::max(half.z, 0.05f)};
 
                     auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
                     const JPH::ShapeRefC shape   = physics.GetOrCreateShape(Physics::ShapeType::Box, half.x, half.y, half.z);
@@ -267,7 +269,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                         registry.Add(
                             parts[0], Components::PhysicsComponent {
                                           .physicsID = physics.CreateRigidBody(
-                                              shape, params.position, params.rotation, JPH::EMotionType::Kinematic, Layers::ID::MOVING, 0,
+                                              shape, params.position, params.rotation.AsVec4(), JPH::EMotionType::Kinematic, Layers::ID::MOVING, 0,
                                               params.physicsCategory, params.physicsMask
                                           ),
                                           .isStatic = true
@@ -284,10 +286,10 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
             case ShapeKind::Empty: {
                 // Logic-only entity (trigger volumes): transform + source stamp,
                 // no rendered geometry and no physics.
-                const FVec3  position = FVec3 {entity.transform.position};
-                const JPH::Quat  rotation = Math::EulerDegreesToQuat(entity.transform.rotation);
-                const FVec3  scale    = FVec3 {entity.transform.scale};
-                const JPH::Mat44 world    = Math::CreateTransform(position, rotation, scale);
+                const auto position = entity.transform.position;
+                const auto rotation = Quat::FromEulerDegrees(entity.transform.rotation);
+                const auto scale = entity.transform.scale;
+                const auto world = ComposeTransform(position, rotation, scale);
 
                 const Entity created = registry.Create(
                     Components::TransformComponent {.position = position, .rotation = rotation, .scale = scale},
@@ -308,20 +310,20 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
             return std::unexpected(SceneError::UnknownLightType);
         }
 
-        const FVec3  position = FVec3 {light.position};
-        const JPH::Quat  rotation = Math::EulerDegreesToQuat(light.rotation);
-        const JPH::Mat44 world    = Math::CreateTransform(position, rotation, {1.0f, 1.0f, 1.0f});
+        const auto position = light.position;
+        const auto rotation = Quat::FromEulerDegrees(light.rotation);
+        const auto world = ComposeTransform(position, rotation, {1.0f, 1.0f, 1.0f});
 
-        const FVec3 rawDirection = FVec3 {light.direction};
-        const FVec3 direction    = rawDirection.LengthSquared() > 1e-8f ? rawDirection.Normalized() : rawDirection;
+        const auto rawDirection = light.direction;
+        const auto direction = rawDirection.LengthSquared() > 1e-8f ? rawDirection.Normalized() : rawDirection;
 
         const Entity created = registry.Create(
             Components::NameComponent {.name = String64(light.name)},
-            Components::TransformComponent {.position = position, .rotation = rotation, .scale = FVec3::sReplicate(1.0f)},
+            Components::TransformComponent {.position = position, .rotation = rotation, .scale = {1.0f, 1.0f, 1.0f}},
             Components::WorldTransformComponent {.world = world, .previous = world},
             Components::LightComponent {
                 .type        = *type,
-                .color       = FVec3 {light.color},
+                .color       = light.color,
                 .intensity   = light.intensity,
                 .radius      = light.radius,
                 .direction   = direction,
@@ -359,7 +361,7 @@ namespace {
 [[nodiscard]] auto ToDescriptionTransform(const Components::TransformComponent& transform) noexcept -> Transform {
     return Transform {
         .position = ToDescriptionFloat3(transform.position),
-        .rotation = ToDescriptionFloat3(Math::QuatToEulerDegrees(transform.rotation)),
+        .rotation = ToDescriptionFloat3(transform.rotation.EulerAngles() * (180.0f / std::numbers::pi_v<float>)),
         .scale    = ToDescriptionFloat3(transform.scale)
     };
 }
@@ -394,7 +396,7 @@ namespace {
         .baseColor             = gpu.has_value() ? gpu->baseColorFactor : defaults.baseColor,
         .roughness             = pbr ? pbr->roughness : defaults.roughness,
         .metallic              = pbr ? pbr->metallic : defaults.metallic,
-        .emissive              = gpu.has_value() ? ZHLN::FVec3 {gpu->emissiveFactor.x, gpu->emissiveFactor.y, gpu->emissiveFactor.z} : defaults.emissive,
+        .emissive              = gpu.has_value() ? gpu->emissiveFactor.XYZ() : defaults.emissive,
         .emissiveVirtualLights = source.emissiveVirtualLights,
     };
 }
@@ -465,7 +467,7 @@ namespace {
                 .name        = name ? std::string {std::string_view {name->name}} : std::string {},
                 .type        = std::string {ZHLN::Reflect::EnumToString(light.type)},
                 .position    = transform ? ToDescriptionFloat3(transform->position) : defaults.position,
-                .rotation    = transform ? ToDescriptionFloat3(Math::QuatToEulerDegrees(transform->rotation)) : defaults.rotation,
+                .rotation    = transform ? ToDescriptionFloat3(transform->rotation.EulerAngles() * (180.0f / std::numbers::pi_v<float>)) : defaults.rotation,
                 .direction   = ToDescriptionFloat3(light.direction),
                 .color       = ToDescriptionFloat3(light.color),
                 .intensity   = light.intensity,

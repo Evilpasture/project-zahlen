@@ -60,7 +60,7 @@ struct SolidPayload {
 // A single-colour box, plus same-colour text so the payload carries geometry
 // even if a childless box were laid out to nothing -- the colour is what the
 // capture is asked about, and the text never is a different hue than the box.
-[[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const FVec4& color, float size) -> SolidPayload {
+[[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const ZHLN::FVec4& color, float size) -> SolidPayload {
     ZHLN::GUI::Context gui(engine.GetFontAtlas());
     ZHLN::GUI::Frame   ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = engine.GetPlatformHost().GetSize(), .dt = 1.0f / 60.0f});
     ui.Box("Solid", ZHLN::GUI::BoxConfig {.width = {.fixed = size}, .height = {.fixed = size}, .color = color, .padding = 12.0f}, [&]() {

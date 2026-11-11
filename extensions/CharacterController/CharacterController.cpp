@@ -5,6 +5,7 @@
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "CharacterController.hpp"
+#include <Zahlen/Math/Transform.hpp>
 
 #include "Zahlen/Math/Camera.hpp"
 #include "Zahlen/ECS/Components.hpp"
@@ -111,7 +112,7 @@ void CharacterOrientationInterpolation(
     const float clampedAlpha = std::clamp(alpha.value, 0.0f, 1.0f);
     query.ForEach([&](Entity, const auto& move, const auto& phys, auto& transform) {
         if (!phys.isStatic) {
-            transform.rotation = move.prevOrientation.SLERP(move.orientation, clampedAlpha);
+            transform.rotation = Slerp(move.prevOrientation, move.orientation, clampedAlpha);
         }
     });
 }

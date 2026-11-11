@@ -32,7 +32,7 @@ void test_physics_step_without_task_scheduler_uses_serial_fallback() {
     }
     const auto position = pc.BodyPosition(body);
     if (ExpectTrue(position.has_value())) {
-        ExpectLt(position->GetY(), 10.0);
+        ExpectLt(position->y, 10.0);
     }
 }
 

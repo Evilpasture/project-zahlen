@@ -14,7 +14,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <CharacterController/CharacterMovement.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -48,7 +48,7 @@ enum class CharacterTestError : uint8_t {
 
 namespace {
 
-inline auto GetBodyPosition(const ZHLN::PhysicsContext& pc, uint32_t denseIndex) noexcept -> JPH::Vec3 {
+inline auto GetBodyPosition(const ZHLN::PhysicsContext& pc, uint32_t denseIndex) noexcept -> ZHLN::FVec3 {
     auto        posView = pc.GetPositionBuffer();
     const auto* posData = static_cast<const JPH::Real*>(posView.buf);
     return {static_cast<float>(posData[denseIndex * 4 + 0]), static_cast<float>(posData[denseIndex * 4 + 1]), static_cast<float>(posData[denseIndex * 4 + 2])};
@@ -66,15 +66,15 @@ struct CPUPipelineHarness {
     ZHLN::Camera         cam;
     ZHLN::Entity         player {};
     ZHLN::Physics::BodyID charPhys {};
-    JPH::Vec3            prevPos = JPH::Vec3::sZero();
-    JPH::Vec3            currPos = JPH::Vec3::sZero();
+    ZHLN::FVec3          prevPos = ZHLN::FVec3::Zero();
+    ZHLN::FVec3          currPos = ZHLN::FVec3::Zero();
 
     float accumulator  = 0.0f;
     float currentAlpha = 0.0f;
 
     static constexpr float kTargetDt = 1.0f / 60.0f;
 
-    explicit CPUPipelineHarness(const ZHLN::PhysicsConfig& cfg, JPH::RVec3Arg spawnPos = JPH::RVec3(0, 0, 0), const ZHLN::Physics::DualShapeConfig& hull = {}):
+    explicit CPUPipelineHarness(const ZHLN::PhysicsConfig& cfg, ZHLN::DVec3 spawnPos = ZHLN::DVec3::Zero(), const ZHLN::Physics::DualShapeConfig& hull = {}):
         pc(cfg) {
         // Ground at Y = -0.5m with half-height 0.5m -> surface at Y = 0.0m (Dense index 0)
         auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 100.0f, 0.5f, 100.0f);
@@ -89,15 +89,15 @@ struct CPUPipelineHarness {
                       }
         );
         player   = reg.Create(
-            ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Character::MovementComponent {.speed = 6.0f},
+            ZHLN::Components::TransformComponent {.position = spawnPos.Cast<float>()}, ZHLN::Character::MovementComponent {.speed = 6.0f},
             ZHLN::Components::PhysicsComponent {.physicsID = charPhys, .isStatic = false}
         );
-        prevPos = JPH::Vec3(spawnPos);
-        currPos = JPH::Vec3(spawnPos);
+        prevPos = spawnPos.Cast<float>();
+        currPos = spawnPos.Cast<float>();
 
         pc.OptimizeBroadphase();
 
-        cam.position = JPH::Vec3(spawnPos) + JPH::Vec3(0.0f, 1.5f, -5.0f);
+        cam.position = spawnPos.Cast<float>() + ZHLN::FVec3(0.0f, 1.5f, -5.0f);
         cam.yaw      = -90.0f;
         cam.pitch    = 0.0f;
     }
@@ -126,7 +126,7 @@ struct CPUPipelineHarness {
 
         accumulator += std::min(renderDt, 0.1f);
         while (accumulator >= kTargetDt) {
-            JPH::Vec3 vel(move->inputX * move->speed, verticalVel, move->inputZ * move->speed);
+            const ZHLN::FVec3 vel {move->inputX * move->speed, verticalVel, move->inputZ * move->speed};
             pc.SetCharacterVelocity(charPhys, vel);
 
             // Prop interaction is controller policy, not a contact-callback
@@ -146,8 +146,8 @@ struct CPUPipelineHarness {
 
         trans->position = prevPos + alpha * (currPos - prevPos);
 
-        JPH::Vec3 targetCenter = JPH::Vec3(trans->position) + JPH::Vec3(0.0f, 1.5f, 0.0f);
-        cam.position           = targetCenter + JPH::Vec3(0.0f, 0.0f, -5.0f);
+        const ZHLN::FVec3 targetCenter = trans->position + ZHLN::FVec3(0.0f, 1.5f, 0.0f);
+        cam.position           = targetCenter + ZHLN::FVec3(0.0f, 0.0f, -5.0f);
     }
 };
 
@@ -175,10 +175,10 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
             ZHLN::Test::ExpectTrue(harness.pc.IsCharacterOnGround(harness.charPhys));
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
-            ZHLN::Test::ExpectLt(std::abs(pos.GetY()), 0.005f);
+            const auto pos = GetBodyPosition(harness.pc, 1);
+            ZHLN::Test::ExpectLt(std::abs(pos.y), 0.005f);
 
-            if (!harness.pc.IsCharacterOnGround(harness.charPhys) || std::abs(pos.GetY()) >= 0.005f) {
+            if (!harness.pc.IsCharacterOnGround(harness.charPhys) || std::abs(pos.y) >= 0.005f) {
                 return std::unexpected(CharacterTestError::GroundedStateFailed);
             }
             return {};
@@ -194,10 +194,10 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
             }
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
-            ZHLN::Test::ExpectGe(pos.GetZ(), 5.85f) && ZHLN::Test::ExpectLe(pos.GetZ(), 6.15f);
+            const auto pos = GetBodyPosition(harness.pc, 1);
+            ZHLN::Test::ExpectGe(pos.z, 5.85f) && ZHLN::Test::ExpectLe(pos.z, 6.15f);
 
-            if (pos.GetZ() < 5.85f || pos.GetZ() > 6.15f) {
+            if (pos.z < 5.85f || pos.z > 6.15f) {
                 return std::unexpected(CharacterTestError::DisplacementMismatch);
             }
             return {};
@@ -243,7 +243,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(dt144, 0.0f, 1.0f);
 
                 const auto trans        = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
-                JPH::Vec3  targetCenter = JPH::Vec3(trans->position) + JPH::Vec3(0.0f, 1.5f, 0.0f);
+                const ZHLN::FVec3 targetCenter = trans->position + ZHLN::FVec3(0.0f, 1.5f, 0.0f);
 
                 float dist = (harness.cam.position - targetCenter).Length();
                 distances.push_back(dist);
@@ -306,12 +306,12 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(1.0f / 60.0f, 0.0f, 1.66f);
             }
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+            const auto pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectLe(pos.GetZ(), 3.15f);
-            ZHLN::Test::ExpectGe(pos.GetZ(), 2.85f);
+            ZHLN::Test::ExpectLe(pos.z, 3.15f);
+            ZHLN::Test::ExpectGe(pos.z, 2.85f);
 
-            if (pos.GetZ() > 3.15f) {
+            if (pos.z > 3.15f) {
                 return std::unexpected(CharacterTestError::WallBreachDetected);
             }
             return {};
@@ -332,12 +332,12 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(1.0f / 60.0f, 1.0f, 1.0f);
             }
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+            const auto pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectLe(pos.GetZ(), 2.20f);
-            ZHLN::Test::ExpectGe(pos.GetX(), 4.0f);
+            ZHLN::Test::ExpectLe(pos.z, 2.20f);
+            ZHLN::Test::ExpectGe(pos.x, 4.0f);
 
-            if (pos.GetZ() > 2.20f || pos.GetX() < 4.0f) {
+            if (pos.z > 2.20f || pos.x < 4.0f) {
                 return std::unexpected(CharacterTestError::WallSlideFailed);
             }
             return {};
@@ -362,7 +362,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 if (!onGround) {
                     wasInAir = true;
                     vertVel -= 32.0f * dt;
-                    peakY = std::max(peakY, GetBodyPosition(harness.pc, 1).GetY());
+                    peakY = std::max(peakY, GetBodyPosition(harness.pc, 1).y);
                 } else if (wasInAir) {
                     landed  = true;
                     vertVel = 0.0f;
@@ -398,12 +398,12 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(1.0f / 60.0f, 0.0f, 0.66f);
             }
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+            const auto pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectGt(pos.GetZ(), 3.0f);
+            ZHLN::Test::ExpectGt(pos.z, 3.0f);
             ZHLN::Test::ExpectTrue(harness.pc.IsCharacterOnGround(harness.charPhys));
 
-            if (pos.GetZ() <= 3.0f || !harness.pc.IsCharacterOnGround(harness.charPhys)) {
+            if (pos.z <= 3.0f || !harness.pc.IsCharacterOnGround(harness.charPhys)) {
                 return std::unexpected(CharacterTestError::StepClimbFailed);
             }
             return {};
@@ -414,9 +414,9 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
 
-            JPH::Quat rampRot   = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-25.0f));
+            const auto rampRot = ZHLN::Quat::FromEulerDegrees({-25.0f, 0.0f, 0.0f});
             auto      rampShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.2f, 5.0f);
-            harness.pc.CreateRigidBody(rampShape, {0, 1.0, 4.0}, rampRot, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            harness.pc.CreateRigidBody(rampShape, {0, 1.0, 4.0}, rampRot.AsVec4(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -425,12 +425,12 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
             }
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+            const auto pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectGt(pos.GetY(), 0.8f);
-            ZHLN::Test::ExpectGt(pos.GetZ(), 3.0f);
+            ZHLN::Test::ExpectGt(pos.y, 0.8f);
+            ZHLN::Test::ExpectGt(pos.z, 3.0f);
 
-            if (pos.GetY() <= 0.8f) {
+            if (pos.y <= 0.8f) {
                 return std::unexpected(CharacterTestError::SlopeClimbFailed);
             }
             return {};

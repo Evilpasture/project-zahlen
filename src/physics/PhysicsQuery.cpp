@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PhysicsWorld.hpp"
+#include <Zahlen/Math/Math3D.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -103,14 +104,16 @@ auto PhysicsContext::Raycast(ZHLN::DVec3 origin, ZHLN::FVec3 direction, float ma
             result.bodyID   = *handle;
             result.hasHit   = true;
             result.fraction = hit.mFraction;
-            result.position = ray.GetPointOnRay(hit.mFraction);
+            const auto point = ray.GetPointOnRay(hit.mFraction);
+            result.position = {point.GetX(), point.GetY(), point.GetZ()};
 
             const auto*       lockInterface = &world.system->GetBodyLockInterfaceNoLock();
             JPH::BodyLockRead lock(*lockInterface, hit.mBodyID);
             if (lock.Succeeded()) {
-                result.normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, result.position);
+                const auto normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point);
+                result.normal = {normal.GetX(), normal.GetY(), normal.GetZ()};
             } else {
-                result.normal = JPH::Vec3::sAxisY();
+                result.normal = {0.0f, 1.0f, 0.0f};
             }
         }
     }
@@ -158,13 +161,15 @@ auto PhysicsContext::RaycastAll(ZHLN::DVec3 origin, ZHLN::FVec3 direction, float
                 result.bodyID   = *handle;
                 result.hasHit   = true;
                 result.fraction = hit.mFraction;
-                result.position = ray.GetPointOnRay(hit.mFraction);
+                const auto point = ray.GetPointOnRay(hit.mFraction);
+                result.position = {point.GetX(), point.GetY(), point.GetZ()};
 
                 JPH::BodyLockRead lock(*lockInterface, hit.mBodyID);
                 if (lock.Succeeded()) {
-                    result.normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, result.position);
+                    const auto normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point);
+                    result.normal = {normal.GetX(), normal.GetY(), normal.GetZ()};
                 } else {
-                    result.normal = JPH::Vec3::sAxisY();
+                    result.normal = {0.0f, 1.0f, 0.0f};
                 }
                 results.push_back(result);
             }
@@ -456,7 +461,7 @@ auto PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frus
                     const JPH::Vec3  center = bounds.GetCenter();
                     const float      radius = bounds.GetExtent().Length();
 
-                    if (frustumRef.IsSphereVisible(center, radius)) {
+                    if (frustumRef.IsSphereVisible({center.GetX(), center.GetY(), center.GetZ()}, radius)) {
                         out.push_back(*handle);
                     }
                 }

@@ -168,7 +168,7 @@ constexpr auto kComponentKinds = MakeComponentKinds<Comp::NameComponent, Comp::T
             field.x = v[0];
             field.y = v[1];
             field.z = v[2];
-            field.SetW(v[3]);
+            field.w = v[3];
         } else if constexpr (std::is_same_v<FT, FVec3>) {
             float v[3] = {field.x, field.y, field.z};
             for (int axis = 0; axis < 3; ++axis) {
@@ -178,8 +178,8 @@ constexpr auto kComponentKinds = MakeComponentKinds<Comp::NameComponent, Comp::T
             }
             field = FVec3(v[0], v[1], v[2]);
         } else if constexpr (std::is_same_v<FT, JPH::Quat>) {
-            const FVec3 euler   = ZHLN::Math::QuatToEulerDegrees(field);
-            float           deg[3]  = {euler.x, euler.y, euler.z};
+            const auto euler = field.GetEulerAngles() * (180.0f / JPH::JPH_PI);
+            float           deg[3]  = {euler.GetX(), euler.GetY(), euler.GetZ()};
             bool            changed = false;
             for (int axis = 0; axis < 3; ++axis) {
                 std::array<char, 96> axisLabelBuf {};
@@ -220,7 +220,7 @@ auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name) -> ZHLN::Enti
     // TransformSystem::ResolveTransforms to add on first tick: an entity the
     // editor just made should be whole immediately, so inspecting or serialising
     // it on the same frame does not depend on a system having run.
-    const JPH::Mat44 local = JPH::Mat44::sIdentity();
+    const auto local = Mat4x4::Identity();
 
     reg.Add(entity, Comp::NameComponent {.name = ZHLN::String64 {label}});
     reg.Add(entity, Comp::TransformComponent {});
@@ -311,7 +311,7 @@ auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp,
     const float ndcY   = (2.0f * (my - static_cast<float>(vp.y))) / h - 1.0f;
     const float aspect = w / h;
 
-    const JPH::Mat44 invVP = (camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix()).Inversed();
+    const auto invVP = Inverse(camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix());
     const FVec4  nearW = invVP * FVec4(ndcX, ndcY, 0.0f, 1.0f);
     const FVec4  farW  = invVP * FVec4(ndcX, ndcY, 1.0f, 1.0f);
     if (nearW.w <= 0.0f || farW.w <= 0.0f) {
@@ -328,7 +328,7 @@ auto RayPlane(const FVec3& origin, const FVec3& dir, const FVec3& normal, const 
     if (std::fabs(d) < 1e-6f) {
         return false;
     }
-    const float t = (planePoint - origin).Dot(normal) / d;
+    const float t = Dot(planePoint - origin, normal) / d;
     hit           = origin + dir * t;
     return true;
 }
@@ -340,7 +340,7 @@ auto WorldToScreen(const Camera& camera, const SceneViewport& r, const FVec3& wo
         return false;
     }
     const float      aspect = w / h;
-    const JPH::Mat44 vp     = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix();
+    const auto vp = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix();
     const FVec4  clip   = vp * FVec4(world.x, world.y, world.z, 1.0f);
     if (clip.w <= 0.0f) {
         return false;
@@ -354,15 +354,15 @@ auto WorldToScreen(const Camera& camera, const SceneViewport& r, const FVec3& wo
 auto AxisVector(EditorState::TransformAxis axis) noexcept -> FVec3 {
     switch (axis) {
         case EditorState::TransformAxis::X:
-            return FVec3::sAxisX();
+            return FVec3::UnitX();
         case EditorState::TransformAxis::Y:
-            return FVec3::sAxisY();
+            return FVec3::UnitY();
         case EditorState::TransformAxis::Z:
-            return FVec3::sAxisZ();
+            return FVec3::UnitZ();
         case EditorState::TransformAxis::None:
             break;
     }
-    return FVec3::sZero();
+    return FVec3::Zero();
 }
 
 } // namespace
@@ -406,7 +406,7 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
                 state.transformAxis          = EditorState::TransformAxis::None;
                 state.transformEntity        = state.selectedEntity;
                 state.transformStartPosition = t->position;
-                state.transformStartRotation = t->rotation;
+                state.transformStartRotation = JPH::Quat(t->rotation.x, t->rotation.y, t->rotation.z, t->rotation.w);
                 state.transformStartScale    = t->scale;
 
                 state.transformPlaneNormal = CameraForward(camera);
@@ -433,7 +433,7 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
             // Cancel: write the captures back, drop the mode.
             reg.Patch<Comp::TransformComponent>(e, [&](Comp::TransformComponent& t) -> void {
                 t.position = state.transformStartPosition;
-                t.rotation = state.transformStartRotation;
+                t.rotation = {state.transformStartRotation.GetX(), state.transformStartRotation.GetY(), state.transformStartRotation.GetZ(), state.transformStartRotation.GetW()};
                 t.scale    = state.transformStartScale;
             });
             state.transformMode = EditorState::TransformMode::None;
@@ -476,9 +476,9 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
                         const float     angle  = std::atan2(oy - my, mx - ox);
                         const FVec3 axis   = (state.transformAxis != EditorState::TransformAxis::None) ? AxisVector(state.transformAxis) :
                                                                                                              state.transformPlaneNormal * -1.0f;
-                        const JPH::Quat turn   = JPH::Quat::sRotation(axis, angle - state.transformStartAngle);
+                        const JPH::Quat turn   = JPH::Quat::sRotation(JPH::Vec3(axis.x, axis.y, axis.z), angle - state.transformStartAngle);
                         const JPH::Quat newRot = turn * state.transformStartRotation;
-                        reg.Patch<Comp::TransformComponent>(e, [&newRot](Comp::TransformComponent& t) -> void { t.rotation = newRot; });
+                        reg.Patch<Comp::TransformComponent>(e, [&newRot](Comp::TransformComponent& t) -> void { t.rotation = {newRot.GetX(), newRot.GetY(), newRot.GetZ(), newRot.GetW()}; });
                     }
                     break;
                 }

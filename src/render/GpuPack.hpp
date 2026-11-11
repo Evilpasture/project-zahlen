@@ -7,6 +7,7 @@
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Render/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/FrameData.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <cstdint>
 
@@ -19,7 +20,7 @@ namespace ZHLN::GpuPack {
 
 [[nodiscard]] auto PackMeshParticleEmitter(const MeshParticleEmitterDesc& desc) noexcept -> MeshParticleEmitterParams;
 
-[[nodiscard]] auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t shadowTileBase) noexcept -> Light;
+[[nodiscard]] auto PackLight(const LightDesc& desc, const Mat4x4& worldToView, int32_t shadowTileBase) noexcept -> Light;
 
 [[nodiscard]] auto PackFrameData(const FrameData& frame) noexcept -> FrameUniforms;
 

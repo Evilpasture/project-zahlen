@@ -9,8 +9,6 @@
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "GLTFImporter.hpp"
 #include "TangentGenerator.hpp"
-#include <Jolt/Physics/Collision/Shape/BoxShape.h>
-#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -301,6 +299,7 @@ struct CPUPrimitiveJob {
     float              defaultMorphWeights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     std::vector<float> tempDeltas;
 
+    bool           wantsMeshCollider = false;
     JPH::ShapeRefC meshCollider = nullptr;
     JPH::ShapeRefC boxCollider  = nullptr;
 
@@ -868,16 +867,10 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
     }
     job.boundingRadius = std::sqrt(maxD2) * 1.15f + 0.5f;
 
-    const float extentsX = (job.localMax[0] - job.localMin[0]) * 0.5f;
-    const float extentsY = (job.localMax[1] - job.localMin[1]) * 0.5f;
-    const float extentsZ = (job.localMax[2] - job.localMin[2]) * 0.5f;
-
-    const JPH::ShapeRefC baseBox = new JPH::BoxShape(FVec3(extentsX, extentsY, extentsZ));
-    job.boxCollider              = new JPH::RotatedTranslatedShape(localCenter, JPH::Quat::sIdentity(), baseBox);
-
-    if (prim.type == cgltf_primitive_type_triangles && jointsAcc == nullptr) {
-        job.meshCollider = Physics::CreateMeshShape(job.positions.data(), static_cast<uint32_t>(job.positions.size()), job.indices.data(), job.indexCount);
-    }
+    // Shape creation is deliberately deferred until the parallel CPU work has
+    // completed. The PhysicsContext factory/cache is used only on initial import;
+    // a GPU refresh must retain the existing prefab colliders.
+    job.wantsMeshCollider = prim.type == cgltf_primitive_type_triangles && jointsAcc == nullptr;
 
     // VK_EXT_mesh_shader: partition the primitive into meshlets. Only triangle
     // lists can be clustered; everything else keeps the legacy vertex path
@@ -1210,6 +1203,7 @@ auto GetOrCreateCompiledPrimitive(
 auto BuildModelPrefab(
     RenderContext&   ctx,
     AssetManager&    cwMgr,
+    PhysicsContext&  physics,
     cgltf_data*      data,
     std::string_view virtualPath,
     std::string_view textureSearchPath,
@@ -1237,7 +1231,7 @@ auto BuildModelPrefab(
         float m[16];
         cgltf_node_transform_local(node, m);
         const JPH::Mat44 localTransform(
-            FVec4(m[0], m[1], m[2], m[3]), FVec4(m[4], m[5], m[6], m[7]), FVec4(m[8], m[9], m[10], m[11]), FVec4(m[12], m[13], m[14], m[15])
+            JPH::Vec4(m[0], m[1], m[2], m[3]), JPH::Vec4(m[4], m[5], m[6], m[7]), JPH::Vec4(m[8], m[9], m[10], m[11]), JPH::Vec4(m[12], m[13], m[14], m[15])
         );
 
         prefab->nodes.push_back(
@@ -1283,11 +1277,11 @@ auto BuildModelPrefab(
                 }
             }
 
-            JPH::Mat44 ibm = JPH::Mat44::sIdentity();
+            auto ibm = Mat4x4::Identity();
             if (skin->inverse_bind_matrices != nullptr) {
                 float ibmRaw[16];
                 cgltf_accessor_read_float(skin->inverse_bind_matrices, j, ibmRaw, 16);
-                ibm = JPH::Mat44(
+                ibm = Mat4x4::FromCols(
                     FVec4(ibmRaw[0], ibmRaw[1], ibmRaw[2], ibmRaw[3]), FVec4(ibmRaw[4], ibmRaw[5], ibmRaw[6], ibmRaw[7]),
                     FVec4(ibmRaw[8], ibmRaw[9], ibmRaw[10], ibmRaw[11]), FVec4(ibmRaw[12], ibmRaw[13], ibmRaw[14], ibmRaw[15])
                 );
@@ -1449,7 +1443,22 @@ auto BuildModelPrefab(
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;
     prefab->parts.reserve(primitiveJobs.size());
 
-    for (const auto& primJob: primitiveJobs) {
+    for (auto& primJob: primitiveJobs) {
+        // One source primitive may occur under several nodes. Build its shapes
+        // once, on the calling thread, alongside its cached GPU resources.
+        if (!primJob.positions.empty() && !primCache.contains(primJob.prim)) {
+            const FVec3 halfExtents {(primJob.localMax[0] - primJob.localMin[0]) * 0.5f,
+                                     (primJob.localMax[1] - primJob.localMin[1]) * 0.5f,
+                                     (primJob.localMax[2] - primJob.localMin[2]) * 0.5f};
+            const FVec3 center {(primJob.localMax[0] + primJob.localMin[0]) * 0.5f,
+                                (primJob.localMax[1] + primJob.localMin[1]) * 0.5f,
+                                (primJob.localMax[2] + primJob.localMin[2]) * 0.5f};
+            const auto box = physics.GetOrCreateShape(Physics::ShapeType::Box, halfExtents.x, halfExtents.y, halfExtents.z);
+            primJob.boxCollider = physics.CreateTranslatedShape(box, center);
+            if (primJob.wantsMeshCollider) {
+                primJob.meshCollider = physics.CreateMeshShape(primJob.positions.data(), static_cast<uint32_t>(primJob.positions.size()), primJob.indices.data(), primJob.indexCount);
+            }
+        }
         const auto* node     = primJob.node;
         const auto  compPrim = GetOrCreateCompiledPrimitive(ctx, primJob, imageToBindlessIdx, primCache);
 
@@ -1574,7 +1583,7 @@ void RegisterPrefabGPUResources(RenderContext& ctx, const ModelPrefab& prefab) {
 // Public Entry Points
 // ============================================================================
 
-auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path, ImportOptions options) -> ZHLN::Optional<ModelPrefab&> {
+auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, PhysicsContext& physics, std::string_view path, ImportOptions options) -> ZHLN::Optional<ModelPrefab&> {
     if (!std::isfinite(options.emissiveFactorScale) || options.emissiveFactorScale <= 0.0f) {
         Log("[glTF] '{}' requested an invalid emissive factor scale {}.", path, options.emissiveFactorScale);
         return std::nullopt;
@@ -1618,12 +1627,13 @@ auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view pat
         RegisterPrefabGPUResources(ctx, *cached);
         return cached;
     }
-    return BuildModelPrefab(ctx, cwMgr, data, path, rawPath, options);
+    return BuildModelPrefab(ctx, cwMgr, physics, data, path, rawPath, options);
 }
 
 auto LoadGLBPrefabFromMemory(
     RenderContext&           ctx,
     AssetManager&            cwMgr,
+    PhysicsContext&          physics,
     std::span<const uint8_t> bytes,
     std::string_view         virtualPath,
     std::string_view         bytesPath,
@@ -1674,7 +1684,7 @@ auto LoadGLBPrefabFromMemory(
         RegisterPrefabGPUResources(ctx, *cached);
         return cached;
     }
-    return BuildModelPrefab(ctx, cwMgr, data, virtualPath, basePath, options);
+    return BuildModelPrefab(ctx, cwMgr, physics, data, virtualPath, basePath, options);
 }
 
 void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
@@ -1709,7 +1719,7 @@ auto InstantiatePrefabFromMemory(
     Entity*                           outBuffer,
     uint32_t                          maxCount
 ) -> uint32_t {
-    const auto prefab = LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), bytes, virtualPath);
+    const auto prefab = LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), bytes, virtualPath);
     if (!prefab) {
         return 0;
     }

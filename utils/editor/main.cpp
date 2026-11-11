@@ -10,12 +10,8 @@
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <SceneDocument.hpp>
 #include "engine/Platform.hpp"
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
 #include <Zahlen/ConfigCli.hpp>
 #include <FreeCam/FreeCam.hpp>
-#include <Jolt/Physics/Collision/CastResult.h>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -26,7 +22,6 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -57,6 +52,9 @@
 #include <utility>
 
 namespace {
+
+using ZHLN::FVec3;
+using ZHLN::FVec4;
 
 // WORLD EDITOR
 
@@ -133,7 +131,7 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
     float ndcY   = (2.0f * (mouseY - static_cast<float>(vp.y))) / static_cast<float>(vp.height) - 1.0f;
     float aspect = static_cast<float>(vp.width) / static_cast<float>(vp.height);
 
-    JPH::Mat44 invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
+    const auto invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
 
     FVec4 nearWorld = invVP * FVec4(ndcX, ndcY, 0.0f, 1.0f);
     FVec4 farWorld  = invVP * FVec4(ndcX, ndcY, 1.0f, 1.0f);
@@ -142,7 +140,7 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
     FVec3 pFar  = FVec3(farWorld.x / farWorld.w, farWorld.y / farWorld.w, farWorld.z / farWorld.w);
     FVec3 dir   = (pFar - pNear).Normalized();
 
-    return engine.Physics().Raycast(pNear, dir, 1000.0f);
+    return engine.Physics().Raycast(pNear.Cast<double>(), dir, 1000.0f);
 }
 
 // Draws one frame of the self-hosted editor using the Clay layout engine:
@@ -393,12 +391,12 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
             const int kind                     = s_NativeEditorState.requestedSpawn;
             s_NativeEditorState.requestedSpawn = -1;
 
-            const float     yawRad   = JPH::DegreesToRadians(cam.yaw);
-            const float     pitchRad = JPH::DegreesToRadians(cam.pitch);
-            const FVec3 forward  = FVec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
+            const auto yawRad = ZHLN::DegF(cam.yaw).ToRadians();
+            const auto pitchRad = ZHLN::DegF(cam.pitch).ToRadians();
+            const FVec3 forward  = FVec3(ZHLN::Cos(yawRad) * ZHLN::Cos(pitchRad), ZHLN::Sin(pitchRad), ZHLN::Sin(yawRad) * ZHLN::Cos(pitchRad)).Normalized();
 
             ZHLN::PrefabFactory::SpawnParams sp;
-            sp.position = cam.position + forward * 8.0f;
+            sp.position = (cam.position + forward * 8.0f).Cast<double>();
 
             ZHLN::Entity spawned = ZHLN::Entity::Null();
             switch (kind) {

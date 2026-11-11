@@ -4,7 +4,6 @@
 #include "render/features/ShadowAtlas.hpp"
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Jolt/Math/Vec2.h>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
@@ -12,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <iterator>
+#include <numbers>
 
 namespace ZHLN {
 
@@ -43,23 +43,25 @@ constexpr std::array<Mat3, ShadowAtlas::kPointFaces> kFaceAxes = {{
     };
 }
 
-[[nodiscard]] auto BasisToView(const FaceBasis& basis, const FVec3& origin) noexcept -> JPH::Mat44 {
-    const JPH::Mat44 rotation {
+[[nodiscard]] auto BasisToView(const FaceBasis& basis, const FVec3& origin) noexcept -> Mat4x4 {
+    const Mat4x4 rotation = Mat4x4::FromCols(
         FVec4 {basis.x.x, basis.y.x, basis.z.x, 0.0f},
         FVec4 {basis.x.y, basis.y.y, basis.z.y, 0.0f},
         FVec4 {basis.x.z, basis.y.z, basis.z.z, 0.0f},
-        FVec4 {0.0f, 0.0f, 0.0f, 1.0f},
-    };
-    const FVec3 shift = rotation * (-origin);
-    JPH::Mat44      view  = rotation;
-    view.SetColumn4(3, FVec4 {shift.x, shift.y, shift.z, 1.0f});
+        FVec4 {0.0f, 0.0f, 0.0f, 1.0f}
+    );
+    const FVec3 shift = TransformVector(rotation, -origin);
+    Mat4x4      view  = rotation;
+    view[0, 3] = shift.x;
+    view[1, 3] = shift.y;
+    view[2, 3] = shift.z;
     return view;
 }
 
-[[nodiscard]] auto ConeToView(const FVec3& direction, const FVec3& origin) noexcept -> JPH::Mat44 {
+[[nodiscard]] auto ConeToView(const FVec3& direction, const FVec3& origin) noexcept -> Mat4x4 {
     const FVec3 forward = direction.LengthSquared() > 1e-8f ? direction.Normalized() : FVec3 {0.0f, 0.0f, -1.0f};
-    const FVec3 hint    = (std::abs(forward.y) > 0.99f) ? FVec3::sAxisZ() : FVec3::sAxisY();
-    const FVec3 right   = Cross(hint, forward).NormalizedOr(FVec3::sAxisX());
+    const FVec3 hint    = (std::abs(forward.y) > 0.99f) ? FVec3::UnitZ() : FVec3::UnitY();
+    const FVec3 right   = Cross(hint, forward).Normalized();
     const FaceBasis basis {.x = right, .y = Cross(forward, right), .z = -forward};
     return BasisToView(basis, origin);
 }
@@ -76,19 +78,19 @@ auto ShadowAtlas::MakeFaceMatrices(
     float            range,
     bool             isPoint,
     float            outerConeRadians,
-    JPH::Mat44*      out
+    Mat4x4*      out
 ) noexcept -> uint32_t {
     const float    farPlane  = std::max(range, kAtlasNearPlane * 2.0f);
     const uint32_t faceCount = FaceCount(isPoint, outerConeRadians);
 
     if (faceCount == 1) {
-        const float      outer      = std::clamp(outerConeRadians, 0.01f, JPH::JPH_PI * 0.45f);
-        const JPH::Mat44 projection = Math::CreatePerspective(outer * 2.0f, 1.0f, kAtlasNearPlane, farPlane);
+        const float      outer      = std::clamp(outerConeRadians, 0.01f, std::numbers::pi_v<float> * 0.45f);
+        const Mat4x4 projection = CreatePerspective(outer * 2.0f, 1.0f, kAtlasNearPlane, farPlane);
         out[0]                      = projection * ConeToView(direction, position);
         return 1;
     }
 
-    const JPH::Mat44 projection = Math::CreatePerspective(JPH::JPH_PI * 0.5f, 1.0f, kAtlasNearPlane, farPlane);
+    const Mat4x4 projection = CreatePerspective(std::numbers::pi_v<float> * 0.5f, 1.0f, kAtlasNearPlane, farPlane);
     for (uint32_t face = 0; face < kPointFaces; ++face) {
         out[face] = projection * BasisToView(FaceBasisAt(face), position);
     }

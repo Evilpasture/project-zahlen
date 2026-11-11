@@ -27,10 +27,6 @@
 // The namespace stays ZHLN::GUI so the schema reads as part of the GUI family.
 // ===========================================================================
 
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Vec4.h>
-// clang-format on
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/ECS/EventBus.hpp>

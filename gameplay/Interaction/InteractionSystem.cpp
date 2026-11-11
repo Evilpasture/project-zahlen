@@ -81,7 +81,7 @@ void TeleportPlayer(
     // sits at the capsule centre, so lift by the shape's own ground offset.
     const FVec3 destPos = destTrans->position;
     const FVec3 center  = destPos + FVec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsID) + 0.05f, 0.0f);
-    physics->SetCharacterPosition(playerPhys->physicsID, center);
+    physics->SetCharacterPosition(playerPhys->physicsID, center.Cast<double>());
     physics->SetCharacterVelocity(playerPhys->physicsID, {0.0f, 0.0f, 0.0f});
 
     if (const auto playerTrans = registry.Get<Components::TransformComponent>(playerEnt)) {
@@ -91,8 +91,8 @@ void TeleportPlayer(
     // View snap: the destination's Euler triplet rotates +X to
     // (cos p cos y, sin p, cos p sin y) -- exactly SceneCamera's direction
     // formula -- so the camera's yaw/pitch invert straight out of it.
-    const JPH::Quat destRot = destTrans->rotation;
-    const FVec3 forward = destRot.RotateAxisX();
+    const auto destRot = destTrans->rotation;
+    const FVec3 forward = destRot * FVec3::UnitX();
     if (const Entity camEnt = registry.SingletonEntity<Components::MainCameraTagComponent>(); camEnt != Entity::Null()) {
         registry.Patch<Components::CameraComponent>(camEnt, [&](Components::CameraComponent& cc) {
             cc.camera.yaw   = std::atan2(forward.z, forward.x) * 57.29577951308232f;
@@ -171,7 +171,7 @@ void InteractionSystem::Update(
         const FVec3 triggerPosition = trans->position;
         bool            inside          = false;
         if (trigger.halfExtents.LengthSquared() > 1e-4f) {
-            const FVec3 delta = (playerPos - triggerPosition).Abs();
+            const auto delta = (playerPos - triggerPosition).Abs();
             inside = delta.x <= trigger.halfExtents.x && delta.y <= trigger.halfExtents.y && delta.z <= trigger.halfExtents.z;
         } else {
             const float dist = (triggerPosition - playerPos).Length();
@@ -395,7 +395,7 @@ void DoorMovementSystem::Update(
 
         // Interpolate visual transform
         if ((door->flags & DoorFlags::Rotating) != DoorFlags::None) {
-            trans->rotation = door->closedRotation.SLERP(door->openRotation, door->progress);
+            trans->rotation = Slerp(door->closedRotation, door->openRotation, door->progress);
         } else {
             trans->position = door->closedPosition + (door->openPosition - door->closedPosition) * door->progress;
         }
@@ -408,7 +408,7 @@ void DoorMovementSystem::Update(
         if (physics) {
             if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
                 if (phys->physicsID.Pack() != 0) {
-                    physics->SetKinematicPose(phys->physicsID, trans->position, trans->rotation);
+                    physics->SetKinematicPose(phys->physicsID, trans->position.Cast<double>(), trans->rotation.AsVec4());
                 }
             }
         }
@@ -477,7 +477,7 @@ void ButtonMovementSystem::Update(
             if (physics) {
                 if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
                     if (phys->physicsID.Pack() != 0) {
-                        physics->SetKinematicPose(phys->physicsID, trans->position, trans->rotation);
+                        physics->SetKinematicPose(phys->physicsID, trans->position.Cast<double>(), trans->rotation.AsVec4());
                     }
                 }
             }

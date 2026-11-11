@@ -34,7 +34,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>
@@ -154,9 +154,9 @@ auto AuthorPartsFromRecipe(const Skeleton& skeleton, const RagdollRecipe& recipe
         part.enableMotors     = spec.enableMotors;
         part.maxMotorForce    = spec.maxMotorForce;
 
-        // The joint carries the container; the inverse is Jolt's to compute.
-        const JPH::Mat44 bindPose = JPH::Mat44(skeleton.joints[i].inverseBindMatrix).Inversed();
-        part.position             = bindPose.GetTranslation();
+        // Ragdoll creation is a Jolt boundary; preserve its matrix inverse here.
+        const auto bindPose = Physics::ToJoltMatrix(skeleton.joints[i].inverseBindMatrix).Inversed();
+        part.position = Physics::FromJoltVector(bindPose.GetTranslation()).Cast<double>();
         part.rotation             = bindPose.GetQuaternion().Normalized();
 
         switch (spec.shape) {

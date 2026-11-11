@@ -20,7 +20,8 @@ module;
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
@@ -53,13 +54,13 @@ auto ClientReplicator::ApplyInitialObjects(Engine& engine, std::span<const uint8
 
         const FVec3  position = object.position;
         const FVec3  scale    = object.size;
-        const JPH::Mat44 worldMat = Math::CreateTransform(position, {0.0f, 0.0f, 0.0f, 1.0f}, scale);
+        const auto worldMat = ComposeTransform(position, Quat::Identity(), scale);
 
         reg.Add(
             e, Components::NameComponent {.name = String64("ReplicatedObject")}, Components::TransformComponent {.position = position, .scale = scale},
             Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
             NetworkIdentityComponent {.serverUID = object.uid, .isLocalOwner = false},
-            NetworkInterpolationComponent {.targetPosition = position, .targetRotation = JPH::Quat::sIdentity()}
+            NetworkInterpolationComponent {.targetPosition = position, .targetRotation = {0.0f, 0.0f, 0.0f, 1.0f}}
         );
     }
     return {};
@@ -79,7 +80,7 @@ auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t
         if (const auto e = uidToEntityMap.Find(body.uid)) {
             reg.Patch<NetworkInterpolationComponent>(*e, [&](NetworkInterpolationComponent& interp) {
                 interp.targetPosition = body.position;
-                interp.targetRotation = body.rotation;
+                interp.targetRotation = body.rotation.AsVec4();
                 interp.linearVelocity = body.velocity;
             });
         }
@@ -119,12 +120,8 @@ void NetworkInterpolationSystem(
             continue;
         }
         const float t  = std::min(1.0f, interp->interpolationSpeed * dt.value);
-        const FVec3 position       = trans->position;
-        const JPH::Quat rotation       = trans->rotation;
-        const FVec3 interpTarget   = interp->targetPosition;
-        const JPH::Quat interpRotation = interp->targetRotation;
-        trans->position                = position + (interpTarget - position) * t;
-        trans->rotation                = rotation.SLERP(interpRotation, t).Normalized();
+        trans->position = Lerp(trans->position, interp->targetPosition, t);
+        trans->rotation = Slerp(Quat {trans->rotation}, Quat {interp->targetRotation}, t);
     }
 }
 

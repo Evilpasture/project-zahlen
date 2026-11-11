@@ -240,7 +240,7 @@ void AnimationStepSystem::Update(
             if (auto childTrans = query.Get<Components::TransformComponent>(childEnt)) {
                 if (const auto trs = anim->RigidNode(handle, nodeIdx)) {
                     childTrans->position = trs->translation;
-                    childTrans->rotation = trs->rotation;
+                    childTrans->rotation = Quat(trs->rotation);
                     childTrans->scale    = trs->scale;
                 }
             }

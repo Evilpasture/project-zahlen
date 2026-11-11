@@ -68,12 +68,12 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
             return;
         }
 
-        FVec3 targetPos = FVec3::sZero();
+        FVec3 targetPos = FVec3::Zero();
 
         // 2. TARGET POSITION RESOLUTION (Always smoothly interpolate using alpha)
         bool foundPos = reg.Patch<Components::WorldTransformComponent>(targetEnt, [&](const auto& worldTrans) -> auto {
-            const JPH::Mat44 world = worldTrans.world;
-            targetPos              = world.GetTranslation();
+            const auto& world = worldTrans.world;
+            targetPos = {world[0, 3], world[1, 3], world[2, 3]};
         });
 
         if (!foundPos) {
@@ -84,11 +84,11 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
         auto  inputState = reg.GetSingleton<Components::InputStateComponent>();
         float wheelDelta = inputState ? inputState->GetMouseWheel() : 0.0f;
         if (std::abs(wheelDelta) > 0.01f) {
-            camComp.targetDistance = JPH::Clamp(camComp.targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
+            camComp.targetDistance = std::clamp(camComp.targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
         }
 
         if (camComp.stiffness > 0.0f) {
-            float factor = JPH::Clamp(camComp.stiffness * dt, 0.0f, 1.0f);
+            float factor = std::clamp(camComp.stiffness * dt, 0.0f, 1.0f);
             camComp.distance += (camComp.targetDistance - camComp.distance) * factor;
             camComp.fov += (camComp.targetFov - camComp.fov) * factor;
         } else {
@@ -108,9 +108,9 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
         cam.fov   = camComp.fov;
 
         // 5. EXPONENTIAL SMOOTHING & FINAL POSITION
-        float     yawRad   = JPH::DegreesToRadians(camComp.yaw);
-        float     pitchRad = JPH::DegreesToRadians(camComp.pitch);
-        FVec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+        float     yawRad   = DegF(camComp.yaw).ToRadians().value;
+        float     pitchRad = DegF(camComp.pitch).ToRadians().value;
+        FVec3 offsetDir(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad));
 
         if (camComp.hasInitSmoothTarget == 0) {
             camComp.smoothTargetPos     = targetPos;

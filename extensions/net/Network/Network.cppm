@@ -18,11 +18,7 @@
 module;
 
 // --- Global Module Fragment: External non-modular includes only ---
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/HashMap.hpp>
 // The umbrella, not the one module this file happens to name (Enums.hpp).
@@ -134,7 +130,7 @@ struct ZHLN_ANNOTATION(ZHLN::Wire::Version<2> {}) InitialSnapshotMessage {
 struct PhysicsBodyState {
     uint64_t uid       ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {}) = 0;
     FVec3 position ZHLN_ANNOTATION(ZHLN::Description<"World-space position, quantized to 1/256 m"> {});
-    JPH::Quat rotation ZHLN_ANNOTATION(ZHLN::Description<"Sign-canonical orientation, quantized to 1/32767 per component"> {});
+    Quat rotation ZHLN_ANNOTATION(ZHLN::Description<"Sign-canonical orientation, quantized to 1/32767 per component"> {});
     FVec3 velocity ZHLN_ANNOTATION(ZHLN::Description<"Linear velocity in metres per second"> {});
 };
 
@@ -208,7 +204,7 @@ struct MessageEnvelope {
 [[nodiscard]] auto DecodeClientInput(std::span<const uint8_t> bytes) -> Wire::Result<ClientInputMessage>;
 
 // ============================================================================
-// Quantization Codecs for Jolt math types (ZHLN::Wire::Codec specializations).
+// Quantization Codecs for native math types (ZHLN::Wire::Codec specializations).
 // Declared before any use: every instantiation of ZHLN.Wire templates inside
 // this module must observe them.
 // ============================================================================
@@ -216,7 +212,7 @@ struct MessageEnvelope {
 } // namespace ZHLN::Net
 
 template <>
-struct ZHLN::Wire::Codec<FVec3> {
+struct ZHLN::Wire::Codec<ZHLN::FVec3> {
     // Quantized wire unit: int32 over POSITION_SCALE (1/256 m) → ±8,388,607 m.
     static constexpr double WorldMax = 2147483647.0 / ZHLN::Net::POSITION_SCALE;
 
@@ -255,14 +251,14 @@ struct ZHLN::Wire::Codec<FVec3> {
 };
 
 template <>
-struct ZHLN::Wire::Codec<JPH::Quat> {
-    static auto Encode(const JPH::Quat& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void> {
+struct ZHLN::Wire::Codec<ZHLN::Quat> {
+    static auto Encode(const ZHLN::Quat& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void> {
         // Canonical form: the representative of the ±q pair with w >= 0, so
         // the same orientation always produces identical bytes.
         float x = value.x;
         float y = value.y;
         float z = value.z;
-        float w = value.GetW();
+        float w = value.w;
         if (w < 0.0f) {
             x = -x;
             y = -y;
@@ -285,7 +281,7 @@ struct ZHLN::Wire::Codec<JPH::Quat> {
         return {};
     }
 
-    static auto Decode(JPH::Quat& value, ZHLN::Wire::Reader& reader) -> ZHLN::Wire::Result<void> {
+    static auto Decode(ZHLN::Quat& value, ZHLN::Wire::Reader& reader) -> ZHLN::Wire::Result<void> {
         int16_t quantized[4] = {};
         for (size_t index = 0; index < 4; ++index) {
             const ZHLN::Wire::IndexPathScope scope(reader.Path(), index);
@@ -294,7 +290,7 @@ struct ZHLN::Wire::Codec<JPH::Quat> {
                 return res;
             }
         }
-        value = JPH::Quat(
+        value = ZHLN::Quat(
                     static_cast<float>(quantized[0]) * ZHLN::Net::INV_QUAT_SCALE, static_cast<float>(quantized[1]) * ZHLN::Net::INV_QUAT_SCALE,
                     static_cast<float>(quantized[2]) * ZHLN::Net::INV_QUAT_SCALE, static_cast<float>(quantized[3]) * ZHLN::Net::INV_QUAT_SCALE
         )

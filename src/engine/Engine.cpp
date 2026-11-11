@@ -187,7 +187,7 @@ void Engine::TraceDiagnostics() const noexcept {
         const int block     = i / 4;
         const int lane      = i % 4;
         auto      plane_str = ZHLN::Format(
-            "  Plane {}: [{}x {}y {}z] offset: {}\n", names[i], f.mX[block].mF32[lane], f.mY[block].mF32[lane], f.mZ[block].mF32[lane], f.mW[block].mF32[lane]
+            "  Plane {}: [{}x {}y {}z] offset: {}\n", names[i], f.mX[static_cast<size_t>(block)][static_cast<size_t>(lane)], f.mY[static_cast<size_t>(block)][static_cast<size_t>(lane)], f.mZ[static_cast<size_t>(block)][static_cast<size_t>(lane)], f.mW[static_cast<size_t>(block)][static_cast<size_t>(lane)]
         );
         Diagnostics::WriteDiagnosticError(plane_str.string_view());
     }

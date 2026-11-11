@@ -3,13 +3,12 @@
 
 #pragma once
 #include <Zahlen/Math/Vec3.hpp>
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/Array.hpp>
@@ -51,16 +50,14 @@ struct Components {
     };
     struct TransformComponent {
         ZHLN::FVec3 position = {};
-        ZHLN::FVec4 rotation = {0.0f, 0.0f, 0.0f, 1.0f};
+        ZHLN::Quat rotation = ZHLN::Quat::Identity();
         ZHLN::FVec3 scale    = {1.0f, 1.0f, 1.0f};
 
-        // The calculation loads the Jolt types; the component is storage. The
-        // parameters are FVec3/QuatArg, so the members convert on the way in.
-        [[nodiscard]] JPH::Mat44 GetLocalMatrix() const {
-            return JPH::Mat44::sRotationTranslation(rotation, position) * JPH::Mat44::sScale(scale);
+        [[nodiscard]] Mat4x4 GetLocalMatrix() const noexcept {
+            return ComposeTransform(position, rotation, scale);
         }
 
-        [[nodiscard]] JPH::Mat44 GetMatrix() const {
+        [[nodiscard]] Mat4x4 GetMatrix() const noexcept {
             return GetLocalMatrix();
         }
     };
@@ -95,7 +92,7 @@ struct Components {
         AssetID      meshAsset  = InvalidAssetID;
         Mesh         mesh       = {};
         Shape        shape      = Shape::None;
-        FVec3    dimensions = FVec3::sZero(); // box: half extents; others: radius/extent, height
+        FVec3    dimensions = FVec3::Zero(); // box: half extents; others: radius/extent, height
         ZHLN::FVec4 color      = {1.0f, 1.0f, 1.0f, 1.0f};
     };
 

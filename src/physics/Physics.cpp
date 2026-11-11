@@ -21,6 +21,7 @@
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Core/Buffer.h>
@@ -33,6 +34,7 @@
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <algorithm>
 #include <array>
 #include <memory>
@@ -207,20 +209,20 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
             const uint32_t dense = snap.slotToDense[slot];
             if (dense < snap.count) {
                 const size_t base         = static_cast<size_t>(dense) * 4;
-                outState.previousPosition = JPH::Vec3(
+                outState.previousPosition = {
                     static_cast<float>(snap.prevPositions[base]),
                     static_cast<float>(snap.prevPositions[base + 1]),
                     static_cast<float>(snap.prevPositions[base + 2])
-                );
-                outState.currentPosition = JPH::Vec3(
+                };
+                outState.currentPosition = {
                     static_cast<float>(snap.positions[base]),
                     static_cast<float>(snap.positions[base + 1]),
                     static_cast<float>(snap.positions[base + 2])
-                );
+                };
                 outState.previousRotation =
-                    JPH::Quat(snap.prevRotations[base], snap.prevRotations[base + 1], snap.prevRotations[base + 2], snap.prevRotations[base + 3]);
+                    {snap.prevRotations[base], snap.prevRotations[base + 1], snap.prevRotations[base + 2], snap.prevRotations[base + 3]};
                 outState.currentRotation =
-                    JPH::Quat(snap.rotations[base], snap.rotations[base + 1], snap.rotations[base + 2], snap.rotations[base + 3]);
+                    {snap.rotations[base], snap.rotations[base + 1], snap.rotations[base + 2], snap.rotations[base + 3]};
                 outState.isCharacter = (snapState == Physics::SlotState::Character);
                 outState.valid       = true;
                 return outState;
@@ -229,12 +231,12 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
     }
 
     if (liveState == Physics::SlotState::PendingCreateRigid || liveState == Physics::SlotState::PendingCreateChar) {
-        const JPH::Vec3 spawnPos(bt.spawnPositions[slot]);
-        const JPH::Quat spawnRot  = bt.spawnRotations[slot];
-        outState.previousPosition = spawnPos;
-        outState.currentPosition  = spawnPos;
-        outState.previousRotation = spawnRot;
-        outState.currentRotation  = spawnRot;
+        const auto spawnPos = JPH::Vec3(bt.spawnPositions[slot]);
+        const auto spawnRot = bt.spawnRotations[slot];
+        outState.previousPosition = {spawnPos.GetX(), spawnPos.GetY(), spawnPos.GetZ()};
+        outState.currentPosition  = outState.previousPosition;
+        outState.previousRotation = {spawnRot.GetX(), spawnRot.GetY(), spawnRot.GetZ(), spawnRot.GetW()};
+        outState.currentRotation  = outState.previousRotation;
         outState.isCharacter      = (liveState == Physics::SlotState::PendingCreateChar);
         outState.valid            = true;
     }
@@ -355,6 +357,24 @@ void PhysicsContext::OptimizeBroadphase() {
 
 auto PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p1, float p2, float p3, float p4) -> JPH::ShapeRefC {
     return _impl->shapeCache.GetOrCreate(type, p1, p2, p3, p4);
+}
+
+auto PhysicsContext::CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC {
+    return Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
+}
+
+auto PhysicsContext::CreateTranslatedShape(const JPH::ShapeRefC& shape, FVec3 offset) -> JPH::ShapeRefC {
+    if (!shape) return nullptr;
+    return new JPH::RotatedTranslatedShape(JPH::Vec3(offset.x, offset.y, offset.z), JPH::Quat::sIdentity(), shape);
+}
+
+auto PhysicsContext::CreateCompoundShape(const JPH::ShapeRefC& first, const JPH::ShapeRefC& second) -> JPH::ShapeRefC {
+    if (!first || !second) return nullptr;
+    JPH::StaticCompoundShapeSettings settings;
+    settings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), first);
+    settings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), second);
+    const auto result = settings.Create();
+    return result.IsValid() ? result.Get() : nullptr;
 }
 
 auto PhysicsContext::CreateRigidBody(
@@ -796,7 +816,7 @@ auto PhysicsContext::GetRagdollPose(Physics::RagdollID handle, JPH::RVec3& outRo
     return _impl->ragdolls.GetRagdollPose(handle, outRootOffset, outWorldJoints);
 }
 
-auto PhysicsContext::BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<JPH::RVec3> {
+auto PhysicsContext::BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<DVec3> {
     const auto&    world = _impl->world;
     const auto&    bt    = world.bodyTable;
     const uint32_t slot  = handle.index;
@@ -816,13 +836,13 @@ auto PhysicsContext::BodyPosition(Physics::BodyID handle) const noexcept -> std:
             const uint32_t dense = snap.slotToDense[slot];
             if (dense < snap.count) {
                 const size_t base = static_cast<size_t>(dense) * 4;
-                return JPH::RVec3(snap.positions[base], snap.positions[base + 1], snap.positions[base + 2]);
+                return DVec3 {snap.positions[base], snap.positions[base + 1], snap.positions[base + 2]};
             }
         }
     }
 
     if (liveState == Physics::SlotState::PendingCreateRigid || liveState == Physics::SlotState::PendingCreateChar) {
-        return bt.spawnPositions[slot];
+        return Physics::FromJoltPosition(bt.spawnPositions[slot]);
     }
 
     return std::nullopt;
@@ -929,13 +949,13 @@ void PhysicsContext::AddRadialImpulse(ZHLN::DVec3 center, float radius, float ma
             continue;
         }
 
-        const JPH::RVec3 diff    = *bodyPos - JPH::RVec3(center.x, center.y, center.z);
+        const auto diff = *bodyPos - center;
         const auto       dist    = static_cast<float>(diff.Length());
         const float      falloff = 1.0f - std::clamp(dist / radius, 0.0f, 1.0f);
 
         if (dist > 1e-4f && falloff > 0.01f) {
-            const JPH::Vec3 impulseDir = JPH::Vec3(diff / static_cast<double>(dist)) + JPH::Vec3(0.0f, 0.35f, 0.0f);
-            const JPH::Vec3 impulse    = impulseDir.Normalized() * (maxImpulse * falloff * falloff);
+            const auto impulseDir = (diff / static_cast<double>(dist)).Cast<float>() + FVec3 {0.0f, 0.35f, 0.0f};
+            const auto impulse = impulseDir.Normalized() * (maxImpulse * falloff * falloff);
             AddImpulse(physID, impulse);
         }
     }

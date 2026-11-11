@@ -54,6 +54,7 @@ enum class SampleAssetsError : uint8_t {
 };
 
 namespace {
+using ZHLN::FVec3;
 
 // Candidates in preference order, relative to the sample-assets root. The
 // first file that exists and parses as a GLB wins; when none does the test
@@ -152,7 +153,7 @@ struct GLTFSampleAssetsTestSuite {
             // Fidelity import units: authored linear emission, full texture
             // detail -- the same options the FidelityHarness renders with.
             constexpr ZHLN::GLTF::ImportOptions fidelity {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048};
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, modelPath, modelPath, fidelity);
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), ZHLN::EngineAccess::PhysicsOf(*engine), bytes, modelPath, modelPath, fidelity);
             if (!prefab || !ZHLN::Test::ExpectGt(prefab->parts.size(), size_t {0})) {
                 return std::unexpected(SampleAssetsError::ImportFailed);
             }

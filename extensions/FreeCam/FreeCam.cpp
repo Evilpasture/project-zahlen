@@ -14,7 +14,6 @@
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 
-#include <Jolt/Math/Vec3.h>
 
 #include <algorithm>
 #include <cmath>
@@ -37,18 +36,18 @@ void Drive(Components::CameraComponent& cc, const Components::InputStateComponen
         cam.pitch = std::clamp(cam.pitch - (input.GetMouseDeltaY() * look), -89.0f, 89.0f);
     }
 
-    const float yawRad   = JPH::DegreesToRadians(cam.yaw);
-    const float pitchRad = JPH::DegreesToRadians(cam.pitch);
-    FVec3   forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+    const float yawRad   = DegF(cam.yaw).ToRadians().value;
+    const float pitchRad = DegF(cam.pitch).ToRadians().value;
+    FVec3   forward(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad));
     forward         = forward.Normalized();
-    FVec3 right = forward.Cross(FVec3::sAxisY());
+    FVec3 right = Cross(forward, FVec3::UnitY());
     if (right.LengthSquared() > 1e-8f) {
         right = right.Normalized();
     }
-    const FVec3 up    = FVec3::sAxisY();
+    const FVec3 up    = FVec3::UnitY();
     const float     speed = input.IsKeyDown(static_cast<uint8_t>(KeyCode::LShift)) ? (knobs.speed * knobs.sprintMultiplier) : knobs.speed;
 
-    FVec3 move = FVec3::sZero();
+    FVec3 move = FVec3::Zero();
     if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::W))) {
         move += forward;
     }

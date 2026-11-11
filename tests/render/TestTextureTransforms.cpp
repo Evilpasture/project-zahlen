@@ -7,6 +7,8 @@
 // vertex/fragment shaders, which testing the imported Material alone cannot.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -165,7 +167,7 @@ struct TextureTransformsTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& camera = cameraComp->camera;
-            camera.position = FVec3(0.0f, 0.0f, kCameraDistance);
+            camera.position = ZHLN::FVec3(0.0f, 0.0f, kCameraDistance);
             camera.yaw      = -90.0f;
             camera.pitch    = 0.0f;
             camera.fov      = 45.0f;
@@ -209,8 +211,8 @@ struct TextureTransformsTestSuite {
                 }
                 const auto meshID = ZHLN::HashAssetID(meshKeys[column]);
                 rc.RegisterMesh(meshID, mesh);
-                const FVec3 offset(kPanelX[column], 0.0f, 0.0f);
-                const JPH::Mat44 world = JPH::Mat44::sTranslation(offset);
+                const ZHLN::FVec3 offset(kPanelX[column], 0.0f, 0.0f);
+                const auto world = ZHLN::CreateTranslation(offset);
                 const ZHLN::Entity e = reg.Create();
                 reg.Add(e, ZHLN::Components::TransformComponent {.position = offset});
                 reg.Add(e, ZHLN::Components::WorldTransformComponent {.world = world, .previous = world});
@@ -226,7 +228,7 @@ struct TextureTransformsTestSuite {
             // crosses an atlas quadrant or a mesh edge, so bilinear filtering
             // and small camera/exposure differences cannot mask a reversed UV.
             const float pixelsPerUnit = static_cast<float>(image.height) /
-                                        (2.0f * kCameraDistance * std::tan(JPH::DegreesToRadians(camera.fov) * 0.5f));
+                                        (2.0f * kCameraDistance * std::tan(ZHLN::DegF(camera.fov).ToRadians().value * 0.5f));
             std::array<std::array<std::array<int, 3>, 4>, 3> samples {};
             for (size_t column = 0; column < 3; ++column) {
                 for (size_t probe = 0; probe < 4; ++probe) {

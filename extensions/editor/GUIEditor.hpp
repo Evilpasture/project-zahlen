@@ -99,15 +99,15 @@ struct EditorState {
     ZHLN::Entity transformEntity = ZHLN::Entity::Null();
 
     // Captures taken at mode entry; cancel writes them back.
-    FVec3 transformStartPosition = FVec3::sZero();
+    FVec3 transformStartPosition = FVec3::Zero();
     JPH::Quat transformStartRotation = JPH::Quat::sIdentity();
-    FVec3 transformStartScale    = FVec3::sReplicate(1.0f);
+    FVec3 transformStartScale    = FVec3::Splat(1.0f);
 
     // Anchors for the running mode: Move intersects the mouse ray with a plane
     // through the start position (normal = camera forward at entry); Rotate and
     // Scale measure screen-space angle / distance around the projected object.
-    FVec3 transformPlaneNormal = FVec3::sAxisY();
-    FVec3 transformAnchor      = FVec3::sZero();
+    FVec3 transformPlaneNormal = FVec3::UnitY();
+    FVec3 transformAnchor      = FVec3::Zero();
     float     transformStartAngle  = 0.0f;
     float     transformStartDist   = 1.0f;
 

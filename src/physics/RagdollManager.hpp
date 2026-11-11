@@ -7,7 +7,7 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Core/Reference.h>
-#include <Jolt/Math/Mat4x4.h>
+#include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/PhysicsSystem.h>

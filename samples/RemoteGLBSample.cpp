@@ -523,7 +523,7 @@ void ClearSubject(ZHLN::Engine& engine, Subject& subject) {
 // Draco-compressed asset this importer cannot decode, a binary it cannot parse --
 // leaves the previous subject on screen instead of an empty turntable.
 auto ImportSubject(ZHLN::Engine& engine, Subject& subject, std::span<const uint8_t> bytes, std::string_view virtualPath) -> bool {
-    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), bytes, virtualPath);
+    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), bytes, virtualPath);
     if (!prefab) {
         ZHLN::Log("[RemoteGLB] '{}' is not a glTF this importer can read; the previous subject stays on screen.", virtualPath);
         return false;

@@ -9,21 +9,18 @@
 #include <Zahlen/Core/Profiler.hpp>
 #include <algorithm>
 #include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Physics/Physics.hpp>
 
 namespace ZHLN {
 
 void AccumulateImpulse(ECS::Registry& registry, Entity entity, float x, float y, float z) {
-    const JPH::Vec3 linear(x, y, z);
     if (auto cmd = registry.Get<Components::ImpulseCommand>(entity)) {
-        const JPH::Vec3 accumulated = cmd->linear;
-        cmd->linear                 = accumulated + linear;
+        cmd->linear += {x, y, z};
         return;
     }
     if (!registry.IsAlive(entity)) {
         return;
     }
-    registry.Add(entity, Components::ImpulseCommand {.linear = linear});
+    registry.Add(entity, Components::ImpulseCommand {.linear = {x, y, z}});
 }
 
 namespace {
@@ -37,8 +34,8 @@ void CommitImpulses(Engine& engine) {
         const auto   cmd  = reg.Get<Components::ImpulseCommand>(e);
         const auto   phys = reg.Get<Components::PhysicsComponent>(e);
         if (cmd && phys) {
-            const JPH::Vec3 impulse = cmd->linear;
-            if (impulse.LengthSq() > 0.0f) {
+            const auto impulse = cmd->linear;
+            if (impulse.LengthSquared() > 0.0f) {
                 pc.AddImpulse(phys->physicsID, impulse);
             }
         }

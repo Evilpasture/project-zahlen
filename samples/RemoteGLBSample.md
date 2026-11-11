@@ -163,7 +163,7 @@ the reason `Take` exists.
 
 ## The subject
 
-Import is `GLTF::LoadGLBPrefabFromMemory(ctx, assetMgr, bytes, virtualPath)`
+Import is `GLTF::LoadGLBPrefabFromMemory(ctx, assetMgr, physics, bytes, virtualPath)`
 followed by `PrefabFactory::InstantiatePrefab`. The virtual path is the
 cache file's filename, so a second run and a device-lost rebuild hit the same
 prefab-cache entry. That is a **separate in-memory cache**: the importer may

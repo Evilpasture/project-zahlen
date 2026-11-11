@@ -11,16 +11,9 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Vec4.h>
-#include <Jolt/Math/Mat4x4.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <cstdint>
 #include <memory>
@@ -63,8 +56,8 @@ struct IKChain {
     int32_t   upperNodeIndex    = -1;
     int32_t   lowerNodeIndex    = -1;
     int32_t   endNodeIndex      = -1;
-    FVec3 targetPosition    = FVec3::sZero();
-    JPH::Quat targetRotation    = JPH::Quat::sIdentity();
+    FVec3 targetPosition    = FVec3::Zero();
+    FVec4 targetRotation    = {0.0f, 0.0f, 0.0f, 1.0f};
     FVec3 poleVector        = FVec3(0.0f, -1.0f, 0.0f);
     float     weight            = 1.0f;
     bool      orientEndEffector = true;
@@ -95,9 +88,9 @@ class AnimationContext {
 
     [[nodiscard]] auto Playback(AnimationID handle) const noexcept -> ZHLN::Optional<PlaybackState>;
     [[nodiscard]] auto Morph(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<MorphSample>;
-    [[nodiscard]] auto RigidNode(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<Math::TransformTRS>;
-    [[nodiscard]] auto LocalPose(AnimationID handle) const noexcept -> std::span<const JPH::Mat44>;
-    [[nodiscard]] auto ModelPose(AnimationID handle) const noexcept -> std::span<const JPH::Mat44>;
+    [[nodiscard]] auto RigidNode(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<TransformParts>;
+    [[nodiscard]] auto LocalPose(AnimationID handle) const noexcept -> std::span<const Mat4x4>;
+    [[nodiscard]] auto ModelPose(AnimationID handle) const noexcept -> std::span<const Mat4x4>;
 
   private:
     struct Impl;

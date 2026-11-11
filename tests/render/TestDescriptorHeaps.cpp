@@ -153,7 +153,7 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = FVec3(0.0f, 4.45f, 11.0f);
+            cam.position = ZHLN::FVec3(0.0f, 4.45f, 11.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;
@@ -195,7 +195,7 @@ struct DescriptorHeapsSuite {
 
                 const uint32_t  col = i % kGridCols;
                 const uint32_t  row = i / kGridCols;
-                const FVec3 pos(firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f);
+                const ZHLN::FVec3 pos(firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f);
 
                 ZHLN::PrefabFactory::CreateBox(
                     *engine, {halfExtent, halfExtent, halfExtent},
@@ -437,7 +437,7 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = FVec3(0.0f, 1.5f, 6.0f);
+            cam.position = ZHLN::FVec3(0.0f, 1.5f, 6.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;

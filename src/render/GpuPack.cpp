@@ -8,6 +8,9 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Matrix.hpp>
+#include <algorithm>
+#include <cmath>
+#include <numbers>
 
 namespace ZHLN::GpuPack {
 
@@ -100,7 +103,7 @@ auto PackMeshParticleEmitter(const MeshParticleEmitterDesc& desc) noexcept -> Me
     return packed;
 }
 
-auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t shadowTileBase) noexcept -> Light {
+auto PackLight(const LightDesc& desc, const Mat4x4& worldToView, int32_t shadowTileBase) noexcept -> Light {
     Light packed {};
 
     packed.type           = static_cast<Slang::LightType>(static_cast<uint32_t>(desc.type));
@@ -116,7 +119,7 @@ auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t sha
     packed.color     = desc.color;
 
     if (desc.type == LightType::Spot && desc.outerConeRadians > 0.0f) {
-        const float outer   = std::min(desc.outerConeRadians, JPH::JPH_PI * 0.5f);
+        const float outer   = std::min(desc.outerConeRadians, std::numbers::pi_v<float> * 0.5f);
         const float inner   = std::clamp(desc.innerConeRadians, 0.0f, outer);
         packed.outerConeCos = std::cos(outer);
         packed.innerConeCos = std::cos(inner);
@@ -126,13 +129,13 @@ auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t sha
     }
 
     const FVec3 position     = desc.position;
-    const FVec4 positionView = FVec4(worldToView * position, 1.0f);
+    const FVec4 positionView = FVec4((worldToView * FVec4(position, 1.0f)).XYZ(), 1.0f);
     packed.positionView          = positionView;
 
     if (desc.type == LightType::Area) {
-        const JPH::Mat44 quad = desc.points;
+        const Mat4x4 quad = desc.points;
         for (uint32_t column = 0; column < 4; ++column) {
-            const ZHLN::FVec4 lane = quad.GetColumn4(column);
+            const ZHLN::FVec4 lane = quad.Column(column);
             packed.points[column]   = lane;
         }
     }
