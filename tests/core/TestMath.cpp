@@ -8,6 +8,7 @@
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <cmath>
 #include <cstdint>
 
@@ -100,6 +101,46 @@ void test_vec3_math() {
     const DVec3 dp {-1.25, 2.5, -4.0};
     Expect(dp.Fract() == DVec3 {0.75, 0.5, 0.0}) == true;
     Expect(Wrap(dp, DVec3 {2.0, 3.0, 5.0}) == DVec3 {0.75, 2.5, 1.0}) == true;
+}
+
+void test_vec4_math() {
+    constexpr FVec4 a {1.0f, 2.0f, 3.0f, 4.0f};
+    constexpr FVec4 b {4.0f, 5.0f, 6.0f, 7.0f};
+    static_assert(FVec4::Zero() == FVec4 {0, 0, 0, 0});
+    static_assert(FVec4::One() == FVec4 {1, 1, 1, 1});
+    static_assert(FVec4::Splat(2.0f) == FVec4 {2, 2, 2, 2});
+    static_assert(FVec4::UnitW() == FVec4 {0, 0, 0, 1});
+    static_assert(FVec4::Forward() == FVec4 {0, 0, -1, 0});
+    static_assert(-a == FVec4 {-1, -2, -3, -4});
+    static_assert(a + b == FVec4 {5, 7, 9, 11});
+    static_assert(b - a == FVec4 {3, 3, 3, 3});
+    static_assert(a * b == FVec4 {4, 10, 18, 28});
+    static_assert(b / a == FVec4 {4, 2.5f, 2, 1.75f});
+    static_assert(2.0f * a == FVec4 {2, 4, 6, 8});
+    static_assert(a / 2.0f == FVec4 {0.5f, 1, 1.5f, 2});
+    static_assert(Dot(a, b) == 60.0f);
+    static_assert(a.LengthSquared() == 30.0f);
+    static_assert(DistanceSquared(a, b) == 36.0f);
+    static_assert(Lerp(a, b, 0.5f) == FVec4 {2.5f, 3.5f, 4.5f, 5.5f});
+    static_assert(a[0] == 1 && a[1] == 2 && a[2] == 3 && a[3] == 4);
+    static_assert(sizeof(FVec4) == 4 * sizeof(float));
+    static_assert(sizeof(DVec4) == 4 * sizeof(double));
+
+    FVec4 v = a;
+    v[3] = 8.0f;
+    v += b;
+    v -= b;
+    v *= 2.0f;
+    v /= 2.0f;
+    Expect(v.w) == 8.0f;
+    Expect(FVec4::Zero().Normalized() == FVec4::Zero()) == true;
+    Expect(std::abs(FVec4 {1, 2, 2, 4}.Length() - 5.0f) < 1e-6f) == true;
+    Expect(std::abs(FVec4 {1, 2, 2, 4}.Normalized().Length() - 1.0f) < 1e-6f) == true;
+    Expect(std::abs(Distance(DVec4 {1, 2, 2, 4}, DVec4::Zero()) - 5.0) < 1e-12) == true;
+    const DVec4 p {-1.25, 2.5, -4.0, 5.75};
+    Expect(p.Floor() == DVec4 {-2, 2, -4, 5}) == true;
+    Expect(p.Fract() == DVec4 {0.75, 0.5, 0.0, 0.75}) == true;
+    Expect(Wrap(p, DVec4 {2, 3, 5, 2}) == DVec4 {0.75, 2.5, 1, 1.75}) == true;
 }
 
 // --- 2. Frustum Plane Extraction & SIMD SoA Culling ---
